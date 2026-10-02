@@ -81,11 +81,15 @@ class LeanTurn:
         interactive: bool = True,
         on_seal: Optional[Callable[[TurnResult], None]] = None,
         meta: Optional[dict[str, Any]] = None,
+        end_marker: str = "",
     ) -> None:
         self.interactive = interactive
         self._on_seal = on_seal
         self._handed_off = False
         self.compactions = 0
+        # A word the agent may end with to signal something (discussion: DONE).
+        self.end_marker = end_marker
+        self.marker_found = False
         # Extra fields on agent_start, e.g. who handed this work over.
         self.meta = dict(meta or {})
         self.client = client
@@ -277,6 +281,8 @@ class LeanTurn:
             self._append_text("text", step, note)
             self.emit({"type": "agent_token", "step": step, "data": note})
 
+        if self.end_marker:
+            self._strip_end_marker()
         visible = self._visible_text()
         if not visible:
             visible = final_text
@@ -310,6 +316,19 @@ class LeanTurn:
             empty=empty,
             stop_reason=stop_reason,
         )
+
+    def _strip_end_marker(self) -> None:
+        """Remove a trailing control word (e.g. DONE in a discussion) from the reply."""
+        pattern = re.compile(rf"[\s*_`]*\b{re.escape(self.end_marker)}\b[\s.!*_`]*$")
+        for item in reversed(self.timeline):
+            if item.get("kind") != "text":
+                continue
+            text = str(item.get("text") or "")
+            if pattern.search(text):
+                item["text"] = pattern.sub("", text).rstrip()
+                self.marker_found = True
+                self.emit({"type": "text_replace", "step": item.get("step"), "text": item["text"]})
+            break
 
     def _out_of_steps_note(self, max_steps: int) -> str:
         done = [str(item.get("label") or item.get("name") or "") for item in self.timeline if item.get("kind") == "tool"]

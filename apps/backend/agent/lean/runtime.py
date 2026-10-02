@@ -143,7 +143,10 @@ class LeanSession:
         try:
             turn_history = history
             prompt_text = self._format_user(message)
-            if self._should_fan_out(message, responders):
+            if self._is_discussion():
+                success, error = self._run_discussion(responders, prompt_text, history)
+                responders = []
+            elif self._should_fan_out(message, responders):
                 success, error = self._run_fan_out(responders, prompt_text, history)
                 responders = []
             for index, persona in enumerate(responders):
@@ -291,6 +294,74 @@ class LeanSession:
             self._persist(persona, result, depth, meta=turn.meta)
         return result
 
+    # ── discussion mode ─────────────────────────────────────────────────
+    def _is_discussion(self) -> bool:
+        return bool(self.room and self.room.kind == "group" and self.room.mode == "discussion" and len(self._members()) >= 2)
+
+    def _run_discussion(self, first: list[AgentPersona], prompt_text: str, history: list[dict[str, Any]]) -> tuple[bool, str]:
+        """Agents take turns on the user's message until one says DONE or the cap is reached.
+
+        Speaking order starts with whoever was chosen to answer, then goes round
+        the room. Each agent sees the whole discussion so far. The room's lead
+        then writes a short conclusion.
+        """
+        members = self._members()
+        order = list({p.id: p for p in [*first, *members]}.values())
+        cap = max(2, int(self.room.max_messages or 6))
+        spoken: list[tuple[AgentPersona, TurnResult]] = []
+        success, error = True, ""
+        for index in range(cap):
+            if self.cancel.is_set():
+                break
+            persona = order[index % len(order)]
+            done_rule = "If the group has reached a good answer, end your message with the word DONE."
+            if index == 0:
+                brief = (
+                    f"{prompt_text}\n\n[System]: Discussion mode. {persona.name}, open the discussion with your view. "
+                    f"Keep it under 120 words. {done_rule}"
+                )
+                turn_history = history
+            else:
+                brief = (
+                    f"[System]: Discussion mode, message {index + 1} of up to {cap}. {persona.name}, read the discussion "
+                    "above and add your view: build on it, question it, or correct it. Don't repeat what was said. "
+                    f"Keep it under 120 words. {done_rule}"
+                )
+                transcript = "\n\n".join(f"[{p.name}]: {r.text}" for p, r in spoken if r.text)
+                turn_history = history + [{"role": "user", "content": prompt_text}, {"role": "assistant", "content": transcript}]
+            turn = self._build_turn(
+                persona, brief, history=turn_history, depth=0, allow_handoff=False,
+                meta={"discussion": index + 1}, end_marker="DONE",
+            )
+            result = turn.run(brief)
+            if not result.empty:
+                self._persist(persona, result, 0, meta=turn.meta)
+                self.results.append(result)
+            success = success and result.success
+            error = error or result.error
+            if not result.success:
+                break
+            spoken.append((persona, result))
+            # Stop on DONE, but always let at least two agents speak.
+            if turn.marker_found and len(spoken) >= 2:
+                break
+        if len(spoken) >= 2 and settings.group_merge() and not self.cancel.is_set():
+            lead = members[0]
+            transcript = "\n\n".join(f"[{p.name}]: {r.text}" for p, r in spoken if r.text)
+            conclude_history = history + [{"role": "user", "content": prompt_text}, {"role": "assistant", "content": transcript}]
+            brief = (
+                f"[System]: {lead.name}, the discussion is over. Write a short conclusion for the user: the answer the "
+                "group reached and any disagreement still open. Under 120 words."
+            )
+            turn = self._build_turn(lead, brief, history=conclude_history, depth=0, allow_handoff=False, meta={"role": "merge"})
+            result = turn.run(brief)
+            if not result.empty:
+                self._persist(lead, result, 0, meta=turn.meta)
+                self.results.append(result)
+            success = success and result.success
+            error = error or result.error
+        return success, error
+
     # ── parallel fan-out ────────────────────────────────────────────────
     def _should_fan_out(self, message: str, responders: list[AgentPersona]) -> bool:
         """Several agents were asked by name (or @all), and they share one model.
@@ -373,6 +444,7 @@ class LeanSession:
         delegated_by: Optional[AgentPersona] = None,
         allow_handoff: bool = True,
         meta: Optional[dict[str, Any]] = None,
+        end_marker: str = "",
     ) -> LeanTurn:
         meta = dict(meta or {})
         if delegated_by is not None:
@@ -416,6 +488,7 @@ class LeanSession:
             interactive=self.source in INTERACTIVE_SOURCES,
             on_seal=lambda part: self._record(persona, part, depth, meta),
             meta=meta,
+            end_marker=end_marker,
         )
         return turn
 

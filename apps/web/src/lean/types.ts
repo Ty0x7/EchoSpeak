@@ -90,6 +90,9 @@ export type LeanRoom = {
   last_message_at: number;
   last_preview: string;
   updated_at: number;
+  /** "reply": chosen agents answer once. "discussion": they take turns, then the lead concludes. */
+  mode?: "reply" | "discussion";
+  max_messages?: number;
 };
 
 export type LeanApproval = {

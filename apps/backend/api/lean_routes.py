@@ -39,11 +39,15 @@ class RoomPayload(BaseModel):
     name: str = ""
     agent_ids: list[str] = Field(default_factory=list)
     kind: str = "group"
+    mode: str = "reply"
+    max_messages: int = 6
 
 
 class RoomUpdatePayload(BaseModel):
     name: Optional[str] = None
     agent_ids: Optional[list[str]] = None
+    mode: Optional[str] = None
+    max_messages: Optional[int] = None
 
 
 def _agent_public(agent: Any) -> dict[str, Any]:
@@ -304,7 +308,10 @@ def create_room(payload: RoomPayload) -> dict[str, Any]:
     if missing:
         raise HTTPException(status_code=400, detail=f"Unknown agents: {', '.join(missing)}")
     try:
-        room = get_room_store().create(name=payload.name, agent_ids=payload.agent_ids, kind=payload.kind)
+        room = get_room_store().create(
+            name=payload.name, agent_ids=payload.agent_ids, kind=payload.kind,
+            mode=payload.mode, max_messages=payload.max_messages,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return room.model_dump()
@@ -313,7 +320,10 @@ def create_room(payload: RoomPayload) -> dict[str, Any]:
 @router.patch("/rooms/{room_id}")
 def update_room(room_id: str, payload: RoomUpdatePayload) -> dict[str, Any]:
     try:
-        room = get_room_store().update(room_id, name=payload.name, agent_ids=payload.agent_ids)
+        room = get_room_store().update(
+            room_id, name=payload.name, agent_ids=payload.agent_ids,
+            mode=payload.mode, max_messages=payload.max_messages,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Room not found") from exc
     except ValueError as exc:

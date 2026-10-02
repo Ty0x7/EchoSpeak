@@ -31,6 +31,25 @@ class Room(BaseModel):
     updated_at: float = Field(default_factory=time.time)
     last_message_at: float = 0.0
     last_preview: str = ""
+    # "reply": the chosen agent(s) answer once. "discussion": agents take turns
+    # for up to max_messages, then the lead concludes.
+    mode: str = "reply"
+    max_messages: int = 6
+
+
+ROOM_MODES = {"reply", "discussion"}
+
+
+def _clean_mode(mode: Optional[str]) -> str:
+    value = str(mode or "reply").strip().lower()
+    return value if value in ROOM_MODES else "reply"
+
+
+def _clean_cap(value: Any) -> int:
+    try:
+        return max(2, min(12, int(value)))
+    except (TypeError, ValueError):
+        return 6
 
 
 class RoomStore:
@@ -70,7 +89,7 @@ class RoomStore:
                     return room.model_copy()
         return None
 
-    def create(self, *, name: str, agent_ids: list[str], kind: str = "group") -> Room:
+    def create(self, *, name: str, agent_ids: list[str], kind: str = "group", mode: str = "reply", max_messages: int = 6) -> Room:
         from agent.threads import get_thread_manager
 
         agent_ids = [a for a in dict.fromkeys(str(x).strip() for x in agent_ids) if a]
@@ -79,13 +98,24 @@ class RoomStore:
         kind = "direct" if kind == "direct" or len(agent_ids) == 1 and kind != "group" else "group"
         title = (name or "").strip()[:60] or "Group chat"
         thread = get_thread_manager().create_thread(title=title, source="room")
-        room = Room(id=f"room_{uuid.uuid4().hex[:10]}", name=title, kind=kind, agent_ids=agent_ids, thread_id=thread.thread_id)
+        room = Room(
+            id=f"room_{uuid.uuid4().hex[:10]}", name=title, kind=kind, agent_ids=agent_ids, thread_id=thread.thread_id,
+            mode=_clean_mode(mode), max_messages=_clean_cap(max_messages),
+        )
         with self._lock:
             self._rooms[room.id] = room
             self._save()
         return room.model_copy()
 
-    def update(self, room_id: str, *, name: Optional[str] = None, agent_ids: Optional[list[str]] = None) -> Room:
+    def update(
+        self,
+        room_id: str,
+        *,
+        name: Optional[str] = None,
+        agent_ids: Optional[list[str]] = None,
+        mode: Optional[str] = None,
+        max_messages: Optional[int] = None,
+    ) -> Room:
         with self._lock:
             room = self._rooms.get(room_id)
             if room is None:
@@ -98,6 +128,10 @@ class RoomStore:
                 if not ids:
                     raise ValueError("A room needs at least one agent")
                 updates["agent_ids"] = ids
+            if mode is not None:
+                updates["mode"] = _clean_mode(mode)
+            if max_messages is not None:
+                updates["max_messages"] = _clean_cap(max_messages)
             room = room.model_copy(update=updates)
             self._rooms[room_id] = room
             self._save()

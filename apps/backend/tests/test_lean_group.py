@@ -220,3 +220,50 @@ def test_builtin_teammates_are_renamed_once_and_ids_still_resolve(tmp_path):
     store.update("scout", {"name": "Friday"})
     assert PersonaStore(path).get("scout").name == "Friday"
     assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+
+
+# ── discussion mode ─────────────────────────────────────────────────────
+
+def _discussion_room(session_id: str, cap: int = 6) -> Room:
+    room = _room(session_id, ["echo", "scout", "forge"])
+    return room.model_copy(update={"mode": "discussion", "max_messages": cap})
+
+
+def test_discussion_takes_turns_until_done_then_the_lead_concludes(monkeypatch):
+    session_id = f"disc-{uuid.uuid4().hex[:6]}"
+    scripts = {
+        "scout": ScriptedClient([ModelTurn(content="Option A is faster.")]),
+        "echo": ScriptedClient([ModelTurn(content="Agreed, A fits here. DONE"), ModelTurn(content="Go with A.")]),
+        "forge": ScriptedClient([]),  # never reached: Echo said DONE
+    }
+    session, events = _session(monkeypatch, scripts, room=_discussion_room(session_id), session_id=session_id)
+    out = session.run("@Jarvis which option should I pick?")
+
+    assert [m["agent_id"] for m in out["messages"]] == ["scout", "echo", "echo"]
+    assert [m["text"] for m in out["messages"]] == ["Option A is faster.", "Agreed, A fits here.", "Go with A."]
+    assert scripts["forge"].calls == []
+    # The second speaker saw the first one's message.
+    assert any("Option A is faster." in str(m.get("content")) for m in scripts["echo"].calls[0])
+    assert any(e["type"] == "text_replace" and e["text"] == "Agreed, A fits here." for e in events)
+    starts = [e for e in events if e["type"] == "agent_start"]
+    assert starts[-1].get("role") == "merge"
+
+
+def test_discussion_stops_at_the_message_cap(monkeypatch):
+    session_id = f"disc-cap-{uuid.uuid4().hex[:6]}"
+    scripts = {
+        "scout": ScriptedClient([ModelTurn(content="A.")]),
+        "echo": ScriptedClient([ModelTurn(content="B."), ModelTurn(content="Wrap-up.")]),
+        "forge": ScriptedClient([ModelTurn(content="C.")]),
+    }
+    session, _ = _session(monkeypatch, scripts, room=_discussion_room(session_id, cap=3), session_id=session_id)
+    out = session.run("@Jarvis thoughts?")
+    assert [m["text"] for m in out["messages"]] == ["A.", "B.", "C.", "Wrap-up."]
+
+
+def test_room_mode_and_cap_are_validated(tmp_path, monkeypatch):
+    from agent.lean import rooms
+
+    monkeypatch.setattr(rooms, "_clean_cap", rooms._clean_cap)
+    assert rooms._clean_mode("Discussion") == "discussion" and rooms._clean_mode("chaos") == "reply"
+    assert rooms._clean_cap(50) == 12 and rooms._clean_cap(1) == 2 and rooms._clean_cap("x") == 6

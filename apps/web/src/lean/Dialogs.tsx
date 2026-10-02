@@ -172,9 +172,11 @@ export function RoomDialog({
   room: LeanRoom | null;
   agents: LeanPersona[];
   onClose(): void;
-  onSave(payload: { name: string; agent_ids: string[] }): Promise<void>;
+  onSave(payload: { name: string; agent_ids: string[]; mode: "reply" | "discussion"; max_messages: number }): Promise<void>;
 }) {
   const [name, setName] = useState(room?.name || "");
+  const [mode, setMode] = useState<"reply" | "discussion">(room?.mode || "reply");
+  const [cap, setCap] = useState<number>(room?.max_messages || 6);
   const [members, setMembers] = useState<string[]>(room?.agent_ids || agents.slice(0, 3).map((a) => a.id));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -185,7 +187,7 @@ export function RoomDialog({
     }
     setBusy(true);
     try {
-      await onSave({ name: name.trim() || "Group chat", agent_ids: members });
+      await onSave({ name: name.trim() || "Group chat", agent_ids: members, mode, max_messages: cap });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -238,6 +240,28 @@ export function RoomDialog({
           })}
         </div>
       </div>
+      <div className="es-field">
+        <span>How the group answers</span>
+        <div className="es-mode-pick" role="radiogroup" aria-label="How the group answers">
+          <button type="button" role="radio" aria-checked={mode === "reply"} className={`es-toggle-chip${mode === "reply" ? " is-on" : ""}`} onClick={() => setMode("reply")}>
+            <strong>One reply</strong>
+            <small>The agent you @mention (or the best fit) answers.</small>
+          </button>
+          <button type="button" role="radio" aria-checked={mode === "discussion"} className={`es-toggle-chip${mode === "discussion" ? " is-on" : ""}`} onClick={() => setMode("discussion")}>
+            <strong>Discussion</strong>
+            <small>Agents take turns building on each other, then the lead sums up.</small>
+          </button>
+        </div>
+        {mode === "discussion" ? (
+          <label className="es-cap">
+            Stop after
+            <select value={cap} onChange={(e) => setCap(Number(e.target.value))}>
+              {[4, 6, 8].map((n) => <option key={n} value={n}>{n} messages</option>)}
+            </select>
+            or when an agent says the group is done.
+          </label>
+        ) : null}
+      </div>
       {error ? <div className="es-form-error">{error}</div> : null}
     </Modal>
   );
@@ -256,7 +280,10 @@ export function RoomHeader({ room, agents, onEdit }: { room: LeanRoom; agents: L
         )}
         <div>
           <strong>{solo ? solo.name : room.name}</strong>
-          <small>{solo ? solo.title || solo.description : members.map((m) => m.name).join(" · ")}</small>
+          <small>
+            {solo ? solo.title || solo.description : members.map((m) => m.name).join(" · ")}
+            {!solo && room.mode === "discussion" ? <span className="es-room-mode">Discussion · up to {room.max_messages || 6}</span> : null}
+          </small>
         </div>
       </div>
       {room.kind === "group" ? (

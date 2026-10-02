@@ -32,10 +32,10 @@ export const leanApi = (apiBase: string) => ({
     const data = await json<{ items: LeanRoom[] }>(await fetch(`${apiBase}/lean/rooms`));
     return data.items || [];
   },
-  async createRoom(payload: { name: string; agent_ids: string[]; kind?: string }): Promise<LeanRoom> {
+  async createRoom(payload: { name: string; agent_ids: string[]; kind?: string; mode?: string; max_messages?: number }): Promise<LeanRoom> {
     return json(await fetch(`${apiBase}/lean/rooms`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }));
   },
-  async updateRoom(id: string, payload: { name?: string; agent_ids?: string[] }): Promise<LeanRoom> {
+  async updateRoom(id: string, payload: { name?: string; agent_ids?: string[]; mode?: string; max_messages?: number }): Promise<LeanRoom> {
     return json(await fetch(`${apiBase}/lean/rooms/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }));
   },
   async deleteRoom(id: string): Promise<void> {

@@ -1011,3 +1011,11 @@
 .lm-stopped span { flex: 1; }
 .lm-note { display: flex; align-items: center; gap: 10px; max-width: 720px; color: var(--es-faint); font: 500 11px var(--es-font); }
 .lm-note::before, .lm-note::after { content: ""; flex: 1; height: 1px; background: var(--es-line); }
+
+/* Group answer mode */
+.es-mode-pick { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.es-mode-pick .es-toggle-chip strong { text-transform: none; }
+.es-cap { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; color: var(--es-dim); font: 500 12px var(--es-font); }
+.es-cap select { height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--es-line-2); background: #121213; color: var(--es-text); font: 500 12px var(--es-font); }
+.es-room-mode { margin-left: 8px; padding: 1px 7px; border: 1px solid var(--es-line-2); border-radius: 999px; color: var(--es-dim); font-size: 10px; }
+@media (max-width: 560px) { .es-mode-pick { grid-template-columns: 1fr; } }
