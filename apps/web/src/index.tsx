@@ -2626,12 +2626,7 @@ const globalCss = `
            background: #111;
            color: ${colors.text};
          }
-         @media (max-width: 1120px) {
-           .composer-mode-controls {
-             flex: 1 1 100%;
-             justify-content: flex-end;
-           }
-         }
+
          @media (max-width: 760px) {
            .live-run-header {
              align-items: flex-start;
@@ -2650,16 +2645,7 @@ const globalCss = `
            .live-run-trace {
              padding-left: 0;
            }
-           .controls-row {
-             display: grid;
-             grid-template-columns: minmax(0, 1fr);
-             gap: 6px;
-           }
-           .composer-primary-controls {
-             width: 100%;
-             min-width: 0;
-             grid-template-columns: auto minmax(0, .8fr) minmax(0, 1.2fr) minmax(72px, .7fr);
-           }
+
            .composer-tools-slot {
              min-height: 46px;
              border-right: 1px solid rgba(255,255,255,0.08);
@@ -2670,35 +2656,9 @@ const globalCss = `
            .effort-slot {
              min-width: 0;
            }
-           .composer-mode-controls {
-             width: 100%;
-             display: grid;
-             grid-template-columns: repeat(4, minmax(0, 1fr));
-             justify-content: stretch;
-           }
-           .composer-mode-button {
-             min-width: 0;
-             width: 100%;
-             padding: 0 4px;
-           }
+
          }
-         @media (max-width: 520px) {
-           .composer-primary-controls {
-             grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
-           }
-           .effort-slot {
-             grid-column: 1 / -1;
-             border-top: 1px solid rgba(255,255,255,0.08);
-             border-right: 0;
-           }
-           .composer-mode-label {
-             display: none;
-           }
-           .composer-mode-button {
-             min-width: 38px;
-             padding: 0 8px;
-           }
-         }
+
        `;
 
 const sanitizeForTTS = (input: string) => {
@@ -7241,6 +7201,62 @@ export const Dashboard: React.FC<{
     }
   };
 
+  // ── Composer toolbar: always one row; collapses by its own width ──
+  const [toolbarSize, setToolbarSize] = useState<"full" | "icons" | "compact" | "mini">("full");
+  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
+  const toolbarObserverRef = useRef<ResizeObserver | null>(null);
+  const toolbarRef = useCallback((el: HTMLDivElement | null) => {
+    toolbarObserverRef.current?.disconnect();
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width;
+      setToolbarSize(width >= 960 ? "full" : width >= 760 ? "icons" : width >= 600 ? "compact" : "mini");
+    });
+    observer.observe(el);
+    toolbarObserverRef.current = observer;
+  }, []);
+  useEffect(() => {
+    if (toolbarSize !== "mini") setToolbarMenuOpen(false);
+  }, [toolbarSize]);
+  useEffect(() => {
+    if (!toolbarMenuOpen) return;
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      const outside = event instanceof KeyboardEvent
+        ? event.key === "Escape"
+        : !(event.target as HTMLElement | null)?.closest?.(".toolbar-overflow");
+      if (outside) setToolbarMenuOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", close);
+    };
+  }, [toolbarMenuOpen]);
+  const toggleMonitor = () =>
+    setMonitoring((v) => {
+      const next = !v;
+      if (next) refreshMonitor();
+      return next;
+    });
+  const toggleReadAloud = () => {
+    const enabled = !voiceReadAloud;
+    setVoiceReadAloud(enabled);
+    if (!enabled) stopTts();
+  };
+  const toggleVoiceMode = () => {
+    const enabled = !voiceConversationMode;
+    setVoiceConversationMode(enabled);
+    if (enabled && !streaming && !listening && voicePhase !== "transcribing") void start();
+    if (!enabled) {
+      void voiceInputRef.current?.stop(false);
+      setListening(false);
+      stopTts();
+      setVoicePhase("idle");
+      setVoiceNotice("");
+    }
+  };
+
   const queueFollowUp = async () => {
     const sessionId = String(activeThreadIdRef.current || "").trim();
     const message = String(input || "").trim();
@@ -8870,7 +8886,7 @@ export const Dashboard: React.FC<{
                       </div>
                     </div>
                     {/* Row 2: mic mon viz | Provider | Model */}
-                    <div className="controls-row">
+                    <div className="controls-row" ref={toolbarRef} data-size={toolbarSize}>
                       <div className="composer-primary-controls">
                         <div className="composer-tools-slot" role="group" aria-label="Input tools">
                         <button
@@ -8908,17 +8924,11 @@ export const Dashboard: React.FC<{
                           </span>
                         ) : null}
                         <button
-                          className={`composer-square ${monitoring ? "active" : ""}`}
+                          className={`composer-square is-overflowable ${monitoring ? "active" : ""}`}
                           type="button"
                           title={monitoring ? "Stop screen monitor" : "Screen monitor"}
                           aria-label={monitoring ? "Stop screen monitor" : "Screen monitor"}
-                          onClick={() =>
-                            setMonitoring((v) => {
-                              const n = !v;
-                              if (n) refreshMonitor();
-                              return n;
-                            })
-                          }
+                          onClick={toggleMonitor}
                         >
                           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                             <rect x="2" y="4" width="20" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
@@ -8926,7 +8936,7 @@ export const Dashboard: React.FC<{
                           </svg>
                         </button>
                         <button
-                          className={`composer-square ${!speechEnabled ? "active" : ""}`}
+                          className={`composer-square is-overflowable ${!speechEnabled ? "active" : ""}`}
                           type="button"
                           title={speechEnabled ? "Sound on · click to mute" : "Sound off · click to unmute"}
                           aria-label={speechEnabled ? "Mute sound" : "Unmute sound"}
@@ -8997,7 +9007,7 @@ export const Dashboard: React.FC<{
                           ))}
                         </select>
                         </div>
-                        <div className="control-slot effort-slot" data-label="Effort">
+                        <div className="control-slot effort-slot is-overflowable" data-label="Effort">
                         <select
                           className="model-picker"
                           value={reasoningEffort}
@@ -9019,50 +9029,38 @@ export const Dashboard: React.FC<{
                       <button
                         className={`composer-mode-button ${thinkingEnabled ? "active" : ""}`}
                         type="button"
-                        title={thinkingEnabled ? "Thinking enabled" : "Thinking disabled"}
-                        aria-label={thinkingEnabled ? "Disable thinking" : "Enable thinking"}
+                        title={thinkingEnabled ? "Thinking: on" : "Thinking: off"}
+                        aria-label="Thinking"
+                        aria-pressed={thinkingEnabled}
                         onClick={() => setThinkingEnabled(!thinkingEnabled)}
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3"/></svg>
                         <span className="composer-mode-label">Think</span>
                       </button>
                       <button
-                        className={`composer-mode-button ${voiceReadAloud ? "active" : ""}`}
+                        className={`composer-mode-button is-overflowable ${voiceReadAloud ? "active" : ""}`}
                         type="button"
-                        title={voiceReadAloud ? "Read replies aloud ON" : "Read replies aloud OFF"}
+                        title={voiceReadAloud ? "Read replies aloud: on" : "Read replies aloud: off"}
                         aria-label="Read replies aloud"
-                        onClick={() => {
-                          const enabled = !voiceReadAloud;
-                          setVoiceReadAloud(enabled);
-                          if (!enabled) stopTts();
-                        }}
+                        aria-pressed={voiceReadAloud}
+                        onClick={toggleReadAloud}
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 10h3l4-3v10l-4-3H4zM15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/></svg>
                         <span className="composer-mode-label">Read</span>
                       </button>
                       <button
-                        className={`composer-mode-button ${voiceConversationMode ? "active" : ""}`}
+                        className={`composer-mode-button is-overflowable ${voiceConversationMode ? "active" : ""}`}
                         type="button"
-                        title={voiceConversationMode ? "Voice conversation mode ON" : "Voice mode OFF"}
+                        title={voiceConversationMode ? "Voice conversation: on" : "Voice conversation: off"}
                         aria-label="Voice conversation mode"
-                        onClick={() => {
-                          const enabled = !voiceConversationMode;
-                          setVoiceConversationMode(enabled);
-                          if (enabled && !streaming && !listening && voicePhase !== "transcribing") void start();
-                          if (!enabled) {
-                            void voiceInputRef.current?.stop(false);
-                            setListening(false);
-                            stopTts();
-                            setVoicePhase("idle");
-                            setVoiceNotice("");
-                          }
-                        }}
+                        aria-pressed={voiceConversationMode}
+                        onClick={toggleVoiceMode}
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 10v4M9 7v10M13 4v16M17 7v10M21 10v4"/></svg>
                         <span className="composer-mode-label">Voice</span>
                       </button>
                       <button
-                        className={`composer-mode-button ${wakeWordEnabled ? "active" : ""}`}
+                        className={`composer-mode-button is-overflowable ${wakeWordEnabled ? "active" : ""}`}
                         type="button"
                         title="Wake word is not active yet. It follows the local Voice foundation in Phase 6."
                         aria-label="Wake word unavailable"
@@ -9071,6 +9069,52 @@ export const Dashboard: React.FC<{
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 0 1 10 10M12 22A10 10 0 0 1 2 12M5 5a10 10 0 0 1 14 14"/></svg>
                         <span className="composer-mode-label">Wake</span>
                       </button>
+                      {toolbarSize === "mini" ? (
+                        <div className="toolbar-overflow">
+                          <button
+                            type="button"
+                            className={`composer-mode-button${toolbarMenuOpen ? " active" : ""}`}
+                            title="More controls"
+                            aria-label="More controls"
+                            aria-haspopup="menu"
+                            aria-expanded={toolbarMenuOpen}
+                            onClick={() => setToolbarMenuOpen((v) => !v)}
+                          >
+                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
+                          </button>
+                          {toolbarMenuOpen ? (
+                            <div className="toolbar-menu" role="menu" aria-label="More controls">
+                              <button type="button" role="menuitemcheckbox" aria-checked={voiceReadAloud} onClick={toggleReadAloud}>
+                                <span>Read replies aloud</span><i data-on={voiceReadAloud ? "true" : "false"} />
+                              </button>
+                              <button type="button" role="menuitemcheckbox" aria-checked={voiceConversationMode} onClick={toggleVoiceMode}>
+                                <span>Voice conversation</span><i data-on={voiceConversationMode ? "true" : "false"} />
+                              </button>
+                              <button type="button" role="menuitemcheckbox" aria-checked={monitoring} onClick={toggleMonitor}>
+                                <span>Screen monitor</span><i data-on={monitoring ? "true" : "false"} />
+                              </button>
+                              <button type="button" role="menuitemcheckbox" aria-checked={speechEnabled} onClick={() => setSpeechEnabled(!speechEnabled)}>
+                                <span>Sound</span><i data-on={speechEnabled ? "true" : "false"} />
+                              </button>
+                              <button type="button" role="menuitem" disabled title="Wake word is not active yet.">
+                                <span>Wake word</span><small>Soon</small>
+                              </button>
+                              <label className="toolbar-menu-select">
+                                <span>Effort</span>
+                                <select value={reasoningEffort} onChange={(e: any) => setReasoningEffort(e.target.value)} aria-label="Reasoning effort">
+                                  <option value="minimal">Minimal</option>
+                                  <option value="low">Low</option>
+                                  <option value="medium">Medium</option>
+                                  <option value="high">High</option>
+                                  <option value="extra_high">Extra High</option>
+                                  <option value="max">Max</option>
+                                  <option value="ultra">Ultra</option>
+                                </select>
+                              </label>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       </div>
                     </div>
                   </div>

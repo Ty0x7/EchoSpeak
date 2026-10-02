@@ -692,3 +692,88 @@
 .echo-root.echo-root .session-folder-strip b { color: var(--es-dim) !important; font-weight: 600; }
 .echo-root.echo-root .context-meter-wrap { border-radius: 14px; }
 .echo-root.echo-root .chat-scroll { gap: 6px; }
+
+/* ── Composer toolbar: one row, collapses by its own width (data-size) ── */
+.echo-root.echo-root .controls-row { flex-wrap: nowrap; align-items: stretch; gap: 6px; }
+.echo-root.echo-root .composer-primary-controls {
+  flex: 1 1 auto;
+  min-width: 0;
+  grid-template-columns: auto minmax(88px, .75fr) minmax(120px, 1.25fr) minmax(84px, .6fr);
+}
+.echo-root.echo-root .composer-mode-controls { flex: 0 0 auto; }
+.echo-root.echo-root .provider-picker,
+.echo-root.echo-root .model-picker { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.echo-root.echo-root .composer-mode-button { transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, padding 0.15s ease; }
+
+.echo-root.echo-root .controls-row:not([data-size="full"]) .composer-mode-label { display: none; }
+.echo-root.echo-root .controls-row:not([data-size="full"]) .composer-mode-button { min-width: 38px; padding: 0 10px; }
+
+.echo-root.echo-root .controls-row[data-size="compact"] .control-slot::before,
+.echo-root.echo-root .controls-row[data-size="mini"] .control-slot::before { display: none; }
+.echo-root.echo-root .controls-row[data-size="compact"] :is(.provider-picker, .model-picker),
+.echo-root.echo-root .controls-row[data-size="mini"] :is(.provider-picker, .model-picker) {
+  height: 100%;
+  min-height: 46px;
+  padding-bottom: 0;
+}
+.echo-root.echo-root .controls-row[data-size="compact"] .composer-primary-controls {
+  grid-template-columns: auto minmax(70px, .7fr) minmax(90px, 1.3fr) minmax(70px, .6fr);
+}
+.echo-root.echo-root .controls-row:is([data-size="compact"], [data-size="mini"]) .voice-transport-status { max-width: 14px; padding: 0; color: transparent; }
+
+.echo-root.echo-root .controls-row[data-size="mini"] .is-overflowable { display: none !important; }
+.echo-root.echo-root .controls-row[data-size="mini"] .composer-primary-controls {
+  grid-template-columns: auto minmax(0, .8fr) minmax(0, 1.2fr);
+}
+
+.toolbar-overflow { position: relative; display: flex; }
+.toolbar-overflow > .composer-mode-button svg { width: 15px; height: 15px; }
+.toolbar-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  z-index: 1000;
+  display: grid;
+  gap: 2px;
+  min-width: 230px;
+  padding: 6px;
+  border-radius: 14px;
+  border: 1px solid var(--es-line-2);
+  background: rgba(17, 17, 18, 0.97);
+  backdrop-filter: blur(14px);
+  box-shadow: var(--es-sheen), 0 16px 40px rgba(0, 0, 0, 0.55);
+  animation: es-menu-in 0.16s ease-out both;
+}
+@keyframes es-menu-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.toolbar-menu > button, .toolbar-menu-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--es-text);
+  font: 500 12.5px var(--es-font);
+  text-align: left;
+  cursor: pointer;
+}
+.toolbar-menu > button:hover:not(:disabled), .toolbar-menu-select:hover { background: var(--es-glass-2); }
+.toolbar-menu > button:disabled { color: var(--es-faint); cursor: default; }
+.toolbar-menu > button:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.5); outline-offset: -2px; }
+.toolbar-menu small { color: var(--es-faint); font-size: 11px; }
+.toolbar-menu i { width: 26px; height: 15px; border-radius: 999px; background: #2a2a2d; position: relative; flex: 0 0 26px; transition: background 0.15s ease; }
+.toolbar-menu i::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #d4d4d8; transition: transform 0.15s ease; }
+.toolbar-menu i[data-on="true"] { background: #f4f4f5; }
+.toolbar-menu i[data-on="true"]::after { transform: translateX(11px); background: #0a0a0a; }
+.toolbar-menu-select select {
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid var(--es-line-2);
+  background: var(--es-surface-2);
+  color: var(--es-text);
+  font: 500 12px var(--es-font);
+}
