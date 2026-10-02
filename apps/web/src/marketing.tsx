@@ -92,7 +92,6 @@ function SectionHeading({ id, number, label, lines, lede }: { id: string; number
       <span className="sh-num" aria-hidden="true">{number}</span>
       <div className="sh-label">
         <ChapterLabel number={number}>{label}</ChapterLabel>
-        <i aria-hidden="true" />
       </div>
       <div className="sh-body">
         <h2 id={id}>
@@ -112,7 +111,7 @@ function EchoOrbit() {
     <div className="orbit-feature">
       <div className="orbit-feature-copy">
         <span>One Echo · many ways to work</span>
-        <h3>Echo changes how he helps without changing who he is.</h3>
+        <h3 id="capabilities-title">Echo changes how he helps without changing who he is.</h3>
         <p>Ask a question, start research, attach a project, speak aloud, or bring Scout and Forge in. The surface changes; the chat, memory and history stay connected.</p>
       </div>
       <div className="orbit-stage" aria-label="Chat, group chats, projects, research, memory and voice, all around Echo">
@@ -325,13 +324,6 @@ export function Marketing() {
         </nav>
 
         <section className="capability-section section-shell" id="capabilities" aria-labelledby="capabilities-title">
-          <SectionHeading
-            id="capabilities-title"
-            number="01"
-            label="What it does"
-            lines={["Not just chat.", "Agents that act."]}
-            lede="Echo and his team use real tools on your PC and show every step while they work."
-          />
           <EchoOrbit />
           <div className="capability-grid">
             {capabilities.map((capability) => (
@@ -445,13 +437,12 @@ const styles = `
   .echo-stage-team span { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border: 1px solid #262626; border-radius: 999px; background: #0e0e0e; }
   .echo-stage-team b { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #3a3a3a; border-radius: 6px; background: #171717; color: #eee; font-family: Inter, sans-serif; font-size: 10px; letter-spacing: 0; }
 
-  .chapter-nav { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-  .chapter-nav a { position: relative; min-height: 96px; padding: 24px 24px 22px; display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: start; color: #8a8a86; border-right: 1px solid var(--line); transition: color .2s ease, background .2s ease; }
-  .chapter-nav a:first-child { border-left: 1px solid var(--line); }
-  .chapter-nav a:hover { color: #f3f3f0; background: #0a0a0a; }
+  .chapter-nav { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid #1c1c1c; }
+  .chapter-nav a { position: relative; min-height: 76px; padding: 26px 4px 22px; display: grid; grid-template-columns: 30px 1fr; gap: 8px; align-items: start; color: #8a8a86; transition: color .2s ease; }
+  .chapter-nav a:hover { color: #f3f3f0; }
   .chapter-nav span { color: #8a8a86; font-family: monospace; font-size: 10px; }
   .chapter-nav strong { font-size: 12.5px; font-weight: 560; letter-spacing: -.01em; }
-  .chapter-nav i { position: absolute; left: 24px; right: 24px; bottom: 18px; height: 1px; background: #272727; }
+  .chapter-nav i { position: absolute; left: 4px; right: 24px; bottom: -1px; height: 1px; }
   .chapter-nav i::after { content: ""; display: block; width: 0; height: 1px; background: #e7e7e3; transition: width .3s ease; }
   .chapter-nav a:hover i::after { width: 100%; }
 
@@ -462,9 +453,7 @@ const styles = `
   .sh-num { position: absolute; z-index: -1; right: -6px; top: -64px; font-size: clamp(140px, 18vw, 260px); font-weight: 700; line-height: 1; letter-spacing: -.08em; color: transparent; -webkit-text-stroke: 1px #1d1d1d; user-select: none; pointer-events: none; transition: transform 1.2s cubic-bezier(.2,.7,0,1), opacity 1.2s ease; opacity: 0; transform: translateY(24px); }
   .sh[data-visible="true"] .sh-num { opacity: 1; transform: none; }
   .sh-label { display: flex; align-items: center; gap: 18px; }
-  .sh-label i { flex: 1; height: 1px; background: #333; transform-origin: left; transform: scaleX(0); transition: transform 1s cubic-bezier(.2,.7,0,1) .1s; }
-  .sh[data-visible="true"] .sh-label i { transform: scaleX(1); }
-  .sh-body { margin-top: 34px; display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: clamp(28px, 5vw, 80px); align-items: end; }
+  .sh-body { margin-top: 22px; display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: clamp(28px, 5vw, 80px); align-items: end; }
   .sh h2 { margin: 0; font-size: clamp(44px, 5.2vw, 78px); line-height: 1.02; letter-spacing: -.058em; font-weight: 580; }
   .sh-line { display: block; overflow: hidden; padding-bottom: .06em; }
   .sh-line > span { display: inline-block; transform: translateY(105%); transition: transform .9s cubic-bezier(.2,.7,0,1); }
@@ -473,7 +462,7 @@ const styles = `
   .sh-lede { margin: 0 0 8px; max-width: 460px; color: #a1a19d; font-size: 16px; line-height: 1.65; opacity: 0; transform: translateY(10px); transition: opacity .8s ease .3s, transform .8s cubic-bezier(.2,.7,0,1) .3s; }
   .sh[data-visible="true"] .sh-lede { opacity: 1; transform: none; }
 
-  .orbit-feature { margin-top: 64px; min-height: 360px; padding: 40px 46px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: center; border: 1px solid #2a2a2a; border-radius: 20px; background: #0b0b0b; overflow: hidden; }
+  .orbit-feature { margin-top: 0; min-height: 360px; padding: 40px 46px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: center; border: 1px solid #2a2a2a; border-radius: 20px; background: #0b0b0b; overflow: hidden; }
   .orbit-feature-copy > span { color: #85857f; font-family: monospace; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
   .orbit-feature-copy h3 { max-width: 540px; margin: 18px 0 16px; font-size: clamp(28px, 3vw, 44px); line-height: 1.05; letter-spacing: -.045em; font-weight: 580; }
   .orbit-feature-copy p { max-width: 500px; margin: 0; color: #9a9a96; font-size: 14.5px; line-height: 1.65; }
@@ -496,18 +485,18 @@ const styles = `
 
   .sd-flow { fill: none; stroke: none; }
   .sd-pulse { fill: #f2f2ef; filter: drop-shadow(0 0 4px rgba(255,255,255,.55)); }
-  .capability-section, .agents-section, .architecture-section { padding-block: 120px; }
-  .agents-section, .architecture-section { border-top: 1px solid var(--line); }
-  .capability-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #242424; border-left: 1px solid #242424; }
-  .capability-card { min-height: 236px; padding: 26px 24px 22px; display: flex; flex-direction: column; gap: 12px; border-right: 1px solid #242424; border-bottom: 1px solid #242424; color: #c8c8c4; transition: background .2s ease; }
-  .capability-card:hover { background: #0b0b0b; }
+  .capability-section { padding-block: 64px 32px; }
+  .agents-section, .architecture-section { padding-block: 64px; }
+  .capability-grid { margin-top: 12px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .capability-card { min-height: 224px; padding: 24px 22px 20px; display: flex; flex-direction: column; gap: 12px; border-radius: 16px; background: #0b0b0b; color: #c8c8c4; transition: background .2s ease, transform .2s ease; }
+  .capability-card:hover { background: #101010; transform: translateY(-2px); }
   .capability-card svg { color: #e2e2de; }
   .capability-card h3 { margin: 6px 0 0; font-size: 16px; font-weight: 600; letter-spacing: -.02em; color: #f2f2ef; }
   .capability-card p { margin: 0; color: #9a9a96; font-size: 13.5px; line-height: 1.6; }
   .capability-card span { margin-top: auto; color: #7c7c78; font-family: monospace; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
 
   .flow-kicker { color: #85857f; font-family: "SFMono-Regular", Consolas, monospace; font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
-  .flow-diagram { margin-top: 56px; padding: 30px; display: grid; grid-template-columns: 1fr 44px 1fr 44px 1fr; gap: 0; align-items: center; border: 1px solid #292929; border-radius: 18px; background: #080808; }
+  .flow-diagram { margin-top: 40px; padding: 30px; display: grid; grid-template-columns: 1fr 44px 1fr 44px 1fr; gap: 0; align-items: center; border: 1px solid #292929; border-radius: 18px; background: #080808; }
   .flow-col { display: grid; gap: 10px; }
   .flow-node { min-height: 64px; padding: 14px 16px; display: flex; align-items: center; gap: 12px; border: 1px solid #2c2c2c; border-radius: 12px; background: #0e0e0e; color: #d6d6d2; font-size: 13.5px; line-height: 1.45; }
   .flow-node b { width: 28px; height: 28px; flex: 0 0 28px; display: grid; place-items: center; border: 1px solid #3a3a3a; border-radius: 9px; background: #171717; font-size: 12px; }
@@ -534,7 +523,7 @@ const styles = `
 
 
 
-  .system-diagram { margin: 56px 0 0; padding: 26px; border: 1px solid #262626; border-radius: 20px; background: #080808; }
+  .system-diagram { margin: 40px 0 0; padding: 26px; border: 1px solid #262626; border-radius: 20px; background: #080808; }
   .system-diagram svg { display: block; width: 100%; height: auto; }
   .sd-boundary { fill: none; stroke: #2e2e2e; stroke-width: 1.2; stroke-dasharray: 5 6; }
   .sd-node { fill: #0e0e0e; stroke: #2e2e2e; stroke-width: 1.2; }
@@ -608,7 +597,6 @@ const styles = `
     .site-header { grid-template-columns: 1fr auto; }
     .site-header nav { display: none; }
         .chapter-nav { grid-template-columns: repeat(2, 1fr); }
-    .chapter-nav a { border-bottom: 1px solid var(--line); }
     .flow-handoff { grid-template-columns: 1fr; gap: 10px; }
     .sh-body { grid-template-columns: 1fr; align-items: start; }
     .sh-num { top: -40px; }
@@ -634,7 +622,8 @@ const styles = `
     .eyebrow { margin-bottom: 22px; font-size: 9.5px; }
     .hero h1 { font-size: clamp(46px, 14vw, 66px); }
     .button { width: 100%; }
-    .capability-section, .agents-section, .architecture-section { padding-block: 80px; }
+    .capability-section { padding-block: 56px 28px; }
+    .agents-section, .architecture-section { padding-block: 48px; }
     .capability-grid { grid-template-columns: 1fr; }
     .orbit-stage { height: 260px; transform: scale(.86); }
     .orbit-ring-c { display: none; }
