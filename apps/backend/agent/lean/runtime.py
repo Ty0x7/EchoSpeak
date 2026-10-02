@@ -7,10 +7,12 @@ import re
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from agent.lean import settings
 from agent.lean.loop import LeanTurn, TurnResult
 from agent.lean.personas import AgentPersona, get_persona_store
 from agent.lean.prompt import build_system_prompt
@@ -23,6 +25,8 @@ from agent.lean.toolbox import NativeTool, Toolbox, project_root_for_session
 Emit = Callable[[dict[str, Any]], None]
 
 MAX_DELEGATION_DEPTH = 2
+# Handoffs one user message may trigger in total, across all agents.
+MAX_HANDOFFS_PER_MESSAGE = 6
 # Sources with a live UI that can show an approval card.
 INTERACTIVE_SOURCES = {"web", "desktop", "voice", "chat", "api"}
 _HISTORY_MESSAGES = 30
@@ -70,6 +74,11 @@ class LeanSession:
         self.results: list[TurnResult] = []
         self._clients: dict[str, ChatClient] = {}
         self._soul_text: Optional[str] = None
+        self._user_message = ""
+        self._handoffs = 0
+        # Parallel agents share these.
+        self._emit_lock = threading.Lock()
+        self._state_lock = threading.Lock()
 
     # ── public ──────────────────────────────────────────────────────────
     def run(self, message: str, *, persona_id: str = "") -> dict[str, Any]:
@@ -84,10 +93,11 @@ class LeanSession:
     def emit(self, event: dict[str, Any]) -> None:
         event.setdefault("request_id", self.request_id)
         event.setdefault("at", time.time())
-        try:
-            self._emit(event)
-        except Exception:
-            logger.exception("Lean session emit failed")
+        with self._emit_lock:
+            try:
+                self._emit(event)
+            except Exception:
+                logger.exception("Lean session emit failed")
 
     def _members(self) -> list[AgentPersona]:
         if self.room is None:
@@ -125,6 +135,7 @@ class LeanSession:
         self.execution_id = execution.id
         self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else ""})
 
+        self._user_message = message
         history = self._history(exclude_execution=execution.id)
         responders = self._route(message, default_persona)
         success = True
@@ -132,6 +143,9 @@ class LeanSession:
         try:
             turn_history = history
             prompt_text = self._format_user(message)
+            if self._should_fan_out(message, responders):
+                success, error = self._run_fan_out(responders, prompt_text, history)
+                responders = []
             for index, persona in enumerate(responders):
                 if self.cancel.is_set():
                     break
@@ -152,8 +166,9 @@ class LeanSession:
                     turn_history = turn_history + [{"role": "assistant", "content": spoken}]
                     nxt = responders[index + 1]
                     prompt_text = (
-                        f"[System]: {nxt.name}, it's your turn. Reply to the user's last message from your "
-                        "side. Don't repeat what the others already said."
+                        f"[System]: {nxt.name}, it's your turn. Reply to the user's last message from your side. "
+                        "If you agree with what was said, say so in one line. If something is wrong or missing, "
+                        "correct it or add it. Don't repeat what's already been said."
                     )
         except Exception as exc:
             logger.exception("Lean session failed")
@@ -197,10 +212,29 @@ class LeanSession:
         named = mentioned_agents(message, members)
         if named:
             return named[:4]
-        picked = self._model_route(message, members)
-        return picked or [members[0]]
+        last = self._last_speaker(members)
+        picked = self._model_route(message, members, last=last)
+        # Router unsure: keep talking to whoever answered last.
+        return picked or [last or members[0]]
 
-    def _model_route(self, message: str, members: list[AgentPersona]) -> list[AgentPersona]:
+    def _last_speaker(self, members: list[AgentPersona]) -> Optional[AgentPersona]:
+        from agent.state import get_state_store
+
+        ids = {m.id for m in members}
+        try:
+            timeline = get_state_store().session_timeline(self.session_id, limit=10)
+        except Exception:
+            return None
+        for turn in reversed(timeline.get("turns") or []):
+            if str(turn.get("execution_id") or "") == self.execution_id:
+                continue
+            for msg in reversed(turn.get("messages") or []):
+                agent_id = str(msg.get("agent_id") or "")
+                if msg.get("role") != "user" and agent_id in ids and str(msg.get("text") or "").strip():
+                    return next(m for m in members if m.id == agent_id)
+        return None
+
+    def _model_route(self, message: str, members: list[AgentPersona], *, last: Optional[AgentPersona] = None) -> list[AgentPersona]:
         """Ask the model which agent(s) should answer. Never gates tools."""
         roster = "\n".join(f"- {m.name}: {m.description or m.title}" for m in members)
         recent = self._history(exclude_execution=self.execution_id)[-4:]
@@ -209,6 +243,8 @@ class LeanSession:
             "You route messages in a group chat between a user and AI agents.\n"
             f"Agents:\n{roster}\n\n"
             + (f"Recent conversation:\n{context}\n\n" if context else "")
+            + (f"The last agent to reply was {last.name}. If the new message continues that exchange "
+               f"(a follow-up, a yes/no, \"and…?\"), pick {last.name}.\n\n" if last else "")
             + f"New user message:\n{message[:1500]}\n\n"
             "Who should reply? Usually pick exactly one agent. Pick two only if both clearly add something different. "
             'Answer with JSON only, like {"agents": ["Name"]}.'
@@ -238,13 +274,106 @@ class LeanSession:
             logger.warning("Group routing failed, using lead agent: {}", exc)
             return []
 
-    def _run_agent(self, persona: AgentPersona, message: str, *, history: list[dict[str, Any]], depth: int) -> TurnResult:
+    def _run_agent(
+        self,
+        persona: AgentPersona,
+        message: str,
+        *,
+        history: list[dict[str, Any]],
+        depth: int,
+        delegated_by: Optional[AgentPersona] = None,
+    ) -> TurnResult:
+        turn = self._build_turn(persona, message, history=history, depth=depth, delegated_by=delegated_by)
+        result = turn.run(message)
+        if not result.empty:
+            self._persist(persona, result, depth, meta=turn.meta)
+        return result
 
+    # ── parallel fan-out ────────────────────────────────────────────────
+    def _should_fan_out(self, message: str, responders: list[AgentPersona]) -> bool:
+        """Several agents were asked by name (or @all), and they share one model.
+
+        A local server answering two personas on different models would have to
+        load both at once, so mixed-model groups keep taking turns.
+        """
+        if len(responders) < 2 or not settings.group_fan_out():
+            return False
+        if len(mentioned_agents(message, self._members())) < 2:
+            return False
+        endpoints = {(e.base_url, e.model) for e in (self._endpoint_for(p) for p in responders)}
+        return len(endpoints) == 1
+
+    def _run_fan_out(self, responders: list[AgentPersona], prompt_text: str, history: list[dict[str, Any]]) -> tuple[bool, str]:
+        turns = [
+            (persona, self._build_turn(persona, prompt_text, history=history, depth=0, allow_handoff=False, meta={"parallel": True}))
+            for persona in responders
+        ]
+        # Open every message up front, in the order the user named them.
+        for _, turn in turns:
+            turn.announce()
+        with ThreadPoolExecutor(max_workers=len(turns), thread_name_prefix="lean-fanout") as pool:
+            futures = [pool.submit(turn.run, prompt_text, announce=False) for _, turn in turns]
+            results = [future.result() for future in futures]
+        success, error = True, ""
+        answers: list[tuple[AgentPersona, TurnResult]] = []
+        # Saved in the same order they were shown, whichever finished first.
+        for (persona, turn), result in zip(turns, results):
+            if not result.empty:
+                self._persist(persona, result, 0, meta=turn.meta)
+                self.results.append(result)
+            success = success and result.success
+            error = error or result.error
+            if result.success and result.text:
+                answers.append((persona, result))
+        if len(answers) >= 2 and settings.group_merge() and not self.cancel.is_set():
+            merged = self._merge(answers, prompt_text, history)
+            success = success and merged.success
+            error = error or merged.error
+        return success, error
+
+    def _merge(self, answers: list[tuple[AgentPersona, TurnResult]], prompt_text: str, history: list[dict[str, Any]]) -> TurnResult:
+        """The room's lead turns independent answers into one short reply."""
+        members = self._members()
+        lead = members[0] if members else answers[0][0]
+        merge_history = history + [
+            {"role": "user", "content": prompt_text},
+            {"role": "assistant", "content": "\n\n".join(f"[{p.name}]: {r.text}" for p, r in answers)},
+        ]
+        names = ", ".join(p.name for p, _ in answers)
+        brief = (
+            f"[System]: {lead.name}, {names} each answered the user's message on their own (above). "
+            "Write a short merged reply: where they agree, where they differ and which is more likely right "
+            "(check with a tool only if it's quick), and the answer you recommend. Don't restate everything."
+        )
+        turn = self._build_turn(lead, brief, history=merge_history, depth=0, allow_handoff=False, meta={"role": "merge"})
+        result = turn.run(brief)
+        if not result.empty:
+            self._persist(lead, result, 0, meta=turn.meta)
+            self.results.append(result)
+        return result
+
+    def _build_turn(
+        self,
+        persona: AgentPersona,
+        message: str,
+        *,
+        history: list[dict[str, Any]],
+        depth: int,
+        delegated_by: Optional[AgentPersona] = None,
+        allow_handoff: bool = True,
+        meta: Optional[dict[str, Any]] = None,
+    ) -> LeanTurn:
+        meta = dict(meta or {})
+        if delegated_by is not None:
+            meta["delegated_by"] = {"id": delegated_by.id, "name": delegated_by.name}
+        can_hand_off = allow_handoff and depth < MAX_DELEGATION_DEPTH
         teammates = self._members() if self.room else [p for p in self.personas.list() if p.id != persona.id]
         terminal = Terminal(self.project_root)
         toolbox = Toolbox(
             toolsets=persona.toolsets or None,
-            extra_tools=self._native_tools(persona, depth) + coding_tools() + terminal.tools(),
+            extra_tools=self._native_tools(persona, depth, delegated_by=delegated_by, allow_handoff=can_hand_off)
+            + coding_tools()
+            + terminal.tools(),
             session_id=self.session_id,
             project_root=self.project_root,
         )
@@ -256,7 +385,7 @@ class LeanSession:
             notes=toolbox.notes,
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
             project_overview=project_overview(self.project_root) if self.project_root else "",
-            teammates=teammates if depth < MAX_DELEGATION_DEPTH else [],
+            teammates=teammates if can_hand_off else [],
             room_name=self.room.name if self.room and self.room.kind == "group" else "",
             memories=memories,
         )
@@ -273,21 +402,20 @@ class LeanSession:
             cancel=self.cancel,
             temperature=self._temperature(),
             interactive=self.source in INTERACTIVE_SOURCES,
-            on_seal=lambda part: self._record(persona, part, depth),
+            on_seal=lambda part: self._record(persona, part, depth, meta),
+            meta=meta,
         )
-        result = turn.run(message)
-        if not result.empty:
-            self._persist(persona, result, depth)
-        return result
+        return turn
 
-    def _record(self, persona: AgentPersona, part: TurnResult, depth: int) -> None:
+    def _record(self, persona: AgentPersona, part: TurnResult, depth: int, meta: dict[str, Any]) -> None:
         """A message closed before a handoff: save it now so it sorts before the teammate's."""
         self.results.append(part)
-        self._persist(persona, part, depth)
+        self._persist(persona, part, depth, meta=meta)
 
-    def _persist(self, persona: AgentPersona, result: TurnResult, depth: int) -> None:
+    def _persist(self, persona: AgentPersona, result: TurnResult, depth: int, *, meta: Optional[dict[str, Any]] = None) -> None:
         from agent.state import get_state_store
 
+        meta = meta or {}
         try:
             get_state_store().add_item(
                 turn_id=self.execution_id,
@@ -303,13 +431,22 @@ class LeanSession:
                     "backend_success": result.success,
                     "error": result.error,
                     "delegation_depth": depth,
+                    "delegated_by": meta.get("delegated_by") or None,
+                    "role": str(meta.get("role") or ""),
                 },
             )
         except Exception:
             logger.exception("Lean assistant message persistence failed")
 
     # ── native tools ────────────────────────────────────────────────────
-    def _native_tools(self, persona: AgentPersona, depth: int) -> list[NativeTool]:
+    def _native_tools(
+        self,
+        persona: AgentPersona,
+        depth: int,
+        *,
+        delegated_by: Optional[AgentPersona] = None,
+        allow_handoff: bool = True,
+    ) -> list[NativeTool]:
         memory = getattr(self.agent, "memory", None)
         tools: list[NativeTool] = []
         if memory is not None:
@@ -359,16 +496,25 @@ class LeanSession:
                 parallel_safe=True,
             ))
 
-        if depth < MAX_DELEGATION_DEPTH:
+        if allow_handoff and depth < MAX_DELEGATION_DEPTH:
             candidates = self._members() if self.room else self.personas.list()
-            candidates = [c for c in candidates if c.id != persona.id]
+            # Never offer a hand-back to whoever handed this work over.
+            excluded = {persona.id, delegated_by.id if delegated_by else ""}
+            candidates = [c for c in candidates if c.id not in excluded]
             if candidates:
                 def check(args: dict[str, Any]) -> str:
                     target = self.personas.find_by_name(str(args.get("agent") or ""))
-                    if target is None or target.id == persona.id or target.id not in {c.id for c in candidates}:
+                    if delegated_by is not None and target is not None and target.id == delegated_by.id:
+                        return (f"Error: {target.name} handed this task to you. Finish it yourself and reply; "
+                                "your answer goes back to them automatically.")
+                    if target is None or target.id not in {c.id for c in candidates}:
                         return "Error: unknown agent. Choose one of: " + ", ".join(c.name for c in candidates)
                     if not str(args.get("task") or "").strip():
                         return "Error: describe the task in 'task'."
+                    with self._state_lock:
+                        if self._handoffs >= MAX_HANDOFFS_PER_MESSAGE:
+                            return (f"Error: this request has already used {MAX_HANDOFFS_PER_MESSAGE} handoffs. "
+                                    "Finish the work yourself with what you have.")
                     return f"Handed to {target.name}. Their reply is below."
 
                 def delegate(args: dict[str, Any]) -> str:
@@ -377,9 +523,13 @@ class LeanSession:
                         return problem
                     target = self.personas.find_by_name(str(args.get("agent") or ""))
                     task = str(args.get("task") or "").strip()
+                    with self._state_lock:
+                        self._handoffs += 1
                     self.emit({"type": "delegation", "from": persona.id, "to": target.id, "task": task[:400]})
                     brief = f"{persona.name} handed you this task:\n{task}"
-                    result = self._run_agent(target, brief, history=[], depth=depth + 1)
+                    if self._user_message:
+                        brief += f"\n\nFor context, the user's message was:\n{self._user_message[:800]}"
+                    result = self._run_agent(target, brief, history=[], depth=depth + 1, delegated_by=persona)
                     if not result.empty:
                         self.results.append(result)
                     return f"{target.name} replied:\n{result.text}"

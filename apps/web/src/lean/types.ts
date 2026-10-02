@@ -40,7 +40,10 @@ export type LeanMessageData = {
   text: string;
   startedAt: number;
   endedAt?: number;
+  /** Name of the agent that handed this work over. */
   delegatedBy?: string;
+  /** "merge": the lead's summary after several agents answered at once. */
+  role?: string;
 };
 
 export type LeanLiveState = {

@@ -1251,6 +1251,8 @@ class StateStore:
                             "agent_name": str(item.payload.get("agent_name") or ""),
                             "message_id": str(item.payload.get("message_id") or ""),
                             "timeline": list(item.payload.get("timeline") or []),
+                            "delegated_by": item.payload.get("delegated_by") or None,
+                            "agent_role": str(item.payload.get("role") or ""),
                         })
         if not any(m["role"] == "user" for m in messages) and execution.query:
             messages.insert(0, {

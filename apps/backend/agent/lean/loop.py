@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import time
 import uuid
@@ -81,10 +82,13 @@ class LeanTurn:
         persist_tool_runs: bool = True,
         interactive: bool = True,
         on_seal: Optional[Callable[[TurnResult], None]] = None,
+        meta: Optional[dict[str, Any]] = None,
     ) -> None:
         self.interactive = interactive
         self._on_seal = on_seal
         self._handed_off = False
+        # Extra fields on agent_start, e.g. who handed this work over.
+        self.meta = dict(meta or {})
         self.client = client
         self.persona = persona
         self.system_prompt = system_prompt
@@ -177,8 +181,13 @@ class LeanTurn:
         self.timeline = []
         self._handed_off = True
 
-    def run(self, user_message: str) -> TurnResult:
-        self._start_message()
+    def announce(self) -> None:
+        """Open this agent's message. Parallel runs call it first, in order."""
+        self._start_message(**self.meta)
+
+    def run(self, user_message: str, *, announce: bool = True) -> TurnResult:
+        if announce:
+            self.announce()
         tools = self.toolbox.schemas()
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self.history)
@@ -326,6 +335,16 @@ class LeanTurn:
             for key in ("prompt", "completion", "total"):
                 self.usage[key] += int(turn.usage.get(key) or 0)
             self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens()})
+        # In group chats the transcript shows "[Name]: text"; models sometimes copy
+        # that onto their own reply. Drop it.
+        own_prefix = re.match(rf"\s*\[{re.escape(self.persona.name)}\]:\s*", turn.content or "")
+        if own_prefix:
+            turn.content = turn.content[own_prefix.end():]
+            for item in reversed(self.timeline):
+                if item.get("kind") == "text" and item.get("step") == step:
+                    item["text"] = re.sub(rf"^\s*\[{re.escape(self.persona.name)}\]:\s*", "", item["text"])
+                    self.emit({"type": "text_replace", "step": step, "text": item["text"]})
+                    break
         # Text that turned out to be a text-encoded tool call should not stay visible.
         if not turn.tool_calls and turn.content:
             recovered, cleaned = extract_text_tool_calls(turn.content, set(self.toolbox.names))
@@ -395,7 +414,7 @@ class LeanTurn:
                 result = self.toolbox.run(name, args)
                 results[call.id] = (result.ok, result.output)
                 # Open the continuation only now, so it sorts after the teammate's reply.
-                self._start_message(continues=True)
+                self._start_message(continues=True, **self.meta)
                 continue
             allowed, denial = self._approve(call, name, args, step)
             if not allowed:

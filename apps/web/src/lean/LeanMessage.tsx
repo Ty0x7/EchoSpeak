@@ -198,12 +198,14 @@ export function LeanMessage({
   const lastText = [...segments].reverse().find((s) => s.kind === "text");
   const waiting = streaming && segments.length === 0;
   return (
-    <article className="lm" data-status={data.status} data-live={streaming ? "true" : "false"}>
+    <article className="lm" data-status={data.status} data-live={streaming ? "true" : "false"} data-role={data.role || undefined}>
       {showHeader ? (
         <header className="lm-head">
           <AgentAvatar id={data.agent.id} name={data.agent.name} initials={data.agent.initials} />
           <span className="lm-name">{data.agent.name || "Echo"}</span>
           {data.agent.title ? <span className="lm-title">{data.agent.title}</span> : null}
+          {data.role === "merge" ? <span className="lm-tag">Summary</span> : null}
+          {data.delegatedBy ? <span className="lm-via" title={`${data.delegatedBy} handed this to ${data.agent.name}`}>via {data.delegatedBy}</span> : null}
           {at ? <time className="lm-time">{new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time> : null}
         </header>
       ) : null}

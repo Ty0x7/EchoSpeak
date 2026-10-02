@@ -78,6 +78,8 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
         status: "streaming",
         text: "",
         startedAt: at,
+        delegatedBy: evt.delegated_by?.name ? String(evt.delegated_by.name) : undefined,
+        role: evt.role ? String(evt.role) : undefined,
       };
       return { ...state, routing: false, order: [...state.order.filter((x) => x !== id), id], messages: { ...state.messages, [id]: msg } };
     }
@@ -169,6 +171,8 @@ export function messageFromTimeline(args: {
   timeline: any[];
   at: number;
   success?: boolean;
+  delegatedBy?: string;
+  role?: string;
 }): LeanMessageData {
   const segments: LeanSegment[] = [];
   for (const row of args.timeline || []) {
@@ -218,5 +222,7 @@ export function messageFromTimeline(args: {
     text: args.text,
     startedAt: args.at,
     endedAt: args.at,
+    delegatedBy: args.delegatedBy || undefined,
+    role: args.role || undefined,
   };
 }

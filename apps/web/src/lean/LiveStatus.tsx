@@ -1,21 +1,48 @@
 import React, { useEffect, useState } from "react";
 import { AgentAvatar } from "./LeanMessage";
-import type { LeanLiveState, LeanSegment } from "./types";
+import type { LeanAgentRef, LeanLiveState, LeanMessageData, LeanSegment } from "./types";
 
-/** What the active agent is doing right now, in a few words. */
-export function describeLive(live: LeanLiveState): { agent?: { id: string; name: string; initials?: string }; activity: string } {
-  if (live.routing && !live.order.length) return { activity: "Choosing who should answer" };
-  const current = live.order.length ? live.messages[live.order[live.order.length - 1]] : undefined;
-  if (!current) return { activity: "Connecting to the model" };
-  const name = current.agent.name || "Echo";
-  const last = current.segments[current.segments.length - 1] as LeanSegment | undefined;
-  let activity = `${name} is starting`;
-  if (last?.kind === "thinking") activity = `${name} is thinking`;
-  else if (last?.kind === "tool" && last.status === "running") activity = last.label;
-  else if (last?.kind === "approval" && !last.decision) activity = `${name} needs your OK`;
-  else if (last?.kind === "text") activity = `${name} is writing`;
-  else if (last) activity = `${name} is working`;
-  return { agent: current.agent, activity };
+function activityOf(msg: LeanMessageData): string {
+  const name = msg.agent.name || "Echo";
+  const last = msg.segments[msg.segments.length - 1] as LeanSegment | undefined;
+  if (last?.kind === "thinking") return `${name} is thinking`;
+  if (last?.kind === "tool" && last.status === "running") return last.label;
+  if (last?.kind === "approval" && !last.decision) return `${name} needs your OK`;
+  if (last?.kind === "text") return `${name} is writing`;
+  if (last) return `${name} is working`;
+  return msg.role === "merge" ? `${name} is summarizing` : `${name} is starting`;
+}
+
+const joinNames = (names: string[]) =>
+  names.length <= 2 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+
+/** What the active agent(s) are doing right now, in a few words. */
+export function describeLive(live: LeanLiveState): { agents: LeanAgentRef[]; activity: string; needsOk: boolean } {
+  if (live.routing && !live.order.length) return { agents: [], activity: "Choosing who should answer", needsOk: false };
+  const all = live.order.map((id) => live.messages[id]).filter(Boolean);
+  if (!all.length) return { agents: [], activity: "Connecting to the model", needsOk: false };
+  const working = all.filter((m) => m.status === "streaming");
+  const needsOk = working.some((m) => {
+    const last = m.segments[m.segments.length - 1];
+    return last?.kind === "approval" && !last.decision;
+  });
+  // Several agents answering at once (a fan-out).
+  if (working.length > 1) {
+    const waiting = working.find((m) => activityOf(m).endsWith("needs your OK"));
+    return {
+      agents: working.map((m) => m.agent),
+      activity: waiting ? activityOf(waiting) : `${joinNames(working.map((m) => m.agent.name || "Echo"))} are working`,
+      needsOk,
+    };
+  }
+  const current = working[0] || all[all.length - 1];
+  const activity = activityOf(current);
+  return {
+    agents: [current.agent],
+    // Make a handoff visible: "Echo → Scout · Searching …".
+    activity: current.delegatedBy ? `${current.delegatedBy} → ${current.agent.name} · ${activity}` : activity,
+    needsOk,
+  };
 }
 
 const elapsed = (ms: number) => {
@@ -51,11 +78,18 @@ export function LiveStatusPill({ live, onStop }: { live: LeanLiveState | null; o
   }, [live]);
 
   if (!shown) return null;
-  const { agent, activity } = describeLive(shown);
-  const needsOk = activity.endsWith("needs your OK");
+  const { agents, activity, needsOk } = describeLive(shown);
   return (
     <div className="lm-status" data-leaving={leaving ? "true" : "false"} data-attention={needsOk ? "true" : "false"} role="status" aria-live="polite">
-      {agent ? <AgentAvatar id={agent.id} name={agent.name} initials={agent.initials} size={20} /> : <span className="lm-status-dot" aria-hidden />}
+      {agents.length ? (
+        <span className="es-stack">
+          {agents.slice(0, 4).map((agent) => (
+            <AgentAvatar key={agent.id} id={agent.id} name={agent.name} initials={agent.initials} size={20} />
+          ))}
+        </span>
+      ) : (
+        <span className="lm-status-dot" aria-hidden />
+      )}
       <span className="lm-status-text lm-shimmer">{activity}</span>
       <span className="lm-status-time">{elapsed(Date.now() - shown.startedAt)}</span>
       <button type="button" className="lm-status-stop" onClick={onStop} title="Stop (Esc)" aria-label="Stop">

@@ -4600,6 +4600,8 @@ export const Dashboard: React.FC<{
                     timeline: Array.isArray(msg.timeline) ? msg.timeline : [],
                     at: atMs,
                     success: msg.backend_success !== false,
+                    delegatedBy: msg.delegated_by?.name ? String(msg.delegated_by.name) : undefined,
+                    role: msg.agent_role ? String(msg.agent_role) : undefined,
                   })
                 : undefined,
               role,

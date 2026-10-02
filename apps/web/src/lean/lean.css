@@ -862,3 +862,19 @@
       .es-toggle-chip, .es-member, .lm-status-stop, .toolbar-menu i, .toolbar-menu i::after),
   .echo-root.echo-root :is(.send-button, .composer-mode-button) { transition-duration: 1ms !important; }
 }
+
+/* ── Multi-agent labels ──────────────────────────────────────────────── */
+.lm-tag,
+.lm-via {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--es-line-2);
+  color: var(--es-dim);
+  font: 600 10px/1.5 var(--es-font);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.lm-via { border-color: transparent; padding-left: 0; color: var(--es-faint); font-weight: 500; }
+.lm[data-role="merge"] .lm-body { padding-left: 33px; border-left: 2px solid var(--es-line-2); margin-left: 2px; }
+.lm-status .es-stack > .lm-avatar + .lm-avatar { box-shadow: 0 0 0 2px rgba(16, 16, 17, 0.9), var(--es-sheen); }

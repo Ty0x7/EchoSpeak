@@ -77,3 +77,13 @@ def request_timeout_seconds() -> float:
         return max(30.0, float(_setting("lean_request_timeout_seconds", 600)))
     except (TypeError, ValueError):
         return 600.0
+
+
+def group_fan_out() -> bool:
+    """@all or several @mentions: answer at the same time, independently."""
+    return _as_bool(_setting("lean_group_fan_out", True))
+
+
+def group_merge() -> bool:
+    """After a fan-out, the room's lead writes a short merged reply."""
+    return _as_bool(_setting("lean_group_merge", True))

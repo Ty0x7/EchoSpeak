@@ -381,3 +381,11 @@ def test_session_persists_a_b_a_as_three_ordered_messages(monkeypatch):
     assert [m["message_id"] for m in saved] == [m["message_id"] for m in out["messages"]]
     assert [m["text"] for m in saved] == ["Asking Scout.", "Found it.", "Scout found it, so we're done."]
     assert any(row.get("kind") == "tool" for row in saved[0]["timeline"])
+
+
+def test_agent_copying_its_own_transcript_prefix_is_cleaned():
+    events: list[dict[str, Any]] = []
+    client = ScriptedClient([ModelTurn(content="[Echo]: Spaces, per PEP 8.")])
+    result = _turn(client, _toolbox({}), events).run("tabs or spaces?")
+    assert result.text == "Spaces, per PEP 8."
+    assert any(e["type"] == "text_replace" and e["text"] == "Spaces, per PEP 8." for e in events)
