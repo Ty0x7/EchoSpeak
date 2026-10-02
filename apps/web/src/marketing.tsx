@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { EchoFace, EchoSays, echoFaceStyles } from "./components/EchoFace";
 
 const githubUrl = import.meta.env.VITE_GITHUB_URL || "https://github.com/Ty0x7/EchoSpeak";
@@ -58,6 +58,76 @@ const chapters = [
   ["04", "Download", "#download"],
 ];
 
+/** Adds data-visible once the element scrolls into view (immediately with reduced motion). */
+function useReveal<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || typeof IntersectionObserver === "undefined") {
+      setVisible(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisible(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "0px 0px -12% 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  return { ref, visible };
+}
+
+function SectionHeading({ id, number, label, lines, lede }: { id: string; number: string; label: string; lines: [string, string]; lede?: string }) {
+  const { ref, visible } = useReveal<HTMLDivElement>();
+  return (
+    <div className="sh" ref={ref} data-visible={visible ? "true" : "false"}>
+      <span className="sh-num" aria-hidden="true">{number}</span>
+      <div className="sh-label">
+        <ChapterLabel number={number}>{label}</ChapterLabel>
+        <i aria-hidden="true" />
+      </div>
+      <div className="sh-body">
+        <h2 id={id}>
+          <span className="sh-line"><span>{lines[0]}</span></span>
+          <span className="sh-line sh-line-muted"><span>{lines[1]}</span></span>
+        </h2>
+        {lede ? <p className="sh-lede">{lede}</p> : null}
+      </div>
+    </div>
+  );
+}
+
+/** Echo at the centre, the ways he helps orbiting around him. */
+function EchoOrbit() {
+  const labels = ["Chat", "Group chats", "Projects", "Research", "Memory", "Voice"];
+  return (
+    <div className="orbit-feature">
+      <div className="orbit-feature-copy">
+        <span>One Echo · many ways to work</span>
+        <h3>Echo changes how he helps without changing who he is.</h3>
+        <p>Ask a question, start research, attach a project, speak aloud, or bring Scout and Forge in. The surface changes; the chat, memory and history stay connected.</p>
+      </div>
+      <div className="orbit-stage" aria-label="Chat, group chats, projects, research, memory and voice, all around Echo">
+        <div className="orbit-ring orbit-ring-a" aria-hidden="true" />
+        <div className="orbit-ring orbit-ring-b" aria-hidden="true" />
+        <div className="orbit-ring orbit-ring-c" aria-hidden="true" />
+        <div className="orbit-core"><EchoFace size={84} /></div>
+        {labels.map((label, index) => (
+          <span className={`orbit-label orbit-label-${index}`} key={label} style={{ animationDelay: `${index * -1.1}s` }}>{label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ChapterLabel({ number, children }: { number: string; children: React.ReactNode }) {
   return <p className="section-index"><strong>{number}</strong><span>{children}</span></p>;
 }
@@ -88,13 +158,13 @@ function GroupChatDiagram() {
       <div className="flow-arrow" aria-hidden="true" />
       <div className="flow-col">
         <span className="flow-kicker">At the same time, independently</span>
-        <div className="flow-node"><b>S</b><span><strong>Scout</strong>Answers on its own</span></div>
-        <div className="flow-node"><b>F</b><span><strong>Forge</strong>Answers on its own</span></div>
+        <div className="flow-node flow-node-working"><b className="mini-face" aria-hidden="true"><i /><i /></b><span><strong>Scout</strong>Answers on its own</span></div>
+        <div className="flow-node flow-node-working flow-node-late"><b className="mini-face" aria-hidden="true"><i /><i /></b><span><strong>Forge</strong>Answers on its own</span></div>
       </div>
       <div className="flow-arrow" aria-hidden="true" />
       <div className="flow-col">
         <span className="flow-kicker">Room lead</span>
-        <div className="flow-node flow-node-strong"><b>E</b><span><strong>Echo · Summary</strong>Where they agree, where they differ, what to do</span></div>
+        <div className="flow-node flow-node-strong"><b className="mini-face mini-face-echo" aria-hidden="true"><i /><i /></b><span><strong>Echo · Summary</strong>Where they agree, where they differ, what to do</span></div>
       </div>
       <div className="flow-handoff">
         <span className="flow-kicker">Handoffs</span>
@@ -144,6 +214,18 @@ function SystemDiagram() {
         {node(500, 80, 312, 120, "Local backend", ["Routes each message", "Runs the agent loop, asks approvals"], "PYTHON", true)}
         {node(44, 330, 300, 120, "On disk", ["Chats with every step", "Memory, agents, settings"])}
 
+        {/* Pulses that travel the connectors. */}
+        <path id="sd-p1" d="M344 140 H500" className="sd-flow" />
+        <path id="sd-p2" d="M812 140 H900" className="sd-flow" />
+        <path id="sd-p3" d="M656 200 V250 H581 V280" className="sd-flow" />
+        <path id="sd-p4" d="M530 200 V230 H194 V330" className="sd-flow" />
+        {["sd-p1", "sd-p2", "sd-p3", "sd-p4"].map((id, index) => (
+          <circle key={id} r={3.2} className="sd-pulse">
+            <animateMotion dur={`${2.6 + index * 0.4}s`} begin={`${index * 0.7}s`} repeatCount="indefinite">
+              <mpath href={`#${id}`} />
+            </animateMotion>
+          </circle>
+        ))}
         {/* window <-> backend */}
         <line x1={344} y1={140} x2={500} y2={140} className="sd-line" markerStart="url(#sd-arrow)" markerEnd="url(#sd-arrow)" />
         <text x={422} y={128} textAnchor="middle" className="sd-label">HTTP + LIVE STREAM</text>
@@ -243,10 +325,14 @@ export function Marketing() {
         </nav>
 
         <section className="capability-section section-shell" id="capabilities" aria-labelledby="capabilities-title">
-          <div className="section-heading">
-            <ChapterLabel number="01">What it does</ChapterLabel>
-            <h2 id="capabilities-title">Not another chat window.<br /><span>Agents that do the work, in the open.</span></h2>
-          </div>
+          <SectionHeading
+            id="capabilities-title"
+            number="01"
+            label="What it does"
+            lines={["Not just chat.", "Agents that act."]}
+            lede="Echo and his team use real tools on your PC and show every step while they work."
+          />
+          <EchoOrbit />
           <div className="capability-grid">
             {capabilities.map((capability) => (
               <article className="capability-card" key={capability.title}>
@@ -260,19 +346,24 @@ export function Marketing() {
         </section>
 
         <section className="agents-section section-shell" id="agents" aria-labelledby="agents-title">
-          <div className="section-heading">
-            <ChapterLabel number="02">Group chats</ChapterLabel>
-            <h2 id="agents-title">Ask the team.<br /><span>Get one clear answer.</span></h2>
-          </div>
-          <p className="section-lede">Mention several agents and they answer side by side, each on their own. The room's lead then writes a short summary. If the agents use different models, they take turns instead, so a local GPU never has to load two models at once.</p>
+          <SectionHeading
+            id="agents-title"
+            number="02"
+            label="Group chats"
+            lines={["Ask the team.", "Get one clear answer."]}
+            lede="Mention several agents and they answer side by side, each on their own; the room's lead then sums up. Agents on different models take turns instead, so a local GPU never loads two models at once."
+          />
           <GroupChatDiagram />
         </section>
 
         <section className="architecture-section section-shell" id="how-it-works" aria-labelledby="architecture-title">
-          <div className="section-heading">
-            <ChapterLabel number="03">How it works</ChapterLabel>
-            <h2 id="architecture-title">Simple on the surface.<br /><span>Visible underneath.</span></h2>
-          </div>
+          <SectionHeading
+            id="architecture-title"
+            number="03"
+            label="How it works"
+            lines={["Simple on the surface.", "Visible underneath."]}
+            lede="Everything runs on your PC: the app, the agents and your data. Only the model can be local or in the cloud."
+          />
           <SystemDiagram />
           <MessageTimeline />
         </section>
@@ -366,14 +457,48 @@ const styles = `
 
   .section-index { margin: 0; display: inline-flex; align-items: center; gap: 12px; color: #8a8a86; font-family: "SFMono-Regular", Consolas, monospace; font-size: 9.5px; letter-spacing: .11em; text-transform: uppercase; }
   .section-index strong { width: 31px; height: 31px; display: grid; place-items: center; flex: 0 0 auto; border: 1px solid #333; border-radius: 50%; color: #d3d3cf; font-size: 9px; font-weight: 500; }
-  .section-heading { display: grid; grid-template-columns: 1fr 3fr; gap: 40px; align-items: start; }
-  .section-heading h2 { margin: 0; font-size: clamp(40px, 4.4vw, 66px); line-height: 1.02; letter-spacing: -.055em; font-weight: 560; }
-  .section-heading h2 span { color: #85857f; }
-  .section-lede { max-width: 760px; margin: 28px 0 0 calc(25% + 10px); color: #a1a19d; font-size: 17px; line-height: 1.65; }
 
+  .sh { position: relative; isolation: isolate; }
+  .sh-num { position: absolute; z-index: -1; right: -6px; top: -64px; font-size: clamp(140px, 18vw, 260px); font-weight: 700; line-height: 1; letter-spacing: -.08em; color: transparent; -webkit-text-stroke: 1px #1d1d1d; user-select: none; pointer-events: none; transition: transform 1.2s cubic-bezier(.2,.7,0,1), opacity 1.2s ease; opacity: 0; transform: translateY(24px); }
+  .sh[data-visible="true"] .sh-num { opacity: 1; transform: none; }
+  .sh-label { display: flex; align-items: center; gap: 18px; }
+  .sh-label i { flex: 1; height: 1px; background: #333; transform-origin: left; transform: scaleX(0); transition: transform 1s cubic-bezier(.2,.7,0,1) .1s; }
+  .sh[data-visible="true"] .sh-label i { transform: scaleX(1); }
+  .sh-body { margin-top: 34px; display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: clamp(28px, 5vw, 80px); align-items: end; }
+  .sh h2 { margin: 0; font-size: clamp(44px, 5.2vw, 78px); line-height: 1.02; letter-spacing: -.058em; font-weight: 580; }
+  .sh-line { display: block; overflow: hidden; padding-bottom: .06em; }
+  .sh-line > span { display: inline-block; transform: translateY(105%); transition: transform .9s cubic-bezier(.2,.7,0,1); }
+  .sh-line-muted > span { color: #85857f; transition-delay: .12s; }
+  .sh[data-visible="true"] .sh-line > span { transform: none; }
+  .sh-lede { margin: 0 0 8px; max-width: 460px; color: #a1a19d; font-size: 16px; line-height: 1.65; opacity: 0; transform: translateY(10px); transition: opacity .8s ease .3s, transform .8s cubic-bezier(.2,.7,0,1) .3s; }
+  .sh[data-visible="true"] .sh-lede { opacity: 1; transform: none; }
+
+  .orbit-feature { margin-top: 64px; min-height: 360px; padding: 40px 46px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; align-items: center; border: 1px solid #2a2a2a; border-radius: 20px; background: #0b0b0b; overflow: hidden; }
+  .orbit-feature-copy > span { color: #85857f; font-family: monospace; font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; }
+  .orbit-feature-copy h3 { max-width: 540px; margin: 18px 0 16px; font-size: clamp(28px, 3vw, 44px); line-height: 1.05; letter-spacing: -.045em; font-weight: 580; }
+  .orbit-feature-copy p { max-width: 500px; margin: 0; color: #9a9a96; font-size: 14.5px; line-height: 1.65; }
+  .orbit-stage { position: relative; justify-self: center; width: min(100%, 420px); height: 300px; }
+  .orbit-ring { position: absolute; top: 50%; left: 50%; border: 1px solid #2c2c2b; border-radius: 50%; }
+  .orbit-ring-a { width: 230px; height: 110px; animation: orbitSpinA 26s linear infinite; }
+  .orbit-ring-b { width: 330px; height: 160px; opacity: .75; animation: orbitSpinB 34s linear infinite; }
+  .orbit-ring-c { width: 400px; height: 220px; opacity: .35; border-style: dashed; animation: orbitSpinA 48s linear infinite reverse; }
+  @keyframes orbitSpinA { from { transform: translate(-50%, -50%) rotate(-18deg); } to { transform: translate(-50%, -50%) rotate(342deg); } }
+  @keyframes orbitSpinB { from { transform: translate(-50%, -50%) rotate(28deg); } to { transform: translate(-50%, -50%) rotate(388deg); } }
+  .orbit-core { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -54%); z-index: 2; }
+  .orbit-label { position: absolute; z-index: 3; padding: 6px 10px; border: 1px solid #30302f; border-radius: 7px; background: #0d0d0d; color: #c4c4c0; font-family: monospace; font-size: 9.5px; letter-spacing: .07em; text-transform: uppercase; white-space: nowrap; animation: orbitBob 6.6s ease-in-out infinite; }
+  .orbit-label-0 { top: 10px; left: 50%; margin-left: -24px; }
+  .orbit-label-1 { top: 62px; right: 0; }
+  .orbit-label-2 { bottom: 54px; right: 12px; }
+  .orbit-label-3 { bottom: 4px; left: 50%; margin-left: -38px; }
+  .orbit-label-4 { bottom: 54px; left: 8px; }
+  .orbit-label-5 { top: 62px; left: 0; }
+  @keyframes orbitBob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+  .sd-flow { fill: none; stroke: none; }
+  .sd-pulse { fill: #f2f2ef; filter: drop-shadow(0 0 4px rgba(255,255,255,.55)); }
   .capability-section, .agents-section, .architecture-section { padding-block: 120px; }
   .agents-section, .architecture-section { border-top: 1px solid var(--line); }
-  .capability-grid { margin-top: 64px; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #242424; border-left: 1px solid #242424; }
+  .capability-grid { margin-top: 14px; display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid #242424; border-left: 1px solid #242424; }
   .capability-card { min-height: 236px; padding: 26px 24px 22px; display: flex; flex-direction: column; gap: 12px; border-right: 1px solid #242424; border-bottom: 1px solid #242424; color: #c8c8c4; transition: background .2s ease; }
   .capability-card:hover { background: #0b0b0b; }
   .capability-card svg { color: #e2e2de; }
@@ -391,6 +516,16 @@ const styles = `
   .flow-node-user { justify-content: flex-start; background: #161617; border-color: #333; }
   .flow-node-strong { border-color: #555; background: #121212; }
   .flow-arrow { height: 1px; margin: 0 8px; background: #3a3a3a; position: relative; }
+  .flow-arrow::before { content: ""; position: absolute; top: -2px; left: 0; width: 5px; height: 5px; border-radius: 50%; background: #f2f2ef; box-shadow: 0 0 6px rgba(255,255,255,.6); animation: flowDot 2.4s cubic-bezier(.4,0,.2,1) infinite; }
+  @keyframes flowDot { 0% { left: 0; opacity: 0; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { left: calc(100% - 5px); opacity: 0; } }
+  .flow-node .mini-face { width: 30px; height: 30px; flex: 0 0 30px; display: flex; align-items: center; justify-content: center; gap: 5px; border-radius: 9px; border: 1px solid #3a3a3a; background: #171717; }
+  .mini-face i { width: 4px; height: 8px; border-radius: 4px; background: #f2f2ef; animation: miniBlink 5s infinite; }
+  .flow-node .mini-face-echo { background: #f4f4f2; border-color: #f4f4f2; }
+  .mini-face-echo i { background: #070707; animation-delay: 1.3s; }
+  @keyframes miniBlink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
+  .flow-node-working { animation: nodeWork 3.2s ease-in-out infinite; }
+  .flow-node-late { animation-delay: 1.6s; }
+  @keyframes nodeWork { 0%, 100% { border-color: #2c2c2c; } 50% { border-color: #5a5a57; box-shadow: 0 0 0 1px rgba(255,255,255,.04), 0 10px 30px rgba(0,0,0,.4); } }
   .flow-arrow::after { content: ""; position: absolute; right: 0; top: -3px; width: 6px; height: 6px; border-top: 1px solid #8a8a86; border-right: 1px solid #8a8a86; transform: rotate(45deg); }
   .flow-handoff { grid-column: 1 / -1; margin-top: 26px; padding-top: 22px; border-top: 1px solid #222; display: grid; grid-template-columns: 1fr 3fr; gap: 20px; align-items: start; }
   .flow-handoff p { margin: 0; color: #a1a19d; font-size: 14px; line-height: 1.65; }
@@ -466,15 +601,18 @@ const styles = `
     .timeline::before { display: none; }
     .flow-arrow { width: 1px; height: 22px; margin: 0 auto; }
     .flow-arrow::after { top: auto; bottom: 0; right: -3px; transform: rotate(135deg); }
+    .flow-arrow::before { left: -2px; animation-name: flowDotDown; }
+    @keyframes flowDotDown { 0% { top: 0; opacity: 0; } 15%, 85% { opacity: 1; } 100% { top: calc(100% - 5px); opacity: 0; } }
   }
   @media (max-width: 820px) {
     .site-header { grid-template-columns: 1fr auto; }
     .site-header nav { display: none; }
-    .section-heading { grid-template-columns: 1fr; gap: 22px; }
-    .section-lede { margin-left: 0; }
-    .chapter-nav { grid-template-columns: repeat(2, 1fr); }
+        .chapter-nav { grid-template-columns: repeat(2, 1fr); }
     .chapter-nav a { border-bottom: 1px solid var(--line); }
     .flow-handoff { grid-template-columns: 1fr; gap: 10px; }
+    .sh-body { grid-template-columns: 1fr; align-items: start; }
+    .sh-num { top: -40px; }
+    .orbit-feature { grid-template-columns: 1fr; padding: 30px 24px; }
     .system-diagram { padding: 16px; }
     .system-diagram svg { display: none; }
     .system-stack { display: grid; }
@@ -497,7 +635,9 @@ const styles = `
     .hero h1 { font-size: clamp(46px, 14vw, 66px); }
     .button { width: 100%; }
     .capability-section, .agents-section, .architecture-section { padding-block: 80px; }
-    .capability-grid { grid-template-columns: 1fr; margin-top: 44px; }
+    .capability-grid { grid-template-columns: 1fr; }
+    .orbit-stage { height: 260px; transform: scale(.86); }
+    .orbit-ring-c { display: none; }
     .capability-card { min-height: 0; }
     .chapter-nav a { padding: 20px 16px; grid-template-columns: 26px 1fr; min-height: 80px; }
     .chapter-nav i { left: 16px; right: 16px; bottom: 14px; }
@@ -515,5 +655,5 @@ const styles = `
       .site-footer { grid-template-columns: 1fr; gap: 24px; }
     .site-footer > div { justify-self: start; flex-wrap: wrap; }
   }
-  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .marketing-site *, .marketing-site *::before, .marketing-site *::after { animation: none !important; transition-duration: .01ms !important; } }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } .marketing-site *, .marketing-site *::before, .marketing-site *::after { animation: none !important; transition-duration: .01ms !important; } .sd-pulse { display: none; } }
 `;

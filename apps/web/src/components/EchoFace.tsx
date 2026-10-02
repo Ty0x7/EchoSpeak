@@ -150,9 +150,9 @@ export const echoFaceStyles = `
   .echo-face-shadow { position: absolute; bottom: 0; width: 62%; height: calc(var(--face) * .06); border-radius: 50%; background: rgba(0,0,0,.55); filter: blur(calc(var(--face) * .03)); animation: echoShadow 6s ease-in-out infinite; }
   @keyframes echoFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(calc(var(--face) * -.045)); } }
   @keyframes echoShadow { 0%, 100% { transform: scaleX(1); opacity: .9; } 50% { transform: scaleX(.84); opacity: .55; } }
-  .echo-says { margin: 0; min-height: 40px; padding: 10px 15px; border: 1px solid #2c2c2c; border-radius: 14px 14px 14px 4px; background: #111; color: #e6e6e2; font-size: 14px; font-weight: 550; letter-spacing: -.01em; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+  .echo-says { margin: 0; min-height: 40px; overflow: hidden; padding: 10px 15px; border: 1px solid #2c2c2c; border-radius: 14px 14px 14px 4px; background: #111; color: #e6e6e2; font-size: 14px; font-weight: 550; letter-spacing: -.01em; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
   .echo-says span { display: inline-block; animation: echoSay 3.6s ease both; }
-  @keyframes echoSay { 0% { opacity: 0; transform: translateY(4px); } 10%, 88% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(-3px); } }
+  @keyframes echoSay { 0% { transform: translateY(120%); } 10%, 88% { transform: none; } 100% { transform: translateY(-120%); } }
   @media (prefers-reduced-motion: reduce) {
     .echo-face-float, .echo-face-shadow, .echo-says span { animation: none !important; }
     .echo-face { transform: none; }
