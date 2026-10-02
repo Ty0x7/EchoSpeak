@@ -11,7 +11,6 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import settings
 from agent.lean.loop import LeanTurn, TurnResult
 from agent.lean.personas import AgentPersona, get_persona_store
 from agent.lean.prompt import build_system_prompt
@@ -240,7 +239,6 @@ class LeanSession:
             return []
 
     def _run_agent(self, persona: AgentPersona, message: str, *, history: list[dict[str, Any]], depth: int) -> TurnResult:
-        from agent.state import get_state_store
 
         teammates = self._members() if self.room else [p for p in self.personas.list() if p.id != persona.id]
         terminal = Terminal(self.project_root)

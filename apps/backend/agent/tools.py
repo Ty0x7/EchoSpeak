@@ -15,16 +15,13 @@ import time
 import hashlib
 import uuid
 from contextvars import ContextVar, Token
-from datetime import datetime, timezone, timedelta
-from io import BytesIO
+from datetime import datetime
 from typing import Optional, Dict, Any, Literal
 from pathlib import Path
-from urllib.parse import urlparse
 from loguru import logger
 from pydantic import BaseModel, Field, AliasChoices
 
 from langchain_core.tools import tool
-from pytesseract import pytesseract
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

@@ -24,9 +24,8 @@ Engineering upgrades on free DDG (no paid key required)
 from __future__ import annotations
 
 import re
-import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Sequence
 from urllib.parse import urlparse
 
 from loguru import logger

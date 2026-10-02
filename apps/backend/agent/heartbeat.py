@@ -268,7 +268,6 @@ class HeartbeatManager:
         # -- Current time --
         now = datetime.now(timezone.utc)
         try:
-            import locale
             local_now = datetime.now()
             sections.append(f"Current time: {local_now.strftime('%A, %B %d %Y %I:%M %p')} (local) / {now.strftime('%H:%M UTC')}")
         except Exception:

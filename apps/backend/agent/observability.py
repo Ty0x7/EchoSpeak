@@ -8,14 +8,11 @@ for tools, requests, and system health. Exposed via the /observability API.
 from __future__ import annotations
 
 import time
-import json
-from dataclasses import dataclass, field
-from typing import Optional, Dict, List, Any
+from dataclasses import dataclass
+from typing import Optional, Dict
 from threading import Lock
-from pathlib import Path
 from collections import deque
 
-from loguru import logger
 
 
 @dataclass

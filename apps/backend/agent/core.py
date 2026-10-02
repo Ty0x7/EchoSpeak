@@ -7,7 +7,6 @@ Supports multiple LLM providers: OpenAI, Ollama, LM Studio, LocalAI, llama.cpp, 
 import importlib.util
 import hashlib
 import ast
-import difflib
 from dataclasses import asdict, dataclass, field, replace
 import json
 import os
@@ -16,7 +15,7 @@ import sys
 import threading
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Iterable
 from loguru import logger
@@ -24,7 +23,7 @@ from loguru import logger
 try:
     from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 except ImportError:
-    from langchain.schema import AIMessage, HumanMessage, SystemMessage
+    from langchain.schema import AIMessage, HumanMessage
 
 from pydantic import BaseModel, Field
 from typing import List, Any, Dict
@@ -209,7 +208,7 @@ class _TraceHandler:
         except Exception:
             pass
 
-from config import config, ModelProvider, get_llm_config, DATA_DIR
+from config import config, ModelProvider, DATA_DIR
 from agent.context_budget import (
     ContextBlock,
     ContextBudgetManager,
@@ -217,7 +216,7 @@ from agent.context_budget import (
     sanitize_untrusted_context,
 )
 from agent.context_chain import ContextAssembler, ContextItem
-from agent.memory import AgentMemory, get_agent_memory
+from agent.memory import get_agent_memory
 from agent.research import (
     SearchGrounder,
     format_grounded_tool_output,
@@ -226,7 +225,6 @@ from agent.research import (
 from agent.session_memory import SessionMemoryDistiller
 from agent.intent_guard import is_explicit_new_project_request, is_information_request, may_materialize_project
 from agent.mode_controller import (
-    CodingPhaseName,
     ModeDecision,
     TurnMode,
     allowed_tools_for_mode,
@@ -247,9 +245,8 @@ from agent.skills_registry import (
     SkillDefinition,
 )
 from agent.tools import get_available_tools, TOOL_METADATA
-from agent.tool_registry import ToolRegistry, PluginRegistry
+from agent.tool_registry import ToolRegistry
 from agent.router import IntentRouter, RoutingDecision
-from agent.resolution import EchoResolutionEngine, ResolutionRecommendation
 from agent.state import ProjectLedgerEntry, ThreadSessionState, ToolOutcome, get_state_store
 from agent.model_adapters import get_family_adapter
 from agent.identity import compile_echo_identity
@@ -270,7 +267,6 @@ from agent.model_control_plane import (
     ModelTurnEnvelopeCompiler,
     RuntimeProposalFeedback,
     is_usable_verified_outcome,
-    merge_contract_into_system_messages,
     safe_decision_rejection_message,
 )
 from agent.update_context import ensure_update_context_plugin_registered, get_update_context_service
@@ -6210,12 +6206,10 @@ class EchoSpeakAgent:
 
     def _create_tools(self) -> List[Tool]:
         from agent.tools import (
-            web_search,
             analyze_screen,
             vision_qa,
             get_system_time,
             calculate,
-            take_screenshot,
             open_chrome,
             open_application,
             notepad_write,
@@ -8060,7 +8054,6 @@ class EchoSpeakAgent:
         )
 
         def _run(query: str = "", **kwargs: Any) -> str:
-            from agent.research import looks_like_multi_intent, recipe_multi_search_queries, intent_domains
 
             q = str(query or kwargs.get("query") or kwargs.get("q") or "").strip()
             # Prefer the full user turn for multi-intent split (never trust model arg alone).
@@ -8371,7 +8364,6 @@ class EchoSpeakAgent:
             from agent.sports_data import (
                 get_sports_data_client,
                 is_live_sports_data_intent,
-                live_sports_mode,
             )
             from config import config as _cfg
 

@@ -9,11 +9,10 @@ Implements the Google A2A spec (JSON-RPC 2.0):
 
 from __future__ import annotations
 
-import json
 import time
 import uuid
 from enum import Enum
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from typing import Optional, Dict, List, Any
 from threading import Lock
 

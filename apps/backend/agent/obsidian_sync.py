@@ -8,14 +8,13 @@ side silently.
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import re
 import shutil
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 

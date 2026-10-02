@@ -6,7 +6,6 @@ coding project containing goals, current phase, files touched, and next steps.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 

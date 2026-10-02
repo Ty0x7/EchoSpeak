@@ -5,7 +5,6 @@ Provides FastAPI server for REST API access.
 
 import os
 import sys
-import base64
 import json
 import queue
 import asyncio
@@ -16,7 +15,6 @@ import time
 import uuid
 import hmac
 import hashlib
-from datetime import datetime
 from pathlib import Path
 from io import BytesIO
 from collections import deque, OrderedDict
@@ -7314,7 +7312,6 @@ async def consume_research_artifact_api(artifact_id: str, payload: Dict[str, Any
 async def skills_status_api():
     """Truthful skill executable classification (prompt-only never marked executable)."""
     from agent.skill_status_audit import audit_all_skills
-    from agent.specialist_runtime import get_specialist_runtime_manager
 
     rows = audit_all_skills(
         available_capabilities={"approvals", "research"},

@@ -10,7 +10,6 @@ lightweight system load hint at Stage 2 (on_context) for all queries.
 
 import os
 import platform
-import time
 from datetime import datetime
 
 from agent.tool_registry import PipelinePlugin, PluginRegistry

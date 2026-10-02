@@ -22,7 +22,6 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Any, AsyncIterator
 from threading import Lock
 
-from loguru import logger
 
 
 SEMANTIC_ACTIVITY_SCHEMA_VERSION = 1

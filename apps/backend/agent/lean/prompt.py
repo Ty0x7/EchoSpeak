@@ -12,7 +12,6 @@ import platform
 from datetime import datetime
 from typing import Any, Optional
 
-from config import config
 from agent.lean.personas import AgentPersona
 
 WORKING_RULES = """\
