@@ -139,6 +139,7 @@ def _self_check() -> int:
         sys.path.insert(0, str(backend_root))
     import api.server  # noqa: F401
     import agent.lean.runtime  # noqa: F401
+    import faster_whisper  # noqa: F401  (local speech; fails the build if not bundled)
     print("echospeak-backend self-check ok")
     return 0
 

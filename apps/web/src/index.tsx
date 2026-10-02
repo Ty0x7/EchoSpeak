@@ -53,6 +53,7 @@ import {
 } from "./desktop/bridge";
 import {
   LocalVoiceInput,
+  WakeListener,
   localVoicePlayback,
 } from "./voiceTransport";
 import type {
@@ -4802,7 +4803,10 @@ export const Dashboard: React.FC<{
     () => window.localStorage.getItem("echospeak.voice.read_aloud") === "true",
   );
   const [voiceConversationMode, setVoiceConversationMode] = useState<boolean>(false);
-  const wakeWordEnabled = false;
+  const [wakeWordEnabled, setWakeWordEnabled] = useState<boolean>(
+    () => window.localStorage.getItem("echospeak.voice.wake") === "true",
+  );
+  const wakeListenerRef = useRef<WakeListener | null>(null);
   const [voicePhase, setVoicePhase] = useState<VoiceTransportPhase>("idle");
   const [voiceNotice, setVoiceNotice] = useState("");
   const [voiceInputLevel, setVoiceInputLevel] = useState(0);
@@ -6855,6 +6859,44 @@ export const Dashboard: React.FC<{
     }
   };
 
+  const toggleWakeWord = () => {
+    setWakeWordEnabled((on) => {
+      window.localStorage.setItem("echospeak.voice.wake", String(!on));
+      if (on) setVoiceNotice("");
+      return !on;
+    });
+  };
+  // "Hey Echo": listen only while idle; release the mic during a voice turn,
+  // while a reply streams or is read aloud, and when Wake is off.
+  const wakeIdle = wakeWordEnabled && !listening && !streaming && (voicePhase === "idle" || voicePhase === "error");
+  useEffect(() => {
+    if (!wakeIdle) {
+      wakeListenerRef.current?.stop();
+      return;
+    }
+    if (!wakeListenerRef.current) wakeListenerRef.current = new WakeListener();
+    const listener = wakeListenerRef.current;
+    void listener
+      .start({
+        apiBase,
+        onWake: () => {
+          listener.stop();
+          void start();
+        },
+        onUnavailable: (message) => {
+          listener.stop();
+          setWakeWordEnabled(false);
+          window.localStorage.setItem("echospeak.voice.wake", "false");
+          setVoiceNotice(message);
+        },
+      })
+      .catch((error) => {
+        setWakeWordEnabled(false);
+        setVoiceNotice(error instanceof Error ? error.message : "The microphone is unavailable.");
+      });
+    return () => listener.stop();
+  }, [wakeIdle, apiBase]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const stopActiveTurn = () => {
     stopTts();
     setVoicePhase("idle");
@@ -8671,9 +8713,10 @@ export const Dashboard: React.FC<{
                       <button
                         className={`composer-mode-button is-overflowable ${wakeWordEnabled ? "active" : ""}`}
                         type="button"
-                        title="Wake word is not active yet. It follows the local Voice foundation in Phase 6."
-                        aria-label="Wake word unavailable"
-                        disabled
+                        title={wakeWordEnabled ? "Wake word: on (say “Hey Echo”)" : "Wake word: off"}
+                        aria-label="Wake word"
+                        aria-pressed={wakeWordEnabled}
+                        onClick={toggleWakeWord}
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 0 1 10 10M12 22A10 10 0 0 1 2 12M5 5a10 10 0 0 1 14 14"/></svg>
                         <span className="composer-mode-label">Wake</span>
@@ -8705,8 +8748,8 @@ export const Dashboard: React.FC<{
                               <button type="button" role="menuitemcheckbox" aria-checked={speechEnabled} onClick={() => setSpeechEnabled(!speechEnabled)}>
                                 <span>Sound</span><i data-on={speechEnabled ? "true" : "false"} />
                               </button>
-                              <button type="button" role="menuitem" disabled title="Wake word is not active yet.">
-                                <span>Wake word</span><small>Soon</small>
+                              <button type="button" role="menuitemcheckbox" aria-checked={wakeWordEnabled} onClick={toggleWakeWord}>
+                                <span>Wake word</span><i data-on={wakeWordEnabled ? "true" : "false"} />
                               </button>
                               <label className="toolbar-menu-select">
                                 <span>Effort</span>

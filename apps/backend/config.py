@@ -939,6 +939,8 @@ class Config:
         self.voice_local_tts_provider = os.getenv("VOICE_LOCAL_TTS_PROVIDER", self.voice_local_provider).strip() or "windows-sapi"
         self.voice_cloud_provider = os.getenv("VOICE_CLOUD_PROVIDER", "").strip()
         self.voice_faster_whisper_model_path = os.getenv("VOICE_FASTER_WHISPER_MODEL_PATH", "").strip()
+        # Word that starts a voice turn when Wake is on ("Hey Echo").
+        self.voice_wake_word = os.getenv("VOICE_WAKE_WORD", "echo").strip().lower() or "echo"
         self.voice_whisper_cpp_model_path = os.getenv("VOICE_WHISPER_CPP_MODEL_PATH", "").strip()
         self.voice_piper_model_path = os.getenv("VOICE_PIPER_MODEL_PATH", "").strip()
         self.voice_stt_language = os.getenv("VOICE_STT_LANGUAGE", "").strip()
@@ -1477,6 +1479,7 @@ class Config:
             "voice_whisper_cpp_model_path",
             "voice_piper_model_path",
             "voice_stt_language",
+            "voice_wake_word",
             "voice_max_audio_bytes",
             "generation_local_provider",
             "generation_cloud_provider",

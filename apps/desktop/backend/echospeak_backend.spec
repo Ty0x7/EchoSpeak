@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
-from PyInstaller.utils.hooks import collect_submodules, copy_metadata
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs, collect_submodules, copy_metadata
 
 spec_dir = Path(SPECPATH).resolve()
 desktop_dir = spec_dir.parent
@@ -27,6 +27,10 @@ for filename in ("SOUL.md",):
         datas.append((str(path), "."))
 datas += data_tree(backend_root / "skills", "skills")
 datas += data_tree(backend_root / "workspaces", "workspaces")
+
+# Local speech (faster-whisper): its VAD model files and CTranslate2's native DLLs.
+datas += collect_data_files("faster_whisper")
+binaries_extra = collect_dynamic_libs("ctranslate2")
 
 for distribution in (
     "langchain",
@@ -61,7 +65,7 @@ hiddenimports = (
 a = Analysis(
     [str(desktop_dir / "backend" / "echospeak_backend.py")],
     pathex=[str(backend_root)],
-    binaries=[],
+    binaries=binaries_extra,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

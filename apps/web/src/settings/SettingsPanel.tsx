@@ -11,6 +11,7 @@ type SectionId =
   | "personality"
   | "permissions"
   | "terminal"
+  | "voice"
   | "search"
   | "memory"
   | "automations"
@@ -32,6 +33,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
     items: [
       { id: "permissions", label: "Permissions", icon: "shield" },
       { id: "terminal", label: "Terminal", icon: "terminal" },
+      { id: "voice", label: "Voice", icon: "mic" },
       { id: "search", label: "Web search", icon: "globe" },
       { id: "memory", label: "Memory", icon: "brain" },
     ],
@@ -46,7 +48,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
   { group: "", items: [{ id: "about", label: "About", icon: "info" }] },
 ];
 
-type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "globe" | "brain" | "clock" | "send" | "info" | "classic";
+type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "mic" | "globe" | "brain" | "clock" | "send" | "info" | "classic";
 
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -56,6 +58,7 @@ function Icon({ name }: { name: IconName }) {
     spark: <path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z" />,
     shield: <path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z M9 12l2 2 4-4" />,
     terminal: <><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M7 9.5l3 2.5-3 2.5M12.5 15h4" /></>,
+    mic: <><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" /></>,
     globe: <><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.4 2.4 3.6 5.2 3.6 8.5s-1.2 6.1-3.6 8.5c-2.4-2.4-3.6-5.2-3.6-8.5S9.6 5.9 12 3.5z" /></>,
     brain: <path d="M9 4.5a3 3 0 0 0-3 3v.3A3 3 0 0 0 4.5 13a3 3 0 0 0 2 4.5A3 3 0 0 0 12 18V5.5A1.5 1.5 0 0 0 10.5 4H9zM15 4.5a3 3 0 0 1 3 3v.3a3 3 0 0 1 1.5 5.2 3 3 0 0 1-2 4.5A3 3 0 0 1 12 18" />,
     clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
@@ -190,6 +193,8 @@ function SectionBody({ id, s, save, props, reload }: { id: SectionId; s: Setting
       return <PermissionsSection s={s} save={save} />;
     case "terminal":
       return <TerminalSection s={s} save={save} apiBase={props.apiBase} />;
+    case "voice":
+      return <VoiceSection s={s} save={save} apiBase={props.apiBase} onOpenClassic={props.onOpenClassic} />;
     case "search":
       return <SearchSection s={s} save={save} />;
     case "memory":
@@ -201,6 +206,93 @@ function SectionBody({ id, s, save, props, reload }: { id: SectionId; s: Setting
     case "about":
       return <AboutSection apiBase={props.apiBase} onOpenClassic={props.onOpenClassic} reload={reload} />;
   }
+}
+
+// ── Voice ───────────────────────────────────────────────────────────────
+type VoiceSetupInfo = {
+  runtime_available: boolean;
+  provider: string;
+  models: { size: string; label: string; mb: number; note: string; installed: boolean; active: boolean }[];
+  download: { running: boolean; size: string; progress: number; error: string };
+};
+
+function VoiceSection({ s, save, apiBase, onOpenClassic }: { s: SettingsMap; save: Save; apiBase: string; onOpenClassic(tab: string): void }) {
+  const [info, setInfo] = useState<VoiceSetupInfo | null>(null);
+  const refresh = useCallback(async () => {
+    try {
+      setInfo(await (await fetch(`${apiBase}/media-runtime/voice/setup`)).json());
+    } catch {
+      setInfo(null);
+    }
+  }, [apiBase]);
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), info?.download?.running ? 1000 : 6000);
+    return () => window.clearInterval(timer);
+  }, [refresh, info?.download?.running]);
+
+  const install = async (size: string) => {
+    const response = await fetch(`${apiBase}/media-runtime/voice/setup`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ size }),
+    });
+    if (response.ok) setInfo(await response.json());
+  };
+
+  const active = info?.models.find((m) => m.active);
+  const usingWhisper = info?.provider === "faster-whisper-local" && Boolean(active);
+  let tone: "ok" | "warn" | "err" | "idle" = "idle";
+  let statusText = "Checking…";
+  if (info) {
+    if (!info.runtime_available) {
+      tone = "err";
+      statusText = "The speech engine isn't included in this build";
+    } else if (info.download.running) {
+      tone = "warn";
+      statusText = `Downloading ${info.download.size} model · ${Math.round(info.download.progress * 100)}%`;
+    } else if (usingWhisper) {
+      tone = "ok";
+      statusText = `Ready · Whisper ${active!.label} on this PC`;
+    } else {
+      tone = "warn";
+      statusText = "Not set up · the mic uses Windows speech recognition";
+    }
+  }
+
+  return (
+    <>
+      <Group title="Speech to text" description="Pick a Whisper model to download. It runs on this PC, so what you say never leaves it.">
+        <Row label={<Status tone={tone}>{statusText}</Status>} help={info?.download.error || undefined} />
+        {info?.models.map((m) => (
+          <Row key={m.size} label={`${m.label} · ${m.mb} MB`} help={m.note}>
+            {m.active ? (
+              <span className="st-muted">In use</span>
+            ) : (
+              <button
+                type="button"
+                className={`es-btn es-btn-sm${m.size === "base" && !usingWhisper ? " es-btn-primary" : ""}`}
+                disabled={!info.runtime_available || info.download.running}
+                onClick={() => void install(m.size)}
+              >
+                {m.installed ? "Use" : "Download"}
+              </button>
+            )}
+          </Row>
+        ))}
+      </Group>
+      <Group title="Wake word" description="Say “Hey Echo” to start talking without touching the keyboard. Turn it on with Wake in the composer.">
+        <Row label="Wake word" help={usingWhisper ? "Listens for short bursts of speech and checks them on this PC." : "Set up speech to text above first."}>
+          <TextField value={String(s.voice_wake_word || "echo")} onCommit={(v: string) => save({ voice_wake_word: v.trim().toLowerCase() || "echo" })} />
+        </Row>
+      </Group>
+      <Group title="More">
+        <Row label="Voices, read-aloud and other providers">
+          <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => onOpenClassic("services")}>Open</button>
+        </Row>
+      </Group>
+    </>
+  );
 }
 
 // ── General ─────────────────────────────────────────────────────────────
@@ -924,7 +1016,7 @@ function AboutSection({ apiBase, onOpenClassic, reload }: { apiBase: string; onO
     <>
       <Group>
         <Row label="EchoSpeak" help="Local-first agents. Your data stays on this PC.">
-          <span className="st-muted is-mono">8.1</span>
+          <span className="st-muted is-mono">{String(import.meta.env.VITE_APP_VERSION || "10.0.0")}</span>
         </Row>
         <Row label="Agent runtime" help={status ? `Lean loop · up to ${status.max_iterations} steps · ${Math.round((status.context_tokens || 0) / 1000)}k context` : "…"}>
           <Status tone={status?.enabled ? "ok" : "warn"}>{status?.enabled ? "Active" : "Legacy"}</Status>

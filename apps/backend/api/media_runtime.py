@@ -124,6 +124,59 @@ def transcribe_voice_input(request: VoiceTranscriptionRequest):
     }
 
 
+class VoiceSetupRequest(BaseModel):
+    size: str = "base"
+
+
+class VoiceWakeRequest(BaseModel):
+    audio_base64: str
+    wake_word: str = ""  # empty: the saved setting (Settings > Voice)
+
+
+@router.get("/voice/setup")
+def voice_setup_status():
+    from agent.voice_setup import status
+
+    return status()
+
+
+@router.post("/voice/setup")
+def voice_setup_start(request: VoiceSetupRequest):
+    from agent.voice_setup import start_setup
+
+    try:
+        return start_setup(request.size)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/voice/wake")
+def voice_wake_check(request: VoiceWakeRequest):
+    """Does this short clip contain the wake word? Transcribed locally, never stored."""
+    import tempfile
+    from pathlib import Path
+
+    from agent.voice_setup import check_wake
+
+    try:
+        audio = base64.b64decode(request.audio_base64, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise HTTPException(status_code=400, detail="Wake audio is not valid base64") from exc
+    if not audio or len(audio) > 2_000_000:
+        raise HTTPException(status_code=400, detail="Wake clips must be short WAV recordings")
+    with tempfile.TemporaryDirectory(prefix="echospeak-wake-") as folder:
+        path = Path(folder) / "wake.wav"
+        path.write_bytes(audio)
+        try:
+            from config import config
+
+            return check_wake(path, request.wake_word or str(getattr(config, "voice_wake_word", "") or "echo"))
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @router.post("/voice/synthesize")
 def synthesize_voice_output(request: VoiceSynthesisRequest):
     try:
