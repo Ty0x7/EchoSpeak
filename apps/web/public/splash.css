@@ -1,0 +1,11 @@
+/*
+ * Boot splash, painted before any script loads. Kept in a file, not an inline
+ * <style>: Tauri hashes inline <style> tags into the CSP, and once style-src
+ * has a hash the webview ignores 'unsafe-inline', which blocks every <style>
+ * the app injects at runtime.
+ */
+html, body { margin: 0; background: #070707; }
+.es-boot-splash { position: fixed; inset: 0; display: grid; place-items: center; background: #070707; }
+.es-boot-splash img { border-radius: 11px; opacity: .9; animation: es-splash 1.6s ease-in-out infinite; }
+@keyframes es-splash { 0%, 100% { opacity: .45; transform: scale(.97); } 50% { opacity: .95; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .es-boot-splash img { animation: none; } }

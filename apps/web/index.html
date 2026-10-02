@@ -7,16 +7,13 @@
     <meta name="description" content="EchoSpeak is a local-first personal agent runtime for conversation, research, memory, and project work." />
     <link rel="icon" type="image/png" href="/logo.png" />
     <link rel="apple-touch-icon" href="/logo.png" />
+    <!-- Must stay a file: an inline style tag here would disable 'unsafe-inline' in the desktop CSP. -->
+    <link rel="stylesheet" href="/splash.css" />
     <title>EchoSpeak — Personal agent runtime</title>
   </head>
   <body>
     <!-- Painted before any script loads; React replaces it on first render. -->
-    <div id="root"><div style="position:fixed;inset:0;display:grid;place-items:center;background:#070707"><img src="/logo.png" alt="" width="44" height="44" style="border-radius:11px;opacity:.9;animation:es-splash 1.6s ease-in-out infinite" /></div></div>
-    <style>
-      html, body { margin: 0; background: #070707; }
-      @keyframes es-splash { 0%, 100% { opacity: .45; transform: scale(.97); } 50% { opacity: .95; transform: scale(1); } }
-      @media (prefers-reduced-motion: reduce) { #root img { animation: none !important; } }
-    </style>
+    <div id="root"><div class="es-boot-splash"><img src="/logo.png" alt="" width="44" height="44" /></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

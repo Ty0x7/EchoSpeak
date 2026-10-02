@@ -33,7 +33,7 @@ test("custom chrome can drag while controls and composer remain interactive", ()
   assert.ok(capability.permissions.includes("core:window:allow-start-dragging"));
   assert.ok(desktopApp.includes('className="desktop-titlebar" data-tauri-drag-region'));
   assert.ok(!desktopApp.includes('className="desktop-window-controls" data-tauri-drag-region'));
-  const composer = dashboard.match(/<textarea[\s\S]{0,1600}aria-label="Ask Echo anything"/i)?.[0] || "";
+  const composer = dashboard.match(/<textarea\s+ref=\{textareaRef\}[\s\S]{0,4000}?aria-label="Message"/i)?.[0] || "";
   assert.ok(composer, "canonical composer textarea was not found");
   assert.ok(composer.includes("disabled={!activeThreadId}"), "composer must require an explicitly created Session");
   assert.ok(desktopCss.includes("pointer-events: auto"));
@@ -124,4 +124,15 @@ test("native contract is reproducible and supports disposable acceptance data", 
   assert.ok(host.includes("TargetKind::Folder"));
   assert.ok(rust.includes('.env("ECHOSPEAK_DATA_DIR", &data_dir)'));
   assert.ok(rust.includes('.env("ECHOSPEAK_LOGS_DIR", &log_dir)'));
+});
+
+test("index.html has no inline style or script blocks (they would break the desktop CSP)", async () => {
+  // Tauri hashes inline <style>/<script> tags into the CSP at build time. A
+  // hash in style-src makes the webview ignore 'unsafe-inline', which blocks
+  // every <style> the app injects at runtime and leaves it unstyled.
+  const html = await readFile(new URL("../../web/index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /<style[\s>]/i);
+  assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/i);
+  assert.doesNotMatch(html, /\sstyle="/i);
+  assert.match(config.app.security.csp, /style-src[^;]*'unsafe-inline'/);
 });
