@@ -10,6 +10,8 @@ export type LeanAgentRef = {
 export type LeanSegment =
   | { kind: "thinking"; step: number; text: string; startedAt: number; endedAt?: number }
   | { kind: "text"; step: number; text: string }
+  /** A marker in the timeline, e.g. "Earlier steps summarized to fit the context window". */
+  | { kind: "note"; step: number; text: string }
   | {
       kind: "tool";
       step: number;

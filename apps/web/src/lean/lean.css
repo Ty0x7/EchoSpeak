@@ -1009,3 +1009,5 @@
 /* Agent stopped at the step limit: say so and offer Continue. */
 .lm-stopped { display: flex; align-items: center; gap: 10px; max-width: 720px; padding: 8px 10px; border: 1px dashed var(--es-line-2); border-radius: var(--es-r-sm); color: var(--es-dim); font: 500 12px var(--es-font); }
 .lm-stopped span { flex: 1; }
+.lm-note { display: flex; align-items: center; gap: 10px; max-width: 720px; color: var(--es-faint); font: 500 11px var(--es-font); }
+.lm-note::before, .lm-note::after { content: ""; flex: 1; height: 1px; background: var(--es-line); }

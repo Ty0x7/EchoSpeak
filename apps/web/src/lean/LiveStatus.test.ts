@@ -62,4 +62,14 @@ describe("multi-agent live state", () => {
     const restored = messageFromTimeline({ messageId: "m1", agentId: "echo", agentName: "Echo", text: "x", timeline: [], at: 1, stopReason: "max_steps" });
     expect(restored.stopReason).toBe("max_steps");
   });
+  it("shows a marker where a long turn was summarized", () => {
+    const state = run([
+      ev("m1", "echo", { type: "agent_start", agent: { id: "echo", name: "Echo" } }),
+      ev("m1", "echo", { type: "context_compacted", steps: 4 }),
+    ]);
+    expect(state.messages.m1.segments.map((s) => s.kind)).toEqual(["note"]);
+    const restored = messageFromTimeline({ messageId: "m1", agentId: "echo", agentName: "Echo", text: "done", at: 1,
+      timeline: [{ kind: "note", step: 0, text: "Earlier steps summarized to fit the context window" }] });
+    expect(restored.segments[0].kind).toBe("note");
+  });
 });

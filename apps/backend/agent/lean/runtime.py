@@ -12,7 +12,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import settings
+from agent.lean import settings, summaries
 from agent.lean.loop import LeanTurn, TurnResult
 from agent.lean.personas import AgentPersona, get_persona_store
 from agent.lean.prompt import build_system_prompt
@@ -194,6 +194,8 @@ class LeanSession:
         if self.room is not None and final_text:
             get_room_store().touch(self.room.id, final_text)
         self._remember_async(message, final_text)
+        if not cancelled and final_text:
+            summaries.update_in_background(self.session_id, lambda: self._side_client(default_persona))
         return {
             "execution_id": execution.id,
             "success": bool(success and not cancelled),
@@ -397,6 +399,7 @@ class LeanSession:
             teammates=teammates if can_hand_off else [],
             room_name=self.room.name if self.room and self.room.kind == "group" else "",
             memories=memories,
+            chat_summary=summaries.summary_text(self.session_id) if depth == 0 else "",
         )
         turn = LeanTurn(
             client=self._client_for(persona),
@@ -579,6 +582,11 @@ class LeanSession:
             self._clients[key] = ChatClient(endpoint, reasoning_effort=effort)
         return self._clients[key]
 
+    def _side_client(self, persona: AgentPersona) -> ChatClient:
+        """A separate, thinking-off client for background work (summaries)."""
+        endpoint = self._endpoint_for(persona)
+        return ChatClient(endpoint, reasoning_effort=reasoning_effort_for(endpoint, False, self.reasoning_effort))
+
     def _temperature(self) -> Optional[float]:
         try:
             from config import config
@@ -623,8 +631,14 @@ class LeanSession:
             return []
         group = bool(self.room and self.room.kind == "group")
         rows: list[dict[str, Any]] = []
-        for turn in timeline.get("turns") or []:
+        turns = timeline.get("turns") or []
+        # Recent turns verbatim; older ones only if the chat summary doesn't cover them yet.
+        covered = set(summaries.load(self.session_id).get("covered") or [])
+        recent_start = max(0, len(turns) - summaries.RECENT_TURNS)
+        for index, turn in enumerate(turns):
             if str(turn.get("execution_id") or "") == exclude_execution:
+                continue
+            if index < recent_start and str(turn.get("execution_id") or "") in covered:
                 continue
             for msg in turn.get("messages") or []:
                 text = str(msg.get("text") or "").strip()

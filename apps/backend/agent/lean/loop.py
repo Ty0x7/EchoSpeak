@@ -85,6 +85,7 @@ class LeanTurn:
         self.interactive = interactive
         self._on_seal = on_seal
         self._handed_off = False
+        self.compactions = 0
         # Extra fields on agent_start, e.g. who handed this work over.
         self.meta = dict(meta or {})
         self.client = client
@@ -533,10 +534,15 @@ class LeanTurn:
             if _estimate_tokens(messages, tools) <= budget:
                 return
         # 2. Drop the oldest history messages (plain text, never this turn's work).
+        #    Older chat is still covered by the chat summary in the system prompt.
         while _estimate_tokens(messages, tools) > budget and self._history_in_messages > 0:
             messages.pop(1)
             self._history_in_messages -= 1
-        # 3. Last resort: shrink every tool result except the newest one.
+        # 3. Summarize this turn's earlier steps instead of cutting them.
+        if _estimate_tokens(messages, tools) > budget and self._compact_turn(messages, keep_steps=2 if aggressive else 3):
+            if _estimate_tokens(messages, tools) <= budget:
+                return
+        # 4. Last resort: shrink every tool result except the newest one.
         if _estimate_tokens(messages, tools) > budget:
             tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
             for index in tool_indexes[:-1]:
@@ -544,6 +550,59 @@ class LeanTurn:
                     content = str(messages[index].get("content") or "")
                     if len(content) > 300:
                         messages[index]["content"] = content[:250] + "\n…[trimmed]"
+
+
+    def _compact_turn(self, messages: list[dict[str, Any]], *, keep_steps: int) -> bool:
+        """Replace this turn's older steps with a model-written summary.
+
+        The summary is appended to the user's message (chat templates such as
+        Gemma's require user/assistant turns to alternate), and the last
+        `keep_steps` assistant steps stay verbatim. Returns False when there is
+        too little to compact or the summary call fails.
+        """
+        user_index = 1 + self._history_in_messages
+        if user_index >= len(messages) or messages[user_index].get("role") != "user":
+            return False
+        steps = [i for i in range(user_index + 1, len(messages)) if messages[i].get("role") == "assistant"]
+        if len(steps) <= keep_steps + 1:
+            return False
+        cut = steps[-keep_steps]
+        span = messages[user_index + 1:cut]
+        lines: list[str] = []
+        for message in span:
+            if message.get("role") == "assistant":
+                calls = ", ".join(
+                    f"{c.get('function', {}).get('name')}({str(c.get('function', {}).get('arguments') or '')[:160]})"
+                    for c in message.get("tool_calls") or []
+                )
+                text = str(message.get("content") or "").strip()[:400]
+                lines.append("You: " + (text + " " if text else "") + (f"[called {calls}]" if calls else ""))
+            elif message.get("role") == "tool":
+                lines.append(f"Result of {message.get('name') or 'tool'}: {str(message.get('content') or '')[:900]}")
+        body = "\n".join(lines)[-14000:]
+        prompt = (
+            "Summarize the work done so far on this task so you can keep going without the full tool output. "
+            "Keep: the goal, what was tried, concrete findings (values, file paths, links, errors), and what is "
+            "left to do. At most 200 words, plain sentences.\n\n" + body
+        )
+        try:
+            turn = self.client.stream_turn([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=700, cancel=self.cancel)
+            summary = str(turn.content or "").strip()
+        except Exception:
+            logger.debug("Lean turn compaction failed", exc_info=True)
+            return False
+        if not summary:
+            return False
+        messages[user_index] = {
+            **messages[user_index],
+            "content": str(messages[user_index].get("content") or "")
+            + f"\n\n[Progress so far on this task, summarized to fit the context window]:\n{summary}",
+        }
+        del messages[user_index + 1:cut]
+        self.compactions += 1
+        self.timeline.append({"kind": "note", "step": 0, "text": "Earlier steps summarized to fit the context window", "at": time.time()})
+        self.emit({"type": "context_compacted", "steps": len(steps) - keep_steps})
+        return True
 
 
 def _friendly_error(error: str) -> str:

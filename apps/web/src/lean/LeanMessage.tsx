@@ -233,6 +233,7 @@ export function LeanMessage({
           if (seg.kind === "thinking") return <ThinkingBlock key={`t${index}`} seg={seg} live={streaming} />;
           if (seg.kind === "tool") return <ToolRow key={`x${seg.id || index}`} seg={seg} />;
           if (seg.kind === "approval") return <ApprovalCard key={`a${seg.id}`} seg={seg} onDecide={onDecide} />;
+          if (seg.kind === "note") return <div key={`n${index}`} className="lm-note">{seg.text}</div>;
           if (!seg.text.trim()) return null;
           const isTail = seg === lastText && streaming;
           return (

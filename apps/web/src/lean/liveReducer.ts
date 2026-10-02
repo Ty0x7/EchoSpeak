@@ -17,6 +17,7 @@ export const LEAN_EVENT_TYPES = new Set([
   "delegation",
   "token_usage",
   "memory_saved",
+  "context_compacted",
 ]);
 
 export function isLeanEvent(evt: LeanEvent): boolean {
@@ -135,6 +136,11 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
           },
         ],
       }));
+    case "context_compacted":
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [...m.segments, { kind: "note", step: 0, text: "Earlier steps summarized to fit the context window" }],
+      }));
     case "approval_resolved":
       return patchMessage(state, id, (m) => ({
         ...m,
@@ -185,6 +191,7 @@ export function messageFromTimeline(args: {
       segments.push({ kind: "thinking", step, text: String(row.text || ""), startedAt, endedAt });
     }
     else if (row?.kind === "text") segments.push({ kind: "text", step, text: String(row.text || "") });
+    else if (row?.kind === "note") segments.push({ kind: "note", step, text: String(row.text || "") });
     else if (row?.kind === "tool")
       segments.push({
         kind: "tool",

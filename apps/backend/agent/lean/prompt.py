@@ -88,6 +88,7 @@ def build_system_prompt(
     teammates: Optional[list[AgentPersona]] = None,
     room_name: str = "",
     memories: Optional[list[dict[str, Any]]] = None,
+    chat_summary: str = "",
     terminal_note: str = "",
     project_overview: str = "",
 ) -> str:
@@ -102,5 +103,6 @@ def build_system_prompt(
         _team(persona, list(teammates or []), room_name),
         _environment(project_root=project_root, notes=list(notes or []), terminal_note=terminal_note, project_overview=project_overview),
         _memory(list(memories or [])),
+        ("## Earlier in this chat (summary)\n" + chat_summary.strip()) if chat_summary.strip() else "",
     ]
     return "\n\n".join(section for section in sections if section).strip()
