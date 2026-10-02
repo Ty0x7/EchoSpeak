@@ -94,8 +94,8 @@ export function EchoFace({ size = 280, className = "" }: { size?: number | strin
 
 const LINES = [
   "Hi, I'm Echo.",
-  "Want me to ask Scout?",
-  "Forge can build that.",
+  "Want me to ask Jarvis?",
+  "Glados can build that.",
   "I run on your PC.",
   "@mention the whole team.",
 ];

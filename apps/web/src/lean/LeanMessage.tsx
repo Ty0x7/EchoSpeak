@@ -3,11 +3,24 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { LeanMessageData, LeanSegment } from "./types";
 
-export function AgentAvatar({ id, name, initials, size = 26 }: { id?: string; name?: string; initials?: string; size?: number }) {
-  const label = (initials || name || "?").slice(0, 2);
+/**
+ * Agents are drawn as small faces, like the logo: Echo is white with dark eyes,
+ * every teammate is dark with white eyes. `initials` is kept for callers but
+ * no longer drawn.
+ */
+export function AgentAvatar({ id, name, size = 26 }: { id?: string; name?: string; initials?: string; size?: number }) {
+  const key = String(id || name || "");
+  // Spread the blinks so a group of faces never blinks in unison.
+  const blinkDelay = `${(Array.from(key).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 47) / 10}s`;
   return (
-    <span className="lm-avatar" style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }} aria-hidden>
-      {id === "echo" ? <img src="/logo.png" alt="" /> : label}
+    <span
+      className="lm-avatar lm-face"
+      data-tone={id === "echo" ? "light" : "dark"}
+      style={{ width: size, height: size, ["--av" as string]: `${size}px`, ["--blink" as string]: blinkDelay }}
+      aria-hidden
+    >
+      <i />
+      <i />
     </span>
   );
 }

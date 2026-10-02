@@ -27,7 +27,7 @@ function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 /** What the app does today. Keep in step with docs/ARCHITECTURE.md. */
 const capabilities: Array<{ icon: IconName; title: string; copy: string; meta: string }> = [
   { icon: "chat", title: "An agent that finishes the job", copy: "Echo keeps calling tools until it has an answer, and you watch every step as it happens: thinking, searches, file reads, commands.", meta: "Agent loop · live timeline" },
-  { icon: "team", title: "Agents and group chats", copy: "Echo, Scout and Forge come built in, and you can make your own. Put them in a group chat, @mention who should answer, or let the group decide.", meta: "Personas · rooms · handoffs" },
+  { icon: "team", title: "Agents and group chats", copy: "Echo, Jarvis and Glados come built in, and you can make your own. Put them in a group chat, @mention who should answer, or let the group decide.", meta: "Personas · rooms · handoffs" },
   { icon: "code", title: "Projects and code", copy: "Attach a folder and agents can read, search and edit its files, and run commands in PowerShell or an optional Docker sandbox.", meta: "Files · terminal · sandbox" },
   { icon: "research", title: "Research with sources", copy: "Web search and page reading, with links to the pages actually read in the answer.", meta: "Search · read · cite" },
   { icon: "memory", title: "Memory on your machine", copy: "Echo remembers facts you share and recalls them when they matter. Chats, memory and settings are stored locally.", meta: "Local storage" },
@@ -112,7 +112,7 @@ function EchoOrbit() {
       <div className="orbit-feature-copy">
         <span>One Echo · many ways to work</span>
         <h3 id="capabilities-title">Echo changes how he helps without changing who he is.</h3>
-        <p>Ask a question, start research, attach a project, speak aloud, or bring Scout and Forge in. The surface changes; the chat, memory and history stay connected.</p>
+        <p>Ask a question, start research, attach a project, speak aloud, or bring Jarvis and Glados in. The surface changes; the chat, memory and history stay connected.</p>
       </div>
       <div className="orbit-stage" aria-label="Chat, group chats, projects, research, memory and voice, all around Echo">
         <div className="orbit-ring orbit-ring-a" aria-hidden="true" />
@@ -139,8 +139,8 @@ function EchoStage() {
       <div className="echo-stage-foot">
         <div className="echo-stage-who"><strong>Echo</strong><span>Personal agent</span></div>
         <div className="echo-stage-team" aria-label="Teammates">
-          <span><b>S</b>Scout</span>
-          <span><b>F</b>Forge</span>
+          <span><b className="mini-face" aria-hidden="true"><i /><i /></b>Jarvis</span>
+          <span><b className="mini-face" aria-hidden="true"><i /><i /></b>Glados</span>
         </div>
       </div>
     </div>
@@ -149,16 +149,16 @@ function EchoStage() {
 
 function GroupChatDiagram() {
   return (
-    <div className="flow-diagram" role="img" aria-label="Group chat flow. You ask Scout and Forge; both answer at the same time on their own; then Echo, the room's lead, posts a summary. Separately, an agent can hand a task to a teammate and continue after their reply.">
+    <div className="flow-diagram" role="img" aria-label="Group chat flow. You ask Jarvis and Glados; both answer at the same time on their own; then Echo, the room's lead, posts a summary. Separately, an agent can hand a task to a teammate and continue after their reply.">
       <div className="flow-col">
         <span className="flow-kicker">You</span>
-        <div className="flow-node flow-node-user">@Scout @Forge which option should I use?</div>
+        <div className="flow-node flow-node-user">@Jarvis @Glados which option should I use?</div>
       </div>
       <div className="flow-arrow" aria-hidden="true" />
       <div className="flow-col">
         <span className="flow-kicker">At the same time, independently</span>
-        <div className="flow-node flow-node-working"><b className="mini-face" aria-hidden="true"><i /><i /></b><span><strong>Scout</strong>Answers on its own</span></div>
-        <div className="flow-node flow-node-working flow-node-late"><b className="mini-face" aria-hidden="true"><i /><i /></b><span><strong>Forge</strong>Answers on its own</span></div>
+        <div className="flow-node flow-node-working"><b className="mini-face" aria-hidden="true"><i /><i /></b><span><strong>Jarvis</strong>Answers on its own</span></div>
+        <div className="flow-node flow-node-working flow-node-late"><b className="mini-face" aria-hidden="true"><i /><i /></b><span><strong>Glados</strong>Answers on its own</span></div>
       </div>
       <div className="flow-arrow" aria-hidden="true" />
       <div className="flow-col">
@@ -167,7 +167,7 @@ function GroupChatDiagram() {
       </div>
       <div className="flow-handoff">
         <span className="flow-kicker">Handoffs</span>
-        <p><strong>Echo</strong> asks Scout <i aria-hidden="true">→</i> <strong>Scout</strong> replies, marked “via Echo” <i aria-hidden="true">→</i> <strong>Echo</strong> continues below. Each turn is its own message, in the order it happened, with a limit on how many handoffs one question can trigger.</p>
+        <p><strong>Echo</strong> asks Jarvis <i aria-hidden="true">→</i> <strong>Jarvis</strong> replies, marked “via Echo” <i aria-hidden="true">→</i> <strong>Echo</strong> continues below. Each turn is its own message, in the order it happened, with a limit on how many handoffs one question can trigger.</p>
       </div>
     </div>
   );
@@ -299,7 +299,7 @@ export function Marketing() {
           <div className="hero-copy">
             <p className="eyebrow"><span>EchoSpeak {appVersion}</span><span>Windows desktop</span></p>
             <h1>Your computer.<br />Your context.<br /><em>Your agents.</em></h1>
-            <p className="hero-lede">A local-first assistant with a team of agents. Chat with Echo, bring Scout and Forge into a group chat, attach a project folder, and watch every step: thinking, tools and handoffs.</p>
+            <p className="hero-lede">A local-first assistant with a team of agents. Chat with Echo, bring Jarvis and Glados into a group chat, attach a project folder, and watch every step: thinking, tools and handoffs.</p>
             <div className="hero-actions">
               <a className="button button-primary" href={installerUrl}><Icon name="windows" />{downloadLabel} <Icon name="arrow" size={17} /></a>
               <a className="button button-secondary" href={githubUrl} target="_blank" rel="noreferrer"><Icon name="github" />View on GitHub</a>
@@ -436,6 +436,8 @@ const styles = `
   .echo-stage-team { display: flex; gap: 8px; }
   .echo-stage-team span { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px 6px 6px; border: 1px solid #262626; border-radius: 999px; background: #0e0e0e; }
   .echo-stage-team b { width: 20px; height: 20px; display: grid; place-items: center; border: 1px solid #3a3a3a; border-radius: 6px; background: #171717; color: #eee; font-family: Inter, sans-serif; font-size: 10px; letter-spacing: 0; }
+  .echo-stage-team b.mini-face { display: flex; align-items: center; justify-content: center; gap: 3px; }
+  .echo-stage-team .mini-face i { width: 2.5px; height: 6px; }
 
   .chapter-nav { display: grid; grid-template-columns: repeat(4, 1fr); border-bottom: 1px solid #1c1c1c; }
   .chapter-nav a { position: relative; min-height: 76px; padding: 26px 4px 22px; display: grid; grid-template-columns: 30px 1fr; gap: 8px; align-items: start; color: #8a8a86; transition: color .2s ease; }

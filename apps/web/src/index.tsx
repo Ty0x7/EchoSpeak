@@ -4181,7 +4181,7 @@ export const Dashboard: React.FC<{
                 ? messageFromTimeline({
                     messageId: String(msg.message_id || msgId),
                     agentId: leanAgentId,
-                    agentName: String(msg.agent_name || leanPersona?.name || "Echo"),
+                    agentName: String(leanPersona?.name || msg.agent_name || "Echo"),
                     initials: leanPersona?.initials,
                     title: leanPersona?.title,
                     text,

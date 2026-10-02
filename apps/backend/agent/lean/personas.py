@@ -59,31 +59,58 @@ def _seed() -> list[AgentPersona]:
         ),
         AgentPersona(
             id="scout",
-            name="Scout",
+            name="Jarvis",
             title="Researcher",
             description="Deep web research, fact checking, comparing sources, news, sports, weather, and summarizing long pages or videos.",
-            soul=(
-                "You are Scout, a meticulous researcher on Echo's team. You search widely, read the "
-                "actual sources, cross-check claims, and report findings with the source links. "
-                "You say plainly when sources disagree or when something could not be confirmed."
-            ),
-            avatar="S",
+            soul=_SOULS["scout"],
+            avatar="J",
             toolsets=["research", "memory"],
         ),
         AgentPersona(
             id="forge",
-            name="Forge",
+            name="Glados",
             title="Builder",
             description="Writes and edits code, builds projects, runs terminal commands, debugs errors, and works inside project folders.",
-            soul=(
-                "You are Forge, the builder on Echo's team. You read the existing code before changing it, "
-                "make complete working edits (never placeholder stubs), run commands to verify, and "
-                "report exactly what changed."
-            ),
-            avatar="F",
+            soul=_SOULS["forge"],
+            avatar="G",
             toolsets=["core", "terminal", "research", "memory"],
         ),
     ]
+
+
+_SOULS = {
+    "scout": (
+        "You are Jarvis, a meticulous researcher on Echo's team. You search widely, read the "
+        "actual sources, cross-check claims, and report findings with the source links. "
+        "You say plainly when sources disagree or when something could not be confirmed."
+    ),
+    "forge": (
+        "You are Glados, the builder on Echo's team. You read the existing code before changing it, "
+        "make complete working edits (never placeholder stubs), run commands to verify, and "
+        "report exactly what changed."
+    ),
+}
+
+# Store format 2 renamed the built-in teammates (Scout -> Jarvis, Forge -> Glados).
+# The ids stay the same so chats, rooms and settings keep pointing at them.
+_STORE_VERSION = 2
+_RENAMES = {"scout": ("Jarvis", "J", "Scout"), "forge": ("Glados", "G", "Forge")}
+
+
+def _migrate_names(rows: list[dict[str, Any]]) -> None:
+    """One-time rename of the built-in teammates; later user edits are kept."""
+    for row in rows:
+        rename = _RENAMES.get(str(row.get("id") or ""))
+        if not rename:
+            continue
+        name, avatar, old = rename
+        row["name"] = name
+        if str(row.get("avatar") or "").strip() in {"", old[0]}:
+            row["avatar"] = avatar
+        soul = str(row.get("soul") or "")
+        if not soul.strip() or soul.startswith(f"You are {old},"):
+            row["soul"] = _SOULS[row["id"]]
+        row["updated_at"] = time.time()
 
 
 class PersonaStore:
@@ -96,9 +123,12 @@ class PersonaStore:
     def _load(self) -> None:
         with self._lock:
             rows: list[dict[str, Any]] = []
+            version = _STORE_VERSION
             if self.path.exists():
                 try:
-                    rows = list(json.loads(self.path.read_text(encoding="utf-8")).get("agents") or [])
+                    payload = json.loads(self.path.read_text(encoding="utf-8"))
+                    rows = list(payload.get("agents") or [])
+                    version = int(payload.get("version") or 1)
                 except Exception:
                     backup = self.path.with_suffix(f".corrupt-{int(time.time())}.json")
                     try:
@@ -106,6 +136,9 @@ class PersonaStore:
                     except Exception:
                         pass
                     rows = []
+            migrate = bool(rows) and version < _STORE_VERSION
+            if migrate:
+                _migrate_names(rows)
             self._agents = {}
             for row in rows:
                 try:
@@ -120,10 +153,12 @@ class PersonaStore:
             elif "echo" not in self._agents:
                 self._agents["echo"] = _seed()[0]
                 self._save()
+            elif migrate:
+                self._save()
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"version": 1, "agents": [agent.model_dump() for agent in self._agents.values()]}
+        payload = {"version": _STORE_VERSION, "agents": [agent.model_dump() for agent in self._agents.values()]}
         temp = self.path.with_suffix(".tmp")
         temp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         temp.replace(self.path)

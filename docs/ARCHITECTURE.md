@@ -123,7 +123,7 @@ stateDiagram-v2
   Done --> [*]: agent_done + saved as one message
 ```
 
-- **Personas** (`lean/personas.py`): Echo (personal agent, all toolsets), Scout (research and memory) and Forge (core, terminal, research and memory) are built in. Custom agents are saved in `lean/agents.json`, each with its own instructions ("soul"), toolsets and optional provider and model.
+- **Personas** (`lean/personas.py`): Echo (personal agent, all toolsets), Jarvis (research and memory) and Glados (core, terminal, research and memory) are built in. Their ids are still `scout` and `forge` (they were renamed in store format 2, so old chats, rooms and `@scout` mentions keep working). Custom agents are saved in `lean/agents.json`, each with its own instructions ("soul"), toolsets and optional provider and model.
 - **Toolsets** (`lean/toolbox.py`) pick which registered tools an agent sees. Some tools are native to the lean runtime:
   - `memory_save` and `memory_search`.
   - `delegate_to_agent`.
@@ -142,10 +142,10 @@ sequenceDiagram
   participant U as You
   participant S as LeanSession
   participant E as Echo (room lead)
-  participant Sc as Scout
-  participant F as Forge
+  participant Sc as Jarvis
+  participant F as Glados
 
-  U->>S: "@Scout @Forge which option?"
+  U->>S: "@Jarvis @Glados which option?"
   alt every named agent uses the same model endpoint (fan-out)
     S->>Sc: announce (message 1)
     S->>F: announce (message 2)

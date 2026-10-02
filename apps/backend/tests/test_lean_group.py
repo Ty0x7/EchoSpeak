@@ -128,7 +128,7 @@ def test_router_keeps_the_last_speaker_for_follow_ups(monkeypatch):
 
     assert [m["agent_id"] for m in out["messages"]] == ["forge"]
     routing_prompt = scripts["echo"].calls[0][0]["content"]
-    assert "The last agent to reply was Forge" in routing_prompt
+    assert "The last agent to reply was Glados" in routing_prompt
 
 
 # ── U3/U4: fan-out, merge, and turn order ───────────────────────────────
@@ -195,4 +195,28 @@ def test_parallel_agents_are_told_to_answer_only_for_themselves(monkeypatch):
     session, _ = _session(monkeypatch, scripts, room=room, session_id=session_id)
     session.run("@Scout @Forge thoughts?")
     scout_prompt = scripts["scout"].calls[0][-1]["content"]
-    assert "Scout, answer for yourself only. Forge will answer separately" in scout_prompt
+    assert "Jarvis, answer for yourself only. Glados will answer separately" in scout_prompt
+
+
+def test_builtin_teammates_are_renamed_once_and_ids_still_resolve(tmp_path):
+    import json
+
+    from agent.lean.personas import PersonaStore
+
+    path = tmp_path / "agents.json"
+    old = [
+        {"id": "echo", "name": "Echo", "builtin": True},
+        {"id": "scout", "name": "Scout", "avatar": "S", "soul": "You are Scout, a meticulous researcher."},
+        {"id": "forge", "name": "Echo Code", "avatar": "F", "soul": "Custom instructions the user wrote."},
+    ]
+    path.write_text(json.dumps({"version": 1, "agents": old}), encoding="utf-8")
+    store = PersonaStore(path)
+    scout, forge = store.get("scout"), store.get("forge")
+    assert (scout.name, scout.avatar) == ("Jarvis", "J") and scout.soul.startswith("You are Jarvis,")
+    assert (forge.name, forge.avatar) == ("Glados", "G") and forge.soul == "Custom instructions the user wrote."
+    # Old @mentions by id still find them.
+    assert store.find_by_name("@scout").id == "scout" and store.find_by_name("Glados").id == "forge"
+    # Runs once: a later rename by the user sticks.
+    store.update("scout", {"name": "Friday"})
+    assert PersonaStore(path).get("scout").name == "Friday"
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2

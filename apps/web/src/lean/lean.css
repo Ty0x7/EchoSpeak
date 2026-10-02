@@ -105,8 +105,21 @@
   user-select: none;
 }
 .lm-avatar img { width: 62%; height: 62%; object-fit: contain; border-radius: 3px; }
+/* Agent faces: Echo light, teammates dark (same look as the website). */
+.lm-face { display: inline-flex; align-items: center; justify-content: center; gap: max(2px, calc(var(--av) * .15)); border-radius: 30%; }
+.lm-face i { width: max(2px, calc(var(--av) * .12)); height: max(4px, calc(var(--av) * .27)); border-radius: 999px; background: #f2f2ef; transform-origin: 50% 60%; animation: lm-blink 6s infinite; animation-delay: var(--blink, 0s); }
+.lm-face[data-tone="light"] { background: #f4f4f2; border-color: #f4f4f2; box-shadow: inset 0 -1px 0 rgba(0, 0, 0, .08); }
+.lm-face[data-tone="light"] i { background: #070707; }
+@keyframes lm-blink { 0%, 94%, 100% { transform: scaleY(1); } 96.5% { transform: scaleY(.12); } }
+@media (prefers-reduced-motion: reduce) { .lm-face i { animation: none; } }
 .es-stack { display: inline-flex; align-items: center; }
-.es-stack > .lm-avatar + .lm-avatar { margin-left: -7px; box-shadow: 0 0 0 2px var(--es-surface-1), var(--es-sheen); }
+.es-stack > .lm-avatar { position: relative; }
+.es-stack > .lm-avatar + .lm-avatar { margin-left: -5px; box-shadow: 0 0 0 2px var(--es-surface-1), var(--es-sheen); }
+/* The first face (usually Echo, the room lead) sits on top. */
+.es-stack > .lm-avatar:nth-child(1) { z-index: 4; }
+.es-stack > .lm-avatar:nth-child(2) { z-index: 3; }
+.es-stack > .lm-avatar:nth-child(3) { z-index: 2; }
+.es-stack > .lm-avatar:nth-child(4) { z-index: 1; }
 .es-stack-more { font-size: 9px !important; color: var(--es-dim); margin-left: -7px; }
 
 /* ── Agent messages (lean runtime) ───────────────────────────────────── */

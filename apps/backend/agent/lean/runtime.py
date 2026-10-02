@@ -632,7 +632,8 @@ class LeanSession:
                 if msg.get("role") == "user":
                     rows.append({"role": "user", "content": f"[User]: {text}" if group else text})
                 else:
-                    name = str(msg.get("agent_name") or "")
+                    # Current name, so renamed agents read correctly in old history.
+                    name = self._name_of(str(msg.get("agent_id"))) if msg.get("agent_id") else str(msg.get("agent_name") or "")
                     rows.append({"role": "assistant", "content": f"[{name}]: {text}" if group and name else text})
         # Merge consecutive same-role messages: chat templates expect alternation.
         merged: list[dict[str, Any]] = []
