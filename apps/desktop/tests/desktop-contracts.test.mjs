@@ -51,11 +51,12 @@ test("desktop composer submits only into an explicitly selected Session", () => 
 });
 
 test("desktop startup and sidebar use one monochrome Echo identity", () => {
-  assert.ok(desktopApp.includes('className="desktop-boot-echo"'));
-  assert.ok(desktopApp.includes('className="desktop-boot-progress"'));
+  // Echo's face spins on the boot screen (same face as the splash).
+  assert.ok(desktopApp.includes('className="desktop-boot-face"'));
+  assert.ok(desktopApp.includes("desktop-boot-progress"));
   assert.ok(!desktopApp.includes("desktop-boot-mark"));
   assert.ok(!desktopApp.includes("desktop-boot-orbit"));
-  assert.ok(desktopCss.includes("@keyframes desktop-echo-rotate"));
+  assert.ok(desktopCss.includes("@keyframes echo-face-spin"));
   assert.ok(desktopCss.includes("@keyframes desktop-progress"));
   assert.ok(sidebar.includes("{!props.desktop ? <div"));
   assert.ok(sidebar.includes("Desktop identity belongs to the native title bar"));
