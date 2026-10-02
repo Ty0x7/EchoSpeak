@@ -73,21 +73,34 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# One-folder build: Python starts straight from the installed files. The old
+# one-file build unpacked ~2 GB to %TEMP% on every launch (15-20 s) and ran a
+# second worker process that Windows gave its own console window.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="echospeak-backend",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
+    # Console subsystem keeps stdout/stderr pipes to the desktop host; the
+    # host spawns it with CREATE_NO_WINDOW, so no window is shown.
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    name="echospeak-backend",
 )

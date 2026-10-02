@@ -146,7 +146,7 @@ export const setDesktopCompanionAlwaysOnTop = (enabled: boolean): Promise<void> 
 
 export const readDesktopWindowLabel = (): Promise<string> => invoke<string>("desktop_window_label");
 
-export const controlDesktopWindow = (action: "minimize" | "toggle_maximize" | "close"): Promise<void> =>
+export const controlDesktopWindow = (action: "show" | "minimize" | "toggle_maximize" | "close"): Promise<void> =>
   invoke<void>("control_desktop_window", { action });
 
 const authenticatedRequest = (

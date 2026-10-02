@@ -829,3 +829,14 @@ html.echospeak-companion-root #root {
   opacity: 0.35;
   cursor: default;
 }
+
+/* Boot screen dissolves into the workspace instead of cutting. */
+.desktop-boot-state.is-leaving {
+  z-index: 20;
+  pointer-events: none;
+  animation: desktop-boot-leave 240ms ease-in both;
+}
+@keyframes desktop-boot-leave { to { opacity: 0; transform: scale(1.01); } }
+@media (prefers-reduced-motion: reduce) {
+  .desktop-boot-state, .desktop-boot-state.is-leaving, .desktop-content > .echo-root { animation-duration: 1ms !important; }
+}

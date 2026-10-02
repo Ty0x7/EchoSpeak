@@ -100,3 +100,5 @@ apps/desktop/src-tauri/binaries/
 .launch-debug-data*/
 .launch-debug-logs*/
 .claude/launch.json
+apps/desktop/src-tauri/backend-dist/
+apps/desktop/.build/

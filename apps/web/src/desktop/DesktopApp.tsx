@@ -34,6 +34,17 @@ export function DesktopApp() {
   const [boot, dispatch] = useReducer(reduceDesktopBootState, initialDesktopBootState);
   const startupStartedAtRef = useRef(Date.now());
   const bootstrappedInstanceRef = useRef("");
+  const [bootLeaving, setBootLeaving] = React.useState(false);
+
+  // The main window starts hidden; reveal it once the boot screen has painted
+  // so the first visible frame is never blank.
+  useEffect(() => {
+    if (windowKind !== "main") return;
+    const frame = requestAnimationFrame(() =>
+      requestAnimationFrame(() => void controlDesktopWindow("show").catch(() => undefined))
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [windowKind]);
 
   useEffect(() => {
     let disposed = false;
@@ -124,6 +135,13 @@ export function DesktopApp() {
   };
 
   const showWorkspace = boot.hasBeenReady;
+  // Keep the boot screen mounted briefly so it fades into the workspace.
+  useEffect(() => {
+    if (!showWorkspace) return;
+    setBootLeaving(true);
+    const timer = window.setTimeout(() => setBootLeaving(false), 260);
+    return () => window.clearTimeout(timer);
+  }, [showWorkspace]);
   if (windowKind === null) return null;
   if (windowKind === "companion") {
     document.documentElement.classList.add("echospeak-companion-root");
@@ -146,8 +164,9 @@ export function DesktopApp() {
       </header>
 
       <main className="desktop-content">
-        {showWorkspace ? <Dashboard desktopSettingsWindow={settingsWindow} /> : (
-          <section className="desktop-boot-state" aria-live="polite">
+        {showWorkspace ? <Dashboard desktopSettingsWindow={settingsWindow} /> : null}
+        {!showWorkspace || bootLeaving ? (
+          <section className={`desktop-boot-state${showWorkspace ? " is-leaving" : ""}`} aria-live="polite">
             <div className="desktop-boot-echo" aria-hidden><img src="/logo.png" alt="" draggable={false} /></div>
             <div className="desktop-boot-progress" aria-hidden><span /></div>
             <p className="desktop-boot-detail">{boot.detail}</p>
@@ -161,7 +180,7 @@ export function DesktopApp() {
               </div>
             ) : null}
           </section>
-        )}
+        ) : null}
         {showWorkspace && boot.phase !== "ready" ? (
           <aside className={`desktop-service-banner is-${boot.phase}`} role="status">
             <span>{boot.detail}</span>

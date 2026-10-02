@@ -71,6 +71,10 @@ fn open_desktop_logs(state: State<'_, DesktopState>) -> Result<(), String> {
 #[tauri::command]
 fn control_desktop_window(action: String, window: Window) -> Result<(), String> {
     match action.as_str() {
+        "show" => {
+            window.show().map_err(|error| error.to_string())?;
+            window.set_focus()
+        }
         "minimize" => window.minimize(),
         "toggle_maximize" => {
             if window.is_maximized().map_err(|error| error.to_string())? {
@@ -157,7 +161,16 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Restore size/position, but not visibility: the UI reveals the window
+        // itself once its splash has painted, so there is never a blank frame.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        & !tauri_plugin_window_state::StateFlags::VISIBLE,
+                )
+                .build(),
+        )
         .plugin(log_builder.build())
         .invoke_handler(tauri::generate_handler![
             desktop_runtime,

@@ -91,6 +91,47 @@ def _start_parent_watchdog(parent_pid: int, name: str) -> None:
     threading.Thread(target=target, args=(parent_pid,), name=name, daemon=True).start()
 
 
+def _hide_child_consoles() -> None:
+    """The backend runs without a console window. On Windows, any console
+    program it starts (git, PowerShell, docker, ffprobe…) would otherwise pop
+    its own window, so default every child to CREATE_NO_WINDOW."""
+    if os.name != "nt":
+        return
+    import subprocess
+
+    create_no_window = 0x08000000
+    original_init = subprocess.Popen.__init__
+
+    def init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if not kwargs.get("creationflags"):
+            kwargs["creationflags"] = create_no_window
+        original_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = init  # type: ignore[method-assign]
+
+
+def _start_file_log(logs_dir: Path) -> None:
+    """Rotating backend log that exists no matter how the process was started."""
+    try:
+        from loguru import logger
+
+        logger.add(
+            str(logs_dir / "backend.log"),
+            rotation="10 MB",
+            retention=5,
+            encoding="utf-8",
+            enqueue=True,
+            level="INFO",
+        )
+    except Exception:
+        pass
+    # Without a console, stray print()/tracebacks would be lost; keep them.
+    if sys.stdout is None or sys.stderr is None:
+        stream = open(logs_dir / "backend-console.log", "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stdout or stream
+        sys.stderr = sys.stderr or stream
+
+
 def main(argv: list[str] | None = None) -> int:
     # Windows packaged logs often default to a legacy code page; force UTF-8
     # so pipeline markers and tool names are not replaced with U+FFFD.
@@ -102,6 +143,8 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     args = _parser().parse_args(argv)
     data_dir, logs_dir = _validate_desktop_contract(args)
+    _hide_child_consoles()
+    _start_file_log(logs_dir)
     os.environ["ECHOSPEAK_RUNTIME_KIND"] = "desktop"
     os.environ["API_HOST"] = "127.0.0.1"
     os.environ["API_PORT"] = str(args.port)

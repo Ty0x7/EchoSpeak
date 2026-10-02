@@ -77,20 +77,27 @@
       }
     ],
     "security": {
-      "capabilities": ["desktop-main"],
+      "capabilities": [
+        "desktop-main"
+      ],
       "freezePrototype": true,
       "csp": "default-src 'self' tauri: asset:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://127.0.0.1:* ws://127.0.0.1:* https: wss:; img-src 'self' asset: http://asset.localhost data: blob: http://127.0.0.1:* https:; media-src 'self' asset: http://asset.localhost blob: http://127.0.0.1:* https:; font-src 'self' data:; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "msi"],
+    "targets": [
+      "nsis",
+      "msi"
+    ],
     "publisher": "EchoSpeak Project",
     "category": "Productivity",
     "shortDescription": "Local-first personal AI for Windows",
     "longDescription": "EchoSpeak is a local-first personal AI with conversational Chat and compact live status for durable work, tools, research, and specialist activity.",
-    "icon": ["icons/icon.ico", "icons/icon.png"],
-    "externalBin": ["binaries/echospeak-backend"],
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
@@ -98,9 +105,14 @@
       "allowDowngrades": false,
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["English"],
+        "languages": [
+          "English"
+        ],
         "startMenuFolder": "EchoSpeak"
       }
+    },
+    "resources": {
+      "backend-dist/": "backend/"
     }
   }
 }

@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
@@ -258,10 +258,23 @@ pub fn launch_backend(app: AppHandle, state: DesktopState) -> Result<(), String>
 
     let port = port_from_api_base(&api_base)?;
     let parent_pid = std::process::id().to_string();
+    // One-folder backend bundled as a resource (see build-sidecar.ps1). The
+    // shell plugin spawns it with CREATE_NO_WINDOW, so no console appears.
+    let backend_exe = app
+        .path()
+        .resource_dir()
+        .map_err(|error| format!("Could not resolve the app resource folder: {error}"))?
+        .join("backend")
+        .join(if cfg!(windows) { "echospeak-backend.exe" } else { "echospeak-backend" });
+    if !backend_exe.is_file() {
+        return Err(format!(
+            "The packaged EchoSpeak backend is missing at {}",
+            backend_exe.display()
+        ));
+    }
     let command = app
         .shell()
-        .sidecar("echospeak-backend")
-        .map_err(|error| format!("Could not locate the packaged EchoSpeak backend: {error}"))?
+        .command(backend_exe)
         .args([
             "--host".to_string(),
             "127.0.0.1".to_string(),

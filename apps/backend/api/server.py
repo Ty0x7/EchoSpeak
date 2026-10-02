@@ -2068,6 +2068,36 @@ def _extract_text_from_upload(filename: str, content_type: Optional[str], data: 
         raise HTTPException(status_code=400, detail=f"Unsupported text encoding: {exc}") from exc
 
 
+_WARMUP_GATE = threading.Event()
+
+
+def _start_background_warmup() -> None:
+    """Load the heavy chat stack after the server is up, off the startup path.
+
+    The first agent needs langchain/torch/transformers (~15-20s to import) and
+    the memory store. Doing it here, a moment after readiness, means the UI is
+    interactive immediately and the first message rarely waits on imports.
+    """
+    if os.getenv("ECHOSPEAK_TESTING", "").strip().lower() in {"1", "true", "yes"}:
+        return
+    if os.getenv("ECHOSPEAK_DISABLE_WARMUP", "").strip().lower() in {"1", "true", "yes"}:
+        return
+
+    def warm() -> None:
+        # Wait until readiness has been reported once (or 20s), so the heavy
+        # imports never hold the import lock while readiness is being checked.
+        _WARMUP_GATE.wait(timeout=20)
+        time.sleep(1.0)  # let the UI hydrate first
+        started = time.perf_counter()
+        try:
+            get_agent("default")
+            logger.info("Background warmup finished in {:.1f}s", time.perf_counter() - started)
+        except Exception as exc:
+            logger.warning("Background warmup skipped: {}", exc)
+
+    threading.Thread(target=warm, name="echospeak-warmup", daemon=True).start()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
@@ -2137,6 +2167,7 @@ async def lifespan(app: FastAPI):
         logger.info("Model prewarming disabled on startup; model loads on demand.")
     await _reconcile_discord_bot_runtime()
     await _reconcile_heartbeat_runtime()
+    _start_background_warmup()
     
     # --- Telegram Bot startup (v5.4.0) ---
     if bool(getattr(config, "allow_telegram_bot", False)):
@@ -8718,11 +8749,16 @@ async def health_check():
 
 
 @app.get("/startup/readiness")
-async def startup_readiness():
+def startup_readiness():
+    # Sync on purpose: FastAPI runs it in a worker thread, so readiness checks
+    # (file reads, provider probe) never block the event loop.
     """Authoritative durable-owner readiness; optional providers never block it."""
     from agent.startup_readiness import build_startup_readiness
 
-    return build_startup_readiness()
+    result = build_startup_readiness()
+    if result.get("core_ready"):
+        _WARMUP_GATE.set()
+    return result
 
 
 @app.get("/metrics")

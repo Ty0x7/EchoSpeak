@@ -10,7 +10,13 @@
     <title>EchoSpeak — Personal agent runtime</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Painted before any script loads; React replaces it on first render. -->
+    <div id="root"><div style="position:fixed;inset:0;display:grid;place-items:center;background:#070707"><img src="/logo.png" alt="" width="44" height="44" style="border-radius:11px;opacity:.9;animation:es-splash 1.6s ease-in-out infinite" /></div></div>
+    <style>
+      html, body { margin: 0; background: #070707; }
+      @keyframes es-splash { 0%, 100% { opacity: .45; transform: scale(.97); } 50% { opacity: .95; transform: scale(1); } }
+      @media (prefers-reduced-motion: reduce) { #root img { animation: none !important; } }
+    </style>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
