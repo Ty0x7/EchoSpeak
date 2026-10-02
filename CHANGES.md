@@ -1,5 +1,83 @@
 # Changes
 
+## v10.0.0 — 2026-10-02 (first official release)
+
+Version 9 was skipped. This release folds in all 8.1+ work since the 8.0
+baseline. User-facing notes: `docs/releases/v10.0.0.md`. Architecture:
+`docs/ARCHITECTURE.md`.
+
+### Runtime
+- **Lean runtime is the only runtime** (roadmap #1). `process_query` → `run_lean_query` for
+  every source. Deleted `semantic_runtime`, `turn_understanding`, `model_control_plane`,
+  `model_conformance`, `model_intelligence` and ten modules only they used; `core.py`
+  19.7k → 7.0k lines (253 unreachable methods, call-graph sweep + pyflakes).
+  `ECHOSPEAK_LEAN_RUNTIME` no longer switches anything.
+- **Caller roles** for channels: owner / trusted / public resolved from the source and
+  Discord identity. Guests get look-up tools only (no files, terminal, memory, chat search
+  or handoffs); Telegram is owner only with an allow-list. `tests/test_lean_caller_role.py`.
+- **Honest step limit** (#5): `stop_reason="max_steps"`, a "So far I: …" note and a
+  Continue button. Nudge budget removed.
+- **Summaries instead of trimming** (#3): rolling chat summary (`lean/summaries/`, 12 recent
+  turns kept, batches of 4, ≤250 words) in the system prompt; in-turn compaction of older
+  steps into a progress note (`context_compacted` event).
+- **Group chats**: handoff budget (6/message), no hand-back, user message in the brief,
+  sticky routing, parallel fan-out on a shared endpoint + lead summary, one message per
+  agent turn in order (A → B → A), "[Name]:" prefix stripped.
+- **Discussion mode** (#9): rooms gain `mode` (reply | discussion) and `max_messages`
+  (2–12, UI 4/6/8); agents take turns, `DONE` ends once ≥2 spoke, lead writes the conclusion.
+- Jarvis/Glados renames with an `agents.json` v2 migration (ids unchanged).
+
+### Data
+- **SQLite state store** (#2): `phase3/state.db` (records, events, FTS5 `message_search`).
+  Same `StateStore` interface; writes only changed rows; one-time JSON import (files kept).
+  `GET /lean/search`, sidebar "Search chats", `chat_search` agent tool.
+- **One projects folder** (#8): `DATA_DIR/projects` in every mode; legacy projects copied
+  once into the default dev data dir.
+
+### Terminal
+- **Sandbox by default** (#10): `terminal_execution_mode` auto (Docker when running, else
+  host), `terminal_docker_network` ask/on/off (container network attached per command).
+  Approval only to leave the sandbox, go online, or delete project files. One-time
+  settings migration (`.settings-migrated-v10` marker).
+
+### Voice
+- **Guided setup + wake word** (#7): Settings › Voice downloads faster-whisper
+  tiny/base/small into `DATA_DIR/voice/models` and activates it. "Hey Echo" via
+  `WakeListener` (browser energy VAD) → `POST /media-runtime/voice/wake` (local
+  transcription). New dependency: `faster-whisper==1.1.1`.
+
+### Desktop
+- **In-app updates**: `tauri-plugin-updater` 2.12.0; `check_for_update` / `install_update`
+  commands (service stopped before the installer runs); Settings › About button;
+  `scripts/setup-updater-key.ps1` and `scripts/release-windows.ps1` (signed build,
+  `latest.json`, optional `gh release create`).
+- Boot: one-folder sidecar (no console, no per-launch extraction), `--self-check` in the
+  build, instant splash, real progress bar, spinning Echo face, readiness timeout 15 s, no
+  raw "signal is aborted" errors. Inline splash CSS moved out of `index.html` (CSP fix).
+- Version 10.0.0 everywhere; `apps/backend/version.py` is the backend constant (`/health`).
+
+### Web
+- `index.tsx` split (#6): 12.5k → 9.0k lines, helpers/types/CSS/chat components in `src/app/`.
+- Live status pill, portal mention menu, one-row composer toolbar, agent faces, resizable
+  sidebar sections, new Settings, polish pass (motion, focus, contrast, radii).
+- Cleanup: ~1,000 lines of unused components, 410 lines of commented-out voice code,
+  25 stale compiled twins, gsap.
+
+### Tooling
+- `apps/backend/scripts/eval_gemma.py`: 20 real prompts against a live backend + model
+  (#4), reports in `data/evals/`.
+- Website refresh (animated Echo, accurate copy, Lighthouse 98–100) and
+  `docs/ARCHITECTURE.md`.
+
+### Known issues
+- 78 backend tests still call `EchoSpeakAgent` internals removed with the legacy
+  pipeline and fail; they are kept for review, not deleted. 36 other failures predate 10.0.
+- The first sandboxed command builds the Docker image (~1 GB, a few minutes).
+- In-app updates need `setup-updater-key.ps1` once before the first signed release; builds
+  without the key run fine but can't update themselves.
+
+---
+
 ## Architecture note — unified coordination (docs)
 
 **Principle:** optimize for the next subsystem being easy to build, not for the
