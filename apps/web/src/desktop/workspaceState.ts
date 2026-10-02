@@ -6,11 +6,6 @@ export type DesktopExecutionProfile = "chat" | "work" | "code";
 export const desktopWorkspaceForView = (view: DesktopSidebarView): DesktopWorkspaceSurface =>
   view === "avatar" ? "visualizer" : view;
 
-export const desktopWorkspaceLabel = (surface: DesktopWorkspaceSurface): string => ({
-  chat: "Conversation",
-  visualizer: "Echo Visualizer",
-})[surface];
-
 export const desktopVisualizerPanelLabel = (panel: DesktopVisualizerPanel): string => ({
   ring: "Echo Visualizer",
   work: "Work",

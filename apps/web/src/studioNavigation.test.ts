@@ -17,22 +17,26 @@ describe("Studio keyboard navigation", () => {
     expect(nextStudioTabIndex(0, 0, "ArrowRight")).toEqual(null);
   });
 
-  it("lists every Studio section including trailing Automation tabs", () => {
+  it("lists every Studio section in the grouped order", () => {
     expect(STUDIO_SECTION_ORDER).toEqual([
-      "overview",
+      "settings",
+      "search_settings",
+      "services",
+      "avatar_editor",
+      "connections",
+      "capabilities",
       "skills",
+      "mcp_settings",
+      "approvals",
       "memory",
       "docs",
-      "settings",
-      "capabilities",
       "soul",
-      "avatar_editor",
-      "approvals",
-      "executions",
+      "overview",
       "projects",
+      "executions",
       "automations",
-      "connections",
-      "services",
+      "system_services",
+      "advanced_settings",
     ]);
   });
 });
