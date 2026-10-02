@@ -114,5 +114,16 @@
     "resources": {
       "backend-dist/": "backend/"
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "",
+      "endpoints": [
+        "https://github.com/Ty0x7/EchoSpeak/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

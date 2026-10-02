@@ -1,4 +1,5 @@
 mod backend;
+mod updates;
 
 use backend::{DesktopRuntime, DesktopState};
 use tauri::{Manager, State, Window};
@@ -172,6 +173,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(log_builder.build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             desktop_runtime,
             restart_desktop_backend,
@@ -182,7 +184,9 @@ pub fn run() {
             open_settings_window,
             open_companion_window,
             set_companion_always_on_top,
-            desktop_window_label
+            desktop_window_label,
+            updates::check_for_update,
+            updates::install_update
         ])
         .setup(|app| {
             // Host-controlled override supports disposable development and

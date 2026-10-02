@@ -1,6 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AgentAvatar } from "../lean/LeanMessage";
 import type { LeanPersona } from "../lean/types";
+import {
+  checkForDesktopUpdate,
+  installDesktopUpdate,
+  isDesktopRuntime,
+  onDesktopUpdateProgress,
+  type DesktopUpdateInfo,
+  type DesktopUpdateProgress,
+} from "../desktop/bridge";
 import { ChoiceCards, Group, ListEditor, Row, SecretField, Segmented, Select, Status, TextField, Toggle } from "./controls";
 import { useSettings, type SettingsMap } from "./useSettings";
 
@@ -1007,6 +1015,79 @@ function ChannelsSection({ s, save }: { s: SettingsMap; save: Save }) {
 }
 
 // ── About ───────────────────────────────────────────────────────────────
+function UpdateRow() {
+  const [info, setInfo] = useState<DesktopUpdateInfo | null>(null);
+  const [busy, setBusy] = useState<"" | "checking" | "installing">("");
+  const [progress, setProgress] = useState<DesktopUpdateProgress | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let stop: (() => void) | undefined;
+    void onDesktopUpdateProgress(setProgress).then((unlisten) => (stop = unlisten));
+    return () => stop?.();
+  }, []);
+
+  const check = async () => {
+    setBusy("checking");
+    setError("");
+    try {
+      setInfo(await checkForDesktopUpdate());
+    } catch (err) {
+      setError(String((err as Error)?.message || err));
+    } finally {
+      setBusy("");
+    }
+  };
+  useEffect(() => {
+    void check();
+  }, []);
+
+  const install = async () => {
+    setBusy("installing");
+    setError("");
+    try {
+      await installDesktopUpdate(); // EchoSpeak closes and restarts on success.
+    } catch (err) {
+      setError(String((err as Error)?.message || err));
+      setBusy("");
+    }
+  };
+
+  let help = "Checking…";
+  let tone: "ok" | "warn" | "err" | "idle" = "idle";
+  if (error) {
+    help = error;
+    tone = "err";
+  } else if (busy === "installing") {
+    const pct = progress?.total ? Math.round((progress.downloaded / progress.total) * 100) : null;
+    help = progress?.phase === "installing" ? "Installing… EchoSpeak will restart." : `Downloading${pct === null ? "…" : ` · ${pct}%`}`;
+    tone = "warn";
+  } else if (info && !info.configured) {
+    help = "This build was made without update signing, so it can't update itself.";
+  } else if (info?.available) {
+    const headline = info.notes.trim().split(/\r?\n/)[0] || "";
+    help = `Version ${info.version} is ready to install.${headline ? ` ${headline}` : ""}`;
+    tone = "warn";
+  } else if (info) {
+    help = "You have the latest version.";
+    tone = "ok";
+  }
+
+  return (
+    <Row label={<Status tone={tone}>Updates</Status>} help={help}>
+      {info?.available ? (
+        <button type="button" className="es-btn es-btn-sm es-btn-primary" disabled={Boolean(busy)} onClick={() => void install()}>
+          {busy === "installing" ? "Updating…" : `Update to ${info.version}`}
+        </button>
+      ) : (
+        <button type="button" className="es-btn es-btn-sm" disabled={Boolean(busy) || info?.configured === false} onClick={() => void check()}>
+          {busy === "checking" ? "Checking…" : "Check for updates"}
+        </button>
+      )}
+    </Row>
+  );
+}
+
 function AboutSection({ apiBase, onOpenClassic, reload }: { apiBase: string; onOpenClassic(tab: string): void; reload(): Promise<void> }) {
   const [status, setStatus] = useState<any>(null);
   useEffect(() => {
@@ -1018,8 +1099,9 @@ function AboutSection({ apiBase, onOpenClassic, reload }: { apiBase: string; onO
         <Row label="EchoSpeak" help="Local-first agents. Your data stays on this PC.">
           <span className="st-muted is-mono">{String(import.meta.env.VITE_APP_VERSION || "10.0.0")}</span>
         </Row>
+        {isDesktopRuntime() ? <UpdateRow /> : null}
         <Row label="Agent runtime" help={status ? `Lean loop · up to ${status.max_iterations} steps · ${Math.round((status.context_tokens || 0) / 1000)}k context` : "…"}>
-          <Status tone={status?.enabled ? "ok" : "warn"}>{status?.enabled ? "Active" : "Legacy"}</Status>
+          <Status tone={status ? "ok" : "idle"}>{status ? "Active" : "…"}</Status>
         </Row>
         <Row label="Reload settings" help="Pick up changes made outside this window.">
           <button type="button" className="es-btn es-btn-sm" onClick={() => void reload()}>Reload</button>

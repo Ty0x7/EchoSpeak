@@ -22,6 +22,8 @@ tauri = { version = "=2.11.5", features = [] }
 tauri-plugin-log = "=2.8.0"
 tauri-plugin-shell = "=2.3.5"
 tauri-plugin-single-instance = "=2.4.2"
+# In-app updates: checks GitHub Releases for a signed installer and installs it.
+tauri-plugin-updater = "=2.12.0"
 tauri-plugin-window-state = "=2.4.1"
 tokio = { version = "1.46", features = ["time"] }
 uuid = { version = "1.18", features = ["v4"] }

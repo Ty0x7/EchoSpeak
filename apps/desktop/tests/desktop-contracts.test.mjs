@@ -137,3 +137,22 @@ test("index.html has no inline style or script blocks (they would break the desk
   assert.doesNotMatch(html, /\sstyle="/i);
   assert.match(config.app.security.csp, /style-src[^;]*'unsafe-inline'/);
 });
+
+test("in-app updates verify signed GitHub releases and stop the service before installing", async () => {
+  const updates = await readFile(new URL("../src-tauri/src/updates.rs", import.meta.url), "utf8");
+  const permissions = await readFile(new URL("../src-tauri/permissions/desktop.toml", import.meta.url), "utf8");
+  const updater = config.plugins.updater;
+  assert.equal(typeof updater.pubkey, "string");
+  assert.deepEqual(updater.endpoints, ["https://github.com/Ty0x7/EchoSpeak/releases/latest/download/latest.json"]);
+  assert.equal(updater.windows.installMode, "passive");
+  // Ordinary builds must not need the private signing key; only the release script turns this on.
+  assert.notEqual(config.bundle.createUpdaterArtifacts, true);
+  assert.ok(cargo.includes('tauri-plugin-updater = "=2.12.0"'));
+  assert.ok(host.includes("tauri_plugin_updater::Builder::new().build()"));
+  assert.ok(host.includes("updates::check_for_update") && host.includes("updates::install_update"));
+  assert.ok(permissions.includes('"check_for_update"') && permissions.includes('"install_update"'));
+  // The installer replaces the Python service's files, so it must be stopped first.
+  assert.ok(updates.indexOf("shutdown_backend") < updates.indexOf("update.install("));
+  // No updater: permissions for the renderer; it goes through the two commands above.
+  assert.ok(!capability.permissions.some((permission) => String(permission).startsWith("updater:")));
+});

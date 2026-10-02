@@ -1,5 +1,7 @@
 param(
-    [string]$PythonExecutable = "python"
+    [string]$PythonExecutable = "python",
+    # Extra Tauri config merged at build time (release-windows.ps1 uses it to sign updates).
+    [string]$TauriConfigPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,7 +23,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $DesktopRoot "node_modules"))) {
     if ($LASTEXITCODE -ne 0) { throw "Desktop dependency install failed." }
 }
 
-npm --prefix $DesktopRoot run tauri build
+if ($TauriConfigPath) {
+    npm --prefix $DesktopRoot run tauri -- build --config $TauriConfigPath
+} else {
+    npm --prefix $DesktopRoot run tauri build
+}
 if ($LASTEXITCODE -ne 0) {
     throw "Tauri Windows build failed with exit code $LASTEXITCODE."
 }
