@@ -26,6 +26,8 @@ baseline. User-facing notes: `docs/releases/v10.0.0.md`. Architecture:
 - **Discussion mode** (#9): rooms gain `mode` (reply | discussion) and `max_messages`
   (2–12, UI 4/6/8); agents take turns, `DONE` ends once ≥2 spoke, lead writes the conclusion.
 - Jarvis/Glados renames with an `agents.json` v2 migration (ids unchanged).
+- Group routing: plain-language "each of you", "all of you", "everyone", "you all" address
+  every member, like `@all` (explicit @names still win).
 
 ### Data
 - **SQLite state store** (#2): `phase3/state.db` (records, events, FTS5 `message_search`).
@@ -65,7 +67,9 @@ baseline. User-facing notes: `docs/releases/v10.0.0.md`. Architecture:
 
 ### Tooling
 - `apps/backend/scripts/eval_gemma.py`: 20 real prompts against a live backend + model
-  (#4), reports in `data/evals/`.
+  (#4), reports in `data/evals/`. First runs on Gemma 4 E4B: 20/20 (cases 1–17 in one
+  run, 18–20 after the routing fix below). It caught two bugs: `chat_search` was in no
+  toolset, and "each of you" in a group went to one agent.
 - Website refresh (animated Echo, accurate copy, Lighthouse 98–100) and
   `docs/ARCHITECTURE.md`.
 

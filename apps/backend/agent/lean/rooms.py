@@ -174,12 +174,17 @@ def get_room_store() -> RoomStore:
 
 
 _MENTION = re.compile(r"(?<![\w@])@([A-Za-z][\w-]{0,39})")
+# Plain-language ways of addressing the whole group, treated like @all.
+_EVERYONE = re.compile(
+    r"\b(each of you|all of you|every one of you|you all|y'?all|everyone|everybody|both of you|all three of you)\b",
+    re.IGNORECASE,
+)
 
 
 def mentioned_agents(message: str, candidates: list[Any]) -> list[Any]:
     names = {m.group(1).casefold() for m in _MENTION.finditer(message or "")}
     if not names:
-        return []
+        return list(candidates) if len(candidates) > 1 and _EVERYONE.search(message or "") else []
     if names & {"all", "everyone", "team"}:
         return list(candidates)
     return [agent for agent in candidates if agent.name.casefold() in names or agent.id.casefold() in names]

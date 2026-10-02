@@ -267,3 +267,14 @@ def test_room_mode_and_cap_are_validated(tmp_path, monkeypatch):
     monkeypatch.setattr(rooms, "_clean_cap", rooms._clean_cap)
     assert rooms._clean_mode("Discussion") == "discussion" and rooms._clean_mode("chaos") == "reply"
     assert rooms._clean_cap(50) == 12 and rooms._clean_cap(1) == 2 and rooms._clean_cap("x") == 6
+
+
+def test_plain_language_everyone_addresses_the_whole_group():
+    from agent.lean.rooms import mentioned_agents
+
+    team = [type("P", (), {"name": n, "id": n.lower()})() for n in ("Echo", "Jarvis", "Glados")]
+    for message in ("Each of you: one tip for focus.", "What do you all think?", "Everyone, quick vote", "both of you weigh in"):
+        assert [p.name for p in mentioned_agents(message, team)] == ["Echo", "Jarvis", "Glados"], message
+    assert mentioned_agents("What do you think?", team) == []
+    assert [p.name for p in mentioned_agents("@Jarvis, and each of you", team)] == ["Jarvis"]  # explicit names win
+    assert mentioned_agents("each of you", team[:1]) == []  # one-to-one chats are unaffected
