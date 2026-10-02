@@ -582,6 +582,29 @@ class LeanSession:
                 parallel_safe=True,
             ))
 
+        def chat_search(args: dict[str, Any]) -> str:
+            from agent.state import get_state_store
+
+            hits = get_state_store().search_messages(str(args.get("query") or ""), limit=8)
+            hits = [hit for hit in hits if hit["turn_id"] != self.execution_id]
+            if not hits:
+                return "No past messages match."
+            lines = []
+            for hit in hits:
+                when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
+                who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
+                here = " (this chat)" if hit["session_id"] == self.session_id else ""
+                lines.append(f"- {when}{here} {who}: {hit['snippet']}")
+            return "\n".join(lines)
+
+        tools.append(NativeTool(
+            name="chat_search",
+            description="Search the words of every past chat with the user, including other chats. Use it when the user refers to something discussed before.",
+            parameters={"type": "object", "properties": {"query": {"type": "string", "description": "A few keywords."}}, "required": ["query"]},
+            func=chat_search,
+            parallel_safe=True,
+        ))
+
         if allow_handoff and depth < MAX_DELEGATION_DEPTH:
             candidates = self._members() if self.room else self.personas.list()
             # Never offer a hand-back to whoever handed this work over.

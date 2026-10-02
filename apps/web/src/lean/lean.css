@@ -1019,3 +1019,80 @@
 .es-cap select { height: 28px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--es-line-2); background: #121213; color: var(--es-text); font: 500 12px var(--es-font); }
 .es-room-mode { margin-left: 8px; padding: 1px 7px; border: 1px solid var(--es-line-2); border-radius: 999px; color: var(--es-dim); font-size: 10px; }
 @media (max-width: 560px) { .es-mode-pick { grid-template-columns: 1fr; } }
+
+/* ── Sidebar: search past chats ──────────────────────────────────────── */
+.es-chat-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--es-line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--es-faint);
+  transition: border-color var(--es-dur) var(--es-ease), background var(--es-dur) var(--es-ease);
+}
+.es-chat-search:focus-within { border-color: var(--es-line-3); background: var(--es-glass); color: var(--es-dim); }
+.es-chat-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--es-text);
+  font: 500 12px/1 var(--es-font);
+}
+.es-chat-search input::placeholder { color: var(--es-faint); }
+.es-chat-search input::-webkit-search-cancel-button { filter: invert(1) opacity(0.5); }
+.es-split[hidden] { display: none; }
+.es-search-results {
+  flex: 1 1 0;
+  min-height: 96px;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 6px 6px 6px 1px;
+  border-top: 1px solid var(--es-line);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+.es-search-hit {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--es-font);
+  transition: background var(--es-dur) var(--es-ease);
+}
+.es-search-hit:hover, .es-search-hit.is-active { background: var(--es-glass); }
+.es-search-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--es-text);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.es-search-title small { flex: 0 0 auto; color: var(--es-faint); font-size: 10px; font-weight: 500; }
+.es-search-snippet {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--es-dim);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.es-search-snippet b { color: var(--es-faint); font-weight: 600; }
+.es-search-snippet mark { background: rgba(255, 255, 255, 0.14); color: var(--es-text); border-radius: 3px; padding: 0 2px; }

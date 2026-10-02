@@ -1,3 +1,4 @@
+import type { ChatSearchHit } from "../components/ProjectSidebar";
 import type { LeanPersona, LeanRoom } from "./types";
 
 async function json<T>(resp: Response): Promise<T> {
@@ -15,6 +16,10 @@ async function json<T>(resp: Response): Promise<T> {
 }
 
 export const leanApi = (apiBase: string) => ({
+  async searchChats(query: string): Promise<ChatSearchHit[]> {
+    const data = await json<{ items: ChatSearchHit[] }>(await fetch(`${apiBase}/lean/search?q=${encodeURIComponent(query)}&limit=20`));
+    return data.items || [];
+  },
   async agents(): Promise<LeanPersona[]> {
     const data = await json<{ items: LeanPersona[] }>(await fetch(`${apiBase}/lean/agents`));
     return data.items || [];

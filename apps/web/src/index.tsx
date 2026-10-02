@@ -3769,6 +3769,7 @@ export const Dashboard: React.FC<{
   // ── Lean runtime: live turn, agent roster, rooms ──
   const lean = useLeanLive();
   const leanClient = useMemo(() => leanApi(apiBase), [apiBase]);
+  const searchChats = useCallback((query: string) => leanClient.searchChats(query), [leanClient]);
   const [agents, setAgents] = useState<LeanPersona[]>([]);
   const [rooms, setRooms] = useState<LeanRoom[]>([]);
   const [toolsetIds, setToolsetIds] = useState<string[]>([]);
@@ -7992,6 +7993,7 @@ export const Dashboard: React.FC<{
           onNewSession={createNewThread}
           onAddFolder={() => void attachFolder()}
           onSelectSession={switchThread}
+          onSearchChats={searchChats}
           onRenameSession={(id, title) => void renameThread(id, title)}
           onDeleteSession={(id) => void deleteThread(id)}
           onDeleteProject={async (id) => {

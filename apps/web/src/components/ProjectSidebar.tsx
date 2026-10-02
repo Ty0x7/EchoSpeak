@@ -3,6 +3,7 @@ import { loadSectionLayout, saveSectionLayout, settleShare, shareForKey, type Se
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any> };
 type Session = { id: string; name: string; at: number; projectId?: string };
+export type ChatSearchHit = { session_id: string; title: string; snippet: string; role: string; agent: string; created_at: number; matches: number };
 
 type SidebarProps = {
   desktop?: boolean;
@@ -25,7 +26,21 @@ type SidebarProps = {
   settingsOpen?: boolean;
   /** Agents and group chats (lean runtime). */
   roster?: React.ReactNode;
+  /** Full-text search over past chats. */
+  onSearchChats?(query: string): Promise<ChatSearchHit[]>;
 };
+
+/** Snippets mark matches as [word]; render those as <mark>. */
+function Snippet({ text }: { text: string }) {
+  const parts = text.split(/(\[[^\]]*\])/g);
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.startsWith("[") && part.endsWith("]") ? <mark key={index}>{part.slice(1, -1)}</mark> : <React.Fragment key={index}>{part}</React.Fragment>,
+      )}
+    </>
+  );
+}
 
 const surface = "#0a0a0a";
 const border = "rgba(255,255,255,.10)";
@@ -152,6 +167,26 @@ export function ProjectSidebar(props: SidebarProps) {
   const [dragging, setDragging] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => saveSectionLayout(layout), [layout]);
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<ChatSearchHit[] | null>(null);
+  const searching = query.trim().length >= 2;
+  const onSearchChats = props.onSearchChats;
+  useEffect(() => {
+    if (!searching || !onSearchChats) {
+      setHits(null);
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      onSearchChats(query.trim())
+        .then((items) => live && setHits(items))
+        .catch(() => live && setHits([]));
+    }, 180);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [query, searching, onSearchChats]);
   const iconOnly = props.collapsed;
   const projects = useMemo(() => props.projects.filter((project) => !project.archived), [props.projects]);
   const sessions = props.sessions;
@@ -589,6 +624,24 @@ export function ProjectSidebar(props: SidebarProps) {
               </span>
               <span style={titleEllipsis}>New chat</span>
             </button>
+            {props.onSearchChats ? (
+              <label className="es-chat-search">
+                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-3.5-3.5" />
+                </svg>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setQuery("");
+                  }}
+                  placeholder="Search chats"
+                  aria-label="Search chats"
+                />
+              </label>
+            ) : null}
             {props.roster ? (
               <>
                 <div className="echo-rail-divider" />
@@ -597,7 +650,37 @@ export function ProjectSidebar(props: SidebarProps) {
             ) : null}
           </div>
 
-          <div className="es-split" ref={splitRef} data-dragging={dragging ? "true" : "false"}>
+          {searching ? (
+            <section className="es-search-results" aria-label="Search results">
+              {hits === null ? (
+                <div role="status" className="es-sec-empty">Searching…</div>
+              ) : hits.length ? (
+                hits.map((hit) => (
+                  <button
+                    key={hit.session_id}
+                    type="button"
+                    className={`es-search-hit${props.activeSessionId === hit.session_id ? " is-active" : ""}`}
+                    onClick={() => {
+                      props.onView("chat");
+                      props.onSelectSession(hit.session_id);
+                      setQuery("");
+                    }}
+                  >
+                    <span className="es-search-title">
+                      {hit.title}
+                      {hit.matches > 1 ? <small>{hit.matches} matches</small> : null}
+                    </span>
+                    <span className="es-search-snippet">
+                      <b>{hit.role === "user" ? "You" : hit.agent || "Echo"}:</b> <Snippet text={hit.snippet} />
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="es-sec-empty">No chats mention “{query.trim()}”.</div>
+              )}
+            </section>
+          ) : null}
+          <div className="es-split" ref={splitRef} data-dragging={dragging ? "true" : "false"} hidden={searching}>
             <section className="es-sec" aria-label="Chats" data-open={layout.chatsOpen ? "true" : "false"} style={sectionFlex(layout.chatsOpen, layout.chatsShare)}>
               <div className="es-sec-head">
                 <button

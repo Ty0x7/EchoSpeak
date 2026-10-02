@@ -336,3 +336,31 @@ def delete_room(room_id: str) -> dict[str, Any]:
     if not get_room_store().delete(room_id):
         raise HTTPException(status_code=404, detail="Room not found")
     return {"deleted": True, "id": room_id}
+
+
+@router.get("/search")
+def search_chats(q: str = "", limit: int = 20) -> dict[str, Any]:
+    """Search every past chat. One row per chat, best match first."""
+    from agent.state import get_state_store
+    from agent.threads import get_thread_manager
+
+    hits = get_state_store().search_messages(q, limit=max(1, min(limit, 50)) * 4)
+    manager = get_thread_manager()
+    chats: dict[str, dict[str, Any]] = {}
+    for hit in hits:
+        chat = chats.get(hit["session_id"])
+        if chat is None:
+            thread = manager.get_thread(hit["session_id"])
+            if thread is None:
+                continue  # deleted chat
+            chat = chats[hit["session_id"]] = {
+                "session_id": hit["session_id"],
+                "title": thread.title or "Untitled chat",
+                "snippet": hit["snippet"],
+                "role": hit["role"],
+                "agent": hit["agent"],
+                "created_at": hit["created_at"],
+                "matches": 0,
+            }
+        chat["matches"] += 1
+    return {"query": q, "items": list(chats.values())[:limit]}

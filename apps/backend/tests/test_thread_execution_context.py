@@ -283,7 +283,12 @@ def test_state_store_round_trips_unicode_without_mojibake(tmp_path, monkeypatch)
 
     assert reloaded.objective == text
     assert reloaded.current_subject == text
-    assert "â" not in (phase_dir / "thread_state.json").read_text(encoding="utf-8")
+    import sqlite3
+
+    stored = sqlite3.connect(str(phase_dir / "state.db")).execute(
+        "SELECT body FROM records WHERE kind = 'thread_state' AND id = 'unicode'"
+    ).fetchone()[0]
+    assert "â" not in stored and "café" in stored
 
 
 def test_internal_policy_block_is_distinct_from_windows_elevation_error():
