@@ -256,6 +256,8 @@ class TelegramBotManager:
                     text,
                     source="telegram",
                     thread_id=f"telegram_{username}",
+                    # Only allow-listed users count as the owner; an open bot talks to guests.
+                    caller_role="owner" if self._allowed_users else "public",
                 )
             except Exception as exc:
                 logger.error(f"Telegram agent error: {exc}")

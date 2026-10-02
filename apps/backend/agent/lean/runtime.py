@@ -29,6 +29,16 @@ MAX_DELEGATION_DEPTH = 2
 MAX_HANDOFFS_PER_MESSAGE = 6
 # Sources with a live UI that can show an approval card.
 INTERACTIVE_SOURCES = {"web", "desktop", "voice", "chat", "api"}
+
+# Who is talking. Only the owner gets the full toolset, memory, and past chats;
+# people reaching Echo through Discord, Telegram, Twitch, or Twitter as guests
+# get look-up tools only, so nothing on this PC is exposed to them.
+CALLER_ROLES = ("owner", "trusted", "public")
+GUEST_TOOLS = {
+    "public": ["get_system_time", "calculate", "web_search", "safe_web_fetch", "weather_live", "sports_live"],
+    "trusted": ["get_system_time", "calculate", "web_search", "safe_web_fetch", "weather_live", "sports_live",
+                "youtube_transcript"],
+}
 _HISTORY_MESSAGES = 30
 
 
@@ -58,7 +68,9 @@ class LeanSession:
         room: Optional[Room] = None,
         thinking_enabled: bool = True,
         reasoning_effort: str = "medium",
+        caller_role: str = "owner",
     ) -> None:
+        self.caller_role = caller_role if caller_role in CALLER_ROLES else "public"
         self.thinking_enabled = thinking_enabled
         self.reasoning_effort = reasoning_effort
         self.agent = agent
@@ -449,18 +461,22 @@ class LeanSession:
         meta = dict(meta or {})
         if delegated_by is not None:
             meta["delegated_by"] = {"id": delegated_by.id, "name": delegated_by.name}
-        can_hand_off = allow_handoff and depth < MAX_DELEGATION_DEPTH
+        guest = self.caller_role != "owner"
+        can_hand_off = allow_handoff and depth < MAX_DELEGATION_DEPTH and not guest
         teammates = self._members() if self.room else [p for p in self.personas.list() if p.id != persona.id]
-        terminal = Terminal(self.project_root)
-        toolbox = Toolbox(
-            toolsets=persona.toolsets or None,
-            extra_tools=self._native_tools(persona, depth, delegated_by=delegated_by, allow_handoff=can_hand_off)
-            + coding_tools()
-            + terminal.tools(),
-            session_id=self.session_id,
-            project_root=self.project_root,
-        )
-        memories = self._recall(message)
+        if guest:
+            toolbox = Toolbox(toolsets=GUEST_TOOLS[self.caller_role], session_id=self.session_id)
+        else:
+            terminal = Terminal(self.project_root)
+            toolbox = Toolbox(
+                toolsets=persona.toolsets or None,
+                extra_tools=self._native_tools(persona, depth, delegated_by=delegated_by, allow_handoff=can_hand_off)
+                + coding_tools()
+                + terminal.tools(),
+                session_id=self.session_id,
+                project_root=self.project_root,
+            )
+        memories = [] if guest else self._recall(message)
         prompt = build_system_prompt(
             persona=persona,
             soul_text=self._soul() if persona.id == "echo" else "",
@@ -761,6 +777,8 @@ class LeanSession:
         memory = getattr(self.agent, "memory", None)
         if memory is None or not answer or self.source in {"routine", "heartbeat", "proactive"}:
             return
+        if self.caller_role != "owner":
+            return
 
         def work() -> None:
             try:
@@ -794,6 +812,7 @@ def run_lean_query(
     persona_id: str = "",
     thinking_enabled: bool = True,
     reasoning_effort: str = "medium",
+    caller_role: str = "owner",
 ) -> dict[str, Any]:
     room = get_room_store().by_thread(session_id)
     session = LeanSession(
@@ -806,11 +825,13 @@ def run_lean_query(
         room=room,
         thinking_enabled=thinking_enabled,
         reasoning_effort=reasoning_effort,
+        caller_role=caller_role,
     )
     return session.run(message, persona_id=persona_id)
 
 
-def run_lean_text(agent: Any, *, message: str, session_id: str, source: str, request_id: str = "") -> tuple[str, bool]:
+def run_lean_text(agent: Any, *, message: str, session_id: str, source: str, request_id: str = "",
+                  caller_role: str = "owner") -> tuple[str, bool]:
     """Non-streaming entry for channels (Discord, Telegram, routines, /query)."""
     result = run_lean_query(
         agent,
@@ -820,5 +841,6 @@ def run_lean_text(agent: Any, *, message: str, session_id: str, source: str, req
         emit=lambda _event: None,
         cancel=threading.Event(),
         source=source,
+        caller_role=caller_role,
     )
     return str(result.get("response") or ""), bool(result.get("success"))

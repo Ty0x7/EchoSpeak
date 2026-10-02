@@ -23,14 +23,8 @@ def _as_bool(value: Any) -> bool:
 
 
 def lean_runtime_enabled() -> bool:
-    """The lean loop is the default. Set ECHOSPEAK_LEAN_RUNTIME=0 to fall back.
-
-    The legacy regression suite (ECHOSPEAK_TESTING=1) keeps exercising the
-    legacy runtime unless a test opts in explicitly.
-    """
-    if os.getenv("ECHOSPEAK_LEAN_RUNTIME") is None and _as_bool(os.getenv("ECHOSPEAK_TESTING", "0")):
-        return False
-    return _as_bool(_setting("echospeak_lean_runtime", True))
+    """The lean loop is the only runtime since 10.0 (the legacy pipeline was removed)."""
+    return True
 
 
 def max_iterations() -> int:

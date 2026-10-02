@@ -909,6 +909,8 @@ class Config:
             try:
                 self.mcp_servers = json.loads(mcp_servers_env)
             except Exception as e:
+                from loguru import logger
+
                 logger.warning(f"Failed to parse MCP_SERVERS env var: {e}")
                 self.mcp_servers = {}
         else:

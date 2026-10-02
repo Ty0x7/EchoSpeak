@@ -31,7 +31,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from fastapi import FastAPI, HTTPException, Query, Response, Request, UploadFile, File, WebSocket, WebSocketDisconnect, Header, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
@@ -1863,182 +1863,17 @@ def _start_agent_thread(
     voice_turn_id: str = "",
     agent_id: str = "",
 ) -> None:
-    from agent.lean.settings import lean_runtime_enabled
-
-    if lean_runtime_enabled():
-        threading.Thread(
-            target=_run_lean_stream,
-            kwargs=dict(
-                agent=agent, message=message, thread_id=thread_id, request_id=request_id,
-                q=q, cancel_event=cancel_event, source=source,
-                voice_turn_id=voice_turn_id, agent_id=agent_id,
-                thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort,
-            ),
-            name="lean-turn",
-            daemon=True,
-        ).start()
-        return
-
-    def run_agent():
-        handler: Optional[_StreamingHandler] = None
-        try:
-            handler = _StreamingHandler(q, request_id)
-            handler._agent_ref = agent  # social-aware last-resort preambles
-            # Decision = code (on tool_start). Wording = free model generation when needed.
-            try:
-                # Fresh multi-beat state for this turn
-                agent._turn_partial_beats = []
-                agent._active_user_query = message
-                handler.set_on_partial(lambda text: agent.record_turn_partial_beat(text))
-            except Exception:
-                pass
-            # Scope was persisted before this worker started; process_query restores
-            # it once under the agent request lock.
-            thread_state = get_state_store().get_thread_state(thread_id).model_dump()
-            memory_before = int(agent.memory.count_items(thread_id=thread_id) or 0)
-            response, success = agent.process_query(
-                message,
-                include_memory=include_memory,
-                callbacks=[handler],
-                thread_id=thread_id,
-                source=source,
-                cancel_event=cancel_event,
-                request_id=request_id,
-                thinking_enabled=thinking_enabled,
-                reasoning_effort=reasoning_effort,
-            )
-            doc_sources = agent.get_last_doc_sources() if include_memory else []
-            state_store = get_state_store()
-            latest_state = state_store.get_thread_state(thread_id).model_dump()
-            worker_execution_id = str(
-                getattr(agent, "completed_execution_id_for_current_worker", lambda: "")() or ""
-            )
-            if not worker_execution_id and not voice_turn_id:
-                worker_execution_id = str(latest_state.get("last_execution_id") or "")
-            if voice_turn_id and not worker_execution_id:
-                raise RuntimeError("Voice query completed without an exact worker Execution identity")
-            execution = state_store.get_execution(worker_execution_id) if worker_execution_id else None
-            if voice_turn_id and execution is None:
-                raise RuntimeError("Voice query completed without its durable Execution")
-            if voice_turn_id and execution is not None:
-                from agent.voice_transport import bind_voice_turn_submission
-
-                bind_voice_turn_submission(
-                    voice_turn_id,
-                    session_id=str(thread_id or ""),
-                    request_id=request_id,
-                    execution_id=execution.id,
-                    task_run_id=str(execution.task_run_id or ""),
-                    query_completed=True,
-                )
-            turn_projection = state_store.turn_projection(execution.id) if execution is not None else None
-            execution_projection = dict((turn_projection or {}).get("execution_projection") or {})
-            response_render = None
-            try:
-                exec_meta = execution.metadata if execution is not None else {}
-                if isinstance(exec_meta, dict):
-                    response_render = exec_meta.get("response_render")
-            except Exception:
-                response_render = None
-            spoken_text = ""
-            try:
-                spoken_text = str(agent.get_last_tts_text() or "")
-            except Exception:
-                spoken_text = ""
-            # Prefer the last generation's visible text when partials already covered the preamble.
-            final_response = str(response or "")
-            if handler.partial_replies:
-                # Strip already-spoken beats from final so we don't re-say "I'm great" after weather.
-                trimmed = final_response
-                for part in handler.partial_replies:
-                    p = (part or "").strip()
-                    if not p:
-                        continue
-                    if trimmed.startswith(p):
-                        trimmed = trimmed[len(p):].lstrip(" \n\t-–—")
-                    elif p in trimmed:
-                        # Soft fallback: drop first occurrence only
-                        trimmed = trimmed.replace(p, "", 1).strip()
-                # If stripping wiped everything, keep last non-empty partial out and use leftover live gen
-                leftover_gen = (handler._visible_gen or "").strip()
-                if trimmed.strip():
-                    final_response = trimmed.strip()
-                elif leftover_gen:
-                    final_response = leftover_gen
-                # else keep original response (better than empty)
-            memory_after = int(agent.memory.count_items(thread_id=thread_id) or 0)
-            if memory_after > memory_before or bool(execution_projection.get("memory_records")):
-                handler._put({"type": "memory_saved", "memory_count": memory_after, "at": time.time()})
-            handler._put(
-                {
-                    "type": "final",
-                    "response": final_response,
-                    "success": success,
-                    "memory_count": memory_after,
-                    "doc_sources": doc_sources,
-                    "research": handler.research_runs,
-                    "response_render": response_render,
-                    "spoken_text": spoken_text if not handler.partial_replies else (final_response or spoken_text),
-                    "partial_replies": list(handler.partial_replies),
-                    "execution_id": execution.id if execution else None,
-                    "trace_id": execution.trace_id if execution else None,
-                    # A newer Turn may already own Session state. In that case,
-                    # this older stream receives its own Turn projection but no
-                    # stale Session projection capable of overwriting the UI.
-                    "thread_state": (
-                        latest_state
-                        if execution is not None
-                        and str(latest_state.get("last_execution_id") or latest_state.get("current_execution_id") or "") == execution.id
-                        else {}
-                    ),
-                    "execution_projection": execution_projection,
-                    "voice_turn_id": voice_turn_id or None,
-                    "at": time.time(),
-                }
-            )
-        except Exception as e:
-            if voice_turn_id:
-                try:
-                    from agent.voice_transport import fail_voice_turn
-
-                    fail_voice_turn(
-                        voice_turn_id,
-                        session_id=str(thread_id or ""),
-                        error_code="voice_query_failed",
-                    )
-                except Exception:
-                    pass
-            _metric_inc("errors", 1)
-            diagnostic_id = hashlib.sha256(
-                f"{request_id}:{type(e).__name__}:{e}".encode("utf-8", errors="ignore")
-            ).hexdigest()[:12]
-            logger.exception(
-                "Query stream worker failed request_id={} diagnostic_id={}",
-                request_id,
-                diagnostic_id,
-            )
-            event = {
-                "type": "error",
-                "message": _safe_stream_failure(e),
-                "diagnostic_id": diagnostic_id,
-                "at": time.time(),
-                "request_id": request_id,
-            }
-            if handler is not None:
-                handler._put(event)
-            else:
-                q.put(event)
-        finally:
-            # Provider, parser, and lifecycle failures must close the same UI
-            # activity state as successful turns.
-            idle_event = {"type": "status", "agent_mode": "idle", "at": time.time(), "request_id": request_id}
-            if handler is not None:
-                handler._put(idle_event)
-            else:
-                q.put(idle_event)
-            q.put(None)
-
-    threading.Thread(target=run_agent, daemon=True).start()
+    threading.Thread(
+        target=_run_lean_stream,
+        kwargs=dict(
+            agent=agent, message=message, thread_id=thread_id, request_id=request_id,
+            q=q, cancel_event=cancel_event, source=source,
+            voice_turn_id=voice_turn_id, agent_id=agent_id,
+            thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort,
+        ),
+        name="lean-turn",
+        daemon=True,
+    ).start()
 
 
 def _extract_text_from_upload(filename: str, content_type: Optional[str], data: bytes) -> str:
@@ -2124,11 +1959,7 @@ async def lifespan(app: FastAPI):
         try:
             prewarmed_agent = await asyncio.to_thread(get_agent, "default")
             if prewarmed_agent.llm_provider == ModelProvider.LM_STUDIO:
-                from agent.model_runtime import (
-                    ensure_selected_model_ready,
-                    resolve_model_profile,
-                    resolve_structured_output_capability,
-                )
+                from agent.model_runtime import ensure_selected_model_ready, resolve_model_profile
                 model_id = str(prewarmed_agent._selected_model_id() or "default")
                 profile = resolve_model_profile(
                     ModelProvider.LM_STUDIO.value,
@@ -2146,18 +1977,6 @@ async def lifespan(app: FastAPI):
                         or 120.0
                     ),
                 )
-                capability = await asyncio.to_thread(
-                    resolve_structured_output_capability,
-                    ModelProvider.LM_STUDIO.value,
-                    model_id,
-                    llm=prewarmed_agent.model_runtime.llm,
-                    profile=profile,
-                    probe_timeout=float(getattr(config, "turn_understanding_probe_timeout_seconds", 8.0) or 8.0),
-                )
-                if capability.probed and capability.mode == "native_json_schema":
-                    prewarmed_agent._turn_understanding_warmed_models = {
-                        f"{ModelProvider.LM_STUDIO.value}:{model_id}"
-                    }
             logger.info("Default Session runtime and embeddings prewarmed")
         except Exception as exc:
             logger.warning("Runtime prewarm degraded; startup continues honestly: {}", exc)
@@ -4837,7 +4656,6 @@ async def create_specialist_run_api(request: SpecialistRunCreateRequest):
 
     from agent.execution_graph import ExecutionProfile
     from agent.research_runtime import RequirementKind, TurnRequirement
-    from agent.semantic_runtime import get_canonical_semantic_runtime
     from agent.specialist_authority import (
         SpecialistAuthorityError,
         validate_specialist_delegation_policy,
@@ -4957,11 +4775,6 @@ async def create_specialist_run_api(request: SpecialistRunCreateRequest):
             model_id=request.model_id,
             local_base_url=local_base_url,
             authority_validator=_validate_specialist_run_authority,
-            continuation_scheduler=lambda finished: (
-                get_canonical_semantic_runtime().schedule_specialist_continuation(
-                    get_agent(request.session_id), finished
-                )
-            ),
         )
     except HTTPException:
         raise
@@ -4981,7 +4794,6 @@ async def continue_specialist_run_api(
     run_id: str, request: SpecialistTurnRequest
 ):
     _specialist_project_scope(request.session_id, request.project_id)
-    from agent.semantic_runtime import get_canonical_semantic_runtime
     from agent.specialist_runtime import get_specialist_runtime_manager
     from agent.specialist_store import get_specialist_run_store
 
@@ -4997,11 +4809,6 @@ async def continue_specialist_run_api(
             run.id,
             prompt=request.prompt,
             authority_validator=_validate_specialist_run_authority,
-            continuation_scheduler=lambda finished: (
-                get_canonical_semantic_runtime().schedule_specialist_continuation(
-                    get_agent(request.session_id), finished
-                )
-            ),
         )
     except HTTPException:
         raise
@@ -7852,7 +7659,7 @@ async def tool_calling_diagnostics_api(thread_id: Optional[str] = Query(default=
     native_enabled = bool(diag.get("native_tool_calling_enabled")) and not disabled
     matrix = {
         "provider": provider,
-        "execution_loop": "canonical_model_control_plane",
+        "execution_loop": "lean",
         "native_tool_calls": native_enabled,
         "native_tool_calls_supported": native_supported,
         "strict_agent_decision_validation": True,

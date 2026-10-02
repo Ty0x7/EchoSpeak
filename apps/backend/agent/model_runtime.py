@@ -850,18 +850,7 @@ def resolve_model_profile(provider: str, model_id: str, configured: Optional[dic
     provider = str(provider or "unknown").strip().lower()
     model_id = str(model_id or "default").strip() or "default"
     meta = dict(configured or {})
-    conformance = _load_conformance_report(provider, model_id)
-    if conformance:
-        meta["measured_conformance"] = {
-            "created_at": conformance.get("created_at"),
-            "family": conformance.get("family"),
-            "adapter_version": conformance.get("adapter_version"),
-            "passed": bool(conformance.get("passed")),
-            "metrics": dict(conformance.get("metrics") or {}),
-            "recommended_max_exposed_tools": int(
-                conformance.get("recommended_max_exposed_tools") or 0
-            ),
-        }
+    conformance: Optional[dict[str, Any]] = None  # measured conformance reports were retired in 10.0
     local = bool(meta.get("local", provider not in _HOSTED_PROVIDERS))
     # Physical window only: explicit override or universal fallback. Callers
     # (process_query, /provider) should inject config.local.context_length /
@@ -926,33 +915,6 @@ def resolve_model_profile(provider: str, model_id: str, configured: Optional[dic
         ),
         metadata=meta,
     )
-
-
-def _load_conformance_report(
-    provider: str, model_id: str
-) -> Optional[dict[str, Any]]:
-    """Load exact-model evidence without making it an execution authority."""
-
-    try:
-        from agent.model_conformance import canonical_conformance_report_path
-
-        path = canonical_conformance_report_path(
-            provider, model_id, root=Path(DATA_DIR) / "model_conformance"
-        )
-        if not path.exists() or path.stat().st_size > 2_000_000:
-            return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if (
-            not isinstance(payload, dict)
-            or str(payload.get("provider") or "").casefold()
-            != str(provider or "").casefold()
-            or str(payload.get("model_id") or "") != str(model_id or "")
-        ):
-            return None
-        return payload
-    except Exception as exc:
-        logger.debug("Model conformance evidence unavailable: {}", exc)
-        return None
 
 
 def get_model_adapter(provider: str, model_id: str = ""):

@@ -43,7 +43,7 @@ TOOLSETS: dict[str, list[str]] = {
         "discord_web_send", "discord_contacts_add", "discord_contacts_discover",
     ],
     "self": ["self_list", "self_read", "self_grep", "self_git_status", "self_edit", "self_rollback"],
-    "memory": ["memory_save", "memory_search"],
+    "memory": ["memory_save", "memory_search", "chat_search"],
     # Skill, MCP, and Connection tools that registered at runtime.
     "skills": ["@external"],
 }
@@ -54,7 +54,7 @@ DEFAULT_TOOLSETS = ["core", "research", "terminal", "vision", "memory", "skills"
 PARALLEL_SAFE = {
     "get_system_time", "calculate", "system_info", "file_list", "file_read", "file_find", "file_search",
     "web_search", "safe_web_fetch", "youtube_transcript", "weather_live",
-    "sports_live", "project_status", "memory_search", "email_read_inbox",
+    "sports_live", "project_status", "memory_search", "chat_search", "email_read_inbox",
     "email_search", "email_get_thread", "discord_read_channel", "self_list",
     "self_read", "self_grep", "self_git_status", "desktop_list_windows",
 }
