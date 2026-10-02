@@ -15,8 +15,9 @@
 
 <p align="center">
   <a href="docs/GETTING_STARTED.md">Getting Started</a> ·
-  <a href="docs/SYSTEM_ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
   <a href="CHANGES.md">Changelog</a> ·
+  <a href="docs/releases/v10.0.0.md">10.0 release notes</a> ·
   <a href="ROADMAP.md">Roadmap</a> ·
   <a href="docs/AGENT.md">Agent Guide</a> ·
   <a href="docs/INTEGRATIONS.md">Integrations</a> ·
@@ -31,26 +32,17 @@ EchoSpeak is a personal AI agent that runs on your hardware — not in someone e
 
 If you want an AI assistant that feels local, fast, and always-on — this is it.
 
-## Install (recommended)
+## Download
 
-```bash
-# 1. Backend (Python 3.11–3.12)
-cd apps/backend
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+**Windows 10/11 (64-bit):** get the installer from the [latest release](https://github.com/Ty0x7/EchoSpeak/releases/latest) (`EchoSpeak_10.0.0_x64-setup.exe`). Later versions install from inside the app: **Settings › About › Update**.
 
-# 2. Onboarding wizard
-cd ../onboard-tui
-npm install && npm run start
-```
-
-The wizard writes runtime config, validates backend health, and opens the Web UI. All action permissions are disabled by default.
+For a local model, install [LM Studio](https://lmstudio.ai) or Ollama (Gemma 4 E4B is the tested default). Docker Desktop is optional; when it's running, terminal commands run in a sandbox.
 
 <details>
-<summary><strong>Manual setup / Arch Linux note</strong></summary>
+<summary><strong>Run from source</strong></summary>
 
 ```bash
-# Backend
+# Backend (Python 3.11–3.12)
 cd apps/backend
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -59,11 +51,10 @@ python app.py --mode api
 # Web UI
 cd apps/web
 npm install && npm run dev
-# → http://localhost:5173
+# → http://localhost:5174/app
 
-# Go TUI (optional)
-cd apps/tui
-go run .
+# Windows desktop app (PowerShell)
+powershell -File apps/desktop/scripts/build-windows.ps1 -PythonExecutable <path to python 3.12>
 ```
 
 On Arch/CachyOS with PEP 668, use `./.venv/bin/python -m pip install -r requirements.txt`.
@@ -72,99 +63,46 @@ On Arch/CachyOS with PEP 668, use `./.venv/bin/python -m pip install -r requirem
 
 ## Highlights
 
-- **Local-first** — conversations, memory, and data stay on your machine. No telemetry, no cloud dependency.
-- **Any model** — Google Gemini, OpenAI, Ollama, LM Studio, LocalAI, vLLM, llama.cpp.
-- **Multi-channel** — Web UI, Discord, Telegram, Twitter/X, Twitch, Go TUI, Python CLI, A2A protocol.
-- **Persistent memory** — deterministic profile facts, curated durable memories, FAISS vector search, document RAG.
-- **Governed tools** — 30+ tools with confirmation gates, Project path scope, permission flags, and layered safety.
-- **Unified coordination** — one request lifecycle and one owner per concept so subsystems plug in without special-case “guesses” (`docs/UNIFIED_COORDINATION.md`).
-- **Runtime contracts** — equal model access, Project scope, hydration, ToolRun truth (`docs/RUNTIME_CONTRACTS.md` + `docs/LIFECYCLE_TRUTHFULNESS.md`; v7.6.10 pending live validation).
-- **Skills + plugins** — drop-in skill bundles with custom tools and pipeline hooks.
-- **Customizable soul** — define personality, voice, and boundaries via `SOUL.md`.
-- **Proactive agent** — heartbeat system pulse, scheduled routines, autonomous Twitter presence.
-
-## Everything we built
-
-### Core platform
-
-- **Canonical semantic runtime** — Turn Understanding separates lightweight conversation from durable actionable work.
-- **TaskRun execution graph** — one durable objective owner tracks requirements, dependencies, progress, waits, evidence, and completion.
-- **Bounded model loop** — native tool calls, structured observations, malformed-output repair, provider retry, and no-progress protection.
-- **Specialist delegation** — coding work is correlated to real Codex or OpenCode sessions and returns through TaskRun.
-- **Single completion gate** — verified requirement sufficiency, not prose or tool execution alone, controls finalization.
-- **Chat-only UI** — Chat stays conversational while live TaskRun, ToolRun, evidence, and specialist status remain compactly available in the same conversation.
-
-### Memory + knowledge
-
-- **Profile facts** — deterministic recall for name, relations, preferences.
-- **Curated memories** — long-term facts stored via "remember …" and auto-extraction.
-- **FAISS vector store** — semantic similarity search over conversation history.
-- **Document RAG** — upload PDFs/docs, chunked and indexed for Q&A.
-- **Projects** — activate a project to inject domain context into every response.
-
-### Channels
-
-| Channel | How it connects |
-|---------|----------------|
-| **Web/Desktop UI** | React/Vite — Chat with compact live TaskRun, research, Code, checklist, media, and approval status |
-| **Discord** | Bot account for server channels + DMs; Playwright bridge for personal sessions |
-| **Telegram** | Native bot via grammY-style integration |
-| **Twitter/X** | Autonomous tweets (grounded by git diffs), changelog tweets, mention replies |
-| **Twitch** | Chat messages routed through the agent pipeline |
-| **Go TUI** | Terminal client with session management and streaming |
-| **A2A** | Google Agent-to-Agent protocol for inter-agent communication |
-
-### Tools + automation
-
-- **Web research** — provider-backed discovery, safe page retrieval, provenance, and requirement-level evidence evaluation.
-- **File operations** — Project-scoped reads and governed writes through durable ToolRuns.
-- **Terminal** — denylisted dangerous commands with confirmation (not a narrow allowlist).
-- **Browser** — Playwright-driven page control, screenshots, form filling.
-- **Email** — send and compose via SMTP integration.
-- **Routines** — cron-scheduled, webhook-triggered, or manual agent actions.
-- **Heartbeat** — system pulse: gathers todos, git activity, twitter state, then decides if anything is worth reporting.
-- **Git changelog** — detects new commits and auto-announces updates.
-
-### Runtime + safety
-
-- **Layered config** — `.env` (static) → `settings.json` (runtime) → `settings.secrets.json` (credentials).
-- **Confirmation gates** — all side-effect tools pause for `confirm`/`cancel`.
-- **Project + permission gates** — path scope and `ALLOW_*` flags (skill `TOOLS.txt` is soft guidance only; see runtime contracts).
-- **Approval records** — persisted approval state tied to threads and executions.
-- **Role-based access** — Discord users resolve to OWNER / TRUSTED / PUBLIC with scoped permissions.
-- **Observability** — real-time tool metrics, latency tracking, error aggregation.
+- **Local-first.** Conversations, memory and data stay on your machine. No telemetry, no cloud dependency.
+- **Any model.** LM Studio, Ollama, llama.cpp, vLLM, LocalAI, OpenAI, Gemini; each agent can use its own.
+- **Agents that finish the job.** One agent loop keeps calling tools until the task is done, says honestly when it runs out of steps, and offers Continue.
+- **Agents and group chats.** Echo, Jarvis and Glados (or your own agents) hand work to each other, answer side by side, or hold a short discussion that ends in one conclusion.
+- **Coding and terminal.** Project folders, exact-text edits, file search, background processes, and a Docker sandbox by default.
+- **Voice.** Local Whisper speech-to-text set up from Settings in one click, read-aloud, voice mode, and a "Hey Echo" wake word.
+- **Memory and search.** Long-term memory, rolling chat summaries, and full-text search across every past chat.
+- **Channels.** Discord, Telegram, Twitch and Twitter, with guests limited to look-up tools.
+- **One-click updates.** Signed releases install from inside the app.
 
 ## How it works
 
 ```
-Web UI / Discord / Telegram / Twitter / Twitch / TUI / A2A
-                        │
-                        ▼
-              ┌──────────────────┐
-              │  process_query() │
-              │  5-stage pipeline │
-              └────────┬─────────┘
-                       │
-         ┌─────────────┼─────────────┐
-         ▼             ▼             ▼
-   ┌──────────┐ ┌────────────┐ ┌──────────┐
-   │  Memory  │ │    LLM     │ │  Tools   │
-   │  FAISS + │ │ Gemini /   │ │ 30+ with │
-   │  Profile │ │ OpenAI /   │ │ confirm  │
-   │  + RAG   │ │ Ollama     │ │ gates    │
-   └──────────┘ └────────────┘ └──────────┘
+App window · voice · Discord · Telegram · Twitch · routines
+                         │
+                         ▼
+               process_query()  →  lean runtime (agent/lean)
+                         │
+        ┌────────────────┼──────────────────┐
+        ▼                ▼                  ▼
+   LeanSession       LeanTurn loop       Toolbox
+   routing, group    model ⇄ tools,      files · terminal (sandbox)
+   chats, handoffs   approvals, context  web · memory · chat search · MCP
+                         │
+                         ▼
+          SQLite state · FAISS memory · settings (your data folder)
 ```
+
+The full walkthrough, with diagrams, is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Tech stack
 
 | Layer | Technology |
 |-------|------------|
-| Backend | Python · FastAPI · canonical semantic runtime · FAISS |
-| Frontend | React · Vite · Framer Motion · TailwindCSS |
-| Windows desktop | Tauri 2 · Rust host · packaged Python sidecar |
+| Backend | Python · FastAPI · lean agent loop · SQLite (FTS5) · FAISS |
+| Frontend | React · Vite · Framer Motion |
+| Windows desktop | Tauri 2 · Rust host · packaged Python sidecar · signed in-app updates |
+| Voice | faster-whisper (local) · Windows SAPI · Piper · OpenAI audio |
+| Models | Any OpenAI-compatible endpoint: LM Studio · Ollama · llama.cpp · vLLM · LocalAI · OpenAI · Gemini |
 | TUI | Go · Bubble Tea · Lipgloss |
-| Voice | Browser SpeechRecognition + speech synthesis |
-| LLM | Gemini · OpenAI · Ollama · LM Studio |
 
 ## Project structure
 
@@ -172,27 +110,21 @@ Web UI / Discord / Telegram / Twitter / Twitch / TUI / A2A
 EchoSpeak/
 ├── apps/
 │   ├── backend/
-│   │   ├── agent/           # Core pipeline (16 modules)
+│   │   ├── agent/lean/      # The agent runtime: loop, sessions, toolbox, approvals, personas, rooms
+│   │   ├── agent/           # Tools, memory, state store (SQLite), voice, projects
 │   │   ├── api/             # FastAPI server
-│   │   ├── skills/          # Drop-in skill bundles
-│   │   ├── workspaces/      # Skill prompts + soft tool preference lists
-│   │   ├── discord_bot.py   # Discord integration
-│   │   ├── telegram_bot.py  # Telegram integration
-│   │   ├── twitter_bot.py   # Twitter/X (autonomous + mentions)
-│   │   ├── twitch_bot.py    # Twitch chat bot
-│   │   └── SOUL.md          # Agent personality
-│   ├── web/                 # React frontend
-│   ├── desktop/             # Additive Tauri Windows host + sidecar packaging
+│   │   ├── scripts/         # eval_gemma.py (20-prompt evaluation) and tools
+│   │   ├── discord_bot.py, telegram_bot.py, twitch_bot.py, twitter_bot.py
+│   │   └── SOUL.md          # Echo's personality
+│   ├── web/                 # React app (and the website)
+│   ├── desktop/             # Tauri Windows app, sidecar packaging, release scripts
 │   ├── tui/                 # Go terminal UI
 │   └── onboard-tui/         # Setup wizard
-├── docs/                    # Documentation
-│   ├── UNIFIED_COORDINATION.md   # One lifecycle; no guessing; easy next subsystem
-│   ├── RUNTIME_CONTRACTS.md      # Equal models, Project, hydration, Known limitations
-│   └── LIFECYCLE_TRUTHFULNESS.md  # Recovery, confirm, ToolRun truth
-├── ARCHITECTURE.md
-├── CHANGES.md               # Full changelog
-├── ROADMAP.md
-└── AUDIT.md                 # System reference
+├── docs/
+│   ├── ARCHITECTURE.md      # How EchoSpeak works
+│   └── releases/            # Release notes
+├── CHANGES.md               # Changelog
+└── ROADMAP.md
 ```
 
 ## Configuration
@@ -208,26 +140,24 @@ Most settings can be changed from the **Web UI Settings tab** without editing fi
 
 ## Safety model
 
-1. **Environment flags** — master switches (`ENABLE_SYSTEM_ACTIONS`, `ALLOW_FILE_WRITE`, etc.)
-2. **Project path scope** — filesystem tools only under the attached Project / allowed roots
-3. **Registration + policy** — tools must be registered; skill workspaces do not invent a hard allowlist ceiling
-4. **Approval records** — side effects persist as approval objects tied to thread + execution
-5. **User confirmation** — action tools require explicit confirm (types A–D: `docs/LIFECYCLE_TRUTHFULNESS.md` §4)
-
-Full contracts: `docs/UNIFIED_COORDINATION.md`, `docs/RUNTIME_CONTRACTS.md`.
+1. **Smart approvals.** Deleting files, dangerous commands, messages that leave the PC, desktop control and MCP actions wait for Allow / Deny in the chat. Everything else runs.
+2. **Sandbox by default.** With Docker running, commands run in a container with only the project mounted, offline until you allow the internet.
+3. **Project scope.** File tools work inside the attached project folder.
+4. **Caller roles.** Only you get files, terminal, memory and past chats. People reaching Echo through Discord, Telegram, Twitch or Twitter get look-up tools only.
+5. **Signed updates.** The app installs only releases signed with the project's key.
 
 ## Documentation
 
 | Document | Description |
 |----------|-------------|
 | [Getting Started](docs/GETTING_STARTED.md) | 5-minute setup guide |
-| [Architecture](docs/SYSTEM_ARCHITECTURE.md) | Current system internals |
+| [Architecture](docs/ARCHITECTURE.md) | How EchoSpeak works, with diagrams |
+| [10.0 release notes](docs/releases/v10.0.0.md) | What's new in 10.0 |
 | [Desktop Architecture](docs/DESKTOP_ARCHITECTURE.md) | Windows host, sidecar, transport, lifecycle, and native gates |
 | [Changelog](CHANGES.md) | Full version history |
 | [Roadmap](ROADMAP.md) | What's next |
 | [Agent Guide](docs/AGENT.md) | Extending the agent |
 | [Integrations](docs/INTEGRATIONS.md) | Tool and service details |
-| [Audit](AUDIT.md) | Full system reference |
 
 ## Contributing
 
