@@ -209,7 +209,7 @@ flowchart LR
 | Custom agents, group chats | `lean/agents.json`, `lean/rooms.json` | JSON |
 | Memory | `memory/` (FAISS vector index + items), `memory_files/` (`agent/memory.py`) | FAISS + JSON |
 | Routines | `routines/` (`agent/routines.py`) | JSON |
-| Projects | Desktop: `<data dir>/projects/*.json`. Browser/dev: `apps/backend/projects/*.json` | JSON per project |
+| Projects | `<data dir>/projects/*.json` in every mode (pre-10.0 dev projects in `apps/backend/projects/` are copied over once) | JSON per project |
 | Logs | Desktop: app log dir, `backend.log` (rotates at 10 MB, keeps 5) | text |
 | UI preferences | Browser `localStorage` (sidebar split, toolbar state …) | per device |
 
@@ -247,6 +247,6 @@ In priority order. This is an honest view of the weak spots and debt.
 5. **Honest stop at the step limit.** Report "ran out of steps" and offer Continue, instead of forcing a final answer (harness review U2). **S, medium.**
 6. **Split `apps/web/src/index.tsx`** (12.5k lines) into chat, composer, history and sidebar modules once the legacy activity UI can go (after item 1). **M–L, medium.**
 7. **Voice onboarding, then wake word.** Voice only works after a Whisper model is set up by hand. A guided download in Settings would make the mic work out of the box. Wake word is the most requested missing feature. **M then L.**
-8. **One projects folder.** Browser/dev mode reads `apps/backend/projects/` while desktop mode reads `<data dir>/projects/`. Found while making the website screenshot: an isolated data dir still showed real projects. **S, low but surprising.**
+8. ~~**One projects folder.**~~ Done in 10.0: every mode uses `<data dir>/projects/`.
 9. **A group "discussion" mode.** Several rounds with termination conditions (max messages, a `DONE` mention, Stop), reusing the router as the speaker selector (`docs/research/multi-agent-review.md`, P1). **L, medium.**
 10. **Sandboxed terminal by default when Docker is running.** Commands run in the container with only the project mounted, and approvals are needed only for host or network access (harness review A1). **L, high once Docker is common.**

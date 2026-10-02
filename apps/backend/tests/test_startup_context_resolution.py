@@ -103,3 +103,19 @@ def test_startup_readiness_reports_real_steps_without_provider_gate(monkeypatch,
     assert payload["instance_id"] == "instance-test"
     assert payload["completed_steps"] == payload["total_steps"]
     assert not any(item["key"] == "provider" for item in payload["components"])
+
+
+def test_browser_mode_also_keeps_projects_in_the_data_folder(monkeypatch, tmp_path: Path):
+    import config
+    from agent import projects as projects_mod
+
+    monkeypatch.delenv("ECHOSPEAK_RUNTIME_KIND", raising=False)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    legacy = tmp_path / "legacy-projects"
+    legacy.mkdir()
+    (legacy / "p1.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(projects_mod, "LEGACY_PROJECTS_DIR", legacy)
+    manager = projects_mod.ProjectManager()
+    assert manager.projects_dir == tmp_path / "projects"
+    # A custom data folder never adopts the legacy dev projects.
+    assert not (tmp_path / "projects" / "p1.json").exists()

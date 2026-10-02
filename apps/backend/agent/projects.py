@@ -15,16 +15,41 @@ from pydantic import BaseModel, Field
 from loguru import logger
 
 
-PROJECTS_DIR = Path(__file__).parent.parent / "projects"
+# Before 10.0, browser/dev mode kept projects here instead of in the data folder.
+LEGACY_PROJECTS_DIR = Path(__file__).parent.parent / "projects"
 
 
 def _default_projects_dir() -> Path:
-    """Keep browser storage compatible while desktop follows its owned data root."""
-    if os.getenv("ECHOSPEAK_RUNTIME_KIND", "").strip().lower() == "desktop":
-        from config import DATA_DIR
+    """Projects live in the data folder in every mode (desktop, browser, dev)."""
+    from config import DATA_DIR
 
-        return Path(DATA_DIR) / "projects"
-    return PROJECTS_DIR
+    target = Path(DATA_DIR) / "projects"
+    _adopt_legacy_projects(target)
+    return target
+
+
+def _adopt_legacy_projects(target: Path) -> None:
+    """Copy pre-10.0 dev projects into the default dev data folder, once.
+
+    Never into a custom data folder (tests, isolated runs, the desktop app),
+    so an isolated run can't pick up someone's real projects.
+    """
+    from config import BASE_DIR, DATA_DIR
+
+    if Path(DATA_DIR).resolve() != (Path(BASE_DIR) / "data").resolve() or not LEGACY_PROJECTS_DIR.is_dir():
+        return
+    marker = target / ".adopted-legacy-projects"
+    if marker.exists():
+        return
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        for source in LEGACY_PROJECTS_DIR.glob("*.json"):
+            destination = target / source.name
+            if not destination.exists():
+                shutil.copy2(source, destination)
+        marker.write_text(f"Copied from {LEGACY_PROJECTS_DIR}\n", encoding="utf-8")
+    except OSError as exc:
+        logger.warning("Could not adopt legacy projects from {}: {}", LEGACY_PROJECTS_DIR, exc)
 
 
 class Project(BaseModel):
