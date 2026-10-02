@@ -304,15 +304,24 @@ class LeanSession:
         return len(endpoints) == 1
 
     def _run_fan_out(self, responders: list[AgentPersona], prompt_text: str, history: list[dict[str, Any]]) -> tuple[bool, str]:
+        # Small models otherwise tend to answer for every agent named in the message.
+        briefs = {
+            persona.id: (
+                f"{prompt_text}\n\n[System]: {persona.name}, answer for yourself only. "
+                + ", ".join(p.name for p in responders if p.id != persona.id)
+                + " will answer separately, at the same time."
+            )
+            for persona in responders
+        }
         turns = [
-            (persona, self._build_turn(persona, prompt_text, history=history, depth=0, allow_handoff=False, meta={"parallel": True}))
+            (persona, self._build_turn(persona, briefs[persona.id], history=history, depth=0, allow_handoff=False, meta={"parallel": True}))
             for persona in responders
         ]
         # Open every message up front, in the order the user named them.
         for _, turn in turns:
             turn.announce()
         with ThreadPoolExecutor(max_workers=len(turns), thread_name_prefix="lean-fanout") as pool:
-            futures = [pool.submit(turn.run, prompt_text, announce=False) for _, turn in turns]
+            futures = [pool.submit(turn.run, briefs[persona.id], announce=False) for persona, turn in turns]
             results = [future.result() for future in futures]
         success, error = True, ""
         answers: list[tuple[AgentPersona, TurnResult]] = []

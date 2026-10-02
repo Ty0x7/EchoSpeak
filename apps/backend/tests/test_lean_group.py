@@ -182,3 +182,17 @@ def test_agents_on_different_models_take_turns_and_converge(monkeypatch):
     assert scripts["echo"].calls == []
     forge_context = " ".join(str(m.get("content")) for m in scripts["forge"].calls[0])
     assert "Option A." in forge_context and "If you agree" in forge_context
+
+
+def test_parallel_agents_are_told_to_answer_only_for_themselves(monkeypatch):
+    session_id = f"self-only-{uuid.uuid4().hex[:6]}"
+    room = _room(session_id, ["echo", "scout", "forge"])
+    scripts = {
+        "scout": ScriptedClient([ModelTurn(content="A.")]),
+        "forge": ScriptedClient([ModelTurn(content="B.")]),
+        "echo": ScriptedClient([ModelTurn(content="Summary.")]),
+    }
+    session, _ = _session(monkeypatch, scripts, room=room, session_id=session_id)
+    session.run("@Scout @Forge thoughts?")
+    scout_prompt = scripts["scout"].calls[0][-1]["content"]
+    assert "Scout, answer for yourself only. Forge will answer separately" in scout_prompt
