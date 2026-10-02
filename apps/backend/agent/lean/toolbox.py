@@ -83,6 +83,10 @@ class NativeTool:
     parameters: dict[str, Any]
     func: Callable[[dict[str, Any]], str]
     parallel_safe: bool = False
+    # Set for tools that hand the conversation to another agent. Called before
+    # the tool runs: returns an "Error: ..." for bad arguments, otherwise the
+    # short note shown on the tool card in the caller's message.
+    handoff: Optional[Callable[[dict[str, Any]], str]] = None
 
 
 def _flag_enabled(flag: str) -> bool:
@@ -211,6 +215,10 @@ class Toolbox:
         if name in self.native:
             return self.native[name].parallel_safe
         return name in PARALLEL_SAFE
+
+    def handoff(self, name: str) -> Optional[Callable[[dict[str, Any]], str]]:
+        tool = self.native.get(name)
+        return tool.handoff if tool else None
 
     def resolve_name(self, name: str) -> str:
         """Accept harmless spelling drift such as 'Web-Search' -> 'web_search'."""

@@ -248,3 +248,136 @@ def test_cancel_stops_the_loop():
     result = _turn(client, _toolbox({}), [], cancel=cancel).run("go")
     assert not result.success and result.error == "cancelled"
     assert client.calls == []
+
+
+# ── group chat: every agent turn is its own message ─────────────────────
+
+def test_handoff_seals_the_message_so_the_reply_lands_after_the_teammate():
+    """A -> B -> A must produce three messages in that order, not A (with A's
+    continuation streamed into it) above B."""
+    events: list[dict[str, Any]] = []
+    teammate_client = ScriptedClient([ModelTurn(reasoning="checking", content="Scout: it's sunny.")])
+
+    def run_teammate(args: dict[str, Any]) -> str:
+        teammate = LeanTurn(
+            client=teammate_client,  # type: ignore[arg-type]
+            persona=AgentPersona(id="scout", name="Scout"),
+            system_prompt="system", history=[], toolbox=_toolbox({}),
+            session_id="t", request_id="r", execution_id="e",
+            emit=events.append, cancel=threading.Event(), persist_tool_runs=False,
+        )
+        return "Scout replied:\n" + teammate.run(args["task"]).text
+
+    box = _toolbox({})
+    box.native["delegate_to_agent"] = NativeTool(
+        name="delegate_to_agent", description="", parameters={"type": "object", "properties": {}},
+        func=run_teammate, handoff=lambda args: "Handed to Scout. Their reply is below.",
+    )
+    sealed: list[Any] = []
+    client = ScriptedClient([
+        ModelTurn(content="Let me ask Scout.", tool_calls=[ToolCall("d1", "delegate_to_agent", '{"agent": "Scout", "task": "weather"}')]),
+        ModelTurn(reasoning="Scout answered", content="So: bring sunglasses."),
+    ])
+    turn = LeanTurn(
+        client=client,  # type: ignore[arg-type]
+        persona=AgentPersona(id="echo", name="Echo"),
+        system_prompt="system", history=[], toolbox=box,
+        session_id="t", request_id="r", execution_id="e",
+        emit=events.append, cancel=threading.Event(), persist_tool_runs=False,
+        on_seal=sealed.append,
+    )
+    result = turn.run("what's the weather?")
+
+    starts = [e for e in events if e["type"] == "agent_start"]
+    assert [e["agent_id"] for e in starts] == ["echo", "scout", "echo"]
+    ids = [e["message_id"] for e in starts]
+    assert len(set(ids)) == 3
+
+    # Every event belongs to the message that was open at the time.
+    def text_of(message_id: str) -> str:
+        return "".join(e.get("data", "") for e in events if e["type"] == "agent_token" and e["message_id"] == message_id)
+
+    assert text_of(ids[0]) == "Let me ask Scout."
+    assert text_of(ids[1]) == "Scout: it's sunny."
+    assert text_of(ids[2]) == "So: bring sunglasses."
+    tool_events = [e for e in events if e["type"] in {"tool_start", "tool_end"}]
+    assert {e["message_id"] for e in tool_events} == {ids[0]}
+    assert [e["message_id"] for e in events if e["type"] == "reasoning_delta"] == [ids[1], ids[2]]
+
+    # Each message is closed before the next one opens.
+    done_order = [e["message_id"] for e in events if e["type"] == "agent_done"]
+    assert done_order == [ids[0], ids[1], ids[2]]
+    assert sealed and sealed[0].message_id == ids[0] and sealed[0].text == "Let me ask Scout."
+    assert result.message_id == ids[2] and result.text == "So: bring sunglasses."
+    # The model still got the teammate's answer as the tool result.
+    assert any(m.get("role") == "tool" and "it's sunny" in m.get("content", "") for m in client.calls[1])
+
+
+def test_handoff_with_nothing_more_to_say_leaves_no_empty_message():
+    events: list[dict[str, Any]] = []
+    box = _toolbox({})
+    box.native["delegate_to_agent"] = NativeTool(
+        name="delegate_to_agent", description="", parameters={"type": "object", "properties": {}},
+        func=lambda args: "Scout replied:\nDone.", handoff=lambda args: "Handed to Scout.",
+    )
+    client = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("d1", "delegate_to_agent", '{"agent": "Scout", "task": "x"}')]),
+        ModelTurn(content=""),
+    ])
+    result = _turn(client, box, events).run("go")
+    assert result.empty and result.text == ""
+    assert len(client.calls) == 2  # no "you stopped without replying" nudge after a handoff
+    assert events[-1]["type"] == "agent_done" and events[-1]["empty"] is True
+
+
+def test_bad_handoff_arguments_do_not_seal_the_message():
+    events: list[dict[str, Any]] = []
+    box = _toolbox({})
+    box.native["delegate_to_agent"] = NativeTool(
+        name="delegate_to_agent", description="", parameters={"type": "object", "properties": {}},
+        func=lambda args: "unused", handoff=lambda args: "Error: unknown agent. Choose one of: Scout",
+    )
+    client = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("d1", "delegate_to_agent", '{"agent": "Nobody"}')]),
+        ModelTurn(content="Okay, I'll answer myself."),
+    ])
+    result = _turn(client, box, events).run("go")
+    assert [e["type"] for e in events].count("agent_start") == 1
+    assert result.text == "Okay, I'll answer myself."
+    assert any(m.get("role") == "tool" and m.get("content", "").startswith("Error: unknown agent") for m in client.calls[1])
+
+
+def test_session_persists_a_b_a_as_three_ordered_messages(monkeypatch):
+    """Full LeanSession: Echo delegates to Scout and then wraps up. The saved
+    Session timeline must reload as Echo, Scout, Echo with distinct ids."""
+    from agent.lean import runtime as lean_runtime
+    from agent.state import get_state_store
+
+    scripts = {
+        "echo": ScriptedClient([
+            ModelTurn(content="Asking Scout.", tool_calls=[ToolCall("d1", "delegate_to_agent", '{"agent": "Scout", "task": "find it"}')]),
+            ModelTurn(content="Scout found it, so we're done."),
+        ]),
+        "scout": ScriptedClient([ModelTurn(content="Found it.")]),
+    }
+    monkeypatch.setattr(lean_runtime.LeanSession, "_client_for", lambda self, persona, routing=False: scripts[persona.id])
+    monkeypatch.setattr(lean_runtime.LeanSession, "_recall", lambda self, query, limit=8: [])
+    events: list[dict[str, Any]] = []
+    session_id = "handoff-order-test"
+    agent = type("Agent", (), {"memory": None})()
+    out = lean_runtime.LeanSession(
+        agent=agent, session_id=session_id, request_id="req-handoff", emit=events.append,
+        cancel=threading.Event(), source="web",
+    ).run("find the thing", persona_id="echo")
+
+    assert out["success"]
+    assert [m["agent_id"] for m in out["messages"]] == ["echo", "scout", "echo"]
+    assert len({m["message_id"] for m in out["messages"]}) == 3
+    assert out["response"] == "Scout found it, so we're done."
+
+    turns = get_state_store().session_timeline(session_id)["turns"]
+    saved = [m for t in turns for m in t["messages"] if m["role"] == "assistant"]
+    assert [m["agent_id"] for m in saved] == ["echo", "scout", "echo"]
+    assert [m["message_id"] for m in saved] == [m["message_id"] for m in out["messages"]]
+    assert [m["text"] for m in saved] == ["Asking Scout.", "Found it.", "Scout found it, so we're done."]
+    assert any(row.get("kind") == "tool" for row in saved[0]["timeline"])

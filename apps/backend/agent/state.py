@@ -1232,7 +1232,9 @@ class StateStore:
                     })
             elif item.item_type == "assistant_message":
                 text = str((item.payload or {}).get("text") or "").strip()
-                if text:
+                # A lean message closed at a handoff can hold only tool cards.
+                handoff_part = bool((item.payload or {}).get("agent_id") and (item.payload or {}).get("timeline"))
+                if text or handoff_part:
                     messages.append({
                         "role": "assistant",
                         "text": text,

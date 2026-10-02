@@ -136,15 +136,21 @@ class LeanSession:
             for index, persona in enumerate(responders):
                 if self.cancel.is_set():
                     break
+                before = len(self.results)
                 result = self._run_agent(persona, prompt_text, history=turn_history, depth=0)
-                self.results.append(result)
+                if not result.empty:
+                    self.results.append(result)
                 success = success and result.success
                 error = error or result.error
                 if index + 1 < len(responders):
-                    # The next responder sees the user message, then what this agent said.
+                    # The next responder sees the user message, then everything said
+                    # since (including teammates this agent handed work to).
                     if index == 0:
                         turn_history = turn_history + [{"role": "user", "content": prompt_text}]
-                    turn_history = turn_history + [{"role": "assistant", "content": f"[{persona.name}]: {result.text}"}]
+                    spoken = "\n\n".join(
+                        f"[{self._name_of(r.agent_id)}]: {r.text}" for r in self.results[before:] if r.text
+                    )
+                    turn_history = turn_history + [{"role": "assistant", "content": spoken}]
                     nxt = responders[index + 1]
                     prompt_text = (
                         f"[System]: {nxt.name}, it's your turn. Reply to the user's last message from your "
@@ -155,7 +161,7 @@ class LeanSession:
             success = False
             error = f"{type(exc).__name__}: {exc}"
 
-        final_text = self.results[-1].text if self.results else ""
+        final_text = next((r.text for r in reversed(self.results) if r.text), "")
         cancelled = self.cancel.is_set()
         store.update_execution(
             execution.id,
@@ -269,8 +275,21 @@ class LeanSession:
             cancel=self.cancel,
             temperature=self._temperature(),
             interactive=self.source in INTERACTIVE_SOURCES,
+            on_seal=lambda part: self._record(persona, part, depth),
         )
         result = turn.run(message)
+        if not result.empty:
+            self._persist(persona, result, depth)
+        return result
+
+    def _record(self, persona: AgentPersona, part: TurnResult, depth: int) -> None:
+        """A message closed before a handoff: save it now so it sorts before the teammate's."""
+        self.results.append(part)
+        self._persist(persona, part, depth)
+
+    def _persist(self, persona: AgentPersona, result: TurnResult, depth: int) -> None:
+        from agent.state import get_state_store
+
         try:
             get_state_store().add_item(
                 turn_id=self.execution_id,
@@ -290,7 +309,6 @@ class LeanSession:
             )
         except Exception:
             logger.exception("Lean assistant message persistence failed")
-        return result
 
     # ── native tools ────────────────────────────────────────────────────
     def _native_tools(self, persona: AgentPersona, depth: int) -> list[NativeTool]:
@@ -347,17 +365,25 @@ class LeanSession:
             candidates = self._members() if self.room else self.personas.list()
             candidates = [c for c in candidates if c.id != persona.id]
             if candidates:
-                def delegate(args: dict[str, Any]) -> str:
+                def check(args: dict[str, Any]) -> str:
                     target = self.personas.find_by_name(str(args.get("agent") or ""))
                     if target is None or target.id == persona.id or target.id not in {c.id for c in candidates}:
                         return "Error: unknown agent. Choose one of: " + ", ".join(c.name for c in candidates)
-                    task = str(args.get("task") or "").strip()
-                    if not task:
+                    if not str(args.get("task") or "").strip():
                         return "Error: describe the task in 'task'."
+                    return f"Handed to {target.name}. Their reply is below."
+
+                def delegate(args: dict[str, Any]) -> str:
+                    problem = check(args)
+                    if problem.startswith("Error"):
+                        return problem
+                    target = self.personas.find_by_name(str(args.get("agent") or ""))
+                    task = str(args.get("task") or "").strip()
                     self.emit({"type": "delegation", "from": persona.id, "to": target.id, "task": task[:400]})
                     brief = f"{persona.name} handed you this task:\n{task}"
                     result = self._run_agent(target, brief, history=[], depth=depth + 1)
-                    self.results.append(result)
+                    if not result.empty:
+                        self.results.append(result)
                     return f"{target.name} replied:\n{result.text}"
 
                 tools.append(NativeTool(
@@ -369,10 +395,15 @@ class LeanSession:
                         "task": {"type": "string", "description": "Everything they need to do the task."},
                     }, "required": ["agent", "task"]},
                     func=delegate,
+                    handoff=check,
                 ))
         return tools
 
     # ── helpers ─────────────────────────────────────────────────────────
+    def _name_of(self, agent_id: str) -> str:
+        persona = self.personas.get(agent_id)
+        return persona.name if persona else agent_id
+
     def _endpoint_for(self, persona: AgentPersona):
         provider = persona.model.provider or str(getattr(getattr(self.agent, "llm_provider", None), "value", "") or "lmstudio")
         model_id = persona.model.model_id if persona.model.provider or persona.model.model_id else ""

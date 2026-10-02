@@ -37,6 +37,48 @@ describe("lean live reducer", () => {
     expect(state.messages.m2.agent.name).toBe("Forge");
   });
 
+  it("shows A -> B -> A as three messages in the order they happened", () => {
+    const a1 = { request_id: "r1", message_id: "a1", agent_id: "echo" };
+    const b = { request_id: "r1", message_id: "b1", agent_id: "scout" };
+    const a2 = { request_id: "r1", message_id: "a2", agent_id: "echo" };
+    const state = run([
+      { type: "agent_start", ...a1, agent: { id: "echo", name: "Echo" } },
+      { type: "agent_token", ...a1, step: 1, data: "Asking Scout." },
+      { type: "tool_start", ...a1, step: 1, id: "d1", name: "delegate_to_agent", label: "Handing to Scout" },
+      { type: "tool_end", ...a1, step: 1, id: "d1", name: "delegate_to_agent", ok: true, output: "Handed to Scout." },
+      { type: "agent_done", ...a1, text: "Asking Scout.", success: true, handoff: true },
+      { type: "delegation", request_id: "r1", from: "echo", to: "scout" },
+      { type: "agent_start", ...b, agent: { id: "scout", name: "Scout" } },
+      { type: "reasoning_delta", ...b, step: 1, text: "looking" },
+      { type: "agent_token", ...b, step: 1, data: "Found it." },
+      { type: "agent_done", ...b, text: "Found it.", success: true },
+      { type: "agent_start", ...a2, agent: { id: "echo", name: "Echo" }, continues: true },
+      { type: "reasoning_delta", ...a2, step: 2, text: "wrap up" },
+      { type: "agent_token", ...a2, step: 2, data: "Done." },
+      { type: "agent_done", ...a2, text: "Done.", success: true },
+    ]);
+    expect(state.order).toEqual(["a1", "b1", "a2"]);
+    expect(state.order.map((id) => state.messages[id].agent.id)).toEqual(["echo", "scout", "echo"]);
+    expect(state.order.map((id) => state.messages[id].text)).toEqual(["Asking Scout.", "Found it.", "Done."]);
+    // Each message carries only its own thinking and tools.
+    expect(state.messages.a1.segments.map((s) => s.kind)).toEqual(["text", "tool"]);
+    expect(state.messages.b1.segments.map((s) => s.kind)).toEqual(["thinking", "text"]);
+    expect(state.messages.a2.segments.map((s) => s.kind)).toEqual(["thinking", "text"]);
+    expect(state.order.every((id) => state.messages[id].status === "done")).toBe(true);
+  });
+
+  it("drops a continuation that ended with nothing to add", () => {
+    const a2 = { request_id: "r1", message_id: "a2", agent_id: "echo" };
+    const state = run([
+      { type: "agent_start", ...base, agent: { id: "scout", name: "Scout" } },
+      { type: "agent_done", ...base, text: "Found it.", success: true },
+      { type: "agent_start", ...a2, agent: { id: "echo", name: "Echo" }, continues: true },
+      { type: "agent_done", ...a2, text: "", success: true, empty: true },
+    ]);
+    expect(state.order).toEqual(["m1"]);
+    expect("a2" in state.messages).toBe(false);
+  });
+
   it("tracks approvals through their decision", () => {
     const state = run([
       { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },

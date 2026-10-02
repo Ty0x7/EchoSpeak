@@ -4463,10 +4463,12 @@ export const Dashboard: React.FC<{
           for (const msg of Array.isArray(turn.messages) ? turn.messages : []) {
             const role = String(msg.role || "").toLowerCase() === "user" ? "user" : "assistant";
             const text = String(msg.text || "").trim();
-            if (!text) continue;
+            // Lean messages closed at a handoff may hold only tool cards.
+            const leanPart = role === "assistant" && Boolean(msg.agent_id && msg.message_id) && Array.isArray(msg.timeline) && msg.timeline.length > 0;
+            if (!text && !leanPart) continue;
             const atMs = Number(msg.at || 0) * 1000 || (role === "user" ? baseAt : doneAt);
             const msgId = `hist-${executionId || "x"}-${role}-${msg.item_id || loadedMsgs.length}`;
-            if (loadedMsgs.some((m) => m.id === msgId || (m.executionId === executionId && m.role === role && m.text === text))) {
+            if (loadedMsgs.some((m) => m.id === msgId || (msg.message_id && m.id === String(msg.message_id)) || (!leanPart && m.executionId === executionId && m.role === role && m.text === text))) {
               continue;
             }
             const researchRuns: ResearchRun[] = [];

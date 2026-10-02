@@ -48,6 +48,8 @@ class TurnResult:
     agent_id: str
     timeline: list[dict[str, Any]] = field(default_factory=list)
     error: str = ""
+    # True for a continuation after a handoff that ended without saying anything.
+    empty: bool = False
 
 
 def _estimate_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
@@ -78,8 +80,11 @@ class LeanTurn:
         temperature: Optional[float] = None,
         persist_tool_runs: bool = True,
         interactive: bool = True,
+        on_seal: Optional[Callable[[TurnResult], None]] = None,
     ) -> None:
         self.interactive = interactive
+        self._on_seal = on_seal
+        self._handed_off = False
         self.client = client
         self.persona = persona
         self.system_prompt = system_prompt
@@ -130,7 +135,7 @@ class LeanTurn:
             self.timeline.append({"kind": kind, "step": step, "text": text, "at": time.time()})
 
     # ── main loop ───────────────────────────────────────────────────────
-    def run(self, user_message: str) -> TurnResult:
+    def _start_message(self, **extra: Any) -> None:
         self.emit({
             "type": "agent_start",
             "agent": {
@@ -139,7 +144,41 @@ class LeanTurn:
                 "title": self.persona.title,
                 "initials": self.persona.initials(),
             },
+            **extra,
         })
+
+    def _visible_text(self) -> str:
+        return "\n\n".join(
+            item["text"].strip() for item in self.timeline if item.get("kind") == "text" and item.get("text", "").strip()
+        ).strip()
+
+    def _seal_for_handoff(self, step: int) -> None:
+        """Close the current message so a teammate's reply lands after it.
+
+        Whatever this agent says after the handoff streams into a new message
+        below the teammate's, so the chat reads in the order things happened.
+        """
+        self._close_thinking()
+        sealed = TurnResult(
+            text=self._visible_text(),
+            success=True,
+            message_id=self.message_id,
+            agent_id=self.persona.id,
+            timeline=self.timeline,
+        )
+        self.emit({"type": "agent_done", "text": sealed.text, "success": True, "error": "",
+                   "steps": step, "handoff": True, "usage": dict(self.usage)})
+        if self._on_seal is not None:
+            try:
+                self._on_seal(sealed)
+            except Exception:
+                logger.exception("Lean handoff seal failed")
+        self.message_id = f"msg_{uuid.uuid4().hex[:12]}"
+        self.timeline = []
+        self._handed_off = True
+
+    def run(self, user_message: str) -> TurnResult:
+        self._start_message()
         tools = self.toolbox.schemas()
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self.history)
@@ -205,6 +244,10 @@ class LeanTurn:
                 if content.strip():
                     final_text = content.strip()
                     break
+                if self._handed_off:
+                    # The teammate already answered; nothing more is needed.
+                    final_text = ""
+                    break
                 if nudges < 2:
                     nudges += 1
                     messages.pop()
@@ -229,12 +272,11 @@ class LeanTurn:
                 error = str(exc)
                 success = False
 
-        visible = "\n\n".join(
-            item["text"].strip() for item in self.timeline if item.get("kind") == "text" and item.get("text", "").strip()
-        ).strip()
+        visible = self._visible_text()
         if not visible:
             visible = final_text
-        if not visible:
+        empty = bool(self._handed_off and not visible and error in {"", "cancelled"})
+        if not visible and not empty:
             if error == "cancelled":
                 visible = "Stopped."
             elif error:
@@ -250,6 +292,7 @@ class LeanTurn:
             "error": error,
             "steps": step,
             "usage": dict(self.usage),
+            "empty": empty,
         })
         return TurnResult(
             text=visible,
@@ -258,6 +301,7 @@ class LeanTurn:
             agent_id=self.persona.id,
             timeline=self.timeline,
             error=error,
+            empty=empty,
         )
 
     # ── model ───────────────────────────────────────────────────────────
@@ -338,6 +382,20 @@ class LeanTurn:
                 output = f"Error: {problem}. Call {name} again with a JSON object matching its parameters."
                 results[call.id] = (False, output)
                 self._tool_finished(call, name, args, step, False, output, 0)
+                continue
+            handoff = self.toolbox.handoff(name)
+            if handoff is not None:
+                note = str(handoff(args) or "")
+                if note.lower().startswith("error"):
+                    results[call.id] = (False, note)
+                    self._tool_finished(call, name, args, step, False, note, 0)
+                    continue
+                self._tool_finished(call, name, args, step, True, note, 0)
+                self._seal_for_handoff(step)
+                result = self.toolbox.run(name, args)
+                results[call.id] = (result.ok, result.output)
+                # Open the continuation only now, so it sorts after the teammate's reply.
+                self._start_message(continues=True)
                 continue
             allowed, denial = self._approve(call, name, args, step)
             if not allowed:

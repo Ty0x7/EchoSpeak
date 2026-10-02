@@ -139,6 +139,11 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
         segments: m.segments.map((s) => (s.kind === "approval" && s.id === evt.id ? { ...s, decision: evt.decision } : s)),
       }));
     case "agent_done":
+      // A continuation after a handoff that had nothing to add: drop it.
+      if (evt.empty && state.messages[id]) {
+        const { [id]: _dropped, ...rest } = state.messages;
+        return { ...state, order: state.order.filter((x) => x !== id), messages: rest };
+      }
       return patchMessage(state, id, (m) => ({
         ...m,
         status: evt.success === false && evt.error ? "failed" : "done",
