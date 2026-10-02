@@ -259,9 +259,6 @@ def infer_new_project_slug(user_input: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", raw.strip()).strip("-")[:48]
     return slug or "new-project"
 
-    def as_dict(self) -> Dict[str, Any]:
-        return asdict(self)
-
 
 class ActiveWorkStore:
     """Load/save ActiveWorkState per thread on disk."""

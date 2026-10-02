@@ -5250,11 +5250,7 @@ class EchoSpeakAgent:
             text,
             flags=re.IGNORECASE,
         ):
-            candidates.append(
-                json.dumps({"action": match.group(1), "arguments": match.group(2)})
-                if False
-                else f'{{"action":"{match.group(1)}","arguments":{match.group(2)}}}'
-            )
+            candidates.append(f'{{"action":"{match.group(1)}","arguments":{match.group(2)}}}')
 
         for match in re.finditer(r"<\|tool_call\|?>(.*?)(?:<\|/tool_call\|?>|$)", text, flags=re.IGNORECASE | re.DOTALL):
             body = match.group(1).strip()
