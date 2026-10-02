@@ -60,13 +60,69 @@ _NEVER = re.compile(
 
 
 def execution_mode() -> str:
-    raw = str(getattr(config, "terminal_execution_mode", "docker") or "docker").strip().lower()
-    return "host" if raw == "host" else "docker"
+    """The configured mode: "auto" (sandbox when Docker runs, else this PC), "docker" or "host"."""
+    raw = str(getattr(config, "terminal_execution_mode", "auto") or "auto").strip().lower()
+    if raw in {"docker", "sandbox", "container"}:
+        return "docker"
+    return "host" if raw == "host" else "auto"
+
+
+_DOCKER_CHECK: dict[str, Any] = {"at": 0.0, "ok": False}
+
+
+def docker_available(max_age: float = 30.0) -> bool:
+    """Is Docker running right now? Cached briefly so every command doesn't pay for `docker info`."""
+    now = time.monotonic()
+    if now - float(_DOCKER_CHECK["at"]) > max_age:
+        ok, _ = _SANDBOX.daemon_ok()
+        _DOCKER_CHECK.update(at=now, ok=ok)
+    return bool(_DOCKER_CHECK["ok"])
+
+
+def resolved_mode() -> str:
+    """Where commands actually run: "docker" (sandbox) or "host"."""
+    mode = execution_mode()
+    if mode == "auto":
+        return "docker" if docker_available() else "host"
+    return mode
+
+
+def network_policy() -> str:
+    """Sandbox internet access: "ask" (off until a command needs it and you approve), "on" or "off"."""
+    value = str(getattr(config, "terminal_docker_network", "") or os.getenv("TERMINAL_DOCKER_NETWORK", "ask")).strip().lower()
+    if value in {"none", "off", "false", "0"}:
+        return "off"
+    if value in {"bridge", "on", "true", "1"}:
+        return "on"
+    return "ask"
 
 
 def docker_network() -> str:
-    value = str(getattr(config, "terminal_docker_network", "") or os.getenv("TERMINAL_DOCKER_NETWORK", "bridge")).strip().lower()
-    return "none" if value in {"none", "off", "false", "0"} else "bridge"
+    """Network the container is created on. It is disconnected when the policy is not "on"."""
+    return "none" if network_policy() == "off" else "bridge"
+
+
+# In the sandbox the workspace folders are still your real files.
+_WORKSPACE_DESTRUCTIVE = re.compile(
+    r"(?ix)(^|[\s;&|(])(rm\s|rmdir|unlink\s|shred\s|git\s+reset\s+--hard|git\s+clean|git\s+checkout\s+--|"
+    r"git\s+push|find\s+.*-delete|truncate\s)"
+)
+
+
+def approval_for(args: dict[str, Any]) -> tuple[bool, str]:
+    """When a terminal command needs the user's OK. Called by approvals.py."""
+    from agent.lean.approvals import dangerous_command
+
+    command = str(args.get("command") or args.get("cmd") or "")
+    if resolved_mode() == "host":
+        return (True, "this command can change or delete things") if dangerous_command(command) else (False, "")
+    if str(args.get("where") or "").lower() == "host":
+        return True, "this runs directly on your PC, outside the sandbox"
+    if args.get("network") and network_policy() == "ask":
+        return True, "this command needs internet access"
+    if _WORKSPACE_DESTRUCTIVE.search(command):
+        return True, "this can delete or overwrite files in your project"
+    return False, ""
 
 
 def _limit(name: str, legacy_default: str, default: str) -> str:
@@ -256,7 +312,18 @@ class DockerSandbox:
             created = self._run(args, timeout=180)
             if created.returncode != 0:
                 return False, f"Could not start the sandbox container: {created.stderr.strip()[-400:]}"
+            if network_policy() == "ask":
+                # Offline until a command asks for the internet (and you approve).
+                self.set_network(False)
             return True, "ready"
+
+    def set_network(self, on: bool) -> bool:
+        """Connect or disconnect the sandbox from the internet (bridge network)."""
+        verb = "connect" if on else "disconnect"
+        proc = self._run(["network", verb, "bridge", CONTAINER_NAME], timeout=30)
+        text = (proc.stderr or "") + (proc.stdout or "")
+        # Already in the wanted state is fine.
+        return proc.returncode == 0 or "already exists" in text or "is not connected" in text
 
     def exec(self, command: str, workdir: str, timeout: int) -> tuple[int, str]:
         try:
@@ -377,7 +444,8 @@ class Terminal:
 
     def __init__(self, project_root: str = "") -> None:
         self.project_root = project_root
-        self.mode = execution_mode()
+        # "docker" (sandbox) or "host"; "auto" resolves to one of them here.
+        self.mode = resolved_mode()
 
     def _cwd(self, raw: Any) -> tuple[Optional[Path], str]:
         from agent.tools import _format_file_tool_roots, _safe_file_path
@@ -406,9 +474,17 @@ class Terminal:
                     "use `;` not `&&` in Windows PowerShell). Start servers and watchers with process_start.")
         plan = mount_plan(self.project_root)
         mounts = ", ".join(f"{root} -> {target}" for root, target in plan) or "none"
-        return ("terminal runs bash in a Linux sandbox container (Node 22, Python 3, git; network "
-                f"{'on' if docker_network() == 'bridge' else 'off'}). Your folders are mounted: {mounts}. "
-                "Windows paths in commands are translated automatically. Start servers and watchers with process_start.")
+        policy = network_policy()
+        network = {
+            "on": "internet on",
+            "off": "no internet",
+            "ask": "offline by default; set network=true for commands that need the internet (npm/pip install, git clone)",
+        }[policy]
+        return ("terminal runs bash in a Linux sandbox container (Node 22, Python 3, git; "
+                f"{network}). Your folders are mounted: {mounts}. "
+                "Windows paths in commands are translated automatically. Only if a task truly needs this PC "
+                "(Windows apps, installed tools), set where=\"host\"; that asks the user first. "
+                "Start servers and watchers with process_start.")
 
     def run(self, args: dict[str, Any]) -> str:
         command = str(args.get("command") or args.get("cmd") or "").strip()
@@ -421,19 +497,31 @@ class Terminal:
             return error
         timeout = _timeout(args.get("timeout"), 120)
         started = time.perf_counter()
-        if self.mode == "host":
+        where = "host" if self.mode == "host" or str(args.get("where") or "").lower() == "host" else "docker"
+        if where == "host":
             code, out = _run_host(command, cwd, timeout)
         else:
             plan = mount_plan(self.project_root)
             ok, detail = _SANDBOX.ensure_container(plan)
             if not ok:
                 return (f"Error: the Docker sandbox is not available: {detail} "
-                        "Tell the user to start Docker Desktop, or switch Terminal to Host in Settings > Terminal.")
+                        "Tell the user to start Docker Desktop, or switch Terminal to Auto or This PC in Settings > Terminal.")
+            want_net = bool(args.get("network"))
+            policy = network_policy()
+            if want_net and policy == "off":
+                return "Error: internet access is turned off for the sandbox in Settings > Terminal."
+            if want_net and policy == "ask":
+                _SANDBOX.set_network(True)
             workdir = to_container_path(cwd, plan) or "/work"
-            code, out = _SANDBOX.exec(translate_windows_paths(command, plan), workdir, timeout)
+            try:
+                code, out = _SANDBOX.exec(translate_windows_paths(command, plan), workdir, timeout)
+            finally:
+                if want_net and policy == "ask":
+                    _SANDBOX.set_network(False)
         elapsed = time.perf_counter() - started
         status = "ok" if code == 0 else f"exit code {code}"
-        return f"[{status} · {elapsed:.1f}s · {self.mode} · {cwd}]\n{_clip(out.strip()) or '(no output)'}"
+        label = "this PC" if where == "host" else "sandbox"
+        return f"[{status} · {elapsed:.1f}s · {label} · {cwd}]\n{_clip(out.strip()) or '(no output)'}"
 
     def process_start(self, args: dict[str, Any]) -> str:
         command = str(args.get("command") or "").strip()
@@ -493,6 +581,10 @@ class Terminal:
                     "command": {"type": "string"},
                     "cwd": {"type": "string", "description": "Folder to run in (default: project folder)."},
                     "timeout": {"type": "integer", "description": "Seconds, up to 900 (default 120)."},
+                    **({
+                        "network": {"type": "boolean", "description": "True if the command needs the internet (installs, git clone)."},
+                        "where": {"type": "string", "enum": ["sandbox", "host"], "description": "Leave as sandbox unless this PC is truly needed."},
+                    } if self.mode == "docker" else {}),
                 }, "required": ["command"]},
                 func=self.run,
             ),

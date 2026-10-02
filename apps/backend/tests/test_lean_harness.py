@@ -72,13 +72,18 @@ def test_never_list_blocks_system_destruction():
         assert not _NEVER.search(ok), ok
 
 
-def test_dangerous_terminal_commands_need_approval():
-    class E:
-        risk_level = "destructive"
-        is_action = True
-        category = "system"
-        origin = "native"
+class _TerminalEntry:
+    risk_level = "destructive"
+    is_action = True
+    category = "system"
+    origin = "native"
 
+
+def test_dangerous_terminal_commands_need_approval(monkeypatch):
+    from agent.lean import terminal
+
+    monkeypatch.setattr(terminal, "resolved_mode", lambda: "host")
+    E = _TerminalEntry
     assert tool_needs_approval(E(), "terminal", {"command": "git push origin main"})[0]
     assert tool_needs_approval(E(), "terminal", {"command": "npm install && rm build.txt"})[0]
     assert not tool_needs_approval(E(), "terminal", {"command": "npm test"})[0]
@@ -145,3 +150,48 @@ def test_routine_runs_on_lean_loop_and_delivers(monkeypatch):
     assert calls["source"] == "routine" and calls["persona_id"] == "scout"
     assert "automated run" in calls["message"] and "Summarize news" in calls["message"]
     assert sent == [("Done: 3 headlines.", ["discord"])]
+
+
+def test_sandbox_asks_only_to_leave_it_go_online_or_delete_project_files(monkeypatch):
+    from agent.lean import terminal
+
+    monkeypatch.setattr(terminal, "resolved_mode", lambda: "docker")
+    monkeypatch.setattr(terminal, "network_policy", lambda: "ask")
+    E = _TerminalEntry
+    assert not tool_needs_approval(E(), "terminal", {"command": "npm test"})[0]
+    assert not tool_needs_approval(E(), "terminal", {"command": "curl https://example.com"})[0]  # offline anyway
+    assert tool_needs_approval(E(), "terminal", {"command": "npm install", "network": True}) == (True, "this command needs internet access")
+    assert tool_needs_approval(E(), "terminal", {"command": "dir", "where": "host"})[1].startswith("this runs directly on your PC")
+    assert tool_needs_approval(E(), "terminal", {"command": "rm build.txt"})[0]
+    assert tool_needs_approval(E(), "terminal", {"command": "git reset --hard HEAD~1"})[0]
+    monkeypatch.setattr(terminal, "network_policy", lambda: "on")
+    assert not tool_needs_approval(E(), "terminal", {"command": "npm install", "network": True})[0]
+
+
+def test_auto_mode_uses_the_sandbox_only_when_docker_runs(monkeypatch):
+    from config import config
+    from agent.lean import terminal
+
+    monkeypatch.setattr(config, "terminal_execution_mode", "auto", raising=False)
+    monkeypatch.setattr(terminal, "docker_available", lambda max_age=30.0: True)
+    assert terminal.resolved_mode() == "docker"
+    monkeypatch.setattr(terminal, "docker_available", lambda max_age=30.0: False)
+    assert terminal.resolved_mode() == "host"
+    monkeypatch.setattr(config, "terminal_execution_mode", "host", raising=False)
+    assert terminal.resolved_mode() == "host"
+
+
+def test_v10_settings_migration_moves_terminal_defaults_once(monkeypatch, tmp_path):
+    import json
+
+    import config as config_mod
+
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"terminal_execution_mode": "host", "terminal_docker_network": "bridge"}), encoding="utf-8")
+    monkeypatch.setattr(config_mod, "SETTINGS_PATH", settings_path)
+    monkeypatch.setattr(config_mod, "_V10_MARKER", tmp_path / ".settings-migrated-v10")
+    migrated = config_mod._migrate_v10_defaults(config_mod._read_json_dict(settings_path))
+    assert (migrated["terminal_execution_mode"], migrated["terminal_docker_network"]) == ("auto", "ask")
+    # A later explicit choice is kept.
+    settings_path.write_text(json.dumps({"terminal_execution_mode": "host"}), encoding="utf-8")
+    assert config_mod._migrate_v10_defaults(config_mod._read_json_dict(settings_path))["terminal_execution_mode"] == "host"

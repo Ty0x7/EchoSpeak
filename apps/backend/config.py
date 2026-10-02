@@ -297,8 +297,36 @@ def _strip_secret_overrides(payload: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+_V10_MARKER = DATA_DIR / ".settings-migrated-v10"
+
+
+def _migrate_v10_defaults(payload: dict[str, Any]) -> dict[str, Any]:
+    """Once, on upgrade to 10.0: move the terminal to the new defaults.
+
+    Before 10.0 the terminal was either sandbox-only or this-PC-only and the
+    sandbox was always online. 10.0 defaults to "auto" (sandbox when Docker
+    runs) with internet on request. Later choices in Settings are kept.
+    """
+    if _V10_MARKER.exists():
+        return payload
+    changed = False
+    if str(payload.get("terminal_execution_mode") or "").strip().lower() in {"host", "docker"}:
+        payload["terminal_execution_mode"] = "auto"
+        changed = True
+    if str(payload.get("terminal_docker_network") or "").strip().lower() == "bridge":
+        payload["terminal_docker_network"] = "ask"
+        changed = True
+    try:
+        if changed:
+            _write_json_dict(SETTINGS_PATH, payload)
+        _V10_MARKER.write_text("terminal defaults moved to auto/ask\n", encoding="utf-8")
+    except OSError:
+        pass
+    return payload
+
+
 def read_runtime_override_payload(include_secrets: bool = True, migrate_legacy: bool = True) -> dict[str, Any]:
-    public_payload = _read_json_dict(SETTINGS_PATH)
+    public_payload = _migrate_v10_defaults(_read_json_dict(SETTINGS_PATH))
     refs = public_payload.get(_CREDENTIAL_REFS_KEY)
     refs = dict(refs) if isinstance(refs, dict) else {}
     secret_payload: dict[str, Any] = {}
@@ -885,14 +913,15 @@ class Config:
                 self.mcp_servers = {}
         else:
             self.mcp_servers = {}
-        # docker|sandbox is the safe default; host execution requires explicit opt-in.
-        self.terminal_execution_mode = os.getenv("TERMINAL_EXECUTION_MODE", "docker").strip().lower()
+        # auto (default): the Docker sandbox when it is running, otherwise this PC.
+        # docker: sandbox only. host: this PC only.
+        self.terminal_execution_mode = os.getenv("TERMINAL_EXECUTION_MODE", "auto").strip().lower()
         self.terminal_docker_image = os.getenv("TERMINAL_DOCKER_IMAGE", "python:3.12-slim").strip() or "python:3.12-slim"
         self.terminal_docker_memory = os.getenv("TERMINAL_DOCKER_MEMORY", "512m").strip() or "512m"
         self.terminal_docker_cpus = os.getenv("TERMINAL_DOCKER_CPUS", "1.0").strip() or "1.0"
         self.terminal_docker_user = os.getenv("TERMINAL_DOCKER_USER", "65534:65534").strip() or "65534:65534"
-        # Lean sandbox: persistent dev container network ("bridge" = on, "none" = off).
-        self.terminal_docker_network = os.getenv("TERMINAL_DOCKER_NETWORK", "bridge").strip().lower() or "bridge"
+        # Lean sandbox internet: "ask" (default; off until a command needs it and you approve), "bridge"/"on", "none"/"off".
+        self.terminal_docker_network = os.getenv("TERMINAL_DOCKER_NETWORK", "ask").strip().lower() or "ask"
         # Lean runtime controls (Settings > Agent).
         self.lean_approval_mode = os.getenv("LEAN_APPROVAL_MODE", "smart").strip().lower() or "smart"
         self.lean_max_iterations = int(os.getenv("LEAN_MAX_ITERATIONS", "60") or 60)

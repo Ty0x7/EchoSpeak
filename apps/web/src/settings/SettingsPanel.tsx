@@ -492,8 +492,12 @@ function TerminalSection({ s, save, apiBase }: { s: SettingsMap; save: Save; api
     return () => window.clearInterval(timer);
   }, [refresh, info?.setup?.running]);
 
-  const mode = String(s.terminal_execution_mode || "docker") === "host" ? "host" : "docker";
+  const rawMode = String(s.terminal_execution_mode || "auto");
+  const mode = rawMode === "host" ? "host" : rawMode === "docker" ? "docker" : "auto";
   const docker = info?.docker || {};
+  // In Auto, the sandbox is used whenever Docker is running.
+  const usesSandbox = mode === "docker" || (mode === "auto" && Boolean(docker.docker_running));
+  const network = ["none", "off"].includes(String(s.terminal_docker_network)) ? "off" : ["bridge", "on"].includes(String(s.terminal_docker_network)) ? "on" : "ask";
   const setup = async () => {
     await fetch(`${apiBase}/lean/terminal/setup`, { method: "POST" });
     void refresh();
@@ -510,6 +514,9 @@ function TerminalSection({ s, save, apiBase }: { s: SettingsMap; save: Save; api
     if (mode === "host") {
       tone = "ok";
       statusText = `Ready · ${info.host_shell}`;
+    } else if (mode === "auto" && !docker.docker_running) {
+      tone = "ok";
+      statusText = `Running on this PC · start Docker Desktop to use the sandbox`;
     } else if (info.setup?.running) {
       tone = "warn";
       statusText = info.setup.message || "Setting up…";
@@ -536,6 +543,12 @@ function TerminalSection({ s, save, apiBase }: { s: SettingsMap; save: Save; api
           onChange={(v) => save({ terminal_execution_mode: v })}
           options={[
             {
+              value: "auto",
+              title: "Auto",
+              badge: "Recommended",
+              body: "Uses the sandbox whenever Docker Desktop is running, and this PC otherwise. Agents ask before leaving the sandbox.",
+            },
+            {
               value: "docker",
               title: "Sandbox",
               badge: "Safer",
@@ -550,8 +563,8 @@ function TerminalSection({ s, save, apiBase }: { s: SettingsMap; save: Save; api
         />
       </Group>
       <Group title="Status">
-        <Row label={<Status tone={tone}>{statusText}</Status>} help={mode === "docker" ? info?.setup?.ok === false ? info.setup.message : docker.detail : undefined}>
-          {mode === "docker" ? (
+        <Row label={<Status tone={tone}>{statusText}</Status>} help={usesSandbox ? info?.setup?.ok === false ? info.setup.message : docker.detail : undefined}>
+          {usesSandbox ? (
             <div className="st-inline-actions">
               <button type="button" className="es-btn es-btn-sm" onClick={() => void reset()} disabled={!docker.docker_running}>Reset</button>
               <button type="button" className="es-btn es-btn-sm es-btn-primary" onClick={() => void setup()} disabled={Boolean(info?.setup?.running) || !docker.docker_installed}>
@@ -560,7 +573,7 @@ function TerminalSection({ s, save, apiBase }: { s: SettingsMap; save: Save; api
             </div>
           ) : null}
         </Row>
-        {mode === "docker" && info?.mounts?.length ? (
+        {usesSandbox && info?.mounts?.length ? (
           <Row label="Folders inside the sandbox" stack>
             <div className="st-mounts">
               {info.mounts.map((m) => (
@@ -575,10 +588,18 @@ function TerminalSection({ s, save, apiBase }: { s: SettingsMap; save: Save; api
           </Row>
         ) : null}
       </Group>
-      {mode === "docker" ? (
+      {mode !== "host" ? (
         <Group title="Sandbox options">
-          <Row label="Internet access" help="Needed for npm install, pip install, and git clone.">
-            <Toggle checked={String(s.terminal_docker_network || "bridge") !== "none"} onChange={(v) => save({ terminal_docker_network: v ? "bridge" : "none" })} label="Internet access" />
+          <Row label="Internet access" help="Needed for npm install, pip install, and git clone. Ask first keeps the sandbox offline until a command needs it.">
+            <Select
+              value={network}
+              onChange={(v) => save({ terminal_docker_network: v })}
+              options={[
+                { value: "ask", label: "Ask first" },
+                { value: "on", label: "Always on" },
+                { value: "off", label: "Off" },
+              ]}
+            />
           </Row>
           <Row label="Memory limit">
             <Select value={String(s.terminal_docker_memory || "4g").replace("512m", "4g")} onChange={(v) => save({ terminal_docker_memory: v })} options={["2g", "4g", "6g", "8g"].map((m) => ({ value: m, label: m.toUpperCase().replace("G", " GB") }))} />

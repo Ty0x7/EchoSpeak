@@ -9847,12 +9847,13 @@ export const Dashboard: React.FC<{
                             <label style={{ display: "block", fontSize: 13, color: colors.textDim, marginBottom: 4 }}>Terminal Execution Mode</label>
                             <select
                               className="input-field"
-                              value={String(settingsDraft.terminal_execution_mode || "docker")}
+                              value={String(settingsDraft.terminal_execution_mode || "auto")}
                               onChange={(e) => updateDraft("terminal_execution_mode", e.target.value)}
                               style={{ width: "100%", padding: "10px 14px", fontSize: 14 }}
                             >
-                              <option value="docker">Docker sandbox (recommended)</option>
-                              <option value="host">Host terminal (unsandboxed opt-in)</option>
+                              <option value="auto">Auto: sandbox when Docker runs (recommended)</option>
+                              <option value="docker">Docker sandbox only</option>
+                              <option value="host">This PC only</option>
                             </select>
                             <div className="research-snippet" style={{ marginTop: 5, fontSize: 11 }}>
                               Terminal is optional for ordinary file reads and approval-gated edits. Host mode runs commands directly on this machine.

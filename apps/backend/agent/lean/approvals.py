@@ -47,6 +47,11 @@ _DANGEROUS_COMMAND = re.compile(
 )
 
 
+def dangerous_command(command: str) -> bool:
+    """A shell command that can change or delete things on this PC."""
+    return bool(_DANGEROUS_COMMAND.search(command or ""))
+
+
 def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bool, str]:
     """Return (needs_approval, reason)."""
     mode = settings.approval_mode()
@@ -55,10 +60,11 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
     if mode == "always":
         return bool(getattr(entry, "is_action", False)), "action tool"
     if name in {"terminal_run", "terminal", "process_start"}:
-        command = str(args.get("command") or "")
-        if _DANGEROUS_COMMAND.search(command):
-            return True, "this command can change or delete things"
-        return False, ""
+        # Sandbox: ask only to leave it, to go online, or to delete project files.
+        # This PC: ask for dangerous commands (terminal.approval_for).
+        from agent.lean.terminal import approval_for
+
+        return approval_for(args)
     if name in EXTERNAL_TOOLS or str(getattr(entry, "category", "")) in {"discord", "email", "communications"} and getattr(entry, "is_action", False):
         return True, "this sends something outside your machine"
     if name in DESKTOP_CONTROL_TOOLS:
