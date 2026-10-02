@@ -8623,6 +8623,16 @@ export const Dashboard: React.FC<{
                         </div>
                       </section>
                     ) : null}
+                    {!timeline.length && !streaming && !lean.live ? (
+                      <div className="es-chat-empty">
+                        <strong>{activeRoom ? activeRoom.name : "What can I help with?"}</strong>
+                        <span>
+                          {activeRoom?.kind === "group"
+                            ? "Write to the whole group, or @mention an agent to pick who answers."
+                            : "Ask anything, or drop a folder on the composer to work inside a project."}
+                        </span>
+                      </div>
+                    ) : null}
                     <AnimatePresence initial={false}>
                       {timeline.map((t) =>
                         t.kind === "message" ? (

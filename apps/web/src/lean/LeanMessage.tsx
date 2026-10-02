@@ -209,7 +209,7 @@ export function LeanMessage({
       ) : null}
       <div className="lm-body">
         {waiting ? (
-          <div className="lm-waiting"><span className="lm-dots"><i /><i /><i /></span><span className="lm-shimmer">Starting up</span></div>
+          <div className="lm-waiting" aria-hidden><span className="lm-dots"><i /><i /><i /></span></div>
         ) : null}
         {segments.map((seg, index) => {
           if (seg.kind === "thinking") return <ThinkingBlock key={`t${index}`} seg={seg} live={streaming} />;
