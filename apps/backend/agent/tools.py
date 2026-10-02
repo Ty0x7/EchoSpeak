@@ -313,14 +313,10 @@ def _candidate_file_path(path: str, root: Path) -> Path:
     candidate = Path(raw).expanduser()
     if candidate.is_absolute():
         return candidate
-    # Bare relative paths during coding → project folder, not EchoSpeak repo root
+    # Relative paths resolve inside the active project (src/, apps/, anything).
     proj = get_active_project_root()
-    if proj is not None and not low.startswith(("desktop/", "apps/", "src/")):
-        try:
-            if proj.exists() or True:
-                return proj / raw
-        except Exception:
-            pass
+    if proj is not None:
+        return proj / raw
     candidate = root / raw
     return candidate
 
@@ -428,6 +424,10 @@ def _mutation_precondition_denial(tool_name: str) -> str:
     if tool_name not in governed:
         return ""
     context = _tool_execution_context.get() or {}
+    if context.get("lean_runtime"):
+        # The lean loop approves destructive actions before the call and
+        # checkpoints every overwrite; there is no frozen precondition to match.
+        return ""
     expected = dict(context.get("mutation_precondition") or {})
     if int(expected.get("version") or 0) < 2:
         return "Mutation blocked: no versioned approval precondition reached the tool boundary."
@@ -890,7 +890,8 @@ def _looks_like_code_stub(path: str, content: str) -> bool:
             or re.match(r"^//.*", ln)
             for ln in lines
         )
-        if commentish or len(c) < 60:
+        # Short real code (a one-line script) is fine; only reject placeholders.
+        if commentish:
             return True
     # Entire file is only comments / TODO placeholders
     code_lines = [

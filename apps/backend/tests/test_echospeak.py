@@ -526,7 +526,8 @@ class TestDiscordHardening:
         assert resolved.resolve() != (_file_tool_root() / "index.html").resolve()
         # Stub rejection (generic code quality gate)
         assert _looks_like_code_stub("game.js", "// Implement collision detection…") is True
-        assert _looks_like_code_stub("game.js", "x=1") is True
+        # Short real code is a legitimate file; only placeholders are stubs.
+        assert _looks_like_code_stub("hello.py", 'print("hi")') is False
         big = "function loop(){ requestAnimationFrame(loop); }\n" * 20
         assert _looks_like_code_stub("game.js", big) is False
         set_active_project_root(None)

@@ -109,10 +109,14 @@ def safe_decision_rejection_message(
                 "that confidently, so I haven't guessed."
             )
         if decision is not None and decision.kind == DecisionKind.CALL_TOOL:
+            # A rejected proposal is not evidence that the user's request is
+            # blocked.  The control plane will give the selected model a
+            # bounded chance to choose another currently-authorized capability;
+            # if that is exhausted, keep the user-facing message free of
+            # internal requirement/authority terminology.
             return (
-                "I still need to run a verified lookup for the remaining public-source part, "
-                "but the tool call was not accepted under the current requirement binding. "
-                "Please retry that part."
+                "I couldn't run that lookup with the first proposed approach. "
+                "The request is preserved and can continue with an available research path."
             )
         return "I need to verify that with an available source before I answer, so I won't guess."
     if decision is not None and decision.kind == DecisionKind.CALL_TOOL:
@@ -384,17 +388,31 @@ class ModelStreamIdleTimeout(ModelProviderError):
         )
 
 
+class ModelStreamTimeout(ModelProviderError):
+    """Hard cap one provider call even when it keeps emitting heartbeats."""
+
+    def __init__(
+        self,
+        timeout_seconds: float,
+        *,
+        progress_chars: int = 0,
+        event_count: int = 0,
+    ) -> None:
+        self.timeout_seconds = float(timeout_seconds)
+        self.progress_chars = int(progress_chars)
+        self.event_count = int(event_count)
+        super().__init__(
+            "selected provider stream exceeded its call budget of "
+            f"{self.timeout_seconds:.1f}s"
+        )
+
+
 def _provider_error_retryability(
     exc: Exception,
     *,
     partial_stream: bool,
 ) -> tuple[bool, str]:
     """Classify provider failures without creating a second retry authority."""
-
-    if isinstance(exc, ModelStreamIdleTimeout):
-        return False, "stream_idle_timeout"
-    if partial_stream:
-        return False, "partial_stream_failed"
 
     error_type = type(exc).__name__.casefold()
     message = str(exc or "").casefold()
@@ -426,6 +444,14 @@ def _provider_error_retryability(
         return False, "non_retryable_provider_error"
     if any(item in message for item in non_retryable_messages):
         return False, "non_retryable_provider_error"
+
+    if isinstance(exc, ModelStreamTimeout):
+        return True, "stream_call_timeout"
+    if isinstance(exc, ModelStreamIdleTimeout):
+        # A stream that pauses is recoverable when the same selected model is
+        # still authoritative. Keep the retry bounded by the control-plane
+        # provider_retries budget; never substitute a provider or model here.
+        return True, "stream_idle_timeout"
     if status_code is not None:
         retryable_status = (
             status_code in {408, 409, 425, 429} or status_code >= 500
@@ -436,6 +462,12 @@ def _provider_error_retryability(
             if retryable_status
             else "non_retryable_provider_error",
         )
+
+    if partial_stream:
+        # A partial stream may be a transport interruption rather than a bad
+        # model response. Give the selected model one bounded clean retry so
+        # local reasoning streams do not become terminal chat failures.
+        return True, "partial_stream_failed"
 
     transient_types = (
         "apierror",
@@ -516,6 +548,30 @@ class RuntimeProposalFeedback(RuntimeError):
         )
 
 
+def safe_runtime_feedback_message(feedback: RuntimeProposalFeedback) -> str:
+    """Keep internal binding/allowlist diagnostics out of Chat."""
+
+    code = str(getattr(feedback, "reason_code", "") or "").casefold()
+    if (
+        code.startswith("tool_")
+        or code.startswith("task_")
+        or code.startswith("requirement_")
+        or code in {
+            "no_actionable_requirement",
+            "capability_inventory_changed",
+            "permission_snapshot_changed",
+            "project_authority_changed",
+            "project_root_changed",
+            "model_binding_changed",
+        }
+    ):
+        return (
+            "I couldn't complete that lookup on the first attempt. "
+            "The request is preserved and can continue with an available research path."
+        )
+    return str(getattr(feedback, "safe_message", "The request is preserved while Echo recovers."))
+
+
 class ModelTransport(Protocol):
     def complete(
         self,
@@ -542,6 +598,7 @@ class LangChainStreamingTransport:
         chat_model: Any,
         *,
         stream_idle_timeout_seconds: float = 45.0,
+        max_call_seconds: float = 180.0,
         poll_interval_seconds: float = 0.1,
         generation_parameters: Optional[dict[str, Any]] = None,
         callbacks: Optional[list[Any]] = None,
@@ -549,6 +606,9 @@ class LangChainStreamingTransport:
         self.chat_model = chat_model
         self.stream_idle_timeout_seconds = max(
             0.05, float(stream_idle_timeout_seconds)
+        )
+        self.max_call_seconds = max(
+            self.stream_idle_timeout_seconds, float(max_call_seconds)
         )
         self.poll_interval_seconds = max(0.01, float(poll_interval_seconds))
         self.generation_parameters = dict(generation_parameters or {})
@@ -576,6 +636,7 @@ class LangChainStreamingTransport:
         aggregate: Any = None
         stream_queue: queue.Queue[tuple[str, Any]] = queue.Queue()
         stop_event = threading.Event()
+        iterator_ref: dict[str, Any] = {}
 
         def produce() -> None:
             iterator: Any = None
@@ -587,6 +648,7 @@ class LangChainStreamingTransport:
                     )
                 else:
                     iterator = runnable.stream(outbound)
+                iterator_ref["value"] = iterator
                 for chunk in iterator:
                     if stop_event.is_set():
                         break
@@ -608,17 +670,29 @@ class LangChainStreamingTransport:
             daemon=True,
         )
         worker.start()
-        last_progress_at = time.monotonic()
+        call_started_at = time.monotonic()
+        last_progress_at = call_started_at
         progress_chars = 0
         try:
             while True:
                 if cancel and cancel():
                     stop_event.set()
                     return AssembledModelResponse(finish_reason="cancelled")
-                remaining = self.stream_idle_timeout_seconds - (
-                    time.monotonic() - last_progress_at
+                now = time.monotonic()
+                idle_remaining = self.stream_idle_timeout_seconds - (
+                    now - last_progress_at
                 )
-                if remaining <= 0:
+                call_remaining = self.max_call_seconds - (
+                    now - call_started_at
+                )
+                if call_remaining <= 0:
+                    stop_event.set()
+                    raise ModelStreamTimeout(
+                        self.max_call_seconds,
+                        progress_chars=progress_chars,
+                        event_count=len(events),
+                    )
+                if idle_remaining <= 0:
                     stop_event.set()
                     raise ModelStreamIdleTimeout(
                         self.stream_idle_timeout_seconds,
@@ -627,7 +701,11 @@ class LangChainStreamingTransport:
                     )
                 try:
                     event_kind, value = stream_queue.get(
-                        timeout=min(self.poll_interval_seconds, remaining)
+                        timeout=min(
+                            self.poll_interval_seconds,
+                            idle_remaining,
+                            call_remaining,
+                        )
                     )
                 except queue.Empty:
                     continue
@@ -639,6 +717,11 @@ class LangChainStreamingTransport:
                 aggregate = chunk if aggregate is None else aggregate + chunk
                 event = _langchain_chunk_event(chunk)
                 events.append(event)
+                # Metadata/heartbeat chunks prove that the provider is alive,
+                # even when no token was emitted. Meaningful token progress is
+                # still counted separately for diagnostics; the hard call
+                # budget above prevents a heartbeat-only stream from hanging.
+                last_progress_at = time.monotonic()
                 choice = (event.get("choices") or [{}])[0]
                 delta = choice.get("delta") or {}
                 fragments = delta.get("tool_calls") or []
@@ -668,6 +751,13 @@ class LangChainStreamingTransport:
                     })
         finally:
             stop_event.set()
+            active_iterator = iterator_ref.get("value")
+            close_active_iterator = getattr(active_iterator, "close", None)
+            if callable(close_active_iterator):
+                try:
+                    close_active_iterator()
+                except Exception:
+                    pass
             worker.join(timeout=0.25)
         parsed = adapter.parse_stream(events)
         # A provider may expose only normalized tool_calls on its aggregate
@@ -1284,7 +1374,7 @@ class ModelExecutionControlPlane:
         max_loops: int = 12,
         max_tool_calls: int = 16,
         malformed_repair_attempts: int = 2,
-        provider_retries: int = 1,
+        provider_retries: int = 2,
         provider_backoff_seconds: float = 0.35,
         no_progress_limit: int = 2,
         max_elapsed_seconds: float = 600.0,
@@ -1446,8 +1536,13 @@ class ModelExecutionControlPlane:
                         exc,
                         partial_stream=partial_stream,
                     )
+                    retry_limit = (
+                        1
+                        if isinstance(exc, (ModelStreamIdleTimeout, ModelStreamTimeout))
+                        else self.provider_retries
+                    )
                     will_retry = (
-                        retryable and provider_attempt < self.provider_retries
+                        retryable and provider_attempt < retry_limit
                     )
                     self._emit(
                         diagnostic_sink,
@@ -1455,6 +1550,7 @@ class ModelExecutionControlPlane:
                             "event": "provider_retry",
                             "attempt": provider_attempt + 1,
                             "retrying": will_retry,
+                            "retry_limit": retry_limit,
                             "reason_code": reason_code,
                             "partial_stream": partial_stream,
                             "error_type": type(exc).__name__,
@@ -1465,15 +1561,28 @@ class ModelExecutionControlPlane:
                                 if isinstance(exc, ModelStreamIdleTimeout)
                                 else 0.0
                             ),
+                            "stream_call_timeout_seconds": (
+                                exc.timeout_seconds
+                                if isinstance(exc, ModelStreamTimeout)
+                                else 0.0
+                            ),
                             "stream_progress_chars": (
                                 exc.progress_chars
-                                if isinstance(exc, ModelStreamIdleTimeout)
+                                if isinstance(exc, (ModelStreamIdleTimeout, ModelStreamTimeout))
                                 else 0
                             ),
                         },
                     )
                     if not will_retry:
                         break
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "The previous generation ended before a complete response. "
+                            "Continue the same request from the current durable state; "
+                            "do not repeat completed tool actions."
+                        ),
+                    })
                     delay = self.provider_backoff_seconds * (2 ** provider_attempt)
                     deadline = time.monotonic() + delay
                     while time.monotonic() < deadline:
@@ -1631,12 +1740,21 @@ class ModelExecutionControlPlane:
                         and open_tool_work
                         and not outcomes
                     )
-                    # Valid allowed-tool rejection after failed repair is authority conflict,
-                    # not "failed model output".
+                    # A CALL_TOOL validation error is normally a recoverable
+                    # proposal problem (wrong tool name, malformed arguments,
+                    # or a stale model choice), not a policy denial.  Keep it
+                    # inside the selected-model loop so the model can select a
+                    # different tool from the fresh allowlist.  The runtime
+                    # authority remains the validator and execution boundary.
                     reason = (
-                        "runtime_authority_conflict"
+                        "tool_proposal_rejected"
                         if decision.kind == DecisionKind.CALL_TOOL
                         else "runtime_decision_rejected"
+                    )
+                    retryable_tool_proposal = bool(
+                        decision.kind == DecisionKind.CALL_TOOL
+                        and DecisionKind.CALL_TOOL in envelope.valid_next_actions
+                        and envelope.allowed_tools
                     )
                     feedback = RuntimeProposalFeedback(
                         (
@@ -1647,7 +1765,8 @@ class ModelExecutionControlPlane:
                         safe_decision_rejection_message(envelope, decision=decision),
                         retryable=(
                             prose_only_under_tools
-                            or reason != "runtime_authority_conflict"
+                            or retryable_tool_proposal
+                            or decision.kind != DecisionKind.CALL_TOOL
                         ),
                         task_run_id=envelope.task.task_run_id,
                         requirement_id=envelope.task.active_requirement_id,
@@ -1723,15 +1842,24 @@ class ModelExecutionControlPlane:
                     ),
                 })
                 continue
-            executable_calls = calls[:remaining_calls]
-            if len(executable_calls) < len(calls):
-                messages.append({
-                    "role": "system",
-                    "content": (
-                        "The runtime accepted only the calls that fit the current bounded "
-                        "tool budget. Re-evaluate remaining requirements after their outcomes."
-                    ),
-                })
+            # The runtime owns one active requirement/liveness checkpoint at a
+            # time. A model may return several calls against the same stale
+            # envelope, but executing that batch would clear the checkpoint on
+            # the first ToolRun and make the next call look unauthorized. Run
+            # only the first proposal, refresh the envelope, then let the
+            # selected model choose the next independent requirement.
+            executable_calls = calls[:1]
+            serialized_batch = len(calls) > 1
+            if serialized_batch:
+                self._emit(
+                    diagnostic_sink,
+                    {
+                        "event": "tool_batch_serialized",
+                        "proposed_count": len(calls),
+                        "executed_count": 1,
+                        "loop": trace.loop_count,
+                    },
+                )
             recover_batch = False
             for batch_index, call in enumerate(executable_calls):
                 tool_call_count += 1
@@ -1749,12 +1877,35 @@ class ModelExecutionControlPlane:
                     recover_batch = True
                     break
                 except RuntimeProposalFeedback as feedback:
+                    if feedback.reason_code == "no_actionable_requirement":
+                        refreshed = envelope_factory(outcomes)
+                        if refreshed.completion_evaluation.finalizable:
+                            grounded = (
+                                synthesize_mixed_requirement_partial(refreshed)
+                                or synthesize_structured_evidence_answer(refreshed)
+                            )
+                            if grounded:
+                                repaired = AgentDecision(
+                                    kind=DecisionKind.ANSWER,
+                                    message=grounded,
+                                    reason_code="runtime_grounded_answer_fallback",
+                                    verified_outcome_ids=[
+                                        item.run_id
+                                        for item in refreshed.verified_tool_outcomes
+                                    ],
+                                )
+                                return self._finish(
+                                    repaired,
+                                    trace,
+                                    "answer",
+                                    diagnostic_sink,
+                                )
                     if recover_from_feedback(feedback):
                         recover_batch = True
                         break
                     blocked = AgentDecision(
                         kind=DecisionKind.BLOCK,
-                        message=feedback.safe_message,
+                        message=safe_runtime_feedback_message(feedback),
                         reason_code=feedback.reason_code,
                     )
                     return self._finish(blocked, trace, "blocked", diagnostic_sink)
@@ -1785,7 +1936,7 @@ class ModelExecutionControlPlane:
                         break
                     blocked = AgentDecision(
                         kind=DecisionKind.BLOCK,
-                        message=feedback.safe_message,
+                        message=safe_runtime_feedback_message(feedback),
                         reason_code=feedback.reason_code,
                     )
                     return self._finish(blocked, trace, "blocked", diagnostic_sink)
@@ -1821,6 +1972,15 @@ class ModelExecutionControlPlane:
                         )
                     })
                 messages.append(adapter.format_tool_outcome(projected, call.id))
+                if serialized_batch:
+                    messages.append({
+                        "role": "system",
+                        "content": (
+                            "The runtime executed the first proposal and refreshed the "
+                            "requirement ledger. Re-evaluate the remaining requirements "
+                            "before proposing another tool."
+                        ),
+                    })
             if recover_batch:
                 continue
         blocked = AgentDecision(
@@ -1936,12 +2096,20 @@ def _to_langchain_messages(messages: list[dict[str, Any]]) -> list[Any]:
 
 def _langchain_chunk_event(chunk: Any) -> dict[str, Any]:
     content = getattr(chunk, "content", "") or ""
+    content_blocks = content if isinstance(content, list) else None
     if isinstance(content, list):
         content = "".join(
-            str(item.get("text") or "") if isinstance(item, dict) else str(item)
+            (
+                ""
+                if isinstance(item, dict)
+                and str(item.get("type") or "").casefold() in {"reasoning", "thinking"}
+                else str(item.get("text") or "")
+            ) if isinstance(item, dict) else str(item)
             for item in content
         )
     additional = dict(getattr(chunk, "additional_kwargs", None) or {})
+    message = getattr(chunk, "message", None)
+    message_additional = dict(getattr(message, "additional_kwargs", None) or {})
     metadata = dict(getattr(chunk, "response_metadata", None) or {})
     fragments = []
     for index, item in enumerate(getattr(chunk, "tool_call_chunks", None) or []):
@@ -1954,7 +2122,19 @@ def _langchain_chunk_event(chunk: Any) -> dict[str, Any]:
             },
         })
     delta: dict[str, Any] = {"content": str(content)}
-    reasoning = additional.get("reasoning_content") or additional.get("reasoning")
+    reasoning = (
+        additional.get("reasoning_content")
+        or additional.get("reasoning")
+        or message_additional.get("reasoning_content")
+        or message_additional.get("reasoning")
+    )
+    if not reasoning and content_blocks is not None:
+        reasoning = "".join(
+            str(item.get("text") or item.get("content") or "")
+            for item in content_blocks
+            if isinstance(item, dict)
+            and str(item.get("type") or "").casefold() in {"reasoning", "thinking"}
+        )
     if reasoning:
         delta["reasoning_content"] = str(reasoning)
     if fragments:
@@ -1985,6 +2165,7 @@ __all__ = [
     "ModelExecutionControlPlane",
     "ModelProviderError",
     "ModelStreamIdleTimeout",
+    "ModelStreamTimeout",
     "ModelTransport",
     "ModelTurnEnvelopeCompiler",
     "merge_contract_into_system_messages",

@@ -19,9 +19,11 @@ type SidebarProps = {
   onRenameSession(id: string, title: string): void;
   onDeleteSession(id: string): void;
   onDeleteProject(id: string): void;
-  onView(view: "chat" | "avatar"): void;
+  onView(view: "chat"): void;
   onSettings(): void;
   settingsOpen?: boolean;
+  /** Agents and group chats (lean runtime). */
+  roster?: React.ReactNode;
 };
 
 const surface = "#0a0a0a";
@@ -141,15 +143,6 @@ function Icon({
   }
 }
 
-const primaryViewDefs: {
-  id: "chat" | "avatar";
-  label: string;
-  icon: "chat" | "avatar";
-  title: string;
-}[] = [
-  { id: "chat", label: "Chat", icon: "chat", title: "Conversation" },
-  { id: "avatar", label: "Visualizer", icon: "avatar", title: "Echo Visualizer" },
-];
 
 export function ProjectSidebar(props: SidebarProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -470,40 +463,39 @@ export function ProjectSidebar(props: SidebarProps) {
           aria-label="Primary views"
           style={{
             display: "grid",
-            gridTemplateColumns: iconOnly ? "1fr" : "1fr 1fr",
+            gridTemplateColumns: "1fr",
             gap: 3,
             padding: iconOnly ? "0 1px 5px" : "0 1px 7px",
             flex: "0 0 auto",
           }}
         >
-          {primaryViewDefs.map((view) => {
-            const active = props.activeView === view.id;
-            return (
-              <button
-                className={`echo-side-button ${active ? "is-active" : ""}`}
-                type="button"
-                key={view.id}
-                style={{
-                  ...railButton(active),
-                  width: "100%",
-                  justifyContent: "center",
-                  border: `1px solid ${active ? "rgba(255,255,255,.18)" : "rgba(255,255,255,.08)"}`,
-                  background: active ? "rgba(255,255,255,.09)" : "rgba(255,255,255,.018)",
-                }}
-                onClick={() => props.onView(view.id)}
-                title={view.title}
-                aria-label={view.title}
-              >
-                <span style={iconSlot(active)}>
-                  <Icon name={view.icon} size={iconOnly ? 16 : 15} active={active} />
-                </span>
-                {!iconOnly && <span style={titleEllipsis}>{view.label}</span>}
-              </button>
-            );
-          })}
+          <button
+            className="echo-side-button es-new-chat"
+            type="button"
+            onClick={() => {
+              props.onView("chat");
+              props.onNewSession();
+            }}
+            title="New chat"
+            aria-label="New chat"
+          >
+            <span style={iconSlot(false)}>
+              <svg width={iconOnly ? 16 : 15} height={iconOnly ? 16 : 15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+              </svg>
+            </span>
+            {!iconOnly && <span style={titleEllipsis}>New chat</span>}
+          </button>
         </nav>
 
         <div className="echo-rail-divider" />
+
+        {props.roster ? (
+          <>
+            {props.roster}
+            <div className="echo-rail-divider" />
+          </>
+        ) : null}
 
         <section aria-label="Workspace" style={{ padding: iconOnly ? "0 1px" : 0, display: "grid", gap: 7, flex: "0 0 auto" }}>
           <div style={{ display: "grid", gap: 2 }}>
@@ -611,7 +603,7 @@ export function ProjectSidebar(props: SidebarProps) {
               </button>
             )}
 
-            {looseSessions.map((session) => sessionRow(session))}
+            {!props.hydrating && looseSessions.map((session) => sessionRow(session))}
 
             <div className="echo-rail-divider" />
 
@@ -725,7 +717,7 @@ export function ProjectSidebar(props: SidebarProps) {
                       )}
                     </div>
                     {/* Sessions under a project: hide in rail to keep icons clear; open sidebar to manage */}
-                    {!iconOnly && open && childSessions.map((session) => sessionRow(session, true))}
+                    {!props.hydrating && !iconOnly && open && childSessions.map((session) => sessionRow(session, true))}
                     {!iconOnly && open && !childSessions.length && (
                       <button
                         type="button"

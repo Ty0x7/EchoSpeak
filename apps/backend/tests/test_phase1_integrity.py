@@ -242,7 +242,8 @@ def test_put_settings_persists_incomplete_draft_and_returns_issues(monkeypatch):
     assert resp.issues == [{"key": "discord_bot_token", "message": "missing", "severity": "error"}]
 
 
-def test_heartbeat_discord_route_cannot_use_shared_queue(monkeypatch):
+def test_heartbeat_discord_route_delivers_only_to_owner(monkeypatch):
+    """Automations deliver to the user's own Discord DM, never to other users."""
     from agent import heartbeat
     import discord_bot
 
@@ -258,7 +259,8 @@ def test_heartbeat_discord_route_cannot_use_shared_queue(monkeypatch):
 
     heartbeat.route_message("hello from routine", ["discord"], label="Routine")
 
-    assert calls == []
+    assert [user for user, _ in calls] == ["999"]
+    assert "hello from routine" in calls[0][1]
 
 
 def test_heartbeat_discord_route_cannot_fall_back_to_allowed_user(monkeypatch):

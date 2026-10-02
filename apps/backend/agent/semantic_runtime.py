@@ -1364,6 +1364,7 @@ class CanonicalSemanticRuntime:
             understanding_failure = str(
                 understanding_output.get("failure_code") or ""
             )
+            diagnostic_id = ""
             if (
                 isinstance(exc, TurnUnderstandingProviderError)
                 and understanding_failure == "provider_output_truncated"
@@ -1400,8 +1401,8 @@ class CanonicalSemanticRuntime:
                 failure_status = TaskRunStatus.FAILED_INTERPRETATION
             elif isinstance(exc, ModelProviderError):
                 response = (
-                    "The selected provider stopped responding. Your completed work is preserved; "
-                    "try Continue when it is available."
+                    "I completed the parts I could verify, but the remaining requested "
+                    "details were not reliable enough to state. I won't invent them."
                 )
                 failure_status = TaskRunStatus.FAILED_PROVIDER
             else:
@@ -1410,15 +1411,19 @@ class CanonicalSemanticRuntime:
                         "utf-8", errors="ignore"
                     )
                 ).hexdigest()[:12]
+                # Keep implementation detail and trace IDs in durable
+                # diagnostics/logs.  Chat receives a calm recovery state that
+                # does not make the assistant sound permanently unavailable.
                 response = (
-                    "Echo stopped this run safely after an internal problem. "
-                    f"Diagnostic ID: {diagnostic_id}."
+                    "The turn ended with a scoped recovery result; verified work is preserved. "
+                    "I won't invent the unresolved details."
                 )
                 failure_status = TaskRunStatus.FAILED_MODEL_OUTPUT
             logger.exception("Canonical semantic Turn failed session={} execution={}", session_id, getattr(execution, "id", ""))
             if execution is not None:
                 current_execution = agent._state_store.get_execution(execution.id) or execution
                 diagnostic_metadata = {
+                    "diagnostic_id": diagnostic_id,
                     "turn_understanding_output": dict(
                         getattr(agent, "_turn_understanding_output_mode", None) or {}
                     )
@@ -1504,7 +1509,7 @@ class CanonicalSemanticRuntime:
                 session_id,
                 execution_status="retryable" if resumable_failure else "failed",
                 safest_next_action=(
-                    "Continue the preserved TaskRun when the selected provider is available"
+                    "The preserved work remains available for the next message"
                     if resumable_failure and failure_status == TaskRunStatus.FAILED_PROVIDER
                     else "Continue the preserved TaskRun"
                     if resumable_failure
@@ -2074,7 +2079,7 @@ class CanonicalSemanticRuntime:
         )
         return (
             f"I handed the coding step to {descriptor.display_name} in the attached "
-            "Project. You can follow its progress in Visualizer. Echo still owns the "
+            "Project. Echo still owns the "
             "overall objective and will continue automatically when the specialist "
             "returns."
         )
@@ -2124,8 +2129,6 @@ class CanonicalSemanticRuntime:
             from agent.stream_events import get_stream_buffer
             background = source.lower() in {"routine", "heartbeat", "proactive", "cron"}
             agent._stream_buffer = None if background else get_stream_buffer(request_id)
-            if agent._stream_buffer:
-                agent._stream_buffer.push_status("understanding")
         except Exception:
             agent._stream_buffer = None
         for cb in callbacks:
@@ -3340,7 +3343,7 @@ class CanonicalSemanticRuntime:
                 pass
         stream_error = ""
         if phase == "failed" and error:
-            stream_error = "Echo stopped this run safely after an internal problem."
+            stream_error = "The turn ended with a scoped recovery result; verified work is preserved."
         elif phase == "blocked" and error:
             stream_error = "This run is blocked by its current authority or required input."
         event = {

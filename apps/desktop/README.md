@@ -11,7 +11,7 @@ The implemented foundation includes:
 - a Rust-owned Python sidecar lifecycle with health-gated startup, bounded
   automatic recovery, manual recovery, log capture, and process-tree shutdown;
 - a per-launch authenticated loopback transport and a typed renderer bridge;
-- a desktop-only Chat/Visualizer workspace with Settings in a centered modal;
+- a desktop-only Chat workspace with compact live run status and Settings in a centered modal;
 - PyInstaller and Tauri packaging scripts for NSIS and MSI outputs; and
 - static contract, frontend, and focused backend tests.
 
@@ -168,8 +168,8 @@ After both bundles exist:
 6. Request `/health` without the per-launch key and confirm only that public
    health route is reachable. Request a protected route without a key and
    confirm HTTP 401. Confirm the renderer can hydrate through its bridge.
-7. Exercise Chat and Visualizer, including the Work, Research, Code, Checklist,
-   and Media panels, then open and close Settings. Confirm panel navigation is
+7. Exercise Chat and its live Work, Research, Code, Checklist, and Media status,
+   then open and close Settings. Confirm panel navigation is
    projection-only and the composer remains usable. Confirm selecting a Project
    or Quick Chat does not create a Session; only an explicit plus/new-session
    action does.

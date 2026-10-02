@@ -314,9 +314,9 @@ validation gate and TaskRun terminalization. Therefore the graph cannot create
 a second completion path. Tool execution remains a durable ToolRun and a graph
 Tool node may only link to its ID.
 
-Desktop Chat and Visualizer are the only primary views. Work and Code are
-Visualizer panels over the same Session, Project, and TaskRun. Settings is a
-modal. View or panel navigation creates no Session or TaskRun. An explicit handoff
+Desktop Chat is the only primary view. Work and Code are compact Chat
+projections over the same Session, Project, and TaskRun. Settings is a modal.
+Projection navigation creates no Session or TaskRun. An explicit handoff
 supersedes the source TaskRun and creates one linked replacement in the same
 scope. It preserves requirement/evidence history but clears mutable capability,
 retry, approval, configuration, inventory, and model authority snapshots so
@@ -413,7 +413,7 @@ the iterator when the provider transport supports it. No alternate model is used
 ## Frontend projection
 
 `GET /task-runs/{id}` is an exact Session/Project-scoped bounded read model for
-the Visualizer Work panel. It projects requirements, completion, graph, stage, approvals, Executions,
+the Chat work projection. It projects requirements, completion, graph, stage, approvals, Executions,
 ToolRuns, evidence/artifacts, media, and coding lineage without private
 reasoning, prompts, secrets, or unbounded output. Work's store is keyed by
 Session and Project and owns no lifecycle state. Automation-backed ProductTasks
@@ -425,18 +425,18 @@ inventory, Session model, and explicit approval. Direct preview mutation APIs
 return conflict and cannot launch or stop a host process.
 
 Chat shows conversation plus one transient lifecycle projection driven by
-backend understanding/planning/model/tool/wait/terminal events, then reconciled
+ backend understanding/planning/model/tool/wait/terminal events, then reconciled
 from durable final state. The same versioned, bounded semantic activity
-projection drives Chat, the main avatar, Visualizer, and the optional desktop
-companion through one frontend decoder and reducer. TaskRun snapshots expose
+projection drives Chat and the optional desktop companion through one frontend
+decoder and reducer. TaskRun snapshots expose
 only display-safe requirement status, attempts, retries, source counts, gaps,
 recovery, next action, and completion disposition; private reasoning, prompts,
 secrets, tracebacks, and persistence IDs are excluded from that projection.
-Visualizer may also rehydrate the same authoritative state from the exact-scope
-TaskRun read model, but it does not own or infer completion. Chat retains
+Chat rehydrates the same authoritative state from the exact-scope TaskRun read
+model, but it does not own or infer completion. Chat retains
 actionable approval, clarification, conflict, and recoverable failure UI. Detailed
 ToolRuns, evidence, research branches, tasks/runs, provenance, and health remain
-in Visualizer detail panels and Settings diagnostics.
+in Chat activity/history and Settings diagnostics.
 
 The centered Settings modal must remain accessible under narrow windows,
 maximized/full screen, and DPI scaling through controlled overflow, keyboard
@@ -607,7 +607,7 @@ session IDs. Malformed authoritative state fails closed and produces a
 quarantine copy plus manual recovery instructions; it is never overwritten
 with defaults.
 
-The Visualizer Code projection consumes one exact-scope NDJSON stream. The stream
+The Chat Code projection consumes one exact-scope NDJSON stream. The stream
 wakes on `SpecialistRunStore` revision changes and carries ordered event
 receipts; timeout frames are connection keepalives only. Frontend navigation,
 rendering, and local state cannot advance specialist lifecycle or TaskRun
@@ -632,7 +632,7 @@ Release claims require, with disposable data:
 2. Web typecheck, component tests, and production build.
 3. Desktop contract tests, Rust format/check/test/Clippy, and Tauri build.
 4. Sidecar and installer builds when the required toolchains are available.
-5. Native launch, startup recovery, Chat/Visualizer switching, Chat input/send,
+5. Native launch, startup recovery, Chat navigation, Chat input/send,
    Session continuity, and responsive Settings-modal navigation.
 6. Live configured-model checks for Research routing, memory recall/isolation,
    coding continuation, tool selection, automation planning, and honest blocks.

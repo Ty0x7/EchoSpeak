@@ -1223,6 +1223,35 @@ class TurnInterpreter:
                 )
                 continue
             last_extracted = extracted
+            # A single eligible continuation candidate is an authoritative
+            # runtime fact, not a model choice. Bind it before strict semantic
+            # validation so a local model cannot strand an otherwise valid
+            # "continue" turn by omitting the required ID. Ambiguous candidate
+            # sets still fail closed and retain the existing repair path.
+            if isinstance(extracted, dict):
+                relation_value = str(extracted.get("relation") or "").strip().casefold()
+                task_relations = {
+                    TurnRelation.CONTINUE_TASK.value,
+                    TurnRelation.PROVIDE_TASK_INPUT.value,
+                    TurnRelation.CORRECT_TASK.value,
+                    TurnRelation.CANCEL_TASK.value,
+                    TurnRelation.SWITCH_TASK.value,
+                }
+                if relation_value in task_relations and not str(
+                    extracted.get("selected_task_id") or ""
+                ).strip():
+                    candidates = [
+                        item for item in list(envelope.suspended_tasks or [])
+                        if not item.legacy_untrusted
+                    ]
+                    if len(candidates) == 1:
+                        extracted = {
+                            **extracted,
+                            "selected_task_id": candidates[0].task_id,
+                        }
+                        logger.info(
+                            "Turn Understanding bound omitted selected_task_id to the sole eligible TaskRun"
+                        )
             try:
                 interpretation, diagnostics = validate_turn_interpretation_payload(extracted)
             except TurnInterpretationNormalizationError as exc:

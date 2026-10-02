@@ -495,6 +495,28 @@ class ModelRuntimeClient:
                 bind_parameters["thinking_budget"] = 0
                 bind_parameters["include_thoughts"] = False
                 applied = True
+        elif thinking_enabled:
+            # Local hosts generally do not implement a portable native
+            # reasoning-effort field.  Still honor the user's effort choice by
+            # changing the bounded generation budget through the parameter the
+            # selected provider actually supports.  This is an output budget,
+            # not private-thought exposure or a hidden model fallback.
+            output_parameter = str(resolved.get("output_parameter") or "")
+            if output_parameter:
+                try:
+                    context_limit = int(
+                        getattr(getattr(config, "local", None), "context_length", 0)
+                        or 32768
+                    )
+                except (TypeError, ValueError):
+                    context_limit = 32768
+                budget = max(1024, int(resolved.get("budget_tokens") or 4096))
+                # Keep enough room for the prompt and tools on local models.
+                budget = min(budget, max(4096, context_limit // 2), 65536)
+                bind_parameters[output_parameter] = budget
+                resolved["effective_output_budget"] = budget
+                resolved["control_kind"] = "bounded_output_budget"
+                applied = True
         note = str(resolved.get("note") or "")
         if not thinking_enabled and not applied:
             note = (

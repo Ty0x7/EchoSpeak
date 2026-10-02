@@ -1090,10 +1090,10 @@ def _safe_stream_failure(exc: BaseException) -> str:
     if "cancel" in name or "cancel" in detail:
         return "Stopped by Ty."
     if "timeout" in name or "stall" in name or "timed out" in detail:
-        return "The selected provider stalled. This run stopped cleanly."
+        return "Verified work is preserved; the remaining details were not reliable enough to state."
     if "connect" in name or "unavailable" in detail:
-        return "The selected model is unavailable right now."
-    return "Echo stopped this run safely after an internal problem."
+        return "The model is unavailable right now. Nothing was changed."
+    return "The turn ended with a scoped recovery result; verified work is preserved."
 
 
 class _StreamingHandler(BaseCallbackHandler):
@@ -1132,7 +1132,10 @@ class _StreamingHandler(BaseCallbackHandler):
         self._emit_synthetic_preamble = False
         self._iteration_count = 0
         self._seen_llm_run_ids: set[str] = set()
-        self._token_usage = {"prompt": 0, "completion": 0, "total": 0}
+        self._token_usage = {"prompt": 0, "completion": 0, "total": 0, "reasoning": 0}
+        self._stream_reasoning_chars = 0
+        self._stream_visible_chars = 0
+        self._last_token_progress_chars = 0
 
     def _put(self, event: dict) -> None:
         """Emit a stream event with monotonic seq for reconnect/reorder guards."""
@@ -1457,8 +1460,12 @@ class _StreamingHandler(BaseCallbackHandler):
     def on_llm_end(self, response: Any, run_id: str, parent_run_id: Optional[str] = None, **kwargs):
         usage = self._usage_from_response(response)
         if usage:
-            for key in self._token_usage:
+            for key in ("prompt", "completion", "total"):
                 self._token_usage[key] += int(usage.get(key) or 0)
+            self._token_usage["reasoning"] = max(
+                self._token_usage.get("reasoning", 0),
+                int(self._stream_reasoning_chars / 4),
+            )
             self._put({"type": "token_usage", **self._token_usage})
         expose_summary = bool(
             getattr(getattr(self, "_agent_ref", None), "_turn_thinking_enabled", True)
@@ -1491,6 +1498,32 @@ class _StreamingHandler(BaseCallbackHandler):
                 reasoning = token
                 visible_token = ""
 
+        # Count generation progress without exposing raw private reasoning.
+        # Providers may report exact usage at completion; while streaming we
+        # expose only bounded approximate counters so the Chat UI can show
+        # liveness and keep reasoning visually separate from the answer.
+        self._stream_reasoning_chars += len(str(reasoning or ""))
+        self._stream_visible_chars += len(str(visible_token or ""))
+        progress_chars = self._stream_reasoning_chars + self._stream_visible_chars
+        if progress_chars and (
+            progress_chars - self._last_token_progress_chars >= 48
+            or self._last_token_progress_chars == 0
+        ):
+            self._last_token_progress_chars = progress_chars
+            reasoning_tokens = int((self._stream_reasoning_chars + 3) / 4)
+            completion_tokens = int((self._stream_visible_chars + 3) / 4)
+            self._put({
+                "type": "token_usage",
+                "prompt": self._token_usage.get("prompt", 0),
+                "completion": completion_tokens,
+                "reasoning": reasoning_tokens,
+                "total": max(
+                    int(self._token_usage.get("total", 0)),
+                    int(self._token_usage.get("prompt", 0)) + completion_tokens + reasoning_tokens,
+                ),
+                "approximate": True,
+            })
+
         # 2. Push accumulated loops + current reasoning to UI
         if reasoning and self._expose_model_reasoning:
             self._current_reasoning += reasoning
@@ -1511,7 +1544,12 @@ class _StreamingHandler(BaseCallbackHandler):
 
         # 3. Stream non-reasoning answer tokens so the chat can show live text.
         # Buffer per generation so we can seal a partial spoken beat before tools.
-        if visible_token and not self._in_think_block and not reasoning:
+        # A provider chunk may carry a reasoning delta and visible answer text
+        # together.  The previous `and not reasoning` guard discarded the
+        # visible portion of those chunks, leaving Chat with a token counter but
+        # no live answer text.  Reasoning remains private; only the visible
+        # answer stream crosses this boundary.
+        if visible_token and not self._in_think_block:
             self._visible_gen += visible_token
             self._put({
                 "type": "agent_token",
@@ -1733,6 +1771,84 @@ class _StreamingHandler(BaseCallbackHandler):
         })
 
 
+def _run_lean_stream(
+    *,
+    agent,
+    message: str,
+    thread_id: Optional[str],
+    request_id: str,
+    q: queue.Queue,
+    cancel_event: threading.Event,
+    source: str,
+    voice_turn_id: str = "",
+    agent_id: str = "",
+    thinking_enabled: bool = True,
+    reasoning_effort: str = "medium",
+) -> None:
+    """Stream one lean-runtime turn as NDJSON events (see agent/lean/loop.py)."""
+    from agent.lean.runtime import run_lean_query
+
+    session_id = _normalize_thread_id(thread_id) or "default"
+    try:
+        result = run_lean_query(
+            agent,
+            message=message,
+            session_id=session_id,
+            request_id=request_id,
+            emit=q.put,
+            cancel=cancel_event,
+            source=source,
+            persona_id=agent_id,
+            thinking_enabled=thinking_enabled,
+            reasoning_effort=reasoning_effort,
+        )
+        state_store = get_state_store()
+        if voice_turn_id and result.get("execution_id"):
+            try:
+                from agent.voice_transport import bind_voice_turn_submission
+
+                bind_voice_turn_submission(
+                    voice_turn_id,
+                    session_id=session_id,
+                    request_id=request_id,
+                    execution_id=str(result["execution_id"]),
+                    task_run_id="",
+                    query_completed=True,
+                )
+            except Exception:
+                logger.warning("Voice turn binding failed for lean turn request_id={}", request_id)
+        memory_count = 0
+        try:
+            memory_count = int(agent.memory.count_items(thread_id=session_id) or 0)
+        except Exception:
+            pass
+        q.put({
+            "type": "final",
+            "runtime": "lean",
+            "response": str(result.get("response") or ""),
+            "messages": list(result.get("messages") or []),
+            "success": bool(result.get("success")),
+            "memory_count": memory_count,
+            "execution_id": result.get("execution_id"),
+            "thread_state": state_store.get_thread_state(session_id).model_dump(),
+            "voice_turn_id": voice_turn_id or None,
+            "request_id": request_id,
+            "at": time.time(),
+        })
+    except Exception as exc:
+        _metric_inc("errors", 1)
+        logger.exception("Lean stream worker failed request_id={}", request_id)
+        q.put({
+            "type": "error",
+            "message": _safe_stream_failure(exc),
+            "request_id": request_id,
+            "at": time.time(),
+        })
+    finally:
+        q.put({"type": "status", "agent_mode": "idle", "at": time.time(), "request_id": request_id})
+        q.put(None)
+
+
 def _start_agent_thread(
     *,
     agent,
@@ -1747,7 +1863,24 @@ def _start_agent_thread(
     reasoning_effort: str = "medium",
     source: str = "web",
     voice_turn_id: str = "",
+    agent_id: str = "",
 ) -> None:
+    from agent.lean.settings import lean_runtime_enabled
+
+    if lean_runtime_enabled():
+        threading.Thread(
+            target=_run_lean_stream,
+            kwargs=dict(
+                agent=agent, message=message, thread_id=thread_id, request_id=request_id,
+                q=q, cancel_event=cancel_event, source=source,
+                voice_turn_id=voice_turn_id, agent_id=agent_id,
+                thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort,
+            ),
+            name="lean-turn",
+            daemon=True,
+        ).start()
+        return
+
     def run_agent():
         handler: Optional[_StreamingHandler] = None
         try:
@@ -2043,269 +2176,12 @@ async def lifespan(app: FastAPI):
     try:
         from agent.routines import get_routine_manager
 
-        def _routine_callback(routine):
-            """Claim one durable Run, then execute one governed Turn."""
-            from agent.automation_runtime import (
-                AutomationModelBinding,
-                AutomationRunStatus,
-                ModelBindingPolicy,
-                get_automation_run_store,
-            )
-            from agent.projects import get_project_manager
-            from agent.task_store import get_task_store
+        from agent.lean.automations import routine_runner
 
-            scheduled_for = str(getattr(routine, "next_run", "") or f"run:{int(getattr(routine, 'run_count', 0)) + 1}")
-            session_id = str(getattr(routine, "session_id", "") or "").strip()
-            project_id = str(getattr(routine, "project_id", "") or "").strip()
-            query = str(routine.action_config.get("query") or routine.action_config.get("message") or routine.name).strip()
-            if not project_id or not session_id:
-                return {
-                    "success": False,
-                    "error": "Routine requires an explicit Project and Session",
-                }
-            project = get_project_manager().get_project(project_id)
-            session = get_state_store().get_thread_state(session_id)
-            if project is None or str(session.active_project_id or "") != project_id:
-                return {
-                    "success": False,
-                    "error": "Routine Project/Session binding is missing or stale",
-                }
-            task = get_task_store().create(
-                title=f"Routine: {routine.name}",
-                description=query,
-                objective=query,
-                project_id=project_id,
-                session_id=session_id,
-                source="routine",
-                source_id=routine.id,
-                scheduled_for=scheduled_for,
-                idempotency_key=f"routine:{routine.id}:{scheduled_for}",
-            )
-            if task.status in {"complete", "done"}:
-                return {"success": True, "task_id": task.id}
-            run_store = get_automation_run_store()
-            run = run_store.create_run(
-                idempotency_key=f"routine:{routine.id}:{scheduled_for}",
-                project_id=project_id,
-                session_id=session_id,
-                task_id=task.id,
-                routine_id=str(routine.id),
-                trigger_id=scheduled_for,
-                source="routine",
-                source_id=str(routine.id),
-                objective=query,
-                model_binding=AutomationModelBinding(
-                    policy=ModelBindingPolicy.SESSION_DEFAULT,
-                    source_session_id=session_id,
-                ),
-            )
-            from agent.automation_runtime import (
-                AutomationModelBinding,
-                AutomationRunStatus,
-                ModelBindingPolicy,
-                get_automation_run_store,
-            )
-            from agent.projects import get_project_manager
-            from agent.task_store import get_task_store
-
-            scheduled_for = str(getattr(routine, "next_run", "") or f"run:{int(getattr(routine, 'run_count', 0)) + 1}")
-            session_id = str(getattr(routine, "session_id", "") or "").strip()
-            project_id = str(getattr(routine, "project_id", "") or "").strip()
-            query = str(routine.action_config.get("query") or routine.action_config.get("message") or routine.name).strip()
-            if not project_id or not session_id:
-                return {
-                    "success": False,
-                    "error": "Routine requires an explicit Project and Session",
-                }
-            project = get_project_manager().get_project(project_id)
-            session = get_state_store().get_thread_state(session_id)
-            if project is None or str(session.active_project_id or "") != project_id:
-                return {
-                    "success": False,
-                    "error": "Routine Project/Session binding is missing or stale",
-                }
-            task = get_task_store().create(
-                title=f"Routine: {routine.name}",
-                description=query,
-                objective=query,
-                project_id=project_id,
-                session_id=session_id,
-                source="routine",
-                source_id=routine.id,
-                scheduled_for=scheduled_for,
-                idempotency_key=f"routine:{routine.id}:{scheduled_for}",
-            )
-            if task.status in {"complete", "done"}:
-                return {"success": True, "task_id": task.id}
-            run_store = get_automation_run_store()
-            run = run_store.create_run(
-                idempotency_key=f"routine:{routine.id}:{scheduled_for}",
-                project_id=project_id,
-                session_id=session_id,
-                task_id=task.id,
-                routine_id=str(routine.id),
-                trigger_id=scheduled_for,
-                source="routine",
-                source_id=str(routine.id),
-                objective=query,
-                model_binding=AutomationModelBinding(
-                    policy=ModelBindingPolicy.SESSION_DEFAULT,
-                    source_session_id=session_id,
-                ),
-            )
-            if run.status == AutomationRunStatus.COMPLETED:
-                return {"success": True, "task_id": task.id, "run_id": run.id}
-            claimed = run_store.claim(
-                run.id,
-                project_id=project_id,
-                session_id=session_id,
-                claimant_id="api-routine-coordinator",
-                expected_revision=run.revision,
-                lease_seconds=300,
-            )
-            if claimed is None or claimed.lease is None:
-                return {
-                    "success": False,
-                    "task_id": task.id,
-                    "run_id": run.id,
-                    "error": "Routine occurrence is already claimed or no longer queued",
-                }
-            lease_token = claimed.lease.token
-            get_task_store().update(
-                task.id,
-                status="in_progress",
-                automation_run_ids=list(dict.fromkeys([*task.automation_run_ids, run.id])),
-            )
-            try:
-                r_agent = get_agent(session_id)
-                provider = str(r_agent.llm_provider.value)
-                model_id = str(r_agent.provider_info.get("model") or "default")
-                claimed = run_store.bind_model(
-                    run.id,
-                    AutomationModelBinding(
-                        policy=ModelBindingPolicy.SESSION_DEFAULT,
-                        source_session_id=session_id,
-                        resolved_provider=provider,
-                        resolved_model_id=model_id,
-                    ),
-                    project_id=project_id,
-                    session_id=session_id,
-                    claimant_id="api-routine-coordinator",
-                    lease_token=lease_token,
-                )
-                claimed = run_store.transition(
-                    run.id,
-                    AutomationRunStatus.RUNNING,
-                    project_id=project_id,
-                    session_id=session_id,
-                    claimant_id="api-routine-coordinator",
-                    lease_token=lease_token,
-                )
-                response, success = r_agent.process_query(
-                    query, source="routine", thread_id=session_id, callbacks=[],
-                )
-                state = get_state_store().get_thread_state(session_id)
-                from agent.automation_projection import project_execution
-                channels = list(getattr(routine, "delivery_channels", None) or ["web"])
-                blocked_channels = [channel for channel in channels if str(channel).lower() != "web"]
-                execution_id = str(state.last_execution_id or state.current_execution_id or "")
-                canonical = project_execution(
-                    project_id=project_id,
-                    session_id=session_id,
-                    execution_id=execution_id,
-                    occurrence_id=run.id,
-                )
-                tool_run_ids = list(canonical.tool_run_ids) if canonical else []
-                approval_ids = [str(state.pending_approval_id)] if state.pending_approval_id else []
-                verified = bool(canonical and canonical.verified and response and not blocked_channels)
-                status = (
-                    "complete" if verified
-                    else "needs_permission" if canonical and canonical.automation_status == "waiting_for_approval"
-                    else "blocked" if blocked_channels or (canonical and canonical.product_task_status == "blocked")
-                    else "cancelled" if canonical and canonical.product_task_status == "cancelled"
-                    else "failed"
-                )
-                run_status = AutomationRunStatus(
-                    "completed" if verified
-                    else "blocked" if blocked_channels
-                    else canonical.automation_status if canonical
-                    else "failed"
-                )
-                run_store.transition(
-                    run.id,
-                    run_status,
-                    project_id=project_id,
-                    session_id=session_id,
-                    claimant_id="api-routine-coordinator",
-                    lease_token=lease_token,
-                    execution_id=execution_id,
-                    tool_run_ids=tool_run_ids,
-                    approval_ids=approval_ids,
-                    artifact_ids=list(canonical.artifact_ids) if canonical else [],
-                    task_run_id=str(canonical.task_run_id) if canonical else "",
-                    outcome={
-                        "verified": verified,
-                        "completion_authority": "task_run",
-                        "canonical_task_status": canonical.canonical_status.value if canonical else "missing",
-                        "canonical_completion_disposition": canonical.completion_disposition if canonical else "pending",
-                        "response_present": bool(response),
-                        "blocked_delivery_channels": blocked_channels,
-                    },
-                    error="" if verified else "Governed Turn did not reach a verified terminal outcome",
-                )
-                get_task_store().update(
-                    task.id,
-                    status=status,
-                    execution_ids=[execution_id] if execution_id else [],
-                    task_run_ids=[canonical.task_run_id] if canonical else [],
-                    tool_run_ids=tool_run_ids,
-                    approval_ids=approval_ids,
-                    verification={
-                        "verified": verified,
-                        "completion_authority": "task_run",
-                        "canonical_task_status": canonical.canonical_status.value if canonical else "missing",
-                        "response_present": bool(response),
-                        "blocked_delivery_channels": blocked_channels,
-                        "reason": (
-                            "External routine delivery requires a governed communication ToolRun"
-                            if blocked_channels else "Turn completed" if verified else "Turn failed"
-                        ),
-                    },
-                )
-                return {
-                    "success": verified,
-                    "task_id": task.id,
-                    "run_id": run.id,
-                    "error": "External delivery awaits governed approval" if blocked_channels else "" if verified else str(response or "Routine failed"),
-                }
-            except Exception as exc:
-                try:
-                    current_run = run_store.get_run(run.id, project_id=project_id, session_id=session_id)
-                    if current_run and current_run.status in {
-                        AutomationRunStatus.PREPARING,
-                        AutomationRunStatus.RUNNING,
-                    }:
-                        run_store.transition(
-                            run.id,
-                            AutomationRunStatus.FAILED,
-                            project_id=project_id,
-                            session_id=session_id,
-                            claimant_id="api-routine-coordinator",
-                            lease_token=lease_token,
-                            error=str(exc),
-                        )
-                except Exception as transition_exc:
-                    logger.error(f"Routine Run failure transition failed: {transition_exc}")
-                get_task_store().update(task.id, status="failed", verification={"verified": False, "error": str(exc)})
-                logger.warning(f"Routine callback error ({routine.name}): {exc}")
-                return {"success": False, "task_id": task.id, "run_id": run.id, "error": str(exc)}
+        # Routines run on the lean loop and post into their own chat.
+        _routine_callback = routine_runner(get_agent)
 
         rm = get_routine_manager()
-        from agent.automation_runtime import get_automation_run_store
-
-        recovered_runs = get_automation_run_store().recover_expired()
-        if recovered_runs:
-            logger.info("Recovered {} expired Automation Runs", len(recovered_runs))
         rm.set_run_callback(_routine_callback)
         rm.start_scheduler()
         logger.info("Routine scheduler started")
@@ -2323,6 +2199,12 @@ async def lifespan(app: FastAPI):
         logger.info("Spotify playback monitor started")
 
     yield
+    try:
+        from agent.lean.terminal import stop_all_processes
+
+        stop_all_processes()
+    except Exception:
+        pass
     
     # Shutdown heartbeat scheduler
     try:
@@ -2403,6 +2285,10 @@ from api.media_runtime import router as media_runtime_router
 
 app.include_router(media_router)
 app.include_router(media_runtime_router)
+
+from api.lean_routes import router as lean_router
+
+app.include_router(lean_router)
 # Ensure domain ToolRegistry entries load independently of agent import order.
 for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):
     try:
@@ -2872,6 +2758,11 @@ class QueryRequest(BaseModel):
         max_length=200,
         pattern=r"^[A-Za-z0-9._:-]+$",
         description="Durable local Voice transport turn whose final transcript equals message",
+    )
+    agent_id: Optional[str] = Field(
+        default=None,
+        max_length=80,
+        description="Lean runtime: which agent persona answers in a direct chat (default Echo)",
     )
 
 
@@ -6642,6 +6533,7 @@ async def query_stream(request: QueryRequest):
             reasoning_effort=request.reasoning_effort,
             source=source,
             voice_turn_id=str(request.voice_turn_id or ""),
+            agent_id=str(request.agent_id or ""),
         )
     except Exception as exc:
         cancel_event.set()

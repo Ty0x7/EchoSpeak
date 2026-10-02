@@ -10,7 +10,6 @@ import type { EchoReaction, ToolCategory } from "./components/echoAnimationUtils
 import { AvatarEditor } from "./components/AvatarEditor";
 import { ProjectSidebar } from "./components/ProjectSidebar";
 import { MediaLibraryView } from "./features/media/MediaLibraryView.tsx";
-import { VisualizerWorkspace } from "./features/visualizer/VisualizerWorkspace";
 import {
   SettingsCatalog,
   type SettingsCatalogAction,
@@ -62,14 +61,18 @@ import type {
   VoiceTransportPhase,
 } from "./voiceTransport";
 import { canApplySessionHistory, ownsStreamCleanup } from "./desktop/sessionProjection";
+import leanCss from "./lean/lean.css?inline";
+import settingsCss from "./settings/settings.css?inline";
+import { SettingsPanel } from "./settings/SettingsPanel";
+import { LeanMessage, AgentAvatar } from "./lean/LeanMessage";
+import { isLeanEvent, messageFromTimeline } from "./lean/liveReducer";
+import { useLeanLive } from "./lean/useLeanLive";
+import { leanApi } from "./lean/api";
+import { RosterSections } from "./lean/Roster";
+import { AgentEditor, MentionMenu, RoomDialog, RoomHeader, activeMention, mentionMatches } from "./lean/Dialogs";
+import type { LeanEvent, LeanMessageData, LeanPersona, LeanRoom } from "./lean/types";
 import {
   desktopExecutionProfile,
-  desktopWorkspaceForView,
-  desktopWorkspaceLabel,
-  desktopVisualizerPanelLabel,
-  isDesktopContextualSurface,
-  type DesktopSidebarView,
-  type DesktopVisualizerPanel,
   type DesktopWorkspaceSurface,
 } from "./desktop/workspaceState";
 import {
@@ -142,6 +145,8 @@ type Message = {
   executionId?: string;
   /** Client stream key used while the Turn was open (debugging correlation). */
   clientRequestId?: string;
+  /** Lean runtime: the agent who spoke and the thinking/tool timeline behind the reply. */
+  lean?: LeanMessageData;
 };
 
 /** Rough client-side token estimate (chars / 3.5) — matches context meter */
@@ -338,8 +343,9 @@ type AgentStreamEvent = (
   | { type: "turn_bound"; request_id?: string; execution_id?: string; turn_id?: string; thread_id?: string; active_project_id?: string; model?: string; reasoning_control?: Record<string, unknown>; at: number }
   | { type: "task_bound"; task_run_id: string; task_revision: number; objective?: string; active_requirement?: string; status?: string; request_id?: string; at: number }
   | { type: "iteration_boundary"; iteration: number; phase?: string; model?: string; request_id?: string; at: number }
-  | { type: "token_usage"; prompt?: number; completion?: number; total?: number; request_id?: string; at: number }
+  | { type: "token_usage"; prompt?: number; completion?: number; total?: number; reasoning?: number; approximate?: boolean; request_id?: string; at: number }
   | { type: "reasoning_summary"; content: string; iteration?: number; request_id?: string; at: number }
+  | { type: "provider_retry"; attempt?: number; retrying?: boolean; reason_code?: string; request_id?: string; at: number }
   | { type: "recovery"; message: string; request_id?: string; at: number }
   | { type: "lifecycle"; phase: string; execution_id?: string; error?: string; request_id?: string; at?: number }
   | { type: "error"; message: string; at: number; request_id?: string }
@@ -451,12 +457,37 @@ const LiveChatActivityBar: React.FC<{
           </div>
         )}
       </div>
+      {(activity.replyDraft || activity.thinkingText || activity.tokenUsage?.reasoning) ? (
+        <div className="live-run-live-text" aria-live="polite">
+          {activity.thinkingText ? (
+            <div className="live-run-live-thought">
+              <span>Thinking summary</span>
+              <p>{activity.thinkingText}</p>
+            </div>
+          ) : activity.tokenUsage?.reasoning ? (
+            <div className="live-run-live-thought">
+              <span>Thinking</span>
+              <p>Generating a private reasoning trace · {formatTokenCount(activity.tokenUsage.reasoning)} tokens</p>
+            </div>
+          ) : null}
+          {activity.replyDraft ? (
+            <div className="live-run-live-reply">
+              <span>Reply</span>
+              <p>{activity.replyDraft}</p>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {expanded && (activity.objective || activity.activeRequirement || activity.activeModel || activity.tokenUsage || activity.recoveryReason || activity.nextAction || activity.requirements.length) ? (
         <div className="live-run-details">
           {activity.objective ? <div className="live-run-detail"><span>Objective</span>{activity.objective}</div> : null}
           {activity.activeRequirement ? <div className="live-run-detail"><span>Current step</span>{activity.activeRequirement}</div> : null}
           {activity.activeModel ? <div className="live-run-detail"><span>Model</span>{activity.activeModel}</div> : null}
-          {activity.tokenUsage?.total ? <div className="live-run-detail"><span>Tokens</span>{formatTokenCount(activity.tokenUsage.total)}</div> : null}
+          {activity.thinkingText ? <div className="live-run-detail"><span>Reasoning summary</span>{activity.thinkingText}</div> : null}
+          {!activity.thinkingText && activity.tokenUsage?.reasoning ? <div className="live-run-detail"><span>Reasoning</span>Generating a private reasoning trace</div> : null}
+          {activity.tokenUsage?.reasoning ? <div className="live-run-detail"><span>Thinking tokens</span>{formatTokenCount(activity.tokenUsage.reasoning)}{activity.tokenUsage.approximate ? " ~" : ""}</div> : null}
+          {activity.tokenUsage?.completion ? <div className="live-run-detail"><span>Reply tokens</span>{formatTokenCount(activity.tokenUsage.completion)}{activity.tokenUsage.approximate ? " ~" : ""}</div> : null}
+          {activity.tokenUsage?.total ? <div className="live-run-detail"><span>Total tokens</span>{formatTokenCount(activity.tokenUsage.total)}{activity.tokenUsage.approximate ? " ~" : ""}</div> : null}
           {activity.recoveryReason ? <div className="live-run-detail"><span>Recovery</span>{activity.recoveryReason}</div> : null}
           {activity.nextAction ? <div className="live-run-detail"><span>Next</span>{activity.nextAction}</div> : null}
         </div>
@@ -1913,6 +1944,39 @@ const globalCss = `
            gap: 5px;
            flex: 0 0 auto;
          }
+         .live-run-live-text {
+           display: grid;
+           gap: 8px;
+           margin: 9px 0 0 21px;
+           padding: 9px 10px;
+           border-left: 1px solid rgba(255,255,255,0.16);
+           background: rgba(255,255,255,0.018);
+           color: rgba(255,255,255,0.68);
+           font-size: 11px;
+           line-height: 1.48;
+         }
+         .live-run-live-text > div {
+           min-width: 0;
+         }
+         .live-run-live-text span {
+           display: block;
+           margin-bottom: 3px;
+           color: rgba(255,255,255,0.34);
+           font: 600 8px/1.2 'JetBrains Mono', ui-monospace, monospace;
+           letter-spacing: .08em;
+           text-transform: uppercase;
+         }
+         .live-run-live-text p {
+           margin: 0;
+           white-space: pre-wrap;
+           overflow-wrap: anywhere;
+         }
+         .live-run-live-thought {
+           color: rgba(255,255,255,0.48);
+         }
+         .live-run-live-reply {
+           color: rgba(255,255,255,0.86);
+         }
          .live-run-action {
            min-height: 28px;
            padding: 0 9px;
@@ -2395,6 +2459,9 @@ const globalCss = `
            text-transform: uppercase;
            color: rgba(255,255,255,0.32);
            line-height: 1;
+           white-space: nowrap;
+           overflow: hidden;
+           text-overflow: ellipsis;
          }
          .provider-slot {
            flex: 0 1 38%;
@@ -2583,14 +2650,20 @@ const globalCss = `
            .live-run-trace {
              padding-left: 0;
            }
+           .controls-row {
+             display: grid;
+             grid-template-columns: minmax(0, 1fr);
+             gap: 6px;
+           }
            .composer-primary-controls {
-             grid-template-columns: repeat(3, minmax(0, 1fr));
+             width: 100%;
+             min-width: 0;
+             grid-template-columns: auto minmax(0, .8fr) minmax(0, 1.2fr) minmax(72px, .7fr);
            }
            .composer-tools-slot {
-             grid-column: 1 / -1;
              min-height: 46px;
-             border-right: 0;
-             border-bottom: 1px solid rgba(255,255,255,0.08);
+             border-right: 1px solid rgba(255,255,255,0.08);
+             border-bottom: 0;
            }
            .provider-slot,
            .model-slot,
@@ -2598,13 +2671,26 @@ const globalCss = `
              min-width: 0;
            }
            .composer-mode-controls {
-             justify-content: space-between;
+             width: 100%;
+             display: grid;
+             grid-template-columns: repeat(4, minmax(0, 1fr));
+             justify-content: stretch;
            }
            .composer-mode-button {
-             flex: 1 1 0;
+             min-width: 0;
+             width: 100%;
+             padding: 0 4px;
            }
          }
          @media (max-width: 520px) {
+           .composer-primary-controls {
+             grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+           }
+           .effort-slot {
+             grid-column: 1 / -1;
+             border-top: 1px solid rgba(255,255,255,0.08);
+             border-right: 0;
+           }
            .composer-mode-label {
              display: none;
            }
@@ -3302,6 +3388,14 @@ const ChatBubble: React.FC<{
     return () => window.clearInterval(tick);
   }, [msg.id, msg.text, isUser, typewriter]);
 
+  if (!isUser && msg.lean) {
+    return (
+      <div style={{ width: "100%", minWidth: 0 }} data-testid="lean-message">
+        <LeanMessage data={msg.lean} at={msg.at} />
+      </div>
+    );
+  }
+
   const canQuickReply = Boolean(isConfirmPrompt && onQuickReply && !streaming);
   const bodyText = isUser || !typewriter ? msg.text : shown;
   const stillTyping = !isUser && typewriter && shown.length < (msg.text || "").length;
@@ -3977,9 +4071,7 @@ export const Dashboard: React.FC<{
   const apiBase = useMemo(() => getEchoSpeakApiBase(), []);
   const workspaceRoute = location.pathname.replace(/\/+$/, "");
   const mediaRouteActive = workspaceRoute === "/app/media";
-  const [desktopSurface, setDesktopSurface] = useState<DesktopWorkspaceSurface>(() =>
-    mediaRouteActive ? "visualizer" : "chat"
-  );
+  const desktopSurface: DesktopWorkspaceSurface = "chat";
   const [desktopSettingsOpen, setDesktopSettingsOpen] = useState(desktopSettingsWindow);
   const [desktopStudioHost, setDesktopStudioHost] = useState<HTMLDivElement | null>(null);
   const {
@@ -4022,24 +4114,16 @@ export const Dashboard: React.FC<{
   const activeGroupButtonRef = useRef<HTMLButtonElement | null>(null);
   const activeGroupMenuRef = useRef<HTMLDivElement | null>(null);
   const [activeGroupPos, setActiveGroupPos] = useState<{ top: number; left: number } | null>(null);
-  const [showVisualizer, setShowVisualizer] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).visualizerVisible);
   const [showSidebar, setShowSidebar] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarVisible);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarCollapsed);
-  const [visualizerDensity] = useState<"calm" | "normal" | "dense">(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).visualizerDensity);
   const [narrowLayout, setNarrowLayout] = useState<boolean>(() => typeof window !== "undefined" && window.innerWidth < 900);
   const [agentMode, setAgentMode] = useState<"idle" | "research" | "coding" | "working" | "thinking">("idle");
   const [agentActivity, dispatchActivity] = useReducer(agentActivityReducer, undefined, initialAgentActivity);
-  const [visualizerPin, setVisualizerPin] = useState<DesktopVisualizerPanel | null>(null);
   useEffect(() => {
     if (mediaRouteActive) {
       setLeftTab("chat");
-      if (desktopMode) {
-        setDesktopSurface("visualizer");
-        setVisualizerPin("media");
-      }
       return;
     }
-    if (desktopMode) setVisualizerPin((current) => current === "media" ? "ring" : current);
   }, [desktopMode, mediaRouteActive]);
   const [liveReplyDraft, setLiveReplyDraft] = useState("");
   const liveReplyDraftRef = useRef("");
@@ -4098,7 +4182,11 @@ export const Dashboard: React.FC<{
   const activeProjectIdRef = useRef<string>(desktopBootstrap?.active_project_id || "");
   const [folderDropActive, setFolderDropActive] = useState(false);
   const [projectsLoading, setProjectsLoading] = useState<boolean>(false);
-  const [initialHydrationComplete, setInitialHydrationComplete] = useState(Boolean(desktopBootstrap));
+  // Bootstrap data is only a startup hint.  Do not paint it as authoritative
+  // chat history: the first scoped /threads read reconciles the durable list.
+  // Keeping this false until that read completes prevents transient sessions,
+  // welcome messages, and activity rows from flashing and then disappearing.
+  const [initialHydrationComplete, setInitialHydrationComplete] = useState(false);
   const [threadState, setThreadState] = useState<ThreadSessionState | null>(() => (desktopBootstrap?.thread_state || null) as ThreadSessionState | null);
   const [pendingApproval, setPendingApproval] = useState<PendingActionEnvelope | null>(null);
   const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
@@ -4124,6 +4212,46 @@ export const Dashboard: React.FC<{
     })),
   );
   const [activeThreadId, setActiveThreadId] = useState<string>(() => desktopBootstrap?.active_session_id || "");
+  // ── Lean runtime: live turn, agent roster, rooms ──
+  const lean = useLeanLive();
+  const leanClient = useMemo(() => leanApi(apiBase), [apiBase]);
+  const [agents, setAgents] = useState<LeanPersona[]>([]);
+  const [rooms, setRooms] = useState<LeanRoom[]>([]);
+  const [toolsetIds, setToolsetIds] = useState<string[]>([]);
+  const [agentEditor, setAgentEditor] = useState<{ open: boolean; agent: LeanPersona | null }>({ open: false, agent: null });
+  const [roomDialog, setRoomDialog] = useState<{ open: boolean; room: LeanRoom | null }>({ open: false, room: null });
+  const [mention, setMention] = useState<{ start: number; query: string; index: number } | null>(null);
+  // New Settings is the default; the classic screen stays reachable for rare panels.
+  const [classicSettings, setClassicSettings] = useState(false);
+  const refreshRoster = useCallback(async () => {
+    try {
+      const [nextAgents, nextRooms] = await Promise.all([leanClient.agents(), leanClient.rooms()]);
+      setAgents(nextAgents);
+      setRooms(nextRooms);
+    } catch {
+      // Older backends without the lean runtime simply show no roster.
+    }
+  }, [leanClient]);
+  useEffect(() => {
+    void refreshRoster();
+    leanClient.toolsets().then((sets) => setToolsetIds(sets.map((s) => s.id))).catch(() => undefined);
+  }, [refreshRoster, leanClient]);
+  const activeRoom = useMemo(() => rooms.find((room) => room.thread_id === activeThreadId) || null, [rooms, activeThreadId]);
+  const roomThreadIds = useMemo(() => new Set(rooms.map((room) => room.thread_id)), [rooms]);
+  const roomMembers = useMemo(
+    () => (activeRoom ? (activeRoom.agent_ids.map((id) => agents.find((a) => a.id === id)).filter(Boolean) as LeanPersona[]) : []),
+    [activeRoom, agents]
+  );
+  const decideLeanApproval = useCallback(
+    async (approvalId: string, decision: "allow" | "deny" | "always") => {
+      try {
+        await leanClient.decide(approvalId, decision);
+      } catch (error) {
+        console.warn("Approval decision failed", error);
+      }
+    },
+    [leanClient]
+  );
   const currentWorkRuns = useWorkStore((state) => state.runs);
   const loadCurrentWorkRuns = useWorkStore((state) => state.loadRuns);
   const workProjectionRevisionRef = useRef<string>("");
@@ -4272,7 +4400,11 @@ export const Dashboard: React.FC<{
         activeThreadIdRef.current = sessionId;
         setActiveThreadId(sessionId);
       }
-      setInitialHydrationComplete(true);
+      // Keep the bootstrap projection hidden until the authoritative refresh
+      // below has completed.  This avoids rendering stale/ephemeral Sessions.
+      void refreshThreads().then((ok) => {
+        if (ok) setInitialHydrationComplete(true);
+      });
     };
     window.addEventListener("echospeak-desktop-bootstrap", applyBootstrap);
     return () => window.removeEventListener("echospeak-desktop-bootstrap", applyBootstrap);
@@ -4288,6 +4420,7 @@ export const Dashboard: React.FC<{
   }, [activeProjectId]);
 
   useEffect(() => {
+    if (!initialHydrationComplete || !activeThreadId) return;
     if (activeThreadId) {
       localStorage.setItem("echospeak.active_thread_id", activeThreadId);
       // Keep legacy key updated for compatibility if needed
@@ -4298,7 +4431,7 @@ export const Dashboard: React.FC<{
       refreshApprovals(activeThreadId);
       refreshExecutions(activeThreadId);
     }
-  }, [activeThreadId]);
+  }, [activeThreadId, initialHydrationComplete]);
 
   /**
    * Reconstruct the completed chat timeline from durable Session → Turn records.
@@ -4489,8 +4622,23 @@ export const Dashboard: React.FC<{
                   : [],
               },
             } as OperationalThreadState;
+            const leanAgentId = role === "assistant" ? String(msg.agent_id || "") : "";
+            const leanPersona = leanAgentId ? agents.find((a) => a.id === leanAgentId) : undefined;
             loadedMsgs.push({
-              id: msgId,
+              id: leanAgentId && msg.message_id ? String(msg.message_id) : msgId,
+              lean: leanAgentId
+                ? messageFromTimeline({
+                    messageId: String(msg.message_id || msgId),
+                    agentId: leanAgentId,
+                    agentName: String(msg.agent_name || leanPersona?.name || "Echo"),
+                    initials: leanPersona?.initials,
+                    title: leanPersona?.title,
+                    text,
+                    timeline: Array.isArray(msg.timeline) ? msg.timeline : [],
+                    at: atMs,
+                    success: msg.backend_success !== false,
+                  })
+                : undefined,
               role,
               text,
               at: atMs,
@@ -4517,8 +4665,10 @@ export const Dashboard: React.FC<{
             });
           }
 
-          // ToolRuns — exact IDs, completed/failed only (never live spinners after refresh)
-          const runs = Array.isArray(turn.tool_runs) ? turn.tool_runs : [];
+          // ToolRuns — exact IDs, completed/failed only (never live spinners after refresh).
+          // Lean turns carry their tools inside each agent's timeline instead.
+          const leanTurn = (Array.isArray(turn.messages) ? turn.messages : []).some((m: any) => m?.agent_id);
+          const runs = leanTurn ? [] : Array.isArray(turn.tool_runs) ? turn.tool_runs : [];
           for (const run of runs) {
             const runId = String(run.id || "").trim();
             const toolName = String(run.tool_name || "tool").trim();
@@ -4606,7 +4756,7 @@ export const Dashboard: React.FC<{
         useAppStore.setState({ messages: loadedMsgs });
         setActivities(loadedActs);
         sessionProjectionRef.current.set(threadId, { messages: loadedMsgs, activities: loadedActs });
-        // Historical research for the Visualizer panel; Chat embeds stay on assistant messages.
+        // Historical research remains available to Chat embeds on assistant messages.
         if (hydratedResearch.length) {
           replaceResearchRuns(hydratedResearch);
         } else {
@@ -4713,6 +4863,17 @@ export const Dashboard: React.FC<{
       setActiveProjectId(String(data.active_project_id || ""));
       setLatestExecutionId(String(data.last_execution_id || ""));
       setLatestTraceId(String(data.last_trace_id || ""));
+      // The scoped Thread state is the first authoritative model projection
+      // available during startup.  Seed the controls from it so the picker
+      // does not briefly show a global/default provider before /provider has
+      // returned for this Session.
+      if (data.runtime_provider || data.selected_model_id) {
+        setProviderDraft((draft) => ({
+          ...draft,
+          provider: String(data.runtime_provider || draft.provider || ""),
+          model: String(data.selected_model_id || draft.model || ""),
+        }));
+      }
       return data;
     } catch (e) {
       console.error("Failed to refresh thread state:", e);
@@ -4953,6 +5114,9 @@ export const Dashboard: React.FC<{
     setThreads((prev) => prev.filter((item) => item.id === id || !isEmptySessionDraft(item)));
     setActiveThreadId(id);
     dispatchActivity({ type: "reset" });
+    // The live timeline belongs to the Session that was visible; history reload restores it.
+    lean.finish();
+    setMention(null);
     setStreaming(streamControllersRef.current.has(id));
     liveReplyDraftRef.current = "";
     setLiveReplyDraft("");
@@ -5041,7 +5205,6 @@ export const Dashboard: React.FC<{
   };
 
   const docInputRef = useRef<HTMLInputElement | null>(null);
-  const bootedRef = useRef(false);
   const backendRetryRef = useRef<{ attempt: number; timer: number | null }>({ attempt: 0, timer: null });
   const refreshAvatarConfig = useCallback(async () => {
     try {
@@ -5962,13 +6125,15 @@ export const Dashboard: React.FC<{
     if (userTypingTimerRef.current) clearTimeout(userTypingTimerRef.current);
     setDocSources([]);
     // Turn-local research only — do not carry prior Session source cards into this answer.
-    // Global research history remains available in Visualizer; Chat embeds use turnResearchRuns.
+    // Research history remains available through Chat embeds; keep each turn isolated.
     // Fresh turn = fresh checklist only (no stacked plans from prior messages)
     setTaskPlans([]);
     liveReplyDraftRef.current = "";
     setLiveReplyDraft("");
     dispatchActivity({ type: "stream_start" });
     setStreaming(true);
+    lean.start(runRequestId);
+    setMention(null);
     // Drop prior-turn tool metadata so done-labels never inherit stale queries
     // (e.g. Python search label leaking into a later GTA+FIFA turn).
     toolInfoRef.current = {};
@@ -6217,7 +6382,6 @@ export const Dashboard: React.FC<{
           toolInfoRef.current[evt.id] = { name: evt.name, input: evt.input, requestId: runRequestId };
           const toolNameStart = String(evt.name || "").toLowerCase();
           if (toolNameStart === "terminal_run") {
-            setVisualizerPin("coding");
             setAgentMode("coding");
           }
           // Only hide pure injects that fire almost every turn
@@ -6292,7 +6456,7 @@ export const Dashboard: React.FC<{
             }
           }
           // The durable ToolRun and specialist projections own code activity.
-          // The stream only nudges the Visualizer toward its Code panel.
+          // The stream only updates compact Chat status for coding activity.
           const codingTools = new Set([
             "file_write",
             "file_read",
@@ -6306,7 +6470,6 @@ export const Dashboard: React.FC<{
             "checkpoint_undo",
           ]);
           if (codingTools.has(toolName)) {
-            setVisualizerPin("coding");
             setAgentMode("coding");
           }
           // Unified done label: built-in, sports, MCP (mcp__server__tool), skills, …
@@ -6379,6 +6542,90 @@ export const Dashboard: React.FC<{
             }
             maxStreamSeq = evtSeq;
           }
+          // Lean runtime events render through the agent timeline, not the legacy cards.
+          if (isLeanEvent(evt as unknown as LeanEvent)) {
+            const leanEvt = evt as unknown as LeanEvent;
+            if (leanEvt.type === "run_start") {
+              const execId = String(leanEvt.execution_id || "");
+              if (execId) {
+                durableTurnId = execId;
+                activeExecutionIdsRef.current.set(streamThreadId, execId);
+                setLatestExecutionId(execId);
+              }
+              // The legacy bootstrap "thinking…" card is not part of a lean turn.
+              setActivities((prev) => prev.filter((a) => !(a.kind === "thinking" && a.request_id === runRequestId)));
+            }
+            if (leanEvt.type === "memory_saved" && typeof leanEvt.memory_count === "number") {
+              setMemoryCount(leanEvt.memory_count);
+              continue;
+            }
+            if (leanEvt.type === "tool_start") setAgentMode(String(leanEvt.name || "").includes("search") ? "research" : "working");
+            if (leanEvt.type !== "final") {
+              lean.push(leanEvt);
+              continue;
+            }
+            // Final: commit exactly what streamed, one message per agent.
+            if (finalHandled) continue;
+            finalHandled = true;
+            const done = lean.finish();
+            const finalExecId = String(leanEvt.execution_id || durableTurnId || "");
+            const committed = done ? done.order.map((id) => done.messages[id]).filter(Boolean) : [];
+            const ctxWindowLean = Number(providerInfo?.context_window || 0) || 32768;
+            if (!canApplyFinalToChat({
+              activeThreadId: String(activeThreadIdRef.current || ""),
+              activeProjectId: String(activeProjectIdRef.current || ""),
+              ownedThreadId: streamThreadId,
+              ownedProjectId: streamProjectId,
+              streamOpen: streamControllersRef.current.get(streamThreadId) === streamController,
+            })) {
+              setStreaming(false);
+              continue;
+            }
+            for (const item of committed) {
+              const text = item.text || item.segments.filter((s) => s.kind === "text").map((s) => (s as { text: string }).text).join("\n\n").trim();
+              addMessage({
+                id: item.messageId,
+                role: "assistant",
+                text,
+                at: item.startedAt,
+                skipTypewriter: true,
+                lean: { ...item, status: item.status === "streaming" ? "done" : item.status, text },
+                executionId: finalExecId || undefined,
+                clientRequestId: runRequestId,
+                usage: buildMessageUsage(text, useAppStore.getState().messages, ctxWindowLean, {
+                  provider: providerInfo?.provider,
+                  model: providerInfo?.model,
+                }),
+              });
+            }
+            if (!committed.length && String(leanEvt.response || "").trim()) {
+              addMessage({ id: crypto.randomUUID(), role: "assistant", text: String(leanEvt.response), at: Date.now(), skipTypewriter: true });
+            }
+            if (leanEvt.thread_state) {
+              setThreadState(leanEvt.thread_state);
+              setActiveProjectId(String(leanEvt.thread_state.active_project_id || ""));
+            }
+            if (typeof leanEvt.memory_count === "number") setMemoryCount(leanEvt.memory_count);
+            setStreaming(false);
+            setAgentMode("idle");
+            setEchoReaction(leanEvt.success ? "success" : "error");
+            const spokenLean = String(committed[committed.length - 1]?.text || leanEvt.response || "").trim();
+            if (spokenLean && (voiceReadAloud || voiceConversationMode)) {
+              void speakLocalText(spokenLean, {
+                clientTurnId: voiceTranscript?.clientTurnId || runRequestId,
+                requestId: runRequestId,
+                executionId: finalExecId,
+                taskRunId: "",
+              }).then((played) => {
+                if (played && voiceConversationMode && activeThreadIdRef.current === streamThreadId && !streamControllersRef.current.has(streamThreadId)) {
+                  void start();
+                }
+              });
+            }
+            void refreshThreads();
+            void refreshRoster();
+            continue;
+          }
           for (const action of activityActionsFromStreamEvent(evt as unknown as Record<string, unknown>)) {
             dispatchActivity(action);
           }
@@ -6399,7 +6646,9 @@ export const Dashboard: React.FC<{
             ) {
               dispatchActivity({
                 type: "step_update",
-                nextAction: "This provider does not expose native effort control on the active endpoint.",
+                nextAction: reasoningControl.applied
+                  ? "Using the selected effort as a bounded generation budget on this provider."
+                  : "This provider does not expose native effort control on the active endpoint.",
               });
             }
           } else if (evt.type === "task_bound") {
@@ -6414,6 +6663,14 @@ export const Dashboard: React.FC<{
                 status: "done",
                 at: normalizeTimestampMs(evt.at || Date.now()),
               });
+            }
+          } else if (evt.type === "provider_retry") {
+            // A failed provider attempt is not a second assistant message.
+            // Clear only the transient generation draft so the bounded retry
+            // remains one continuous visible Echo run.
+            if (evt.retrying) {
+              liveReplyDraftRef.current = "";
+              setLiveReplyDraft("");
             }
           } else if (evt.type === "recovery" || evt.type === "lifecycle" || evt.type === "iteration_boundary" || evt.type === "token_usage") {
             // The shared activity decoder above owns these semantic projections.
@@ -6891,6 +7148,36 @@ export const Dashboard: React.FC<{
       }
 
       setStreaming(false);
+      // A lean turn interrupted before its final event keeps what already streamed.
+      if (lean.stateRef.current?.requestId === runRequestId) {
+        const leftover = lean.finish();
+        if (leftover && !finalHandled) {
+          for (const id of leftover.order) {
+            const item = leftover.messages[id];
+            if (!item || !item.segments.length) continue;
+            const text = item.segments.filter((s) => s.kind === "text").map((s) => (s as { text: string }).text).join("\n\n").trim();
+            addMessage({
+              id: item.messageId,
+              role: "assistant",
+              text: text || (aborted ? "Stopped." : "Interrupted."),
+              at: item.startedAt,
+              skipTypewriter: true,
+              lean: {
+                ...item,
+                status: "failed",
+                text,
+                segments: item.segments.map((s) =>
+                  s.kind === "tool" && s.status === "running"
+                    ? { ...s, status: "failed" as const }
+                    : s.kind === "thinking" && !s.endedAt
+                    ? { ...s, endedAt: Date.now() }
+                    : s
+                ),
+              },
+            });
+          }
+        }
+      }
       // If stream died without final but we already streamed tokens, promote draft once
       // only when the user did not cancel/abort mid-flight.
       if (!finalHandled && !aborted && liveReplyDraftRef.current.trim()) {
@@ -7165,20 +7452,9 @@ export const Dashboard: React.FC<{
   };
 
   useEffect(() => {
-    if (!bootedRef.current) {
-      bootedRef.current = true;
-      addMessage({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        text: "Hello! I'm EchoSpeak. How can I assist you today?",
-        at: Date.now(),
-      });
-    }
-  }, [addMessage]);
-
-  useEffect(() => {
+    if (!initialHydrationComplete || !activeThreadId) return;
     refreshProviderInfo({ allowRetry: true });
-  }, [apiBase, activeThreadId]);
+  }, [apiBase, activeThreadId, initialHydrationComplete]);
 
   const refreshServices = async () => {
     setServicesLoading(true);
@@ -7473,8 +7749,8 @@ export const Dashboard: React.FC<{
   };
 
   useEffect(() => {
-    if (leftTab === "research" || (desktopMode && desktopSurface === "visualizer" && visualizerPin === "research")) void refreshResearchArtifacts();
-  }, [activeProjectId, activeThreadId, desktopMode, desktopSurface, leftTab, visualizerPin]);
+    if (leftTab === "research") void refreshResearchArtifacts();
+  }, [activeProjectId, activeThreadId, leftTab]);
 
   useEffect(() => {
     const gatewayUrl = `${apiBase.replace(/^http/i, "ws")}/gateway/ws`;
@@ -7787,10 +8063,10 @@ export const Dashboard: React.FC<{
     saveRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null, {
       sidebarVisible: showSidebar,
       sidebarCollapsed,
-      visualizerVisible: showVisualizer,
-      visualizerDensity,
+      visualizerVisible: false,
+      visualizerDensity: "normal",
     });
-  }, [showSidebar, sidebarCollapsed, showVisualizer, visualizerDensity]);
+  }, [showSidebar, sidebarCollapsed]);
 
   useEffect(() => {
     const onResize = () => setNarrowLayout(window.innerWidth < 900);
@@ -7849,13 +8125,8 @@ export const Dashboard: React.FC<{
     ? desktopSettingsOpen
     : leftTab !== "chat" && leftTab !== "research";
   const mediaWorkspaceOpen = !desktopMode && mediaRouteActive;
-  const desktopVisualizerOpen = desktopMode && desktopSurface === "visualizer";
-  const desktopContextualWorkspace = desktopMode && isDesktopContextualSurface(desktopSurface);
-  const activeWorkspaceLabel = desktopMode
-    ? desktopSurface === "visualizer"
-      ? desktopVisualizerPanelLabel(visualizerPin || "ring")
-      : desktopWorkspaceLabel(desktopSurface)
-    : "EchoSpeak";
+  const desktopContextualWorkspace = false;
+  const activeWorkspaceLabel = desktopMode ? "Conversation" : "EchoSpeak";
   const studioActiveTab = studioTabs.find((t) => t.id === leftTab);
   const activeStudioGroup = studioGroups.find((group) =>
     group.tabs.some((tab) => tab.id === leftTab)
@@ -7885,6 +8156,7 @@ export const Dashboard: React.FC<{
     });
   }, [leftTab]);
   const closeStudio = () => {
+    setClassicSettings(false);
     if (desktopSettingsWindow) {
       void controlDesktopWindow("close");
       return;
@@ -7892,7 +8164,6 @@ export const Dashboard: React.FC<{
     setLeftTab("chat");
     if (desktopMode) setDesktopSettingsOpen(false);
     if (mediaRouteActive) navigate("/app");
-    setShowVisualizer(true);
   };
   useEffect(() => {
     if (!desktopMode || !studioOpen) return;
@@ -7908,14 +8179,14 @@ export const Dashboard: React.FC<{
     : runtimeGridColumns({
       sidebarVisible: showSidebar,
       sidebarCollapsed: sidebarCollapsed || narrowLayout,
-      visualizerVisible: mediaWorkspaceOpen ? true : showVisualizer && !narrowLayout,
-      visualizerDensity,
+      visualizerVisible: false,
+      visualizerDensity: "normal",
     });
 
   return (
     <div
       className="echo-root"
-      data-execution-profile={desktopMode ? desktopExecutionProfile(desktopSurface, visualizerPin || "ring") : undefined}
+      data-execution-profile={desktopMode ? desktopExecutionProfile(desktopSurface) : undefined}
       style={{
         width: "100%",
         height: "100%",
@@ -7927,6 +8198,46 @@ export const Dashboard: React.FC<{
       }}
     >
       <style>{globalCss}</style>
+      <style>{leanCss}</style>
+      <style>{settingsCss}</style>
+      {agentEditor.open ? (
+        <AgentEditor
+          agent={agentEditor.agent}
+          toolsets={toolsetIds.length ? toolsetIds : ["core", "research", "terminal", "vision", "memory", "skills", "desktop", "comms"]}
+          onClose={() => setAgentEditor({ open: false, agent: null })}
+          onSave={async (payload) => {
+            if (agentEditor.agent) await leanClient.updateAgent(agentEditor.agent.id, payload);
+            else await leanClient.createAgent(payload);
+            await refreshRoster();
+          }}
+          onDelete={
+            agentEditor.agent && !agentEditor.agent.builtin
+              ? async () => {
+                  await leanClient.deleteAgent(agentEditor.agent!.id);
+                  await refreshRoster();
+                }
+              : undefined
+          }
+        />
+      ) : null}
+      {roomDialog.open ? (
+        <RoomDialog
+          room={roomDialog.room}
+          agents={agents}
+          onClose={() => setRoomDialog({ open: false, room: null })}
+          onSave={async (payload) => {
+            if (roomDialog.room) {
+              await leanClient.updateRoom(roomDialog.room.id, payload);
+              await refreshRoster();
+              return;
+            }
+            const room = await leanClient.createRoom({ ...payload, kind: "group" });
+            await refreshRoster();
+            setThreads((prev) => [{ id: room.thread_id, name: room.name, at: Date.now() }, ...prev.filter((t) => t.id !== room.thread_id)]);
+            switchThread(room.thread_id);
+          }}
+        />
+      ) : null}
       {!showSidebar && !studioOpen ? (
         <button
           className="icon-button"
@@ -7953,12 +8264,57 @@ export const Dashboard: React.FC<{
           hydrating={!initialHydrationComplete}
           collapsed={sidebarCollapsed || narrowLayout}
           projects={projects}
-          sessions={threads}
+          sessions={threads.filter((thread) => !roomThreadIds.has(thread.id))}
+          roster={
+            agents.length ? (
+              <RosterSections
+                agents={agents}
+                rooms={rooms}
+                activeThreadId={activeThreadId}
+                collapsed={sidebarCollapsed || narrowLayout}
+                onOpenAgent={async (agent) => {
+                  if (agent.id === "echo") {
+                    const recent = threads.find((thread) => !roomThreadIds.has(thread.id));
+                    if (recent) switchThread(recent.id);
+                    else void createNewThread();
+                    return;
+                  }
+                  let room = rooms.find((r) => r.kind === "direct" && r.agent_ids.length === 1 && r.agent_ids[0] === agent.id);
+                  if (!room) {
+                    try {
+                      room = await leanClient.createRoom({ name: agent.name, agent_ids: [agent.id], kind: "direct" });
+                      await refreshRoster();
+                      await refreshThreads();
+                    } catch (error) {
+                      console.warn("Could not open a chat with", agent.name, error);
+                      return;
+                    }
+                  }
+                  setThreads((prev) => (prev.some((t) => t.id === room!.thread_id) ? prev : [{ id: room!.thread_id, name: room!.name, at: Date.now() }, ...prev]));
+                  switchThread(room.thread_id);
+                }}
+                onEditAgent={(agent) => setAgentEditor({ open: true, agent })}
+                onNewAgent={() => setAgentEditor({ open: true, agent: null })}
+                onOpenRoom={(room) => {
+                  setThreads((prev) => (prev.some((t) => t.id === room.thread_id) ? prev : [{ id: room.thread_id, name: room.name, at: Date.now() }, ...prev]));
+                  switchThread(room.thread_id);
+                }}
+                onNewRoom={() => setRoomDialog({ open: true, room: null })}
+                onDeleteRoom={async (room) => {
+                  try {
+                    await leanClient.deleteRoom(room.id);
+                  } catch (error) {
+                    console.warn("Delete room failed", error);
+                  }
+                  await refreshRoster();
+                  await refreshThreads();
+                }}
+              />
+            ) : null
+          }
           activeProjectId={activeProjectId}
           activeSessionId={activeThreadId}
-          activeView={desktopMode
-            ? (desktopSurface === "visualizer" ? "avatar" : desktopSurface)
-            : (showVisualizer && !narrowLayout ? "avatar" : "chat")}
+          activeView="chat"
           onToggleCollapsed={() => setSidebarCollapsed(v => !v)}
           onNewSession={createNewThread}
           onAddFolder={() => void attachFolder()}
@@ -7981,19 +8337,9 @@ export const Dashboard: React.FC<{
             }
           }}
           settingsOpen={studioOpen}
-          onView={(view) => {
-            if (desktopMode) {
-              const surface = desktopWorkspaceForView(view as DesktopSidebarView);
-              setDesktopSurface(surface);
-              if (mediaRouteActive) navigate("/app");
-              setLeftTab("chat");
-              if (surface === "visualizer" && !visualizerPin) setVisualizerPin("ring");
-              return;
-            }
-            if (mediaRouteActive) navigate("/app");
+          onView={() => {
             setLeftTab("chat");
-            setShowVisualizer(view === "avatar");
-            if (view === "avatar") setVisualizerPin((current) => current || "ring");
+            if (mediaRouteActive) navigate("/app");
           }}
         /> : null}
         {mediaWorkspaceOpen ? (
@@ -8002,16 +8348,6 @@ export const Dashboard: React.FC<{
               apiBase={apiBase}
               sessionId={activeThreadId}
               projectId={activeProjectId}
-            />
-          </div>
-        ) : null}
-        {!mediaWorkspaceOpen && (desktopMode ? desktopVisualizerOpen : showVisualizer && !narrowLayout) ? (
-          <div className="visualizer-pane">
-            <VisualizerWorkspace
-              apiBase={apiBase}
-              sessionId={activeThreadId || ""}
-              projectId={activeProjectId || ""}
-              activity={agentActivity}
             />
           </div>
         ) : null}
@@ -8045,7 +8381,6 @@ export const Dashboard: React.FC<{
                     closeStudio();
                     return;
                   }
-                  setShowVisualizer(true);
                   setLeftTab("overview");
                   if (desktopMode && !desktopSettingsWindow) {
                     void openDesktopSettingsWindow().catch(() => setDesktopSettingsOpen(true));
@@ -8090,31 +8425,6 @@ export const Dashboard: React.FC<{
                 )}
               </button>
 
-              <button
-                type="button"
-                className="icon-button"
-                onClick={() => setShowVisualizer((v) => !v)}
-                title={showVisualizer ? "Hide visualizer" : "Show visualizer"}
-                style={{
-                  display: "none",
-                  color: "#fff",
-                  background: showVisualizer ? "#222" : "transparent",
-                  border: `1px solid ${colors.line}`,
-                }}
-              >
-                {showVisualizer ? (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="4" width="18" height="16" rx="2" />
-                    <path d="M12 4v16" />
-                  </svg>
-                ) : (
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="4" width="18" height="16" rx="2" />
-                    <path d="M12 4v16" />
-                    <path d="M8 9h2M8 13h2M8 17h2" />
-                  </svg>
-                )}
-              </button>
             </div>
           </div>
           <div className="panel-body">
@@ -8265,6 +8575,9 @@ export const Dashboard: React.FC<{
               {true && (
                 <>
                   <div key={activeThreadId || "quick-chat"} className="chat-scroll" style={{ flex: 1 }} ref={chatScrollRef} onScroll={onChatScroll}>
+                    {activeRoom ? (
+                      <RoomHeader room={activeRoom} agents={agents} onEdit={() => setRoomDialog({ open: true, room: activeRoom })} />
+                    ) : null}
                     {activeChatTask ? (
                       <section style={{ margin: "4px 4px 12px", padding: "11px 13px", border: "1px solid rgba(255,255,255,.1)", background: "linear-gradient(115deg,rgba(255,255,255,.045),rgba(255,255,255,.012))", borderRadius: 5, display: "flex", alignItems: "center", gap: 12 }} aria-label="Current work">
                         <div style={{ minWidth: 0, flex: 1 }}>
@@ -8272,16 +8585,6 @@ export const Dashboard: React.FC<{
                           <div style={{ marginTop: 5, color: "rgba(255,255,255,.86)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeChatTask.objective}</div>
                           <div style={{ marginTop: 4, color: "rgba(255,255,255,.36)", fontSize: 9.5 }}>{activeChatSatisfied}/{activeChatRequirementStates.length || 1} requirements satisfied</div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDesktopSurface("visualizer");
-                            setShowVisualizer(true);
-                          }}
-                          style={{ flex: "0 0 auto", border: "1px solid rgba(255,255,255,.15)", background: "#111", color: "#fff", borderRadius: 3, minHeight: 30, padding: "0 10px", cursor: "pointer", fontSize: 9.5 }}
-                        >
-                          Open in Visualizer
-                        </button>
                       </section>
                     ) : null}
                     <AnimatePresence initial={false}>
@@ -8335,39 +8638,44 @@ export const Dashboard: React.FC<{
                         />
                       </div>
                     ) : null}
-                    {streaming && liveReplyDraft ? (
-                      <div style={{ display: "flex", justifyContent: "flex-start", padding: "10px 4px 8px", width: "100%", minWidth: 0, boxSizing: "border-box" }}>
-                        <div
-                          className="chat-flat chat-line-assistant"
-                          style={{
-                            width: "100%",
-                            maxWidth: "100%",
-                            minWidth: 0,
-                            fontSize: 15,
-                            lineHeight: 1.65,
-                            whiteSpace: "pre-wrap",
-                            overflowWrap: "anywhere",
-                            wordBreak: "break-word",
-                          }}
-                        >
-                          {liveReplyDraft}
-                          <span
-                            style={{
-                              display: "inline-block",
-                              width: 8,
-                              height: 15,
-                              marginLeft: 3,
-                              borderRadius: 1,
-                              background: "rgba(255,255,255,0.75)",
-                              animation: "pulse 0.8s infinite",
-                              verticalAlign: "text-bottom",
-                            }}
-                          />
-                        </div>
+                    {lean.live ? (
+                      <div data-testid="lean-live-turn">
+                        {lean.live.routing && !lean.live.order.length ? (
+                          <div className="lm-routing">
+                            <span className="lm-dots"><i /><i /><i /></span>
+                            <span className="lm-shimmer">Choosing who should answer</span>
+                          </div>
+                        ) : null}
+                        {lean.live.order.map((id) => {
+                          const item = lean.live!.messages[id];
+                          return item ? <LeanMessage key={id} data={item} live onDecide={decideLeanApproval} at={item.startedAt} /> : null;
+                        })}
+                        {!lean.live.order.length && !lean.live.routing ? (
+                          <div className="lm-routing">
+                            <span className="lm-dots"><i /><i /><i /></span>
+                            <span className="lm-shimmer">Connecting to the model</span>
+                          </div>
+                        ) : null}
+                        {streaming ? (
+                          <div className="lm-live-bar" role="status">
+                            <span>Working</span>
+                            <button
+                              type="button"
+                              className="es-btn"
+                              onClick={() => {
+                                stopTts();
+                                setVoicePhase("idle");
+                                cancelSessionTurn(activeThreadId, true);
+                              }}
+                            >
+                              Stop
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
-                    {/* Single Echo activity strip for the active Session stream only. */}
-                    {streaming ? (
+                    {/* Single Echo activity strip for the active Session stream only (legacy runtime). */}
+                    {streaming && !lean.live ? (
                       <LiveChatActivityBar
                         activity={agentActivity}
                         showSpinner
@@ -8486,16 +8794,64 @@ export const Dashboard: React.FC<{
                           disabled={!activeThreadId}
                           onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
                             updateComposerInput(e.target.value);
+                            if (activeRoom?.kind === "group") {
+                              const found = activeMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
+                              setMention(found && mentionMatches(found.query, roomMembers).length ? { ...found, index: 0 } : null);
+                            }
                           }}
                           onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+                            if (mention) {
+                              const matches = mentionMatches(mention.query, roomMembers);
+                              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                                e.preventDefault();
+                                const step = e.key === "ArrowDown" ? 1 : -1;
+                                setMention({ ...mention, index: (mention.index + step + matches.length) % Math.max(1, matches.length) });
+                                return;
+                              }
+                              if ((e.key === "Enter" || e.key === "Tab") && matches[mention.index]) {
+                                e.preventDefault();
+                                const pick = matches[mention.index];
+                                const caret = e.currentTarget.selectionStart ?? input.length;
+                                const next = `${input.slice(0, mention.start)}@${pick.name} ${input.slice(caret)}`;
+                                updateComposerInput(next);
+                                setMention(null);
+                                return;
+                              }
+                              if (e.key === "Escape") {
+                                setMention(null);
+                                return;
+                              }
+                            }
                             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                               e.preventDefault();
                               void sendText();
                             }
                           }}
-                          placeholder={activeThreadId ? "Ask Echo anything..." : "Create a Session with + to chat"}
-                          aria-label="Ask Echo anything"
+                          onBlur={() => window.setTimeout(() => setMention(null), 120)}
+                          placeholder={
+                            !activeThreadId
+                              ? "Create a Session with + to chat"
+                              : activeRoom?.kind === "group"
+                              ? `Message ${activeRoom.name}  ·  @ to pick who answers`
+                              : activeRoom
+                              ? `Message ${roomMembers[0]?.name || activeRoom.name}`
+                              : "Ask Echo anything..."
+                          }
+                          aria-label="Message"
                         />
+                        {mention && activeRoom?.kind === "group" ? (
+                          <MentionMenu
+                            query={mention.query}
+                            agents={roomMembers}
+                            activeIndex={mention.index}
+                            onPick={(pick) => {
+                              const caret = textareaRef.current?.selectionStart ?? input.length;
+                              updateComposerInput(`${input.slice(0, mention.start)}@${pick.name} ${input.slice(caret)}`);
+                              setMention(null);
+                              textareaRef.current?.focus();
+                            }}
+                          />
+                        ) : null}
                       </div>
                       <div className="composer-trailing">
                         <ContextMeter messages={messages} contextWindow={providerInfo?.context_window || 0} />
@@ -8567,27 +8923,6 @@ export const Dashboard: React.FC<{
                           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                             <rect x="2" y="4" width="20" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
                             <path d="M12 16v4M8 20h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                          </svg>
-                        </button>
-                        <button
-                          className={`composer-square ${(desktopMode ? desktopSurface === "visualizer" : showVisualizer && !narrowLayout) ? "active" : ""}`}
-                          type="button"
-                          title={(desktopMode ? desktopSurface === "visualizer" : showVisualizer && !narrowLayout) ? "Return to Chat" : "Show visualizer"}
-                          aria-label={(desktopMode ? desktopSurface === "visualizer" : showVisualizer && !narrowLayout) ? "Return to Chat" : "Show visualizer"}
-                          onClick={() => {
-                            if (!desktopMode) {
-                              setShowVisualizer((v) => !v);
-                              return;
-                            }
-                            if (mediaRouteActive) navigate("/app");
-                            setLeftTab("chat");
-                            setDesktopSurface((surface) => surface === "visualizer" ? "chat" : "visualizer");
-                          }}
-                        >
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                            <rect x="3.5" y="5" width="17" height="14" rx="2" />
-                            <path d="M12 5v14" />
-                            <path d="M3.5 12h8.5" />
                           </svg>
                         </button>
                         <button
@@ -8802,7 +9137,21 @@ export const Dashboard: React.FC<{
                 </div>
               )}
 
-              {studioOpen && (!desktopMode || desktopStudioHost) && createPortal(
+              {studioOpen && !classicSettings && (!desktopMode || desktopStudioHost) && createPortal(
+                <SettingsPanel
+                  apiBase={apiBase}
+                  fullscreen={Boolean(desktopMode && desktopSettingsWindow)}
+                  agents={agents}
+                  onClose={closeStudio}
+                  onEditAgent={(agent) => setAgentEditor({ open: true, agent })}
+                  onOpenClassic={(tab) => {
+                    setClassicSettings(true);
+                    setLeftTab(tab as typeof leftTab);
+                  }}
+                />,
+                desktopMode ? desktopStudioHost! : document.body
+              )}
+              {studioOpen && classicSettings && (!desktopMode || desktopStudioHost) && createPortal(
                 <div className="studio-backdrop">
                   <motion.div
                   className="studio-shell"
@@ -8815,7 +9164,10 @@ export const Dashboard: React.FC<{
                   aria-label="EchoSpeak Settings"
                 >
                   <div className="studio-top">
-                    <div className="studio-title">Settings</div>
+                    <button type="button" className="es-btn es-btn-sm" onClick={() => setClassicSettings(false)}>
+                      ← New settings
+                    </button>
+                    <div className="studio-title">Classic settings</div>
                     <button
                       type="button"
                       className="studio-x"
@@ -9067,7 +9419,7 @@ export const Dashboard: React.FC<{
                     <section className="settings-general-card">
                       <div>
                         <div className="research-title">Conversation</div>
-                        <div className="research-snippet">Chat stays conversational; durable work is projected in Visualizer.</div>
+                        <div className="research-snippet">Chat stays conversational while live work status remains available in the same conversation.</div>
                       </div>
                       <div className="settings-general-row">
                         <span>
@@ -9075,22 +9427,6 @@ export const Dashboard: React.FC<{
                           <small>Create a chat only when you explicitly ask for one.</small>
                         </span>
                         <button className="icon-button" type="button" onClick={() => void createNewThread()}>New Chat</button>
-                      </div>
-                      <div className="settings-general-row">
-                        <span>
-                          <strong>Visualizer</strong>
-                          <small>Open the live projection of Echo&apos;s current work.</small>
-                        </span>
-                        <button
-                          className="icon-button"
-                          type="button"
-                          onClick={() => {
-                            closeStudio();
-                            if (desktopMode) setDesktopSurface("visualizer");
-                          }}
-                        >
-                          Open
-                        </button>
                       </div>
                     </section>
 

@@ -44,19 +44,19 @@ expand Project scope, or establish completion through prose.
 | Echo assistant identity and behavior | `SOUL.md` via bounded `EchoIdentityProjection` | Turn-understanding and execution prompts |
 | Project identity/root | `ProjectManager` | Sidebar and Settings Project views |
 | Session identity/bindings/references | `ThreadSessionState` / `StateStore` | thread list, workspace chrome |
-| Cross-Turn semantic objective, requirements, and graph | `TaskRunStore` | Session references, compact Chat status, Visualizer panels |
+| Cross-Turn semantic objective, requirements, and graph | `TaskRunStore` | Session references and compact Chat status |
 | Per-Turn interpretation | `ExecutionRecord.turn_interpretation` | lifecycle/activity UI |
-| Execution, ToolRun, approval | `StateStore` | Chat transient state, Visualizer, Settings diagnostics |
+| Execution, ToolRun, approval | `StateStore` | Chat transient state and Settings diagnostics |
 | Registered capability | `ToolRegistry` and `SkillsRegistry` | Tools/Skills screens, prompts |
 | Personal semantic memory | `MemoryCurator` writing `AgentMemory` records | indexes, profile/Markdown mirrors, Settings memory view |
 | Documents | `DocumentStore` | chunks, embeddings, graph and UI results |
-| Research requirements and sufficiency | `TaskRunStore` plus `RequirementCompletionEvaluator`; `ResearchArtifactStore` owns evidence artifacts | Visualizer Research panel and citations |
-| Coding delegation and continuation | `TaskRunStore` plus `SpecialistRunStore` | Visualizer Code panel |
+| Research requirements and sufficiency | `TaskRunStore` plus `RequirementCompletionEvaluator`; `ResearchArtifactStore` owns evidence artifacts | Chat research status and citations |
+| Coding delegation and continuation | `TaskRunStore` plus `SpecialistRunStore` | Chat Code status |
 | Tasks and definitions | `TaskStore` and `RoutineManager` | Automations cards and schedule views |
 | Automation work completion | `TaskRunStore` through the existing completion gate | `AutomationRunStore` lease/history projection, Product Task cards |
 | Connections | `ConnectionRegistry` | Connections cards and routine capability choices |
 | Extension packages | Contract-only `PackageManifest`; no installation owner exists | hidden/unavailable package presentation |
-| Media jobs and assets | `GenerationJobStore` / `VoiceJobStore`; `MediaLibraryStore` for verified assets | unified `MediaJobProjection`, Visualizer Media panel |
+| Media jobs and assets | `GenerationJobStore` / `VoiceJobStore`; `MediaLibraryStore` for verified assets | unified `MediaJobProjection`, Chat media status |
 | User Voice transport | `VoiceTransportStore` for transcript/playback lineage; canonical runtime for semantic work | Chat microphone, playback, and Voice status |
 
 Malformed authoritative JSON fails closed, is preserved in quarantine, and
@@ -89,10 +89,10 @@ in `requirement_history`. A nonterminal TaskRun whose only owning Execution is
 already terminal, or whose lifecycle checkpoint is structurally impossible, is
 quarantined without deleting data and cannot be selected for continuation.
 
-The desktop exposes exactly two primary views: Chat and Visualizer. Work,
-Research, Code, Checklist, and Media are internal Visualizer panels. Settings
-is a centered modal, not another primary workspace. Switching views or panels is
-navigation only and never creates a Session, TaskRun, Execution, or specialist
+The desktop exposes one primary view: Chat. Work, Research, Code, Checklist,
+and Media are compact Chat projections. Settings is a centered modal, not
+another primary workspace. Opening or collapsing a projection is navigation
+only and never creates a Session, TaskRun, Execution, or specialist
 handoff. An explicit profile handoff
 atomically supersedes the prior TaskRun and creates one linked replacement in
 the same Session and Project. Requirement/evidence state is retained, while
@@ -157,8 +157,11 @@ revision compare-and-swap before the question is emitted. Pre-task ambiguity
 may ask a question without inventing a resumable TaskRun. Interpretation,
 policy, authority-conflict, and quarantined failures are terminal history.
 Provider, model-output, and tool-parse failures retain the TaskRun objective and
-are eligible only when a later selected-model interpretation explicitly chooses
-to retry or continue them.
+stay inside the bounded selected-model loop. A stream idle/call timeout gets one
+same-model retry; a bounded loop exhaustion then terminalizes only the unresolved
+requirements as exhausted, preserves verified evidence, and may return an honest
+partial answer through the existing finalization gate. It never selects a hidden
+provider/model or leaves the failed step as an indefinitely resumable zombie.
 
 After arbitration, the runtime captures immutable per-Turn execution authority.
 Durable Session progress updates cannot erase or expand its allowlist. Every
@@ -186,7 +189,7 @@ ToolRun/ToolOutcome to the same attempt, recomputes sufficiency, and returns
 through the existing finalization gate. Pre-lineage approvals fail closed.
 
 Project preview start and stop are registered, approval-gated ToolRegistry
-actions. The Visualizer Code panel requests them through the canonical Turn
+actions. The Chat Code projection requests them through the canonical Turn
 path; direct host-process endpoints are removed. Preview status remains a
 read-only projection.
 
@@ -290,9 +293,9 @@ the TaskRun or produce Echo's final response. The existing
 `RequirementCompletionEvaluator` and model-control-plane finalization gate
 remain authoritative.
 
-Code is an internal Visualizer projection and control surface for those durable
-specialist sessions. Work reads the same SpecialistRuns through TaskRun detail.
-Opening Chat, Visualizer, Work, or Code is side-effect free; only an explicit
+Code is a Chat projection and control surface for those durable specialist
+sessions. Work reads the same SpecialistRuns through TaskRun detail. Opening
+Chat or any compact projection is side-effect free; only an explicit
 Delegate, Continue, Interrupt, or one-shot approval action mutates specialist
 state. The former file/terminal/inline-diff workspace and its direct APIs are
 physically retired.
@@ -319,7 +322,7 @@ the backend streams understanding, planning, waiting-for-model, thinking, tool,
 waiting-for-user/approval, responding, and terminal lifecycle events. Final UI
 state reconciles from durable Execution/Session truth. Pending approvals and
 actionable failures remain visible. Durable ToolRuns, evidence, plans, and
-verification remain available in Visualizer detail panels.
+verification remain available in Chat activity and history projections.
 
 HTTP and gateway streams have a bounded startup deadline. Client cancellation
 sets a request-scoped cancellation token consumed by Turn Understanding and the
@@ -339,7 +342,7 @@ Connection management is rendered inside the same selected-card detail panel;
 its controls mutate only the revision-checked `ConnectionRegistry` APIs and do
 not copy connection or capability state into the frontend.
 
-The Visualizer Work panel consumes one Session/Project-keyed store and exact
+The Chat work projection consumes one Session/Project-keyed store and exact
 TaskRun projections. It shows overview, the read-only TaskRun graph,
 requirements, evidence, artifacts, occurrences, media lineage, approvals,
 Executions, and ToolRuns. The store holds backend IDs and revisions only and

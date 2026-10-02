@@ -1242,6 +1242,14 @@ class StateStore:
                         "backend_success": (item.payload or {}).get("backend_success"),
                         "error": str((item.payload or {}).get("error") or ""),
                     })
+                    if (item.payload or {}).get("agent_id"):
+                        # Lean runtime: which agent spoke and what it did on the way.
+                        messages[-1].update({
+                            "agent_id": str(item.payload.get("agent_id") or ""),
+                            "agent_name": str(item.payload.get("agent_name") or ""),
+                            "message_id": str(item.payload.get("message_id") or ""),
+                            "timeline": list(item.payload.get("timeline") or []),
+                        })
         if not any(m["role"] == "user" for m in messages) and execution.query:
             messages.insert(0, {
                 "role": "user",

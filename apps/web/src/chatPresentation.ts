@@ -130,5 +130,6 @@ export function sanitizeUserFacingText(text: string): string {
   clean = clean.replace(/req_[a-f0-9\-]{8,}/gi, "");
   clean = clean.replace(/<agent_decision>[\s\S]*?<\/agent_decision>/gi, "");
   clean = clean.replace(/Selected provider could not complete[\s\S]*/gi, "Provider stalled — retrying.");
+  clean = clean.replace(/Provider stalled[^\n]*/gi, "Retrying the selected model step.");
   return clean.trim();
 }

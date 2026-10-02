@@ -88,7 +88,7 @@
     "publisher": "EchoSpeak Project",
     "category": "Productivity",
     "shortDescription": "Local-first personal AI for Windows",
-    "longDescription": "EchoSpeak is a local-first personal AI with conversational Chat and a Visualizer for durable work, tools, research, and specialist activity.",
+    "longDescription": "EchoSpeak is a local-first personal AI with conversational Chat and compact live status for durable work, tools, research, and specialist activity.",
     "icon": ["icons/icon.ico", "icons/icon.png"],
     "externalBin": ["binaries/echospeak-backend"],
     "windows": {

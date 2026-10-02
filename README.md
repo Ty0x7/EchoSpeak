@@ -92,7 +92,7 @@ On Arch/CachyOS with PEP 668, use `./.venv/bin/python -m pip install -r requirem
 - **Bounded model loop** — native tool calls, structured observations, malformed-output repair, provider retry, and no-progress protection.
 - **Specialist delegation** — coding work is correlated to real Codex or OpenCode sessions and returns through TaskRun.
 - **Single completion gate** — verified requirement sufficiency, not prose or tool execution alone, controls finalization.
-- **Projection-only UI** — Chat stays conversational while Visualizer reads the same TaskRun, ToolRun, evidence, and specialist records.
+- **Chat-only UI** — Chat stays conversational while live TaskRun, ToolRun, evidence, and specialist status remain compactly available in the same conversation.
 
 ### Memory + knowledge
 
@@ -106,7 +106,7 @@ On Arch/CachyOS with PEP 668, use `./.venv/bin/python -m pip install -r requirem
 
 | Channel | How it connects |
 |---------|----------------|
-| **Web/Desktop UI** | React/Vite — Chat plus a read-only Visualizer for TaskRuns, research, specialist Code, checklist, media, and approvals |
+| **Web/Desktop UI** | React/Vite — Chat with compact live TaskRun, research, Code, checklist, media, and approval status |
 | **Discord** | Bot account for server channels + DMs; Playwright bridge for personal sessions |
 | **Telegram** | Native bot via grammY-style integration |
 | **Twitter/X** | Autonomous tweets (grounded by git diffs), changelog tweets, mention replies |

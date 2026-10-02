@@ -266,6 +266,7 @@ from agent.model_contracts import (
 from agent.model_control_plane import (
     LangChainStreamingTransport,
     ModelExecutionControlPlane,
+    ModelProviderError,
     ModelTurnEnvelopeCompiler,
     RuntimeProposalFeedback,
     is_usable_verified_outcome,
@@ -10874,12 +10875,20 @@ class EchoSpeakAgent:
             for key, value in reasoning_control.items()
             if key != "bind_parameters"
         }
+        profile = getattr(self, "_active_model_profile", None)
+        profile_metadata = dict(getattr(profile, "metadata", {}) or {})
+        provider_request_timeout = float(
+            profile_metadata.get("model_request_timeout_seconds")
+            or getattr(config, "model_request_timeout_seconds", 180.0)
+            or 180.0
+        )
         transport = LangChainStreamingTransport(
             self.model_runtime.llm,
             stream_idle_timeout_seconds=float(
                 getattr(config, "model_stream_idle_timeout_seconds", 45.0)
                 or 45.0
             ),
+            max_call_seconds=provider_request_timeout,
             generation_parameters=dict(reasoning_control.get("bind_parameters") or {}),
             callbacks=list(callbacks or []),
         )
@@ -10887,17 +10896,10 @@ class EchoSpeakAgent:
         task = getattr(self, "_active_task_run", None)
         budget = getattr(task, "research_budget", None)
         budget_loops = int(getattr(budget, "max_external_calls", configured_loops) or configured_loops) + 2
-        profile = getattr(self, "_active_model_profile", None)
-        profile_metadata = dict(getattr(profile, "metadata", {}) or {})
         configured_elapsed = float(
             profile_metadata.get("model_control_max_elapsed_seconds")
             or getattr(config, "model_control_max_elapsed_seconds", 600.0)
             or 600.0
-        )
-        provider_request_timeout = float(
-            profile_metadata.get("model_request_timeout_seconds")
-            or getattr(config, "model_request_timeout_seconds", 180.0)
-            or 180.0
         )
         observed_understanding_latency = 0.0
         latency_rows = getattr(self, "_turn_understanding_latency_by_model", {}) or {}
@@ -10940,7 +10942,7 @@ class EchoSpeakAgent:
             event_name = str(event.get("event") or "")
             message = ""
             if event_name == "provider_retry" and bool(event.get("retrying")):
-                message = "Provider stalled — retrying."
+                message = "Retrying the selected model step."
             elif event_name in {"runtime_proposal_feedback", "model_output_repair"}:
                 message = "Adjusting the approach."
             elif event_name == "tool_execution_error":
@@ -10965,7 +10967,9 @@ class EchoSpeakAgent:
                 getattr(config, "model_control_malformed_repairs", 2) or 2
             ),
             provider_retries=int(
-                getattr(config, "model_control_provider_retries", 1) or 1
+                getattr(config, "model_control_provider_retries", 2)
+                if getattr(config, "model_control_provider_retries", None) is not None
+                else 2
             ),
             provider_backoff_seconds=float(
                 getattr(
@@ -18859,6 +18863,178 @@ class EchoSpeakAgent:
                 return forced
         return response
 
+    def _recover_model_provider_failure(
+        self,
+        exc: ModelProviderError,
+        callbacks: Optional[list],
+        *,
+        recovery_reason_code: str = "provider_recovery_partial",
+    ) -> str:
+        """Turn an exhausted selected-model step into an honest partial answer.
+
+        Provider retries remain owned by ``ModelExecutionControlPlane``.  This
+        boundary only reconciles the durable TaskRun after those retries or
+        bounded loop repairs are exhausted, preserves every verified outcome
+        already written, and lets
+        the existing finalization gate terminalize a partial verdict.  It never
+        invokes another model/provider or creates a second completion path.
+        """
+        from agent.model_control_plane import (
+            collect_structured_evidence_lines,
+            synthesize_mixed_requirement_partial,
+            synthesize_structured_evidence_answer,
+        )
+        from agent.research_runtime import (
+            CompletionDisposition,
+            RequirementCompletionEvaluator,
+            RequirementStatus,
+        )
+        from agent.task_runs import TaskInputOwner, get_task_run_store
+
+        store = get_task_run_store()
+        normalized_reason = str(recovery_reason_code or "provider_recovery_partial")[:120]
+        task = getattr(self, "_active_task_run", None)
+        current = None
+        if task is not None:
+            current = store.get(
+                task.id,
+                session_id=task.session_id,
+                project_id=task.project_id,
+            )
+        if current is not None:
+            states = dict(current.requirement_states or {})
+            thread_state = self._state_store.get_thread_state(self._thread_key())
+            pending_approval = bool(getattr(thread_state, "pending_approval_id", ""))
+            user_blocked_ids = {
+                str(gap.requirement_id or "")
+                for gap in list(current.input_gaps or [])
+                if gap.owner == TaskInputOwner.USER and gap.blocking
+            }
+            changed = False
+            for requirement in list(current.requirements or []):
+                requirement_id = str(requirement.requirement_id or "")
+                state = states.get(requirement_id)
+                if state is None or requirement_id in user_blocked_ids:
+                    continue
+                if state.status not in {
+                    RequirementStatus.PENDING,
+                    RequirementStatus.ACTIVE,
+                    RequirementStatus.WEAK,
+                }:
+                    continue
+                states[requirement_id] = state.model_copy(update={
+                    "status": RequirementStatus.EXHAUSTED,
+                    "terminal_reason": f"{normalized_reason}_exhausted",
+                    "last_strategy": (
+                        "same_model_provider_retry"
+                        if normalized_reason == "provider_recovery_partial"
+                        else "bounded_model_recovery"
+                    ),
+                    "updated_at": time.time(),
+                })
+                changed = True
+            verdict = RequirementCompletionEvaluator.evaluate(
+                current.requirements,
+                states,
+                missing_inputs=current.missing_inputs,
+                pending_approval=pending_approval,
+            )
+            history = list(current.recovery_history or [])
+            history.append({
+                "event": f"{normalized_reason}_exhausted",
+                "error_type": type(exc).__name__,
+                "requirement_ids": list(verdict.unresolved_ids or []),
+                "disposition": verdict.disposition.value,
+                "at": time.time(),
+            })
+            if changed or current.completion_evaluation != verdict:
+                try:
+                    current = store.update(
+                        current.id,
+                        session_id=current.session_id,
+                        project_id=current.project_id,
+                        expected_revision=current.revision,
+                        requirement_states=states,
+                        completion_evaluation=verdict,
+                        recovery_history=history[-64:],
+                        workflow_stage=(
+                            "provider_recovery_partial"
+                            if verdict.disposition == CompletionDisposition.PARTIAL
+                            else "provider_recovery_incomplete"
+                        ),
+                        last_execution_id=str(
+                            getattr(self, "_current_execution_id", "") or ""
+                        ),
+                    )
+                    self._active_task_run = current
+                except Exception as persist_exc:
+                    logger.warning(
+                        "Provider recovery checkpoint was not persisted task_run_id={} error_type={}",
+                        current.id,
+                        type(persist_exc).__name__,
+                    )
+
+        fallback = ""
+        try:
+            envelope = self._compile_model_turn_envelope()
+            if envelope is not None:
+                fallback = (
+                    synthesize_mixed_requirement_partial(envelope)
+                    or synthesize_structured_evidence_answer(envelope)
+                )
+                if not fallback and collect_structured_evidence_lines(envelope):
+                    fallback = synthesize_structured_evidence_answer(envelope)
+        except Exception as synth_exc:
+            logger.warning(
+                "Provider recovery synthesis was unavailable error_type={}",
+                type(synth_exc).__name__,
+            )
+        if not fallback:
+            fallback = (
+                "I completed the parts I could verify, but the remaining requested "
+                "details were not reliable enough to state. I won't invent them."
+            )
+        self._provider_recovery_partial = True
+        self._last_agent_decision_kind = "answer"
+        self._last_agent_decision_reason_code = normalized_reason
+        execution_id = str(getattr(self, "_current_execution_id", "") or "")
+        if execution_id:
+            try:
+                execution = self._state_store.get_execution(execution_id)
+                if execution is not None:
+                    metadata = dict(getattr(execution, "metadata", {}) or {})
+                    metadata["provider_recovery"] = {
+                        "reason_code": normalized_reason,
+                        "error_type": type(exc).__name__,
+                        "task_run_id": str(getattr(current, "id", "") or ""),
+                        "recorded_at": time.time(),
+                    }
+                    self._state_store.update_execution(
+                        execution_id,
+                        metadata=metadata,
+                    )
+            except Exception as metadata_exc:
+                logger.debug(
+                    "Provider recovery diagnostic persistence skipped error_type={}",
+                    type(metadata_exc).__name__,
+                )
+        logger.warning(
+            "Selected model provider recovery produced a bounded partial answer "
+            "reason_code={} error_type={} task_run_id={}",
+            normalized_reason,
+            type(exc).__name__,
+            str(getattr(current, "id", "") or ""),
+        )
+        for callback in list(callbacks or []):
+            put = getattr(callback, "_put", None)
+            if callable(put):
+                put({
+                    "type": "recovery",
+                    "message": "Verified work is preserved; the remaining details were not reliable enough to state.",
+                    "reason_code": normalized_reason,
+                })
+        return fallback
+
     def _answer_has_weather_facts(self, text: str) -> bool:
         hay = str(text or "").lower()
         if re.search(
@@ -19208,7 +19384,15 @@ class EchoSpeakAgent:
         self._model_latest_user_message = str(ctx.resolved_input or ctx.extracted_input or user_input or "")
         self._last_stage4_branch = "model_control_plane_attempt"
         self._last_tool_calling_mode = "canonical_model_execution_control_plane"
-        decision, control_trace = self._run_model_control_plane(callbacks)
+        self._provider_recovery_partial = False
+        try:
+            decision, control_trace = self._run_model_control_plane(callbacks)
+        except ModelProviderError as exc:
+            # The selected model has exhausted its bounded same-model retries.
+            # Preserve durable ToolRuns/evidence and let the existing finalizer
+            # return a scoped partial result instead of converting the turn into
+            # the generic provider-failure response path.
+            return self._recover_model_provider_failure(exc, callbacks)
         logger.info(
             "Canonical model control plane: {}",
             json.dumps(control_trace.safe_dict(), sort_keys=True, default=str),
@@ -19235,6 +19419,32 @@ class EchoSpeakAgent:
         self._last_stage4_branch = f"model_control_plane_{decision.kind.value}"
         self._last_agent_decision_kind = decision.kind.value
         self._last_agent_decision_reason_code = str(decision.reason_code or "")
+        # A bounded model loop can terminate with a BLOCK after retries,
+        # malformed-output repairs, or a serialized tool proposal.  These are
+        # recoverable execution outcomes, not user-facing answers and not
+        # reasons to strand the TaskRun.  Reconcile the current ledger and
+        # synthesize the same evidence-preserving partial result used for an
+        # exhausted provider call.  Authority denials, approvals, and genuine
+        # invariant failures remain on their existing strict paths.
+        recoverable_block_reasons = {
+            "model_loop_elapsed_budget",
+            "model_loop_no_progress",
+            "tool_loop_limit",
+            "model_finish_incomplete",
+            "model_finish_blocked",
+            "no_actionable_requirement",
+        }
+        if (
+            decision.kind == DecisionKind.BLOCK
+            and str(decision.reason_code or "") in recoverable_block_reasons
+        ):
+            return self._recover_model_provider_failure(
+                ModelProviderError(
+                    "bounded selected-model loop ended before a complete terminal action"
+                ),
+                callbacks,
+                recovery_reason_code="bounded_model_recovery",
+            )
         if decision.kind == DecisionKind.UPDATE_PLAN:
             self._apply_model_plan([dict(item) for item in decision.plan])
             return decision.message or "I updated the active task plan."
@@ -19412,10 +19622,26 @@ class EchoSpeakAgent:
             if str(item.get("execution_id") or "") == str(self._current_execution_id or "")
         ]
         last_outcome = getattr(self, "_last_boundary_outcome", None)
-        success = model_completion_valid and not current_failures and not (
-            last_outcome is not None
-            and last_outcome.status not in {"success", "approval_required"}
+        partial_verdict = getattr(
+            getattr(self, "_active_task_run", None),
+            "completion_evaluation",
+            None,
         )
+        if (
+            canonical
+            and bool(getattr(self, "_provider_recovery_partial", False))
+            and bool(getattr(partial_verdict, "finalizable", False))
+        ):
+            # A bounded provider failure may follow a failed/empty attempt, but
+            # the evaluator has already proven that every remaining required
+            # part is terminally incomplete. The finalizer may therefore record
+            # an honest partial answer while preserving all failure telemetry.
+            success = model_completion_valid
+        else:
+            success = model_completion_valid and not current_failures and not (
+                last_outcome is not None
+                and last_outcome.status not in {"success", "approval_required"}
+            )
         return response_text, success
 
     def process_query(
@@ -19438,6 +19664,30 @@ class EchoSpeakAgent:
         task, shortcut, or tool derivation. The runtime then applies the typed
         interpretation and remains the only effect and completion authority.
         """
+        from agent.lean.settings import lean_runtime_enabled
+
+        if lean_runtime_enabled():
+            from agent.lean.runtime import run_lean_query
+
+            def emit(event: dict) -> None:
+                for callback in list(callbacks or []):
+                    put = getattr(callback, "_put", None)
+                    if callable(put):
+                        put(event)
+
+            result = run_lean_query(
+                self,
+                message=user_input,
+                session_id=str(thread_id or "default").strip() or "default",
+                request_id=request_id,
+                emit=emit,
+                cancel=cancel_event or threading.Event(),
+                source=str(source or "web"),
+                thinking_enabled=thinking_enabled,
+                reasoning_effort=reasoning_effort,
+            )
+            return str(result.get("response") or ""), bool(result.get("success"))
+
         from agent.semantic_runtime import get_canonical_semantic_runtime
 
         return get_canonical_semantic_runtime().run(

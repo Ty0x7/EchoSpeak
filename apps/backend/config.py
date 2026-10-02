@@ -706,7 +706,7 @@ class Config:
             0, int(os.getenv("MODEL_CONTROL_MALFORMED_REPAIRS", "2") or 2)
         )
         self.model_control_provider_retries = max(
-            0, int(os.getenv("MODEL_CONTROL_PROVIDER_RETRIES", "1") or 1)
+            0, int(os.getenv("MODEL_CONTROL_PROVIDER_RETRIES", "2") or 2)
         )
         self.model_control_provider_backoff_seconds = max(
             0.0,
@@ -891,6 +891,13 @@ class Config:
         self.terminal_docker_memory = os.getenv("TERMINAL_DOCKER_MEMORY", "512m").strip() or "512m"
         self.terminal_docker_cpus = os.getenv("TERMINAL_DOCKER_CPUS", "1.0").strip() or "1.0"
         self.terminal_docker_user = os.getenv("TERMINAL_DOCKER_USER", "65534:65534").strip() or "65534:65534"
+        # Lean sandbox: persistent dev container network ("bridge" = on, "none" = off).
+        self.terminal_docker_network = os.getenv("TERMINAL_DOCKER_NETWORK", "bridge").strip().lower() or "bridge"
+        # Lean runtime controls (Settings > Agent).
+        self.lean_approval_mode = os.getenv("LEAN_APPROVAL_MODE", "smart").strip().lower() or "smart"
+        self.lean_max_iterations = int(os.getenv("LEAN_MAX_ITERATIONS", "60") or 60)
+        self.lean_context_tokens = int(os.getenv("LEAN_CONTEXT_TOKENS", "0") or 0)
+        self.user_display_name = os.getenv("USER_DISPLAY_NAME", "").strip()
         self.ffprobe_path = os.getenv("VIDEO_FFPROBE_PATH", "ffprobe").strip() or "ffprobe"
         self.ffmpeg_path = os.getenv("VIDEO_FFMPEG_PATH", "ffmpeg").strip() or "ffmpeg"
         self.video_ffprobe_timeout_seconds = int(os.getenv("VIDEO_FFPROBE_TIMEOUT_SECONDS", "15") or 15)
@@ -1423,6 +1430,11 @@ class Config:
             "terminal_docker_memory",
             "terminal_docker_cpus",
             "terminal_docker_user",
+            "terminal_docker_network",
+            "lean_approval_mode",
+            "lean_max_iterations",
+            "lean_context_tokens",
+            "user_display_name",
             "ffprobe_path",
             "ffmpeg_path",
             "video_ffprobe_timeout_seconds",
