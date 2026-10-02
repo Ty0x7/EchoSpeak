@@ -70,3 +70,25 @@ def test_unknown_role_falls_back_to_public(monkeypatch):
 def test_roles_resolve_from_the_channel(source: str, info: Any, expected: str):
     role = get_adapter(source).resolve_role(source, info)
     assert str(getattr(role, "value", role)) == expected
+
+
+def test_the_agent_is_told_who_it_is_talking_to(monkeypatch):
+    session = _session(monkeypatch, "public", [])
+    turn = session._build_turn(get_persona_store().get("echo"), "can you read my files?", history=[], depth=0)
+    note = turn.system_prompt.split("## Who you're talking to", 1)[1]
+    assert "member of the public" in note and "Discord server channel" in note
+    assert "no access to your owner's files" in note
+
+    assert "Who you're talking to" not in lean_runtime.caller_note("web", "owner")  # app chats get no note
+    assert lean_runtime.caller_note("web", "owner") == ""
+    assert "your owner through Telegram" in lean_runtime.caller_note("telegram", "owner")
+    assert "someone your owner trusts" in lean_runtime.caller_note("discord_bot_dm", "trusted")
+
+
+def test_memory_lookups_use_the_request_not_the_channel_wrapper(monkeypatch):
+    recalls: list[str] = []
+    session = _session(monkeypatch, "owner", recalls)
+    wrapped = "Recent #general messages:\n- bob: lol\n\nUser request: what's my sister's name?"
+    session._build_turn(get_persona_store().get("echo"), wrapped, history=[], depth=0)
+    assert recalls == ["what's my sister's name?"]
+    assert lean_runtime.request_text("no wrapper here") == "no wrapper here"

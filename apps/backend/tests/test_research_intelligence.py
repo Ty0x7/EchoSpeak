@@ -168,7 +168,7 @@ def test_v1_artifact_migrates_in_memory_without_rewriting_authority(tmp_path, mo
     loaded = ra.get_research_artifact("legacy-one")
 
     assert loaded is not None
-    assert loaded.schema_version == 2
+    assert loaded.schema_version == ra.CURRENT_RESEARCH_SCHEMA_VERSION
     assert loaded.migrated_from_schema == 1
     assert loaded.summary == "Legacy synthesis"
     assert loaded.sources == []

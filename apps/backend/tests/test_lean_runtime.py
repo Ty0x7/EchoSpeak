@@ -406,3 +406,52 @@ def test_step_limit_stops_honestly_without_an_extra_model_call(monkeypatch):
     assert result.text.startswith("I ran out of steps (2) before finishing.")
     assert "Press Continue" in result.text
     assert events[-1]["type"] == "agent_done" and events[-1]["stop_reason"] == "max_steps"
+
+
+# ── text tool calls in the shapes small models print (ported from the legacy suite) ──
+
+_KNOWN = {"terminal", "file_write", "web_search"}
+
+
+@pytest.mark.parametrize(
+    ("text", "name", "expected"),
+    [
+        ('|TOOL| terminal_run {"command":"echo hello","cwd":"."}', "terminal", {"command": "echo hello"}),
+        ('<execute_tool>file_write(path="index.html", content="<h1>Hello</h1>", append=False)</execute_tool>',
+         "file_write", {"path": "index.html", "content": "<h1>Hello</h1>"}),
+        ('<execute_tool> file_write(file_path="index.html", content="<!DOCTYPE html>\n<html><body><h1>Hello</h1></body></html>" </execute_tool>',
+         "file_write", {"path": "index.html"}),
+        ('<tool_call>{"tool":"terminal_run","args":{"command":"npm test","cwd":"."}}</tool_call>', "terminal", {"command": "npm test"}),
+        ('<|tool_call>call:file_write{path:<|"|>index.html<|"|>, content:<|"|><!DOCTYPE html>\n<html></html><|"|>}<tool_call|>',
+         "file_write", {"path": "index.html", "content": "<!DOCTYPE html>\n<html></html>"}),
+        ('<tool_code>print(default_api.web_search(query="python release"))</tool_code>', "web_search", {"query": "python release"}),
+        ('```tool_code\nweb_search(query="weather Edmonton")\n```', "web_search", {"query": "weather Edmonton"}),
+    ],
+)
+def test_printed_tool_calls_become_real_calls(text, name, expected):
+    calls, cleaned = extract_text_tool_calls(f"Sure, doing that.\n{text}", _KNOWN)
+    assert [c.name for c in calls] == [name]
+    args = json.loads(calls[0].arguments)
+    for key, value in expected.items():
+        assert args[key] == value
+    assert cleaned == "Sure, doing that."  # the raw syntax never reaches the chat
+
+
+def test_tool_code_with_several_calls_runs_each():
+    calls, _ = extract_text_tool_calls(
+        '<tool_code> file_write(path="movement_demo/index.html", content="""<html></html>""") '
+        'file_write(path="movement_demo/script.js", content="""console.log(1)""") </tool_code>',
+        _KNOWN,
+    )
+    assert [json.loads(c.arguments)["path"] for c in calls] == ["movement_demo/index.html", "movement_demo/script.js"]
+
+
+def test_unknown_printed_tool_is_hidden_and_reported_back():
+    calls, cleaned = extract_text_tool_calls("<execute_tool>totally_unknown_tool(foo='bar')</execute_tool>", _KNOWN)
+    assert cleaned == ""
+    assert [c.name for c in calls] == ["totally_unknown_tool"]  # the loop answers "unknown tool" to the model
+
+
+def test_example_json_in_an_answer_is_left_alone():
+    text = 'Here is the payload format:\n```json\n{"name": "widget", "size": 3}\n```'
+    assert extract_text_tool_calls(text, _KNOWN) == ([], text)

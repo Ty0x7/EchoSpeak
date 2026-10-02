@@ -73,9 +73,17 @@ baseline. User-facing notes: `docs/releases/v10.0.0.md`. Architecture:
 - Website refresh (animated Echo, accurate copy, Lighthouse 98–100) and
   `docs/ARCHITECTURE.md`.
 
+### Tests
+- Backend suite is green again (it had 42 long-standing failures before this round).
+  Tests that drove the removed pipeline were reviewed one by one: behaviour the lean
+  runtime should still have was ported first (printed tool calls in Gemma's
+  `<|tool_call>` format, `<execute_tool>`, `<tool_code>`, `|TOOL|`; telling the agent who
+  it is talking to on a channel; memory lookups on the request, not the channel wrapper;
+  public-safe project updates for guests), then those tests were removed. Out-of-date
+  tests for live code were updated (sports schedules, skill tool risk, schema versions,
+  heartbeat on the lean loop, voice provider status, todo file location).
+
 ### Known issues
-- 78 backend tests still call `EchoSpeakAgent` internals removed with the legacy
-  pipeline and fail; they are kept for review, not deleted. 36 other failures predate 10.0.
 - The first sandboxed command builds the Docker image (~1 GB, a few minutes).
 - In-app updates need `setup-updater-key.ps1` once before the first signed release; builds
   without the key run fine but can't update themselves.

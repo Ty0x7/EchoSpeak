@@ -39,7 +39,7 @@ def test_v2_taskrun_migrates_to_current_compatibility_graph() -> None:
         ],
     })
 
-    assert task.schema_version == 5
+    assert task.schema_version == 6
     assert task.execution_profile == ExecutionProfile.WORK
     assert task.execution_graph is not None
     assert task.execution_graph_state is not None
@@ -279,7 +279,7 @@ def test_terminal_task_status_is_projected_without_becoming_a_completion_rule() 
 def test_future_taskrun_and_graph_versions_fail_closed() -> None:
     with pytest.raises(ValueError, match="future TaskRun"):
         TaskRun.model_validate({
-            "schema_version": 6,
+            "schema_version": 7,
             "session_id": "session-1",
             "objective": "No downgrade",
         })

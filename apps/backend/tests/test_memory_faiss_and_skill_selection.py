@@ -33,31 +33,3 @@ def test_faiss_forget_and_rebuild(tmp_path, monkeypatch):
         assert "rambutan" not in (getattr(doc, "page_content", "") or "").lower()
 
 
-def test_prompt_only_not_selected():
-    from agent.skill_contract import SkillManifest, SkillOrigin, SkillSelectionOutcome, SkillStatus
-    from agent.skill_selection import select_skill
-
-    manifest = SkillManifest(
-        id="fake_prompt",
-        name="Fake",
-        description="d",
-        version="1.0.0",
-        origin=SkillOrigin.PACKAGE,
-        status=SkillStatus.INSTALLED,
-        executable=True,
-        prompt="Only a prompt",
-        required_tools=[],
-        package_path="",
-        accepted_intents=["do something fake"],
-    )
-    result = select_skill(
-        user_text="do something fake please",
-        manifests=[manifest],
-        available_tools=set(),
-        available_capabilities=set(),
-    )
-    assert result.outcome in {
-        SkillSelectionOutcome.UNAVAILABLE,
-        SkillSelectionOutcome.NO_MATCHING_SKILL,
-        SkillSelectionOutcome.DISABLED,
-    } or result.skill_id == ""

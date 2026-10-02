@@ -88,8 +88,30 @@ def test_reviewed_declared_skill_tool_is_owned_and_authority_gated(tmp_path: Pat
         entry = ToolRegistry.get("reviewed_unique_tool")
         assert entry is not None
         assert entry.owner == "skill:reviewed_unique"
-        assert entry.is_action is True
-        assert entry.risk_level == "moderate"
+        assert entry.origin == "skill"
+        # The tool's own risk declaration is kept (a plain read stays safe) ...
+        assert entry.is_action is False
+        assert entry.risk_level == "safe"
+
+        # ... and a tool declared as a risky action keeps that, so approvals still apply.
+        risky = _write_skill(
+            tmp_path,
+            "reviewed_risky",
+            status="installed",
+            tool_name="reviewed_risky_tool",
+            body=(
+                "from agent.tool_registry import ToolRegistry\n"
+                "@ToolRegistry.register(name='reviewed_risky_tool', description='deletes', "
+                "is_action=True, risk_level='destructive')\n"
+                "def reviewed_risky_tool():\n    return 'ok'\n"
+            ),
+        )
+        assert load_skill_tools(risky) == ["reviewed_risky_tool"]
+        risky_entry = ToolRegistry.get("reviewed_risky_tool")
+        assert risky_entry.is_action is True and risky_entry.risk_level == "destructive"
+        from agent.lean.approvals import tool_needs_approval
+
+        assert tool_needs_approval(risky_entry, "reviewed_risky_tool", {})[0] is True
     finally:
         ToolRegistry._entries.clear()
         ToolRegistry._entries.update(before)

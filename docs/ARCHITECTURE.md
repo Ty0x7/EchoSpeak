@@ -109,7 +109,7 @@ Details that matter:
   - Destructive or MCP actions.
   - Terminal commands in the Docker sandbox need approval only to run on this PC instead, to use the internet, or to delete project files.
   - Sources without a UI (routines, Discord) never wait for approval; the tool is refused instead.
-- **Caller roles.** `process_query` resolves who is talking (`agent/adapters.py`): the app is the owner; Discord users are owner / trusted / public by id; Twitch and Twitter are public; Telegram is the owner only with an allow-list. Guests get look-up tools only (web, weather, sports, time, math), with no memory recall, chat search or handoffs.
+- **Caller roles.** `process_query` resolves who is talking (`agent/adapters.py`): the app is the owner; Discord users are owner / trusted / public by id; Twitch and Twitter are public; Telegram is the owner only with an allow-list. Guests get look-up tools only (web, weather, sports, time, math, public project updates), with no memory recall, chat search or handoffs, and the system prompt tells the agent who it is talking to and through which channel.
 
 ## 3. Agent lifecycle
 
@@ -252,10 +252,9 @@ Reloading a chat calls the Session timeline (`StateStore.session_timeline`). Eac
 
 ## 8. What to work on next
 
-The 10.0 roadmap is done: legacy runtime retired, SQLite store with chat search, summaries instead of trimming, the evaluation set, honest step limit, `index.tsx` split (first pass), voice setup and wake word, one projects folder, discussion mode, sandbox by default, and in-app updates. Next, in priority order:
+The 10.0 roadmap is done: legacy runtime retired, SQLite store with chat search, summaries instead of trimming, the evaluation set, honest step limit, `index.tsx` split (first pass), voice setup and wake word, one projects folder, discussion mode, sandbox by default, and in-app updates. The backend test suite is green. Next, in priority order:
 
-1. **Clean up the legacy tests.** 78 backend tests still call `EchoSpeakAgent` internals that were removed with the old pipeline. Rewrite the ones that pin behaviour still worth keeping (Discord hardening, approval honesty) against the lean runtime, and delete the rest. **S–M, high (a green suite again).**
-2. **Shrink the backend bundle.** With the legacy pipeline gone, audit what still pulls `torch`/`transformers` into the 1.1 GB sidecar (embeddings, document retrieval) and make those optional downloads like the voice models. **M, high.**
-3. **Split `Dashboard`.** `index.tsx` is still one ~8.9k-line component. Move its state into hooks (session/history, streaming, voice, settings) and the JSX into chat, composer and sidebar components. **M–L, medium.**
-4. **Run the evaluation before every release.** `scripts/eval_gemma.py` needs a live model, so run it on a self-hosted runner or from the release script. **S, medium.**
-5. **Build releases on GitHub Actions.** The release script runs locally today; a tagged workflow on `windows-latest` with the signing key as a secret would make a release one `git tag` away. **M, medium.**
+1. **Shrink the backend bundle.** With the legacy pipeline gone, audit what still pulls `torch`/`transformers` into the 1.1 GB sidecar (embeddings, document retrieval) and make those optional downloads like the voice models. **M, high.**
+2. **Split `Dashboard`.** `index.tsx` is still one ~8.9k-line component. Move its state into hooks (session/history, streaming, voice, settings) and the JSX into chat, composer and sidebar components. **M–L, medium.**
+3. **Run the evaluation before every release.** `scripts/eval_gemma.py` needs a live model, so run it on a self-hosted runner or from the release script. **S, medium.**
+4. **Build releases on GitHub Actions.** The release script runs locally today; a tagged workflow on `windows-latest` with the signing key as a secret would make a release one `git tag` away. **M, medium.**

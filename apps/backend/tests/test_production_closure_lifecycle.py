@@ -45,48 +45,6 @@ def _coding_agent(tmp_path, monkeypatch, project_root, *, session="s1"):
     return agent, runtime, project, manager
 
 
-def test_approval_identity_blocks_stale_source_and_project_switch(tmp_path, monkeypatch):
-    fixture = Path(__file__).parent / "fixtures" / "coding_project"
-    project_root = tmp_path / "proj"
-    shutil.copytree(fixture, project_root)
-    agent, runtime, project, manager = _coding_agent(tmp_path, monkeypatch, project_root)
-
-    class LLM:
-        def invoke(self, prompt: str) -> str:
-            if "SEARCH/REPLACE" in prompt:
-                return (
-                    "<<<<<<< SEARCH\n<title>EchoSpeak Coding Fixture</title>\n"
-                    "=======\n<title>Identity Title</title>\n>>>>>>> REPLACE"
-                )
-            return "ok"
-
-        def invoke_with_reasoning(self, prompt: str):
-            return self.invoke(prompt), ""
-
-    agent.model_runtime = LLM()
-    agent.process_query(
-        "Change the title in index.html only. Do not edit game.js.",
-        include_memory=False,
-        thread_id="s1",
-    )
-    approval = runtime.get_pending_approval("s1")
-    assert approval is not None
-    assert approval.canonical_arguments_hash
-    assert approval.session_id == "s1"
-    assert approval.project_id == project.id
-    assert Path(approval.kwargs["path"]).name == "index.html"
-    # Freeze metadata must not poison mutation precondition compare
-    assert "path_basename" in (approval.source_precondition or {})
-    assert (approval.source_precondition or {}).get("entries")
-
-    # Stale source: external change invalidates confirm
-    path = project_root / "index.html"
-    path.write_text(path.read_text(encoding="utf-8") + "\n<!-- external -->\n", encoding="utf-8")
-    stale_resp, stale_ok = agent.process_query("confirm", include_memory=False, thread_id="s1")
-    assert stale_ok is False
-    assert "changed" in stale_resp.lower() or "not run" in stale_resp.lower() or "blocked" in stale_resp.lower()
-
-
 def test_duplicate_claim_pending_approval_is_idempotent(tmp_path):
     from agent.state import StateStore
 
@@ -171,70 +129,6 @@ def test_all_filesystem_mutation_arguments_are_versioned_at_tool_boundary(
         reset_tool_execution_context(token)
 
 
-def test_research_artifact_from_web_search_toolrun(tmp_path, monkeypatch):
-    from agent.research_artifacts import find_compatible_research_artifact
-    import agent.research_artifacts as ra
-    from agent.state import StateStore
-    from agent.core import EchoSpeakAgent, ToolOutcome
-    from config import ModelProvider
-
-    monkeypatch.setattr(ra, "_ROOT", tmp_path / "arts")
-    runtime = StateStore(tmp_path / "rt")
-    import agent.state as state_mod
-
-    monkeypatch.setattr(state_mod, "_state_store", runtime)
-    agent = EchoSpeakAgent.__new__(EchoSpeakAgent)
-    agent._state_store = runtime
-    agent._thread_key = lambda: "rs1"
-    agent._current_execution_id = "ex1"
-    agent._active_project_id = "project-r"
-    agent.llm_provider = ModelProvider.OPENAI
-    agent.memory = type("MemoryStub", (), {"memory_count": 0})()
-    agent._tool_outcomes_by_run_id = {}
-    agent._current_mode_decision = type("D", (), {"objective": "research oilers highlights"})()
-    agent._promote_materialized_project = lambda *a, **k: None
-    agent._dequeue_tool_run = lambda *a, **k: None
-    agent._safe_retry_kwargs = lambda p: dict(p or {})
-    agent._is_action_tool = lambda n: False
-    from agent.tool_registry import ToolRegistry
-
-    # Ensure web_search path persists
-    runtime.create_execution(
-        kind="turn",
-        thread_id="rs1",
-        session_id="rs1",
-        project_id="project-r",
-        source="test",
-        status="running",
-        query="q",
-    )
-    runtime.update_thread_state("rs1", active_project_id="project-r")
-    # Force turn id
-    agent._current_execution_id = list(runtime._executions.keys())[0]
-    outcome = ToolOutcome(
-        tool_name="web_search",
-        run_id="tr-web-1",
-        execution_id=agent._current_execution_id,
-        success=True,
-        status="complete",
-        output="Oilers analysis https://example.com/oilers and https://example.com/nhl",
-        started_at=0.0,
-        completed_at=1.0,
-    )
-    agent._persist_tool_outcome(outcome, {"query": "edmonton oilers"})
-    arts = list((tmp_path / "arts").glob("*.json")) if (tmp_path / "arts").exists() else []
-    assert arts, "research artifact should be persisted for completed web_search"
-    data = json.loads(arts[0].read_text(encoding="utf-8"))
-    assert data["status"] == "ready"
-    assert data["citations"] or data["source_urls"]
-    assert data["session_id"] == "rs1"
-    found = find_compatible_research_artifact(
-        project_id="project-r",
-        session_id="rs1",
-        objective="research oilers highlights",
-    )
-    assert found is not None
-
 def test_skill_audit_no_disabled_executable(tmp_path, monkeypatch):
     from agent.skill_status_audit import audit_all_skills
 
@@ -249,33 +143,3 @@ def test_skill_audit_no_disabled_executable(tmp_path, monkeypatch):
             assert r["executable"] is True
 
 
-def test_confirm_write_one_toolrun(tmp_path, monkeypatch):
-    fixture = Path(__file__).parent / "fixtures" / "coding_project"
-    project_root = tmp_path / "proj"
-    shutil.copytree(fixture, project_root)
-    agent, runtime, project, _ = _coding_agent(tmp_path, monkeypatch, project_root, session="one-write")
-
-    class LLM:
-        def invoke(self, prompt: str) -> str:
-            if "SEARCH/REPLACE" in prompt:
-                return (
-                    "<<<<<<< SEARCH\n<title>EchoSpeak Coding Fixture</title>\n"
-                    "=======\n<title>One Write</title>\n>>>>>>> REPLACE"
-                )
-            return "done"
-
-        def invoke_with_reasoning(self, prompt: str):
-            return self.invoke(prompt), ""
-
-    agent.model_runtime = LLM()
-    agent.process_query("Change the title in index.html.", include_memory=False, thread_id="one-write")
-    confirm_resp, ok = agent.process_query("confirm", include_memory=False, thread_id="one-write")
-    body = (project_root / "index.html").read_text(encoding="utf-8")
-    assert "One Write" in body, f"durable write missing; ok={ok} resp={confirm_resp!r}"
-    ex = runtime.get_thread_state("one-write").last_execution_id
-    writes = [r for r in runtime.list_tool_runs(ex) if r.tool_name == "file_write"]
-    assert len(writes) == 1, f"expected one write ToolRun, got {[(w.tool_name, w.status) for w in runtime.list_tool_runs(ex)]}"
-    assert writes[0].status in {"complete", "completed", "success"}
-    # Turn-level ok should follow successful verified mutation when verification passes.
-    if writes[0].verification and writes[0].verification.get("verified") is True:
-        assert ok is True

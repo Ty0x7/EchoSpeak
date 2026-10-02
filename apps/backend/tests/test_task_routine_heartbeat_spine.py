@@ -50,51 +50,26 @@ def test_routine_requires_coordinator_and_records_callback_result(tmp_path: Path
     assert completed.last_result_status == "complete"
 
 
-def test_heartbeat_creates_one_task_and_uses_governed_turn(tmp_path: Path, monkeypatch) -> None:
+def test_heartbeat_tick_runs_one_lean_turn_with_the_pulse_and_routes_the_reply(monkeypatch) -> None:
+    """Since 8.1 the heartbeat is one lean turn in its own chat; a reply is routed, silence is not."""
     from agent.heartbeat import HeartbeatManager
-    from agent.automation_runtime import AutomationRunStore
-    from agent.task_store import TaskStore
-    import agent.automation_runtime as automation_module
-    import agent.projects as project_module
-    import agent.state as state_module
-    import agent.task_store as task_module
+    import agent.heartbeat as heartbeat_module
+    import agent.lean.runtime as lean_runtime
 
-    store = TaskStore(tmp_path / "todos.json")
-    monkeypatch.setattr(task_module, "get_task_store", lambda: store)
-    run_store = AutomationRunStore(tmp_path / "automation-runs")
-    monkeypatch.setattr(automation_module, "get_automation_run_store", lambda: run_store)
-    monkeypatch.setattr(
-        project_module,
-        "get_project_manager",
-        lambda: SimpleNamespace(get_project=lambda project_id: SimpleNamespace(id=project_id)),
-    )
-    thread_state = SimpleNamespace(
-        active_project_id="project-a",
-        last_execution_id="execution-1",
-        current_execution_id="",
-        pending_approval_id="",
-    )
-    monkeypatch.setattr(
-        state_module,
-        "get_state_store",
-        lambda: SimpleNamespace(
-            get_thread_state=lambda _thread: thread_state,
-            list_tool_runs=lambda _execution: [],
-        ),
-    )
+    turns = []
+    routed = []
 
-    calls = []
+    def fake_run_lean_query(agent, **kwargs):
+        turns.append(kwargs)
+        return {"response": replies.pop(0), "success": True, "execution_id": f"exec-{len(turns)}"}
 
-    class FakeAgent:
-        llm_provider = SimpleNamespace(value="lmstudio")
-        provider_info = {"model": "test-model"}
-
-        def process_query(self, prompt, **kwargs):
-            calls.append((prompt, kwargs))
-            return "A useful update", True
+    replies = ["A useful update", "NO_HEARTBEAT"]
+    monkeypatch.setattr(lean_runtime, "run_lean_query", fake_run_lean_query)
+    monkeypatch.setattr(heartbeat_module, "route_message", lambda text, channels, label="": routed.append((text, channels)))
+    monkeypatch.setattr(heartbeat_module, "_NO_HEARTBEAT_SENTINEL", "NO_HEARTBEAT", raising=False)
 
     manager = HeartbeatManager(
-        agent=FakeAgent(),
+        agent=object(),
         interval_minutes=30,
         prompt="Check now",
         channels=["web", "email"],
@@ -104,18 +79,15 @@ def test_heartbeat_creates_one_task_and_uses_governed_turn(tmp_path: Path, monke
     monkeypatch.setattr(manager, "_gather_system_pulse", lambda: "all systems nominal")
     manager._tick()
 
-    assert len(calls) == 1
-    assert calls[0][1] == {
-        "include_memory": False,
-        "callbacks": [],
-        "thread_id": "session-a",
-        "source": "heartbeat",
-    }
-    tasks = store.list()
-    assert len(tasks) == 1
-    assert tasks[0].status == "needs_permission"
-    assert tasks[0].execution_ids == ["execution-1"]
-    assert tasks[0].verification["blocked_delivery_channels"] == ["email"]
+    assert len(turns) == 1
+    assert turns[0]["session_id"] == "session-a"
+    assert turns[0]["source"] == "heartbeat"
+    assert "all systems nominal" in turns[0]["message"] and "Check now" in turns[0]["message"]
+    assert routed == [("A useful update", ["web", "email"])]
+
+    manager._tick()  # the agent said there is nothing to report
+    assert len(turns) == 2
+    assert len(routed) == 1
 
 
 def test_background_channel_router_never_calls_legacy_external_senders(monkeypatch) -> None:

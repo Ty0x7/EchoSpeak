@@ -197,27 +197,175 @@ _TEXT_TOOL_PATTERNS = (
 )
 
 
+# Other shapes small local models print instead of calling a tool natively:
+#   <|tool_call>call:file_write{path:<|"|>a.html<|"|>, content:<|"|>…<|"|>}<tool_call|>   (Gemma's own format)
+#   <execute_tool>file_write(path="a.html", content="…")</execute_tool>
+#   <tool_code>print(default_api.web_search(query="…"))</tool_code>, or ```tool_code … ```
+#   |TOOL| terminal {"command": "npm test"}
+# These are explicit tool syntax, so an unknown tool name still becomes a call:
+# the agent gets "unknown tool" back and can correct itself, and the raw syntax
+# never reaches the chat.
+_GEMMA_CALL = re.compile(r"<\|tool_call>\s*call:([\w.\-]+)\s*\{(.*?)\}\s*(?:<tool_call\|>|<\|tool_call\|>|$)", re.S)
+_PY_CALL_BLOCKS = (
+    re.compile(r"<execute_tool>(.*?)(?:</execute_tool>|$)", re.S),
+    re.compile(r"<tool_code>(.*?)(?:</tool_code>|$)", re.S),
+    re.compile(r"```tool_code\s*(.*?)```", re.S),
+)
+_PIPE_TOOL = re.compile(r"\|TOOL\|\s*([\w.\-]+)\s*(\{.*\})", re.S)
+_NAME_ALIASES = {"terminal_run": "terminal", "run_terminal": "terminal", "shell": "terminal", "run_command": "terminal"}
+_ARG_ALIASES = {"file_path": "path", "filepath": "path", "filename": "path"}
+
+
+def _canonical_tool(name: str, known_tools: set[str]) -> str:
+    name = re.sub(r"^(?:default_api|functions|tools)\.", "", str(name or "").strip())
+    if name in known_tools:
+        return name
+    alias = _NAME_ALIASES.get(name)
+    if alias and alias in known_tools:
+        return alias
+    key = re.sub(r"[^a-z0-9]", "", name.lower())
+    for candidate in known_tools:
+        if re.sub(r"[^a-z0-9]", "", candidate.lower()) == key:
+            return candidate
+    return name
+
+
+def _clean_args(args: Any) -> dict[str, Any]:
+    if not isinstance(args, dict):
+        return {}
+    out = dict(args)
+    for alias, target in _ARG_ALIASES.items():
+        if alias in out and target not in out:
+            out[target] = out.pop(alias)
+    return out
+
+
+def _gemma_args(body: str) -> dict[str, Any]:
+    """Parse Gemma's `key:<|"|>text<|"|>, key2:42` argument list."""
+    args: dict[str, Any] = {}
+    pos = 0
+    key_re = re.compile(r"\s*,?\s*([A-Za-z_][\w]*)\s*:\s*")
+    while pos < len(body):
+        match = key_re.match(body, pos)
+        if not match:
+            break
+        key, pos = match.group(1), match.end()
+        if body.startswith('<|"|>', pos):
+            end = body.find('<|"|>', pos + 5)
+            end = len(body) if end < 0 else end
+            args[key] = body[pos + 5:end]
+            pos = end + 5
+            continue
+        end = body.find(",", pos)
+        raw = (body[pos:] if end < 0 else body[pos:end]).strip()
+        pos = len(body) if end < 0 else end
+        try:
+            args[key] = json.loads(raw)
+        except json.JSONDecodeError:
+            args[key] = raw.strip("'\"")
+    return args
+
+
+_PY_KWARG = re.compile(
+    r"([A-Za-z_]\w*)\s*=\s*(\"\"\"(?:.|\n)*?\"\"\"|'''(?:.|\n)*?'''|\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[-\w.]+)"
+)
+
+
+def _py_calls(source: str) -> list[tuple[str, dict[str, Any]]]:
+    """Parse `name(key="value", ...)` calls; tolerate a missing closing paren."""
+    import ast
+
+    text = source.strip()
+    try:
+        tree = ast.parse(text)
+        found = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name in {"print", ""}:
+                continue
+            kwargs = {}
+            for kw in node.keywords:
+                if kw.arg:
+                    try:
+                        kwargs[kw.arg] = ast.literal_eval(kw.value)
+                    except (ValueError, SyntaxError):
+                        kwargs[kw.arg] = ast.unparse(kw.value)
+            found.append((name, kwargs))
+        if found:
+            return found
+    except SyntaxError:
+        pass
+    # Not valid Python (two calls on one line, a missing paren): read the
+    # arguments in order so calls inside string values are never picked up.
+    found = []
+    call_start = re.compile(r"([A-Za-z_][\w.]*)\s*\(")
+    separator = re.compile(r"[\s,]*")
+    pos = 0
+    while True:
+        match = call_start.search(text, pos)
+        if not match:
+            break
+        name, pos = match.group(1).split(".")[-1], match.end()
+        if name == "print":
+            continue
+        kwargs = {}
+        while True:
+            pos = separator.match(text, pos).end()
+            kw = _PY_KWARG.match(text, pos)
+            if not kw:
+                break
+            try:
+                kwargs[kw.group(1)] = ast.literal_eval(kw.group(2))
+            except (ValueError, SyntaxError):
+                kwargs[kw.group(1)] = kw.group(2).strip("'\"")
+            pos = kw.end()
+        found.append((name, kwargs))
+    return found
+
+
 def extract_text_tool_calls(content: str, known_tools: set[str]) -> tuple[list[ToolCall], str]:
     """Recover tool calls a model wrote as text when native calling slipped."""
     calls: list[ToolCall] = []
     cleaned = content or ""
-    for pattern in _TEXT_TOOL_PATTERNS:
+
+    def add(name: str, args: Any) -> None:
+        calls.append(ToolCall(
+            id=f"call_{uuid.uuid4().hex[:12]}",
+            name=_canonical_tool(name, known_tools),
+            arguments=json.dumps(_clean_args(args)),
+        ))
+
+    for index, pattern in enumerate(_TEXT_TOOL_PATTERNS):
         for match in list(pattern.finditer(cleaned)):
             payload = _repair_json(match.group(1))
             if not isinstance(payload, dict):
                 continue
             name = str(payload.get("name") or payload.get("tool") or "").strip()
-            if name not in known_tools:
+            # A ```json {"name": …}``` block may just be example JSON in an answer;
+            # only the explicit tool-call tags count for unknown names.
+            if index == 2 and _canonical_tool(name, known_tools) not in known_tools:
+                continue
+            if not name:
                 continue
             args = payload.get("arguments", payload.get("parameters", payload.get("args", {})))
             if isinstance(args, str):
                 args = _repair_json(args) or {}
-            calls.append(ToolCall(
-                id=f"call_{uuid.uuid4().hex[:12]}",
-                name=name,
-                arguments=json.dumps(args if isinstance(args, dict) else {}),
-            ))
+            add(name, args)
             cleaned = cleaned.replace(match.group(0), "")
+    for match in list(_GEMMA_CALL.finditer(cleaned)):
+        add(match.group(1), _gemma_args(match.group(2)))
+        cleaned = cleaned.replace(match.group(0), "")
+    for pattern in _PY_CALL_BLOCKS:
+        for match in list(pattern.finditer(cleaned)):
+            for name, args in _py_calls(match.group(1)):
+                add(name, args)
+            cleaned = cleaned.replace(match.group(0), "")
+    for match in list(_PIPE_TOOL.finditer(cleaned)):
+        add(match.group(1), _repair_json(match.group(2)) or {})
+        cleaned = cleaned.replace(match.group(0), "")
     return calls, cleaned.strip()
 
 

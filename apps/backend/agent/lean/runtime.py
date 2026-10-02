@@ -34,10 +34,40 @@ INTERACTIVE_SOURCES = {"web", "desktop", "voice", "chat", "api"}
 # people reaching Echo through Discord, Telegram, Twitch, or Twitter as guests
 # get look-up tools only, so nothing on this PC is exposed to them.
 CALLER_ROLES = ("owner", "trusted", "public")
+_CHANNEL_NAMES = {
+    "discord_bot": "a Discord server channel", "discord_bot_dm": "a Discord direct message",
+    "telegram": "Telegram", "twitch": "Twitch chat", "twitter": "Twitter/X", "twitter_autonomous": "Twitter/X",
+}
+
+
+def caller_note(source: str, role: str) -> str:
+    """Tell the agent who is talking when the message comes from a channel, not the app."""
+    channel = _CHANNEL_NAMES.get(str(source or "").lower())
+    if not channel:
+        return ""
+    if role == "owner":
+        return f"This message comes from your owner through {channel}. Keep replies short enough to read there."
+    who = "someone your owner trusts" if role == "trusted" else "a member of the public, not your owner"
+    return (
+        f"This message comes from {who}, through {channel}. You can only look things up for them "
+        "(web, weather, sports, time, math, EchoSpeak project updates). You have no access to your owner's files, terminal, memory, "
+        "projects or other chats here, so never offer those or share anything private about your owner. "
+        "If they ask for more, say that only your owner can do that from the EchoSpeak app."
+    )
+
+
+def request_text(message: str) -> str:
+    """Channel bots send context, then 'User request: ...'. Memory lookups use just the request."""
+    marker = "User request:"
+    index = (message or "").rfind(marker)
+    return message[index + len(marker):].strip() if index >= 0 else (message or "")
+
+
 GUEST_TOOLS = {
-    "public": ["get_system_time", "calculate", "web_search", "safe_web_fetch", "weather_live", "sports_live"],
+    "public": ["get_system_time", "calculate", "web_search", "safe_web_fetch", "weather_live", "sports_live",
+               "project_update_context"],
     "trusted": ["get_system_time", "calculate", "web_search", "safe_web_fetch", "weather_live", "sports_live",
-                "youtube_transcript"],
+                "youtube_transcript", "project_update_context"],
 }
 _HISTORY_MESSAGES = 30
 
@@ -476,7 +506,7 @@ class LeanSession:
                 session_id=self.session_id,
                 project_root=self.project_root,
             )
-        memories = [] if guest else self._recall(message)
+        memories = [] if guest else self._recall(request_text(message))
         prompt = build_system_prompt(
             persona=persona,
             soul_text=self._soul() if persona.id == "echo" else "",
@@ -488,6 +518,7 @@ class LeanSession:
             room_name=self.room.name if self.room and self.room.kind == "group" else "",
             memories=memories,
             chat_summary=summaries.summary_text(self.session_id) if depth == 0 else "",
+            caller_note=caller_note(self.source, self.caller_role),
         )
         turn = LeanTurn(
             client=self._client_for(persona),
@@ -782,7 +813,7 @@ class LeanSession:
 
         def work() -> None:
             try:
-                memory.add_conversation(message, answer, thread_id=self.session_id)
+                memory.add_conversation(request_text(message), answer, thread_id=self.session_id)
             except Exception:
                 logger.debug("Lean conversation memory write failed", exc_info=True)
 
