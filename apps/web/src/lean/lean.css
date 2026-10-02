@@ -11,9 +11,6 @@
   --es-dur-slow: 220ms;
   --es-ease: cubic-bezier(0.2, 0, 0, 1);
   --es-focus: rgba(255, 255, 255, 0.6);
-}
-
-.echo-root {
   --es-bg: #050505;
   --es-surface-1: #0b0b0c;
   --es-surface-2: #111112;
@@ -37,6 +34,7 @@
   --es-font: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --es-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
 }
+
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
 .es-btn {
@@ -446,15 +444,7 @@
   /* Portaled to <body>: fixed, above everything, positioned from the input. */
   position: fixed;
   z-index: 250000;
-  font-family: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
-  --es-line: rgba(255, 255, 255, 0.075);
-  --es-line-2: rgba(255, 255, 255, 0.13);
-  --es-text: #f4f4f5;
-  --es-faint: rgba(244, 244, 245, 0.5);
-  --es-glass-2: rgba(255, 255, 255, 0.075);
-  --es-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.075);
-  --es-r: 12px;
-  --es-font: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--es-font);
   animation: es-menu-in var(--es-dur) var(--es-ease) both;
   display: grid;
   gap: 2px;
@@ -496,19 +486,6 @@
 }
 @keyframes es-fade { from { opacity: 0; } to { opacity: 1; } }
 .es-modal {
-  --es-line: rgba(255, 255, 255, 0.075);
-  --es-line-2: rgba(255, 255, 255, 0.13);
-  --es-line-3: rgba(255, 255, 255, 0.22);
-  --es-text: #f4f4f5;
-  --es-dim: rgba(244, 244, 245, 0.62);
-  --es-faint: rgba(244, 244, 245, 0.5);
-  --es-glass: rgba(255, 255, 255, 0.045);
-  --es-glass-2: rgba(255, 255, 255, 0.075);
-  --es-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.075);
-  --es-drop: 0 1px 2px rgba(0, 0, 0, 0.45);
-  --es-r: 12px;
-  --es-r-sm: 10px;
-  --es-font: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   width: min(580px, 100%);
   max-height: min(820px, calc(100vh - 40px));
   display: flex;

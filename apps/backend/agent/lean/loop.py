@@ -343,7 +343,7 @@ class LeanTurn:
         for call in calls:
             name = self.toolbox.resolve_name(call.name)
             args, arg_error = call.parsed_arguments()
-            signature = hashlib.sha1(f"{name}:{json.dumps(args, sort_keys=True, default=str)}".encode()).hexdigest()
+            signature = self._sig(name, args)
             call_counts[signature] = call_counts.get(signature, 0) + 1
             prepared.append((call, name, args, arg_error or ("" if call_counts[signature] < 3 else "repeat")))
 
