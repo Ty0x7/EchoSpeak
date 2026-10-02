@@ -44,6 +44,7 @@ Run on demand with `uvx` / `npx`. Nothing was added to the project's dependencie
 | 84 unused imports across 30 backend files | ruff F401, excluding tests and `__init__.py` re-exports. Checked against every attribute the tests monkeypatch (`server.get_state_store` and others) | same |
 | An unreachable `as_dict()` method in `agent/active_work.py` | It sat after the `return` inside a module-level function | `Backend: remove unreachable method …` |
 | `json.dumps(...) if False else f"..."` in `agent/core.py` | The condition is always false; only the `else` branch was ever used | same |
+| A 410-line block comment in `apps/web/src/index.tsx` holding the old browser-owned voice code (kept "as migration evidence") | It never ran. Voice capture and playback live in `voiceTransport.ts`. Found by a follow-up scan for large block comments | `Web cleanup: drop 410 lines of commented-out …` |
 | `assets/86a2bb89-…_removalai_preview.png` | Byte-identical to `apps/web/public/logo.png`, and referenced nowhere | `Repo cleanup: …` |
 | `test/index.html` | A "Hello World" page referenced nowhere | same |
 | `apps/web/public/REAL1.png` (564 KB) | An old v0.2.0 terminal screenshot, referenced nowhere, yet shipped in every web and desktop build | same |
