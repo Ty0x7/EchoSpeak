@@ -35,10 +35,6 @@ NUDGE_EMPTY = (
     "otherwise write your answer."
 )
 NUDGE_TRUNCATED = "Your last reply was cut off by the output limit. Continue from where you stopped, concisely."
-NUDGE_BUDGET = (
-    "You have used the tool budget for this request. Do not call tools. Tell the user what you finished, "
-    "what you found, and what is left to do."
-)
 
 
 @dataclass
@@ -51,6 +47,8 @@ class TurnResult:
     error: str = ""
     # True for a continuation after a handoff that ended without saying anything.
     empty: bool = False
+    # "max_steps" when the loop stopped at the step limit before an answer.
+    stop_reason: str = ""
 
 
 def _estimate_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
@@ -196,6 +194,7 @@ class LeanTurn:
 
         max_steps = settings.max_iterations()
         call_counts: dict[str, int] = {}
+        stop_reason = ""
         nudges = 0
         final_text = ""
         error = ""
@@ -270,16 +269,12 @@ class LeanTurn:
 
             self._run_tools(calls, messages, step, call_counts)
         else:
-            # Tool budget exhausted: one last model call without tools.
-            messages.append({"role": "user", "content": NUDGE_BUDGET})
-            try:
-                step += 1
-                self.emit({"type": "step_start", "step": step})
-                turn = self._call_model(messages, [], step)
-                final_text = turn.content.strip()
-            except Exception as exc:
-                error = str(exc)
-                success = False
+            # Out of steps: stop honestly instead of forcing a rushed answer.
+            # The note lists what was done so a "Continue" turn has context.
+            stop_reason = "max_steps"
+            note = self._out_of_steps_note(max_steps)
+            self._append_text("text", step, note)
+            self.emit({"type": "agent_token", "step": step, "data": note})
 
         visible = self._visible_text()
         if not visible:
@@ -302,6 +297,7 @@ class LeanTurn:
             "steps": step,
             "usage": dict(self.usage),
             "empty": empty,
+            "stop_reason": stop_reason,
         })
         return TurnResult(
             text=visible,
@@ -311,7 +307,18 @@ class LeanTurn:
             timeline=self.timeline,
             error=error,
             empty=empty,
+            stop_reason=stop_reason,
         )
+
+    def _out_of_steps_note(self, max_steps: int) -> str:
+        done = [str(item.get("label") or item.get("name") or "") for item in self.timeline if item.get("kind") == "tool"]
+        done = [label for label in dict.fromkeys(done) if label]
+        lines = [f"I ran out of steps ({max_steps}) before finishing."]
+        if done:
+            shown = done[-8:]
+            lines.append("So far I: " + "; ".join(shown) + ("; and more." if len(done) > len(shown) else "."))
+        lines.append("Press Continue and I'll pick up where I left off.")
+        return "\n\n".join(lines)
 
     # ── model ───────────────────────────────────────────────────────────
     def _call_model(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], step: int) -> ModelTurn:

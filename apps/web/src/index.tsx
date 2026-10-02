@@ -2940,7 +2940,11 @@ const ChatBubble: React.FC<{
   if (!isUser && msg.lean) {
     return (
       <div style={{ width: "100%", minWidth: 0 }} data-testid="lean-message">
-        <LeanMessage data={msg.lean} at={msg.at} />
+        <LeanMessage
+          data={msg.lean}
+          at={msg.at}
+          onContinue={!streaming && onQuickReply ? () => onQuickReply(`@${msg.lean!.agent.name || "Echo"} continue where you left off.`) : undefined}
+        />
       </div>
     );
   }
@@ -4190,6 +4194,7 @@ export const Dashboard: React.FC<{
                     success: msg.backend_success !== false,
                     delegatedBy: msg.delegated_by?.name ? String(msg.delegated_by.name) : undefined,
                     role: msg.agent_role ? String(msg.agent_role) : undefined,
+                    stopReason: msg.stop_reason ? String(msg.stop_reason) : undefined,
                   })
                 : undefined,
               role,

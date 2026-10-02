@@ -53,4 +53,13 @@ describe("multi-agent live state", () => {
     const live = describeLive(state);
     expect([live.needsOk, live.activity]).toEqual([true, "Forge needs your OK"]);
   });
+  it("keeps the step-limit stop so the message can offer Continue", () => {
+    const state = run([
+      ev("m1", "echo", { type: "agent_start", agent: { id: "echo", name: "Echo" } }),
+      ev("m1", "echo", { type: "agent_done", text: "I ran out of steps (60) before finishing.", success: true, stop_reason: "max_steps" }),
+    ]);
+    expect(state.messages.m1.stopReason).toBe("max_steps");
+    const restored = messageFromTimeline({ messageId: "m1", agentId: "echo", agentName: "Echo", text: "x", timeline: [], at: 1, stopReason: "max_steps" });
+    expect(restored.stopReason).toBe("max_steps");
+  });
 });

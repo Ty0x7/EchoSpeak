@@ -389,3 +389,20 @@ def test_agent_copying_its_own_transcript_prefix_is_cleaned():
     result = _turn(client, _toolbox({}), events).run("tabs or spaces?")
     assert result.text == "Spaces, per PEP 8."
     assert any(e["type"] == "text_replace" and e["text"] == "Spaces, per PEP 8." for e in events)
+
+
+def test_step_limit_stops_honestly_without_an_extra_model_call(monkeypatch):
+    from agent.lean import settings as lean_settings
+
+    monkeypatch.setattr(lean_settings, "max_iterations", lambda: 2)
+    events: list[dict[str, Any]] = []
+    client = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("c1", "lookup", '{"q": 1}')]),
+        ModelTurn(tool_calls=[ToolCall("c2", "lookup", '{"q": 2}')]),
+    ])
+    result = _turn(client, _toolbox({"lookup": lambda args: "ok"}), events).run("big job")
+    assert len(client.calls) == 2  # no forced third call
+    assert result.stop_reason == "max_steps"
+    assert result.text.startswith("I ran out of steps (2) before finishing.")
+    assert "Press Continue" in result.text
+    assert events[-1]["type"] == "agent_done" and events[-1]["stop_reason"] == "max_steps"

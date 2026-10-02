@@ -44,6 +44,8 @@ export type LeanMessageData = {
   delegatedBy?: string;
   /** "merge": the lead's summary after several agents answered at once. */
   role?: string;
+  /** "max_steps" when the agent stopped at the step limit before finishing. */
+  stopReason?: string;
 };
 
 export type LeanLiveState = {

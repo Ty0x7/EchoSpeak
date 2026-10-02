@@ -150,6 +150,7 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
         ...m,
         status: evt.success === false && evt.error ? "failed" : "done",
         text: String(evt.text || ""),
+        stopReason: evt.stop_reason ? String(evt.stop_reason) : undefined,
         endedAt: at,
         segments: closeThinking(m.segments, at).map((s) =>
           s.kind === "tool" && s.status === "running" ? { ...s, status: "failed" } : s
@@ -173,6 +174,7 @@ export function messageFromTimeline(args: {
   success?: boolean;
   delegatedBy?: string;
   role?: string;
+  stopReason?: string;
 }): LeanMessageData {
   const segments: LeanSegment[] = [];
   for (const row of args.timeline || []) {
@@ -224,5 +226,6 @@ export function messageFromTimeline(args: {
     endedAt: args.at,
     delegatedBy: args.delegatedBy || undefined,
     role: args.role || undefined,
+    stopReason: args.stopReason || undefined,
   };
 }

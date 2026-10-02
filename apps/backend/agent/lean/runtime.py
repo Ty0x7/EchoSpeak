@@ -442,6 +442,7 @@ class LeanSession:
                     "delegation_depth": depth,
                     "delegated_by": meta.get("delegated_by") or None,
                     "role": str(meta.get("role") or ""),
+                    "stop_reason": result.stop_reason,
                 },
             )
         except Exception:

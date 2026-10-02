@@ -198,12 +198,15 @@ export function LeanMessage({
   live = false,
   showHeader = true,
   onDecide,
+  onContinue,
   at,
 }: {
   data: LeanMessageData;
   live?: boolean;
   showHeader?: boolean;
   onDecide?: (id: string, decision: "allow" | "deny" | "always") => Promise<void> | void;
+  /** Offered when the agent stopped at the step limit. */
+  onContinue?: () => void;
   at?: number;
 }) {
   const streaming = live && data.status === "streaming";
@@ -238,6 +241,12 @@ export function LeanMessage({
             </div>
           );
         })}
+        {data.stopReason === "max_steps" && !streaming ? (
+          <div className="lm-stopped">
+            <span>Stopped at the step limit</span>
+            {onContinue ? <button type="button" className="es-btn es-btn-sm" onClick={onContinue}>Continue</button> : null}
+          </div>
+        ) : null}
       </div>
     </article>
   );
