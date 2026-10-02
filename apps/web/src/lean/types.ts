@@ -47,6 +47,7 @@ export type LeanLiveState = {
   requestId: string;
   executionId: string;
   routing: boolean;
+  startedAt: number;
   order: string[];
   messages: Record<string, LeanMessageData>;
 };

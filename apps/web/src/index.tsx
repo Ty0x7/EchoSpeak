@@ -67,6 +67,7 @@ import { SettingsPanel } from "./settings/SettingsPanel";
 import { LeanMessage, AgentAvatar } from "./lean/LeanMessage";
 import { isLeanEvent, messageFromTimeline } from "./lean/liveReducer";
 import { useLeanLive } from "./lean/useLeanLive";
+import { LiveStatusPill } from "./lean/LiveStatus";
 import { leanApi } from "./lean/api";
 import { RosterSections } from "./lean/Roster";
 import { AgentEditor, MentionMenu, RoomDialog, RoomHeader, activeMention, mentionMatches } from "./lean/Dialogs";
@@ -7257,6 +7258,23 @@ export const Dashboard: React.FC<{
     }
   };
 
+  const stopActiveTurn = () => {
+    stopTts();
+    setVoicePhase("idle");
+    cancelSessionTurn(activeThreadIdRef.current || activeThreadId, true);
+  };
+  // Esc stops the running turn unless a menu or picker is using it.
+  useEffect(() => {
+    if (!streaming) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (mention || toolbarMenuOpen || document.querySelector(".es-modal-scrim, .st-root")) return;
+      stopActiveTurn();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   const queueFollowUp = async () => {
     const sessionId = String(activeThreadIdRef.current || "").trim();
     const message = String(input || "").trim();
@@ -8657,9 +8675,8 @@ export const Dashboard: React.FC<{
                     {lean.live ? (
                       <div data-testid="lean-live-turn">
                         {lean.live.routing && !lean.live.order.length ? (
-                          <div className="lm-routing">
+                          <div className="lm-routing" aria-hidden>
                             <span className="lm-dots"><i /><i /><i /></span>
-                            <span className="lm-shimmer">Choosing who should answer</span>
                           </div>
                         ) : null}
                         {lean.live.order.map((id) => {
@@ -8667,25 +8684,8 @@ export const Dashboard: React.FC<{
                           return item ? <LeanMessage key={id} data={item} live onDecide={decideLeanApproval} at={item.startedAt} /> : null;
                         })}
                         {!lean.live.order.length && !lean.live.routing ? (
-                          <div className="lm-routing">
+                          <div className="lm-routing" aria-hidden>
                             <span className="lm-dots"><i /><i /><i /></span>
-                            <span className="lm-shimmer">Connecting to the model</span>
-                          </div>
-                        ) : null}
-                        {streaming ? (
-                          <div className="lm-live-bar" role="status">
-                            <span>Working</span>
-                            <button
-                              type="button"
-                              className="es-btn"
-                              onClick={() => {
-                                stopTts();
-                                setVoicePhase("idle");
-                                cancelSessionTurn(activeThreadId, true);
-                              }}
-                            >
-                              Stop
-                            </button>
                           </div>
                         ) : null}
                       </div>
@@ -8733,6 +8733,7 @@ export const Dashboard: React.FC<{
                     ) : null}
                   </div>
                   <div className="input-bar">
+                    <LiveStatusPill live={streaming ? lean.live : null} onStop={stopActiveTurn} />
                     {/* Row 1: session strip stacked on input (same column width) + context + send */}
                     <div className="input-row">
                       <div className="composer-input-stack">
@@ -8857,6 +8858,7 @@ export const Dashboard: React.FC<{
                         />
                         {mention && activeRoom?.kind === "group" ? (
                           <MentionMenu
+                            anchor={textareaRef.current}
                             query={mention.query}
                             agents={roomMembers}
                             activeIndex={mention.index}

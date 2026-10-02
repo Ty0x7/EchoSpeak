@@ -27,6 +27,7 @@ export function isLeanEvent(evt: LeanEvent): boolean {
 
 export const emptyLive = (requestId = ""): LeanLiveState => ({
   requestId,
+  startedAt: Date.now(),
   executionId: "",
   routing: false,
   order: [],

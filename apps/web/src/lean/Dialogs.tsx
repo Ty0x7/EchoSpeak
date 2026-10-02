@@ -266,22 +266,43 @@ export function RoomHeader({ room, agents, onEdit }: { room: LeanRoom; agents: L
   );
 }
 
-/** @mention suggestions shown above the composer in group chats. */
+/** @mention suggestions. Portaled to <body> so no chat or composer container
+ * can clip it; anchored to the input and opening upward unless there's no room. */
 export function MentionMenu({
   query,
   agents,
   activeIndex,
   onPick,
+  anchor,
 }: {
   query: string;
   agents: LeanPersona[];
   activeIndex: number;
   onPick(agent: LeanPersona): void;
+  anchor: HTMLElement | null;
 }) {
   const matches = mentionMatches(query, agents);
-  if (!matches.length) return null;
-  return (
-    <div className="es-mention-menu" role="listbox" aria-label="Mention an agent">
+  const [rect, setRect] = useState<DOMRect | null>(() => anchor?.getBoundingClientRect() ?? null);
+  useEffect(() => {
+    if (!anchor) return;
+    const update = () => setRect(anchor.getBoundingClientRect());
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [anchor]);
+  if (!matches.length || !rect) return null;
+  const estimated = Math.min(6, matches.length) * 38 + 12;
+  const openUp = rect.top >= estimated + 12 || rect.top > window.innerHeight - rect.bottom;
+  const style: React.CSSProperties = {
+    left: Math.max(8, Math.min(rect.left, window.innerWidth - 268)),
+    ...(openUp ? { bottom: window.innerHeight - rect.top + 8 } : { top: rect.bottom + 8 }),
+  };
+  return createPortal(
+    <div className="es-mention-menu" role="listbox" aria-label="Mention an agent" style={style} data-direction={openUp ? "up" : "down"}>
       {matches.map((agent, index) => (
         <button
           type="button"
@@ -299,7 +320,8 @@ export function MentionMenu({
           <small>{agent.title}</small>
         </button>
       ))}
-    </div>
+    </div>,
+    document.body
   );
 }
 
