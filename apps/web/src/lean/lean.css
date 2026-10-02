@@ -878,3 +878,117 @@
 .lm-via { border-color: transparent; padding-left: 0; color: var(--es-faint); font-weight: 500; }
 .lm[data-role="merge"] .lm-body { padding-left: 33px; border-left: 2px solid var(--es-line-2); margin-left: 2px; }
 .lm-status .es-stack > .lm-avatar + .lm-avatar { box-shadow: 0 0 0 2px rgba(16, 16, 17, 0.9), var(--es-sheen); }
+
+/* ── Sidebar: resizable Chats / Projects split ───────────────────────── */
+.es-side-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.es-side-top {
+  flex: 0 0 auto;
+  max-height: 46%;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  gap: 6px;
+  padding: 0 6px 2px 1px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+.es-split { flex: 1 1 0; min-height: 96px; overflow: hidden; display: flex; flex-direction: column; border-top: 1px solid var(--es-line); padding-top: 4px; }
+.es-sec {
+  flex: 0 0 auto;
+  min-height: 30px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: flex var(--es-dur-slow) var(--es-ease);
+}
+.es-split[data-dragging="true"] .es-sec { transition: none; }
+.es-sec-head { flex: 0 0 30px; display: flex; align-items: center; gap: 2px; padding-right: 8px; min-width: 0; }
+.es-sec-toggle {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--es-faint);
+  font: 650 10px/1 var(--es-font);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--es-dur) var(--es-ease), color var(--es-dur) var(--es-ease);
+}
+.es-sec-toggle:hover { background: var(--es-glass); color: var(--es-text); }
+.es-sec-chev { display: grid; place-items: center; width: 14px; transition: transform var(--es-dur) var(--es-ease); }
+.es-sec[data-open="false"] .es-sec-chev { transform: rotate(-90deg); }
+.es-sec-title { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-sec-count {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--es-dim);
+  font: 600 9.5px/1 var(--es-mono);
+  letter-spacing: 0;
+}
+.es-sec-action {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--es-dim);
+  cursor: pointer;
+  transition: background var(--es-dur) var(--es-ease), color var(--es-dur) var(--es-ease), border-color var(--es-dur) var(--es-ease);
+}
+.es-sec-action:hover { background: var(--es-glass-2); border-color: var(--es-line); color: var(--es-text); }
+.es-sec-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 1px;
+  padding: 1px 6px 6px 1px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+.es-sec-empty { padding: 6px 8px; color: var(--es-faint); font: 500 11px/1.4 var(--es-font); }
+.es-sec-cta { margin: 2px 2px 4px; min-height: 46px; padding: 8px 10px; border-radius: 10px; display: grid; gap: 3px; text-align: left; cursor: pointer; font-family: var(--es-font); }
+.es-sec-cta span { font-size: 11px; color: var(--es-text); }
+.es-sec-cta small { font-size: 10px; color: var(--es-faint); }
+.es-split-handle {
+  flex: 0 0 9px;
+  display: grid;
+  place-items: center;
+  margin-right: 8px;
+  cursor: row-resize;
+  touch-action: none;
+  border-radius: 6px;
+  outline-offset: -2px;
+}
+.es-split-handle > span {
+  width: 100%;
+  height: 1px;
+  background: var(--es-line);
+  transition: background var(--es-dur) var(--es-ease), height var(--es-dur) var(--es-ease);
+}
+.es-split-handle:hover > span,
+.es-split-handle:focus-visible > span,
+.es-split[data-dragging="true"] .es-split-handle > span { height: 3px; border-radius: 3px; background: var(--es-line-3); }
+.es-split-handle:focus-visible { outline: 2px solid var(--es-focus); }
+.es-split[data-dragging="true"] { cursor: row-resize; user-select: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .es-sec, .es-sec-chev, .es-sec-toggle, .es-sec-action, .es-split-handle > span { transition-duration: 1ms !important; }
+}
