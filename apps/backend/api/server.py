@@ -8742,7 +8742,9 @@ async def get_screen_info():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy"}
+    from version import APP_VERSION
+
+    return {"status": "healthy", "version": APP_VERSION}
 
 
 @app.get("/startup/readiness")

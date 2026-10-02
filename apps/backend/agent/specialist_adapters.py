@@ -27,6 +27,7 @@ from agent.specialist_contracts import (
     SpecialistRuntimeKind,
     SpecialistRuntimeState,
 )
+from version import APP_VERSION
 
 
 EventCallback = Callable[..., None]
@@ -346,7 +347,7 @@ class CodexAppServerAdapter(SpecialistAdapter):
             raw_source="codex.process",
         )
         self._client.request("initialize", {
-            "clientInfo": {"name": "EchoSpeak", "version": "8.0.0"},
+            "clientInfo": {"name": "EchoSpeak", "version": APP_VERSION},
             "capabilities": {"experimentalApi": False},
         })
         self._client.notify("initialized")

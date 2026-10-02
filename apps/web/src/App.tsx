@@ -9,7 +9,7 @@ const DesktopApp = lazy(() => import('./desktop/DesktopApp.tsx').then((module) =
 
 /** Same markup as the boot splash in index.html, so loading the app chunk never flashes blank. */
 const BootSplash = () => (
-    <div className="es-boot-splash"><img src="/logo.png" alt="" width={44} height={44} /></div>
+    <div className="es-boot-splash"><div className="es-boot-face"><i /><i /></div></div>
 );
 
 const App: React.FC = () => {

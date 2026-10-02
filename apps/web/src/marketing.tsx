@@ -4,7 +4,7 @@ import { EchoFace, EchoSays, echoFaceStyles } from "./components/EchoFace";
 const githubUrl = import.meta.env.VITE_GITHUB_URL || "https://github.com/Ty0x7/EchoSpeak";
 const releasesUrl = `${githubUrl}/releases`;
 const installerUrl = import.meta.env.VITE_DESKTOP_DOWNLOAD_URL || `${releasesUrl}/latest`;
-const appVersion = String(import.meta.env.VITE_APP_VERSION || "8.0.0");
+const appVersion = String(import.meta.env.VITE_APP_VERSION || "10.0.0");
 const downloadLabel = "Download for Windows";
 
 type IconName = "chat" | "team" | "research" | "code" | "memory" | "voice" | "model" | "shield" | "windows" | "github" | "arrow";

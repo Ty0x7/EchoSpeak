@@ -74,7 +74,7 @@ export function DesktopApp() {
         dispatch({ type: "snapshot", runtime });
         if (runtime.backend_phase === "ready") {
           const controller = new AbortController();
-          const timeout = window.setTimeout(() => controller.abort(), 6000);
+          const timeout = window.setTimeout(() => controller.abort(), 15000);
           try {
             const readiness = await readDesktopReadiness(runtime, controller.signal);
             if (readiness.core_ready && bootstrappedInstanceRef.current !== runtime.instance_id) {
@@ -167,11 +167,17 @@ export function DesktopApp() {
         {showWorkspace ? <Dashboard desktopSettingsWindow={settingsWindow} /> : null}
         {!showWorkspace || bootLeaving ? (
           <section className={`desktop-boot-state${showWorkspace ? " is-leaving" : ""}`} aria-live="polite">
-            <div className="desktop-boot-echo" aria-hidden><img src="/logo.png" alt="" draggable={false} /></div>
-            <div className="desktop-boot-progress" aria-hidden><span /></div>
-            <p className="desktop-boot-detail">{boot.detail}</p>
+            <div className="desktop-boot-face" aria-hidden><i /><i /></div>
+            <div
+              className={`desktop-boot-progress${boot.readiness?.total_steps ? " is-determinate" : ""}`}
+              aria-hidden
+              style={boot.readiness?.total_steps ? { ["--progress" as string]: `${Math.round((boot.readiness.completed_steps / boot.readiness.total_steps) * 100)}%` } : undefined}
+            >
+              <span />
+            </div>
+            <p className="desktop-boot-detail">{boot.phase === "failed" ? boot.detail : boot.detail || "Starting EchoSpeak"}</p>
             {boot.readiness && !boot.readiness.core_ready ? (
-              <p className="desktop-boot-step">{boot.readiness.completed_steps} of {boot.readiness.total_steps}</p>
+              <p className="desktop-boot-step">Step {boot.readiness.completed_steps} of {boot.readiness.total_steps}</p>
             ) : null}
             {boot.phase === "failed" ? (
               <div className="desktop-recovery-actions">
