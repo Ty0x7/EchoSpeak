@@ -32,6 +32,17 @@ $SourceBinary = Join-Path $SourceFolder "echospeak-backend.exe"
 if (-not (Test-Path -LiteralPath $SourceBinary)) {
     throw "Expected backend was not produced at $SourceBinary."
 }
+# Fail the build if the bundle is incomplete (e.g. a module failed to compile
+# during analysis and PyInstaller silently left it out).
+$env:ECHOSPEAK_DATA_DIR = Join-Path $BuildRoot "selfcheck-data"
+$env:ECHOSPEAK_TESTING = "1"
+& $SourceBinary --self-check
+$SelfCheckExit = $LASTEXITCODE
+Remove-Item Env:ECHOSPEAK_TESTING -ErrorAction SilentlyContinue
+Remove-Item Env:ECHOSPEAK_DATA_DIR -ErrorAction SilentlyContinue
+if ($SelfCheckExit -ne 0) {
+    throw "Packaged backend failed its self-check (exit $SelfCheckExit). Fix the import error above and rebuild."
+}
 $StagedFolder = Join-Path $TauriRoot "backend-dist"
 if (Test-Path -LiteralPath $StagedFolder) {
     Remove-Item -LiteralPath $StagedFolder -Recurse -Force

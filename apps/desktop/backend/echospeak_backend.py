@@ -132,7 +132,20 @@ def _start_file_log(logs_dir: Path) -> None:
         sys.stderr = sys.stderr or stream
 
 
+def _self_check() -> int:
+    """Build-time smoke test: the bundle must contain the server and agent."""
+    backend_root = Path(__file__).resolve().parents[2] / "backend"
+    if backend_root.exists() and str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
+    import api.server  # noqa: F401
+    import agent.lean.runtime  # noqa: F401
+    print("echospeak-backend self-check ok")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    if (argv if argv is not None else sys.argv[1:]) == ["--self-check"]:
+        return _self_check()
     # Windows packaged logs often default to a legacy code page; force UTF-8
     # so pipeline markers and tool names are not replaced with U+FFFD.
     for stream in (sys.stdout, sys.stderr):
