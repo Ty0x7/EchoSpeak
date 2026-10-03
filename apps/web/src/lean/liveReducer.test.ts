@@ -137,4 +137,18 @@ describe("lean live reducer", () => {
     ]);
     expect(stopped.messages.m1.outcome).toEqual({ status: "stopped", summary: undefined, reason: "it reached the limit of 4 rounds" });
   });
+
+  it("shows the lead's task board as a plan note under the message that made it", () => {
+    expect(isLeanEvent({ type: "task_board" })).toBe(true);
+    const state = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "task_board", request_id: "r1", tasks: [
+        { id: "t1", owner: "Glados", task: "write counter.py", status: "open" },
+        { id: "t2", owner: "Echo", task: "run the tests", status: "open" },
+      ] },
+      { type: "task_board", request_id: "r1", tasks: [] },
+    ]);
+    const notes = state.messages.m1.segments.filter((s) => s.kind === "note") as { text: string }[];
+    expect(notes.map((n) => n.text)).toEqual(["Plan: Glados → write counter.py · Echo → run the tests"]);
+  });
 });
