@@ -1,6 +1,8 @@
 # Changes
 
-## Unreleased — harness and Groups execution
+## v10.1.0 — 2026-10-03
+
+User-facing notes: `docs/releases/v10.1.0.md`. Harness and Groups execution.
 
 Research, root causes and verdicts: `docs/research/harness-review.md`.
 
