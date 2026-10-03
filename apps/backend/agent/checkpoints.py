@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from loguru import logger
@@ -83,7 +84,9 @@ def create_checkpoint(file_path: str, reason: str = "before_write") -> Optional[
 
         # Generate backup filename
         timestamp = int(time.time() * 1000)
-        filename = f"{timestamp}_{p.name}.bak"
+        # Unique even for two same-named files saved in the same millisecond
+        # (agents working in parallel): a shared name let one backup overwrite the other.
+        filename = f"{timestamp}_{uuid.uuid4().hex[:8]}_{p.name}.bak"
         backup_path = CHECKPOINTS_DIR / filename
 
         # Save backup content
