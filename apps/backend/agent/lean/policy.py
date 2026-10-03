@@ -101,31 +101,26 @@ _SECRET_CACHE: dict[str, Any] = {"at": 0.0, "values": []}
 
 
 def _secret_values() -> list[str]:
-    """Values of the stored credentials (API keys, tokens), cached briefly."""
+    """Values of the configured credentials (API keys, tokens, passwords), cached briefly.
+
+    Read from the live config, so keys set in Settings (credential store) and
+    in the environment are both covered.
+    """
     now = time.time()
     if now - float(_SECRET_CACHE["at"]) < 30:
         return list(_SECRET_CACHE["values"])
     values: list[str] = []
     try:
-        from config import SETTINGS_SECRETS_PATH
+        from config import SECRET_TOP_LEVEL_SETTINGS, config
 
-        data = json.loads(Path(SETTINGS_SECRETS_PATH).read_text(encoding="utf-8")) if Path(SETTINGS_SECRETS_PATH).exists() else {}
-        values = [str(v) for v in _flatten(data) if isinstance(v, str) and len(v.strip()) >= 12]
+        raw = [getattr(config, key, "") for key in SECRET_TOP_LEVEL_SETTINGS if not key.endswith("_path")]
+        for group in ("openai", "gemini"):
+            raw.append(getattr(getattr(config, group, None), "api_key", ""))
+        values = sorted({str(v).strip() for v in raw if isinstance(v, str) and len(v.strip()) >= 12})
     except Exception:
-        logger.debug("Could not read stored secrets for the policy check", exc_info=True)
+        logger.debug("Could not read configured secrets for the policy check", exc_info=True)
     _SECRET_CACHE.update(at=now, values=values)
     return values
-
-
-def _flatten(value: Any):
-    if isinstance(value, dict):
-        for item in value.values():
-            yield from _flatten(item)
-    elif isinstance(value, list):
-        for item in value:
-            yield from _flatten(item)
-    else:
-        yield value
 
 
 def contains_secret(args: dict[str, Any], secrets: Optional[list[str]] = None) -> bool:
