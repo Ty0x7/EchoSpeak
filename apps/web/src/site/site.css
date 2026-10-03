@@ -53,6 +53,12 @@ body { margin: 0; background: #050505; }
 /* One section per screen */
 .snap { display: flex; flex-direction: column; justify-content: center; min-height: 100vh; min-height: 100svh; box-sizing: border-box; padding: 88px 0 20px; }
 .snap-hero { padding: 0; }
+.snap.snap-up { padding-bottom: 120px; }
+/* Artifacts: one frame only, no box around it */
+.snap .panel-build { padding: 0; border: 0; background: none; box-shadow: none; overflow: visible; }
+.panel-build .build-bar { border-bottom: 0; padding-bottom: 0; }
+.panel-build .build-artifact { background: radial-gradient(90% 80% at 50% 40%, #171717, #0b0b0b 75%); }
+.panel-build .splitapp { border: 0; background: #151515; box-shadow: 0 30px 70px rgba(0, 0, 0, 0.6); }
 .snap-last { justify-content: space-between; padding-bottom: 0; }
 .last-pair { display: grid; gap: 16px; margin-block: auto; }
 .last-pair .panels { padding: 0; }

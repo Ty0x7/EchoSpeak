@@ -616,11 +616,11 @@ export function Home() {
       <SiteHeader />
       <main>
         <div className="snap snap-hero"><Hero /></div>
-        <div className="snap"><About /></div>
+        <div className="snap snap-up"><About /></div>
         <div className="snap"><WaysShowcase /></div>
         <div className="snap"><BuildPanel /></div>
-        <div className="snap"><AnswerCards /></div>
-        <div className="snap"><Team /></div>
+        <div className="snap snap-up"><AnswerCards /></div>
+        <div className="snap snap-up"><Team /></div>
         <div className="snap snap-last"><div className="last-pair"><ModelsPanel /><BringHome /></div><SiteFooter /></div>
       </main>
     </div>
