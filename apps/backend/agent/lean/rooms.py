@@ -47,10 +47,13 @@ def _clean_mode(mode: Optional[str]) -> str:
 
 
 def _clean_cap(value: Any) -> int:
+    """Turn budget for a work-together room: 15–60. Values of 12 or less are the old
+    discussion "stop after N messages" cap, so they get the default instead."""
     try:
-        return max(4, min(60, int(value)))
+        cap = int(value)
     except (TypeError, ValueError):
         return 30
+    return 30 if cap <= 12 else min(60, cap)
 
 
 class RoomStore:

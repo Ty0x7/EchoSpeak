@@ -256,7 +256,7 @@ export function RoomDialog({
           <label className="es-cap">
             Up to
             <select value={cap} onChange={(e) => setCap(Number(e.target.value))}>
-              {[12, 30, 60].map((n) => <option key={n} value={n}>{n} turns</option>)}
+              {[15, 30, 60].map((n) => <option key={n} value={n}>{n} turns</option>)}
             </select>
             and stops early when the goal is verified done, or when it stops making progress.
           </label>

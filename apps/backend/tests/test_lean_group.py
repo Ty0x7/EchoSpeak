@@ -3,6 +3,7 @@ handoffs. Uses scripted model turns; no model server needed."""
 
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from typing import Any
@@ -12,6 +13,7 @@ import pytest
 from agent.lean import runtime as lean_runtime
 from agent.lean.provider import Endpoint, ModelTurn, ToolCall
 from agent.lean.rooms import Room
+from agent.lean.toolbox import NativeTool
 from agent.state import get_state_store
 from tests.test_lean_runtime import ScriptedClient
 
@@ -232,51 +234,76 @@ def test_builtin_teammates_are_renamed_once_and_ids_still_resolve(tmp_path):
     assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
 
 
-# ── discussion mode ─────────────────────────────────────────────────────
+# ── work together (stored as mode "discussion") ─────────────────────────
 
-def _discussion_room(session_id: str, cap: int = 6) -> Room:
+def _discussion_room(session_id: str, cap: int = 30) -> Room:
     room = _room(session_id, ["echo", "scout", "forge"])
     return room.model_copy(update={"mode": "discussion", "max_messages": cap})
 
 
-def test_discussion_takes_turns_until_done_then_the_lead_concludes(monkeypatch):
+def _names(tools: list[dict[str, Any]]) -> set[str]:
+    return {t["function"]["name"] for t in tools}
+
+
+def test_work_together_answers_a_question_without_inventing_tasks(monkeypatch):
+    """A plain question: one round of views, then the lead answers. No tasks, no wrap-up."""
     session_id = f"disc-{uuid.uuid4().hex[:6]}"
     scripts = {
         "scout": ScriptedClient([ModelTurn(content="Option A is faster.")]),
-        "echo": ScriptedClient([ModelTurn(content="Agreed, A fits here. DONE"), ModelTurn(content="Go with A.")]),
-        "forge": ScriptedClient([]),  # never reached: Echo said DONE
+        "echo": ScriptedClient([ModelTurn(content="Agreed, A fits here."), ModelTurn(content="Go with A.")]),
+        "forge": ScriptedClient([ModelTurn(content="A, unless you need B's plugins.")]),
     }
     session, events = _session(monkeypatch, scripts, room=_discussion_room(session_id), session_id=session_id)
     out = session.run("@Jarvis which option should I pick?")
 
-    assert [m["agent_id"] for m in out["messages"]] == ["scout", "echo", "echo"]
-    assert [m["text"] for m in out["messages"]] == ["Option A is faster.", "Agreed, A fits here.", "Go with A."]
-    assert scripts["forge"].calls == []
+    assert [m["agent_id"] for m in out["messages"]] == ["scout", "echo", "forge", "echo"]
+    assert out["response"] == "Go with A." and out["outcome"]["status"] == "done"
+    assert session.job.subtasks == [] and not any(e["type"] == "task_board" for e in events)
     # The second speaker saw the first one's message.
     assert any("Option A is faster." in str(m.get("content")) for m in scripts["echo"].calls[0])
-    assert any(e["type"] == "text_replace" and e["text"] == "Agreed, A fits here." for e in events)
-    starts = [e for e in events if e["type"] == "agent_start"]
-    assert starts[-1].get("role") == "merge"
+    # Planning turns can look things up but not change anything; the lead's decision can assign work.
+    assert not _names(scripts["echo"].tools[0]) & {"file_write", "terminal", "assign_tasks"}
+    assert "assign_tasks" in _names(scripts["echo"].tools[1])
 
 
-def test_discussion_stops_at_the_message_cap(monkeypatch):
+def test_work_together_stops_at_its_turn_budget(monkeypatch):
+    """Progress every round, never verified done: the turn budget ends it with a visible reason."""
     session_id = f"disc-cap-{uuid.uuid4().hex[:6]}"
+    written: list[str] = []
+    monkeypatch.setattr(lean_runtime, "coding_tools", lambda: [NativeTool(
+        name="file_write", description="write", parameters={"type": "object", "properties": {}},
+        func=lambda args: written.append("x") or "Wrote it.",
+    )])
+    work = [turn for i in range(20) for turn in (
+        ModelTurn(tool_calls=[ToolCall(f"w{i}", "file_write", "{}")]),
+        ModelTurn(tool_calls=[ToolCall(f"c{i}", "complete_task", '{"summary": "Wrote part %d."}' % i)]),
+    )]
+    not_done = {"done": False, "reason": "more parts are needed", "next": "Glados", "instruction": "write the next part"}
     scripts = {
-        "scout": ScriptedClient([ModelTurn(content="A.")]),
-        "echo": ScriptedClient([ModelTurn(content="B."), ModelTurn(content="Wrap-up.")]),
-        "forge": ScriptedClient([ModelTurn(content="C.")]),
+        "echo": ScriptedClient([
+            ModelTurn(content="Glados should write it."),
+            ModelTurn(tool_calls=[ToolCall("a1", "assign_tasks", '{"tasks": [{"owner": "Glados", "task": "write part 1"}]}')]),
+            ModelTurn(content="Glados is on it."),
+        ]),
+        "scout": ScriptedClient([ModelTurn(content="Fine by me.")]),
+        "forge": ScriptedClient([ModelTurn(content="Ready.")] + work),
+        "_review": type("R", (), {"stream_turn": lambda self, m, **k: ModelTurn(content=json.dumps(not_done))})(),
     }
-    session, _ = _session(monkeypatch, scripts, room=_discussion_room(session_id, cap=3), session_id=session_id)
-    out = session.run("@Jarvis thoughts?")
-    assert [m["text"] for m in out["messages"]] == ["A.", "B.", "C.", "Wrap-up."]
+    session, _ = _session(monkeypatch, scripts, room=_discussion_room(session_id, cap=15), session_id=session_id)
+    out = session.run("@Echo write the whole thing")
+
+    assert out["outcome"]["status"] == "stopped"
+    assert "budget of 15 agent turns" in out["outcome"]["reason"] and "more parts are needed" in out["outcome"]["reason"]
+    assert len(out["messages"]) == 15 and len(written) == 11  # 3 views + the decision + 11 task turns
 
 
-def test_room_mode_and_cap_are_validated(tmp_path, monkeypatch):
+def test_room_mode_and_cap_are_validated():
     from agent.lean import rooms
 
-    monkeypatch.setattr(rooms, "_clean_cap", rooms._clean_cap)
     assert rooms._clean_mode("Discussion") == "discussion" and rooms._clean_mode("chaos") == "reply"
-    assert rooms._clean_cap(50) == 12 and rooms._clean_cap(1) == 2 and rooms._clean_cap("x") == 6
+    assert rooms._clean_cap(15) == 15 and rooms._clean_cap(100) == 60 and rooms._clean_cap("x") == 30
+    # An old "stop after 6 messages" cap is not a turn budget: it gets the default.
+    assert rooms._clean_cap(6) == 30 and rooms._clean_cap(12) == 30
 
 
 def test_plain_language_everyone_addresses_the_whole_group():
