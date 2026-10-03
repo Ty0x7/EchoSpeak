@@ -40,7 +40,7 @@ class RoomPayload(BaseModel):
     agent_ids: list[str] = Field(default_factory=list)
     kind: str = "group"
     mode: str = "reply"
-    max_messages: int = 6
+    max_messages: int = 30
 
 
 class RoomUpdatePayload(BaseModel):

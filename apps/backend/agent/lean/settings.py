@@ -86,9 +86,9 @@ def group_merge() -> bool:
 def group_max_rounds() -> int:
     """Backstop: rounds of work per message in a group chat or handed-off job."""
     try:
-        return max(1, min(int(_setting("lean_group_max_rounds", 4)), 12))
+        return max(1, min(int(_setting("lean_group_max_rounds", 8)), 30))
     except (TypeError, ValueError):
-        return 4
+        return 8
 
 
 def group_token_budget() -> int:

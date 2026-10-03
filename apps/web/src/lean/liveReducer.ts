@@ -20,11 +20,12 @@ export const LEAN_EVENT_TYPES = new Set([
   "context_compacted",
   "run_outcome",
   "job_continue",
+  "task_board",
 ]);
 
 export function isLeanEvent(evt: LeanEvent): boolean {
   if (evt.type === "final") return evt.runtime === "lean";
-  if (["run_start", "routing", "delegation", "run_outcome", "job_continue"].includes(evt.type)) return true;
+  if (["run_start", "routing", "delegation", "run_outcome", "job_continue", "task_board"].includes(evt.type)) return true;
   return Boolean(evt.message_id) && LEAN_EVENT_TYPES.has(evt.type);
 }
 
@@ -87,6 +88,14 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
       const last = state.order[state.order.length - 1];
       if (!last) return state;
       const note = `Not done yet: ${String(evt.reason || "work remains")}. ${String(evt.agent || "An agent")} continues.`;
+      return patchMessage(state, last, (m) => ({ ...m, segments: [...m.segments, { kind: "note", step: 0, text: note, at }] }));
+    }
+    case "task_board": {
+      // The lead's plan, as owned tasks, under the message that made it.
+      const last = state.order[state.order.length - 1];
+      const tasks = Array.isArray(evt.tasks) ? evt.tasks : [];
+      if (!last || !tasks.length) return state;
+      const note = "Plan: " + tasks.map((t: any) => `${String(t.owner || "?")} → ${String(t.task || "")}`).join(" · ");
       return patchMessage(state, last, (m) => ({ ...m, segments: [...m.segments, { kind: "note", step: 0, text: note, at }] }));
     }
     case "agent_start": {

@@ -31,10 +31,11 @@ class Room(BaseModel):
     updated_at: float = Field(default_factory=time.time)
     last_message_at: float = 0.0
     last_preview: str = ""
-    # "reply": the chosen agent(s) answer once. "discussion": agents take turns
-    # for up to max_messages, then the lead concludes.
+    # "reply": the chosen agent(s) answer once. "discussion" (shown as "Work
+    # together"): the team discusses, assigns tasks, does them and keeps going
+    # until the goal is verified done. max_messages is that mode's turn budget.
     mode: str = "reply"
-    max_messages: int = 6
+    max_messages: int = 30
 
 
 ROOM_MODES = {"reply", "discussion"}
@@ -47,9 +48,9 @@ def _clean_mode(mode: Optional[str]) -> str:
 
 def _clean_cap(value: Any) -> int:
     try:
-        return max(2, min(12, int(value)))
+        return max(4, min(60, int(value)))
     except (TypeError, ValueError):
-        return 6
+        return 30
 
 
 class RoomStore:
@@ -89,7 +90,7 @@ class RoomStore:
                     return room.model_copy()
         return None
 
-    def create(self, *, name: str, agent_ids: list[str], kind: str = "group", mode: str = "reply", max_messages: int = 6) -> Room:
+    def create(self, *, name: str, agent_ids: list[str], kind: str = "group", mode: str = "reply", max_messages: int = 30) -> Room:
         from agent.threads import get_thread_manager
 
         agent_ids = [a for a in dict.fromkeys(str(x).strip() for x in agent_ids) if a]

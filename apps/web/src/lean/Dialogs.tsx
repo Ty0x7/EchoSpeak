@@ -176,7 +176,7 @@ export function RoomDialog({
 }) {
   const [name, setName] = useState(room?.name || "");
   const [mode, setMode] = useState<"reply" | "discussion">(room?.mode || "reply");
-  const [cap, setCap] = useState<number>(room?.max_messages || 6);
+  const [cap, setCap] = useState<number>(room?.max_messages && room.max_messages > 12 ? room.max_messages : 30);
   const [members, setMembers] = useState<string[]>(room?.agent_ids || agents.slice(0, 3).map((a) => a.id));
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -248,17 +248,17 @@ export function RoomDialog({
             <small>The agent you @mention (or the best fit) answers.</small>
           </button>
           <button type="button" role="radio" aria-checked={mode === "discussion"} className={`es-toggle-chip${mode === "discussion" ? " is-on" : ""}`} onClick={() => setMode("discussion")}>
-            <strong>Discussion</strong>
-            <small>Agents take turns building on each other, then the lead sums up.</small>
+            <strong>Work together</strong>
+            <small>They plan, split the work, do it, and keep going until it's checked done.</small>
           </button>
         </div>
         {mode === "discussion" ? (
           <label className="es-cap">
-            Stop after
+            Up to
             <select value={cap} onChange={(e) => setCap(Number(e.target.value))}>
-              {[4, 6, 8].map((n) => <option key={n} value={n}>{n} messages</option>)}
+              {[12, 30, 60].map((n) => <option key={n} value={n}>{n} turns</option>)}
             </select>
-            or when an agent says the group is done.
+            and stops early when the goal is verified done, or when it stops making progress.
           </label>
         ) : null}
       </div>
@@ -282,7 +282,7 @@ export function RoomHeader({ room, agents, onEdit }: { room: LeanRoom; agents: L
           <strong>{solo ? solo.name : room.name}</strong>
           <small>
             {solo ? solo.title || solo.description : members.map((m) => m.name).join(" · ")}
-            {!solo && room.mode === "discussion" ? <span className="es-room-mode">Discussion · up to {room.max_messages || 6}</span> : null}
+            {!solo && room.mode === "discussion" ? <span className="es-room-mode">Work together · up to {room.max_messages && room.max_messages > 12 ? room.max_messages : 30} turns</span> : null}
           </small>
         </div>
       </div>

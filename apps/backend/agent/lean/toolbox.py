@@ -215,7 +215,7 @@ class Toolbox:
         requested = set(wanted)
         self.native = {
             name: tool for name, tool in self.native.items()
-            if name in requested or name in {"delegate_to_agent", "complete_task"}
+            if name in requested or name in {"delegate_to_agent", "complete_task", "assign_tasks"}
         }
 
     @property

@@ -98,7 +98,7 @@ export function GroupChatsPage({
                 <button type="button" className="es-page-row-main" onClick={() => onOpen(room)}>
                   <AvatarStack agents={members} size={22} max={4} />
                   <span className="es-page-row-text">
-                    <strong>{room.name}{room.mode === "discussion" ? <span className="es-room-mode">Discussion</span> : null}</strong>
+                    <strong>{room.name}{room.mode === "discussion" ? <span className="es-room-mode">Work together</span> : null}</strong>
                     <small>{room.last_preview || members.map((m) => m.name).join(", ")}</small>
                   </span>
                   <time>{ago(Math.max(Number(room.last_message_at || 0), Number(room.updated_at || 0)) * 1000)}</time>
