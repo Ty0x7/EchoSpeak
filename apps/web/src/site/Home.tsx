@@ -2,8 +2,6 @@ import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { EchoFace, echoFaceStyles } from "../components/EchoFace";
 import { ChartView } from "../widgets/Chart";
-import { ScoreCard } from "../widgets/Cards";
-import { Timeline } from "../widgets/Blocks";
 import { WeatherCard } from "../widgets/Weather";
 import "../widgets/widgets.css";
 import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
@@ -33,10 +31,12 @@ function useReveal<T extends HTMLElement>() {
   return { ref, visible };
 }
 
-function Reveal({ children, className = "", as: Tag = "div", id }: { children: React.ReactNode; className?: string; as?: "div" | "section"; id?: string }) {
+type Anim = "up" | "left" | "right" | "zoom" | "blur" | "flip";
+
+function Reveal({ children, className = "", as: Tag = "div", id, anim = "up", delay = 0 }: { children: React.ReactNode; className?: string; as?: "div" | "section"; id?: string; anim?: Anim; delay?: number }) {
   const { ref, visible } = useReveal<HTMLDivElement>();
   return (
-    <Tag ref={ref as any} id={id} className={`reveal ${className}`} data-visible={visible ? "true" : "false"}>
+    <Tag ref={ref as any} id={id} className={`reveal ${className}`} data-anim={anim} data-visible={visible ? "true" : "false"} style={delay ? { transitionDelay: `${delay}ms` } : undefined}>
       {children}
     </Tag>
   );
@@ -174,11 +174,11 @@ function WaysShowcase() {
   const mode = MODES[active];
   return (
     <section className="ways shell" id="ways" aria-labelledby="ways-title">
-      <Reveal className="section-head is-split">
-        <span className="kicker">One Echo · many ways to help</span>
-        <h2 id="ways-title">He changes how he helps.<br /><span className="dim">Never who he is.</span></h2>
-        <p className="section-lede">Chat, research, build or just talk out loud. It's always the same Echo, with the same memory and the same chats.</p>
+      <Reveal className="section-head" anim="blur">
+        <span className="kicker">What Echo does</span>
+        <h2 id="ways-title">One Echo.<br /><span className="dim">Many ways.</span></h2>
       </Reveal>
+      <Reveal anim="flip">
       <div className="ways-grid" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
         <div className="ways-tabs" role="tablist" aria-label="Ways Echo helps">
           {MODES.map((m, i) => (
@@ -196,6 +196,7 @@ function WaysShowcase() {
           <p className="ways-caption" key={`c-${mode.id}`}><Face size={20} /><span><b>{mode.says}</b> {mode.caption}</span></p>
         </div>
       </div>
+      </Reveal>
     </section>
   );
 }
@@ -213,43 +214,20 @@ const DEMO_CHART = {
   unit: "%",
   source: "Example data",
 };
-const DEMO_SCORES = {
-  title: "Last night's scores (example)",
-  games: [
-    { home: "Riverside Rockets", away: "Bay City Owls", home_score: 4, away_score: 2, status: "Final", league: "Example", state: "post", home_record: "5-1", away_record: "3-3", home_abbr: "RIV", away_abbr: "BAY" },
-    { home: "Harbor Kings", away: "Summit Bears", home_score: 1, away_score: 3, status: "Final", league: "Example", state: "post", home_record: "2-4", away_record: "4-2", home_abbr: "HAR", away_abbr: "SUM" },
-    { home: "Lakeside Foxes", away: "Iron Valley", home_score: 5, away_score: 5, status: "Final · OT", league: "Example", state: "post", home_record: "3-2-1", away_record: "3-2-1", home_abbr: "LAK", away_abbr: "IRV" },
-    { home: "North Shore", away: "Cedar Falls", home_score: 2, away_score: 0, status: "Final", league: "Example", state: "post", home_record: "4-2", away_record: "1-5", home_abbr: "NSH", away_abbr: "CED" },
-  ],
-};
-const DEMO_STEPS = {
-  title: "Set up a local AI model",
-  ordered: true,
-  items: [
-    { title: "Install LM Studio", detail: "Free app that runs AI models on your PC." },
-    { title: "Download a model", detail: "Gemma 4 E4B is a great start on an 8 GB GPU." },
-    { title: "Pick it in EchoSpeak", detail: "Settings › Models › LM Studio." },
-    { title: "Say hi", detail: "Type, or turn on Wake and say “Hey Echo”." },
-  ],
-};
-
 function AnswerCards() {
-  const tiles: { key: string; ask: string; className: string; body: React.ReactNode }[] = [
-    { key: "weather", ask: "“What's the weather in Denver this week?”", className: "bento-weather", body: <WeatherCard data={DEMO_WEATHER} /> },
-    { key: "chart", ask: "“Compare these two stocks this year.”", className: "bento-chart", body: <ChartView data={DEMO_CHART} /> },
-    { key: "steps", ask: "“How do I set up a local model?”", className: "bento-steps", body: <Timeline data={DEMO_STEPS} /> },
-    { key: "scores", ask: "“How did my team do last night?”", className: "bento-scores", body: <ScoreCard data={DEMO_SCORES} /> },
+  const tiles: { key: string; ask: string; className: string; anim: Anim; body: React.ReactNode }[] = [
+    { key: "weather", ask: "“What's the weather in Denver this week?”", className: "bento-weather", anim: "left", body: <WeatherCard data={DEMO_WEATHER} /> },
+    { key: "chart", ask: "“Compare these two stocks this year.”", className: "bento-chart", anim: "right", body: <ChartView data={DEMO_CHART} /> },
   ];
   return (
     <section className="answers shell" aria-labelledby="answers-title">
-      <Reveal className="section-head is-split">
+      <Reveal className="section-head" anim="blur">
         <span className="kicker">Answers you can see</span>
         <h2 id="answers-title">Less reading.<br /><span className="dim">More seeing.</span></h2>
-        <p className="section-lede">Weather, charts, scores, products, videos and how-tos show up as cards, built from real data.</p>
       </Reveal>
       <div className="bento">
         {tiles.map((t) => (
-          <Reveal key={t.key} className={`bento-tile ${t.className}`}>
+          <Reveal key={t.key} anim={t.anim} className={`bento-tile ${t.className}`}>
             <p className="bento-ask"><span className="bento-you">You</span>{t.ask}</p>
             <div className="bento-card">{t.body}</div>
           </Reveal>
@@ -270,14 +248,13 @@ const TEAM = [
 function Team() {
   return (
     <section className="team shell" id="team" aria-labelledby="team-title">
-      <Reveal className="section-head is-split">
+      <Reveal className="section-head" anim="blur">
         <span className="kicker">The team</span>
         <h2 id="team-title">Three agents.<br /><span className="dim">One group chat.</span></h2>
-        <p className="section-lede">@mention who you want, or let them sort it out. They hand work to each other and tell you when it's actually done.</p>
       </Reveal>
       <div className="team-grid">
         {TEAM.map((m, i) => (
-          <Reveal key={m.name} className="member">
+          <Reveal key={m.name} className="member" anim="zoom" delay={i * 90}>
             <div className="member-face" style={{ animationDelay: `${i * -1.4}s` }}>
               <Face tone={m.tone} size={92} />
             </div>
@@ -287,7 +264,7 @@ function Team() {
             <p>{m.line}</p>
           </Reveal>
         ))}
-        <Reveal className="member member-new">
+        <Reveal className="member member-new" anim="zoom" delay={270}>
           <div className="member-face member-plus" aria-hidden="true">+</div>
           <h3>Your own</h3>
           <span className="member-role">Make an agent</span>
@@ -342,10 +319,10 @@ function ApprovalDemo() {
   );
 }
 
-function Panels() {
+function HomePanel() {
   return (
     <div className="panels shell">
-      <Reveal as="section" className="panel panel-light panel-home">
+      <Reveal as="section" className="panel panel-light panel-home" anim="flip">
         <div className="panel-copy">
           <span className="kicker">Private by default</span>
           <h2>Lives on your PC.<br />Not in someone's cloud.</h2>
@@ -362,8 +339,14 @@ function Panels() {
           <span className="house-chip c3">Files</span>
         </div>
       </Reveal>
+    </div>
+  );
+}
 
-      <Reveal as="section" className="panel panel-dark panel-build">
+function BuildPanel() {
+  return (
+    <div className="panels shell">
+      <Reveal as="section" className="panel panel-dark panel-build" anim="zoom">
         <div className="panel-copy">
           <span className="kicker">Artifacts</span>
           <h2>Ask for an app.<br /><span className="dim">Get an app.</span></h2>
@@ -374,8 +357,14 @@ function Panels() {
           <MiniTipCalc />
         </div>
       </Reveal>
+    </div>
+  );
+}
 
-      <Reveal as="section" className="panel panel-light panel-safe">
+function SafePanels() {
+  return (
+    <div className="panels shell">
+      <Reveal as="section" className="panel panel-light panel-safe" anim="left">
         <div className="panel-copy">
           <span className="kicker">You're in charge</span>
           <h2>Asks before<br />anything risky.</h2>
@@ -384,7 +373,7 @@ function Panels() {
         <ApprovalDemo />
       </Reveal>
 
-      <Reveal as="section" className="panel panel-dark panel-models">
+      <Reveal as="section" className="panel panel-dark panel-models" anim="right" delay={120}>
         <div className="panel-copy">
           <span className="kicker">Bring your own brain</span>
           <h2>Free local models.<br /><span className="dim">Or your favourite cloud one.</span></h2>
@@ -418,14 +407,13 @@ const PILLARS: { icon: IconName; title: string; copy: string }[] = [
 function About() {
   return (
     <section className="about shell" id="about" aria-labelledby="about-title">
-      <Reveal className="section-head is-split">
+      <Reveal className="section-head" anim="blur">
         <span className="kicker">About Echo</span>
         <h2 id="about-title">Your own agent.<br /><span className="dim">Not someone else's.</span></h2>
-        <p className="section-lede">Echo is an open-source, local-first agent: a personal AI that lives with you, works for you, and teams up with other agents to get real tasks done.</p>
       </Reveal>
       <div className="pillars">
         {PILLARS.map((pillar, i) => (
-          <Reveal key={pillar.title} className="pillar">
+          <Reveal key={pillar.title} className="pillar" anim="up" delay={(i % 3) * 90}>
             <span className="pillar-icon" style={{ animationDelay: `${i * -0.8}s` }}><Icon name={pillar.icon} size={20} /></span>
             <h3>{pillar.title}</h3>
             <p>{pillar.copy}</p>
@@ -441,7 +429,7 @@ function About() {
 function BringHome() {
   const release = useLatestRelease();
   return (
-    <Reveal as="section" className="bring shell" id="download">
+    <Reveal as="section" className="bring shell" id="download" anim="zoom">
       <div className="bring-mark" aria-hidden="true">
         <span className="bring-face"><i /><i /></span>
       </div>
@@ -469,9 +457,11 @@ export function Home() {
         <Hero />
         <About />
         <WaysShowcase />
+        <HomePanel />
         <AnswerCards />
+        <BuildPanel />
         <Team />
-        <Panels />
+        <SafePanels />
         <BringHome />
       </main>
       <SiteFooter />
