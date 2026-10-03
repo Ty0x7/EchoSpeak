@@ -721,14 +721,12 @@ export function ProjectSidebar(props: SidebarProps) {
               padding: 0,
             }}
           >
-            <img src="/logo.png" alt="EchoSpeak" style={{ width: 18, height: 18, borderRadius: 2, display: "block" }} />
+            <img src="/logo.png" alt="EchoSpeak" style={{ width: 20, height: 20, display: "block" }} />
           </button>
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-              <div style={{ width: 24, height: 24, display: "grid", placeItems: "center", border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.035)", borderRadius: 3 }}>
-                <img src="/logo.png" alt="" style={{ width: 15, height: 15, borderRadius: 2 }} />
-              </div>
+              <img src="/logo.png" alt="" style={{ width: 24, height: 24, display: "block", flex: "0 0 auto" }} />
               <div style={{ minWidth: 0, lineHeight: 1.05 }}>
                 <strong style={{ display: "block", fontFamily: "'Space Grotesk', sans-serif", fontSize: 15.5, letterSpacing: "-.01em" }}>EchoSpeak</strong>
                 <span style={{ display: "block", marginTop: 4, color: "rgba(255,255,255,.35)", fontSize: 8.5, letterSpacing: ".13em", textTransform: "uppercase" }}>Local workspace</span>

@@ -3605,7 +3605,7 @@ export const Dashboard: React.FC<{
         >
           <div className="panel-header">
             <div className="title">
-              <img src="/logo.png" alt="Logo" style={{ width: 14, height: 14, borderRadius: 2 }} />
+              <img src="/logo.png" alt="" style={{ width: 15, height: 15 }} />
               <span>{activeWorkspaceLabel}</span>
               {activeProjectId && leftTab === "chat" && threadState?.mode === "coding" && (
                 <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: "linear-gradient(135deg, rgba(34,197,94,0.15), rgba(34,197,94,0.05))", border: "1px solid rgba(34,197,94,0.25)", color: "#22c55e", fontWeight: 600, marginLeft: 8 }}>

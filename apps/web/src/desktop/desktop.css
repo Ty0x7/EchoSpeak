@@ -71,10 +71,10 @@ html.echospeak-desktop-root #root {
 }
 
 .desktop-titlebar-brand img {
-  width: 16px;
-  height: 16px;
-  border-radius: 3px;
-  object-fit: cover;
+  width: 18px;
+  height: 18px;
+  border-radius: 0;
+  object-fit: contain;
   pointer-events: none;
 }
 
