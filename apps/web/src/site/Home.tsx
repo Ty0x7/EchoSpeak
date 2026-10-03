@@ -174,12 +174,12 @@ function WaysShowcase() {
   const mode = MODES[active];
   return (
     <section className="ways shell" id="ways" aria-labelledby="ways-title">
-      <Reveal className="section-head" anim="blur">
-        <span className="kicker">What Echo does</span>
-        <h2 id="ways-title">One Echo.<br /><span className="dim">Many ways.</span></h2>
-      </Reveal>
-      <Reveal anim="flip">
       <div className="ways-grid" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+        <Reveal className="ways-side" anim="left">
+        <div className="section-head">
+          <span className="kicker">What Echo does</span>
+          <h2 id="ways-title">One Echo.<br /><span className="dim">Many ways.</span></h2>
+        </div>
         <div className="ways-tabs" role="tablist" aria-label="Ways Echo helps">
           {MODES.map((m, i) => (
             <button key={m.id} type="button" role="tab" aria-selected={i === active} className={i === active ? "is-on" : ""} onClick={() => setActive(i)}>
@@ -189,14 +189,16 @@ function WaysShowcase() {
             </button>
           ))}
         </div>
-        <div className="ways-screen" role="tabpanel" aria-label={mode.label}>
+        </Reveal>
+        <Reveal className="ways-screen" anim="right">
+        <div className="ways-screen-inner" role="tabpanel" aria-label={mode.label}>
           <div className="screen-body" key={mode.id}>
             <Screen mode={mode.id} />
           </div>
           <p className="ways-caption" key={`c-${mode.id}`}><Face size={20} /><span><b>{mode.says}</b> {mode.caption}</span></p>
         </div>
+        </Reveal>
       </div>
-      </Reveal>
     </section>
   );
 }
@@ -448,7 +450,105 @@ function BringHome() {
   );
 }
 
+/**
+ * While the hero is on screen, the first downward scroll (wheel, swipe or key) glides
+ * straight to About instead of creeping through the gap. After that, scrolling is free.
+ */
+function useHeroSnap(targetId: string) {
+  useEffect(() => {
+    let animating = false;
+    let touchY: number | null = null;
+    const headerOffset = 68;
+
+    const target = () => {
+      const el = document.getElementById(targetId);
+      return el ? el.getBoundingClientRect().top + window.scrollY - headerOffset : null;
+    };
+    // Only snap while we're still up in the hero.
+    const inHero = () => {
+      const top = target();
+      return top !== null && window.scrollY < top - 40;
+    };
+    const glide = () => {
+      const to = target();
+      if (to === null) return;
+      const from = window.scrollY;
+      const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      if (reduce) {
+        window.scrollTo({ top: to, behavior: "auto" });
+        return;
+      }
+      animating = true;
+      const html = document.documentElement;
+      const prevBehavior = html.style.scrollBehavior;
+      html.style.scrollBehavior = "auto";
+      const duration = 900;
+      const start = performance.now();
+      const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+      const step = (now: number) => {
+        const t = Math.min(1, (now - start) / duration);
+        window.scrollTo(0, from + (to - from) * ease(t));
+        if (t < 1) {
+          requestAnimationFrame(step);
+        } else {
+          html.style.scrollBehavior = prevBehavior;
+          // Swallow the tail of a trackpad fling so it doesn't overshoot.
+          window.setTimeout(() => { animating = false; }, 250);
+        }
+      };
+      requestAnimationFrame(step);
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      if (animating) {
+        e.preventDefault();
+        return;
+      }
+      if (e.deltaY > 0 && inHero()) {
+        e.preventDefault();
+        glide();
+      }
+    };
+    const onTouchStart = (e: TouchEvent) => {
+      touchY = e.touches[0]?.clientY ?? null;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (animating) {
+        e.preventDefault();
+        return;
+      }
+      const y = e.touches[0]?.clientY;
+      if (touchY === null || y === undefined) return;
+      if (touchY - y > 12 && inHero()) {
+        e.preventDefault();
+        touchY = null;
+        glide();
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(el.tagName))) return;
+      if (["ArrowDown", "PageDown", " "].includes(e.key) && !e.shiftKey && inHero()) {
+        e.preventDefault();
+        if (!animating) glide();
+      }
+    };
+
+    window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("touchstart", onTouchStart, { passive: true });
+    window.addEventListener("touchmove", onTouchMove, { passive: false });
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("touchstart", onTouchStart);
+      window.removeEventListener("touchmove", onTouchMove);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [targetId]);
+}
+
 export function Home() {
+  useHeroSnap("about");
   return (
     <div className="site">
       <style>{echoFaceStyles}</style>
