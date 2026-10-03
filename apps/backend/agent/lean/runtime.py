@@ -20,6 +20,8 @@ from agent.lean.prompt import build_system_prompt
 from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoint
 from agent.lean.rooms import Room, get_room_store, mentioned_agents
 from agent.lean.coding import coding_tools, project_overview
+from agent.lean.artifacts import artifact_tools
+from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
 from agent.lean.toolbox import NativeTool, Toolbox, project_root_for_session
 
@@ -66,9 +68,9 @@ def request_text(message: str) -> str:
 
 GUEST_TOOLS = {
     "public": ["get_system_time", "calculate", "web_search", "safe_web_fetch", "weather_live", "sports_live",
-               "project_update_context"],
+               "project_update_context", "stock_history", "product_search", "video_search", "image_search"],
     "trusted": ["get_system_time", "calculate", "web_search", "safe_web_fetch", "weather_live", "sports_live",
-                "youtube_transcript", "project_update_context"],
+                "youtube_transcript", "project_update_context", "stock_history", "product_search", "video_search", "image_search"],
 }
 _HISTORY_MESSAGES = 30
 
@@ -647,7 +649,7 @@ class LeanSession:
         can_hand_off = allow_handoff and depth < MAX_DELEGATION_DEPTH and not guest
         teammates = self._members() if self.room else [p for p in self.personas.list() if p.id != persona.id]
         if guest:
-            toolbox = Toolbox(toolsets=GUEST_TOOLS[self.caller_role], session_id=self.session_id)
+            toolbox = Toolbox(toolsets=GUEST_TOOLS[self.caller_role], extra_tools=rich_tools(), session_id=self.session_id)
         else:
             terminal = Terminal(self.project_root)
             toolbox = Toolbox(
@@ -656,6 +658,8 @@ class LeanSession:
                     persona, depth, delegated_by=delegated_by, allow_handoff=can_hand_off, allow_complete=allow_complete,
                 )
                 + coding_tools()
+                + rich_tools()
+                + artifact_tools()
                 + terminal.tools(),
                 session_id=self.session_id,
                 project_root=self.project_root,

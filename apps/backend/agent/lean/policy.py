@@ -34,6 +34,8 @@ UNTRUSTED_SOURCES = {
     "email_read_inbox", "email_search", "email_get_thread",
     "discord_read_channel", "discord_web_read_recent", "discord_contacts_discover",
     "analyze_screen", "vision_qa",
+    # Titles, prices and pages from the web.
+    "stock_history", "product_search", "video_search", "image_search",
 }
 
 # (C) Actions that leave the machine, speak for the user, or persist something

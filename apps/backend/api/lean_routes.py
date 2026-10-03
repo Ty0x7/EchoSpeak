@@ -364,3 +364,103 @@ def search_chats(q: str = "", limit: int = 20) -> dict[str, Any]:
             }
         chat["matches"] += 1
     return {"query": q, "items": list(chats.values())[:limit]}
+
+
+@router.get("/media")
+def proxy_media(url: str = Query(..., max_length=2048)):
+    """Remote images for chat cards, fetched by the backend (SSRF-checked, size and time capped, cached)."""
+    from fastapi.responses import Response
+
+    from agent.lean.media_proxy import MediaError, fetch_image, media_response_headers
+
+    try:
+        body, content_type = fetch_image(url)
+    except MediaError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
+    return Response(content=body, media_type=content_type, headers=media_response_headers(content_type))
+
+
+# ── Artifacts ─────────────────────────────────────────────────────────────
+
+class ArtifactRestore(BaseModel):
+    version: int
+
+
+@router.get("/artifacts")
+def list_artifacts(session_id: str = Query(default="")) -> dict[str, Any]:
+    from agent.lean import artifacts
+
+    return {"items": artifacts.list_all(session_id)}
+
+
+@router.get("/artifacts/{artifact_id}")
+def get_artifact(artifact_id: str, version: Optional[int] = Query(default=None)) -> dict[str, Any]:
+    from agent.lean import artifacts
+
+    record = artifacts.get(artifact_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    try:
+        current = artifacts.version(record, version)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Version not found") from exc
+    return {
+        **artifacts.summary(record),
+        "history": [{"n": v["n"], "title": v.get("title", ""), "at": v.get("at", 0), "note": v.get("note", "")} for v in record["versions"]],
+        "current": {"n": current["n"], "title": current.get("title", ""), "content": current["content"]},
+    }
+
+
+@router.post("/artifacts/{artifact_id}/frame-token")
+def artifact_frame_token(artifact_id: str) -> dict[str, Any]:
+    from agent.lean import artifacts
+
+    record = artifacts.get(artifact_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    if record["kind"] not in {"html", "svg"}:
+        raise HTTPException(status_code=400, detail="Only HTML and SVG artifacts run in a frame")
+    return {"token": artifacts.issue_frame_token(artifact_id), "ttl": artifacts.FRAME_TOKEN_TTL}
+
+
+@router.get("/artifacts/{artifact_id}/frame")
+def artifact_frame(artifact_id: str, v: Optional[int] = Query(default=None)):
+    """The sandboxed page for HTML/SVG artifacts. Only ever loaded inside a sandboxed iframe."""
+    from fastapi.responses import HTMLResponse
+
+    from agent.lean import artifacts
+
+    record = artifacts.get(artifact_id)
+    if record is None or record["kind"] not in {"html", "svg"}:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    try:
+        html = artifacts.frame_html(record, v)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Version not found") from exc
+    return HTMLResponse(html, headers={
+        "Content-Security-Policy": artifacts.FRAME_CSP,
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Cache-Control": "no-store",
+        "Cross-Origin-Resource-Policy": "same-origin",
+    })
+
+
+@router.post("/artifacts/{artifact_id}/restore")
+def restore_artifact(artifact_id: str, payload: ArtifactRestore) -> dict[str, Any]:
+    from agent.lean import artifacts
+
+    try:
+        record = artifacts.restore(artifact_id, payload.version)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Artifact or version not found") from exc
+    return artifacts.summary(record)
+
+
+@router.delete("/artifacts/{artifact_id}")
+def delete_artifact(artifact_id: str) -> dict[str, Any]:
+    from agent.lean import artifacts
+
+    if not artifacts.delete(artifact_id):
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    return {"deleted": True, "id": artifact_id}

@@ -28,6 +28,27 @@ WORKING_RULES = """\
 - Final reply: clear, friendly and complete. Lead with the answer or what you did, add the detail that makes it useful, skip filler. For research, include the source links you actually read."""
 
 
+SHOWING_ANSWERS = """## Showing answers
+The chat can show rich blocks. Pick the simplest form that fits, and always write a short text answer too; a block never replaces it.
+- Plain text for simple answers ("What's 2+2?" -> "4."). Don't add blocks just because you can.
+- Cards appear by themselves when you use these tools, so don't repeat every number in your text; summarise in a sentence or two:
+  weather_live (weather card), stock_history (price chart), product_search (product cards with prices and links), video_search (video cards), image_search (image gallery), web_search (source chips).
+- Your own blocks: a fenced code block whose language names the block and whose body is JSON. Use only numbers from tool results or well-known facts. Example:
+  ```chart
+  {"kind": "bar", "title": "Battery life (hours)", "labels": ["Phone A", "Phone B"], "series": [{"name": "Hours", "values": [21, 18]}]}
+  ```
+  Other block names and their JSON: steps {"title", "items": [{"title", "detail"}]}; timeline {"items": [{"when", "title", "detail"}]}; comparison {"items": [{"name", "specs": {"Price": "...", ...}}, ...]}; stat {"items": [{"label", "value", "change"}]}; map {"places": [{"name", "lat", "lon"}]} (coordinates only from a tool).
+  When explaining how a process, protocol or system works, add a diagram: a ```mermaid block, e.g.
+  ```mermaid
+  sequenceDiagram
+    Browser->>DNS: Look up example.com
+    DNS->>Browser: IP address
+    Browser->>Server: GET /
+  ```
+  Also: $$...$$ for math, ```py title="app.py" for code, ```diff for changes, markdown tables for tabular data.
+- An artifact (create_artifact) for substantial or interactive output the user will use, keep or iterate on: apps, calculators, games, visual explainers, documents, longer code files. Follow-up changes use update_artifact with the same id. Give a one or two sentence reply alongside it.
+- Never make up links, images, prices or figures. If a tool didn't return the data, say so plainly."""
+
 def _environment(*, project_root: str, notes: list[str], terminal_note: str = "", project_overview: str = "") -> str:
     from agent.tools import _file_tool_roots, _tool_execution_context
 
@@ -103,6 +124,7 @@ def build_system_prompt(
     sections = [
         identity,
         WORKING_RULES,
+        SHOWING_ANSWERS,
         _team(persona, list(teammates or []), room_name),
         _environment(project_root=project_root, notes=list(notes or []), terminal_note=terminal_note, project_overview=project_overview),
         _memory(list(memories or [])),

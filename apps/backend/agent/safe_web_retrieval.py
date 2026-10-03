@@ -431,3 +431,33 @@ def fetch_public_page(
 
 
 __all__ = ["SafePageResult", "SafeWebRetrievalError", "fetch_public_page"]
+
+
+def fetch_public_bytes(
+    url: str,
+    *,
+    headers: Optional[Mapping[str, str]] = None,
+    timeout_seconds: float = 8.0,
+    max_bytes: int = 3_000_000,
+    max_redirects: int = 3,
+) -> tuple[str, dict[str, str], bytes]:
+    """GET a public http(s) URL with the same SSRF protections as fetch_public_page.
+
+    Every hop (redirects included) is re-validated and pinned to a public
+    address. Returns (final_url, headers, body); raises SafeWebRetrievalError
+    for blocked destinations, oversize bodies and non-2xx responses.
+    """
+    from urllib.parse import urljoin
+
+    current = _normalize_url(url)
+    for _ in range(max_redirects + 1):
+        status, response_headers, body = _request_pinned_public_url(
+            current, headers=dict(headers or {}), timeout_seconds=timeout_seconds, max_bytes=max_bytes
+        )
+        if 300 <= status < 400 and response_headers.get("location"):
+            current = _normalize_url(urljoin(current, response_headers["location"]))
+            continue
+        if not 200 <= status < 300:
+            raise SafeWebRetrievalError(f"HTTP {status}", code="http_error")
+        return current, response_headers, body
+    raise SafeWebRetrievalError("Too many redirects", code="too_many_redirects")

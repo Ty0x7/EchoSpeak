@@ -1891,6 +1891,12 @@ async def lifespan(app: FastAPI):
     # The API lifespan is the sole scheduler/coordinator owner in server and
     # desktop processes. Agent instances must not start competing daemons.
     os.environ["ECHOSPEAK_API_RUNTIME"] = "1"
+    try:
+        from agent.lean.soul_defaults import refresh_default_soul
+
+        refresh_default_soul()
+    except Exception:
+        logger.warning("SOUL.md default refresh failed", exc_info=True)
     build_id = (
         os.environ.get("ECHOSPEAK_BUILD_ID")
         or os.environ.get("ECHOSPEAK_DESKTOP_INSTANCE_ID")
@@ -2315,6 +2321,15 @@ async def api_auth_middleware(request: Request, call_next):
     """Optional shared-key auth for network/remote EchoSpeak access."""
     if request.method.upper() == "OPTIONS" or request.url.path in _PUBLIC_AUTH_PATHS:
         return await call_next(request)
+    if request.method.upper() == "GET":
+        # Artifact frames load in an <iframe>, which can't send the auth header;
+        # a short-lived token from an authenticated call opens that one frame.
+        frame = re.fullmatch(r"/lean/artifacts/([a-f0-9]{12})/frame", request.url.path)
+        if frame:
+            from agent.lean.artifacts import frame_token_ok
+
+            if frame_token_ok(frame.group(1), request.query_params.get("t", "")):
+                return await call_next(request)
     client_ip = _get_client_ip(request)
     if not _api_auth_ok(request.headers, client_ip):
         return Response(

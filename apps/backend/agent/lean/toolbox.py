@@ -11,12 +11,13 @@ import contextvars
 import json
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from agent.lean.widgets import collect as collect_widgets
 from config import config
 
 TOOLSETS: dict[str, list[str]] = {
@@ -24,11 +25,12 @@ TOOLSETS: dict[str, list[str]] = {
         "get_system_time", "calculate", "system_info",
         "file_list", "file_read", "file_find", "file_search", "file_edit", "file_write",
         "file_mkdir", "file_copy", "file_move", "file_delete", "checkpoint_undo", "artifact_write",
-        "project_status", "project_update_context",
+        "project_status", "project_update_context", "create_artifact", "update_artifact",
     ],
     "research": [
         "web_search", "safe_web_fetch", "youtube_transcript",
         "weather_live", "sports_live", "browse_task",
+        "stock_history", "product_search", "video_search", "image_search",
     ],
     "terminal": ["terminal", "process_start", "process_output", "process_stop"],
     "vision": ["take_screenshot", "analyze_screen", "vision_qa"],
@@ -109,6 +111,8 @@ class ToolResult:
     ok: bool
     output: str
     duration_ms: int
+    # Cards for the chat built from the tool's own data (see agent/lean/widgets.py).
+    widgets: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -315,13 +319,14 @@ class Toolbox:
                 finally:
                     _tool_execution_context.reset(token)
 
+            widgets: list[dict[str, Any]] = []
             try:
-                output = contextvars.copy_context().run(invoke_native)
+                output, widgets = contextvars.copy_context().run(collect_widgets, invoke_native)
                 ok = not output.lower().startswith(_FAILURE_PREFIXES)
             except Exception as exc:
                 logger.warning("Lean native tool {} failed: {}", name, exc)
                 output, ok = f"Error: {exc}", False
-            return ToolResult(ok, output, int((time.perf_counter() - started) * 1000))
+            return ToolResult(ok, output, int((time.perf_counter() - started) * 1000), widgets if ok else [])
         entry = self.entries.get(name)
         if entry is None:
             close = ", ".join(sorted(self.names)[:40])
@@ -339,8 +344,9 @@ class Toolbox:
             finally:
                 _tool_execution_context.reset(token)
 
+        widgets: list[dict[str, Any]] = []
         try:
-            raw = contextvars.copy_context().run(invoke)
+            raw, widgets = contextvars.copy_context().run(collect_widgets, invoke)
             output = raw if isinstance(raw, str) else json.dumps(raw, default=str, ensure_ascii=False)
             ok = not output.strip().lower().startswith(_FAILURE_PREFIXES)
         except Exception as exc:
@@ -364,7 +370,7 @@ class Toolbox:
                 output = f"{first_line}\n{body}" if not first_line.startswith("<<<") else body
             except Exception:
                 pass
-        return ToolResult(ok, output, int((time.perf_counter() - started) * 1000))
+        return ToolResult(ok, output, int((time.perf_counter() - started) * 1000), widgets if ok else [])
 
 
 def describe_call(name: str, args: dict[str, Any]) -> str:
@@ -372,6 +378,17 @@ def describe_call(name: str, args: dict[str, Any]) -> str:
     pick = lambda *keys: next((str(args[k]) for k in keys if args.get(k)), "")  # noqa: E731
     if name == "web_search":
         return f"Searching “{pick('query', 'q')}”"
+    if name == "stock_history":
+        symbols = args.get("symbols") or args.get("symbol") or ""
+        return f"Stock prices for {', '.join(map(str, symbols)) if isinstance(symbols, list) else symbols}"
+    if name == "product_search":
+        return f"Shopping for “{pick('query')}”"
+    if name == "video_search":
+        return f"Finding videos of “{pick('query')}”"
+    if name == "image_search":
+        return f"Finding pictures of “{pick('query')}”"
+    if name in {"create_artifact", "update_artifact"}:
+        return f"{'Creating' if name == 'create_artifact' else 'Updating'} {pick('title', 'artifact_id') or 'artifact'}"
     if name == "safe_web_fetch":
         return f"Reading {pick('url')}"
     if name in {"file_read", "file_list"}:

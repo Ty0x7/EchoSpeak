@@ -2053,19 +2053,24 @@ class WeatherLiveArgs(BaseModel):
 @tool(
     args_schema=SportsLiveArgs,
     description=(
-        "Live sports scores and betting odds from a structured sports-data API "
-        "(not web crawl). Supports schedule, live_scores, standings, results, "
-        "team_next_event, competition_next_event, and odds. Unsupported provider coverage "
-        "returns a typed no-data/unsupported state so grounded web fallback may run."
+        "Live and recent scores, schedules, results and standings for a team or league (NBA, NFL, MLB, NHL, "
+        "college, Premier League and other soccer, F1, UFC), from ESPN. Shows a score card. Pass the team or "
+        "league in query; betting lines appear when available."
     ),
 )
 def sports_live(query: str, operation: str = "live_scores") -> str:
-    """Structured live sports data (The Odds API). Not a web search crawl."""
+    """Scores, schedules and standings from ESPN (keyless); The Odds API only for odds when a key is set."""
     try:
         from agent.sports_data import get_sports_data_client
 
         client = get_sports_data_client()
-        result = client.query(query or "", operation=operation)
+        if operation == "odds" and client.available:
+            result = client.query(query or "", operation=operation)
+        else:
+            # ESPN's public feeds: no key, any team or league name.
+            from agent.sports_espn import query as espn_query
+
+            result = espn_query(query or "", operation=operation)
         return result.as_tool_text()
     except Exception as exc:
         logger.exception("sports_live provider request failed")
@@ -2115,6 +2120,7 @@ def weather_live(location: str) -> str:
         match = rows[0]
         latitude = float(match["latitude"])
         longitude = float(match["longitude"])
+        us = str(match.get("country_code") or "").upper() in {"US", "PR", "GU", "LR"}
         forecast = _read_json(
             "https://api.open-meteo.com/v1/forecast?"
             + urlencode({
@@ -2124,14 +2130,41 @@ def weather_live(location: str) -> str:
                     "temperature_2m,apparent_temperature,relative_humidity_2m,"
                     "precipitation,weather_code,wind_speed_10m"
                 ),
-                "temperature_unit": "celsius",
-                "wind_speed_unit": "kmh",
+                "hourly": "temperature_2m,weather_code,precipitation_probability",
+                "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max",
+                "forecast_days": 7,
+                "forecast_hours": 24,
+                "temperature_unit": "fahrenheit" if us else "celsius",
+                "wind_speed_unit": "mph" if us else "kmh",
                 "timezone": "auto",
             })
         )
         current = forecast.get("current")
         if not isinstance(current, dict):
             raise ValueError("forecast did not include current conditions")
+
+        def _to_c(value: Any) -> Any:
+            return round((float(value) - 32) * 5 / 9, 1) if us and isinstance(value, (int, float)) else value
+
+        hourly_raw = forecast.get("hourly") or {}
+        hourly = [
+            {"time": t, "temp": temp, "code": code, "precip": pp}
+            for t, temp, code, pp in zip(
+                hourly_raw.get("time") or [], hourly_raw.get("temperature_2m") or [],
+                hourly_raw.get("weather_code") or [], hourly_raw.get("precipitation_probability") or [],
+            )
+        ][:24]
+        daily_raw = forecast.get("daily") or {}
+        daily = [
+            {"date": d, "max": hi, "min": lo, "code": code, "precip": pp}
+            for d, hi, lo, code, pp in zip(
+                daily_raw.get("time") or [], daily_raw.get("temperature_2m_max") or [],
+                daily_raw.get("temperature_2m_min") or [], daily_raw.get("weather_code") or [],
+                daily_raw.get("precipitation_probability_max") or [],
+            )
+        ]
+        unit = "F" if us else "C"
+        place_label = ", ".join(x for x in (match.get("name") or place, match.get("admin1") or "", match.get("country") or "") if x)
         result = {
             "ok": True,
             "source": "open-meteo",
@@ -2144,13 +2177,38 @@ def weather_live(location: str) -> str:
             },
             "observed_at": current.get("time"),
             "timezone": forecast.get("timezone"),
-            "temperature_c": current.get("temperature_2m"),
-            "apparent_temperature_c": current.get("apparent_temperature"),
+            "unit": unit,
+            "temperature": current.get("temperature_2m"),
+            "temperature_c": _to_c(current.get("temperature_2m")),
+            "apparent_temperature_c": _to_c(current.get("apparent_temperature")),
             "relative_humidity_percent": current.get("relative_humidity_2m"),
             "precipitation_mm": current.get("precipitation"),
             "weather_code": current.get("weather_code"),
-            "wind_speed_kmh": current.get("wind_speed_10m"),
+            "wind_speed": current.get("wind_speed_10m"),
+            "wind_unit": "mph" if us else "km/h",
+            "daily_forecast": [
+                f"{row['date']}: {row['min']}-{row['max']}°{unit}, code {row['code']}, rain {row['precip']}%" for row in daily
+            ],
+            "weather_codes": "0 clear, 1-3 partly cloudy, 45/48 fog, 51-57 drizzle, 61-67 rain, 71-77 snow, 80-82 showers, 95-99 thunderstorm",
         }
+        try:
+            from agent.lean.widgets import attach, now_label
+
+            attach({"type": "weather", "data": {
+                "location": place_label,
+                "units": unit,
+                "current": {
+                    "temp": current.get("temperature_2m"), "feels": current.get("apparent_temperature"),
+                    "code": current.get("weather_code"), "humidity": current.get("relative_humidity_2m"),
+                    "wind": current.get("wind_speed_10m"), "wind_unit": "mph" if us else "km/h",
+                },
+                "hourly": hourly,
+                "daily": daily,
+                "as_of": now_label(),
+                "source": "Open-Meteo",
+            }})
+        except Exception:
+            logger.debug("weather widget skipped", exc_info=True)
         return "[WEATHER_LIVE] " + json.dumps(result, ensure_ascii=False, sort_keys=True)
     except Exception as exc:
         return f"[WEATHER_LIVE] ok=false error={type(exc).__name__}: {exc}"
@@ -2280,6 +2338,14 @@ def web_search(
             errors=errors[:5],
             queries_used=queries,
         )
+        try:
+            from agent.lean.widgets import attach
+
+            attach({"type": "citations", "data": {"items": [
+                {"title": h.title, "url": h.url, "snippet": h.snippet} for h in result.hits[:8]
+            ]}})
+        except Exception:
+            logger.debug("citation widget skipped", exc_info=True)
         return format_hits_for_tool(result, multi_query=len(queries) > 1)
     except Exception as e:
         logger.error(f"Web search failed: {e}")
@@ -2695,6 +2761,12 @@ def safe_web_fetch(url: str, objective: str = "", max_text_chars: int = 24000) -
         from agent.safe_web_retrieval import SafeWebRetrievalError, fetch_public_page
 
         result = fetch_public_page(url, max_text_chars=max_text_chars)
+        try:
+            from agent.lean.widgets import attach
+
+            attach({"type": "citations", "data": {"items": [{"title": result.title, "url": result.final_url or result.url}]}})
+        except Exception:
+            logger.debug("citation widget skipped", exc_info=True)
         return result.tool_text()
     except SafeWebRetrievalError as exc:
         return (

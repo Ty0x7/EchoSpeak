@@ -473,7 +473,7 @@ class LeanTurn:
                     result = futures[call.id].result()
                     results[call.id] = (result.ok, result.output)
                     self._note_source(name, args, result.ok)
-                    self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms)
+                    self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets)
         else:
             sequential = prepared
 
@@ -524,7 +524,7 @@ class LeanTurn:
                 continue
             result = self.toolbox.run(name, args)
             results[call.id] = (result.ok, result.output)
-            self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms)
+            self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets)
             self._note_source(name, args, result.ok)
 
         limit = 14000
@@ -618,15 +618,22 @@ class LeanTurn:
             except Exception:
                 logger.debug("Lean tool run persistence failed", exc_info=True)
 
-    def _tool_finished(self, call: Any, name: str, args: dict[str, Any], step: int, ok: bool, output: str, duration_ms: int) -> None:
+    def _tool_finished(self, call: Any, name: str, args: dict[str, Any], step: int, ok: bool, output: str, duration_ms: int,
+                       widgets: Optional[list[dict[str, Any]]] = None) -> None:
         preview = (output or "").strip()
         if len(preview) > 1600:
             preview = preview[:1600] + "…"
+        cards = list(widgets or []) if ok else []
         for item in self.timeline:
             if item.get("kind") == "tool" and item.get("id") == call.id:
                 item.update({"status": "done" if ok else "failed", "output": preview, "duration_ms": duration_ms})
-        self.emit({"type": "tool_end", "step": step, "id": call.id, "name": name, "ok": ok,
-                   "output": preview, "duration_ms": duration_ms})
+                if cards:
+                    item["widgets"] = cards
+        event = {"type": "tool_end", "step": step, "id": call.id, "name": name, "ok": ok,
+                 "output": preview, "duration_ms": duration_ms}
+        if cards:
+            event["widgets"] = cards
+        self.emit(event)
         if self.persist_tool_runs:
             try:
                 from agent.state import get_state_store
