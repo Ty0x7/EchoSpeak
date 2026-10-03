@@ -387,10 +387,10 @@
       "description": "Permission identifier",
       "oneOf": [
         {
-          "description": "Allows the EchoSpeak renderer to inspect or recover its owned local service, use explicit user-invoked folder pickers, control its own window, and check for and install signed updates.",
+          "description": "Allows the EchoSpeak renderer to inspect or recover its owned local service, use explicit user-invoked folder pickers, control its own window, open http(s) links in the default browser, and check for and install signed updates.",
           "type": "string",
           "const": "desktop-runtime",
-          "markdownDescription": "Allows the EchoSpeak renderer to inspect or recover its owned local service, use explicit user-invoked folder pickers, control its own window, and check for and install signed updates."
+          "markdownDescription": "Allows the EchoSpeak renderer to inspect or recover its owned local service, use explicit user-invoked folder pickers, control its own window, open http(s) links in the default browser, and check for and install signed updates."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
