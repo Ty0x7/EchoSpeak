@@ -366,7 +366,12 @@ def _host_shell() -> list[str]:
 
 def _host_command(command: str) -> str:
     if os.name == "nt":
-        return "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'; " + command
+        # Windows PowerShell 5.1 writes UTF-16 for `>` / `>>` and ANSI for Set-Content;
+        # make files written by commands plain UTF-8 so file tools (and people) can read them.
+        utf8_writes = "".join(
+            f"$PSDefaultParameterValues['{cmd}:Encoding']='utf8'; " for cmd in ("Out-File", "Set-Content", "Add-Content")
+        )
+        return "[Console]::OutputEncoding=[Text.Encoding]::UTF8; $ProgressPreference='SilentlyContinue'; " + utf8_writes + command
     return command
 
 

@@ -120,6 +120,23 @@ def test_host_terminal_supports_pipes_and_variables(project, monkeypatch):
     assert "[ok" in out and "42" in out
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows PowerShell redirection")
+def test_host_terminal_redirection_writes_readable_text(project, monkeypatch):
+    from config import config
+
+    monkeypatch.setattr(config, "terminal_execution_mode", "host", raising=False)
+    Terminal(str(project)).run({"command": 'echo "hello team" > team.txt'})
+    assert b"\x00" not in (project / "team.txt").read_bytes()  # not UTF-16
+    assert "hello team" in file_read({"path": "team.txt"})
+
+
+def test_file_read_decodes_utf16_files(project):
+    (project / "notes.txt").write_bytes("hello team\r\n".encode("utf-16"))
+    assert "1| hello team" in file_read({"path": "notes.txt"})
+    (project / "blob.bin").write_bytes(b"\x89PNG\x00\x00\x01")
+    assert "binary" in file_read({"path": "blob.bin"})
+
+
 def test_thinking_toggle_maps_to_reasoning_effort():
     local = Endpoint("http://x/v1", "", "google/gemma-4-e4b", "lmstudio", True)
     assert reasoning_effort_for(local, False, "high") == "none"

@@ -85,6 +85,9 @@ baseline. User-facing notes: `docs/releases/v10.0.0.md`. Architecture:
   host), `terminal_docker_network` ask/on/off (container network attached per command).
   Approval only to leave the sandbox, go online, or delete project files. One-time
   settings migration (`.settings-migrated-v10` marker).
+- Host terminal on Windows: `>` / `>>` / `Set-Content` now write UTF-8. Windows
+  PowerShell wrote UTF-16, which `file_read` refused as binary, so agents without Docker
+  wrote files they then couldn't read back. `file_read` now also decodes UTF-16 files.
 
 ### Voice
 - **Guided setup + wake word** (#7): Settings › Voice downloads faster-whisper

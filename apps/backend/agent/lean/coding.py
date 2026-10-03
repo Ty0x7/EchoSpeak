@@ -46,9 +46,14 @@ def _read_text(path: Path) -> tuple[Optional[str], str]:
         return None, f"Error: file not found: {path}"
     except Exception as exc:
         return None, f"Error: could not read {path}: {exc}"
+    if data[:2] in (b"\xff\xfe", b"\xfe\xff"):  # UTF-16 with a BOM, e.g. from Windows PowerShell `>`
+        try:
+            return data.decode("utf-16"), ""
+        except UnicodeDecodeError:
+            pass
     if b"\x00" in data[:4096]:
         return None, f"Error: {path.name} looks like a binary file."
-    for encoding in ("utf-8", "utf-8-sig", "cp1252"):
+    for encoding in ("utf-8-sig", "cp1252"):
         try:
             return data.decode(encoding), ""
         except UnicodeDecodeError:
