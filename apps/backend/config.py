@@ -325,7 +325,7 @@ def _migrate_v10_defaults(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 # Settings retired in 10.0 with the classic settings screen: nothing reads them
-# any more (see docs/research/harness-review.md, part C). Dropped from saved
+# any more (see docs/research/harness-review-2026-10-02.md, part C). Dropped from saved
 # settings so they don't linger; every setting still in use keeps its value.
 RETIRED_SETTING_KEYS = frozenset({
     "cron_enabled", "cron_state_path", "trace_enabled", "trace_path", "disable_native_tool_calling",

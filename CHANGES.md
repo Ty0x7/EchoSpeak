@@ -1,5 +1,33 @@
 # Changes
 
+## Unreleased — harness and Groups execution
+
+Research, root causes and verdicts: `docs/research/harness-review.md`.
+
+- **Work together** (group rooms, stored as mode `discussion`; `agent/lean/runtime.py` `_run_discussion`,
+  `agent/lean/job.py`): Discuss (3 read-only views) → Decide (`assign_tasks`: owned tasks on a shared board) →
+  Execute → Verify from evidence (every tool call, task state, a check against the request) → Continue with
+  what's missing. Stops on verified done (Echo sums up and asks what's next) or with a stated reason: turn budget
+  (15/30/60, default 30), tokens, repetition, two rounds without progress. Reply mode: 8 rounds, same checks.
+- **Honest state:** `soul_update` (atomic write, read back through the loader the next chat uses, approval,
+  Rule of Two); `memory_save` reads back from disk; replies claiming an action no tool did are challenged, then
+  flagged "Not verified" (`agent/lean/soul.py`, `job.py` `unbacked_claim`).
+- **Terminal** (`agent/lean/terminal.py`): commands still running at their timeout keep going in the background
+  instead of being killed; servers and watchers start in the background; no keyboard input (prompts off,
+  interactive commands refused with the alternative); stderr labeled; failure hints; shell redirect writes are
+  checkpointed; `terminal(background=true)` replaces `process_start` (kept as an alias).
+- **Tools:** smaller default sets (`research` split into `web` + `live`; Glados 37 → 26 tools); names and
+  arguments from other harnesses (`bash`, `read_file`, `edit_file` + `old_string`, …) run the right tool.
+  Persona store v3 migrates toolsets once.
+- **Context:** recall keyed on the task and the user's request (not "[System]" briefs), stopwords ignored;
+  teammates get the chat summary; requests that point back pull in matching past chats; long turns get a goal
+  reminder every 8 steps.
+- **Chat auto-follow** (`apps/web/src/app/chatFollow.ts`): follows new and streaming messages at the bottom;
+  any scroll up stops it at once and keeps the reading position; scrolling back near the bottom resumes.
+- **Fixes:** checkpoint backups no longer collide for same-named files saved in the same millisecond.
+- Tests: `test_lean_work_together.py`, `test_lean_soul.py`, `test_lean_terminal.py`, `test_lean_tools.py`,
+  `test_lean_recall.py`, `chatFollow.test.ts`; eval cases 31–35 in `scripts/eval_gemma.py`.
+
 ## v10.0.3 — 2026-10-03
 
 User-facing notes: `docs/releases/v10.0.3.md`.
@@ -141,7 +169,7 @@ baseline. User-facing notes: `docs/releases/v10.0.0.md`. Architecture:
   prompt says to treat it as data.
 - **Local API**: Host/Origin guard (403) against DNS rebinding and cross-site writes.
   Webhooks are refused while `webhook_enabled` is off and always need a signature.
-- Research and verdicts: `docs/research/harness-review.md`.
+- Research and verdicts: `docs/research/harness-review-2026-10-02.md`.
 
 ### Settings
 - **Settings › Advanced** replaces the classic settings window. It has four pages:
@@ -155,7 +183,7 @@ baseline. User-facing notes: `docs/releases/v10.0.0.md`. Architecture:
 - Routes that only the classic UI used were removed: `/routines*` (use `/lean/routines`),
   `/traces`, `/observability`, `/research/artifacts*`, `/studio/overview`,
   `/skills/executions*`, `/trigger/cron`, `/trigger/webhook`.
-- Full table: `docs/research/harness-review.md` §5.
+- Full table: `docs/research/harness-review-2026-10-02.md` §5.
 
 ### Data
 - **SQLite state store** (#2): `phase3/state.db` (records, events, FTS5 `message_search`).

@@ -98,7 +98,8 @@ so the agent knows where things are before its first tool call.
 
 ## Terminal (`agent/lean/terminal.py`)
 
-`terminal`, `process_start`, `process_output`, `process_stop`.
+`terminal`, `process_output`, `process_stop` (`process_start` still works as an alias for
+`terminal` with `background: true`).
 
 - **host**: PowerShell on this PC (pwsh 7 if installed). Pipes, `$variables`, and `;` chaining work.
 - **docker**: one persistent container `echospeak-sandbox` built from
@@ -108,7 +109,16 @@ so the agent knows where things are before its first tool call.
   default (`terminal_docker_network`). Docker Desktop is started automatically
   if it is installed but not running.
 - A short never-run list blocks disk/boot/OS destruction. Everything else risky
-  goes through approvals. Timeouts up to 900s; dev servers use `process_start`.
+  goes through approvals.
+- A command waits up to `timeout` seconds (default 120, max 900). Still running then,
+  it is not killed: it keeps going as a background process and the agent gets its
+  `process_id` and the output so far. Servers and watchers (`npm run dev`, `vite`,
+  `uvicorn`, `--watch`, ...) go to the background after a 6s look. At most 8 run at once.
+- No keyboard input: stdin is closed and git/pip prompts, pagers and editors are off.
+  Interactive commands (vim, less, a bare REPL, `npm init`, `git add -p`) are refused
+  with the non-interactive form to use.
+- Results: exit code, stdout, a separate `[stderr]` section, and a one-line hint for
+  common failures. Files overwritten by shell redirection are checkpointed first.
 
 Settings > Terminal shows live status and has Set up / Reset buttons
 (`GET /lean/terminal`, `POST /lean/terminal/setup`, `POST /lean/terminal/reset`).

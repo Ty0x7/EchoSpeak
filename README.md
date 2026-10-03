@@ -66,7 +66,7 @@ On Arch/CachyOS with PEP 668, use `./.venv/bin/python -m pip install -r requirem
 - **Local-first.** Conversations, memory and data stay on your machine. No telemetry, no cloud dependency.
 - **Any model.** LM Studio, Ollama, llama.cpp, vLLM, LocalAI, OpenAI, Gemini; each agent can use its own.
 - **Agents that finish the job.** One agent loop keeps calling tools until the task is done, says honestly when it runs out of steps, and offers Continue.
-- **Agents and group chats.** Echo, Jarvis and Glados (or your own agents) hand work to each other, answer side by side, or hold a short discussion that ends in one conclusion.
+- **Agents and group chats.** Echo, Jarvis and Glados (or your own agents) hand work to each other, answer side by side, or work together: plan, split the work, do it, and keep going until it is checked done.
 - **Coding and terminal.** Project folders, exact-text edits, file search, background processes, and a Docker sandbox by default.
 - **Voice.** Local Whisper speech-to-text set up from Settings in one click, read-aloud, voice mode, and a "Hey Echo" wake word.
 - **Memory and search.** Long-term memory, rolling chat summaries, and full-text search across every past chat.

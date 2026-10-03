@@ -199,14 +199,14 @@ sequenceDiagram
   - `@all`, `@everyone` or `@team` picks every member.
   - Otherwise a short model call sees the roster, the last four messages and the last speaker. If that call fails, the last speaker answers.
 - **Fan-out** (`_should_fan_out`, `_run_fan_out`) needs two or more agents named explicitly, and all of them on the same `(base_url, model)`. That way a local server never has to load two models at once. Messages open in the order named and are saved in that order, whichever finishes first. Settings: `lean_group_fan_out` and `lean_group_merge`, both on.
-- **Discussion mode** (`_run_discussion`): rooms with `mode: "discussion"` take turns in member order until `max_messages` (2–12; the UI offers 4/6/8). Each speaker sees everything said so far and may end with `DONE` once at least two have spoken. The lead then writes the conclusion (`role: merge`).
+- **Work together** (`_run_discussion`; rooms with `mode: "discussion"`): Discuss (up to 3 short views, look-up tools only) → Decide (the lead calls `assign_tasks`: owned, checkable tasks on a shared task board, or answers a plain question) → Execute (each owner does its task and calls `complete_task`; every tool call is recorded as evidence) → Verify (the completion check reads the request, the board and the tool log) → Continue (what's missing becomes a new task). `max_messages` is the turn budget (15/30/60, default 30; older caps of 12 or less get 30). A verified finish ends with Echo's wrap-up. See `docs/research/harness-review.md`.
 - **Finishing the job** (`lean/job.py`, `LeanSession._close_job`). A text answer ends an agent's *turn*. Only `complete_task(summary)` ends the *job*.
-  - Each request in a room gets a `Job`: the goal, sub-tasks opened by `delegate_to_agent` (with owner and status), and a round and token count.
+  - Each request in a room gets a `Job`: the goal, sub-tasks opened by `delegate_to_agent` or `assign_tasks` (with owner and status), the evidence (every tool call: what ran and whether it worked), and a round and token count.
   - After the responders, `_judge` checks the job:
-    - Any sub-task still open means it isn't done.
-    - Otherwise a reviewer call (thinking off) compares the transcript with the goal.
+    - Any sub-task still open means it isn't done; one marked done with no successful tool call, when it needed work, is reopened.
+    - Otherwise a reviewer call (thinking off) compares the request with the task board and the tool log. If its answer can't be read, the evidence decides.
   - If the job isn't done, the agent the reviewer names continues with a `[System]` brief (`job_continue` event).
-  - It stops at `group_max_rounds` (4), at `group_token_budget` (200k), or after two near-duplicate replies.
+  - It stops at `group_max_rounds` (8), at `group_token_budget` (200k), after two near-duplicate replies, or after two rounds without progress (no new successful tool call or finished task; for questions, no new answer).
   - The `run_outcome` event ("✓ Done: …" or "Stopped: …") is stored in the execution metadata.
   - In every turn, a promise guard in `LeanTurn` re-prompts replies like "I'll do it" that come with no tool call.
 - **Rooms** (`lean/rooms.py`) are ordinary Sessions with an agent list, `mode` and `max_messages` (`lean/rooms.json`), so history, reload and memory work the same as in a one-to-one chat.
