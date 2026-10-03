@@ -80,10 +80,15 @@ export function SiteHeader() {
       <nav aria-label="Main">
         <button type="button" onClick={() => scrollTo("ways")}>What Echo does</button>
         <button type="button" onClick={() => scrollTo("team")}>The team</button>
+        <button type="button" onClick={() => scrollTo("about")}>About</button>
         <Link to="/docs">Docs</Link>
-        <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
       </nav>
-      <DownloadButton variant="header" />
+      <div className="header-right">
+        <a className="header-github" href={GITHUB_URL} target="_blank" rel="noreferrer" aria-label="EchoSpeak on GitHub" title="GitHub">
+          <Icon name="github" size={18} />
+        </a>
+        <DownloadButton variant="header" />
+      </div>
     </header>
   );
 }

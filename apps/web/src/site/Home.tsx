@@ -6,7 +6,7 @@ import { ScoreCard } from "../widgets/Cards";
 import { Timeline } from "../widgets/Blocks";
 import { WeatherCard } from "../widgets/Weather";
 import "../widgets/widgets.css";
-import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, useScrollTo, type IconName } from "./Chrome";
+import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
 import { GITHUB_URL, useLatestRelease } from "./release";
 import "./site.css";
 
@@ -44,40 +44,42 @@ function Reveal({ children, className = "", as: Tag = "div", id }: { children: R
 
 // ── Hero ─────────────────────────────────────────────────────────────
 
-const HERO_LINES = ["Hi, I'm Echo.", "I live on your PC.", "Want the weather?", "I can build that.", "Jarvis can look it up.", "Glados can code it."];
+const ORBIT_ICONS: IconName[] = ["chat", "research", "code", "chart", "team", "voice", "memory", "shield"];
 
-function HeroBubble() {
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
-    const t = window.setInterval(() => setI((v) => (v + 1) % HERO_LINES.length), 2800);
-    return () => window.clearInterval(t);
-  }, []);
-  return <p className="hero-bubble" aria-live="off"><span key={i}>{HERO_LINES[i]}</span></p>;
+function HeroArt() {
+  return (
+    <div className="hero-art" aria-hidden="true">
+      <div className="hero-glow" />
+      <div className="orbit o1"><span className="orbit-dot" /></div>
+      <div className="orbit o2"><span className="orbit-dot" /></div>
+      <div className="orbit o3" />
+      <div className="orbit-icons">
+        {ORBIT_ICONS.map((icon, i) => (
+          <span key={icon} className="orbit-icon" style={{ ["--a" as string]: `${(360 / ORBIT_ICONS.length) * i}deg` }}>
+            <span><Icon name={icon} size={18} /></span>
+          </span>
+        ))}
+      </div>
+      <div className="hero-face"><EchoFace size="clamp(150px, 22vw, 250px)" /></div>
+    </div>
+  );
 }
 
 function Hero() {
-  const scrollTo = useScrollTo();
   return (
-    <section className="hero shell">
-      <div className="hero-copy">
-        <p className="pill-row"><span className="pill">Free</span><span className="pill">Windows</span><span className="pill">Runs on your PC</span></p>
-        <h1>Meet <span className="hl">Echo</span>.<br />The AI that lives<br />on your computer.</h1>
-        <p className="hero-lede">Ask anything, get real answers you can see, and let Echo and his team actually do the work.</p>
-        <div className="hero-actions">
-          <DownloadButton />
-          <button type="button" className="btn btn-ghost" onClick={() => scrollTo("ways")}>See what Echo can do <Icon name="arrow" size={16} /></button>
+    <section className="hero">
+      <div className="hero-dots" aria-hidden="true" />
+      <div className="hero-inner shell">
+        <div className="hero-copy">
+          <p className="pill-row"><span className="pill">Free</span><span className="pill">Open source</span><span className="pill">Runs on your PC</span></p>
+          <h1>Meet <span className="hl">Echo</span>.<br />The AI that lives<br />on your computer.</h1>
+          <p className="hero-lede">Ask anything, get real answers you can see, and let Echo and his team actually do the work.</p>
+          <div className="hero-actions">
+            <DownloadButton />
+            <a className="btn btn-ghost" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={18} /> View on GitHub</a>
+          </div>
         </div>
-      </div>
-      <div className="hero-art">
-        <HeroBubble />
-        <EchoFace size="clamp(170px, 30vw, 300px)" />
-        <div className="hero-floaters" aria-hidden="true">
-          <span className="floater f1"><Icon name="chart" size={14} /> Stocks</span>
-          <span className="floater f2"><Icon name="code" size={14} /> Code</span>
-          <span className="floater f3"><Icon name="research" size={14} /> Research</span>
-          <span className="floater f4"><Icon name="voice" size={14} /> “Hey Echo”</span>
-        </div>
+        <HeroArt />
       </div>
     </section>
   );
@@ -85,14 +87,14 @@ function Hero() {
 
 // ── One Echo, many ways ─────────────────────────────────────────────
 
-type Mode = { id: string; icon: IconName; label: string; says: string };
+type Mode = { id: string; icon: IconName; label: string; says: string; caption: string };
 const MODES: Mode[] = [
-  { id: "chat", icon: "chat", label: "Talk it through", says: "Ask me anything." },
-  { id: "see", icon: "chart", label: "Answers you can see", says: "Here's the week." },
-  { id: "research", icon: "research", label: "Look things up", says: "I read the sources." },
-  { id: "build", icon: "code", label: "Build things", says: "Made you an app." },
-  { id: "team", icon: "team", label: "Bring the team", says: "Glados is on it." },
-  { id: "voice", icon: "voice", label: "Just say “Hey Echo”", says: "I'm listening." },
+  { id: "chat", icon: "chat", label: "Talk it through", says: "Ask me anything.", caption: "Plans, advice, explanations: talk to Echo like a person." },
+  { id: "see", icon: "chart", label: "Answers you can see", says: "Here's the week.", caption: "Weather, stocks, scores and more show up as cards, not walls of text." },
+  { id: "research", icon: "research", label: "Look things up", says: "I read the sources.", caption: "Echo searches the web, reads the pages and shows where answers came from." },
+  { id: "build", icon: "code", label: "Build things", says: "Made you an app.", caption: "Ask for a calculator, a game or a document and use it right next to the chat." },
+  { id: "team", icon: "team", label: "Bring the team", says: "Glados is on it.", caption: "Echo hands work to Jarvis and Glados and tells you when it's really done." },
+  { id: "voice", icon: "voice", label: "Just say “Hey Echo”", says: "I'm listening.", caption: "Turn on Wake and just talk. Speech stays on your PC." },
 ];
 
 const DEMO_WEATHER = {
@@ -206,18 +208,11 @@ function WaysShowcase() {
             </button>
           ))}
         </div>
-        <div className="ways-echo" aria-hidden="true">
-          <div className="ways-echo-face">
-            <EchoFace size={120} />
-            <span className="ways-badge" key={mode.id}><Icon name={mode.icon} size={18} /></span>
-          </div>
-          <p className="ways-says" key={`s-${mode.id}`}>{mode.says}</p>
-        </div>
         <div className="ways-screen" role="tabpanel" aria-label={mode.label}>
-          <div className="screen-bar"><i /><i /><i /><span>EchoSpeak</span></div>
           <div className="screen-body" key={mode.id}>
             <Screen mode={mode.id} />
           </div>
+          <p className="ways-caption" key={`c-${mode.id}`}><Face size={20} /><span><b>{mode.says}</b> {mode.caption}</span></p>
         </div>
       </div>
     </section>
@@ -255,18 +250,26 @@ const DEMO_STEPS = {
 };
 
 function AnswerCards() {
+  const tiles: { key: string; ask: string; className: string; body: React.ReactNode }[] = [
+    { key: "weather", ask: "“What's the weather in Denver this week?”", className: "bento-weather", body: <WeatherCard data={DEMO_WEATHER} /> },
+    { key: "chart", ask: "“Compare these two stocks this year.”", className: "bento-chart", body: <ChartView data={DEMO_CHART} /> },
+    { key: "scores", ask: "“How are the Oilers doing?”", className: "bento-scores", body: <ScoreCard data={DEMO_SCORES} /> },
+    { key: "steps", ask: "“How do I set up a local model?”", className: "bento-steps", body: <Timeline data={DEMO_STEPS} /> },
+  ];
   return (
-    <section className="answers" aria-labelledby="answers-title">
-      <Reveal className="section-head shell">
+    <section className="answers shell" aria-labelledby="answers-title">
+      <Reveal className="section-head">
         <span className="kicker">Answers you can see</span>
         <h2 id="answers-title">Less reading.<br /><span className="dim">More seeing.</span></h2>
-        <p className="section-lede">Weather, charts, scores, products, videos and step-by-steps show up as cards, built from real data.</p>
+        <p className="section-lede">Weather, charts, scores, products, videos and how-tos show up as cards, built from real data.</p>
       </Reveal>
-      <div className="answers-rail" aria-label="Example answer cards">
-        <div className="rail-card"><WeatherCard data={DEMO_WEATHER} /></div>
-        <div className="rail-card"><ChartView data={DEMO_CHART} /></div>
-        <div className="rail-card"><ScoreCard data={DEMO_SCORES} /></div>
-        <div className="rail-card"><Timeline data={DEMO_STEPS} /></div>
+      <div className="bento">
+        {tiles.map((t) => (
+          <Reveal key={t.key} className={`bento-tile ${t.className}`}>
+            <p className="bento-ask"><span className="bento-you">You</span>{t.ask}</p>
+            <div className="bento-card">{t.body}</div>
+          </Reveal>
+        ))}
       </div>
     </section>
   );
@@ -416,6 +419,50 @@ function Panels() {
   );
 }
 
+// ── About ────────────────────────────────────────────────────────────
+
+const PILLARS: { icon: IconName; title: string; copy: string }[] = [
+  { icon: "github", title: "Open source", copy: "Every line is public on GitHub. Read it, change it, make it yours." },
+  { icon: "house", title: "Your data goes to you", copy: "Chats, memory and files live on your PC, not on a company's servers." },
+  { icon: "spark", title: "A decentralized agent", copy: "No account, no middleman. Echo runs where you are, on the model you choose." },
+  { icon: "check", title: "Gets things done", copy: "Echo doesn't just answer. He searches, writes, builds and finishes the job." },
+  { icon: "team", title: "Talks to other agents", copy: "He works with Jarvis, Glados and agents you make, and can connect to agents elsewhere (A2A)." },
+  { icon: "memory", title: "Becomes yours", copy: "He remembers what matters to you and grows into your own personal agent." },
+];
+
+function About() {
+  return (
+    <section className="about shell" id="about" aria-labelledby="about-title">
+      <Reveal className="section-head">
+        <span className="kicker">About Echo</span>
+        <h2 id="about-title">Your own agent.<br /><span className="dim">Not someone else's.</span></h2>
+        <p className="section-lede">Echo is an open-source, local-first agent: a personal AI that lives with you, works for you, and teams up with other agents to get real tasks done.</p>
+      </Reveal>
+      <div className="pillars">
+        {PILLARS.map((pillar, i) => (
+          <Reveal key={pillar.title} className="pillar">
+            <span className="pillar-icon" style={{ animationDelay: `${i * -0.8}s` }}><Icon name={pillar.icon} size={20} /></span>
+            <h3>{pillar.title}</h3>
+            <p>{pillar.copy}</p>
+          </Reveal>
+        ))}
+      </div>
+      <Reveal className="about-card">
+        <div className="about-avatar" aria-hidden="true">T</div>
+        <div className="about-copy">
+          <span className="kicker">The maker</span>
+          <h3>Built by one person who wanted a better assistant.</h3>
+          <p>Hi, I'm Ty. I build EchoSpeak on my own because I wanted an AI that lives on my own PC, remembers what matters, and actually gets things done instead of just talking about it. It's free, open source, and it gets better every week.</p>
+          <div className="about-links">
+            <a className="text-link" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={16} /> Follow along on GitHub</a>
+            <a className="text-link" href={`${GITHUB_URL}/issues`} target="_blank" rel="noreferrer">Suggest an idea <Icon name="arrow" size={15} /></a>
+          </div>
+        </div>
+      </Reveal>
+    </section>
+  );
+}
+
 // ── Download ─────────────────────────────────────────────────────────
 
 function BringHome() {
@@ -451,6 +498,7 @@ export function Home() {
         <AnswerCards />
         <Team />
         <Panels />
+        <About />
         <BringHome />
       </main>
       <SiteFooter />
