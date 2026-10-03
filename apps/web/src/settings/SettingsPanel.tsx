@@ -1158,7 +1158,7 @@ function AboutSection({ apiBase, openAdvanced, reload }: { apiBase: string; open
     <>
       <Group>
         <Row label="EchoSpeak" help="Local-first agents. Your data stays on this PC.">
-          <span className="st-muted is-mono">{String(import.meta.env.VITE_APP_VERSION || "10.0.1")}</span>
+          <span className="st-muted is-mono">{String(import.meta.env.VITE_APP_VERSION || "10.0.2")}</span>
         </Row>
         {isDesktopRuntime() ? <UpdateRow /> : null}
         <Row label="Agent runtime" help={status ? `Lean loop · up to ${status.max_iterations} steps · ${Math.round((status.context_tokens || 0) / 1000)}k context` : "…"}>
