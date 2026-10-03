@@ -18,11 +18,13 @@ export const LEAN_EVENT_TYPES = new Set([
   "token_usage",
   "memory_saved",
   "context_compacted",
+  "run_outcome",
+  "job_continue",
 ]);
 
 export function isLeanEvent(evt: LeanEvent): boolean {
   if (evt.type === "final") return evt.runtime === "lean";
-  if (evt.type === "run_start" || evt.type === "routing" || evt.type === "delegation") return true;
+  if (["run_start", "routing", "delegation", "run_outcome", "job_continue"].includes(evt.type)) return true;
   return Boolean(evt.message_id) && LEAN_EVENT_TYPES.has(evt.type);
 }
 
@@ -70,6 +72,23 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
       return { ...state, executionId: String(evt.execution_id || "") };
     case "routing":
       return { ...state, routing: true };
+    case "run_outcome": {
+      // The job's ending belongs under the last message of the run.
+      const last = state.order[state.order.length - 1];
+      if (!last) return state;
+      const outcome = {
+        status: evt.status === "stopped" ? ("stopped" as const) : ("done" as const),
+        summary: evt.summary ? String(evt.summary) : undefined,
+        reason: evt.reason ? String(evt.reason) : undefined,
+      };
+      return patchMessage(state, last, (m) => ({ ...m, outcome }));
+    }
+    case "job_continue": {
+      const last = state.order[state.order.length - 1];
+      if (!last) return state;
+      const note = `Not done yet: ${String(evt.reason || "work remains")}. ${String(evt.agent || "An agent")} continues.`;
+      return patchMessage(state, last, (m) => ({ ...m, segments: [...m.segments, { kind: "note", step: 0, text: note, at }] }));
+    }
     case "agent_start": {
       const agent = evt.agent || { id: evt.agent_id, name: evt.agent_id };
       const msg: LeanMessageData = {

@@ -13,6 +13,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from agent.lean import settings, summaries
+from agent.lean.job import COMPLETE_TASK_DESCRIPTION, Job, parse_review
 from agent.lean.loop import LeanTurn, TurnResult
 from agent.lean.personas import AgentPersona, get_persona_store
 from agent.lean.prompt import build_system_prompt
@@ -118,6 +119,8 @@ class LeanSession:
         self._soul_text: Optional[str] = None
         self._user_message = ""
         self._handoffs = 0
+        # Completion tracking for group chats and handed-off work (agent/lean/job.py).
+        self.job: Optional[Job] = None
         # Parallel agents share these.
         self._emit_lock = threading.Lock()
         self._state_lock = threading.Lock()
@@ -146,6 +149,15 @@ class LeanSession:
             return []
         members = [self.personas.get(agent_id) for agent_id in self.room.agent_ids]
         return [m for m in members if m is not None]
+
+    def _is_group(self) -> bool:
+        return bool(self.room and self.room.kind == "group" and len(self._members()) >= 2)
+
+    def _add_result(self, result: TurnResult) -> None:
+        """Every agent message of this request goes through here, in order."""
+        self.results.append(result)
+        if self.job is not None:
+            self.job.record_text(self._name_of(result.agent_id), result.text, int((result.usage or {}).get("total") or 0))
 
     def _run_locked(self, message: str, *, persona_id: str) -> dict[str, Any]:
         from agent.state import get_state_store
@@ -178,6 +190,7 @@ class LeanSession:
         self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else ""})
 
         self._user_message = message
+        self.job = Job(goal=message, max_rounds=settings.group_max_rounds(), token_budget=settings.group_token_budget())
         history = self._history(exclude_execution=execution.id)
         responders = self._route(message, default_persona)
         success = True
@@ -197,7 +210,7 @@ class LeanSession:
                 before = len(self.results)
                 result = self._run_agent(persona, prompt_text, history=turn_history, depth=0)
                 if not result.empty:
-                    self.results.append(result)
+                    self._add_result(result)
                 success = success and result.success
                 error = error or result.error
                 if index + 1 < len(responders):
@@ -215,6 +228,9 @@ class LeanSession:
                         "If you agree with what was said, say so in one line. If something is wrong or missing, "
                         "correct it or add it. Don't repeat what's already been said."
                     )
+            if not self._is_discussion() and success:
+                # A text reply ended each agent's turn; it does not by itself finish the job.
+                self._close_job(default_persona, history, self._format_user(message))
         except Exception as exc:
             logger.exception("Lean session failed")
             success = False
@@ -222,6 +238,13 @@ class LeanSession:
 
         final_text = next((r.text for r in reversed(self.results) if r.text), "")
         cancelled = self.cancel.is_set()
+        outcome = self.job.outcome if self.job is not None else None
+        if cancelled and self._job_needs_closing():
+            outcome = self.job.stop("you stopped it")
+        elif not success and self._job_needs_closing() and not outcome:
+            outcome = self.job.stop(f"an agent hit an error ({error[:160]})")
+        if outcome:
+            self.emit({"type": "run_outcome", **outcome})
         store.update_execution(
             execution.id,
             status="canceled" if cancelled else ("completed" if success else "failed"),
@@ -229,6 +252,7 @@ class LeanSession:
             phase="cancelled" if cancelled else "complete",
             response_preview=final_text[:500],
             error=error[:1000],
+            metadata={**dict(execution.metadata or {}), **({"outcome": outcome} if outcome else {})},
         )
         store.update_thread_state(
             self.session_id,
@@ -250,7 +274,110 @@ class LeanSession:
                 for r in self.results
             ],
             "error": error,
+            "outcome": outcome,
         }
+
+    # ── completion: when is the job done? ───────────────────────────────
+    def _job_needs_closing(self) -> bool:
+        """Group chats and any request where work was handed to a teammate."""
+        return bool(self.job is not None and (self._is_group() or self.job.subtasks))
+
+    def _close_job(self, default_persona: AgentPersona, history: list[dict[str, Any]], prompt_text: str) -> None:
+        """Keep going until the request is done, or stop with a visible reason.
+
+        After each round: open hand-offs mean not done; otherwise (in a group)
+        a short check compares what was delivered with the request. If it
+        isn't done, the right agent is told what is missing and continues.
+        """
+        job = self.job
+        if job is None or not self._job_needs_closing():
+            return
+        job.rounds = max(job.rounds, 1)
+        while True:
+            if self.cancel.is_set():
+                job.stop("you stopped it")
+                return
+            verdict = self._judge(default_persona)
+            if verdict.get("done"):
+                job.finish(str(verdict.get("summary") or ""))
+                return
+            missing = str(verdict.get("reason") or "the request isn't finished").strip().rstrip(".")
+            limit = job.backstop()
+            if limit:
+                job.stop(f"{limit}. Still missing: {missing}")
+                return
+            persona = self._continuation_agent(str(verdict.get("next") or ""), default_persona)
+            instruction = str(verdict.get("instruction") or "").strip().rstrip(".")
+            brief = (
+                f"[System]: {persona.name}, the user's request isn't finished yet: {missing}."
+                + (f" Next: {instruction}." if instruction else "")
+                + " Do the work now with your tools (or hand it to the right teammate), then call complete_task "
+                "with a short summary of what you delivered. Don't just say you will."
+            )
+            job.rounds += 1
+            self.emit({"type": "job_continue", "round": job.rounds, "agent": persona.name, "reason": missing[:300]})
+            continue_history = history + [
+                {"role": "user", "content": prompt_text},
+                {"role": "assistant", "content": job.transcript()},
+            ]
+            result = self._run_agent(persona, brief, history=continue_history, depth=0, meta={"continuation": job.rounds})
+            if not result.empty:
+                self._add_result(result)
+            for item in job.open_subtasks():
+                if item.owner == persona.name and result.completed:
+                    job.close_subtask(item, done=True, summary=result.completed)
+            if not result.success:
+                job.stop(f"{persona.name} hit an error ({result.error[:160]})")
+                return
+
+    def _judge(self, default_persona: AgentPersona) -> dict[str, Any]:
+        job = self.job
+        assert job is not None
+        open_items = job.open_subtasks()
+        if open_items:
+            item = open_items[0]
+            return {
+                "done": False,
+                "reason": f"{item.owner} hasn't finished the task {item.assigned_by} gave them ({item.task[:160]})",
+                "next": item.owner,
+                "instruction": f"finish it: {item.task[:300]}",
+            }
+        delivered = [s.summary for s in job.subtasks if s.summary]
+        last_text = next((text for _, text in reversed(job.texts) if text), "")
+        fallback = (job.claim or {}).get("summary") or "; ".join(delivered) or _first_sentence(last_text)
+        if not self._is_group():
+            # One-to-one chat with hand-offs: every handed-off task is done.
+            return {"done": True, "summary": fallback}
+        members = [m.name for m in self._members()]
+        try:
+            turn = self._review_client(default_persona).stream_turn(
+                [{"role": "user", "content": job.review_prompt(members)}],
+                cancel=self.cancel, temperature=0.1, max_tokens=600,
+            )
+            data = parse_review(turn.content or "")
+        except Exception as exc:
+            logger.warning("Completion check failed: {}", exc)
+            data = {}
+        if not data or "done" not in data:
+            # No clear verdict: don't loop on a broken check.
+            return {"done": True, "summary": fallback}
+        if data.get("done") in (True, "true", "yes"):
+            return {"done": True, "summary": str(data.get("summary") or fallback)}
+        return {"done": False, "reason": str(data.get("reason") or ""), "next": str(data.get("next") or ""),
+                "instruction": str(data.get("instruction") or "")}
+
+    def _continuation_agent(self, name: str, default_persona: AgentPersona) -> AgentPersona:
+        pool = self._members() or self.personas.list()
+        wanted = name.strip().lstrip("@").casefold()
+        for persona in pool:
+            if wanted and wanted in {persona.name.casefold(), persona.id.casefold()}:
+                return persona
+        claimer = (self.job.claim or {}).get("by", "") if self.job else ""
+        for persona in pool:
+            if persona.name == claimer:
+                return persona
+        last = next((self.personas.get(r.agent_id) for r in reversed(self.results) if r.text), None)
+        return last or default_persona
 
     def _route(self, message: str, default_persona: AgentPersona) -> list[AgentPersona]:
         members = self._members()
@@ -329,8 +456,9 @@ class LeanSession:
         history: list[dict[str, Any]],
         depth: int,
         delegated_by: Optional[AgentPersona] = None,
+        meta: Optional[dict[str, Any]] = None,
     ) -> TurnResult:
-        turn = self._build_turn(persona, message, history=history, depth=depth, delegated_by=delegated_by)
+        turn = self._build_turn(persona, message, history=history, depth=depth, delegated_by=delegated_by, meta=meta)
         result = turn.run(message)
         if not result.empty:
             self._persist(persona, result, depth, meta=turn.meta)
@@ -352,6 +480,7 @@ class LeanSession:
         cap = max(2, int(self.room.max_messages or 6))
         spoken: list[tuple[AgentPersona, TurnResult]] = []
         success, error = True, ""
+        stopped = ""
         for index in range(cap):
             if self.cancel.is_set():
                 break
@@ -373,12 +502,12 @@ class LeanSession:
                 turn_history = history + [{"role": "user", "content": prompt_text}, {"role": "assistant", "content": transcript}]
             turn = self._build_turn(
                 persona, brief, history=turn_history, depth=0, allow_handoff=False,
-                meta={"discussion": index + 1}, end_marker="DONE",
+                meta={"discussion": index + 1}, end_marker="DONE", allow_complete=False,
             )
             result = turn.run(brief)
             if not result.empty:
                 self._persist(persona, result, 0, meta=turn.meta)
-                self.results.append(result)
+                self._add_result(result)
             success = success and result.success
             error = error or result.error
             if not result.success:
@@ -386,6 +515,9 @@ class LeanSession:
             spoken.append((persona, result))
             # Stop on DONE, but always let at least two agents speak.
             if turn.marker_found and len(spoken) >= 2:
+                break
+            if self.job is not None and self.job.repeats >= 2:
+                stopped = "the agents started repeating themselves"
                 break
         if len(spoken) >= 2 and settings.group_merge() and not self.cancel.is_set():
             lead = members[0]
@@ -395,13 +527,23 @@ class LeanSession:
                 f"[System]: {lead.name}, the discussion is over. Write a short conclusion for the user: the answer the "
                 "group reached and any disagreement still open. Under 120 words."
             )
-            turn = self._build_turn(lead, brief, history=conclude_history, depth=0, allow_handoff=False, meta={"role": "merge"})
+            turn = self._build_turn(
+                lead, brief, history=conclude_history, depth=0, allow_handoff=False, meta={"role": "merge"}, allow_complete=False,
+            )
             result = turn.run(brief)
             if not result.empty:
                 self._persist(lead, result, 0, meta=turn.meta)
-                self.results.append(result)
+                self._add_result(result)
             success = success and result.success
             error = error or result.error
+        if self.job is not None and not self.cancel.is_set():
+            conclusion = next((r.text for r in reversed(self.results) if r.text), "")
+            if stopped:
+                self.job.stop(stopped)
+            elif len(spoken) < 2 or not success:
+                self.job.stop("the discussion couldn't continue" + (f" ({error[:160]})" if error else ""))
+            else:
+                self.job.finish(_first_sentence(conclusion, 240))
         return success, error
 
     # ── parallel fan-out ────────────────────────────────────────────────
@@ -429,7 +571,10 @@ class LeanSession:
             for persona in responders
         }
         turns = [
-            (persona, self._build_turn(persona, briefs[persona.id], history=history, depth=0, allow_handoff=False, meta={"parallel": True}))
+            (persona, self._build_turn(
+                persona, briefs[persona.id], history=history, depth=0, allow_handoff=False,
+                meta={"parallel": True}, allow_complete=False,
+            ))
             for persona in responders
         ]
         # Open every message up front, in the order the user named them.
@@ -444,7 +589,7 @@ class LeanSession:
         for (persona, turn), result in zip(turns, results):
             if not result.empty:
                 self._persist(persona, result, 0, meta=turn.meta)
-                self.results.append(result)
+                self._add_result(result)
             success = success and result.success
             error = error or result.error
             if result.success and result.text:
@@ -469,11 +614,13 @@ class LeanSession:
             "Write a short merged reply: where they agree, where they differ and which is more likely right "
             "(check with a tool only if it's quick), and the answer you recommend. Don't restate everything."
         )
-        turn = self._build_turn(lead, brief, history=merge_history, depth=0, allow_handoff=False, meta={"role": "merge"})
+        turn = self._build_turn(
+            lead, brief, history=merge_history, depth=0, allow_handoff=False, meta={"role": "merge"}, allow_complete=False,
+        )
         result = turn.run(brief)
         if not result.empty:
             self._persist(lead, result, 0, meta=turn.meta)
-            self.results.append(result)
+            self._add_result(result)
         return result
 
     def _build_turn(
@@ -487,6 +634,7 @@ class LeanSession:
         allow_handoff: bool = True,
         meta: Optional[dict[str, Any]] = None,
         end_marker: str = "",
+        allow_complete: bool = True,
     ) -> LeanTurn:
         meta = dict(meta or {})
         if delegated_by is not None:
@@ -500,7 +648,9 @@ class LeanSession:
             terminal = Terminal(self.project_root)
             toolbox = Toolbox(
                 toolsets=persona.toolsets or None,
-                extra_tools=self._native_tools(persona, depth, delegated_by=delegated_by, allow_handoff=can_hand_off)
+                extra_tools=self._native_tools(
+                    persona, depth, delegated_by=delegated_by, allow_handoff=can_hand_off, allow_complete=allow_complete,
+                )
                 + coding_tools()
                 + terminal.tools(),
                 session_id=self.session_id,
@@ -541,7 +691,7 @@ class LeanSession:
 
     def _record(self, persona: AgentPersona, part: TurnResult, depth: int, meta: dict[str, Any]) -> None:
         """A message closed before a handoff: save it now so it sorts before the teammate's."""
-        self.results.append(part)
+        self._add_result(part)
         self._persist(persona, part, depth, meta=meta)
 
     def _persist(self, persona: AgentPersona, result: TurnResult, depth: int, *, meta: Optional[dict[str, Any]] = None) -> None:
@@ -579,9 +729,30 @@ class LeanSession:
         *,
         delegated_by: Optional[AgentPersona] = None,
         allow_handoff: bool = True,
+        allow_complete: bool = True,
     ) -> list[NativeTool]:
         memory = getattr(self.agent, "memory", None)
         tools: list[NativeTool] = []
+
+        # Group chats and handed-off work end through complete_task, never by text alone.
+        if allow_complete and (self._is_group() or depth > 0):
+            def complete_task(args: dict[str, Any]) -> str:
+                summary = str(args.get("summary") or "").strip()
+                if not summary:
+                    return "Error: say what you delivered in 'summary' (one or two sentences)."
+                if depth == 0 and self.job is not None:
+                    self.job.claim_complete(persona.name, summary)
+                return "Marked as done."
+
+            tools.append(NativeTool(
+                name="complete_task",
+                description=COMPLETE_TASK_DESCRIPTION,
+                parameters={"type": "object", "properties": {
+                    "summary": {"type": "string", "description": "What you delivered, in one or two sentences."},
+                }, "required": ["summary"]},
+                func=complete_task,
+                ends_turn=True,
+            ))
         if memory is not None:
             def memory_save(args: dict[str, Any]) -> str:
                 fact = str(args.get("fact") or args.get("text") or "").strip()
@@ -682,17 +853,43 @@ class LeanSession:
                     with self._state_lock:
                         self._handoffs += 1
                     self.emit({"type": "delegation", "from": persona.id, "to": target.id, "task": task[:400]})
-                    brief = f"{persona.name} handed you this task:\n{task}"
+                    subtask = self.job.open_subtask(owner=target.name, task=task, assigned_by=persona.name) if self.job else None
+                    brief = (
+                        f"{persona.name} handed you this task:\n{task}\n\n"
+                        "Do it yourself with your tools now. When it's finished, call complete_task with a short "
+                        "summary of what you delivered. If you can't finish it, say what is blocking you."
+                    )
                     if self._user_message:
                         brief += f"\n\nFor context, the user's message was:\n{self._user_message[:800]}"
                     result = self._run_agent(target, brief, history=[], depth=depth + 1, delegated_by=persona)
                     if not result.empty:
-                        self.results.append(result)
+                        self._add_result(result)
+                    promised_only = result.stop_reason == "promise_unfulfilled" or not result.text.strip()
+                    if subtask is not None:
+                        if result.completed:
+                            self.job.close_subtask(subtask, done=True, summary=result.completed)
+                        elif not result.success:
+                            self.job.close_subtask(subtask, done=False, summary=result.error)
+                        elif not promised_only:
+                            # A real answer without complete_task: answered. In a group,
+                            # the completion check still verifies it against the request.
+                            self.job.close_subtask(subtask, done=True, summary=_first_sentence(result.text))
+                    # A structured result, so the caller can tell "done" from "said they would".
+                    if result.completed:
+                        return f"{target.name} finished the task.\nDelivered: {result.completed}\n\n{target.name}'s reply:\n{result.text}"
+                    if not result.success:
+                        return f"{target.name} could not do the task ({result.error[:200]}).\n{result.text}"
+                    if promised_only:
+                        return (
+                            f"{target.name} said they would do it but did NOT do anything:\n{result.text}\n\n"
+                            "The task is still open. Do it yourself, or tell the user what is blocking it."
+                        )
                     return f"{target.name} replied:\n{result.text}"
 
                 tools.append(NativeTool(
                     name="delegate_to_agent",
-                    description="Hand a task to a teammate who is better suited and get their answer back. Teammates: "
+                    description="Hand a task to a teammate who is better suited. They do the work with their own tools "
+                    "and report back whether it is finished. Use it to get work done, not to announce or chat. Teammates: "
                     + "; ".join(f"{c.name} ({c.title or c.description[:60]})" for c in candidates),
                     parameters={"type": "object", "properties": {
                         "agent": {"type": "string", "enum": [c.name for c in candidates]},
@@ -724,6 +921,10 @@ class LeanSession:
         if key not in self._clients:
             self._clients[key] = ChatClient(endpoint, reasoning_effort=effort)
         return self._clients[key]
+
+    def _review_client(self, persona: AgentPersona) -> ChatClient:
+        """The completion check: a short, thinking-off call, closed with the session."""
+        return self._client_for(persona, routing=True)
 
     def _side_client(self, persona: AgentPersona) -> ChatClient:
         """A separate, thinking-off client for background work (summaries)."""
@@ -818,6 +1019,12 @@ class LeanSession:
                 logger.debug("Lean conversation memory write failed", exc_info=True)
 
         threading.Thread(target=work, name="lean-memory", daemon=True).start()
+
+
+def _first_sentence(text: str, limit: int = 200) -> str:
+    body = " ".join(str(text or "").split())
+    match = re.match(r"(.+?[.!?])(\s|$)", body)
+    return (match.group(1) if match else body)[:limit]
 
 
 def _bounded_timeline(timeline: list[dict[str, Any]]) -> list[dict[str, Any]]:

@@ -87,6 +87,8 @@ class NativeTool:
     # the tool runs: returns an "Error: ..." for bad arguments, otherwise the
     # short note shown on the tool card in the caller's message.
     handoff: Optional[Callable[[dict[str, Any]], str]] = None
+    # A "final output" tool (complete_task): once it succeeds the agent's turn ends.
+    ends_turn: bool = False
 
 
 def _flag_enabled(flag: str) -> bool:
@@ -170,7 +172,10 @@ class Toolbox:
             self.entries[name] = entry
         # Native tools only appear when one of their toolsets was requested.
         requested = set(wanted)
-        self.native = {name: tool for name, tool in self.native.items() if name in requested or name == "delegate_to_agent"}
+        self.native = {
+            name: tool for name, tool in self.native.items()
+            if name in requested or name in {"delegate_to_agent", "complete_task"}
+        }
 
     @property
     def names(self) -> list[str]:
@@ -219,6 +224,10 @@ class Toolbox:
     def handoff(self, name: str) -> Optional[Callable[[dict[str, Any]], str]]:
         tool = self.native.get(name)
         return tool.handoff if tool else None
+
+    def ends_turn(self, name: str) -> bool:
+        tool = self.native.get(name)
+        return bool(tool and tool.ends_turn)
 
     def resolve_name(self, name: str) -> str:
         """Accept harmless spelling drift such as 'Web-Search' -> 'web_search'."""

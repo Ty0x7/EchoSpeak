@@ -242,6 +242,18 @@ export function LeanMessage({
             </div>
           );
         })}
+        {data.outcome && !streaming ? (
+          <div className="lm-outcome" data-status={data.outcome.status} role="status">
+            {data.outcome.status === "done" ? (
+              <>
+                <span className="lm-outcome-mark" aria-hidden>✓</span>
+                <span><b>Done:</b> {data.outcome.summary || "Finished."}</span>
+              </>
+            ) : (
+              <span><b>Stopped:</b> {data.outcome.reason || "it could not continue."}</span>
+            )}
+          </div>
+        ) : null}
         {data.stopReason === "max_steps" && !streaming ? (
           <div className="lm-stopped">
             <span>Stopped at the step limit</span>

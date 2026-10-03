@@ -2,10 +2,15 @@
 
     messages -> model -> tool calls? -> run tools -> messages -> model -> ... -> answer
 
-The loop ends when the model replies without calling a tool. Failures inside
-the loop (bad arguments, tool errors, denied approvals, repeated calls) are
-returned to the model as tool results so it can adapt; they never end the
+The loop ends when the model replies without calling a tool, or when it calls
+a "final output" tool (complete_task). A reply that only promises work ("I'll
+do that", "On it") does not end it: the agent is asked to act first. Failures
+inside the loop (bad arguments, tool errors, denied approvals, repeated calls)
+are returned to the model as tool results so it can adapt; they never end the
 turn on their own.
+
+Ending a turn is not the same as finishing a job: in group chats and handed-
+off work, agent/lean/job.py decides when the user's request is done.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from loguru import logger
 
 from agent.lean import settings
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
+from agent.lean.job import PROMISE_NUDGE, is_promise_without_action
 from agent.lean.personas import AgentPersona
 from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
 from agent.lean.toolbox import Toolbox, describe_call, safe_args_preview
@@ -47,8 +53,12 @@ class TurnResult:
     error: str = ""
     # True for a continuation after a handoff that ended without saying anything.
     empty: bool = False
-    # "max_steps" when the loop stopped at the step limit before an answer.
+    # "max_steps" when the loop stopped at the step limit before an answer;
+    # "promise_unfulfilled" when the agent kept promising work without doing it.
     stop_reason: str = ""
+    # The summary passed to complete_task, if the agent marked its work done.
+    completed: str = ""
+    usage: dict[str, int] = field(default_factory=dict)
 
 
 def _estimate_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
@@ -82,8 +92,12 @@ class LeanTurn:
         on_seal: Optional[Callable[[TurnResult], None]] = None,
         meta: Optional[dict[str, Any]] = None,
         end_marker: str = "",
+        promise_guard: bool = True,
     ) -> None:
         self.interactive = interactive
+        # Re-prompt an agent whose reply only promises work (see agent/lean/job.py).
+        self.promise_guard = promise_guard
+        self.completed_summary: Optional[str] = None
         self._on_seal = on_seal
         self._handed_off = False
         self.compactions = 0
@@ -201,6 +215,7 @@ class LeanTurn:
         call_counts: dict[str, int] = {}
         stop_reason = ""
         nudges = 0
+        promise_nudges = 0
         final_text = ""
         error = ""
         success = True
@@ -255,6 +270,15 @@ class LeanTurn:
 
             if not calls:
                 if content.strip():
+                    if self.promise_guard and self.toolbox.names and is_promise_without_action(content):
+                        # "Sure, I'll do that" is not the work. Ask for the action
+                        # (twice at most) instead of ending the turn on a promise.
+                        if promise_nudges < 2:
+                            promise_nudges += 1
+                            messages.append({"role": "user", "content": PROMISE_NUDGE})
+                            self.emit({"type": "promise_nudge", "step": step, "count": promise_nudges})
+                            continue
+                        stop_reason = "promise_unfulfilled"
                     final_text = content.strip()
                     break
                 if self._handed_off:
@@ -273,6 +297,12 @@ class LeanTurn:
                 break
 
             self._run_tools(calls, messages, step, call_counts)
+            completed = self._completion_from(calls, messages)
+            if completed is not None:
+                # complete_task is a final-output tool: the agent's work is marked done.
+                self.completed_summary = completed
+                final_text = content.strip()
+                break
         else:
             # Out of steps: stop honestly instead of forcing a rushed answer.
             # The note lists what was done so a "Continue" turn has context.
@@ -286,6 +316,11 @@ class LeanTurn:
         visible = self._visible_text()
         if not visible:
             visible = final_text
+        if not visible and self.completed_summary:
+            # The agent only called complete_task: show what it delivered.
+            visible = self.completed_summary
+            self._append_text("text", step, visible)
+            self.emit({"type": "agent_token", "step": step, "data": visible})
         empty = bool(self._handed_off and not visible and error in {"", "cancelled"})
         if not visible and not empty:
             if error == "cancelled":
@@ -305,6 +340,7 @@ class LeanTurn:
             "usage": dict(self.usage),
             "empty": empty,
             "stop_reason": stop_reason,
+            "completed": self.completed_summary or "",
         })
         return TurnResult(
             text=visible,
@@ -315,7 +351,22 @@ class LeanTurn:
             error=error,
             empty=empty,
             stop_reason=stop_reason,
+            completed=self.completed_summary or "",
+            usage=dict(self.usage),
         )
+
+    def _completion_from(self, calls: list[Any], messages: list[dict[str, Any]]) -> Optional[str]:
+        """The summary from a successful complete_task call in this step, if any."""
+        for call in calls:
+            name = self.toolbox.resolve_name(call.name)
+            if not self.toolbox.ends_turn(name):
+                continue
+            result = next((m for m in reversed(messages) if m.get("role") == "tool" and m.get("tool_call_id") == call.id), None)
+            if result is None or str(result.get("content") or "").lower().startswith("error"):
+                continue
+            args, _ = call.parsed_arguments()
+            return str(args.get("summary") or "").strip() or "Done."
+        return None
 
     def _strip_end_marker(self) -> None:
         """Remove a trailing control word (e.g. DONE in a discussion) from the reply."""

@@ -1009,6 +1009,10 @@
 /* Agent stopped at the step limit: say so and offer Continue. */
 .lm-stopped { display: flex; align-items: center; gap: 10px; max-width: 720px; padding: 8px 10px; border: 1px dashed var(--es-line-2); border-radius: var(--es-r-sm); color: var(--es-dim); font: 500 12px var(--es-font); }
 .lm-stopped span { flex: 1; }
+.lm-outcome { display: flex; align-items: baseline; gap: 8px; max-width: 720px; padding: 7px 10px; border: 1px solid var(--es-line); border-radius: var(--es-r-sm); background: rgba(255, 255, 255, 0.02); color: var(--es-dim); font: 500 12px/1.45 var(--es-font); }
+.lm-outcome b { color: var(--es-text); font-weight: 600; }
+.lm-outcome[data-status="stopped"] { border-style: dashed; }
+.lm-outcome-mark { color: var(--es-text); }
 .lm-note { display: flex; align-items: center; gap: 10px; max-width: 720px; color: var(--es-faint); font: 500 11px var(--es-font); }
 .lm-note::before, .lm-note::after { content: ""; flex: 1; height: 1px; background: var(--es-line); }
 

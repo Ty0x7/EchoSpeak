@@ -113,4 +113,28 @@ describe("lean live reducer", () => {
     const thought = msg.segments[0] as { startedAt: number; endedAt?: number };
     expect((thought.endedAt || 0) - thought.startedAt).toBe(3000);
   });
+
+  it("puts a group job's outcome and continuation notes under the run's last message", () => {
+    const m2 = { request_id: "r1", message_id: "m2", agent_id: "forge" };
+    const state = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "agent_done", ...base, text: "Asked Glados.", success: true },
+      { type: "agent_start", ...m2, agent: { id: "forge", name: "Glados" } },
+      { type: "agent_token", ...m2, step: 1, data: "Wrote it." },
+      { type: "agent_done", ...m2, text: "Wrote it.", success: true },
+      { type: "job_continue", request_id: "r1", reason: "no tests yet", agent: "Glados", round: 2 },
+      { type: "run_outcome", request_id: "r1", status: "done", summary: "hello.py written and tested." },
+    ]);
+    expect(isLeanEvent({ type: "run_outcome" })).toBe(true);
+    expect(state.messages.m1.outcome).toBeUndefined();
+    expect(state.messages.m2.outcome).toEqual({ status: "done", summary: "hello.py written and tested.", reason: undefined });
+    const note = state.messages.m2.segments.find((s) => s.kind === "note") as { text: string };
+    expect(note.text).toBe("Not done yet: no tests yet. Glados continues.");
+
+    const stopped = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "run_outcome", request_id: "r1", status: "stopped", reason: "it reached the limit of 4 rounds" },
+    ]);
+    expect(stopped.messages.m1.outcome).toEqual({ status: "stopped", summary: undefined, reason: "it reached the limit of 4 rounds" });
+  });
 });

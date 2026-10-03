@@ -29,9 +29,19 @@ class BarrierClient(ScriptedClient):
         return super().stream_turn(messages, **kwargs)
 
 
+class _AlwaysDone:
+    calls: list = []
+
+    def stream_turn(self, messages, **kwargs):
+        return ModelTurn(content='{"done": true, "summary": "Answered."}')
+
+
 def _session(monkeypatch, scripts: dict[str, Any], *, room: Room | None = None, session_id: str = ""):
     monkeypatch.setattr(lean_runtime.LeanSession, "_client_for", lambda self, persona, routing=False: scripts[persona.id])
     monkeypatch.setattr(lean_runtime.LeanSession, "_recall", lambda self, query, limit=8: [])
+    # The completion check: scripted per test when it matters, otherwise "done".
+    reviewer = scripts.get("_review") or _AlwaysDone()
+    monkeypatch.setattr(lean_runtime.LeanSession, "_review_client", lambda self, persona: reviewer)
     events: list[dict[str, Any]] = []
     session = lean_runtime.LeanSession(
         agent=type("Agent", (), {"memory": None})(),

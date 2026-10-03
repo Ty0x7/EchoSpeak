@@ -81,3 +81,19 @@ def group_fan_out() -> bool:
 def group_merge() -> bool:
     """After a fan-out, the room's lead writes a short merged reply."""
     return _as_bool(_setting("lean_group_merge", True))
+
+
+def group_max_rounds() -> int:
+    """Backstop: rounds of work per message in a group chat or handed-off job."""
+    try:
+        return max(1, min(int(_setting("lean_group_max_rounds", 4)), 12))
+    except (TypeError, ValueError):
+        return 4
+
+
+def group_token_budget() -> int:
+    """Backstop: model tokens one group-chat message may use (0 = no limit)."""
+    try:
+        return max(0, int(_setting("lean_group_token_budget", 200_000)))
+    except (TypeError, ValueError):
+        return 200_000

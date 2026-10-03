@@ -705,6 +705,25 @@ export const Dashboard: React.FC<{
             });
           }
 
+          // A group chat or handed-off job shows how it ended under its last message.
+          const turnOutcome = turn.execution?.metadata?.outcome;
+          if (turnOutcome && typeof turnOutcome === "object") {
+            for (let i = loadedMsgs.length - 1; i >= 0; i -= 1) {
+              const m = loadedMsgs[i];
+              if (m.lean && m.executionId === (executionId || undefined)) {
+                m.lean = {
+                  ...m.lean,
+                  outcome: {
+                    status: turnOutcome.status === "stopped" ? "stopped" : "done",
+                    summary: turnOutcome.summary ? String(turnOutcome.summary) : undefined,
+                    reason: turnOutcome.reason ? String(turnOutcome.reason) : undefined,
+                  },
+                };
+                break;
+              }
+            }
+          }
+
           // ToolRuns — exact IDs, completed/failed only (never live spinners after refresh).
           // Lean turns carry their tools inside each agent's timeline instead.
           const leanTurn = (Array.isArray(turn.messages) ? turn.messages : []).some((m: any) => m?.agent_id);

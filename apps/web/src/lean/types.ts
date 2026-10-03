@@ -48,7 +48,11 @@ export type LeanMessageData = {
   role?: string;
   /** "max_steps" when the agent stopped at the step limit before finishing. */
   stopReason?: string;
+  /** How a group chat or handed-off job ended; shown under its last message. */
+  outcome?: LeanOutcome;
 };
+
+export type LeanOutcome = { status: "done" | "stopped"; summary?: string; reason?: string };
 
 export type LeanLiveState = {
   requestId: string;
