@@ -44,43 +44,23 @@ function Reveal({ children, className = "", as: Tag = "div", id }: { children: R
 
 // ── Hero ─────────────────────────────────────────────────────────────
 
-const ORBIT_ICONS: IconName[] = ["chat", "research", "code", "chart", "team", "voice", "memory", "shield"];
-
-function HeroArt() {
-  return (
-    <div className="hero-art" aria-hidden="true">
-      <div className="hero-glow" />
-      <div className="orbit o1"><span className="orbit-dot" /></div>
-      <div className="orbit o2"><span className="orbit-dot" /></div>
-      <div className="orbit o3" />
-      <div className="orbit-icons">
-        {ORBIT_ICONS.map((icon, i) => (
-          <span key={icon} className="orbit-icon" style={{ ["--a" as string]: `${(360 / ORBIT_ICONS.length) * i}deg` }}>
-            <span><Icon name={icon} size={18} /></span>
-          </span>
-        ))}
-      </div>
-      <div className="hero-face"><EchoFace size="clamp(150px, 22vw, 250px)" /></div>
-    </div>
-  );
-}
-
 function Hero() {
   return (
-    <section className="hero">
-      <div className="hero-dots" aria-hidden="true" />
-      <div className="hero-inner shell">
-        <div className="hero-copy">
-          <p className="pill-row"><span className="pill">Free</span><span className="pill">Open source</span><span className="pill">Runs on your PC</span></p>
-          <h1>Meet <span className="hl">Echo</span>.<br />The AI that lives<br />on your computer.</h1>
-          <p className="hero-lede">Ask anything, get real answers you can see, and let Echo and his team actually do the work.</p>
-          <div className="hero-actions">
-            <DownloadButton />
-            <a className="btn btn-ghost" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={18} /> View on GitHub</a>
-          </div>
+    <section className="hero shell">
+      <div className="hero-copy">
+        <h1>Meet <span className="hl">Echo</span>, the AI that lives on your computer.</h1>
+        <p className="hero-lede">Ask anything, get answers you can see, and let Echo and his team actually do the work. Your data stays with you.</p>
+        <div className="hero-actions">
+          <DownloadButton />
+          <a className="btn btn-ghost" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={18} /> View on GitHub</a>
         </div>
-        <HeroArt />
+        <ul className="hero-values">
+          <li><Icon name="github" size={15} /> Open source</li>
+          <li><Icon name="house" size={15} /> Your data stays on your PC</li>
+          <li><Icon name="model" size={15} /> Local or cloud models</li>
+        </ul>
       </div>
+      <div className="hero-face"><EchoFace size="clamp(180px, 24vw, 300px)" /></div>
     </section>
   );
 }
@@ -117,15 +97,15 @@ function Screen({ mode }: { mode: string }) {
     case "chat":
       return (
         <div className="scr scr-chat">
-          <p className="msg msg-you">Plan a cozy Saturday for two in Edmonton. Not too expensive.</p>
+          <p className="msg msg-you">Plan a cozy Saturday for two. Not too expensive.</p>
           <div className="msg msg-echo">
             <Face size={22} />
             <div>
               <p>Here's a relaxed day under $60:</p>
               <ul>
-                <li>Morning coffee and a walk by the river valley</li>
-                <li>Afternoon at the Royal Alberta Museum</li>
-                <li>Dinner from the Old Strathcona market, picnic style</li>
+                <li>Morning coffee and a long walk somewhere green</li>
+                <li>A free museum or gallery in the afternoon</li>
+                <li>Dinner from a local market, picnic style</li>
               </ul>
               <p className="muted">Want me to check the weather first?</p>
             </div>
@@ -176,8 +156,8 @@ function Screen({ mode }: { mode: string }) {
       return (
         <div className="scr scr-voice">
           <div className="wave" aria-hidden="true">{Array.from({ length: 28 }, (_, i) => <i key={i} style={{ animationDelay: `${(i % 7) * -0.12}s` }} />)}</div>
-          <p className="voice-said">“Hey Echo, remind me what my sister's name is.”</p>
-          <p className="voice-reply"><Face size={20} /> It's Emily. Want me to text her?</p>
+          <p className="voice-said">“Hey Echo, add milk to my shopping list.”</p>
+          <p className="voice-reply"><Face size={20} /> Added. That's four things on the list.</p>
         </div>
       );
   }
@@ -194,9 +174,10 @@ function WaysShowcase() {
   const mode = MODES[active];
   return (
     <section className="ways shell" id="ways" aria-labelledby="ways-title">
-      <Reveal className="section-head">
+      <Reveal className="section-head is-split">
         <span className="kicker">One Echo · many ways to help</span>
         <h2 id="ways-title">He changes how he helps.<br /><span className="dim">Never who he is.</span></h2>
+        <p className="section-lede">Chat, research, build or just talk out loud. It's always the same Echo, with the same memory and the same chats.</p>
       </Reveal>
       <div className="ways-grid" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
         <div className="ways-tabs" role="tablist" aria-label="Ways Echo helps">
@@ -233,10 +214,12 @@ const DEMO_CHART = {
   source: "Example data",
 };
 const DEMO_SCORES = {
-  title: "Edmonton Oilers (example)",
+  title: "Last night's scores (example)",
   games: [
-    { home: "Edmonton Oilers", away: "Calgary Flames", home_score: 4, away_score: 2, status: "Final", league: "NHL", state: "post", home_record: "5-1", away_record: "3-3", home_abbr: "EDM", away_abbr: "CGY" },
-    { home: "Vancouver Canucks", away: "Edmonton Oilers", home_score: null, away_score: null, status: "Sat 7:00 PM", league: "NHL", state: "pre", home_abbr: "VAN", away_abbr: "EDM" },
+    { home: "Riverside Rockets", away: "Bay City Owls", home_score: 4, away_score: 2, status: "Final", league: "Example", state: "post", home_record: "5-1", away_record: "3-3", home_abbr: "RIV", away_abbr: "BAY" },
+    { home: "Harbor Kings", away: "Summit Bears", home_score: 1, away_score: 3, status: "Final", league: "Example", state: "post", home_record: "2-4", away_record: "4-2", home_abbr: "HAR", away_abbr: "SUM" },
+    { home: "Lakeside Foxes", away: "Iron Valley", home_score: 5, away_score: 5, status: "Final · OT", league: "Example", state: "post", home_record: "3-2-1", away_record: "3-2-1", home_abbr: "LAK", away_abbr: "IRV" },
+    { home: "North Shore", away: "Cedar Falls", home_score: 2, away_score: 0, status: "Final", league: "Example", state: "post", home_record: "4-2", away_record: "1-5", home_abbr: "NSH", away_abbr: "CED" },
   ],
 };
 const DEMO_STEPS = {
@@ -245,7 +228,8 @@ const DEMO_STEPS = {
   items: [
     { title: "Install LM Studio", detail: "Free app that runs AI models on your PC." },
     { title: "Download a model", detail: "Gemma 4 E4B is a great start on an 8 GB GPU." },
-    { title: "Pick it in EchoSpeak", detail: "Settings › Models › LM Studio. Done." },
+    { title: "Pick it in EchoSpeak", detail: "Settings › Models › LM Studio." },
+    { title: "Say hi", detail: "Type, or turn on Wake and say “Hey Echo”." },
   ],
 };
 
@@ -253,12 +237,12 @@ function AnswerCards() {
   const tiles: { key: string; ask: string; className: string; body: React.ReactNode }[] = [
     { key: "weather", ask: "“What's the weather in Denver this week?”", className: "bento-weather", body: <WeatherCard data={DEMO_WEATHER} /> },
     { key: "chart", ask: "“Compare these two stocks this year.”", className: "bento-chart", body: <ChartView data={DEMO_CHART} /> },
-    { key: "scores", ask: "“How are the Oilers doing?”", className: "bento-scores", body: <ScoreCard data={DEMO_SCORES} /> },
     { key: "steps", ask: "“How do I set up a local model?”", className: "bento-steps", body: <Timeline data={DEMO_STEPS} /> },
+    { key: "scores", ask: "“How did my team do last night?”", className: "bento-scores", body: <ScoreCard data={DEMO_SCORES} /> },
   ];
   return (
     <section className="answers shell" aria-labelledby="answers-title">
-      <Reveal className="section-head">
+      <Reveal className="section-head is-split">
         <span className="kicker">Answers you can see</span>
         <h2 id="answers-title">Less reading.<br /><span className="dim">More seeing.</span></h2>
         <p className="section-lede">Weather, charts, scores, products, videos and how-tos show up as cards, built from real data.</p>
@@ -286,7 +270,7 @@ const TEAM = [
 function Team() {
   return (
     <section className="team shell" id="team" aria-labelledby="team-title">
-      <Reveal className="section-head">
+      <Reveal className="section-head is-split">
         <span className="kicker">The team</span>
         <h2 id="team-title">Three agents.<br /><span className="dim">One group chat.</span></h2>
         <p className="section-lede">@mention who you want, or let them sort it out. They hand work to each other and tell you when it's actually done.</p>
@@ -404,6 +388,7 @@ function Panels() {
         <div className="panel-copy">
           <span className="kicker">Bring your own brain</span>
           <h2>Free local models.<br /><span className="dim">Or your favourite cloud one.</span></h2>
+          <p>Run a model on your own GPU for free, or plug in an OpenAI or Gemini key. Switch any time.</p>
         </div>
         <div className="marquee" aria-label="Works with LM Studio, Ollama, llama.cpp, vLLM, LocalAI, OpenAI and Gemini">
           <div className="marquee-track">
@@ -433,7 +418,7 @@ const PILLARS: { icon: IconName; title: string; copy: string }[] = [
 function About() {
   return (
     <section className="about shell" id="about" aria-labelledby="about-title">
-      <Reveal className="section-head">
+      <Reveal className="section-head is-split">
         <span className="kicker">About Echo</span>
         <h2 id="about-title">Your own agent.<br /><span className="dim">Not someone else's.</span></h2>
         <p className="section-lede">Echo is an open-source, local-first agent: a personal AI that lives with you, works for you, and teams up with other agents to get real tasks done.</p>
@@ -447,18 +432,6 @@ function About() {
           </Reveal>
         ))}
       </div>
-      <Reveal className="about-card">
-        <div className="about-avatar" aria-hidden="true">T</div>
-        <div className="about-copy">
-          <span className="kicker">The maker</span>
-          <h3>Built by one person who wanted a better assistant.</h3>
-          <p>Hi, I'm Ty. I build EchoSpeak on my own because I wanted an AI that lives on my own PC, remembers what matters, and actually gets things done instead of just talking about it. It's free, open source, and it gets better every week.</p>
-          <div className="about-links">
-            <a className="text-link" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={16} /> Follow along on GitHub</a>
-            <a className="text-link" href={`${GITHUB_URL}/issues`} target="_blank" rel="noreferrer">Suggest an idea <Icon name="arrow" size={15} /></a>
-          </div>
-        </div>
-      </Reveal>
     </section>
   );
 }
@@ -494,11 +467,11 @@ export function Home() {
       <SiteHeader />
       <main>
         <Hero />
+        <About />
         <WaysShowcase />
         <AnswerCards />
         <Team />
         <Panels />
-        <About />
         <BringHome />
       </main>
       <SiteFooter />

@@ -5,7 +5,10 @@ import { Home } from "./Home";
 
 function ScrollToTop() {
   const { pathname } = useLocation();
-  useEffect(() => window.scrollTo(0, 0), [pathname]);
+  // Braces matter: newer browsers return a Promise from scrollTo, which React would treat as a cleanup.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
   return null;
 }
 
