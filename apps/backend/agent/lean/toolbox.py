@@ -130,6 +130,9 @@ class NativeTool:
     handoff: Optional[Callable[[dict[str, Any]], str]] = None
     # A "final output" tool (complete_task): once it succeeds the agent's turn ends.
     ends_turn: bool = False
+    # Coordination tools (handoff, task board, completion) the runtime offers only
+    # when they apply: kept whatever toolsets the persona has.
+    always: bool = False
 
 
 def _flag_enabled(flag: str) -> bool:
@@ -213,14 +216,16 @@ class Toolbox:
             self.entries[name] = entry
         # Native tools only appear when one of their toolsets was requested.
         requested = set(wanted)
-        self.native = {
-            name: tool for name, tool in self.native.items()
-            if name in requested or name in {"delegate_to_agent", "complete_task", "assign_tasks"}
-        }
+        self.native = {name: tool for name, tool in self.native.items() if name in requested or tool.always}
 
     @property
     def names(self) -> list[str]:
         return list(self.entries) + list(self.native)
+
+    def restrict_to_read_only(self) -> None:
+        """Keep only tools that look things up: for turns that plan, not act."""
+        self.entries = {name: entry for name, entry in self.entries.items() if name in PARALLEL_SAFE}
+        self.native = {name: tool for name, tool in self.native.items() if tool.parallel_safe or tool.always}
 
     def schemas(self) -> list[dict[str, Any]]:
         rendered: list[dict[str, Any]] = []

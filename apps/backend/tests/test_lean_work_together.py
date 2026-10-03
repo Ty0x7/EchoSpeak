@@ -114,25 +114,25 @@ def test_group_runs_well_past_eight_turns_with_corrections_and_finishes_verified
     buggy = "def inc(n):\n    return n\n"
     fixed = "def inc(n):\n    return n + 1\n"
     scripts = {
-        # Discuss (one short round), then Echo decides and later wraps up.
+        # Echo opens the discussion, decides, runs the tests (it has the terminal), and wraps up.
         "echo": ScriptedClient([
-            ModelTurn(content="Glados should write counter.py, Jarvis should test it."),
+            # A plan in the discussion is not a broken promise: no nudge here.
+            ModelTurn(content="Glados should write counter.py; I'll run the tests once it exists."),
             _tools("e1", ("assign_tasks", {"tasks": [
                 {"owner": "Glados", "task": "write counter.py with inc(n)"},
-                {"owner": "Jarvis", "task": "run the tests for counter.py"},
+                {"owner": "Echo", "task": "run the tests for counter.py"},
             ]})),
-            ModelTurn(content="Glados writes it, Jarvis tests it."),
+            ModelTurn(content="Glados writes it, I test it."),
+            # t2: tests fail (the file has a bug). A real attempt, reported honestly.
+            _tools("e2", ("terminal", {})), ModelTurn(content="Tests fail: inc returns n, expected n + 1."),
+            # t4: still failing after the first fix.
+            _tools("e3", ("terminal", {})), ModelTurn(content="Still failing."),
+            # t6: passes.
+            _tools("e4", ("terminal", {})), _done("e5", "Ran the tests: 2 passed."),
             ModelTurn(content="Done: counter.py is written and both tests pass. Want anything else?"),
         ]),
-        "scout": ScriptedClient([
-            ModelTurn(content="Agreed. I'll run the tests once it exists."),
-            # t2: tests fail (the file has a bug). A real attempt, reported honestly.
-            _tools("s1", ("terminal", {})), ModelTurn(content="Tests fail: inc returns n, expected n + 1."),
-            # t4: still failing after the first fix.
-            _tools("s2", ("terminal", {})), ModelTurn(content="Still failing."),
-            # t6: passes.
-            _tools("s3", ("terminal", {})), _done("s4", "Ran the tests: 2 passed."),
-        ]),
+        # Jarvis (research only) weighs in on the plan; it has no terminal, so it gets no build tasks.
+        "scout": ScriptedClient([ModelTurn(content="Agreed. Glados builds, Echo tests.")]),
         "forge": ScriptedClient([
             ModelTurn(content="Sounds good."),
             _tools("f1", ("file_write", {"path": "counter.py", "content": buggy})), _done("f2", "Wrote counter.py."),
@@ -143,10 +143,12 @@ def test_group_runs_well_past_eight_turns_with_corrections_and_finishes_verified
         ]),
     }
     reviewer = Reviewer([
-        {"done": False, "reason": "the tests fail", "next": "Glados", "instruction": "fix inc so it returns n + 1"},
-        {"done": False, "reason": "the fix hasn't been tested", "next": "Jarvis", "instruction": "run the tests again"},
+        # The check may copy the roster line instead of just the name.
+        {"done": False, "reason": "the tests fail", "next": "Glados (Builder; can: read and write files)",
+         "instruction": "fix inc so it returns n + 1"},
+        {"done": False, "reason": "the fix hasn't been tested", "next": "Echo", "instruction": "run the tests again"},
         {"done": False, "reason": "the tests still fail", "next": "Glados", "instruction": "fix inc properly"},
-        {"done": False, "reason": "the new fix hasn't been tested", "next": "Jarvis", "instruction": "run the tests again"},
+        {"done": False, "reason": "the new fix hasn't been tested", "next": "Echo", "instruction": "run the tests again"},
         {"done": True, "summary": "counter.py written; tests pass."},
     ])
     session, events = _session(monkeypatch, scripts, reviewer, project)
@@ -163,6 +165,12 @@ def test_group_runs_well_past_eight_turns_with_corrections_and_finishes_verified
     # The completion check judged from what actually ran, failures included.
     assert "terminal" in reviewer.prompts[0] and "FAILED" in reviewer.prompts[0]
     assert sum(1 for e in events if e["type"] == "job_continue") == 4
+    assert not any(e["type"] == "promise_nudge" for e in events)
+    # The lead was told who can do what, and the planning turns couldn't change anything.
+    lead_tools = {t["function"]["name"]: t["function"]["description"] for t in scripts["echo"].tools[1]}
+    assert "Jarvis (Researcher; can: search the web, recall memory; can't: read and write files, run terminal commands)" \
+        in lead_tools["assign_tasks"]
+    assert "file_write" not in {t["function"]["name"] for t in scripts["forge"].tools[0]}
 
 
 def test_agents_that_only_agree_are_made_to_do_the_work(monkeypatch):
@@ -173,13 +181,13 @@ def test_agents_that_only_agree_are_made_to_do_the_work(monkeypatch):
             ModelTurn(content="Let's have Glados write counter.py."),
             # Decide: no assign_tasks, just agreement.
             ModelTurn(content="We all agree the plan is good."),
+            ModelTurn(content="counter.py is written. Need anything else?"),
         ]),
         "scout": ScriptedClient([ModelTurn(content="Agreed.")]),
         "forge": ScriptedClient([
             ModelTurn(content="Agreed, good plan."),
             _tools("f1", ("file_write", {"path": "counter.py", "content": "def inc(n):\n    return n + 1\n"})),
             _done("f2", "Wrote counter.py."),
-            ModelTurn(content="counter.py is written. Need anything else?"),
         ]),
     }
     # The check can't produce a verdict: the evidence decides (nothing done yet -> not done).
@@ -190,6 +198,7 @@ def test_agents_that_only_agree_are_made_to_do_the_work(monkeypatch):
 
     assert project.files.get("counter.py"), "the work was never done"
     assert out["outcome"]["status"] == "done"
+    assert out["response"] == "counter.py is written. Need anything else?"
     assert any(e["type"] == "job_continue" and "only discussed" in e["reason"] for e in events)
 
 

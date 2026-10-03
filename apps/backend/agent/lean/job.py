@@ -127,7 +127,7 @@ class Job:
     evidence: list[Evidence] = field(default_factory=list)
     repeats: int = 0
     stalls: int = 0
-    _progress_mark: tuple[int, int] = (0, 0)
+    _progress_mark: tuple[int, int, int] = (0, 0, 0)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     # ── recording ───────────────────────────────────────────────────────
@@ -169,21 +169,29 @@ class Job:
         return [s for s in self.subtasks if s.status == "open"]
 
     # ── backstops ───────────────────────────────────────────────────────
-    def note_progress(self) -> bool:
+    def note_progress(self, *, baseline: bool = False) -> bool:
         """Call once per verification round. True if anything moved since the last call.
 
-        Progress is a new successful tool call or a task newly finished. Talk alone
-        is not progress: that is what turns a group into a discussion loop.
+        ``baseline`` only records where things stand (e.g. once the plan is made),
+        so a round in which nobody was asked to act yet is not counted as a stall.
+
+        Progress is measured in what the goal needs. For work (files, commands,
+        changes) it is a new successful tool call or a task newly finished: talk
+        alone is not progress, which is what turns a group into a discussion loop.
+        For a question, a new answer that doesn't repeat an earlier one also counts;
+        the repeat detector and the round limit bound that.
         """
         with self._lock:
             # New tasks are not progress: a checker that keeps adding them would never stall.
             mark = (
                 sum(1 for item in self.evidence if item.ok),
                 sum(1 for item in self.subtasks if item.status == "done"),
+                0 if needs_action(self.goal) else len(self.texts) - self.repeats,
             )
             moved = mark != self._progress_mark
             self._progress_mark = mark
-            self.stalls = 0 if moved else self.stalls + 1
+            if not baseline:
+                self.stalls = 0 if moved else self.stalls + 1
             return moved
 
     def backstop(self) -> str:
@@ -255,7 +263,7 @@ class Job:
             + (f"Task board:\n{board}\n\n" if board else "")
             + f"Tool log (what actually ran):\n{self.evidence_log()}\n\n"
             f"Transcript of this request:\n{self.transcript()}\n\n{claim}{stalled}"
-            f"Agents: {', '.join(members)}\n\n"
+            f"Agents (pick \"next\" by name): {'; '.join(members)}\n\n"
             'Answer with JSON only: {"done": true|false, "summary": "what was delivered, one sentence", '
             '"reason": "if not done: what is missing", "in_loop": true|false, '
             '"next": "agent who should continue", "instruction": "the concrete next action for them"}'
@@ -276,11 +284,15 @@ def parse_review(text: str) -> dict[str, Any]:
     return {}
 
 
-PROMISE_NUDGE = (
-    "You said you would do it, but you made no tool call and handed nothing off, so nothing has happened yet. "
-    "Do it now: call the tool(s) that do the work, or hand it to the right teammate with delegate_to_agent. "
-    "If you can't do it, say why in one line."
-)
+def promise_nudge(tool_names: list[str]) -> str:
+    """Ask for the action, naming only a handoff tool this agent actually has."""
+    handoff = next((name for name in ("assign_tasks", "delegate_to_agent") if name in tool_names), "")
+    return (
+        "You said you would do it, but you made no tool call and handed nothing off, so nothing has happened yet. "
+        "Do it now: call the tool(s) that do the work"
+        + (f", or hand it to the right teammate with {handoff}" if handoff else "")
+        + ". If you can't do it, say why in one line."
+    )
 
 ASSIGN_TASKS_DESCRIPTION = (
     "Turn the plan into work: give each task to the teammate who should do it (you can include yourself). "

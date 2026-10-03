@@ -85,14 +85,16 @@ def test_smart_approval_only_gates_destructive_and_external():
 # ── loop ────────────────────────────────────────────────────────────────
 
 class ScriptedClient:
-    """Plays back model turns; records the messages each call received."""
+    """Plays back model turns; records the messages and tools each call received."""
 
     def __init__(self, turns: list[ModelTurn]) -> None:
         self.turns = list(turns)
         self.calls: list[list[dict[str, Any]]] = []
+        self.tools: list[list[dict[str, Any]]] = []
 
     def stream_turn(self, messages, *, tools=None, on_reasoning=None, on_content=None, cancel=None, temperature=None, max_tokens=None):
         self.calls.append([dict(m) for m in messages])
+        self.tools.append(list(tools or []))
         turn = self.turns.pop(0)
         if turn.reasoning and on_reasoning:
             on_reasoning(turn.reasoning)

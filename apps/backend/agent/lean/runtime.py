@@ -23,7 +23,7 @@ from agent.lean.coding import coding_tools, project_overview
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
-from agent.lean.toolbox import NativeTool, Toolbox, project_root_for_session
+from agent.lean.toolbox import DEFAULT_TOOLSETS, NativeTool, Toolbox, project_root_for_session
 
 Emit = Callable[[dict[str, Any]], None]
 
@@ -419,7 +419,7 @@ class LeanSession:
         if not self._is_group():
             # One-to-one chat with hand-offs: every handed-off task is done and backed by work.
             return {"done": True, "summary": fallback}
-        members = [m.name for m in self._members()]
+        members = [_roster_line(m) for m in self._members()]
         data: dict[str, Any] = {}
         for _attempt in range(2):
             try:
@@ -454,7 +454,8 @@ class LeanSession:
 
     def _continuation_agent(self, name: str, default_persona: AgentPersona) -> AgentPersona:
         pool = self._members() or self.personas.list()
-        wanted = name.strip().lstrip("@").casefold()
+        # The check sees "Glados (Builder; can: …)" and may copy it whole.
+        wanted = name.split("(")[0].strip().lstrip("@").casefold()
         for persona in pool:
             if wanted and wanted in {persona.name.casefold(), persona.id.casefold()}:
                 return persona
@@ -582,7 +583,7 @@ class LeanSession:
         success, error = True, ""
 
         def spend(persona: AgentPersona, brief: str, *, meta: dict[str, Any], allow_complete: bool = False,
-                  allow_assign: bool = False, task: Optional[Subtask] = None) -> TurnResult:
+                  allow_assign: bool = False, task: Optional[Subtask] = None, planning: bool = False) -> TurnResult:
             nonlocal turns, success, error
             turns += 1
             transcript = job.transcript()
@@ -592,6 +593,9 @@ class LeanSession:
             turn = self._build_turn(
                 persona, brief, history=turn_history if turns > 1 else history, depth=0, allow_handoff=False,
                 meta=meta, allow_complete=allow_complete, allow_assign=allow_assign,
+                # Planning turns may look things up but not act, and "I'll run the tests once
+                # it exists" is a plan there, not a broken promise.
+                read_only=planning, promise_guard=not planning,
             )
             previous_active, self._active_subtask = self._active_subtask, task
             try:
@@ -624,7 +628,7 @@ class LeanSession:
                 "You may check facts with read-only tools. Don't start the work yet: the lead assigns tasks next. "
                 f"{goal}"
             )
-            result = spend(persona, brief, meta={"discussion": index + 1})
+            result = spend(persona, brief, meta={"discussion": index + 1}, planning=True)
             if not result.success:
                 break
         if self.cancel.is_set() or not success:
@@ -639,7 +643,7 @@ class LeanSession:
         spend(lead, brief, meta={"role": "decide"}, allow_assign=True)
         if self.cancel.is_set() or not success:
             return self._end_work(success, error)
-        job.note_progress()
+        job.note_progress(baseline=True)
 
         # 3–6. Execute -> Observe -> Verify -> Continue, until verified or a backstop trips.
         while not self.cancel.is_set():
@@ -789,9 +793,10 @@ class LeanSession:
         delegated_by: Optional[AgentPersona] = None,
         allow_handoff: bool = True,
         meta: Optional[dict[str, Any]] = None,
-        end_marker: str = "",
         allow_complete: bool = True,
         allow_assign: bool = False,
+        read_only: bool = False,
+        promise_guard: bool = True,
     ) -> LeanTurn:
         meta = dict(meta or {})
         if delegated_by is not None:
@@ -816,6 +821,9 @@ class LeanSession:
                 session_id=self.session_id,
                 project_root=self.project_root,
             )
+        if read_only:
+            # Planning turns: look things up, but nothing that changes state.
+            toolbox.restrict_to_read_only()
         memories = [] if guest else self._recall(request_text(message))
         prompt = build_system_prompt(
             persona=persona,
@@ -845,7 +853,7 @@ class LeanSession:
             interactive=self.source in INTERACTIVE_SOURCES,
             on_seal=lambda part: self._record(persona, part, depth, meta),
             meta=meta,
-            end_marker=end_marker,
+            promise_guard=promise_guard,
             taint=self._taint,
         )
         return turn
@@ -927,7 +935,8 @@ class LeanSession:
 
             tools.append(NativeTool(
                 name="assign_tasks",
-                description=ASSIGN_TASKS_DESCRIPTION,
+                # Who can do what, so work that needs a terminal or files goes to someone who has them.
+                description=ASSIGN_TASKS_DESCRIPTION + " Team: " + "; ".join(_roster_line(m) for m in members),
                 parameters={"type": "object", "properties": {
                     "tasks": {"type": "array", "items": {"type": "object", "properties": {
                         "owner": {"type": "string", "enum": [m.name for m in members]},
@@ -935,6 +944,7 @@ class LeanSession:
                     }, "required": ["owner", "task"]}},
                 }, "required": ["tasks"]},
                 func=assign_tasks,
+                always=True,
             ))
 
         # Group chats and handed-off work end through complete_task, never by text alone.
@@ -955,6 +965,7 @@ class LeanSession:
                 }, "required": ["summary"]},
                 func=complete_task,
                 ends_turn=True,
+                always=True,
             ))
         if memory is not None:
             def memory_save(args: dict[str, Any]) -> str:
@@ -1099,13 +1110,14 @@ class LeanSession:
                     name="delegate_to_agent",
                     description="Hand a task to a teammate who is better suited. They do the work with their own tools "
                     "and report back whether it is finished. Use it to get work done, not to announce or chat. Teammates: "
-                    + "; ".join(f"{c.name} ({c.title or c.description[:60]})" for c in candidates),
+                    + "; ".join(_roster_line(c) for c in candidates),
                     parameters={"type": "object", "properties": {
                         "agent": {"type": "string", "enum": [c.name for c in candidates]},
                         "task": {"type": "string", "description": "Everything they need to do the task."},
                     }, "required": ["agent", "task"]},
                     func=delegate,
                     handoff=check,
+                    always=True,
                 ))
         return tools
 
@@ -1235,6 +1247,25 @@ def _plain_error(error: str) -> str:
     text = _friendly_error(str(error or ""))
     text = re.sub(r"<[^>]+>", " ", text)
     return " ".join(text.split())[:200].rstrip(" .") or "unknown error"
+
+
+# What each toolset lets an agent do, in the words a model choosing an owner needs.
+_TOOLSET_ABILITIES = {
+    "core": "read and write files", "terminal": "run terminal commands", "research": "search the web",
+    "vision": "see the screen", "desktop": "control desktop apps", "comms": "email and Discord",
+    "memory": "recall memory", "self": "edit EchoSpeak itself", "skills": "installed skills",
+}
+
+
+def _roster_line(persona: AgentPersona) -> str:
+    """'Jarvis (Researcher; can: search the web, recall memory; can't: read and write files, run terminal commands)'."""
+    toolsets = list(persona.toolsets or DEFAULT_TOOLSETS)
+    if "all" in toolsets:
+        return f"{persona.name} ({persona.title or 'agent'}; can use every tool)"
+    can = [_TOOLSET_ABILITIES[t] for t in toolsets if t in _TOOLSET_ABILITIES]
+    cannot = [_TOOLSET_ABILITIES[t] for t in ("core", "terminal") if t not in toolsets]
+    return (f"{persona.name} ({persona.title or 'agent'}; can: {', '.join(can) or 'answer from what it knows'}"
+            + (f"; can't: {', '.join(cannot)}" if cannot else "") + ")")
 
 
 def _first_sentence(text: str, limit: int = 200) -> str:
