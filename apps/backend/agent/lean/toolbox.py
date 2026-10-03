@@ -59,6 +59,43 @@ PARALLEL_SAFE = {
     "self_read", "self_grep", "self_git_status", "desktop_list_windows",
 }
 
+# What the model sees for registry tools, where the registered text is vague,
+# overlaps another tool, or exposes parameters that do nothing (Anthropic,
+# "Writing effective tools for agents": say when to use each tool, keep
+# parameters few and unambiguous). Only the schema changes; the tool doesn't.
+TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
+    "get_system_time": {"description": "The current local date, time, weekday and time zone on this PC."},
+    "calculate": {
+        "description": "Evaluate a math expression exactly (arithmetic, percentages, powers, roots). "
+        "Use it for any calculation beyond a trivial sum instead of working it out yourself.",
+        "params": {"expression": "The expression, e.g. 0.17 * 2340 or sqrt(2) * 10."},
+    },
+    "system_info": {"description": "This PC's operating system, CPU, GPU and memory."},
+    "file_list": {
+        "description": "List what is directly inside one folder (files and subfolders). To find files by name "
+        "anywhere below a folder use file_find; to search text inside files use file_search.",
+        "params": {"path": "Folder to list (default: the project folder).", "limit": "Most entries to return."},
+    },
+    "web_search": {
+        "description": "Search the web for current or factual information. Returns titles, links and snippets. "
+        "If the snippets don't answer the question, open the best result with safe_web_fetch.",
+        "drop": ["objective", "local_first", "freshness"],
+        "params": {"query": "A short keyword query, e.g. 'Edmonton population 2024'."},
+    },
+    "safe_web_fetch": {
+        "params": {"max_text_chars": "Cap on the page text returned; leave it unset unless the page is huge."},
+    },
+    "weather_live": {
+        "description": "Current weather and today's forecast for a place, from a weather API. "
+        "Use this rather than web_search for weather.",
+    },
+    "take_screenshot": {"description": "Save a screenshot of the screen to an image file. "
+                        "To read what's on screen use analyze_screen; to ask about it use vision_qa."},
+    "analyze_screen": {"description": "Read the text currently on screen (OCR)."},
+    "vision_qa": {"description": "Answer a question about what is currently on screen, using a vision model."},
+}
+
+
 _FAILURE_PREFIXES = (
     "refused", "[exit code", "[timed out",
     "failed", "error", "path not allowed", "cwd not allowed", "command rejected",
@@ -194,12 +231,23 @@ class Toolbox:
                     except Exception:
                         schema = {"type": "object", "properties": {}}
             description = getattr(entry, "description", "") or getattr(getattr(entry, "func", None), "description", "")
+            parameters = _compact_schema(schema)
+            override = TOOL_OVERRIDES.get(name) or {}
+            if override.get("description"):
+                description = override["description"]
+            for dropped in override.get("drop", ()):
+                parameters["properties"].pop(dropped, None)
+                if dropped in parameters.get("required", []):
+                    parameters["required"].remove(dropped)
+            for param, text in (override.get("params") or {}).items():
+                if param in parameters["properties"]:
+                    parameters["properties"][param]["description"] = text
             rendered.append({
                 "type": "function",
                 "function": {
                     "name": name,
-                    "description": _compact_description(description),
-                    "parameters": _compact_schema(schema),
+                    "description": _compact_description(description, 320),
+                    "parameters": parameters,
                 },
             })
         for tool in self.native.values():

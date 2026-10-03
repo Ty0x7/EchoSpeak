@@ -555,18 +555,18 @@ class Terminal:
         alive = _process_alive(proc)
         return (f"Started process {pid} ({'running' if alive else 'exited already'}): {command}\n"
                 f"First output:\n{_clip(_tail(proc, 3000), 3000) or '(none yet)'}\n"
-                f"Use process_output with id={pid} to check on it, process_stop to end it.")
+                f"Use process_output with process_id={pid} to check on it, process_stop to end it.")
 
     def process_output(self, args: dict[str, Any]) -> str:
-        proc = _PROCESSES.get(str(args.get("id") or ""))
+        proc = _PROCESSES.get(str(args.get("process_id") or args.get("id") or ""))
         if proc is None:
             running = ", ".join(f"{p.id}: {p.command[:60]}" for p in _PROCESSES.values()) or "none"
-            return f"Error: no process with that id. Known processes: {running}"
+            return f"Error: no process with that process_id. Known processes: {running}"
         state = "running" if _process_alive(proc) else "exited"
         return f"Process {proc.id} is {state} ({proc.command}).\nRecent output:\n{_clip(_tail(proc), 6000) or '(no output)'}"
 
     def process_stop(self, args: dict[str, Any]) -> str:
-        proc = _PROCESSES.get(str(args.get("id") or ""))
+        proc = _PROCESSES.get(str(args.get("process_id") or args.get("id") or ""))
         if proc is None:
             return "Error: no process with that id."
         _stop(proc)
@@ -576,7 +576,8 @@ class Terminal:
         return [
             NativeTool(
                 name="terminal",
-                description=f"Run a shell command and get its output. {self.describe()} Default folder is the project folder.",
+                description=f"Run a shell command that finishes and get its output. {self.describe()} Default folder is "
+                "the project folder. For servers, watchers or anything that keeps running, use process_start instead.",
                 parameters={"type": "object", "properties": {
                     "command": {"type": "string"},
                     "cwd": {"type": "string", "description": "Folder to run in (default: project folder)."},
@@ -590,7 +591,8 @@ class Terminal:
             ),
             NativeTool(
                 name="process_start",
-                description="Start a long-running command in the background (dev server, watcher, build). Returns an id.",
+                description="Start a command that keeps running (dev server, watcher, long build) in the background. "
+                "Returns a process_id for process_output and process_stop.",
                 parameters={"type": "object", "properties": {
                     "command": {"type": "string"},
                     "cwd": {"type": "string"},
@@ -600,14 +602,16 @@ class Terminal:
             NativeTool(
                 name="process_output",
                 description="Show recent output of a background process and whether it is still running.",
-                parameters={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+                parameters={"type": "object", "properties": {"process_id": {"type": "string", "description": "From process_start."}},
+                            "required": ["process_id"]},
                 func=self.process_output,
                 parallel_safe=True,
             ),
             NativeTool(
                 name="process_stop",
-                description="Stop a background process.",
-                parameters={"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+                description="Stop a background process started with process_start.",
+                parameters={"type": "object", "properties": {"process_id": {"type": "string", "description": "From process_start."}},
+                            "required": ["process_id"]},
                 func=self.process_stop,
             ),
         ]
