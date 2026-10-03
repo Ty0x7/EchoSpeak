@@ -52,7 +52,25 @@ export type CitationsData = { items: Citation[] };
 
 export type ScoreData = {
   title?: string;
-  games: { home: string; away: string; home_score?: number | null; away_score?: number | null; status?: string; start?: string; league?: string }[];
+  games: {
+    home: string;
+    away: string;
+    home_score?: number | null;
+    away_score?: number | null;
+    status?: string;
+    start?: string;
+    league?: string;
+    /** pre | in | post */
+    state?: string;
+    venue?: string;
+    line?: string;
+    home_logo?: string;
+    away_logo?: string;
+    home_abbr?: string;
+    away_abbr?: string;
+    home_record?: string;
+    away_record?: string;
+  }[];
   as_of?: string;
 };
 

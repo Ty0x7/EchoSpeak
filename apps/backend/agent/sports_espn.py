@@ -131,6 +131,22 @@ def _event_row(event: dict[str, Any], league_label: str = "") -> dict[str, Any]:
     def name(t: dict[str, Any]) -> str:
         return str((t.get("team") or {}).get("displayName") or (t.get("athlete") or {}).get("displayName") or "")
 
+    def logo(t: dict[str, Any]) -> str:
+        team = t.get("team") or {}
+        if team.get("logo"):
+            return str(team["logo"])
+        logos = team.get("logos") or []
+        return str((logos[0] or {}).get("href") or "") if logos else str(((t.get("athlete") or {}).get("flag") or {}).get("href") or "")
+
+    def record(t: dict[str, Any]) -> str:
+        rows = t.get("records") or t.get("record") or []
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            return str(rows[0].get("summary") or rows[0].get("displayValue") or "")
+        return ""
+
+    def abbr(t: dict[str, Any]) -> str:
+        return str((t.get("team") or {}).get("abbreviation") or "")
+
     def score(t: dict[str, Any]) -> Optional[str]:
         raw = t.get("score")
         if isinstance(raw, dict):
@@ -153,6 +169,9 @@ def _event_row(event: dict[str, Any], league_label: str = "") -> dict[str, Any]:
         "odds": odds.get("details") or "",
         "over_under": odds.get("overUnder"),
         "name": event.get("name") or f"{name(away)} at {name(home)}",
+        "home_logo": logo(home), "away_logo": logo(away),
+        "home_abbr": abbr(home), "away_abbr": abbr(away),
+        "home_record": record(home), "away_record": record(away),
     }
 
 
@@ -180,7 +199,11 @@ def _attach_card(title: str, rows: list[dict[str, Any]]) -> None:
 
         attach({"type": "score_card", "data": {"title": title, "as_of": now_label(), "games": [
             {"home": r["home"], "away": r["away"], "home_score": r["home_score"], "away_score": r["away_score"],
-             "status": r["status"] if r["state"] != "pre" else _local_time(r["start"]), "league": r["league"]}
+             "status": r["status"] if r["state"] != "pre" else _local_time(r["start"]), "league": r["league"],
+             "state": r["state"], "start": r["start"], "venue": r.get("venue", ""), "line": r.get("odds", ""),
+             "home_logo": r.get("home_logo", ""), "away_logo": r.get("away_logo", ""),
+             "home_abbr": r.get("home_abbr", ""), "away_abbr": r.get("away_abbr", ""),
+             "home_record": r.get("home_record", ""), "away_record": r.get("away_record", "")}
             for r in rows[:8]
         ]}})
     except Exception:
