@@ -1,4 +1,4 @@
-"""Real prompts (20 core + group-work cases), run against a live EchoSpeak backend and model.
+"""Real prompts (20 core + group-work + visual-response cases), run against a live EchoSpeak backend and model.
 
 Run it after every change to the agent, with Gemma 4 E4B loaded in LM Studio:
 
@@ -81,6 +81,7 @@ class Result:
     messages: list[dict[str, Any]] = field(default_factory=list)
     outcome: dict[str, Any] = field(default_factory=dict)  # group / handed-off jobs: done or stopped
     continuations: list[str] = field(default_factory=list)
+    widgets: list[dict[str, Any]] = field(default_factory=list)  # cards attached to tool results
     error: str = ""
     seconds: float = 0.0
 
@@ -131,6 +132,32 @@ def file_has(name: str, *needles: str) -> Check:
         path = c.project_dir / name
         return path.is_file() and all(n in path.read_text(encoding="utf-8", errors="replace") for n in needles)
     return (f"{name} contains {', '.join(needles) or 'something'}", check)
+
+
+def widget(kind: str, at_least: int = 1) -> Check:
+    """A card of this type was attached by a tool (with at least N items, when it has items)."""
+    def check(r: Result, c: Context) -> bool:
+        for w in r.widgets:
+            if w.get("type") != kind:
+                continue
+            data = w.get("data") or {}
+            items = data.get("items") or data.get("series") or data.get("games") or data.get("daily") or [1]
+            if len(items) >= at_least:
+                return True
+        return False
+    return (f"showed a {kind} card", check)
+
+
+def no_widgets() -> Check:
+    return ("no cards or blocks", lambda r, c: not r.widgets and "```" not in r.text)
+
+
+def block(lang: str) -> Check:
+    return (f"wrote a ```{lang} block", lambda r, c: f"```{lang}" in r.text)
+
+
+def artifact_version(n: int) -> Check:
+    return (f"artifact at version {n}", lambda r, c: any(w.get("type") == "artifact" and (w.get("data") or {}).get("version") == n for w in r.widgets))
 
 
 def finished() -> Check:
@@ -191,6 +218,23 @@ CASES: list[Case] = [
     Case(22, "Group: research then write", "@Echo get Jarvis to find the year the Eiffel Tower was completed, "
          "then have Glados save just that year to eiffel.txt.", "group-chain",
          [file_has("eiffel.txt", "1889"), finished()], project=True, room="group", timeout=900),
+    # Visual responses: the right format for the job, from tool data.
+    Case(23, "Weather card", "What's the weather in Denver this week?", "visual",
+         [replied(), used("weather_live"), widget("weather", 5)]),
+    Case(24, "Stock chart", "Compare Nvidia and AMD stock this year.", "visual",
+         [replied(), used("stock_history"), widget("chart", 2)]),
+    Case(25, "Product cards", "Find me a wireless controller under $80.", "visual",
+         [replied(), used("product_search"), widget("product_carousel", 2)], timeout=420),
+    Case(26, "Video card", "Show me a video on soldering SMD parts.", "visual",
+         [replied(), used("video_search"), widget("media")]),
+    Case(27, "Artifact", "Build me a tip calculator.", "artifact",
+         [replied(), used("create_artifact"), artifact_version(1)], timeout=600),
+    Case(28, "Artifact v2", "Make it also split the bill between a number of people.", "artifact",
+         [replied(), used("update_artifact"), artifact_version(2)], timeout=600),
+    Case(29, "Diagram", "Explain how TCP handshakes work.", "visual-2",
+         [replied(6000), block("mermaid")]),
+    Case(30, "No overuse", "What's 2+2?", "visual-3",
+         [replied(200), no_widgets(), said("4")]),
 ]
 
 
@@ -233,8 +277,10 @@ def run_case(case: Case, ctx: Context) -> Result:
         kind = event.get("type")
         if kind == "tool_start":
             result.tools.append(str(event.get("name")))
-        elif kind == "tool_end" and not event.get("ok", True):
-            result.tool_failures.append(str(event.get("name")))
+        elif kind == "tool_end":
+            if not event.get("ok", True):
+                result.tool_failures.append(str(event.get("name")))
+            result.widgets.extend(w for w in event.get("widgets") or [] if isinstance(w, dict))
         elif kind == "agent_start":
             result.agents.append(str((event.get("agent") or {}).get("id")))
         elif kind == "delegation":
@@ -342,6 +388,7 @@ def main() -> int:
             "tools": result.tools, "tool_failures": result.tool_failures, "agents": result.agents,
             "delegations": result.delegations, "approvals": result.approvals, "stop_reasons": result.stop_reasons,
             "outcome": result.outcome, "continuations": result.continuations,
+            "widgets": [w.get("type") for w in result.widgets],
             "error": result.error, "reply": result.text,
         })
 
