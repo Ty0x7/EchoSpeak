@@ -432,7 +432,7 @@ class DockerSandbox:
             out = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
             return proc.returncode, out
         except subprocess.TimeoutExpired:
-            return 124, f"Timed out after {timeout}s. For long-running servers use process_start."
+            return 124, f"Timed out after {timeout}s."
 
     def launch(self, command: str, workdir: str, wait: int, proc_id: str) -> tuple[bool, int, str, str]:
         """Run in the background inside the container and wait up to ``wait`` seconds, in one exec.
@@ -471,7 +471,7 @@ def get_sandbox() -> DockerSandbox:
 
 
 # One command, started in the background and waited on: the same script serves
-# terminal (wait = timeout) and process_start (wait = a few seconds).
+# terminal (wait = timeout) and background starts (wait = a few seconds).
 LAUNCH_SCRIPT = r"""
 id="$1"; wait_s="$2"; cmd="$3"
 base="/tmp/es-proc-$id"
@@ -789,6 +789,8 @@ class Terminal:
         command = str(args.get("command") or args.get("cmd") or "").strip()
         if not command:
             return "Error: command is empty."
+        if str(args.get("background") or "").lower() in {"true", "1", "yes"}:
+            return self.process_start({**args, "command": command})
         server = is_long_running(command)
         # A server never finishes: look at its first output, then let it run.
         wait = SERVER_WAIT if server and not args.get("timeout") else _timeout(args.get("timeout"), 120)
@@ -855,13 +857,15 @@ class Terminal:
                     "file_read to read, file_find / file_search to find, file_write / file_edit to change (scoped to "
                     "the project and undoable). Commands get no keyboard input, so use non-interactive forms "
                     "(git commit -m, npm init -y). Waits up to timeout seconds; a command still running then keeps "
-                    "going in the background and you get a process_id. Servers and watchers start in the background "
-                    "by themselves. Check the exit code and output before saying it worked."
+                    "going in the background and you get a process_id for process_output / process_stop. Servers and "
+                    "watchers start in the background by themselves (or set background=true). Check the exit code "
+                    "and output before saying it worked."
                 ),
                 parameters={"type": "object", "properties": {
                     "command": {"type": "string"},
                     "cwd": {"type": "string", "description": "Folder to run in (default: project folder)."},
                     "timeout": {"type": "integer", "description": "Seconds to wait before it moves to the background, up to 900 (default 120)."},
+                    "background": {"type": "boolean", "description": "Start it in the background right away and return its first output."},
                     **({
                         "network": {"type": "boolean", "description": "True if the command needs the internet (installs, git clone)."},
                         "where": {"type": "string", "enum": ["sandbox", "host"], "description": "Leave as sandbox unless this PC is truly needed."},
@@ -870,21 +874,9 @@ class Terminal:
                 func=self.run,
             ),
             NativeTool(
-                name="process_start",
-                description="Start a command that keeps running (dev server, watcher) in the background and show its "
-                "first output. Returns a process_id for process_output and process_stop. (terminal also moves "
-                "servers and slow commands to the background by itself.)",
-                parameters={"type": "object", "properties": {
-                    "command": {"type": "string"},
-                    "cwd": {"type": "string"},
-                    "wait_seconds": {"type": "integer", "description": "Seconds to wait for first output (default 3)."},
-                }, "required": ["command"]},
-                func=self.process_start,
-            ),
-            NativeTool(
                 name="process_output",
                 description="Whether a background process is still running (or its exit code), and its recent output.",
-                parameters={"type": "object", "properties": {"process_id": {"type": "string", "description": "From terminal or process_start."}},
+                parameters={"type": "object", "properties": {"process_id": {"type": "string", "description": "From terminal."}},
                             "required": ["process_id"]},
                 func=self.process_output,
                 parallel_safe=True,
@@ -892,7 +884,7 @@ class Terminal:
             NativeTool(
                 name="process_stop",
                 description="Stop a background process (and anything it started).",
-                parameters={"type": "object", "properties": {"process_id": {"type": "string", "description": "From terminal or process_start."}},
+                parameters={"type": "object", "properties": {"process_id": {"type": "string", "description": "From terminal."}},
                             "required": ["process_id"]},
                 func=self.process_stop,
             ),

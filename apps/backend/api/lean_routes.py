@@ -11,7 +11,7 @@ from agent.lean.approvals import get_approval_broker
 from agent.lean.personas import get_persona_store
 from agent.lean.rooms import get_room_store
 from agent.lean.settings import approval_mode, context_tokens, lean_runtime_enabled, max_iterations
-from agent.lean.toolbox import DEFAULT_TOOLSETS, TOOLSETS
+from agent.lean.toolbox import DEFAULT_TOOLSETS, TOOLSET_ALIASES, TOOLSETS
 
 router = APIRouter(prefix="/lean", tags=["lean"])
 
@@ -242,6 +242,7 @@ def list_toolsets() -> dict[str, Any]:
         "toolsets": [
             {"id": key, "tools": [t for t in tools if not t.startswith("@")]}
             for key, tools in TOOLSETS.items()
+            if key not in TOOLSET_ALIASES
         ],
         "default": DEFAULT_TOOLSETS,
     }

@@ -168,7 +168,9 @@ def test_group_runs_well_past_eight_turns_with_corrections_and_finishes_verified
     assert not any(e["type"] == "promise_nudge" for e in events)
     # The lead was told who can do what, and the planning turns couldn't change anything.
     lead_tools = {t["function"]["name"]: t["function"]["description"] for t in scripts["echo"].tools[1]}
-    assert "Jarvis (Researcher; can: search the web, recall memory; can't: read and write files, run terminal commands)" \
+    assert ("Jarvis (Researcher; can: search the web, look up live data (weather, sports, stocks, shopping), "
+            "recall memory; can't: read and write files, run terminal commands)") in lead_tools["assign_tasks"]
+    assert "Glados (Builder; can: read and write files, run terminal commands, search the web, recall memory)" \
         in lead_tools["assign_tasks"]
     assert "file_write" not in {t["function"]["name"] for t in scripts["forge"].tools[0]}
 

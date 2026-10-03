@@ -231,7 +231,27 @@ def test_builtin_teammates_are_renamed_once_and_ids_still_resolve(tmp_path):
     # Runs once: a later rename by the user sticks.
     store.update("scout", {"name": "Friday"})
     assert PersonaStore(path).get("scout").name == "Friday"
-    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 3
+
+
+def test_research_toolset_is_split_once_and_glados_loses_the_shopping_tools(tmp_path):
+    import json
+
+    from agent.lean.personas import PersonaStore
+
+    path = tmp_path / "agents.json"
+    rows = [
+        {"id": "echo", "name": "Echo", "builtin": True, "toolsets": ["core", "research", "terminal", "memory"]},
+        {"id": "forge", "name": "Glados", "toolsets": ["core", "terminal", "research", "memory"]},
+        {"id": "maker", "name": "Maker", "toolsets": ["research", "web", "self"]},
+    ]
+    path.write_text(json.dumps({"version": 2, "agents": rows}), encoding="utf-8")
+    store = PersonaStore(path)
+    assert store.get("echo").toolsets == ["core", "web", "live", "terminal", "memory"]
+    assert store.get("forge").toolsets == ["core", "terminal", "web", "memory"]
+    assert store.get("maker").toolsets == ["live", "web", "self"]
+    store.update("forge", {"toolsets": ["core", "web", "live"]})
+    assert PersonaStore(path).get("forge").toolsets == ["core", "web", "live"]  # runs once
 
 
 # ── work together (stored as mode "discussion") ─────────────────────────

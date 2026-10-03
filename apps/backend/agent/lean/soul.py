@@ -21,20 +21,17 @@ from config import BASE_DIR, DATA_DIR, config
 ADDED_HEADING = "## Added at your request"
 
 DESCRIPTION = (
-    "Change your soul: your standing instructions about who you are and how you behave, loaded at the "
-    "start of every chat. Use it only when the user asks you to change your personality, tone or standing "
-    "rules for how you work (\"from now on, keep answers short\", \"stop using bullet points\"). Facts about "
-    "the user, their people or projects go in memory_save instead. action: add (a new instruction in "
-    "'text'), replace ('old_text' -> 'text'), remove ('old_text'). The change is saved and read back: only "
-    "tell the user it's saved if this tool says \"Saved and verified\"."
+    "Change your soul: your standing instructions on who you are and how you behave, loaded in every chat. "
+    "Only when the user asks to change your personality, tone or standing rules (\"from now on, keep answers "
+    "short\"); facts about the user go in memory_save. Only say it's saved if this returns \"Saved and verified\"."
 )
 
 PARAMETERS = {
     "type": "object",
     "properties": {
         "action": {"type": "string", "enum": ["add", "replace", "remove"]},
-        "text": {"type": "string", "description": "add: the new instruction, one sentence. replace: what replaces old_text."},
-        "old_text": {"type": "string", "description": "replace/remove: the exact words to change, copied from your soul."},
+        "text": {"type": "string", "description": "add: the new instruction. replace: the new words."},
+        "old_text": {"type": "string", "description": "replace/remove: exact words from your soul."},
     },
     "required": ["action"],
 }

@@ -33,7 +33,9 @@ function Modal({ title, subtitle, onClose, children, footer }: { title: string; 
 
 const TOOLSET_INFO: Record<string, string> = {
   core: "Files and basics",
-  research: "Web search and reading",
+  web: "Web search and reading pages",
+  live: "Weather, sports, stocks, shopping, video and image cards",
+  research: "Web search and live data",
   terminal: "Run commands",
   vision: "Screenshots and vision",
   desktop: "Open apps, control the desktop",
@@ -61,7 +63,7 @@ export function AgentEditor({
   const [avatar, setAvatar] = useState(agent?.avatar || "");
   const [description, setDescription] = useState(agent?.description || "");
   const [soul, setSoul] = useState(agent?.soul || "");
-  const [sets, setSets] = useState<string[]>(agent?.toolsets?.length ? agent.toolsets : ["core", "research", "memory"]);
+  const [sets, setSets] = useState<string[]>(agent?.toolsets?.length ? agent.toolsets : ["core", "web", "memory"]);
   const [modelId, setModelId] = useState(agent?.model?.model_id || "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);

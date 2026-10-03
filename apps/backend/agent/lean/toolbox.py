@@ -20,19 +20,23 @@ from loguru import logger
 from agent.lean.widgets import collect as collect_widgets
 from config import config
 
+# Kept small on purpose (see docs/research/harness-review.md, tool audit): every
+# schema is sent on every request, and small models choose worse from long lists.
 TOOLSETS: dict[str, list[str]] = {
     "core": [
-        "get_system_time", "calculate", "system_info",
+        "calculate", "system_info",
         "file_list", "file_read", "file_find", "file_search", "file_edit", "file_write",
-        "file_mkdir", "file_copy", "file_move", "file_delete", "checkpoint_undo", "artifact_write",
-        "project_status", "project_update_context", "create_artifact", "update_artifact",
+        "file_copy", "file_move", "file_delete", "checkpoint_undo",
+        "project_status", "create_artifact", "update_artifact",
     ],
-    "research": [
-        "web_search", "safe_web_fetch", "youtube_transcript",
+    # Looking things up on the web.
+    "web": ["web_search", "safe_web_fetch", "youtube_transcript"],
+    # Live data and media shown as cards.
+    "live": [
         "weather_live", "sports_live", "browse_task",
         "stock_history", "product_search", "video_search", "image_search",
     ],
-    "terminal": ["terminal", "process_start", "process_output", "process_stop"],
+    "terminal": ["terminal", "process_output", "process_stop"],
     "vision": ["take_screenshot", "analyze_screen", "vision_qa"],
     "desktop": [
         "open_application", "open_chrome", "notepad_write",
@@ -44,13 +48,51 @@ TOOLSETS: dict[str, list[str]] = {
         "discord_read_channel", "discord_send_channel", "discord_web_read_recent",
         "discord_web_send", "discord_contacts_add", "discord_contacts_discover",
     ],
-    "self": ["self_list", "self_read", "self_grep", "self_git_status", "self_edit", "self_rollback"],
+    "self": ["self_list", "self_read", "self_grep", "self_git_status", "self_edit", "self_rollback", "project_update_context"],
     "memory": ["memory_save", "memory_search", "chat_search", "soul_update"],
     # Skill, MCP, and Connection tools that registered at runtime.
     "skills": ["@external"],
 }
 
-DEFAULT_TOOLSETS = ["core", "research", "terminal", "vision", "memory", "skills"]
+# Names kept so stored personas and API callers keep working; not offered in the editor.
+TOOLSET_ALIASES: dict[str, list[str]] = {"research": ["web", "live"]}
+for _alias, _parts in TOOLSET_ALIASES.items():
+    TOOLSETS[_alias] = [tool for part in _parts for tool in TOOLSETS[part]]
+
+DEFAULT_TOOLSETS = ["core", "web", "live", "terminal", "vision", "memory", "skills"]
+
+# Names models trained on other harnesses reach for (Claude Code, Codex, OpenAI
+# examples): run the matching tool instead of failing with "unknown tool".
+# A value may carry fixed arguments, e.g. the old process_start tool.
+TOOL_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
+    **{name: ("terminal", {}) for name in ("bash", "shell", "run_command", "run_shell_command", "exec_command",
+                                           "execute_command", "run_terminal_cmd", "powershell", "terminal_run")},
+    "process_start": ("terminal", {"background": True}),
+    **{name: ("file_read", {}) for name in ("read_file", "view_file", "read", "cat")},
+    **{name: ("file_write", {}) for name in ("write_file", "create_file", "write")},
+    **{name: ("file_edit", {}) for name in ("edit_file", "edit", "str_replace", "replace_in_file", "apply_edit")},
+    **{name: ("file_search", {}) for name in ("grep", "grep_search", "search_files", "search_code", "rg")},
+    **{name: ("file_find", {}) for name in ("glob", "find_files", "file_glob", "find")},
+    **{name: ("file_list", {}) for name in ("ls", "list_dir", "list_directory", "list_files")},
+    **{name: ("safe_web_fetch", {}) for name in ("web_fetch", "fetch", "fetch_url", "open_url", "browse")},
+    **{name: ("web_search", {}) for name in ("search_web", "google_search", "internet_search", "search")},
+    **{name: ("memory_save", {}) for name in ("save_memory", "remember")},
+    **{name: ("memory_search", {}) for name in ("recall", "search_memory")},
+}
+
+# Argument names from the same harnesses, per target tool: renamed, never overriding.
+ARG_ALIASES: dict[str, dict[str, str]] = {
+    "file_read": {"file_path": "path", "filename": "path"},
+    "file_write": {"file_path": "path", "filename": "path", "contents": "content", "text": "content"},
+    "file_edit": {"file_path": "path", "old_string": "old_text", "new_string": "new_text", "old_str": "old_text",
+                  "new_str": "new_text"},
+    "file_search": {"query": "pattern", "regex": "pattern", "include": "file_glob"},
+    "file_find": {"glob": "pattern", "name": "pattern"},
+    "file_list": {"directory": "path", "dir": "path", "dir_path": "path"},
+    "terminal": {"cmd": "command", "workdir": "cwd", "run_in_background": "background"},
+    "safe_web_fetch": {"link": "url"},
+    "web_search": {"q": "query"},
+}
 
 # Read-only tools can run in parallel when the model asks for several at once.
 PARALLEL_SAFE = {
@@ -133,6 +175,11 @@ class NativeTool:
     # Coordination tools (handoff, task board, completion) the runtime offers only
     # when they apply: kept whatever toolsets the persona has.
     always: bool = False
+
+
+def _alias_key(name: str) -> str:
+    """'Web-Fetch' and 'web fetch' -> 'web_fetch'."""
+    return re.sub(r"[^a-z0-9]+", "_", str(name or "").lower()).strip("_")
 
 
 def _flag_enabled(flag: str) -> bool:
@@ -294,7 +341,23 @@ class Toolbox:
         for candidate in self.names:
             if re.sub(r"[^a-z0-9]", "", candidate.lower()) == key:
                 return candidate
+        alias = TOOL_ALIASES.get(_alias_key(name))
+        if alias and (alias[0] in self.entries or alias[0] in self.native):
+            return alias[0]
         return name
+
+    def normalize_call(self, name: str, args: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+        """The tool and arguments to actually run: spelling, other harnesses' names, their argument names."""
+        resolved = self.resolve_name(name)
+        args = dict(args or {})
+        alias = TOOL_ALIASES.get(_alias_key(name))
+        if alias and resolved == alias[0] and name not in self.entries and name not in self.native:
+            for key, value in alias[1].items():
+                args.setdefault(key, value)
+        for old, new in ARG_ALIASES.get(resolved, {}).items():
+            if old in args and new not in args:
+                args[new] = args.pop(old)
+        return resolved, args
 
     def tool_context(self) -> dict[str, Any]:
         root = str(self.project_root or "").strip()

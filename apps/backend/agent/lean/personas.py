@@ -54,7 +54,7 @@ def _seed() -> list[AgentPersona]:
             title="Personal agent",
             description="General assistant. Handles conversation, planning, files, research, and anything that does not clearly belong to a specialist.",
             avatar="E",
-            toolsets=["core", "research", "terminal", "vision", "memory", "skills"],
+            toolsets=["core", "web", "live", "terminal", "vision", "memory", "skills"],
             builtin=True,
         ),
         AgentPersona(
@@ -64,7 +64,7 @@ def _seed() -> list[AgentPersona]:
             description="Deep web research, fact checking, comparing sources, news, sports, weather, and summarizing long pages or videos.",
             soul=_SOULS["scout"],
             avatar="J",
-            toolsets=["research", "memory"],
+            toolsets=["web", "live", "memory"],
         ),
         AgentPersona(
             id="forge",
@@ -73,7 +73,8 @@ def _seed() -> list[AgentPersona]:
             description="Writes and edits code, builds projects, runs terminal commands, debugs errors, and works inside project folders.",
             soul=_SOULS["forge"],
             avatar="G",
-            toolsets=["core", "terminal", "research", "memory"],
+            # The builder looks things up but doesn't need shopping, stocks or video cards.
+            toolsets=["core", "terminal", "web", "memory"],
         ),
     ]
 
@@ -93,8 +94,10 @@ _SOULS = {
 
 # Store format 2 renamed the built-in teammates (Scout -> Jarvis, Forge -> Glados).
 # The ids stay the same so chats, rooms and settings keep pointing at them.
-_STORE_VERSION = 2
+_STORE_VERSION = 3
 _RENAMES = {"scout": ("Jarvis", "J", "Scout"), "forge": ("Glados", "G", "Forge")}
+# Store format 3 split "research" into "web" and "live" (see toolbox.TOOLSET_ALIASES).
+_OLD_FORGE_TOOLSETS = ["core", "terminal", "research", "memory"]
 
 
 def _migrate_names(rows: list[dict[str, Any]]) -> None:
@@ -111,6 +114,19 @@ def _migrate_names(rows: list[dict[str, Any]]) -> None:
         if not soul.strip() or soul.startswith(f"You are {old},"):
             row["soul"] = _SOULS[row["id"]]
         row["updated_at"] = time.time()
+
+
+def _migrate_toolsets(rows: list[dict[str, Any]]) -> None:
+    """"research" becomes "web" + "live"; Glados on the old default gets just "web"."""
+    for row in rows:
+        sets = [str(item) for item in row.get("toolsets") or []]
+        if row.get("id") == "forge" and sets == _OLD_FORGE_TOOLSETS:
+            row["toolsets"] = ["core", "terminal", "web", "memory"]
+            continue
+        if "research" in sets:
+            index = sets.index("research")
+            sets[index:index + 1] = [s for s in ("web", "live") if s not in sets]
+            row["toolsets"] = sets
 
 
 class PersonaStore:
@@ -137,8 +153,10 @@ class PersonaStore:
                         pass
                     rows = []
             migrate = bool(rows) and version < _STORE_VERSION
-            if migrate:
+            if migrate and version < 2:
                 _migrate_names(rows)
+            if migrate and version < 3:
+                _migrate_toolsets(rows)
             self._agents = {}
             for row in rows:
                 try:

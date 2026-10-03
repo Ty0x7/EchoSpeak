@@ -446,8 +446,8 @@ class LeanTurn:
     def _run_tools(self, calls: list[Any], messages: list[dict[str, Any]], step: int, call_counts: dict[str, int]) -> None:
         prepared: list[tuple[Any, str, dict[str, Any], str]] = []
         for call in calls:
-            name = self.toolbox.resolve_name(call.name)
             args, arg_error = call.parsed_arguments()
+            name, args = self.toolbox.normalize_call(call.name, args)
             signature = self._sig(name, args)
             call_counts[signature] = call_counts.get(signature, 0) + 1
             problem = arg_error or ("" if call_counts[signature] < 3 else "repeat")

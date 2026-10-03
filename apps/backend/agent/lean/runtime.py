@@ -1322,7 +1322,8 @@ def _plain_error(error: str) -> str:
 
 # What each toolset lets an agent do, in the words a model choosing an owner needs.
 _TOOLSET_ABILITIES = {
-    "core": "read and write files", "terminal": "run terminal commands", "research": "search the web",
+    "core": "read and write files", "terminal": "run terminal commands", "web": "search the web",
+    "live": "look up live data (weather, sports, stocks, shopping)", "research": "search the web and live data",
     "vision": "see the screen", "desktop": "control desktop apps", "comms": "email and Discord",
     "memory": "recall memory", "self": "edit EchoSpeak itself", "skills": "installed skills",
 }
