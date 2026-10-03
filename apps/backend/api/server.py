@@ -1897,6 +1897,7 @@ async def lifespan(app: FastAPI):
         refresh_default_soul()
     except Exception:
         logger.warning("SOUL.md default refresh failed", exc_info=True)
+    threading.Thread(target=_autoconfigure_local_provider, name="local-model-autoconfig", daemon=True).start()
     build_id = (
         os.environ.get("ECHOSPEAK_BUILD_ID")
         or os.environ.get("ECHOSPEAK_DESKTOP_INSTANCE_ID")
@@ -3529,6 +3530,118 @@ def settings_test(request: SettingsTestRequest):
         return SettingsTestResponse(ok=False, target=target, message=str(e), latency_ms=ms)
 
 
+def _current_default_binding() -> tuple[str, str]:
+    """Provider and model a chat that follows the defaults would use right now."""
+    provider = config.local.provider if config.use_local_models else _default_cloud_provider()
+    return provider.value, _default_model_for_provider(provider) or "default"
+
+
+def _apply_settings_patch(patch: dict) -> None:
+    """Persist a settings patch and keep provider, port and open chats consistent."""
+    from agent.model_runtime import is_known_local_default_url, local_provider_default_url
+
+    global _agent, _runtime_provider
+    existing = _sanitize_incoming_settings(_read_runtime_settings())
+    local_patch = patch.get("local") if isinstance(patch.get("local"), dict) else None
+    if local_patch and "provider" in local_patch and "base_url" not in local_patch:
+        # Picking another app moves the address with it, unless a custom address was typed.
+        current_url = str(((existing.get("local") or {}).get("base_url")) or config.local.base_url or "")
+        new_url = local_provider_default_url(str(local_patch.get("provider") or ""))
+        if new_url and (not current_url.strip() or is_known_local_default_url(current_url)):
+            local_patch["base_url"] = new_url
+    old_default = _current_default_binding()
+    merged = _deep_merge(existing, patch)
+    write_runtime_override_payload(merged)
+    try:
+        config.reload()
+    except Exception:
+        # Config reload failure shouldn't brick the API; keep serving.
+        pass
+    new_default = _current_default_binding()
+    if new_default != old_default:
+        try:
+            changed = get_state_store().retarget_default_bindings(
+                old_provider_id=old_default[0],
+                old_model_id=old_default[1],
+                new_provider_id=new_default[0],
+                new_model_id=new_default[1],
+            )
+            if changed:
+                logger.info(f"Default model changed; {len(changed)} chat(s) now use {new_default[0]}:{new_default[1]}")
+        except Exception as exc:
+            logger.warning(f"Could not move chats to the new default model: {exc}")
+    # IMPORTANT: the agent/LLM objects are cached in-process.
+    # When settings change (model/provider/base_url/tool-calling flags), we must
+    # rebuild agents so the new config is actually used.
+    _agent = None
+    _runtime_provider = None
+    with _agent_pool_lock:
+        _agent_pool.clear()
+
+
+_AUTOCONFIG_LOCK = threading.Lock()
+_AUTOCONFIG_LAST = 0.0
+
+
+def _local_setup_chosen() -> bool:
+    """The user (or a previous auto-setup) already picked where models run."""
+    overrides = _read_runtime_settings() or {}
+    if "use_local_models" in overrides:
+        return True
+    local = overrides.get("local") if isinstance(overrides.get("local"), dict) else {}
+    if str(local.get("model_name") or "").strip():
+        return True
+    if os.getenv("USE_LOCAL_MODELS") or os.getenv("LOCAL_MODEL_NAME"):
+        return True
+    return bool(
+        str(getattr(config.openai, "api_key", "") or "").strip()
+        or str(getattr(config.gemini, "api_key", "") or "").strip()
+    )
+
+
+def _autoconfigure_local_provider(force: bool = False) -> Optional[dict]:
+    """First run: if LM Studio or Ollama is running, point EchoSpeak at it automatically.
+
+    Retries at most every 20 seconds until something is found, so starting LM Studio
+    after EchoSpeak still works. Never overrides a choice the user already made.
+    """
+    from agent.model_runtime import detect_local_providers
+
+    global _AUTOCONFIG_LAST
+    if not force and _local_setup_chosen():
+        return None
+    with _AUTOCONFIG_LOCK:
+        now = time.monotonic()
+        if not force and now - _AUTOCONFIG_LAST < 20:
+            return None
+        _AUTOCONFIG_LAST = now
+        found = next((row for row in detect_local_providers() if row.get("running")), None)
+        if not found:
+            return None
+        _apply_settings_patch({
+            "use_local_models": True,
+            "local": {
+                "provider": found["provider"],
+                "base_url": found["base_url"],
+                "model_name": found["models"][0],
+            },
+        })
+        logger.info(f"Auto-configured local models: {found['provider']} at {found['base_url']} ({found['models'][0]})")
+        return found
+
+
+@app.get("/provider/detect")
+async def detect_providers(apply: bool = Query(default=False)):
+    """Which local model apps are running right now, and their loaded models."""
+    from agent.model_runtime import detect_local_providers
+
+    rows = await asyncio.to_thread(detect_local_providers)
+    applied = None
+    if apply:
+        applied = await asyncio.to_thread(_autoconfigure_local_provider, True)
+    return {"providers": rows, "applied": applied}
+
+
 @app.put("/settings", response_model=SettingsResponse)
 async def put_settings(req: Request):
     """Merge and persist runtime settings overrides.
@@ -3541,27 +3654,10 @@ async def put_settings(req: Request):
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}")
 
     patch = _sanitize_incoming_settings(patch if isinstance(patch, dict) else {})
-    existing = _sanitize_incoming_settings(_read_runtime_settings())
-    merged = _deep_merge(existing, patch)
-
     try:
-        write_runtime_override_payload(merged)
-    except Exception as exc:
+        _apply_settings_patch(patch)
+    except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Failed to write settings: {exc}")
-
-    try:
-        config.reload()
-    except Exception:
-        # Config reload failure shouldn't brick the API; keep serving.
-        pass
-
-    # IMPORTANT: the agent/LLM objects are cached in-process.
-    # When settings change (model/provider/base_url/tool-calling flags), we must
-    # rebuild agents so the new config is actually used.
-    global _agent, _runtime_provider
-    _agent = None
-    with _agent_pool_lock:
-        _agent_pool.clear()
 
     try:
         await _reconcile_discord_bot_runtime()
@@ -7783,6 +7879,8 @@ async def get_provider_info(session_id: Optional[str] = Query(default=None)):
     """
     from agent.model_runtime import list_available_providers, resolve_model_profile
 
+    if not _local_setup_chosen():
+        await asyncio.to_thread(_autoconfigure_local_provider)
     providers = list_available_providers()
     def _profile_for(prov: ModelProvider, model_name: str) -> dict[str, Any]:
         registry = dict(getattr(config, "model_capability_profiles", {}) or {})
@@ -7903,7 +8001,9 @@ async def switch_provider(request: SwitchProviderRequest):
         ).strip()
         if not selected_model:
             raise HTTPException(status_code=422, detail="A model id is required")
-        if request.base_url:
+        from agent.model_runtime import is_known_local_default_url
+
+        if request.base_url and not is_known_local_default_url(request.base_url):
             configured = str(
                 _provider_configured_base_url(provider)
                 if provider not in {ModelProvider.OPENAI, ModelProvider.GEMINI}
@@ -7993,23 +8093,16 @@ async def list_provider_models(provider: Optional[str] = Query(default=None)):
     else:
         p = _runtime_provider or (config.local.provider if config.use_local_models else _default_cloud_provider())
 
-    if p == ModelProvider.OLLAMA:
-        try:
-            import requests
+    if p in (ModelProvider.OLLAMA, ModelProvider.LM_STUDIO, ModelProvider.LOCALAI, ModelProvider.VLLM):
+        from agent.model_runtime import list_local_models
 
-            base = _provider_configured_base_url(ModelProvider.OLLAMA)
-            resp = requests.get(f"{base}/api/tags", timeout=4)
-            resp.raise_for_status()
-            data = resp.json() or {}
-            models = set()
-            for m in data.get("models") or []:
-                name = m.get("name")
-                if name:
-                    models.add(name)
-            return {"provider": p.value, "models": sorted(models)}
-        except Exception as e:
-            logger.warning(f"Failed to list Ollama models: {e}")
-            return {"provider": p.value, "models": []}
+        base = _provider_configured_base_url(p)
+        models = await asyncio.to_thread(list_local_models, p, base, 4.0)
+        if not models:
+            logger.warning(f"No {p.value} models found at {base}")
+        return {"provider": p.value, "models": models, "base_url": base, "reachable": bool(models)}
+
+    return {"provider": p.value, "models": []}
 
     if p in (ModelProvider.LM_STUDIO, ModelProvider.LOCALAI, ModelProvider.VLLM):
         try:

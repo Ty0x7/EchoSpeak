@@ -1744,6 +1744,49 @@ class StateStore:
             self._persist_thread_state()
             return binding.model_copy(deep=True)
 
+    def retarget_default_bindings(
+        self,
+        *,
+        old_provider_id: str,
+        old_model_id: str,
+        new_provider_id: str,
+        new_model_id: str,
+    ) -> list[str]:
+        """Move Sessions that were still on the old default to the new default.
+
+        A Session the user deliberately pointed somewhere else keeps its choice.
+        Returns the Session ids that changed.
+        """
+
+        old_models = {str(old_model_id or ""), "default", ""}
+        changed: list[str] = []
+        with self._lock:
+            for key, state in self._thread_state.items():
+                current = state.model_binding
+                if current is None or current.provider_configuration_id != "global-default":
+                    continue
+                if current.provider_id != old_provider_id or current.model_id not in old_models:
+                    continue
+                if current.provider_id == new_provider_id and current.model_id == new_model_id:
+                    continue
+                binding = SessionModelBinding(
+                    session_id=key,
+                    provider_id=new_provider_id,
+                    model_id=new_model_id,
+                    provider_configuration_id=current.provider_configuration_id,
+                    binding_revision=current.binding_revision + 1,
+                    created_at=current.created_at,
+                    updated_at=time.time(),
+                )
+                state.model_binding = binding
+                state.runtime_provider = binding.provider_id
+                state.selected_model_id = binding.model_id
+                state.updated_at = time.time()
+                changed.append(key)
+            if changed:
+                self._persist_thread_state()
+        return changed
+
     def list_thread_states(self) -> list[ThreadSessionState]:
         """Return Session state snapshots for UI projections and maintenance."""
         with self._lock:

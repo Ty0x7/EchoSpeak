@@ -466,9 +466,10 @@ class ModelProvider(str, Enum):
 
 class LocalModelConfig(BaseModel):
     """Configuration for local model providers."""
-    provider: ModelProvider = ModelProvider.OLLAMA
-    base_url: str = "http://localhost:11434"
-    model_name: str = "qwen3.5-2b-uncensored-hauhaucs-aggressive"
+    provider: ModelProvider = ModelProvider.LM_STUDIO
+    base_url: str = "http://localhost:1234"
+    # Empty until chosen; the runtime falls back to whatever the app has loaded.
+    model_name: str = ""
     temperature: float = 0.7
     max_tokens: int = 4096
     context_length: int = 32768
@@ -569,12 +570,12 @@ class Config:
 
     def _load_env_vars(self):
         """Load configuration from environment variables."""
-        local_provider_raw = os.getenv("LOCAL_MODEL_PROVIDER", "ollama")
+        local_provider_raw = os.getenv("LOCAL_MODEL_PROVIDER", "lmstudio")
         embedding_provider_raw = os.getenv("EMBEDDING_PROVIDER", "openai")
         try:
             local_provider = ModelProvider(local_provider_raw)
         except Exception:
-            local_provider = ModelProvider.OLLAMA
+            local_provider = ModelProvider.LM_STUDIO
         try:
             embedding_provider = ModelProvider(embedding_provider_raw)
         except Exception:
@@ -613,8 +614,8 @@ class Config:
 
         self.local = LocalModelConfig(
             provider=local_provider,
-            base_url=os.getenv("LOCAL_MODEL_URL", "http://localhost:11434"),
-            model_name=os.getenv("LOCAL_MODEL_NAME", "qwen3.5-2b-uncensored-hauhaucs-aggressive"),
+            base_url=os.getenv("LOCAL_MODEL_URL", "http://localhost:1234"),
+            model_name=os.getenv("LOCAL_MODEL_NAME", ""),
             temperature=float(os.getenv("LOCAL_MODEL_TEMPERATURE", "0.7")),
             max_tokens=int(os.getenv("LOCAL_MODEL_MAX_TOKENS", "4096")),
             context_length=int(os.getenv("LOCAL_MODEL_CONTEXT", "32768")),

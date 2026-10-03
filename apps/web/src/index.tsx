@@ -57,6 +57,8 @@ import { SILENT_CHAT_TOOLS, buildMessageUsage, formatToolActivity, previewToolIn
 import { colors, defaultAvatarConfig, fallbackProviders, fetchWithTimeout, geminiModelOptions, isEmptySessionDraft, isLmStudioOnlyLocked, listableProviders, normalizeTimestampMs, openaiModelOptions, sanitizeForTTS, stopTts, useAppStore } from "./app/runtime";
 import { globalCss } from "./app/globalCss";
 import { ActivityCard, ChatBubble, ContextMeter, LiveChatActivityBar } from "./app/chatComponents";
+
+const PROVIDER_LABELS: Record<string, string> = { lmstudio: "LM Studio", ollama: "Ollama", localai: "LocalAI", vllm: "vLLM" };
 type DashboardTab = "chat" | "research" | "overview" | "skills" | "memory" | "docs" | "settings" | "search_settings" | "mcp_settings" | "advanced_settings" | "system_services" | "capabilities" | "approvals" | "executions" | "projects" | "automations" | "connections" | "soul" | "services" | "avatar_editor";
 
 export const Dashboard: React.FC<{
@@ -1284,17 +1286,27 @@ export const Dashboard: React.FC<{
     }
   };
 
+  const modelsRequestRef = useRef("");
   const refreshProviderModels = async (provider: string) => {
+    modelsRequestRef.current = provider;
     try {
       setModelsLoading(true);
       const resp = await fetchWithTimeout(`${apiBase}/provider/models?provider=${encodeURIComponent(provider)}`);
       if (!resp.ok) return;
       const data = (await resp.json()) as ProviderModelsResponse;
-      setProviderModels(Array.isArray(data.models) ? data.models : []);
+      if (modelsRequestRef.current !== provider) return;
+      const models = Array.isArray(data.models) ? data.models : [];
+      setProviderModels(models);
+      if (!models.length && listableProviders.includes(provider)) {
+        const name = PROVIDER_LABELS[provider] || provider;
+        setProviderError(`${name} isn't answering. Open ${name}, load a model and start its local server, then pick it again.`);
+      } else {
+        setProviderError((prev) => (prev && prev.includes("isn't answering") ? null : prev));
+      }
     } catch {
-      setProviderModels([]);
+      if (modelsRequestRef.current === provider) setProviderModels([]);
     } finally {
-      setModelsLoading(false);
+      if (modelsRequestRef.current === provider) setModelsLoading(false);
     }
   };
 
@@ -1314,7 +1326,6 @@ export const Dashboard: React.FC<{
       if (next.provider === "openai") body.openai_model = next.model || undefined;
       else if (next.provider === "gemini") body.gemini_model = next.model || undefined;
       else body.model = next.model || undefined;
-      if (next.base_url) body.base_url = next.base_url;
 
       const resp = await fetchWithTimeout(`${apiBase}/provider/switch`, {
         method: "POST",
@@ -3030,7 +3041,8 @@ export const Dashboard: React.FC<{
   };
 
   useEffect(() => {
-    if (!initialHydrationComplete || !activeThreadId) return;
+    // Also with no chat open yet (fresh install): show the real default, not the first list entry.
+    if (!initialHydrationComplete) return;
     refreshProviderInfo({ allowRetry: true });
   }, [apiBase, activeThreadId, initialHydrationComplete]);
 
@@ -3217,6 +3229,7 @@ export const Dashboard: React.FC<{
     if (switchingProvider) return;
 
     const next = { provider: providerDraft.provider, model: providerDraft.model, base_url: providerDraft.base_url };
+    if (listableProviders.includes(next.provider) && !next.model) return;
     const last = lastAppliedProviderRef.current;
     if (last && last.provider === next.provider && last.model === (next.model || "")) return;
 
@@ -3226,6 +3239,14 @@ export const Dashboard: React.FC<{
 
     return () => window.clearTimeout(t);
   }, [providerDraft.provider, providerDraft.model, providerDraft.base_url, switchingProvider]);
+
+  useEffect(() => {
+    const onSettingsSaved = () => {
+      void refreshProviderInfo();
+    };
+    window.addEventListener("echospeak:settings-saved", onSettingsSaved);
+    return () => window.removeEventListener("echospeak:settings-saved", onSettingsSaved);
+  }, [apiBase]);
 
   useEffect(() => {
     const listener = () => {
@@ -4121,6 +4142,11 @@ export const Dashboard: React.FC<{
                               ×
                             </button>
                           )}
+                          {providerError ? (
+                            <span role="status" title={providerError} style={{ marginLeft: 8, color: "#e8b86a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                              {providerError}
+                            </span>
+                          ) : null}
                         </div>
                         <textarea
                           ref={textareaRef}
@@ -4284,15 +4310,12 @@ export const Dashboard: React.FC<{
                             value={providerDraft.provider}
                             onChange={(e) => {
                               const p = e.target.value;
+                              setProviderModels([]);
                               setProviderDraft((d) => ({
                                 ...d,
                                 provider: p,
-                                model:
-                                  p === "openai"
-                                    ? openaiModelOptions[0]
-                                    : p === "gemini"
-                                      ? geminiModelOptions[0]
-                                      : providerModels[0] || d.model,
+                                base_url: "",
+                                model: p === "openai" ? openaiModelOptions[0] : p === "gemini" ? geminiModelOptions[0] : "",
                               }));
                             }}
                             disabled={switchingProvider || lmStudioOnly}

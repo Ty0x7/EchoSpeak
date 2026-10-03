@@ -76,14 +76,21 @@ def resolve_endpoint(provider: str, model_id: str = "") -> Endpoint:
             "The in-process llama.cpp provider has no HTTP endpoint. "
             "Serve the model with llama-server or LM Studio instead."
         )
-    base = resolve_local_provider_base_url(resolved, str(config.local.base_url or ""))
+    from agent.model_runtime import first_local_model
+
+    configured_url = str(config.local.base_url or "")
+    base = resolve_local_provider_base_url(resolved, configured_url)
     base = base.rstrip("/")
     if not base.endswith("/v1"):
         base = f"{base}/v1"
+    model = model_id if model_id and model_id != "default" else str(config.local.model_name or "")
+    if not model or model == "default":
+        # Nothing chosen yet (fresh install): use whatever the app has loaded.
+        model = first_local_model(resolved, configured_url) or model
     return Endpoint(
         base_url=base,
         api_key="not-needed",
-        model=model_id or str(config.local.model_name or ""),
+        model=model,
         provider=resolved.value,
         local=True,
     )
