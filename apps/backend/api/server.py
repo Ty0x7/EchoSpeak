@@ -471,7 +471,6 @@ def _validate_settings_effective(effective: dict) -> list[dict]:
         "allow_terminal_commands",
         "allow_open_application",
         "allow_self_modification",
-        "allow_discord_webhook",
     ]
     if not enable_system_actions:
         for k in allow_flags:
@@ -504,19 +503,6 @@ def _validate_settings_effective(effective: dict) -> list[dict]:
         secret_path = str(s.get("webhook_secret_path") or "").strip()
         if not secret and not secret_path:
             issues.append({"key": "webhook_secret", "message": "Webhooks enabled but WEBHOOK_SECRET / WEBHOOK_SECRET_PATH is not set.", "severity": "error"})
-
-    if bool(s.get("allow_discord_webhook")):
-        url = str(s.get("discord_webhook_url") or "").strip()
-        if not url:
-            issues.append({"key": "discord_webhook_url", "message": "Allow Discord Webhook is enabled but DISCORD_WEBHOOK_URL is empty.", "severity": "error"})
-
-    if bool(s.get("cron_enabled")):
-        try:
-            from croniter import croniter as _ci  # type: ignore
-        except Exception:
-            _ci = None
-        if _ci is None:
-            issues.append({"key": "cron_enabled", "message": "Cron enabled but croniter is not installed on the backend.", "severity": "warning"})
 
     if bool(s.get("allow_open_application")):
         from config import _normalize_open_application_allowlist
@@ -945,38 +931,6 @@ def _verify_webhook_signature(secret: str, body: bytes, signature_header: Option
         return hmac.compare_digest(expected, sig)
     except Exception:
         return False
-
-
-_cron_state_lock = threading.Lock()
-
-
-def _load_cron_state() -> dict:
-    path_val = str(getattr(config, "cron_state_path", "") or "").strip()
-    if not path_val:
-        return {}
-    path = Path(path_val).expanduser()
-    try:
-        if not path.exists():
-            return {}
-        raw = path.read_text(encoding="utf-8").strip()
-        if not raw:
-            return {}
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _save_cron_state(state: dict) -> None:
-    path_val = str(getattr(config, "cron_state_path", "") or "").strip()
-    if not path_val:
-        return
-    path = Path(path_val).expanduser()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        return
 
 
 def get_vision_manager():
@@ -3433,12 +3387,19 @@ class SettingsTestResponse(BaseModel):
     latency_ms: Optional[float] = None
 
 
+def _settings_response() -> "SettingsResponse":
+    """Effective settings (redacted), the current override patch and any issues."""
+    s = config.to_public_dict()
+    # Not a config field: lives only in the override file (or LM_STUDIO_ONLY), so add it here.
+    s["lm_studio_only"] = _is_lmstudio_only_enabled()
+    overrides = _redact_settings_payload(_sanitize_incoming_settings(_read_runtime_settings()))
+    return SettingsResponse(settings=s, overrides=overrides, issues=_validate_settings_effective(s))
+
+
 @app.get("/settings", response_model=SettingsResponse)
 async def get_settings():
     """Return the effective settings (redacted) and the current override patch."""
-    s = config.to_public_dict()
-    overrides = _redact_settings_payload(_sanitize_incoming_settings(_read_runtime_settings()))
-    return SettingsResponse(settings=s, overrides=overrides, issues=_validate_settings_effective(s))
+    return _settings_response()
 
 
 def _http_get_json(url: str, headers: Optional[dict] = None, timeout_s: float = 6.0) -> tuple[int, Any]:
@@ -3597,9 +3558,7 @@ async def put_settings(req: Request):
     except Exception as exc:
         logger.warning(f"Heartbeat reconcile after settings save failed: {exc}")
 
-    s = config.to_public_dict()
-    overrides = _redact_settings_payload(_sanitize_incoming_settings(_read_runtime_settings()))
-    return SettingsResponse(settings=s, overrides=overrides, issues=_validate_settings_effective(s))
+    return _settings_response()
 
 
 class SoulResponse(BaseModel):
@@ -3717,14 +3676,6 @@ class SessionsResponse(BaseModel):
     thread_ids: List[str]
     lm_studio_only: bool
     runtime_provider: Optional[str] = None
-
-
-class CronTickRequest(BaseModel):
-    job_id: str = Field(..., description="Job identifier")
-    cron: str = Field(..., description="Cron schedule (5-field)")
-    message: str = Field(..., description="Message to run when due")
-    thread_id: Optional[str] = Field(default=None, description="Session/thread id")
-    include_memory: bool = Field(default=True, description="Include memory")
 
 
 class ScreenAnalysisResponse(BaseModel):
@@ -5226,15 +5177,6 @@ async def list_execution_tool_runs(
     )
 
 
-@app.get("/traces/{trace_id}")
-async def get_trace(trace_id: str):
-    store = get_state_store()
-    trace = store.read_trace(trace_id)
-    if trace is None:
-        raise HTTPException(status_code=404, detail="Trace not found")
-    return trace
-
-
 # === Project Management Endpoints ===
 
 class ProjectResponse(BaseModel):
@@ -5438,69 +5380,7 @@ async def deactivate_project(thread_id: Optional[str] = Query(default=None)):
     return {"ok": True, "deactivated": True, "thread_state": get_state_store().get_thread_state(thread_id).model_dump()}
 
 
-# === Routine Management Endpoints ===
-
-class RoutineResponse(BaseModel):
-    id: str
-    name: str
-    description: Optional[str] = ""
-    enabled: bool = True
-    trigger_type: str = "schedule"
-    schedule: Optional[str] = None
-    webhook_path: Optional[str] = None
-    action_type: str = "query"
-    action_config: Dict[str, Any] = Field(default_factory=dict)
-    last_run: Optional[str] = None
-    next_run: Optional[str] = None
-    run_count: int = 0
-    created_at: str
-    updated_at: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    delivery_channels: List[str] = Field(default_factory=lambda: ["web"])
-    project_id: str = ""
-    session_id: str = ""
-    missed_run_policy: str = "run_next"
-    last_task_id: str = ""
-    last_result_status: str = ""
-    last_error: str = ""
-
-
-class RoutineListResponse(BaseModel):
-    items: List[RoutineResponse]
-    count: int
-
-
-class RoutineCreateRequest(BaseModel):
-    name: str
-    description: Optional[str] = ""
-    enabled: Optional[bool] = True
-    trigger_type: Optional[str] = "schedule"
-    schedule: Optional[str] = None
-    webhook_path: Optional[str] = None
-    action_type: Optional[str] = "query"
-    action_config: Optional[Dict[str, Any]] = None
-    metadata: Optional[Dict[str, Any]] = None
-    delivery_channels: Optional[List[str]] = None
-    project_id: str = ""
-    session_id: str = ""
-    missed_run_policy: str = "run_next"
-
-
-class RoutineUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    enabled: Optional[bool] = None
-    trigger_type: Optional[str] = None
-    schedule: Optional[str] = None
-    webhook_path: Optional[str] = None
-    action_type: Optional[str] = None
-    action_config: Optional[Dict[str, Any]] = None
-    metadata: Optional[Dict[str, Any]] = None
-    delivery_channels: Optional[List[str]] = None
-    project_id: Optional[str] = None
-    session_id: Optional[str] = None
-    missed_run_policy: Optional[str] = None
-
+# === Automation scope ===
 
 def _require_automation_project_scope(session_id: str, project_id: str = "") -> str:
     key = str(session_id or "").strip()
@@ -5518,158 +5398,25 @@ def _require_automation_project_scope(session_id: str, project_id: str = "") -> 
     return requested_project_id
 
 
-@app.get("/routines", response_model=RoutineListResponse)
-async def list_routines(
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-    enabled_only: bool = False,
-):
-    """List Routines in the exact active Project/Session scope."""
-    from agent.routines import get_routine_manager
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    manager = get_routine_manager()
-    routines = [
-        routine for routine in manager.list_routines(enabled_only=enabled_only)
-        if routine.project_id == scoped_project_id and routine.session_id == session_id
-    ]
-    return RoutineListResponse(
-        items=[RoutineResponse(**r.model_dump()) for r in routines],
-        count=len(routines),
-    )
-
-
-@app.get("/routines/{routine_id}", response_model=RoutineResponse)
-async def get_routine(
-    routine_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Get a routine by ID."""
-    from agent.routines import get_routine_manager
-    manager = get_routine_manager()
-    routine = manager.get_routine(routine_id)
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    if not routine or routine.project_id != scoped_project_id or routine.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    return RoutineResponse(**routine.model_dump())
-
-
-@app.post("/routines", response_model=RoutineResponse)
-async def create_routine(request: RoutineCreateRequest):
-    """Create a new routine."""
-    from agent.routines import get_routine_manager
-    scoped_project_id = _require_automation_project_scope(request.session_id, request.project_id)
-    manager = get_routine_manager()
-    routine = manager.create_routine(
-        name=request.name,
-        description=request.description,
-        enabled=request.enabled,
-        trigger_type=request.trigger_type,
-        schedule=request.schedule,
-        webhook_path=request.webhook_path,
-        action_type=request.action_type,
-        action_config=request.action_config,
-        metadata=request.metadata,
-        delivery_channels=request.delivery_channels,
-        project_id=scoped_project_id,
-        session_id=request.session_id,
-        missed_run_policy=request.missed_run_policy,
-    )
-    return RoutineResponse(**routine.model_dump())
-
-
-@app.put("/routines/{routine_id}", response_model=RoutineResponse)
-async def update_routine(
-    routine_id: str,
-    request: RoutineUpdateRequest,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Update an existing routine."""
-    from agent.routines import get_routine_manager
-    manager = get_routine_manager()
-    existing = manager.get_routine(routine_id)
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    if not existing or existing.project_id != scoped_project_id or existing.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    if request.project_id is not None and str(request.project_id) != scoped_project_id:
-        raise HTTPException(status_code=409, detail="Routine Project cannot change outside its scope")
-    if request.session_id is not None and str(request.session_id) != session_id:
-        raise HTTPException(status_code=409, detail="Routine Session cannot change outside its scope")
-    routine = manager.update_routine(
-        routine_id=routine_id,
-        name=request.name,
-        description=request.description,
-        enabled=request.enabled,
-        trigger_type=request.trigger_type,
-        schedule=request.schedule,
-        webhook_path=request.webhook_path,
-        action_type=request.action_type,
-        action_config=request.action_config,
-        metadata=request.metadata,
-        delivery_channels=request.delivery_channels,
-        project_id=request.project_id,
-        session_id=request.session_id,
-        missed_run_policy=request.missed_run_policy,
-    )
-    if not routine:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    return RoutineResponse(**routine.model_dump())
-
-
-@app.delete("/routines/{routine_id}")
-async def delete_routine(
-    routine_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Delete a routine."""
-    from agent.routines import get_routine_manager
-    manager = get_routine_manager()
-    routine = manager.get_routine(routine_id)
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    if not routine or routine.project_id != scoped_project_id or routine.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    success = manager.delete_routine(routine_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    return {"ok": True, "deleted": routine_id}
-
-
-@app.post("/routines/{routine_id}/run")
-async def run_routine(
-    routine_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Manually run a routine."""
-    from agent.routines import get_routine_manager
-    manager = get_routine_manager()
-    routine = manager.get_routine(routine_id)
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    if not routine or routine.project_id != scoped_project_id or routine.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    success = manager.run_routine(routine_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Routine not found or run failed")
-    return {"ok": True, "run": routine_id}
-
-
 @app.post("/webhooks/{path:path}")
 async def webhook_trigger(path: str, request: Request):
     """Trigger a routine via webhook."""
     from agent.routines import get_routine_manager
     manager = get_routine_manager()
     
+    if not bool(getattr(config, "webhook_enabled", False)):
+        raise HTTPException(status_code=403, detail="Webhooks are turned off (Settings > Advanced).")
     routine = manager.get_routine_by_webhook(f"/{path}")
     if not routine:
         raise HTTPException(status_code=404, detail="Webhook not found")
     raw_body = await request.body()
     secret = _load_webhook_secret()
-    if secret:
-        sig = request.headers.get("x-echospeak-signature") or request.headers.get("x-signature") or ""
-        if not _verify_webhook_signature(secret, raw_body, sig):
-            raise HTTPException(status_code=401, detail="Invalid signature")
+    if not secret:
+        # Unsigned webhooks would let any local program or web page run a routine.
+        raise HTTPException(status_code=403, detail="Set a webhook secret in Settings > Advanced before using webhooks.")
+    sig = request.headers.get("x-echospeak-signature") or request.headers.get("x-signature") or ""
+    if not _verify_webhook_signature(secret, raw_body, sig):
+        raise HTTPException(status_code=401, detail="Invalid signature")
     
     # Get request body if any — validate type and size
     try:
@@ -6187,14 +5934,6 @@ async def list_documents(
 
 
 # ── Observability Dashboard (v6.0.0) ────────────────────────────────
-
-@app.get("/observability")
-async def observability_dashboard():
-    """Get the observability dashboard with system metrics, tool stats, and errors."""
-    from agent.observability import get_observability_collector
-    collector = get_observability_collector()
-    return collector.get_dashboard()
-
 
 # ── NDJSON Streaming (v6.0.0) ────────────────────────────────────────
 
@@ -6965,20 +6704,6 @@ async def browse_workspace(path: str = Query(default="", description="Relative p
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/trigger/cron")
-async def trigger_cron(_request: CronTickRequest):
-    raise HTTPException(
-        status_code=410,
-        detail="Legacy cron trigger retired; create a Project/Session-scoped Routine",
-    )
-
-
-@app.post("/trigger/webhook")
-async def trigger_webhook(_request: Request):
-    raise HTTPException(
-        status_code=410,
-        detail="Legacy generic webhook retired; use a signed Project/Session-scoped Routine webhook",
-    )
 @app.get("/history", response_model=HistoryResponse)
 def get_history(thread_id: Optional[str] = Query(default=None)):
     """
@@ -7095,78 +6820,6 @@ def clear_history(thread_id: Optional[str] = Query(default=None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/research/artifacts")
-async def list_research_artifacts_api(
-    project_id: str = Query(default=""),
-    session_id: str = Query(...),
-    limit: int = Query(default=50, ge=1, le=200),
-):
-    from agent.research_artifacts import list_research_artifacts_for_scope
-
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    rows = list_research_artifacts_for_scope(
-        project_id=scoped_project_id,
-        session_id=session_id,
-        limit=limit,
-    )
-    return {"items": [r.model_dump(mode="json") for r in rows], "count": len(rows)}
-
-
-@app.get("/research/artifacts/{artifact_id}")
-async def get_research_artifact_api(
-    artifact_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    from agent.research_artifacts import get_research_artifact_for_scope
-
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    art = get_research_artifact_for_scope(
-        artifact_id,
-        project_id=scoped_project_id,
-        session_id=session_id,
-    )
-    if art is None:
-        raise HTTPException(status_code=404, detail="Research artifact not found")
-    return art.model_dump(mode="json")
-
-
-@app.post("/research/artifacts/lookup")
-async def lookup_research_artifact_api(payload: Dict[str, Any] = Body(default_factory=dict)):
-    from agent.research_artifacts import find_compatible_research_artifact
-
-    session_id = str(payload.get("session_id") or "")
-    project_id = _require_automation_project_scope(session_id, str(payload.get("project_id") or ""))
-    art = find_compatible_research_artifact(
-        project_id=project_id,
-        session_id=session_id,
-        objective=str(payload.get("objective") or ""),
-        require_project=bool(payload.get("require_project", True)),
-    )
-    if art is None:
-        return {"ok": False, "error_code": "not_found", "artifact": None}
-    return {"ok": True, "artifact": art.model_dump(mode="json")}
-
-
-@app.post("/research/artifacts/{artifact_id}/consume")
-async def consume_research_artifact_api(artifact_id: str, payload: Dict[str, Any] = Body(default_factory=dict)):
-    """Skill handoff: structured artifact only (never invent citations from prose)."""
-    from agent.research_artifacts import consume_research_artifact_for_skill
-
-    session_id = str(payload.get("session_id") or "")
-    project_id = _require_automation_project_scope(session_id, str(payload.get("project_id") or ""))
-    result = consume_research_artifact_for_skill(
-        artifact_id,
-        project_id=project_id,
-        session_id=session_id,
-        skill_id=str(payload.get("skill_id") or ""),
-        objective=str(payload.get("objective") or ""),
-    )
-    if not result.get("ok"):
-        raise HTTPException(status_code=409, detail=result)
-    return result
-
-
 @app.get("/skills/status")
 async def skills_status_api():
     """Truthful skill executable classification (prompt-only never marked executable)."""
@@ -7186,125 +6839,6 @@ async def skills_status_api():
             for r in rows
             if str(r.get("status") or "").startswith("blocked") or r.get("status") in {"disabled", "invalid", "deprecated"}
         ],
-    }
-
-
-@app.get("/studio/overview")
-async def studio_overview_api(session_id: Optional[str] = Query(default=None)):
-    """Read-only Studio/Viewer projection over canonical backend owners."""
-    from agent.heartbeat import get_heartbeat_manager
-    from agent.automation_runtime import get_automation_run_store
-    from agent.connections import get_connection_registry
-    from agent.projects import get_project_manager
-    from agent.routines import get_routine_manager
-    from agent.skill_execution import list_skill_executions_for_session, list_skill_proposals
-    from agent.skill_status_audit import audit_all_skills
-    from agent.specialist_runtime import get_specialist_runtime_manager
-    from agent.task_store import get_task_store
-    from agent.tool_registry import ToolRegistry
-
-    key = _normalize_thread_id(session_id)
-    state_store = get_state_store()
-    state = state_store.get_thread_state(key)
-    enabled_funcs = {
-        str(getattr(func, "name", None) or getattr(func, "__name__", ""))
-        for func in ToolRegistry.get_config_filtered_funcs(config)
-    }
-    selected = set(state.allowed_tool_names or [])
-    tools = []
-    for name, entry in sorted(ToolRegistry.get_all().items()):
-        missing_flags = [
-            flag for flag in entry.policy_flags
-            if not bool(getattr(config, str(flag).lower(), False))
-        ]
-        tools.append(
-            {
-                "name": name,
-                "description": entry.description,
-                "owner": entry.owner,
-                "category": entry.category,
-                "registered": True,
-                "available": name in enabled_funcs,
-                "executable": name in enabled_funcs,
-                "selected": name in selected,
-                "running": False,
-                "risk_level": entry.risk_level,
-                "is_action": entry.is_action,
-                "policy_flags": list(entry.policy_flags),
-                "blocked_reason": f"Missing configuration: {', '.join(missing_flags)}" if missing_flags else "",
-            }
-        )
-
-    skills = audit_all_skills(
-        available_capabilities={"approvals", "research"},
-        available_artifacts=set(),
-    )
-    active_project_id = str(state.active_project_id or "")
-    tasks = (
-        get_task_store().list(project_id=active_project_id, session_id=key)
-        if active_project_id else []
-    )
-    routines = [
-        routine for routine in get_routine_manager().list_routines()
-        if routine.project_id == active_project_id and routine.session_id == key
-    ] if active_project_id else []
-    automation_runs = (
-        get_automation_run_store().list_runs(project_id=active_project_id, session_id=key)
-        if active_project_id else []
-    )
-    connections = (
-        get_connection_registry().list(project_id=active_project_id, session_id=key)
-        if active_project_id else []
-    )
-    projects = get_project_manager().list_projects()
-    executions = state_store.list_executions(thread_id=key, limit=30)
-    heartbeat = get_heartbeat_manager()
-    resolution = {}
-    if executions:
-        resolution = dict((executions[0].metadata or {}).get("echo_resolution") or {})
-
-    return {
-        "schema_version": 1,
-        "session": state.model_dump(mode="json"),
-        "active_project_id": active_project_id,
-        "projects": [item.model_dump(mode="json") for item in projects],
-        "tasks": [item.model_dump(mode="json") for item in tasks],
-        "routines": [item.model_dump(mode="json") for item in routines],
-        "automation_runs": [item.model_dump(mode="json") for item in automation_runs],
-        "connections": [item.model_dump(mode="json") for item in connections],
-        "heartbeat": {
-            "enabled": bool(getattr(config, "heartbeat_enabled", False)),
-            "running": bool(heartbeat and heartbeat.is_running),
-            "last_tick": heartbeat.last_tick if heartbeat else None,
-            "next_tick": heartbeat.next_tick if heartbeat else None,
-            "history": heartbeat.get_history(limit=10) if heartbeat else [],
-        },
-        "tools": tools,
-        "skills": skills,
-        "specialist_runtimes": [
-            item.model_dump(mode="json")
-            for item in get_specialist_runtime_manager().catalog()
-        ],
-        "skill_proposals": [item.model_dump(mode="json") for item in list_skill_proposals()],
-        "skill_executions": [
-            item.model_dump(mode="json")
-            for item in list_skill_executions_for_session(key, limit=30)
-        ],
-        "executions": [item.model_dump(mode="json") for item in executions],
-        "resolution": resolution,
-        "owners": {
-            "projects": "ProjectManager",
-            "sessions": "ThreadSessionState",
-            "tasks": "TaskStore",
-            "routines": "RoutineManager",
-            "automation_runs": "AutomationRunStore",
-            "connections": "ConnectionRegistry",
-            "heartbeat": "HeartbeatManager",
-            "tools": "ToolRegistry",
-            "skills": "SkillsRegistry",
-            "specialist_runtimes": "SpecialistRuntimeManager",
-            "executions": "StateStore",
-        },
     }
 
 
@@ -7669,35 +7203,6 @@ async def disconnect_connection_api(
         return {"disconnected": True, "connection_id": removed.id}
     except Exception as exc:
         raise _connection_api_error(exc) from exc
-
-
-@app.get("/skills/executions")
-async def skill_executions_api(session_id: str = Query(...), limit: int = Query(default=40, ge=1, le=200)):
-    """Session-scoped projection of durable governed SkillExecution records."""
-    from agent.skill_execution import list_skill_executions_for_session
-    from agent.threads import get_thread_manager
-
-    key = str(session_id or "").strip()
-    if not key or get_thread_manager().get_thread(key) is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    rows = list_skill_executions_for_session(key, limit=limit)
-    return {"items": [row.model_dump(mode="json") for row in rows], "count": len(rows)}
-
-
-@app.post("/skills/executions/{skill_execution_id}/cancel")
-async def cancel_skill_execution_api(skill_execution_id: str, session_id: str = Query(...)):
-    from agent.skill_execution import SkillExecutionError, cancel_skill_execution, get_skill_execution
-
-    record = get_skill_execution(skill_execution_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="SkillExecutionRecord not found")
-    if record.session_id != str(session_id or "").strip():
-        raise HTTPException(status_code=403, detail="SkillExecution belongs to another Session")
-    try:
-        updated = cancel_skill_execution(record.id, state_store=get_state_store())
-    except SkillExecutionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return updated.model_dump(mode="json")
 
 
 @app.get("/diagnostics/tool-calling")

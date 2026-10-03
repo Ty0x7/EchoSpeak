@@ -57,7 +57,6 @@ _SETTINGS_CREDENTIAL_REF_KEY = "runtime_settings"
 
 SECRET_TOP_LEVEL_SETTINGS = {
     "api_auth_key",
-    "discord_webhook_url",
     "discord_bot_token",
     "webhook_secret",
     "webhook_secret_path",
@@ -325,8 +324,41 @@ def _migrate_v10_defaults(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+# Settings retired in 10.0 with the classic settings screen: nothing reads them
+# any more (see docs/research/harness-review.md, part C). Dropped from saved
+# settings so they don't linger; every setting still in use keeps its value.
+RETIRED_SETTING_KEYS = frozenset({
+    "cron_enabled", "cron_state_path", "trace_enabled", "trace_path", "disable_native_tool_calling",
+    "use_tool_calling_llm", "discord_bot_auto_confirm", "telegram_auto_confirm", "allow_discord_webhook",
+    "discord_webhook_url", "multi_agent_enabled", "notification_channels", "orchestration_max_subtasks",
+    "orchestration_timeout", "summary_keep_last_turns", "summary_trigger_turns", "a2a_known_agents",
+    "sports_live_enabled", "action_parser_heuristic_bypass", "action_plan_enabled", "allowed_commands",
+    "calendar_provider", "command_prefix", "echo_resolution_enabled", "email_max_results", "ffmpeg_path",
+    "ffprobe_path", "generation_local_provider", "llm_trim_reserve_tokens", "model_control_max_loops",
+    "research_max_attempts_per_requirement", "research_max_context_tokens", "research_max_external_calls",
+    "research_max_sources_per_requirement", "research_max_time_seconds", "skill_curator_interval_minutes",
+    "threading_auto_title", "threading_enabled", "turn_understanding_diagnostic_preview",
+    "turn_understanding_max_output_tokens", "turn_understanding_probe_timeout_seconds",
+    "turn_understanding_retry_max_output_tokens", "turn_understanding_timeout_max_seconds",
+    "turn_understanding_timeout_seconds", "vertex_location", "video_ffprobe_timeout_seconds",
+})
+
+
+def _drop_retired_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    retired = [key for key in payload if key in RETIRED_SETTING_KEYS]
+    if not retired:
+        return payload
+    for key in retired:
+        payload.pop(key, None)
+    try:
+        _write_json_dict(SETTINGS_PATH, payload)
+    except OSError:
+        pass
+    return payload
+
+
 def read_runtime_override_payload(include_secrets: bool = True, migrate_legacy: bool = True) -> dict[str, Any]:
-    public_payload = _migrate_v10_defaults(_read_json_dict(SETTINGS_PATH))
+    public_payload = _drop_retired_settings(_migrate_v10_defaults(_read_json_dict(SETTINGS_PATH)))
     refs = public_payload.get(_CREDENTIAL_REFS_KEY)
     refs = dict(refs) if isinstance(refs, dict) else {}
     secret_payload: dict[str, Any] = {}
@@ -673,7 +705,6 @@ class Config:
             os.getenv("ODDS_API_KEY", "").strip()
             or os.getenv("THE_ODDS_API_KEY", "").strip()
         )
-        self.sports_live_enabled = os.getenv("SPORTS_LIVE_ENABLED", "true").lower() == "true"
         raw_blocked = os.getenv("WEB_SEARCH_BLOCKED_DOMAINS", "")
         self.web_search_blocked_domains = [
             d.strip().lower().lstrip(".")
@@ -684,36 +715,15 @@ class Config:
         self.use_local_models = os.getenv("USE_LOCAL_MODELS", "false").lower() == "true"
         # use_tool_calling_llm: forces Ollama ToolCallingLLM wrapper format (opt-in).
         # Does NOT gate whether native tool paths may be attempted (see core._allow_llm_tool_calling).
-        self.use_tool_calling_llm = os.getenv("USE_TOOL_CALLING_LLM", "false").lower() == "true"
         self.lmstudio_tool_calling = os.getenv("LM_STUDIO_TOOL_CALLING", "false").lower() == "true"
         # Explicit opt-out for native tool-calling path (equal-access default is allow).
-        self.disable_native_tool_calling = os.getenv("DISABLE_NATIVE_TOOL_CALLING", "false").lower() == "true"
         self.llm_trim_max_tokens = int(os.getenv("LLM_TRIM_MAX_TOKENS", "0") or 0)
-        self.llm_trim_reserve_tokens = int(os.getenv("LLM_TRIM_RESERVE_TOKENS", "512") or 512)
-        # Hard provider boundaries for the canonical semantic/runtime loop. A
-        # model that stops producing bytes must release its Session slot rather
-        # than leaving the desktop in an unbounded "thinking" state.
-        self.turn_understanding_timeout_seconds = float(
-            os.getenv("TURN_UNDERSTANDING_TIMEOUT_SECONDS", "45") or 45
-        )
+        # Hard provider boundaries: a model that stops producing bytes must
+        # release its Session slot rather than leaving the desktop in an
+        # unbounded "thinking" state. (Cold start also bounds the startup prewarm.)
         self.turn_understanding_cold_start_timeout_seconds = float(
             os.getenv("TURN_UNDERSTANDING_COLD_START_TIMEOUT_SECONDS", "120") or 120
         )
-        self.turn_understanding_max_output_tokens = int(
-            os.getenv("TURN_UNDERSTANDING_MAX_OUTPUT_TOKENS", "2048") or 2048
-        )
-        self.turn_understanding_retry_max_output_tokens = int(
-            os.getenv("TURN_UNDERSTANDING_RETRY_MAX_OUTPUT_TOKENS", "4096") or 4096
-        )
-        self.turn_understanding_timeout_max_seconds = float(
-            os.getenv("TURN_UNDERSTANDING_TIMEOUT_MAX_SECONDS", "120") or 120
-        )
-        self.turn_understanding_probe_timeout_seconds = float(
-            os.getenv("TURN_UNDERSTANDING_PROBE_TIMEOUT_SECONDS", "8") or 8
-        )
-        self.turn_understanding_diagnostic_preview = os.getenv(
-            "TURN_UNDERSTANDING_DIAGNOSTIC_PREVIEW", "false"
-        ).lower() == "true"
         self.stream_startup_timeout_seconds = float(
             os.getenv("STREAM_STARTUP_TIMEOUT_SECONDS", "15") or 15
         )
@@ -723,9 +733,6 @@ class Config:
         self.model_stream_idle_timeout_seconds = max(
             5.0,
             float(os.getenv("MODEL_STREAM_IDLE_TIMEOUT_SECONDS", "45") or 45),
-        )
-        self.model_control_max_loops = max(
-            1, int(os.getenv("MODEL_CONTROL_MAX_LOOPS", "12") or 12)
         )
         self.model_control_max_tool_calls = max(
             0, int(os.getenv("MODEL_CONTROL_MAX_TOOL_CALLS", "16") or 16)
@@ -752,26 +759,10 @@ class Config:
         )
         # Global upper bounds for requirement-driven research. Per-depth
         # defaults may be lower; operator limits always win.
-        self.research_max_time_seconds = max(
-            1.0, float(os.getenv("RESEARCH_MAX_TIME_SECONDS", "120") or 120)
-        )
-        self.research_max_attempts_per_requirement = max(
-            1, int(os.getenv("RESEARCH_MAX_ATTEMPTS_PER_REQUIREMENT", "5") or 5)
-        )
-        self.research_max_external_calls = max(
-            1, int(os.getenv("RESEARCH_MAX_EXTERNAL_CALLS", "24") or 24)
-        )
-        self.research_max_sources_per_requirement = max(
-            1, int(os.getenv("RESEARCH_MAX_SOURCES_PER_REQUIREMENT", "8") or 8)
-        )
         self.research_max_concurrency = max(
             1, min(4, int(os.getenv("RESEARCH_MAX_CONCURRENCY", "4") or 4))
         )
-        self.research_max_context_tokens = max(
-            256, int(os.getenv("RESEARCH_MAX_CONTEXT_TOKENS", "12000") or 12000)
-        )
         self.context_budget_enabled = os.getenv("CONTEXT_BUDGET_ENABLED", "true").lower() == "true"
-        self.echo_resolution_enabled = os.getenv("ECHO_RESOLUTION_ENABLED", "true").lower() == "true"
 
         self.document_rag_enabled = os.getenv("DOCUMENT_RAG_ENABLED", "true").lower() == "true"
         self.doc_upload_max_mb = int(os.getenv("DOC_UPLOAD_MAX_MB", "25"))
@@ -796,15 +787,11 @@ class Config:
         self.doc_graph_max_entities = int(os.getenv("DOC_GRAPH_MAX_ENTITIES", "8") or 8)
         self.doc_graph_query_entities = int(os.getenv("DOC_GRAPH_QUERY_ENTITIES", "8") or 8)
 
-        self.summary_trigger_turns = int(os.getenv("SUMMARY_TRIGGER_TURNS", "18"))
-        self.summary_keep_last_turns = int(os.getenv("SUMMARY_KEEP_LAST_TURNS", "6"))
-        self.action_plan_enabled = os.getenv("ACTION_PLAN_ENABLED", "true").lower() == "true"
 
         self.action_parser_enabled = os.getenv("ACTION_PARSER_ENABLED", "true").lower() == "true"
         # Max tokens for the action-parser LLM call - it only outputs a tiny JSON
         # object so a small budget prevents thinking-model over-reasoning.
         self.action_parser_max_tokens = int(os.getenv("ACTION_PARSER_MAX_TOKENS", "256"))
-        self.action_parser_heuristic_bypass = os.getenv("ACTION_PARSER_HEURISTIC_BYPASS", "true").lower() == "true"
         self.memory_extraction_async = os.getenv("MEMORY_EXTRACTION_ASYNC", "true").lower() == "true"
         self.search_grounding_enabled = os.getenv("SEARCH_GROUNDING_ENABLED", "true").lower() == "true"
         self.search_grounding_max_candidates = int(os.getenv("SEARCH_GROUNDING_MAX_CANDIDATES", "3") or 3)
@@ -833,8 +820,6 @@ class Config:
             "Write any lasting notes to the daily memory log. Reply NO_REPLY if nothing to store.",
         ).strip()
 
-        self.trace_enabled = os.getenv("TRACE_ENABLED", "false").lower() == "true"
-        self.trace_path = os.getenv("TRACE_PATH", "").strip() or str(LOGS_DIR / "agent_traces.jsonl")
         self.verification_telemetry_enabled = os.getenv("VERIFICATION_TELEMETRY_ENABLED", "true").lower() == "true"
 
         self.enable_system_actions = os.getenv("ENABLE_SYSTEM_ACTIONS", "false").lower() == "true"
@@ -843,8 +828,6 @@ class Config:
         self.allow_desktop_automation = os.getenv("ALLOW_DESKTOP_AUTOMATION", "false").lower() == "true"
         self.allow_file_write = os.getenv("ALLOW_FILE_WRITE", "false").lower() == "true"
         self.allow_terminal_commands = os.getenv("ALLOW_TERMINAL_COMMANDS", "false").lower() == "true"
-        self.allow_discord_webhook = os.getenv("ALLOW_DISCORD_WEBHOOK", "false").lower() == "true"
-        self.discord_webhook_url = os.getenv("DISCORD_WEBHOOK_URL", "").strip()
         self.allow_discord_bot = os.getenv("ALLOW_DISCORD_BOT", "false").lower() == "true"
         self.discord_bot_token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
         raw_discord_users = os.getenv("DISCORD_BOT_ALLOWED_USERS", "")
@@ -855,7 +838,6 @@ class Config:
         self.discord_bot_allowed_roles = [
             u.strip() for u in raw_discord_roles.replace("\n", ",").split(",") if u.strip()
         ]
-        self.discord_bot_auto_confirm = os.getenv("DISCORD_BOT_AUTO_CONFIRM", "true").lower() == "true"
         self.discord_bot_owner_id = os.getenv("DISCORD_BOT_OWNER_ID", "").strip()
         raw_discord_trusted = os.getenv("DISCORD_BOT_TRUSTED_USERS", "")
         self.discord_bot_trusted_users = [
@@ -929,9 +911,6 @@ class Config:
         self.lean_max_iterations = int(os.getenv("LEAN_MAX_ITERATIONS", "60") or 60)
         self.lean_context_tokens = int(os.getenv("LEAN_CONTEXT_TOKENS", "0") or 0)
         self.user_display_name = os.getenv("USER_DISPLAY_NAME", "").strip()
-        self.ffprobe_path = os.getenv("VIDEO_FFPROBE_PATH", "ffprobe").strip() or "ffprobe"
-        self.ffmpeg_path = os.getenv("VIDEO_FFMPEG_PATH", "ffmpeg").strip() or "ffmpeg"
-        self.video_ffprobe_timeout_seconds = int(os.getenv("VIDEO_FFPROBE_TIMEOUT_SECONDS", "15") or 15)
         # Voice and generated-media work is opt-in even when the host action
         # gate is enabled. Provider credentials never imply permission.
         self.allow_voice_actions = os.getenv("ALLOW_VOICE_ACTIONS", "false").lower() == "true"
@@ -947,28 +926,12 @@ class Config:
         self.voice_piper_model_path = os.getenv("VOICE_PIPER_MODEL_PATH", "").strip()
         self.voice_stt_language = os.getenv("VOICE_STT_LANGUAGE", "").strip()
         self.voice_max_audio_bytes = max(262_144, int(os.getenv("VOICE_MAX_AUDIO_BYTES", "16777216") or 16_777_216))
-        self.generation_local_provider = os.getenv("GENERATION_LOCAL_PROVIDER", "comfyui-local").strip() or "comfyui-local"
         self.generation_cloud_provider = os.getenv("GENERATION_CLOUD_PROVIDER", "").strip()
         self.comfyui_base_url = os.getenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188").strip().rstrip("/")
         self.comfyui_workflow_path = os.getenv("COMFYUI_WORKFLOW_PATH", "").strip()
         self.runway_api_key = os.getenv("RUNWAY_API_KEY", "").strip()
         self.vertex_project_id = os.getenv("VERTEX_PROJECT_ID", "").strip()
-        self.vertex_location = os.getenv("VERTEX_LOCATION", "us-central1").strip() or "us-central1"
-        self.skill_curator_interval_minutes = int(os.getenv("SKILL_CURATOR_INTERVAL_MINUTES", "120") or 120)
-        raw_notification_channels = os.getenv("NOTIFICATION_CHANNELS", "web")
-        self.notification_channels = [
-            c.strip().lower() for c in raw_notification_channels.replace("\n", ",").split(",") if c.strip()
-        ]
-        self.multi_agent_enabled = os.getenv("MULTI_AGENT_ENABLED", "true").lower() == "true"
-        self.allowed_commands = [
-            c.strip()
-            for c in os.getenv("ALLOWED_COMMANDS", "").split(",")
-            if c.strip()
-        ]
-        self.command_prefix = os.getenv("COMMAND_PREFIX", "/").strip() or "/"
 
-        self.cron_enabled = os.getenv("CRON_ENABLED", "false").lower() == "true"
-        self.cron_state_path = os.getenv("CRON_STATE_PATH", str(CRON_STATE_PATH)).strip() or str(CRON_STATE_PATH)
         self.webhook_enabled = os.getenv("WEBHOOK_ENABLED", "false").lower() == "true"
         self.webhook_secret = os.getenv("WEBHOOK_SECRET", "").strip()
         self.webhook_secret_path = os.getenv("WEBHOOK_SECRET_PATH", str(WEBHOOK_SECRET_PATH)).strip() or str(WEBHOOK_SECRET_PATH)
@@ -1007,7 +970,6 @@ class Config:
         self.email_smtp_port = int(os.getenv("EMAIL_SMTP_PORT", "587") or 587)
         self.email_username = os.getenv("EMAIL_USERNAME", "").strip()
         self.email_password = os.getenv("EMAIL_PASSWORD", "").strip()
-        self.email_max_results = int(os.getenv("EMAIL_MAX_RESULTS", "20") or 20)
         self.email_use_tls = os.getenv("EMAIL_USE_TLS", "true").lower() == "true"
 
         # --- Telegram Bot (v5.4.0) ---
@@ -1017,11 +979,9 @@ class Config:
         self.telegram_allowed_users = [
             u.strip() for u in raw_tg_users.replace("\n", ",").split(",") if u.strip()
         ]
-        self.telegram_auto_confirm = os.getenv("TELEGRAM_AUTO_CONFIRM", "true").lower() == "true"
 
         # --- Google Calendar (v6.0.0) ---
         self.allow_calendar = os.getenv("ALLOW_CALENDAR", "false").lower() == "true"
-        self.calendar_provider = os.getenv("CALENDAR_PROVIDER", "google").strip().lower() or "google"
         self.google_calendar_credentials_path = os.getenv("GOOGLE_CALENDAR_CREDENTIALS_PATH", "").strip()
         self.google_calendar_token_path = os.getenv("GOOGLE_CALENDAR_TOKEN_PATH", str(DATA_DIR / "gcal_token.json")).strip()
         self.calendar_lookahead_days = int(os.getenv("CALENDAR_LOOKAHEAD_DAYS", "7") or 7)
@@ -1054,19 +1014,14 @@ class Config:
         self.whatsapp_api_url = os.getenv("WHATSAPP_API_URL", "http://localhost:3001").strip()
 
         # --- Conversation Threading (v6.0.0) ---
-        self.threading_enabled = os.getenv("THREADING_ENABLED", "true").lower() == "true"
-        self.threading_auto_title = os.getenv("THREADING_AUTO_TITLE", "true").lower() == "true"
 
         # --- A2A Protocol (v6.0.0) ---
         self.a2a_enabled = os.getenv("A2A_ENABLED", "false").lower() == "true"
         self.a2a_agent_name = os.getenv("A2A_AGENT_NAME", "EchoSpeak").strip()
         self.a2a_agent_description = os.getenv("A2A_AGENT_DESCRIPTION", "").strip()
         self.a2a_auth_key = os.getenv("A2A_AUTH_KEY", "").strip()
-        self.a2a_known_agents = [u.strip() for u in os.getenv("A2A_KNOWN_AGENTS", "").split(",") if u.strip()]
 
         # --- Multi-Agent Orchestration (v6.0.0) ---
-        self.orchestration_max_subtasks = int(os.getenv("ORCHESTRATION_MAX_SUBTASKS", "5"))
-        self.orchestration_timeout = int(os.getenv("ORCHESTRATION_TIMEOUT", "120"))
 
         # --- Twitch Integration (v6.7.0) ---
         self.allow_twitch = os.getenv("ALLOW_TWITCH", "false").lower() == "true"
@@ -1267,30 +1222,14 @@ class Config:
             "use_local_models",
             "default_cloud_provider",
             "model_capability_profiles",
-            "use_tool_calling_llm",
             "lmstudio_tool_calling",
-            "disable_native_tool_calling",
             "llm_trim_max_tokens",
-            "llm_trim_reserve_tokens",
-            "turn_understanding_timeout_seconds",
             "turn_understanding_cold_start_timeout_seconds",
-            "turn_understanding_timeout_max_seconds",
-            "turn_understanding_probe_timeout_seconds",
-            "turn_understanding_diagnostic_preview",
-            "turn_understanding_max_output_tokens",
-            "turn_understanding_retry_max_output_tokens",
             "stream_startup_timeout_seconds",
             "model_request_timeout_seconds",
             "model_stream_idle_timeout_seconds",
-            "model_control_max_loops",
-            "research_max_time_seconds",
-            "research_max_attempts_per_requirement",
-            "research_max_external_calls",
-            "research_max_sources_per_requirement",
             "research_max_concurrency",
-            "research_max_context_tokens",
             "context_budget_enabled",
-            "echo_resolution_enabled",
             "document_rag_enabled",
             "doc_upload_max_mb",
             "doc_context_max_chars",
@@ -1309,16 +1248,10 @@ class Config:
             "doc_graph_expand_k",
             "doc_graph_max_entities",
             "doc_graph_query_entities",
-            "summary_trigger_turns",
-            "summary_keep_last_turns",
-            "action_plan_enabled",
             "action_parser_enabled",
-            "action_parser_heuristic_bypass",
             "search_grounding_enabled",
             "search_grounding_max_candidates",
             "session_memory_enabled",
-            "trace_enabled",
-            "trace_path",
             "verification_telemetry_enabled",
             "web_search_timeout",
             "web_search_max_results",
@@ -1326,7 +1259,6 @@ class Config:
             "web_search_provider",
             "searxng_base_url",
             "odds_api_key",
-            "sports_live_enabled",
             "tesseract_path",
             "web_search_blocked_domains",
             "enable_system_actions",
@@ -1335,13 +1267,10 @@ class Config:
             "allow_desktop_automation",
             "allow_file_write",
             "allow_terminal_commands",
-            "allow_discord_webhook",
-            "discord_webhook_url",
             "allow_discord_bot",
             "discord_bot_token",
             "discord_bot_allowed_users",
             "discord_bot_allowed_roles",
-            "discord_bot_auto_confirm",
             "discord_bot_owner_id",
             "discord_bot_trusted_users",
             "discord_changelog_enabled",
@@ -1362,12 +1291,6 @@ class Config:
             "skills_dir",
             "workspaces_dir",
             "default_workspace",
-            "notification_channels",
-            "multi_agent_enabled",
-            "allowed_commands",
-            "command_prefix",
-            "cron_enabled",
-            "cron_state_path",
             "webhook_enabled",
             "webhook_secret",
             "webhook_secret_path",
@@ -1384,16 +1307,13 @@ class Config:
             "email_smtp_port",
             "email_username",
             "email_password",
-            "email_max_results",
             "email_use_tls",
             # Telegram
             "allow_telegram_bot",
             "telegram_bot_token",
             "telegram_allowed_users",
-            "telegram_auto_confirm",
             # Google Calendar
             "allow_calendar",
-            "calendar_provider",
             "google_calendar_credentials_path",
             "google_calendar_token_path",
             "calendar_lookahead_days",
@@ -1420,17 +1340,12 @@ class Config:
             "allow_whatsapp",
             "whatsapp_api_url",
             # Threading
-            "threading_enabled",
-            "threading_auto_title",
             # A2A Protocol
             "a2a_enabled",
             "a2a_agent_name",
             "a2a_agent_description",
             "a2a_auth_key",
-            "a2a_known_agents",
             # Orchestration
-            "orchestration_max_subtasks",
-            "orchestration_timeout",
             # Twitch
             "allow_twitch",
             "twitch_client_id",
@@ -1468,9 +1383,6 @@ class Config:
             "lean_max_iterations",
             "lean_context_tokens",
             "user_display_name",
-            "ffprobe_path",
-            "ffmpeg_path",
-            "video_ffprobe_timeout_seconds",
             "allow_voice_actions",
             "allow_generation_actions",
             "voice_local_provider",
@@ -1483,14 +1395,11 @@ class Config:
             "voice_stt_language",
             "voice_wake_word",
             "voice_max_audio_bytes",
-            "generation_local_provider",
             "generation_cloud_provider",
             "comfyui_base_url",
             "comfyui_workflow_path",
             "runway_api_key",
             "vertex_project_id",
-            "vertex_location",
-            "skill_curator_interval_minutes",
         }
 
     def write_runtime_overrides(self, overrides: dict[str, Any]) -> None:
