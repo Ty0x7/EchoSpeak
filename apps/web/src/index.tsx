@@ -3388,7 +3388,9 @@ export const Dashboard: React.FC<{
     const scale = el ? el.getBoundingClientRect().width / (layoutWidth || 1) || 1 : 1;
     return { room: layoutWidth - sidebarWidthPx, scale };
   }, [sidebarWidthPx]);
-  useEffect(() => savePanelWidth(panelWidth), [panelWidth]);
+  useEffect(() => {
+    savePanelWidth(panelWidth);
+  }, [panelWidth]);
   useEffect(() => {
     // Keep the chat usable when the window shrinks.
     const fit = () => setPanelWidth((w) => clampPanelWidth(w, measurePanelRoom().room));

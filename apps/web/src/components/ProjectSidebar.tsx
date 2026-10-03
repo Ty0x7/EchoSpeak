@@ -232,7 +232,9 @@ export function ProjectSidebar(props: SidebarProps) {
   const [dragging, setDragging] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
   const sectionRefs = useRef<Partial<Record<SectionKey, HTMLElement | null>>>({});
-  useEffect(() => saveStackLayout(layout), [layout]);
+  useEffect(() => {
+    saveStackLayout(layout);
+  }, [layout]);
   // Height of the stack, so the default layout can fit the Agents list to its rows.
   const [splitHeight, setSplitHeight] = useState(0);
   useLayoutEffect(() => {
