@@ -1,4 +1,4 @@
-"""Twenty real prompts, run against a live EchoSpeak backend and model.
+"""Real prompts (20 core + group-work cases), run against a live EchoSpeak backend and model.
 
 Run it after every change to the agent, with Gemma 4 E4B loaded in LM Studio:
 
@@ -79,6 +79,8 @@ class Result:
     approvals: list[str] = field(default_factory=list)
     stop_reasons: list[str] = field(default_factory=list)
     messages: list[dict[str, Any]] = field(default_factory=list)
+    outcome: dict[str, Any] = field(default_factory=dict)  # group / handed-off jobs: done or stopped
+    continuations: list[str] = field(default_factory=list)
     error: str = ""
     seconds: float = 0.0
 
@@ -131,6 +133,10 @@ def file_has(name: str, *needles: str) -> Check:
     return (f"{name} contains {', '.join(needles) or 'something'}", check)
 
 
+def finished() -> Check:
+    return ("job ended Done", lambda r, c: r.outcome.get("status") == "done")
+
+
 def agents_spoke(n: int) -> Check:
     return (f"≥{n} agents answered", lambda r, c: len({m.get('agent_id') for m in r.messages if m.get('text')}) >= n)
 
@@ -178,6 +184,13 @@ CASES: list[Case] = [
     Case(20, "Follow the format", "Write a haiku about rain. Only the haiku, nothing else.", "small",
          [replied(400), no_tools(),
           ("three lines", lambda r, c: len([l for l in r.text.strip().splitlines() if l.strip()]) == 3)]),
+    # Group work must actually get done, not just promised (the "Sure, I'll do that" bug).
+    Case(21, "Group: get it done", "@Echo ask Glados to create team.txt containing the line: hello team. "
+         "Make sure it actually gets done.", "group-work",
+         [file_has("team.txt", "hello team"), finished()], project=True, room="group", timeout=900),
+    Case(22, "Group: research then write", "@Echo get Jarvis to find the year the Eiffel Tower was completed, "
+         "then have Glados save just that year to eiffel.txt.", "group-chain",
+         [file_has("eiffel.txt", "1889"), finished()], project=True, room="group", timeout=900),
 ]
 
 
@@ -194,6 +207,10 @@ def chat_for(case: Case, ctx: Context) -> str:
             "mode": "discussion" if case.room == "discussion" else "reply", "max_messages": 4,
         })
         thread_id = room["thread_id"]
+        if case.project:
+            ctx.api.call("POST", "/projects/attach-folder", {
+                "path": str(ctx.project_dir), "name": "Eval project", "session_id": thread_id,
+            })
     else:
         thread = ctx.api.call("POST", "/threads", {
             "title": f"Eval: {case.chat}", "source": "web", "project_id": ctx.project_id if case.project else "",
@@ -224,6 +241,10 @@ def run_case(case: Case, ctx: Context) -> Result:
             result.delegations.append(str(event.get("to")))
         elif kind == "agent_done" and event.get("stop_reason"):
             result.stop_reasons.append(str(event["stop_reason"]))
+        elif kind == "run_outcome":
+            result.outcome = {k: event.get(k) for k in ("status", "summary", "reason") if event.get(k)}
+        elif kind == "job_continue":
+            result.continuations.append(f"{event.get('agent')}: {event.get('reason')}")
         elif kind == "approval_request":
             result.approvals.append(str(event.get("tool")))
             approval_id = str(event.get("id"))
@@ -320,6 +341,7 @@ def main() -> int:
             "checks": [{"label": l, "ok": ok} for l, ok in checks], "seconds": result.seconds,
             "tools": result.tools, "tool_failures": result.tool_failures, "agents": result.agents,
             "delegations": result.delegations, "approvals": result.approvals, "stop_reasons": result.stop_reasons,
+            "outcome": result.outcome, "continuations": result.continuations,
             "error": result.error, "reply": result.text,
         })
 
