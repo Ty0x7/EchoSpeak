@@ -33,7 +33,7 @@ export function EchoFace({ size = 280, className = "" }: { size?: number | strin
       lastMove = performance.now();
     };
     const onOver = (event: PointerEvent) => {
-      const hot = (event.target as Element | null)?.closest?.(".button, .header-install");
+      const hot = (event.target as Element | null)?.closest?.(".button, .header-install, .btn, .header-download");
       face.dataset.mood = hot ? "happy" : "";
     };
 

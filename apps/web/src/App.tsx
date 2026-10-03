@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter as Router, MemoryRouter, Routes, Route } from 'react-router-dom';
 import { Marketing } from './marketing.tsx';
+import { Docs } from './site/Docs.tsx';
 import { isDesktopRuntime } from './desktop/bridge.ts';
 
 // The website should not download the whole app; load it only on /app and in the desktop shell.
@@ -26,6 +27,8 @@ const App: React.FC = () => {
         <Router>
             <Routes>
                 <Route path="/" element={<Marketing />} />
+                <Route path="/docs" element={<Docs />} />
+                <Route path="/docs/:section" element={<Docs />} />
                 <Route path="/app/*" element={<Suspense fallback={<BootSplash />}><Dashboard /></Suspense>} />
             </Routes>
         </Router>

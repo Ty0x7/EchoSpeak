@@ -57,6 +57,7 @@ pnpm-debug.log*
 
 coverage/
 dist/
+dist-site/
 build/
 out/
 
