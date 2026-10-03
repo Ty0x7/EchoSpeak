@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_STACK_LAYOUT,
   SECTION_MIN_PX,
-  migrateLegacyLayout,
+  fitLayout,
   pairShare,
-  resetPair,
+  resetLayout,
   resizePair,
   sectionFractions,
   settleShare,
@@ -48,19 +48,22 @@ describe("sidebar stack (Agents / Chats / Projects)", () => {
     expect((g.agents || 0) + (g.projects || 0)).toBeCloseTo(1, 5);
   });
 
-  it("moves one divider without touching the other section", () => {
+  it("moves one divider without touching the other section, and remembers it as the user's", () => {
     const next = resizePair(DEFAULT_STACK_LAYOUT, "agents", "chats", 0.25);
     const before = DEFAULT_STACK_LAYOUT.weights;
     expect(next.weights.agents + next.weights.chats).toBeCloseTo(before.agents + before.chats, 3);
     expect(next.weights.projects).toBe(before.projects);
     expect(pairShare(next, "agents", "chats")).toBeCloseTo(0.25, 2);
-    expect(pairShare(resetPair(next, "agents", "chats"), "agents", "chats")).toBeCloseTo(pairShare(DEFAULT_STACK_LAYOUT, "agents", "chats"), 2);
+    expect(next.custom).toBe(true);
+    expect(resetLayout(next).custom).toBe(false);
   });
 
-  it("keeps the old Chats/Projects split when upgrading", () => {
-    const layout = migrateLegacyLayout({ chatsShare: 0.75, chatsOpen: true, projectsOpen: false });
-    expect(pairShare(layout, "chats", "projects")).toBeCloseTo(0.75, 2);
-    expect(layout.open.projects).toBe(false);
-    expect(layout.open.agents).toBe(true);
+  it("starts every new install from the same fitted layout", () => {
+    const fitted = fitLayout(DEFAULT_STACK_LAYOUT, 3, 600);
+    expect(fitted.weights.agents).toBeCloseTo((3 * 33 + 8) / 600, 2); // three agent rows, no scrolling
+    expect(fitted.weights.chats / fitted.weights.projects).toBeCloseTo(0.62 / 0.38, 2);
+    expect(fitLayout(DEFAULT_STACK_LAYOUT, 23, 600).weights.agents).toBeCloseTo((6 * 33 + 8) / 600, 2); // capped at six rows
+    const mine = resizePair(fitted, "chats", "projects", 0.3);
+    expect(fitLayout(mine, 3, 600)).toBe(mine); // a layout the user changed is left alone
   });
 });
