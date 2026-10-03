@@ -64,6 +64,76 @@ def is_promise_without_action(text: str) -> bool:
     return bool(_PROMISE.search(body))
 
 
+# Claims that something was already done ("I've saved it", "has been updated").
+_DONE_VERBS = (r"saved|updated|added|wrote|written|created|deleted|removed|sent|stored|changed|edited|installed|"
+               r"committed|recorded|renamed|moved|copied|scheduled|posted|uploaded|downloaded")
+_ACTION_CLAIM = re.compile(
+    rf"""(?ix)
+    \b(?:i'?ve|i\s+have|i\s+just|i'?ve\s+just|i\s+(?:now\s+)?(?:also\s+)?)\s*(?:now\s+|also\s+|successfully\s+)?(?:{_DONE_VERBS})\b
+    | \b(?:has|have)\s+(?:now\s+)?been\s+(?:successfully\s+)?(?:{_DONE_VERBS})\b
+    | \b(?:is|are)\s+now\s+(?:saved|stored|updated|in\s+(?:my|your)\s+(?:soul|memory))\b
+    | \b(?:it'?s|that'?s|it\s+is|that\s+is)\s+(?:now\s+|all\s+)?(?:saved|stored|updated|added|in\s+(?:my|your)\s+(?:soul|memory))\b
+    | ^\W*(?:saved|updated|done)\W+(?:to|in)\s+(?:my\s+|your\s+)?(?:memory|soul)\b
+    """
+)
+# Promises to keep something beyond this chat: only a memory or soul write does that.
+_PERSIST_CLAIM = re.compile(
+    r"(?i)\b(?:i'?ll|i\s+will|i'?m\s+going\s+to)\s+(?:always\s+)?(?:remember|keep\s+(?:that|this|it)\s+in\s+mind)\b"
+    r"|\b(?:noted|saved)\s+(?:that\s+)?(?:for\s+(?:next\s+time|the\s+future|future\s+chats))\b"
+    r"|\bfrom\s+now\s+on,?\s+i'?ll\b"
+)
+# Talking about an earlier turn ("I saved that yesterday") is not a claim about this one.
+_EARLIER = re.compile(r"(?i)\b(earlier|before|yesterday|last\s+time|previously|already\s+(?:had|did))\b")
+PERSIST_TOOLS = {"memory_save", "soul_update"}
+# Tools that only read: a successful call doesn't back a claim that something changed.
+READ_ONLY_TOOLS = {
+    "get_system_time", "calculate", "system_info", "file_list", "file_read", "file_find", "file_search",
+    "web_search", "safe_web_fetch", "youtube_transcript", "weather_live", "sports_live", "project_status",
+    "memory_search", "chat_search", "email_read_inbox", "email_search", "email_get_thread", "discord_read_channel",
+    "self_list", "self_read", "self_grep", "self_git_status", "desktop_list_windows", "process_output",
+    "stock_history", "product_search", "video_search", "image_search", "take_screenshot", "analyze_screen", "vision_qa",
+}
+
+
+def unbacked_claim(text: str, succeeded: set[str]) -> str:
+    """What the reply claims was done that no successful tool call this turn did, or ''.
+
+    ``succeeded`` is the names of tools that worked in this turn. A claim about
+    the soul needs soul_update; about memory or remembering, memory_save or
+    soul_update; any other "I've saved/sent/created…" needs some tool that
+    changes things (or a teammate's handoff).
+    """
+    body = str(text or "")
+    if not body.strip():
+        return ""
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", body) if s.strip() and not _EARLIER.search(s)]
+    claims = [s for s in sentences if _ACTION_CLAIM.search(s) or _PERSIST_CLAIM.search(s)]
+    if not claims:
+        return ""
+    # Bookkeeping (marking done, assigning) changes nothing the claim could be about.
+    changed = {name for name in succeeded if name not in READ_ONLY_TOOLS and name not in {"complete_task", "assign_tasks"}}
+    for claim in claims:
+        low = claim.lower()
+        if re.search(r"\b(soul|personality)\b", low):
+            if "soul_update" not in changed:
+                return claim.strip()
+        elif _PERSIST_CLAIM.search(claim) or re.search(r"\b(memory|memories|remember)\b", low):
+            if not changed & PERSIST_TOOLS:
+                return claim.strip()
+        elif not changed:
+            return claim.strip()
+    return ""
+
+
+def claim_nudge(claim: str) -> str:
+    return (
+        f"You wrote \"{claim[:200]}\", but no tool call in this turn did that, so it isn't true yet. "
+        "Either do it now with the right tool (memory_save for facts about the user, soul_update for how you "
+        "behave, or the tool that does the action), or rewrite your reply so it only says what actually "
+        "happened. If a tool failed, say it failed."
+    )
+
+
 def _fingerprint(text: str) -> set[str]:
     words = re.findall(r"[a-z0-9']+", str(text or "").lower())
     return {" ".join(words[i:i + 2]) for i in range(max(0, len(words) - 1))} or set(words)

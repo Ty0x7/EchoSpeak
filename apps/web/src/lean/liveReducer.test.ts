@@ -138,6 +138,19 @@ describe("lean live reducer", () => {
     expect(stopped.messages.m1.outcome).toEqual({ status: "stopped", summary: undefined, reason: "it reached the limit of 4 rounds" });
   });
 
+  it("flags a claim no tool backed under the agent's message", () => {
+    const state = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "agent_token", ...base, step: 1, data: "I've saved it." },
+      { type: "text_replace", ...base, step: 1, text: "" },
+      { type: "agent_token", ...base, step: 2, data: "Saved in my soul." },
+      { type: "claim_unverified", ...base, step: 2, note: "Not verified: no tool call in this reply did this." },
+    ]);
+    const segs = state.messages.m1.segments;
+    expect(segs.filter((s) => s.kind === "text").map((s) => (s as { text: string }).text)).toEqual(["", "Saved in my soul."]);
+    expect((segs[segs.length - 1] as { text: string }).text).toBe("Not verified: no tool call in this reply did this.");
+  });
+
   it("shows the lead's task board as a plan note under the message that made it", () => {
     expect(isLeanEvent({ type: "task_board" })).toBe(true);
     const state = run([

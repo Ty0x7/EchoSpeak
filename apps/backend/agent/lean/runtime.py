@@ -8,11 +8,12 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import settings, summaries
+from agent.lean import settings, soul, summaries
 from agent.lean.job import ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, needs_action, parse_review
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import AgentPersona, get_persona_store
@@ -983,8 +984,14 @@ class LeanSession:
                 )
                 if not memory_id:
                     return "Failed: that could not be saved (empty, duplicate, or looks like a secret)."
+                # Read back from the durable record file, not this process's copy.
+                stored = _memory_on_disk(memory, str(memory_id))
+                if stored is False:
+                    return "Failed: the memory store reported a save, but it isn't on disk. Tell the user it did not save."
                 self.emit({"type": "memory_saved", "memory_count": int(memory.count_items() or 0)})
-                return f"Saved to memory: {fact}"
+                if isinstance(stored, str) and " ".join(stored.split()) != " ".join(fact.split()):
+                    return f"Already remembered (verified on disk): {stored}"
+                return f"Saved and verified: {fact}"
 
             def memory_search(args: dict[str, Any]) -> str:
                 query = str(args.get("query") or "").strip()
@@ -1014,6 +1021,13 @@ class LeanSession:
                 func=memory_search,
                 parallel_safe=True,
             ))
+
+        tools.append(NativeTool(
+            name="soul_update",
+            description=soul.DESCRIPTION,
+            parameters=soul.PARAMETERS,
+            func=lambda args: self._update_soul(persona, args),
+        ))
 
         def chat_search(args: dict[str, Any]) -> str:
             from agent.state import get_state_store
@@ -1120,6 +1134,47 @@ class LeanSession:
                     always=True,
                 ))
         return tools
+
+    def _update_soul(self, persona: AgentPersona, args: dict[str, Any]) -> str:
+        """Edit the soul this agent's prompt is actually built from, then prove it took.
+
+        A persona with its own soul text uses that; Echo without one uses SOUL.md.
+        The read-back goes through the loader the next chat uses, so "Saved and
+        verified" means a new session will see the change.
+        """
+        from agent.lean.personas import PersonaStore
+
+        action, text, old_text = (str(args.get(key) or "") for key in ("action", "text", "old_text"))
+        current = self.personas.get(persona.id) or persona
+        if current.id == "echo" and not current.soul.strip():
+            enabled, _, max_chars = soul.soul_settings()
+            if not enabled:
+                return "Failed: the soul is turned off in Settings, so it can't be changed. Nothing was changed."
+            path = soul.soul_path()
+            loader = getattr(self.agent, "_load_soul", None)
+            ok, message, new_text = soul.update_soul(
+                action=action, text=text, old_text=old_text,
+                read=lambda: soul.read_file(path),
+                write=lambda body: soul.write_atomic(path, body),
+                read_back=soul.load_check(loader if callable(loader) else None, path),
+                max_chars=max_chars,
+            )
+        else:
+            store = self.personas
+            base = current.soul.strip() or f"You are {current.name}, a capable personal agent."
+            ok, message, new_text = soul.update_soul(
+                action=action, text=text, old_text=old_text,
+                read=lambda: base,
+                write=lambda body: store.update(current.id, {"soul": body.strip()}),
+                # A fresh store reads the file, not this process's copy.
+                read_back=lambda: (PersonaStore(store.path).get(current.id) or current).soul,
+                max_chars=12000,
+            )
+        if ok:
+            if current.id == "echo" and not current.soul.strip():
+                self._soul_text = new_text.strip()
+            self.emit({"type": "soul_updated", "agent_id": current.id})
+        return message
 
     # ── helpers ─────────────────────────────────────────────────────────
     def _name_of(self, agent_id: str) -> str:
@@ -1240,6 +1295,22 @@ class LeanSession:
                 logger.debug("Lean conversation memory write failed", exc_info=True)
 
         threading.Thread(target=work, name="lean-memory", daemon=True).start()
+
+
+def _memory_on_disk(memory: Any, memory_id: str) -> "str | bool | None":
+    """The saved text if the record is active in records.json, False if it isn't,
+    None when this memory store has no record file to check."""
+    path = getattr(memory, "_records_path", None)
+    if not path:
+        return None
+    try:
+        records = json.loads(Path(path).read_text(encoding="utf-8")).get("records") or {}
+    except (OSError, ValueError):
+        return False
+    record = records.get(memory_id) if isinstance(records, dict) else None
+    if not isinstance(record, dict) or not record.get("active", True):
+        return False
+    return str(record.get("text") or "")
 
 
 def _plain_error(error: str) -> str:

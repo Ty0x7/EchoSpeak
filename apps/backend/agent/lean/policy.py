@@ -49,9 +49,9 @@ EXTERNAL_ACTIONS = {
     "calendar_create", "calendar_delete", "github_create_issue", "github_comment",
     "notion_create_page", "spotify_control",
     "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write",
-    # Saved memories are re-read in every future chat: writing one from
-    # untrusted content would plant a persistent injection.
-    "memory_save",
+    # Saved memories and the soul are re-read in every future chat: writing one
+    # from untrusted content would plant a persistent injection.
+    "memory_save", "soul_update",
 }
 
 _UNTRUSTED_NOTE = (

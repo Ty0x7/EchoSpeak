@@ -3703,11 +3703,9 @@ async def get_soul():
     max_chars = getattr(soul_config, "max_chars", 8000)
     enabled = getattr(soul_config, "enabled", True)
     
-    # Resolve path
-    soul_path = Path(soul_path_str).expanduser()
-    if not soul_path.is_absolute():
-        soul_root = DATA_DIR if os.getenv("ECHOSPEAK_RUNTIME_KIND", "").strip().lower() == "desktop" else BASE_DIR
-        soul_path = soul_root / soul_path
+    from agent.lean.soul import soul_path as _soul_path
+
+    soul_path = _soul_path()
     
     content = ""
     exists = soul_path.exists()
@@ -3737,11 +3735,9 @@ async def update_soul(request: SoulUpdateRequest):
     soul_path_str = getattr(soul_config, "path", "./SOUL.md")
     max_chars = getattr(soul_config, "max_chars", 8000)
     
-    # Resolve path
-    soul_path = Path(soul_path_str).expanduser()
-    if not soul_path.is_absolute():
-        soul_root = DATA_DIR if os.getenv("ECHOSPEAK_RUNTIME_KIND", "").strip().lower() == "desktop" else BASE_DIR
-        soul_path = soul_root / soul_path
+    from agent.lean.soul import soul_path as _soul_path, write_atomic as _write_soul
+
+    soul_path = _soul_path()
     
     # Validate content length
     content = request.content.strip()
@@ -3753,8 +3749,7 @@ async def update_soul(request: SoulUpdateRequest):
     
     # Write to file
     try:
-        soul_path.parent.mkdir(parents=True, exist_ok=True)
-        soul_path.write_text(content, encoding="utf-8")
+        _write_soul(soul_path, content)
         logger.info(f"Updated SOUL.md at {soul_path} ({len(content)} chars)")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to write SOUL.md: {e}")

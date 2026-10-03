@@ -21,6 +21,7 @@ export const LEAN_EVENT_TYPES = new Set([
   "run_outcome",
   "job_continue",
   "task_board",
+  "claim_unverified",
 ]);
 
 export function isLeanEvent(evt: LeanEvent): boolean {
@@ -120,6 +121,12 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
       return patchMessage(state, id, (m) => ({
         ...m,
         segments: m.segments.map((s) => (s.kind === "text" && s.step === Number(evt.step) ? { ...s, text: String(evt.text || "") } : s)),
+      }));
+    case "claim_unverified":
+      // The agent kept claiming something no tool did: say so under its message.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [...m.segments, { kind: "note", step: Number(evt.step || 0), text: String(evt.note || "Not verified."), at }],
       }));
     case "tool_start":
       return patchMessage(state, id, (m) => ({

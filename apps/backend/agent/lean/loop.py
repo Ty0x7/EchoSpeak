@@ -29,7 +29,7 @@ from loguru import logger
 
 from agent.lean import policy, settings
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
-from agent.lean.job import is_promise_without_action, promise_nudge
+from agent.lean.job import claim_nudge, is_promise_without_action, promise_nudge, unbacked_claim
 from agent.lean.personas import AgentPersona
 from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
 from agent.lean.toolbox import Toolbox, describe_call, safe_args_preview
@@ -102,6 +102,8 @@ class LeanTurn:
         # Re-prompt an agent whose reply only promises work (see agent/lean/job.py).
         self.promise_guard = promise_guard
         self.completed_summary: Optional[str] = None
+        # Tools that worked in this turn: what a reply's "I've saved it" must be backed by.
+        self.succeeded: set[str] = set()
         self._on_seal = on_seal
         self._handed_off = False
         self.compactions = 0
@@ -138,6 +140,12 @@ class LeanTurn:
                 self._emit(payload)
             except Exception:
                 logger.exception("Lean event emit failed")
+
+    def _retract_text(self, step: int) -> None:
+        """Take back text streamed in this step (a claim that turned out to be untrue)."""
+        if any(item.get("kind") == "text" and item.get("step") == step for item in self.timeline):
+            self.timeline = [item for item in self.timeline if not (item.get("kind") == "text" and item.get("step") == step)]
+            self.emit({"type": "text_replace", "step": step, "text": ""})
 
     def _close_thinking(self) -> None:
         for item in reversed(self.timeline):
@@ -217,6 +225,7 @@ class LeanTurn:
         stop_reason = ""
         nudges = 0
         promise_nudges = 0
+        claim_nudges = 0
         final_text = ""
         error = ""
         success = True
@@ -280,6 +289,19 @@ class LeanTurn:
                             self.emit({"type": "promise_nudge", "step": step, "count": promise_nudges})
                             continue
                         stop_reason = "promise_unfulfilled"
+                    claim = unbacked_claim(content, self.succeeded) if self.promise_guard and self.toolbox.names else ""
+                    if claim and not stop_reason:
+                        # "I've saved it" with nothing saved: ask once for the tool call or the truth.
+                        if claim_nudges < 1:
+                            claim_nudges += 1
+                            messages.append({"role": "user", "content": claim_nudge(claim)})
+                            self.emit({"type": "claim_nudge", "step": step, "claim": claim[:200]})
+                            self._retract_text(step)
+                            continue
+                        stop_reason = "unverified_claim"
+                        note = f"Not verified: no tool call in this reply did this (“{claim[:160]}”)."
+                        self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
+                        self.emit({"type": "claim_unverified", "step": step, "claim": claim[:200], "note": note})
                     final_text = content.strip()
                     break
                 if self._handed_off:
@@ -605,6 +627,8 @@ class LeanTurn:
         if len(preview) > 1600:
             preview = preview[:1600] + "…"
         cards = list(widgets or []) if ok else []
+        if ok:
+            self.succeeded.add(name)
         for item in self.timeline:
             if item.get("kind") == "tool" and item.get("id") == call.id:
                 item.update({"status": "done" if ok else "failed", "output": preview, "duration_ms": duration_ms})

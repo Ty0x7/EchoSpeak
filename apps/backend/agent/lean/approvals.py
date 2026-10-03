@@ -26,6 +26,11 @@ EXTERNAL_TOOLS = {
     "notion_create_page", "spotify_control",
 }
 
+# Tools that rewrite an agent's standing instructions (its soul). Everything in
+# them is obeyed in every later chat, so a bad write persists (Hermes gates its
+# SOUL.md the same way): always shown to the user first, unless approvals are off.
+IDENTITY_TOOLS = {"soul_update"}
+
 # Tools that act on the desktop as if they were the user.
 DESKTOP_CONTROL_TOOLS = {
     "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write",
@@ -57,6 +62,8 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
     mode = settings.approval_mode()
     if mode == "never":
         return False, ""
+    if name in IDENTITY_TOOLS:
+        return True, "this changes how the agent behaves in every future chat"
     if mode == "always":
         return bool(getattr(entry, "is_action", False)), "action tool"
     if name in {"terminal_run", "terminal", "process_start"}:

@@ -734,16 +734,12 @@ class EchoSpeakAgent:
             logger.debug("SOUL.md system disabled via config")
             return ""
 
-        # Get soul path from config
-        soul_path_str = getattr(soul_config, "path", "./SOUL.md")
-        soul_path = Path(soul_path_str).expanduser()
-        
-        # Packaged desktop defaults must resolve to durable app data rather than
+        # Packaged desktop defaults resolve to durable app data rather than
         # PyInstaller's temporary extraction directory.
-        if not soul_path.is_absolute():
-            backend_dir = DATA_DIR if os.getenv("ECHOSPEAK_RUNTIME_KIND", "").strip().lower() == "desktop" else Path(__file__).parent.parent
-            soul_path = backend_dir / soul_path
-        
+        from agent.lean.soul import soul_path as _soul_path
+
+        soul_path = _soul_path()
+
         # Check if file exists
         if not soul_path.exists():
             logger.debug(f"SOUL.md not found at {soul_path}")
@@ -751,16 +747,20 @@ class EchoSpeakAgent:
 
         max_chars = int(getattr(soul_config, "max_chars", 8000) or 8000)
         try:
-            mtime_ns = soul_path.stat().st_mtime_ns
+            stat = soul_path.stat()
+            # Size too: two writes inside one mtime tick (coarse filesystems) must not
+            # serve the old text, or a verified soul edit would read back stale.
+            mtime_ns, size = stat.st_mtime_ns, stat.st_size
             cache = getattr(self, "_soul_cache", {}) or {}
             if (
                 str(cache.get("path") or "") == str(soul_path)
                 and int(cache.get("mtime_ns", -1)) == mtime_ns
+                and int(cache.get("size", -1)) == size
                 and int(cache.get("max_chars", 0)) == max_chars
             ):
                 return str(cache.get("content") or "")
         except OSError:
-            mtime_ns = -1
+            mtime_ns, size = -1, -1
         
         # Read and validate content
         try:
@@ -780,6 +780,7 @@ class EchoSpeakAgent:
             self._soul_cache = {
                 "path": str(soul_path),
                 "mtime_ns": mtime_ns,
+                "size": size,
                 "max_chars": max_chars,
                 "content": content,
             }
