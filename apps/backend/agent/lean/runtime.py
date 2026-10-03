@@ -14,7 +14,7 @@ from loguru import logger
 
 from agent.lean import settings, summaries
 from agent.lean.job import COMPLETE_TASK_DESCRIPTION, Job, parse_review
-from agent.lean.loop import LeanTurn, TurnResult
+from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import AgentPersona, get_persona_store
 from agent.lean.prompt import build_system_prompt
 from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoint
@@ -121,6 +121,10 @@ class LeanSession:
         self._handoffs = 0
         # Completion tracking for group chats and handed-off work (agent/lean/job.py).
         self.job: Optional[Job] = None
+        # Outside content read anywhere in this request (agent/lean/policy.py). Shared
+        # by every agent on it: a handoff brief written after reading a web page can
+        # carry that page's instructions.
+        self._taint: list[str] = []
         # Parallel agents share these.
         self._emit_lock = threading.Lock()
         self._state_lock = threading.Lock()
@@ -242,7 +246,7 @@ class LeanSession:
         if cancelled and self._job_needs_closing():
             outcome = self.job.stop("you stopped it")
         elif not success and self._job_needs_closing() and not outcome:
-            outcome = self.job.stop(f"an agent hit an error ({error[:160]})")
+            outcome = self.job.stop(f"an agent hit an error: {_plain_error(error)}")
         if outcome:
             self.emit({"type": "run_outcome", **outcome})
         store.update_execution(
@@ -327,7 +331,7 @@ class LeanSession:
                 if item.owner == persona.name and result.completed:
                     job.close_subtask(item, done=True, summary=result.completed)
             if not result.success:
-                job.stop(f"{persona.name} hit an error ({result.error[:160]})")
+                job.stop(f"{persona.name} hit an error: {_plain_error(result.error)}")
                 return
 
     def _judge(self, default_persona: AgentPersona) -> dict[str, Any]:
@@ -541,7 +545,7 @@ class LeanSession:
             if stopped:
                 self.job.stop(stopped)
             elif len(spoken) < 2 or not success:
-                self.job.stop("the discussion couldn't continue" + (f" ({error[:160]})" if error else ""))
+                self.job.stop("the discussion couldn't continue" + (f": {_plain_error(error)}" if error else ""))
             else:
                 self.job.finish(_first_sentence(conclusion, 240))
         return success, error
@@ -686,6 +690,7 @@ class LeanSession:
             on_seal=lambda part: self._record(persona, part, depth, meta),
             meta=meta,
             end_marker=end_marker,
+            taint=self._taint,
         )
         return turn
 
@@ -794,7 +799,8 @@ class LeanSession:
             ))
             tools.append(NativeTool(
                 name="memory_search",
-                description="Search what you remember about the user and past conversations.",
+                description="Search the facts you have saved about the user (preferences, people, projects). "
+                "To find what was said in past conversations, use chat_search.",
                 parameters={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
                 func=memory_search,
                 parallel_safe=True,
@@ -817,7 +823,8 @@ class LeanSession:
 
         tools.append(NativeTool(
             name="chat_search",
-            description="Search the words of every past chat with the user, including other chats. Use it when the user refers to something discussed before.",
+            description="Search the words of every past conversation with the user (all chats, including group chats). "
+            "Use it when the user refers to something discussed before. For saved facts about the user, use memory_search.",
             parameters={"type": "object", "properties": {"query": {"type": "string", "description": "A few keywords."}}, "required": ["query"]},
             func=chat_search,
             parallel_safe=True,
@@ -1019,6 +1026,13 @@ class LeanSession:
                 logger.debug("Lean conversation memory write failed", exc_info=True)
 
         threading.Thread(target=work, name="lean-memory", daemon=True).start()
+
+
+def _plain_error(error: str) -> str:
+    """A short, readable reason (no HTML error pages from model servers)."""
+    text = _friendly_error(str(error or ""))
+    text = re.sub(r"<[^>]+>", " ", text)
+    return " ".join(text.split())[:200].rstrip(" .") or "unknown error"
 
 
 def _first_sentence(text: str, limit: int = 200) -> str:

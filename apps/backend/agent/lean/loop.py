@@ -27,7 +27,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import settings
+from agent.lean import policy, settings
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean.job import PROMISE_NUDGE, is_promise_without_action
 from agent.lean.personas import AgentPersona
@@ -93,7 +93,12 @@ class LeanTurn:
         meta: Optional[dict[str, Any]] = None,
         end_marker: str = "",
         promise_guard: bool = True,
+        taint: Optional[list[str]] = None,
     ) -> None:
+        # Tools that brought outside content into this request (shared by every
+        # agent working on it). Drives the Rule-of-Two policy in agent/lean/policy.py.
+        self.taint: list[str] = taint if taint is not None else []
+        self._policy_reasons: dict[str, str] = {}
         self.interactive = interactive
         # Re-prompt an agent whose reply only promises work (see agent/lean/job.py).
         self.promise_guard = promise_guard
@@ -442,7 +447,18 @@ class LeanTurn:
             args, arg_error = call.parsed_arguments()
             signature = self._sig(name, args)
             call_counts[signature] = call_counts.get(signature, 0) + 1
-            prepared.append((call, name, args, arg_error or ("" if call_counts[signature] < 3 else "repeat")))
+            problem = arg_error or ("" if call_counts[signature] < 3 else "repeat")
+            if not problem:
+                # Checked for every call, parallel read-only ones included.
+                decision = policy.evaluate(name, args, entry=self.toolbox.entry(name), tainted_by=self.taint,
+                                           interactive=self.interactive)
+                if decision.action == "deny":
+                    policy.audit(decision, name=name, args=args, session_id=self.session_id, agent=self.persona.id, outcome="blocked")
+                    self._policy_reasons[call.id] = decision.reason
+                    problem = "policy"
+                elif decision.action == "ask":
+                    self._policy_reasons[call.id] = decision.reason
+            prepared.append((call, name, args, problem))
 
         results: dict[str, tuple[bool, str]] = {}
         parallel = [item for item in prepared if not item[3] and self.toolbox.is_parallel_safe(item[1])]
@@ -456,6 +472,7 @@ class LeanTurn:
                 for call, name, args, _ in parallel:
                     result = futures[call.id].result()
                     results[call.id] = (result.ok, result.output)
+                    self._note_source(name, args, result.ok)
                     self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms)
         else:
             sequential = prepared
@@ -467,6 +484,12 @@ class LeanTurn:
                 results[call.id] = (False, "Cancelled by the user before this tool ran.")
                 continue
             self._tool_started(call, name, args, step)
+            if problem == "policy":
+                output = (f"Blocked by EchoSpeak's safety policy: {self._policy_reasons.get(call.id, 'not allowed')}. "
+                          "Don't retry it; continue without it or tell the user what was blocked.")
+                results[call.id] = (False, output)
+                self._tool_finished(call, name, args, step, False, output, 0)
+                continue
             if problem == "repeat":
                 output = (
                     f"You already called {name} with exactly these arguments {call_counts.get(self._sig(name, args), 3) - 1} times "
@@ -476,7 +499,7 @@ class LeanTurn:
                 self._tool_finished(call, name, args, step, False, output, 0)
                 continue
             if problem:
-                output = f"Error: {problem}. Call {name} again with a JSON object matching its parameters."
+                output = f"Error: {problem}. Call {name} again with a JSON object matching its parameters{self._param_hint(name)}."
                 results[call.id] = (False, output)
                 self._tool_finished(call, name, args, step, False, output, 0)
                 continue
@@ -502,22 +525,48 @@ class LeanTurn:
             result = self.toolbox.run(name, args)
             results[call.id] = (result.ok, result.output)
             self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms)
+            self._note_source(name, args, result.ok)
 
         limit = 14000
         for call, name, _args, _ in prepared:
             ok, output = results.get(call.id, (False, "No result."))
             text = output if len(output) <= limit else output[:limit] + f"\n…[{len(output) - limit} more characters trimmed]"
+            if ok and policy.is_untrusted_source(name, self.toolbox.entry(name), _args):
+                text = policy.wrap_untrusted(name, text)  # data, not instructions
             messages.append({"role": "tool", "tool_call_id": call.id, "name": name, "content": text or "(empty result)"})
+
+    def _param_hint(self, name: str) -> str:
+        """' (required: a, b; optional: c)' so a bad call can be fixed in one try."""
+        for schema in self.toolbox.schemas():
+            fn = schema.get("function") or {}
+            if fn.get("name") != name:
+                continue
+            params = fn.get("parameters") or {}
+            required = list(params.get("required") or [])
+            optional = [p for p in (params.get("properties") or {}) if p not in required]
+            parts = [f"required: {', '.join(required)}"] if required else []
+            if optional:
+                parts.append(f"optional: {', '.join(optional)}")
+            return f" ({'; '.join(parts)})" if parts else ""
+        return ""
 
     @staticmethod
     def _sig(name: str, args: dict[str, Any]) -> str:
         return hashlib.sha1(f"{name}:{json.dumps(args, sort_keys=True, default=str)}".encode()).hexdigest()
 
+    def _note_source(self, name: str, args: dict[str, Any], ok: bool) -> None:
+        if ok and policy.is_untrusted_source(name, self.toolbox.entry(name), args) and name not in self.taint:
+            self.taint.append(name)
+
     def _approve(self, call: Any, name: str, args: dict[str, Any], step: int) -> tuple[bool, str]:
         entry = self.toolbox.entry(name)
         needs, reason = tool_needs_approval(entry, name, args)
         broker = get_approval_broker()
-        if not needs or broker.granted(self.session_id, name):
+        policy_reason = self._policy_reasons.get(call.id, "")
+        if policy_reason:
+            # Rule of Two: always ask, even with "always allow" grants or approvals off.
+            needs, reason = True, policy_reason
+        elif not needs or broker.granted(self.session_id, name):
             return True, ""
         if not self.interactive:
             return False, (
@@ -536,6 +585,9 @@ class LeanTurn:
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})
         self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **approval.public()})
         decision = broker.wait(approval, self.cancel)
+        if policy_reason:
+            policy.audit(policy.Decision("ask", policy_reason, "rule_of_two"), name=name, args=args,
+                         session_id=self.session_id, agent=self.persona.id, outcome=decision)
         for item in self.timeline:
             if item.get("kind") == "approval" and item.get("id") == approval.id:
                 item["decision"] = decision
@@ -592,6 +644,15 @@ class LeanTurn:
     # ── context ─────────────────────────────────────────────────────────
     def _fit_context(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], aggressive: bool = False) -> None:
         budget = int(settings.context_tokens() * (0.55 if aggressive else 0.8)) - settings.max_output_tokens() // 2
+        # 0. Tool-result clearing: once the context is half full, raw output from
+        #    tools used many steps ago is cut to its head. The agent already acted
+        #    on it, and long sessions stay coherent instead of hitting the wall.
+        if _estimate_tokens(messages, tools) > budget // 2:
+            tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
+            for index in tool_indexes[:-6]:
+                content = str(messages[index].get("content") or "")
+                if len(content) > 2000:
+                    messages[index]["content"] = content[:1500] + "\n…[older tool output cleared; run the tool again if you need it]"
         if _estimate_tokens(messages, tools) <= budget:
             return
         # 1. Shrink older tool results, keeping the most recent ones intact.

@@ -2144,21 +2144,23 @@ for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):
     except Exception:
         pass
 
+_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
+    "http://localhost:5176",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "http://127.0.0.1:5175",
+    "http://127.0.0.1:5176",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+] + [o.strip() for o in os.getenv("ECHOSPEAK_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "http://localhost:5176",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://127.0.0.1:5175",
-        "http://127.0.0.1:5176",
-        "tauri://localhost",
-        "http://tauri.localhost",
-        "https://tauri.localhost",
-    ],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2302,6 +2304,56 @@ def _mcp_trust_summary(
         out["mcp_running_count"] = int(manager_status.get("running_count") or 0)
         out["mcp_servers_detail"] = manager_status.get("servers") or []
     return out
+
+
+_LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1", "tauri.localhost"}
+
+
+def _request_hostname(host_header: str) -> str:
+    host = str(host_header or "").strip().lower()
+    if host.startswith("["):  # [::1]:8000
+        return host[1:host.find("]")] if "]" in host else host
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def _origin_allowed(origin: str, host_header: str) -> bool:
+    origin = str(origin or "").strip().rstrip("/")
+    if origin in _ALLOWED_ORIGINS:
+        return True
+    # The page the backend serves itself (same origin).
+    netloc = origin.split("://", 1)[-1]
+    return bool(netloc) and netloc.lower() == str(host_header or "").strip().lower()
+
+
+def _local_request_guard(method: str, host_header: str, origin: str, client_ip: str) -> str:
+    """Reason to refuse a request to the local API, or ''.
+
+    - DNS rebinding: a web page whose domain is re-pointed at 127.0.0.1 sends
+      its own name in the Host header. Local requests must name this machine.
+    - Cross-site requests: browsers always send Origin on cross-origin writes;
+      only the app's own origins may change anything. Clients without an
+      Origin header (curl, bots, scripts) are unaffected.
+    """
+    if _is_local_client(client_ip) and not _api_auth_required_for_host(client_ip):
+        extra = {h.strip().lower() for h in os.getenv("ECHOSPEAK_ALLOWED_HOSTS", "").split(",") if h.strip()}
+        hostname = _request_hostname(host_header)
+        if hostname and hostname not in _LOCAL_HOSTNAMES | extra:
+            return f"Host '{hostname}' is not allowed"
+    if origin and method.upper() not in {"GET", "HEAD", "OPTIONS"} and not _origin_allowed(origin, host_header):
+        return f"Origin '{origin}' is not allowed"
+    return ""
+
+
+@app.middleware("http")
+async def local_request_guard_middleware(request: Request, call_next):
+    client_ip = request.client.host if request.client else ""
+    problem = _local_request_guard(
+        request.method, request.headers.get("host", ""), request.headers.get("origin", ""), client_ip
+    )
+    if problem:
+        logger.warning("Refused request to {}: {} (client {})", request.url.path, problem, client_ip)
+        return JSONResponse({"detail": f"Request refused: {problem}."}, status_code=403)
+    return await call_next(request)
 
 
 @app.middleware("http")
