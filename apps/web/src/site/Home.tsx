@@ -294,48 +294,6 @@ function Team() {
 
 // ── Big ad panels ────────────────────────────────────────────────────
 
-function ApprovalDemo() {
-  const [state, setState] = useState<"ask" | "allow" | "deny">("ask");
-  return (
-    <div className="approval-demo">
-      <div className="approval-head"><Face size={22} /><span><b>Echo</b> wants to</span></div>
-      <p className="approval-what">Delete <code>old-notes.txt</code> from your project</p>
-      {state === "ask" ? (
-        <div className="approval-actions">
-          <button type="button" className="ok" onClick={() => setState("allow")}>Allow</button>
-          <button type="button" onClick={() => setState("deny")}>Deny</button>
-        </div>
-      ) : (
-        <p className="approval-result">
-          {state === "allow" ? <><Icon name="check" size={15} /> Deleted. It's in your undo history if you change your mind.</> : <>No problem, I'll leave it alone.</>}
-          <button type="button" className="again" onClick={() => setState("ask")}>Try again</button>
-        </p>
-      )}
-    </div>
-  );
-}
-
-function HomePanel() {
-  return (
-    <div className="panels shell">
-      <Reveal as="section" className="panel panel-light panel-home" anim="flip">
-        <div className="panel-copy">
-          <span className="kicker">Private by default</span>
-          <h2>Lives on your PC.<br />Not in someone's cloud.</h2>
-          <p>Your chats, memory and files stay on your computer. Use a free local model and nothing leaves at all.</p>
-        </div>
-        <div className="house-art" aria-hidden="true">
-          <svg viewBox="0 0 300 240" className="house-svg">
-            <path d="M30 120 150 28l120 92" />
-            <path d="M58 100v118h184V100" />
-          </svg>
-          <div className="house-face"><Face tone="dark" size={92} /></div>
-        </div>
-      </Reveal>
-    </div>
-  );
-}
-
 /** Smoothly counts a number toward its new value. */
 function useTween(value: number, ms = 450) {
   const [shown, setShown] = useState(value);
@@ -433,29 +391,8 @@ function SplitApp({ version }: { version: 1 | 2 }) {
   );
 }
 
-function SplitCode({ version }: { version: 1 | 2 }) {
-  return (
-    <pre className="split-code" aria-label="App code">
-      <code>
-        <span className="c-k">const</span> total = bill * (<span className="c-n">1</span> + tip / <span className="c-n">100</span>);{"\n"}
-        {version === 2 ? <><span className="c-k">const</span> each = total / people;{"\n"}</> : null}
-        {"\n"}
-        <span className="c-k">return</span> ({"\n"}
-        {"  "}&lt;<span className="c-t">Card</span>&gt;{"\n"}
-        {"    "}&lt;<span className="c-t">Big</span>&gt;{"{"}money({version === 2 ? "each" : "total"}){"}"}&lt;/<span className="c-t">Big</span>&gt;{"\n"}
-        {"    "}&lt;<span className="c-t">Slider</span> label=<span className="c-s">"Bill"</span> /&gt;{"\n"}
-        {"    "}&lt;<span className="c-t">Pills</span> options={"{"}[<span className="c-n">10</span>, <span className="c-n">15</span>, <span className="c-n">18</span>, <span className="c-n">20</span>]{"}"} /&gt;{"\n"}
-        {version === 2 ? <>{"    "}&lt;<span className="c-t">People</span> max={"{"}<span className="c-n">6</span>{"}"} /&gt;{"\n"}</> : null}
-        {"  "}&lt;/<span className="c-t">Card</span>&gt;{"\n"}
-        );
-      </code>
-    </pre>
-  );
-}
-
 function BuildDemo() {
   const [version, setVersion] = useState<1 | 2>(2);
-  const [view, setView] = useState<"preview" | "code">("preview");
   return (
     <div className="build-demo">
       <div className="build-chat">
@@ -476,18 +413,10 @@ function BuildDemo() {
       <div className="build-artifact">
         <div className="build-bar">
           <strong>{version === 2 ? "Tip & split" : "Tip calculator"}</strong>
-          <div className="build-versions" role="group" aria-label="Version">
-            {[1, 2].map((v) => (
-              <button key={v} type="button" className={version === v ? "is-on" : ""} onClick={() => setVersion(v as 1 | 2)}>v{v}</button>
-            ))}
-          </div>
-          <div className="build-tabs" role="tablist" aria-label="View">
-            <button type="button" role="tab" aria-selected={view === "preview"} className={view === "preview" ? "is-on" : ""} onClick={() => setView("preview")}>Preview</button>
-            <button type="button" role="tab" aria-selected={view === "code"} className={view === "code" ? "is-on" : ""} onClick={() => setView("code")}>Code</button>
-          </div>
+          <small>App · v{version}</small>
         </div>
-        <div className="build-stage" key={`${version}-${view}`}>
-          {view === "preview" ? <SplitApp version={version} /> : <SplitCode version={version} />}
+        <div className="build-stage" key={version}>
+          <SplitApp version={version} />
         </div>
       </div>
     </div>
@@ -503,28 +432,19 @@ function BuildPanel() {
           <h2>Ask for an app. <span className="dim">Get an app.</span></h2>
         </div>
         <BuildDemo />
-        <p className="build-hint">It's live. Drag the bill, add people, flip between versions.</p>
+        <p className="build-hint">It's live. Drag the bill, add people, or tap a version in the chat.</p>
       </Reveal>
     </div>
   );
 }
 
-function SafePanels() {
+function ModelsPanel() {
   return (
     <div className="panels shell">
-      <Reveal as="section" className="panel panel-light panel-safe" anim="left">
-        <div className="panel-copy">
-          <span className="kicker">You're in charge</span>
-          <h2>Asks before<br />anything risky.</h2>
-          <p>Reading and searching just happen. Deleting, sending or anything after reading a sketchy web page waits for your OK.</p>
-        </div>
-        <ApprovalDemo />
-      </Reveal>
-
-      <Reveal as="section" className="panel panel-dark panel-models" anim="right" delay={120}>
+      <Reveal as="section" className="panel panel-dark panel-models" anim="zoom">
         <div className="panel-copy">
           <span className="kicker">Bring your own brain</span>
-          <h2>Free local models.<br /><span className="dim">Or your favourite cloud one.</span></h2>
+          <h2>Free local models. <span className="dim">Or your favourite cloud one.</span></h2>
           <p>Run a model on your own GPU for free, or plug in an OpenAI or Gemini key. Switch any time.</p>
         </div>
         <div className="marquee" aria-label="Works with LM Studio, Ollama, llama.cpp, vLLM, LocalAI, OpenAI and Gemini">
@@ -597,87 +517,82 @@ function BringHome() {
 }
 
 /**
- * While the hero is on screen, the first downward scroll (wheel, swipe or key) glides
- * straight to About instead of creeping through the gap. After that, scrolling is free.
+ * One wheel tick, swipe or key press glides to the next section (or the next screenful of a
+ * tall one). Only on wide screens; phones scroll normally.
  */
-function useHeroSnap(targetId: string) {
+function useSectionSnap() {
   useEffect(() => {
     let animating = false;
     let touchY: number | null = null;
-    const headerOffset = 68;
 
-    const target = () => {
-      const el = document.getElementById(targetId);
-      return el ? el.getBoundingClientRect().top + window.scrollY - headerOffset : null;
+    const stops = () => {
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      const list: number[] = [];
+      document.querySelectorAll<HTMLElement>(".snap").forEach((el) => {
+        const top = el.getBoundingClientRect().top + window.scrollY;
+        list.push(top);
+        // Tall section: also stop where its bottom meets the bottom of the screen.
+        const end = top + el.offsetHeight - window.innerHeight;
+        if (end > top + 40) list.push(end);
+      });
+      list.push(max);
+      return list.map((v) => Math.max(0, Math.min(max, Math.round(v)))).sort((x, y) => x - y);
     };
-    // Only snap while we're still up in the hero.
-    const inHero = () => {
-      const top = target();
-      return top !== null && window.scrollY < top - 40;
-    };
-    const glide = () => {
-      const to = target();
-      if (to === null) return;
+    const enabled = () => window.innerWidth > 900 && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+    const glide = (to: number) => {
       const from = window.scrollY;
-      const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-      if (reduce) {
-        window.scrollTo({ top: to, behavior: "auto" });
-        return;
-      }
+      if (Math.abs(to - from) < 2) return;
       animating = true;
       const html = document.documentElement;
-      const prevBehavior = html.style.scrollBehavior;
+      const prev = html.style.scrollBehavior;
       html.style.scrollBehavior = "auto";
-      const duration = 900;
+      const duration = Math.min(1000, 550 + Math.abs(to - from) * 0.35);
       const start = performance.now();
       const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
       const step = (now: number) => {
         const t = Math.min(1, (now - start) / duration);
         window.scrollTo(0, from + (to - from) * ease(t));
-        if (t < 1) {
-          requestAnimationFrame(step);
-        } else {
-          html.style.scrollBehavior = prevBehavior;
-          // Swallow the tail of a trackpad fling so it doesn't overshoot.
-          window.setTimeout(() => { animating = false; }, 250);
+        if (t < 1) requestAnimationFrame(step);
+        else {
+          html.style.scrollBehavior = prev;
+          // Swallow the rest of a trackpad fling.
+          window.setTimeout(() => { animating = false; }, 380);
         }
       };
       requestAnimationFrame(step);
     };
+    const go = (dir: 1 | -1) => {
+      const y = window.scrollY;
+      const list = stops();
+      const next = dir > 0 ? list.find((v) => v > y + 4) : [...list].reverse().find((v) => v < y - 4);
+      if (next !== undefined) glide(next);
+    };
 
     const onWheel = (e: WheelEvent) => {
-      if (animating) {
-        e.preventDefault();
-        return;
-      }
-      if (e.deltaY > 0 && inHero()) {
-        e.preventDefault();
-        glide();
-      }
+      if (!enabled() || e.ctrlKey || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+      e.preventDefault();
+      if (animating || Math.abs(e.deltaY) < 2) return;
+      go(e.deltaY > 0 ? 1 : -1);
     };
-    const onTouchStart = (e: TouchEvent) => {
-      touchY = e.touches[0]?.clientY ?? null;
-    };
+    const onTouchStart = (e: TouchEvent) => { touchY = e.touches[0]?.clientY ?? null; };
     const onTouchMove = (e: TouchEvent) => {
-      if (animating) {
-        e.preventDefault();
-        return;
-      }
+      if (!enabled()) return;
+      e.preventDefault();
       const y = e.touches[0]?.clientY;
-      if (touchY === null || y === undefined) return;
-      if (touchY - y > 12 && inHero()) {
-        e.preventDefault();
-        touchY = null;
-        glide();
-      }
+      if (animating || touchY === null || y === undefined || Math.abs(touchY - y) < 14) return;
+      go(touchY - y > 0 ? 1 : -1);
+      touchY = null;
     };
     const onKey = (e: KeyboardEvent) => {
+      if (!enabled()) return;
       const el = e.target as HTMLElement | null;
-      if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(el.tagName))) return;
-      if (["ArrowDown", "PageDown", " "].includes(e.key) && !e.shiftKey && inHero()) {
-        e.preventDefault();
-        if (!animating) glide();
-      }
+      if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
+      const down = ["ArrowDown", "PageDown"].includes(e.key) || (e.key === " " && !e.shiftKey);
+      const up = ["ArrowUp", "PageUp"].includes(e.key) || (e.key === " " && e.shiftKey);
+      if (!down && !up) return;
+      e.preventDefault();
+      if (!animating) go(down ? 1 : -1);
     };
 
     window.addEventListener("wheel", onWheel, { passive: false });
@@ -690,27 +605,25 @@ function useHeroSnap(targetId: string) {
       window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("keydown", onKey);
     };
-  }, [targetId]);
+  }, []);
 }
 
 export function Home() {
-  useHeroSnap("about");
+  useSectionSnap();
   return (
     <div className="site">
       <style>{echoFaceStyles}</style>
       <SiteHeader />
       <main>
-        <Hero />
-        <About />
-        <WaysShowcase />
-        <BuildPanel />
-        <HomePanel />
-        <AnswerCards />
-        <Team />
-        <SafePanels />
-        <BringHome />
+        <div className="snap snap-hero"><Hero /></div>
+        <div className="snap"><About /></div>
+        <div className="snap"><WaysShowcase /></div>
+        <div className="snap"><BuildPanel /></div>
+        <div className="snap"><AnswerCards /></div>
+        <div className="snap"><Team /></div>
+        <div className="snap"><ModelsPanel /></div>
+        <div className="snap snap-last"><BringHome /><SiteFooter /></div>
       </main>
-      <SiteFooter />
     </div>
   );
 }
