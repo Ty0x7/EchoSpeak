@@ -72,10 +72,10 @@ describe("chat auto-follow", () => {
     contentChanged(follower, box);
     box.scrollTo(box.scrollTop - 12); // scrollbar drag: no wheel event
     follower.onScroll(box);
-    expect(distanceFromBottom(box)).toBeLessThan(AT_BOTTOM_PX);
+    expect(distanceFromBottom(box) < AT_BOTTOM_PX).toBe(true);
     expect(follower.following).toBe(false);
     stream(follower, box, 5);
-    expect(distanceFromBottom(box)).toBeGreaterThan(12);
+    expect(distanceFromBottom(box) > 12).toBe(true);
   });
 
   it("resumes when the user scrolls back down near the bottom", () => {
