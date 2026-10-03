@@ -204,9 +204,10 @@ CASES: list[Case] = [
          [replied(), ("handed to Jarvis", lambda r, c: bool(set(r.delegations) & {"jarvis", "scout"})), said("1889")]),
     Case(18, "Group reply", "Each of you: give me one short tip for staying focused.", "group",
          [replied(), agents_spoke(2)], room="group"),
-    Case(19, "Discussion", "Discuss briefly: tabs or spaces for Python? Reach one conclusion.", "discussion",
-         [replied(), agents_spoke(2),
-          ("stayed within the cap", lambda r, c: len([m for m in r.messages if m.get("text")]) <= 4 + 1)],
+    # "discussion" rooms are now "work together": a plain question is discussed, then answered; no tasks.
+    Case(19, "Work together: a question", "Discuss briefly: tabs or spaces for Python? Reach one conclusion.", "discussion",
+         [replied(), agents_spoke(2), finished(),
+          ("no busywork", lambda r, c: len([m for m in r.messages if m.get("text")]) <= 5)],
          room="discussion", timeout=600),
     Case(20, "Follow the format", "Write a haiku about rain. Only the haiku, nothing else.", "small",
          [replied(400), no_tools(),
@@ -235,6 +236,24 @@ CASES: list[Case] = [
          [replied(6000), block("mermaid")]),
     Case(30, "No overuse", "What's 2+2?", "visual-3",
          [replied(200), no_widgets(), said("4")]),
+    # Work together: plan, assign, do, verify, and keep going until it's checked done.
+    Case(31, "Work together: build and verify", "Write count.py that prints the numbers 1 to 5, one per line. "
+         "Run it and make sure the output is right.", "work-together",
+         [file_has("count.py"), used("terminal"), finished(),
+          ("tasks were assigned", lambda r, c: "assign_tasks" in r.tools)],
+         project=True, room="discussion", timeout=1200),
+    # The soul is really written and survives into a new chat (the runner restores it afterwards).
+    Case(32, "Soul: update", "From now on, end every reply with the word Cheers. Save that to your soul.", "soul-a",
+         [replied(), used("soul_update"),
+          ("the write succeeded", lambda r, c: "soul_update" not in r.tool_failures)]),
+    Case(33, "Soul: new chat", "Hi! What's a good name for a cat?", "soul-b", [replied(), said("Cheers")]),
+    # Servers start in the background instead of blocking for the whole timeout.
+    Case(34, "Dev server", "Start a web server in the project folder with: python -m http.server 8765. "
+         "Tell me once it's running.", "code",
+         [replied(), used("terminal", "process_start"),
+          ("didn't wait out the timeout", lambda r, c: r.seconds < 100)], project=True, timeout=300),
+    Case(35, "Stop the server", "Stop that web server now.", "code",
+         [replied(), used("process_stop")], project=True),
 ]
 
 
@@ -375,6 +394,28 @@ def main() -> int:
         project = api.call("POST", "/projects/attach-folder", {"path": str(project_dir), "name": "Eval project"})
         ctx.project_id = project["id"]
 
+    # Soul cases change the real SOUL.md: put it back afterwards, whatever happens.
+    soul_before = None
+    if any(c.chat.startswith("soul") for c in cases):
+        try:
+            soul_before = api.call("GET", "/soul").get("content")
+        except Exception:
+            soul_before = None
+
+    rows: list[dict[str, Any]] = []
+    try:
+        rows = run_cases(cases, ctx)
+    finally:
+        if soul_before is not None:
+            try:
+                api.call("PUT", "/soul", {"content": soul_before})
+                print("Restored SOUL.md.")
+            except Exception as exc:
+                print(f"Could not restore SOUL.md ({exc}); restore it in Settings > Personality.")
+    return report_results(rows, args, health, models, project_dir)
+
+
+def run_cases(cases: list[Case], ctx: Context) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for case in cases:
         print(f"[{case.id:2d}] {case.title} …", end=" ", flush=True)
@@ -391,7 +432,10 @@ def main() -> int:
             "widgets": [w.get("type") for w in result.widgets],
             "error": result.error, "reply": result.text,
         })
+    return rows
 
+
+def report_results(rows: list[dict[str, Any]], args: Any, health: dict[str, Any], models: list[str], project_dir: Path) -> int:
     out_root = Path(args.out)
     previous = sorted(out_root.glob("*/report.json")) if out_root.exists() else []
     stamp = time.strftime("%Y%m%d-%H%M%S")
