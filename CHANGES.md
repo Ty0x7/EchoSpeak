@@ -1,5 +1,56 @@
 # Changes
 
+## v10.0.1 — 2026-10-03
+
+User-facing notes: `docs/releases/v10.0.1.md`. Research and design: `docs/research/visual-responses.md`.
+
+### Visual responses
+- **Widget channel.** Tools attach cards built from their own data (`agent/lean/widgets.py`). Each card is validated
+  on the server and again in the browser, and kept in the message timeline so it shows after a reload.
+- **Cards:** weather (hourly + 7-day), stock charts, product carousels, video cards, image galleries, source chips,
+  and score cards.
+- **New keyless tools:** `stock_history`, `product_search`, `video_search` and `image_search`
+  (`agent/lean/rich_tools.py`).
+- **Rich markdown:**
+  - highlighted code with diff view and copy;
+  - sortable, copyable tables;
+  - Mermaid diagrams;
+  - KaTeX math with `$$`;
+  - fenced JSON blocks: `chart`, `steps`, `timeline`, `comparison`, `stat`, `map`.
+- **Artifacts** (`agent/lean/artifacts.py`, `widgets/ArtifactPanel.tsx`):
+  - `create_artifact` / `update_artifact`, with versions and restore;
+  - a side panel and an Artifacts page;
+  - HTML/SVG served with a CSP sandbox (opaque origin, no network) and opened with a 5-minute, single-artifact
+    frame token.
+- **Image proxy** `/lean/media`: SSRF-checked, 6 s / 5 MB limits, images only, disk cache. On desktop, images load
+  as blobs.
+- **Links** open in the system browser (desktop `open_external_url`). The desktop CSP `frame-src` now allows only
+  the local backend.
+- **Prompt:** a "Showing answers" section saying when to use text, a card, a block or an artifact.
+- **Dependencies:** `katex`, `remark-math`, `rehype-katex`, `mermaid` (lazy) and `highlight.js` (lazy).
+
+### Sports
+- `sports_live` now uses ESPN's public feeds (`agent/sports_espn.py`): team search, scoreboards, schedules
+  (including soccer fixtures) and standings.
+- No `ODDS_API_KEY` needed. The Odds API is used only for odds when a key is set.
+
+### Sidebar
+- New chat, Search chats and a nav (Group chats, Projects, Artifacts, Routines) are pinned. The nav items open pages.
+- Agents / Chats / Projects form one resizable stack with two `SplitHandle` dividers. Storage moved to v2, migrated
+  from the old split.
+- Compact agent rows.
+- Fixed: list rows collapsing to 3px with many chats.
+- The streaming reply clears the Stop/timer pill.
+
+### Echo
+- `SOUL.md` is warm, patient and complete instead of "a little sassy" and "shortest answer".
+- The desktop's data-folder copy is refreshed only when it's an unedited old default (`agent/lean/soul_defaults.py`).
+- New Echo face icons (`apps/desktop/scripts/make-echo-icons.py`).
+
+### Tests
+- Backend 515 passed, web 95, desktop 12.
+- Live eval cases 23–30 (visual responses) on Gemma 4 E4B: 8/8.
+
 ## v10.0.0 — 2026-10-02 (first official release)
 
 Version 9 was skipped. This release folds in all 8.1+ work since the 8.0

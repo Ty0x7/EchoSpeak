@@ -120,6 +120,16 @@ Details that matter:
 - **Local API guard** (`api/server.py` `_local_request_guard`): requests with a foreign `Host` header (DNS rebinding) and cross-site writes get 403.
 - **Caller roles.** `process_query` resolves who is talking (`agent/adapters.py`): the app is the owner; Discord users are owner / trusted / public by id; Twitch and Twitter are public; Telegram is the owner only with an allow-list. Guests get look-up tools only (web, weather, sports, time, math, public project updates), with no memory recall, chat search or handoffs, and the system prompt tells the agent who it is talking to and through which channel.
 
+- **Visual responses** (details in `docs/research/visual-responses.md`):
+  - **Tool cards.** A tool can call `agent/lean/widgets.py` `attach()` to add a card built from its own data
+    (weather, chart, products, media, sources, scores, artifact). The loop sends cards in `tool_end.widgets` and
+    keeps them in the timeline, and the web app draws them with `apps/web/src/widgets/WidgetView.tsx`.
+  - **Model blocks.** Fenced blocks the model writes (```` ```chart ````, `steps`, `timeline`, `comparison`, `stat`,
+    `map`, `mermaid`, and `$$math$$`) are drawn by `RichMarkdown.tsx`. Anything invalid falls back to a code block.
+  - **Images** load through `/lean/media`.
+  - **Artifacts** (`agent/lean/artifacts.py`) open in `ArtifactPanel.tsx`. HTML and SVG run in a sandboxed iframe
+    served from `/lean/artifacts/{id}/frame` with a CSP sandbox and a short-lived token.
+
 ## 3. Agent lifecycle
 
 ```mermaid
