@@ -134,6 +134,23 @@ fn desktop_window_label(window: Window) -> String {
     window.label().to_string()
 }
 
+/// Open an http(s) link from the chat in the user's default browser instead of
+/// navigating the app's webview. Anything that is not a plain web URL is refused.
+#[tauri::command]
+#[allow(deprecated)]
+fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    use tauri_plugin_shell::ShellExt;
+    let trimmed = url.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    let is_web = lower.starts_with("https://") || lower.starts_with("http://");
+    if !is_web || trimmed.len() > 2048 || trimmed.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("Only http(s) links can be opened.".to_string());
+    }
+    app.shell()
+        .open(trimmed.to_string(), None)
+        .map_err(|error| format!("Could not open the link: {error}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut log_builder = tauri_plugin_log::Builder::new()
@@ -185,6 +202,7 @@ pub fn run() {
             open_companion_window,
             set_companion_always_on_top,
             desktop_window_label,
+            open_external_url,
             updates::check_for_update,
             updates::install_update
         ])
