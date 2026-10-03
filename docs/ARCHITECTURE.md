@@ -94,6 +94,7 @@ Details that matter:
 - **Events.** Each NDJSON line is one event:
   - Run level: `run_start`, `routing`, `delegation`.
   - Per agent message (every one carries `message_id` and `agent_id`): `agent_start`, `step_start`, `reasoning_delta`, `agent_token`, `text_replace`, `tool_start`, `tool_end`, `approval_request`, `approval_resolved`, `memory_saved`, `token_usage`, `agent_done`.
+  - Job level: `job_continue`, `run_outcome`.
   - The UI batches events per animation frame (`useLeanLive.ts`) and reduces them by `message_id` (`liveReducer.ts`).
 - **The loop never gives up on its own.**
   - Errors, bad tool arguments, denied approvals and repeated identical calls all go back to the model as tool results.
@@ -109,6 +110,14 @@ Details that matter:
   - Destructive or MCP actions.
   - Terminal commands in the Docker sandbox need approval only to run on this PC instead, to use the internet, or to delete project files.
   - Sources without a UI (routines, Discord) never wait for approval; the tool is refused instead.
+- **Policy check (Rule of Two)** (`lean/policy.py`). This runs in code before every tool call, outside the model.
+  - Reading untrusted content marks the request as tainted. Untrusted sources: web search and fetch, email, channels, MCP reads, networked commands.
+  - Once tainted, external actions need approval, even with approvals switched off. External actions: sends, posts, MCP actions, desktop control, `memory_save`, host or networked commands.
+  - Where nobody can approve, those actions are refused.
+  - A call whose arguments contain a configured API key or token is always refused.
+  - Untrusted results reach the model inside `<untrusted-content>` tags.
+  - Each decision is logged to `DATA_DIR/security/tool-audit.jsonl`.
+- **Local API guard** (`api/server.py` `_local_request_guard`): requests with a foreign `Host` header (DNS rebinding) and cross-site writes get 403.
 - **Caller roles.** `process_query` resolves who is talking (`agent/adapters.py`): the app is the owner; Discord users are owner / trusted / public by id; Twitch and Twitter are public; Telegram is the owner only with an allow-list. Guests get look-up tools only (web, weather, sports, time, math, public project updates), with no memory recall, chat search or handoffs, and the system prompt tells the agent who it is talking to and through which channel.
 
 ## 3. Agent lifecycle
@@ -181,6 +190,15 @@ sequenceDiagram
   - Otherwise a short model call sees the roster, the last four messages and the last speaker. If that call fails, the last speaker answers.
 - **Fan-out** (`_should_fan_out`, `_run_fan_out`) needs two or more agents named explicitly, and all of them on the same `(base_url, model)`. That way a local server never has to load two models at once. Messages open in the order named and are saved in that order, whichever finishes first. Settings: `lean_group_fan_out` and `lean_group_merge`, both on.
 - **Discussion mode** (`_run_discussion`): rooms with `mode: "discussion"` take turns in member order until `max_messages` (2–12; the UI offers 4/6/8). Each speaker sees everything said so far and may end with `DONE` once at least two have spoken. The lead then writes the conclusion (`role: merge`).
+- **Finishing the job** (`lean/job.py`, `LeanSession._close_job`). A text answer ends an agent's *turn*. Only `complete_task(summary)` ends the *job*.
+  - Each request in a room gets a `Job`: the goal, sub-tasks opened by `delegate_to_agent` (with owner and status), and a round and token count.
+  - After the responders, `_judge` checks the job:
+    - Any sub-task still open means it isn't done.
+    - Otherwise a reviewer call (thinking off) compares the transcript with the goal.
+  - If the job isn't done, the agent the reviewer names continues with a `[System]` brief (`job_continue` event).
+  - It stops at `group_max_rounds` (4), at `group_token_budget` (200k), or after two near-duplicate replies.
+  - The `run_outcome` event ("✓ Done: …" or "Stopped: …") is stored in the execution metadata.
+  - In every turn, a promise guard in `LeanTurn` re-prompts replies like "I'll do it" that come with no tool call.
 - **Rooms** (`lean/rooms.py`) are ordinary Sessions with an agent list, `mode` and `max_messages` (`lean/rooms.json`), so history, reload and memory work the same as in a one-to-one chat.
 
 ## 5. Voice and wake
@@ -255,6 +273,6 @@ Reloading a chat calls the Session timeline (`StateStore.session_timeline`). Eac
 The 10.0 roadmap is done: legacy runtime retired, SQLite store with chat search, summaries instead of trimming, the evaluation set, honest step limit, `index.tsx` split (first pass), voice setup and wake word, one projects folder, discussion mode, sandbox by default, and in-app updates. The backend test suite is green. Next, in priority order:
 
 1. **Shrink the backend bundle.** With the legacy pipeline gone, audit what still pulls `torch`/`transformers` into the 1.1 GB sidecar (embeddings, document retrieval) and make those optional downloads like the voice models. **M, high.**
-2. **Split `Dashboard`.** `index.tsx` is still one ~8.9k-line component. Move its state into hooks (session/history, streaming, voice, settings) and the JSX into chat, composer and sidebar components. **M–L, medium.**
+2. **Split `Dashboard`.** `index.tsx` is still one ~4.4k-line component (the classic settings window is gone). Move its state into hooks (session/history, streaming, voice, settings) and the JSX into chat, composer and sidebar components. **M–L, medium.**
 3. **Run the evaluation before every release.** `scripts/eval_gemma.py` needs a live model, so run it on a self-hosted runner or from the release script. **S, medium.**
 4. **Build releases on GitHub Actions.** The release script runs locally today; a tagged workflow on `windows-latest` with the signing key as a secret would make a release one `git tag` away. **M, medium.**

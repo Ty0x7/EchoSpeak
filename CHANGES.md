@@ -28,6 +28,50 @@ baseline. User-facing notes: `docs/releases/v10.0.0.md`. Architecture:
 - Jarvis/Glados renames with an `agents.json` v2 migration (ids unchanged).
 - Group routing: plain-language "each of you", "all of you", "everyone", "you all" address
   every member, like `@all` (explicit @names still win).
+- **Group chats finish the job.** Previously "Sure, I'll do that" ended the run as success.
+  - `complete_task(summary)` now ends a job; plain text never does.
+  - A promise guard re-prompts "I'll…" replies that come with no tool call.
+  - Job state tracks the goal, sub-tasks and their owners. Delegation results say
+    whether the work was done or is still open.
+  - A reviewer checks the result against the goal and names who continues.
+  - Backstops: `group_max_rounds` (4), `group_token_budget` (200k), and repeat detection.
+  - Every run ends with "✓ Done: …" or "Stopped: …", which persists after reload.
+  - Code: `agent/lean/job.py`; `tests/test_group_completion.py`.
+- **Tool definitions**: say when to use each tool (memory vs chat search, file search
+  tools, terminal vs background process, search vs fetch, delegate). Dropped `web_search`
+  params that did nothing; `process_id` instead of `id`. Bad arguments list the required
+  and optional ones. Old tool results are cleared above half the context budget.
+
+### Security
+- **Rule of Two policy** (Meta's Agents Rule of Two, enforced in code before every tool
+  call): `agent/lean/policy.py`.
+  - Once a request has read untrusted content (web, fetch, email, channels, MCP reads,
+    networked commands), external actions need approval: sends, posts, MCP actions,
+    desktop control, `memory_save`, host or networked commands.
+  - The approval is forced even with approvals off. Where nobody can approve, the call
+    is refused.
+  - Calls carrying a configured API key or token are always refused.
+  - Every decision goes to `DATA_DIR/security/tool-audit.jsonl`.
+  - Tests: `tests/test_security_policy.py`.
+- **Spotlighting**: untrusted tool output is wrapped in `<untrusted-content>`, and the
+  prompt says to treat it as data.
+- **Local API**: Host/Origin guard (403) against DNS rebinding and cross-site writes.
+  Webhooks are refused while `webhook_enabled` is off and always need a signature.
+- Research and verdicts: `docs/research/harness-review.md`.
+
+### Settings
+- **Settings › Advanced** replaces the classic settings window. It has four pages:
+  - Settings: less common options;
+  - Memory & documents;
+  - Connections & skills;
+  - Companion.
+  The other sections are unchanged. `index.tsx`: 9.0k → 4.4k lines.
+- 46 dead config keys were retired. Stored values are dropped from `settings.json` on
+  first read (`RETIRED_SETTING_KEYS`).
+- Routes that only the classic UI used were removed: `/routines*` (use `/lean/routines`),
+  `/traces`, `/observability`, `/research/artifacts*`, `/studio/overview`,
+  `/skills/executions*`, `/trigger/cron`, `/trigger/webhook`.
+- Full table: `docs/research/harness-review.md` §5.
 
 ### Data
 - **SQLite state store** (#2): `phase3/state.db` (records, events, FTS5 `message_search`).
