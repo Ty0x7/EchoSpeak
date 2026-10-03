@@ -748,18 +748,9 @@ export const ThinkingActivityCard: React.FC<{
   // Prefer a single animated Echo mark on the newest running step (when this card owns spin).
   const primaryRunningId = [...steps].reverse().find((s) => s.status === "running")?.id;
 
-  useEffect(() => {
-    const el = containerRef.current?.closest(".chat-scroll") as HTMLElement | null;
-    if (!el) return;
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    // Stay glued to the true bottom while tools/thinking update.
-    if (distFromBottom <= 240) {
-      el.scrollTop = el.scrollHeight;
-      requestAnimationFrame(() => {
-        el.scrollTop = el.scrollHeight;
-      });
-    }
-  }, [steps.map((s) => `${s.id}:${s.status}`).join("|"), anyRunning]);
+  // No scrolling here: the chat view follows new content itself, and only while the
+  // user is at the bottom (app/chatFollow.ts). This card used to pull the view down
+  // from up to 240px away on every tool update, undoing a scroll-up to read.
 
   if (steps.length === 0) {
     return null;

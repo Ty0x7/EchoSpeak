@@ -37,6 +37,7 @@ import leanCss from "./lean/lean.css?inline";
 import settingsCss from "./settings/settings.css?inline";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { LeanMessage } from "./lean/LeanMessage";
+import { ChatFollower } from "./app/chatFollow";
 import { isLeanEvent, messageFromTimeline } from "./lean/liveReducer";
 import { useLeanLive } from "./lean/useLeanLive";
 import { LiveStatusPill } from "./lean/LiveStatus";
@@ -1216,10 +1217,9 @@ export const Dashboard: React.FC<{
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
-  const stickToBottomRef = useRef(true);
+  /** Follow new messages while the user is at the bottom; leave the view alone once they scroll up (app/chatFollow.ts). */
+  const followerRef = useRef(new ChatFollower());
   const sessionScrollRef = useRef<Map<string, { top: number; atBottom: boolean }>>(new Map());
-  /** Ignore scroll events caused by our own pin-to-bottom so we never unstick mid-update. */
-  const programmaticScrollRef = useRef(false);
   const pinBottomRafRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -1392,12 +1392,13 @@ export const Dashboard: React.FC<{
    * gets interrupted mid-animation when content keeps growing and leaves the view at ~90–98%.
    */
   const scrollChatToBottom = useCallback((force: boolean = false) => {
-    if (!force && !stickToBottomRef.current) return;
+    if (!force && !followerRef.current.shouldPin()) return;
     const el = chatScrollRef.current;
     if (!el) return;
 
     const pin = () => {
-      programmaticScrollRef.current = true;
+      // The user may have started scrolling up since this was scheduled.
+      if (!force && !followerRef.current.shouldPin()) return;
       // Direct assignment is more reliable than scrollTo for max bottom.
       el.scrollTop = el.scrollHeight;
       // Bottom sentinel (if mounted) — catches residual subpixel / padding cases.
@@ -1413,44 +1414,43 @@ export const Dashboard: React.FC<{
     // Two frames: after React paint, then after layout (markdown / framer-motion / embeds).
     pinBottomRafRef.current = requestAnimationFrame(() => {
       pin();
-      pinBottomRafRef.current = requestAnimationFrame(() => {
-        pin();
-        // Clear flag after the browser has emitted the scroll event for our pin.
-        requestAnimationFrame(() => {
-          programmaticScrollRef.current = false;
-        });
-      });
+      pinBottomRafRef.current = requestAnimationFrame(pin);
     });
   }, []);
 
   const onChatScroll = () => {
-    if (programmaticScrollRef.current) return;
     const el = chatScrollRef.current;
     if (!el) return;
-    // User is still "at bottom" if within a small slack of the true end.
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickToBottomRef.current = distFromBottom <= 48;
+    followerRef.current.onScroll(el);
     const sessionId = String(activeThreadIdRef.current || "");
-    if (sessionId) sessionScrollRef.current.set(sessionId, { top: el.scrollTop, atBottom: stickToBottomRef.current });
+    if (sessionId) sessionScrollRef.current.set(sessionId, { top: el.scrollTop, atBottom: followerRef.current.following });
+  };
+  const onChatWheel = (event: React.WheelEvent<HTMLDivElement>) => {
+    if (chatScrollRef.current) followerRef.current.onWheel(event.deltaY, chatScrollRef.current);
+  };
+  const onChatKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (chatScrollRef.current) followerRef.current.onKey(event.key, chatScrollRef.current);
+  };
+  const onChatTouchStart = () => followerRef.current.onTouchStart();
+  const onChatTouchEnd = () => {
+    if (chatScrollRef.current) followerRef.current.onTouchEnd(chatScrollRef.current);
   };
 
   useLayoutEffect(() => {
     const el = chatScrollRef.current;
     if (!el || !activeThreadId) return;
     const saved = sessionScrollRef.current.get(activeThreadId);
-    programmaticScrollRef.current = true;
     requestAnimationFrame(() => {
       if (saved?.atBottom || !saved) el.scrollTop = el.scrollHeight;
       else el.scrollTop = Math.min(saved.top, Math.max(0, el.scrollHeight - el.clientHeight));
-      stickToBottomRef.current = saved?.atBottom ?? true;
-      requestAnimationFrame(() => { programmaticScrollRef.current = false; });
+      followerRef.current.reset(saved?.atBottom ?? true, el);
     });
   }, [activeThreadId]);
 
   useEffect(() => {
     // initial mount / tab switch — always jump to latest
     if (leftTab === "chat") {
-      stickToBottomRef.current = true;
+      followerRef.current.reset(true);
       scrollChatToBottom(true);
     }
   }, [leftTab, scrollChatToBottom]);
@@ -1477,7 +1477,7 @@ export const Dashboard: React.FC<{
     if (leftTab !== "chat") return;
     if (!streaming && !speaking) return;
     const id = window.setInterval(() => {
-      if (stickToBottomRef.current) scrollChatToBottom(false);
+      if (followerRef.current.shouldPin()) scrollChatToBottom(false);
     }, 80);
     return () => window.clearInterval(id);
   }, [leftTab, streaming, speaking, scrollChatToBottom]);
@@ -1488,7 +1488,7 @@ export const Dashboard: React.FC<{
     if (!el || typeof ResizeObserver === "undefined") return;
 
     const pinIfStuck = () => {
-      if (stickToBottomRef.current) scrollChatToBottom(false);
+      if (followerRef.current.shouldPin()) scrollChatToBottom(false);
     };
 
     const ro = new ResizeObserver(() => pinIfStuck());
@@ -1564,7 +1564,7 @@ export const Dashboard: React.FC<{
     activeRequestIdsRef.current.set(streamThreadId, runRequestId);
     setSessionInFlight(streamThreadId, true);
 
-    stickToBottomRef.current = true; // force sticky to bottom when sending a message
+    followerRef.current.reset(true); // sending a message always follows its reply
     if (!overrideText) setInput("");
 
     const clampContext = (t: string, n: number) => {
@@ -3937,7 +3937,7 @@ export const Dashboard: React.FC<{
                       <small>{activityItems.length}</small>
                     </button>
                   ) : null}
-                  <div key={activeThreadId || "quick-chat"} className="chat-scroll" data-live={streaming ? "true" : undefined} style={{ flex: 1 }} ref={chatScrollRef} onScroll={onChatScroll}>
+                  <div key={activeThreadId || "quick-chat"} className="chat-scroll" data-live={streaming ? "true" : undefined} style={{ flex: 1 }} ref={chatScrollRef} onScroll={onChatScroll} onWheel={onChatWheel} onKeyDown={onChatKeyDown} onTouchStart={onChatTouchStart} onTouchEnd={onChatTouchEnd} onTouchCancel={onChatTouchEnd}>
                     {activeRoom ? (
                       <RoomHeader room={activeRoom} agents={agents} onEdit={() => setRoomDialog({ open: true, room: activeRoom })} />
                     ) : null}
