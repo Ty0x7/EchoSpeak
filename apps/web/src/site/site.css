@@ -51,10 +51,19 @@ body { margin: 0; background: #050505; }
 .text-link:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* One section per screen */
-.snap { display: flex; flex-direction: column; justify-content: center; min-height: 100vh; min-height: 100svh; box-sizing: border-box; padding: 84px 0 28px; }
+.snap { display: flex; flex-direction: column; justify-content: center; min-height: 100vh; min-height: 100svh; box-sizing: border-box; padding: 88px 0 20px; }
 .snap-hero { padding: 0; }
 .snap-last { justify-content: space-between; padding-bottom: 0; }
-.snap-last .bring { margin-block: auto 0; }
+.last-pair { display: grid; gap: 16px; margin-block: auto; }
+.last-pair .panels { padding: 0; }
+.last-pair .panel-models { gap: 26px; padding-block: 34px; }
+.last-pair .bring { margin: 0 auto; padding-block: clamp(28px, 4vw, 48px); }
+.last-pair .bring-mark { height: 170px; }
+.last-pair .panel-models { gap: 20px; padding-block: 28px; }
+.last-pair .panel-copy h2 { margin-top: 10px; font-size: clamp(30px, 3.4vw, 48px); }
+.last-pair .panel-copy p { margin-top: 10px; font-size: 15.5px; }
+.last-pair .marquee-set span { padding: 10px 18px; font-size: 15px; }
+.last-pair .bring h2 { font-size: clamp(40px, 4.6vw, 66px); }
 .snap > section, .snap > .panels { padding-block: 0; }
 .snap .section-head { margin-bottom: 28px; }
 
