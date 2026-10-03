@@ -11,6 +11,7 @@ import {
 } from "../desktop/bridge";
 import { ChoiceCards, Group, ListEditor, Row, SecretField, Segmented, Select, Status, TextField, Toggle } from "./controls";
 import { useSettings, type SettingsMap } from "./useSettings";
+import { AdvancedSection, type AdvancedPage } from "./AdvancedSection";
 
 type SectionId =
   | "general"
@@ -24,6 +25,7 @@ type SectionId =
   | "memory"
   | "automations"
   | "channels"
+  | "advanced"
   | "about";
 
 const NAV: { group: string; items: { id: SectionId; label: string; icon: IconName }[] }[] = [
@@ -53,10 +55,16 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
       { id: "channels", label: "Channels", icon: "send" },
     ],
   },
-  { group: "", items: [{ id: "about", label: "About", icon: "info" }] },
+  {
+    group: "",
+    items: [
+      { id: "advanced", label: "Advanced", icon: "wrench" },
+      { id: "about", label: "About", icon: "info" },
+    ],
+  },
 ];
 
-type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "mic" | "globe" | "brain" | "clock" | "send" | "info" | "classic";
+type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "mic" | "globe" | "brain" | "clock" | "send" | "info" | "wrench";
 
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -72,7 +80,7 @@ function Icon({ name }: { name: IconName }) {
     clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></>,
     send: <path d="M4 12l16-8-6 16-2.5-6.5z M11.5 13.5L20 4" />,
     info: <><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5M12 8h0" /></>,
-    classic: <><rect x="4" y="4" width="16" height="16" rx="2.5" /><path d="M4 9h16M9 9v11" /></>,
+    wrench: <path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L4 16.8V20h3.2l5.3-5.3a4 4 0 0 0 5.2-5.4l-2.4 2.4-2.6-.6-.6-2.6z" />,
   };
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -90,7 +98,10 @@ export type SettingsPanelProps = {
   agents: LeanPersona[];
   onClose(): void;
   onEditAgent(agent: LeanPersona | null): void;
-  onOpenClassic(tab: string): void;
+  /** The chat that was open, for pages scoped to a session or project (memory, connections). */
+  sessionId?: string;
+  projectId?: string;
+  onAvatarConfigChange?(config: any): void;
 };
 
 export function SettingsPanel(props: SettingsPanelProps) {
@@ -103,6 +114,11 @@ export function SettingsPanel(props: SettingsPanelProps) {
     }
   });
   const [query, setQuery] = useState("");
+  const [advancedPage, setAdvancedPage] = useState<AdvancedPage>("settings");
+  const openAdvanced = useCallback((page: AdvancedPage) => {
+    setAdvancedPage(page);
+    setSection("advanced");
+  }, []);
   useEffect(() => {
     try {
       localStorage.setItem("echospeak.settings.section", section);
@@ -128,7 +144,16 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const body = !settings ? (
     <div className="st-empty">{error ? `Couldn't load settings: ${error}` : "Loading…"}</div>
   ) : (
-    <SectionBody id={section} s={settings} save={save} props={props} reload={reload} />
+    <SectionBody
+      id={section}
+      s={settings}
+      save={save}
+      props={props}
+      reload={reload}
+      openAdvanced={openAdvanced}
+      advancedPage={advancedPage}
+      setAdvancedPage={setAdvancedPage}
+    />
   );
 
   return (
@@ -161,10 +186,6 @@ export function SettingsPanel(props: SettingsPanelProps) {
               </div>
             ))}
           </nav>
-          <button type="button" className="st-nav-item st-nav-classic" onClick={() => props.onOpenClassic("settings")}>
-            <Icon name="classic" />
-            <span>Classic settings</span>
-          </button>
         </aside>
         <main className="st-main">
           <header className="st-main-head">
@@ -187,7 +208,25 @@ export function SettingsPanel(props: SettingsPanelProps) {
 
 type Save = (patch: SettingsMap) => Promise<void>;
 
-function SectionBody({ id, s, save, props, reload }: { id: SectionId; s: SettingsMap; save: Save; props: SettingsPanelProps; reload(): Promise<void> }) {
+function SectionBody({
+  id,
+  s,
+  save,
+  props,
+  reload,
+  openAdvanced,
+  advancedPage,
+  setAdvancedPage,
+}: {
+  id: SectionId;
+  s: SettingsMap;
+  save: Save;
+  props: SettingsPanelProps;
+  reload(): Promise<void>;
+  openAdvanced(page: AdvancedPage): void;
+  advancedPage: AdvancedPage;
+  setAdvancedPage(page: AdvancedPage): void;
+}) {
   switch (id) {
     case "general":
       return <GeneralSection s={s} save={save} />;
@@ -202,17 +241,30 @@ function SectionBody({ id, s, save, props, reload }: { id: SectionId; s: Setting
     case "terminal":
       return <TerminalSection s={s} save={save} apiBase={props.apiBase} />;
     case "voice":
-      return <VoiceSection s={s} save={save} apiBase={props.apiBase} onOpenClassic={props.onOpenClassic} />;
+      return <VoiceSection s={s} save={save} apiBase={props.apiBase} openAdvanced={openAdvanced} />;
     case "search":
       return <SearchSection s={s} save={save} />;
     case "memory":
-      return <MemorySection s={s} save={save} onOpenClassic={props.onOpenClassic} />;
+      return <MemorySection s={s} save={save} openAdvanced={openAdvanced} />;
     case "automations":
       return <AutomationsSection s={s} save={save} apiBase={props.apiBase} agents={props.agents} />;
     case "channels":
       return <ChannelsSection s={s} save={save} />;
+    case "advanced":
+      return (
+        <AdvancedSection
+          s={s}
+          save={save}
+          apiBase={props.apiBase}
+          sessionId={props.sessionId || ""}
+          projectId={props.projectId || ""}
+          page={advancedPage}
+          onPage={setAdvancedPage}
+          onAvatarConfigChange={props.onAvatarConfigChange}
+        />
+      );
     case "about":
-      return <AboutSection apiBase={props.apiBase} onOpenClassic={props.onOpenClassic} reload={reload} />;
+      return <AboutSection apiBase={props.apiBase} openAdvanced={openAdvanced} reload={reload} />;
   }
 }
 
@@ -224,7 +276,7 @@ type VoiceSetupInfo = {
   download: { running: boolean; size: string; progress: number; error: string };
 };
 
-function VoiceSection({ s, save, apiBase, onOpenClassic }: { s: SettingsMap; save: Save; apiBase: string; onOpenClassic(tab: string): void }) {
+function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMap; save: Save; apiBase: string; openAdvanced(page: AdvancedPage): void }) {
   const [info, setInfo] = useState<VoiceSetupInfo | null>(null);
   const refresh = useCallback(async () => {
     try {
@@ -295,8 +347,8 @@ function VoiceSection({ s, save, apiBase, onOpenClassic }: { s: SettingsMap; sav
         </Row>
       </Group>
       <Group title="More">
-        <Row label="Voices, read-aloud and other providers">
-          <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => onOpenClassic("services")}>Open</button>
+        <Row label="Read-aloud, whisper.cpp and cloud voice providers">
+          <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => openAdvanced("settings")}>Open</button>
         </Row>
       </Group>
     </>
@@ -743,7 +795,7 @@ function SearchSection({ s, save }: { s: SettingsMap; save: Save }) {
 }
 
 // ── Memory ──────────────────────────────────────────────────────────────
-function MemorySection({ s, save, onOpenClassic }: { s: SettingsMap; save: Save; onOpenClassic(tab: string): void }) {
+function MemorySection({ s, save, openAdvanced }: { s: SettingsMap; save: Save; openAdvanced(page: AdvancedPage): void }) {
   return (
     <>
       <Group description="Agents save lasting facts with their memory tool and recall them automatically.">
@@ -756,10 +808,10 @@ function MemorySection({ s, save, onOpenClassic }: { s: SettingsMap; save: Save;
       </Group>
       <Group title="Manage">
         <Row label="Saved memories" help="Review, edit, or delete what agents remember.">
-          <button type="button" className="es-btn es-btn-sm" onClick={() => onOpenClassic("memory")}>Open</button>
+          <button type="button" className="es-btn es-btn-sm" onClick={() => openAdvanced("memory")}>Open</button>
         </Row>
         <Row label="Documents" help="Upload and remove documents.">
-          <button type="button" className="es-btn es-btn-sm" onClick={() => onOpenClassic("docs")}>Open</button>
+          <button type="button" className="es-btn es-btn-sm" onClick={() => openAdvanced("memory")}>Open</button>
         </Row>
       </Group>
     </>
@@ -1088,7 +1140,7 @@ function UpdateRow() {
   );
 }
 
-function AboutSection({ apiBase, onOpenClassic, reload }: { apiBase: string; onOpenClassic(tab: string): void; reload(): Promise<void> }) {
+function AboutSection({ apiBase, openAdvanced, reload }: { apiBase: string; openAdvanced(page: AdvancedPage): void; reload(): Promise<void> }) {
   const [status, setStatus] = useState<any>(null);
   useEffect(() => {
     fetch(`${apiBase}/lean/status`).then((r) => r.json()).then(setStatus).catch(() => setStatus(null));
@@ -1107,18 +1159,14 @@ function AboutSection({ apiBase, onOpenClassic, reload }: { apiBase: string; onO
           <button type="button" className="es-btn es-btn-sm" onClick={() => void reload()}>Reload</button>
         </Row>
       </Group>
-      <Group title="More" description="Less common options still live in the classic settings screen.">
-        {[
-          ["connections", "Connections and integrations"],
-          ["skills", "Skills"],
-          ["mcp_settings", "MCP servers"],
-          ["services", "Voice and speech"],
-          ["avatar_editor", "Avatar"],
-          ["projects", "Projects"],
-          ["advanced_settings", "Advanced"],
-        ].map(([tab, label]) => (
-          <Row key={tab} label={label}>
-            <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => onOpenClassic(tab)}>Open</button>
+      <Group title="More" description="Less common options are in Advanced.">
+        {([
+          ["connections", "Connections, skills and MCP servers"],
+          ["companion", "Companion avatar"],
+          ["settings", "Advanced settings"],
+        ] as [AdvancedPage, string][]).map(([page, label]) => (
+          <Row key={page} label={label}>
+            <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => openAdvanced(page)}>Open</button>
           </Row>
         ))}
       </Group>

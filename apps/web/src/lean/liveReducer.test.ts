@@ -126,7 +126,7 @@ describe("lean live reducer", () => {
       { type: "run_outcome", request_id: "r1", status: "done", summary: "hello.py written and tested." },
     ]);
     expect(isLeanEvent({ type: "run_outcome" })).toBe(true);
-    expect(state.messages.m1.outcome).toBeUndefined();
+    expect(state.messages.m1.outcome).toBe(undefined);
     expect(state.messages.m2.outcome).toEqual({ status: "done", summary: "hello.py written and tested.", reason: undefined });
     const note = state.messages.m2.segments.find((s) => s.kind === "note") as { text: string };
     expect(note.text).toBe("Not done yet: no tests yet. Glados continues.");

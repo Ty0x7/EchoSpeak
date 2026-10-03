@@ -368,3 +368,22 @@
   .st-row { flex-wrap: wrap; }
   .st-editor-grid { grid-template-columns: 1fr; }
 }
+
+/* Advanced: page switcher and memory rows */
+.st-advanced-pages { margin: 0 0 18px; }
+.st-memory-text {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: text;
+  overflow-wrap: anywhere;
+}
+.st-memory-text:hover { text-decoration: underline; text-decoration-color: rgba(255, 255, 255, 0.25); text-underline-offset: 3px; }
+.st-memory-text:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.6); outline-offset: 2px; border-radius: 4px; }
+.st-indent { padding-left: 14px; }
+.st-embed { padding: 4px 0; }
