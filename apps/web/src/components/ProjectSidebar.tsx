@@ -1,5 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { loadSectionLayout, saveSectionLayout, settleShare, shareForKey, type SectionLayout } from "./sidebarSections";
+import {
+  loadStackLayout,
+  pairShare,
+  resetPair,
+  resizePair,
+  saveStackLayout,
+  sectionFractions,
+  toggleSection,
+  type SectionKey,
+  type StackLayout,
+} from "./sidebarSections";
+import { SplitHandle, type SplitGeometry } from "./SplitHandle";
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any> };
 type Session = { id: string; name: string; at: number; projectId?: string };
@@ -24,11 +35,64 @@ type SidebarProps = {
   onView(view: "chat"): void;
   onSettings(): void;
   settingsOpen?: boolean;
-  /** Agents and group chats (lean runtime). */
-  roster?: React.ReactNode;
+  /** Agents section (lean runtime): compact rows, a count and a + action. */
+  agents?: { count: number; list: React.ReactNode; onNew(): void };
+  /** Agent faces for the icon-only sidebar. */
+  collapsedRoster?: React.ReactNode;
+  /** Pages listed under search (Group chats, Projects, Artifacts, Routines). */
+  page?: SidebarPage;
+  onPage?(page: SidebarPage): void;
+  pageCounts?: Partial<Record<SidebarPage, number>>;
   /** Full-text search over past chats. */
   onSearchChats?(query: string): Promise<ChatSearchHit[]>;
 };
+
+export type SidebarPage = "chat" | "groups" | "projects" | "artifacts" | "routines";
+
+const SECTION_TITLES: Record<SectionKey, string> = { agents: "Agents", chats: "Chats", projects: "Projects" };
+
+const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string }[] = [
+  { id: "groups", label: "Group chats", hint: "Chats with several agents" },
+  { id: "projects", label: "Projects", hint: "Your project folders" },
+  { id: "artifacts", label: "Artifacts", hint: "Apps, documents and diagrams your agents made" },
+  { id: "routines", label: "Routines", hint: "Tasks that run on a schedule" },
+];
+
+function NavIcon({ name }: { name: Exclude<SidebarPage, "chat"> }) {
+  const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  switch (name) {
+    case "groups":
+      return (
+        <svg {...common}>
+          <circle cx="9" cy="9" r="3" />
+          <path d="M3.5 18.5c.6-2.8 2.8-4.5 5.5-4.5s4.9 1.7 5.5 4.5" />
+          <path d="M15.5 6.3a3 3 0 0 1 0 5.4M17.5 14.3c1.6.6 2.7 2 3 4.2" />
+        </svg>
+      );
+    case "projects":
+      return (
+        <svg {...common}>
+          <path d="M3.5 8V6.5A1.5 1.5 0 0 1 5 5h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5V8z" />
+        </svg>
+      );
+    case "artifacts":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="7" height="7" rx="1.5" />
+          <rect x="13" y="4" width="7" height="7" rx="3.5" />
+          <path d="M4.5 19.5 7.5 14l3 5.5z" />
+          <rect x="13" y="13" width="7" height="7" rx="1.5" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 7.5V12l3 2" />
+        </svg>
+      );
+  }
+}
 
 /** Snippets mark matches as [word]; render those as <mark>. */
 function Snippet({ text }: { text: string }) {
@@ -163,10 +227,11 @@ function Icon({
 export function ProjectSidebar(props: SidebarProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [projectsOpen, setProjectsOpen] = useState(true);
-  const [layout, setLayout] = useState<SectionLayout>(() => loadSectionLayout());
+  const [layout, setLayout] = useState<StackLayout>(() => loadStackLayout());
   const [dragging, setDragging] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => saveSectionLayout(layout), [layout]);
+  const sectionRefs = useRef<Partial<Record<SectionKey, HTMLElement | null>>>({});
+  useEffect(() => saveStackLayout(layout), [layout]);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null);
   const searching = query.trim().length >= 2;
@@ -298,24 +363,114 @@ export function ProjectSidebar(props: SidebarProps) {
     </div>
   );
 
-  // Chats / Projects split (full sidebar only). Sections share the space by
-  // flex-grow, so the browser sizes them and the change animates; only a drag
-  // needs to measure.
+  // Agents / Chats / Projects stack (full sidebar only). Sections share the
+  // space by flex-grow, so the browser sizes them and changes animate; only a
+  // drag needs to measure.
   const SECTION_HEAD_PX = 30;
-  const SPLIT_HANDLE_PX = 9;
-  const bothOpen = layout.chatsOpen && layout.projectsOpen;
-  const sectionFlex = (open: boolean, share: number): React.CSSProperties =>
-    open ? { flex: `${bothOpen ? share : 1} 1 0px` } : { flex: `0 0 ${SECTION_HEAD_PX}px` };
-  /** Height (layout px) both lists share, plus the split's top edge, for pointer/keyboard resizing. */
-  const measureSplit = () => {
-    const el = splitRef.current;
-    if (!el) return { area: 0, top: 0, scale: 1 };
-    const rect = el.getBoundingClientRect();
+  const present: SectionKey[] = props.agents ? ["agents", "chats", "projects"] : ["chats", "projects"];
+  const fractions = sectionFractions(layout, present);
+  const sectionFlex = (key: SectionKey): React.CSSProperties =>
+    layout.open[key] ? { flex: `${fractions[key] ?? 1} 1 0px` } : { flex: `0 0 ${SECTION_HEAD_PX}px` };
+  /** Where the upper list starts and how tall both lists are, for pointer/keyboard resizing. */
+  const measurePair = (a: SectionKey, b: SectionKey): SplitGeometry => {
+    const elA = sectionRefs.current[a];
+    const elB = sectionRefs.current[b];
+    if (!elA || !elB) return { top: 0, area: 0, scale: 1 };
+    const rect = elA.getBoundingClientRect();
     // The app shell may be zoomed: convert screen px to layout px.
-    const scale = rect.height / (el.clientHeight || 1) || 1;
-    const padTop = parseFloat(window.getComputedStyle(el).paddingTop || "0");
-    const area = Math.max(0, el.clientHeight - padTop - SECTION_HEAD_PX * 2 - SPLIT_HANDLE_PX);
-    return { area, top: rect.top + padTop * scale, scale };
+    const scale = rect.height / (elA.clientHeight || 1) || 1;
+    const area = Math.max(0, elA.clientHeight + elB.clientHeight - SECTION_HEAD_PX * 2);
+    return { top: rect.top + SECTION_HEAD_PX * scale, area, scale };
+  };
+  const sectionHead = (key: SectionKey, count: number, actions: React.ReactNode) => (
+    <div className="es-sec-head">
+      <button
+        type="button"
+        className="es-sec-toggle"
+        aria-expanded={layout.open[key]}
+        aria-controls={`es-sec-${key}`}
+        onClick={() => setLayout((value) => toggleSection(value, key))}
+      >
+        <span className="es-sec-chev" aria-hidden><Icon name="chevron" size={12} /></span>
+        <span className="es-sec-title">{SECTION_TITLES[key]}</span>
+        <span className="es-sec-count">{count}</span>
+      </button>
+      {actions}
+    </div>
+  );
+  const renderSection = (key: SectionKey) => {
+    const sectionProps = {
+      className: "es-sec",
+      "aria-label": SECTION_TITLES[key],
+      "data-open": layout.open[key] ? "true" : "false",
+      "data-section": key,
+      style: sectionFlex(key),
+      ref: (el: HTMLElement | null) => {
+        sectionRefs.current[key] = el;
+      },
+    };
+    if (key === "agents" && props.agents) {
+      return (
+        <section {...sectionProps}>
+          {sectionHead("agents", props.agents.count, (
+            <button className="es-sec-action" type="button" onClick={props.agents.onNew} title="New agent" aria-label="New agent">
+              <Icon name="plus" size={14} />
+            </button>
+          ))}
+          <div className="es-sec-list es-agent-list" id="es-sec-agents" hidden={!layout.open.agents}>
+            {props.agents.list}
+          </div>
+        </section>
+      );
+    }
+    if (key === "chats") {
+      return (
+        <section {...sectionProps}>
+          {sectionHead("chats", looseSessions.length, (
+            <>
+              <button className="es-sec-action" type="button" onClick={() => { props.onPage?.("chat"); props.onNewSession(); }} title="Start new chat" aria-label="Start new chat">
+                <Icon name="plus" size={14} />
+              </button>
+              {props.desktop ? (
+                <button className="es-sec-action" type="button" onClick={props.onToggleCollapsed} title="Collapse sidebar" aria-label="Collapse sidebar">
+                  <Icon name="collapse" size={14} />
+                </button>
+              ) : null}
+            </>
+          ))}
+          <div className="es-sec-list" id="es-sec-chats" hidden={!layout.open.chats}>
+            {props.hydrating ? (
+              <div role="status" className="es-sec-empty">Restoring chats…</div>
+            ) : looseSessions.length ? (
+              looseSessions.map((session) => sessionRow(session))
+            ) : (
+              <div className="es-sec-empty">No chats yet. Start one with +.</div>
+            )}
+          </div>
+        </section>
+      );
+    }
+    return (
+      <section {...sectionProps}>
+        {sectionHead("projects", projects.length, (
+          <button className="es-sec-action" type="button" onClick={props.onAddFolder} title="Add Project folder" aria-label="Add Project folder">
+            <Icon name="plus" size={14} />
+          </button>
+        ))}
+        <div className="es-sec-list" id="es-sec-projects" hidden={!layout.open.projects}>
+          {props.hydrating ? (
+            <div role="status" className="es-sec-empty">Restoring projects…</div>
+          ) : projects.length ? (
+            projects.map((project) => projectRow(project))
+          ) : (
+            <button className="echo-footer-action es-sec-cta" type="button" onClick={props.onAddFolder}>
+              <span>Add your first Project</span>
+              <small>Attach a local folder</small>
+            </button>
+          )}
+        </div>
+      </section>
+    );
   };
 
   const projectRow = (project: Project) => {
@@ -612,6 +767,7 @@ export function ProjectSidebar(props: SidebarProps) {
               type="button"
               onClick={() => {
                 props.onView("chat");
+                props.onPage?.("chat");
                 props.onNewSession();
               }}
               title="New chat"
@@ -642,11 +798,27 @@ export function ProjectSidebar(props: SidebarProps) {
                 />
               </label>
             ) : null}
-            {props.roster ? (
-              <>
-                <div className="echo-rail-divider" />
-                {props.roster}
-              </>
+            {props.onPage ? (
+              <nav className="es-nav" aria-label="Pages">
+                {NAV_ITEMS.map((item) => {
+                  const active = props.page === item.id;
+                  const count = props.pageCounts?.[item.id];
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`es-nav-item${active ? " is-active" : ""}`}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => props.onPage?.(active ? "chat" : item.id)}
+                      title={item.hint}
+                    >
+                      <NavIcon name={item.id} />
+                      <span>{item.label}</span>
+                      {count ? <small>{count}</small> : null}
+                    </button>
+                  );
+                })}
+              </nav>
             ) : null}
           </div>
 
@@ -662,6 +834,7 @@ export function ProjectSidebar(props: SidebarProps) {
                     className={`es-search-hit${props.activeSessionId === hit.session_id ? " is-active" : ""}`}
                     onClick={() => {
                       props.onView("chat");
+                      props.onPage?.("chat");
                       props.onSelectSession(hit.session_id);
                       setQuery("");
                     }}
@@ -681,108 +854,26 @@ export function ProjectSidebar(props: SidebarProps) {
             </section>
           ) : null}
           <div className="es-split" ref={splitRef} data-dragging={dragging ? "true" : "false"} hidden={searching}>
-            <section className="es-sec" aria-label="Chats" data-open={layout.chatsOpen ? "true" : "false"} style={sectionFlex(layout.chatsOpen, layout.chatsShare)}>
-              <div className="es-sec-head">
-                <button
-                  type="button"
-                  className="es-sec-toggle"
-                  aria-expanded={layout.chatsOpen}
-                  aria-controls="es-sec-chats"
-                  onClick={() => setLayout((value) => ({ ...value, chatsOpen: !value.chatsOpen }))}
-                >
-                  <span className="es-sec-chev" aria-hidden><Icon name="chevron" size={12} /></span>
-                  <span className="es-sec-title">Chats</span>
-                  <span className="es-sec-count">{looseSessions.length}</span>
-                </button>
-                <button className="es-sec-action" type="button" onClick={() => props.onNewSession()} title="Start new chat" aria-label="Start new chat">
-                  <Icon name="plus" size={14} />
-                </button>
-                {props.desktop ? (
-                  <button className="es-sec-action" type="button" onClick={props.onToggleCollapsed} title="Collapse sidebar" aria-label="Collapse sidebar">
-                    <Icon name="collapse" size={14} />
-                  </button>
-                ) : null}
-              </div>
-              <div className="es-sec-list" id="es-sec-chats" hidden={!layout.chatsOpen}>
-                {props.hydrating ? (
-                  <div role="status" className="es-sec-empty">Restoring chats…</div>
-                ) : looseSessions.length ? (
-                  looseSessions.map((session) => sessionRow(session))
-                ) : (
-                  <div className="es-sec-empty">No chats yet. Start one with +.</div>
-                )}
-              </div>
-            </section>
-
-            {bothOpen ? (
-              <div
-                className="es-split-handle"
-                role="separator"
-                aria-orientation="horizontal"
-                aria-label="Resize Chats and Projects"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={Math.round(layout.chatsShare * 100)}
-                tabIndex={0}
-                title="Drag to resize · double-click to reset"
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  setDragging(true);
-                }}
-                onPointerMove={(event) => {
-                  if (!dragging) return;
-                  const { area, top, scale } = measureSplit();
-                  const y = (event.clientY - top) / scale - SECTION_HEAD_PX - SPLIT_HANDLE_PX / 2;
-                  setLayout((value) => ({ ...value, chatsShare: settleShare(y / (area || 1), area) }));
-                }}
-                onPointerUp={(event) => {
-                  event.currentTarget.releasePointerCapture(event.pointerId);
-                  setDragging(false);
-                }}
-                onPointerCancel={() => setDragging(false)}
-                onDoubleClick={() => setLayout((value) => ({ ...value, chatsShare: 0.5 }))}
-                onKeyDown={(event) => {
-                  const next = shareForKey(layout.chatsShare, event.key, measureSplit().area);
-                  if (next === null) return;
-                  event.preventDefault();
-                  setLayout((value) => ({ ...value, chatsShare: next }));
-                }}
-              >
-                <span aria-hidden />
-              </div>
-            ) : null}
-
-            <section className="es-sec" aria-label="Projects" data-open={layout.projectsOpen ? "true" : "false"} style={sectionFlex(layout.projectsOpen, 1 - layout.chatsShare)}>
-              <div className="es-sec-head">
-                <button
-                  type="button"
-                  className="es-sec-toggle"
-                  aria-expanded={layout.projectsOpen}
-                  aria-controls="es-sec-projects"
-                  onClick={() => setLayout((value) => ({ ...value, projectsOpen: !value.projectsOpen }))}
-                >
-                  <span className="es-sec-chev" aria-hidden><Icon name="chevron" size={12} /></span>
-                  <span className="es-sec-title">Projects</span>
-                  <span className="es-sec-count">{projects.length}</span>
-                </button>
-                <button className="es-sec-action" type="button" onClick={props.onAddFolder} title="Add Project folder" aria-label="Add Project folder">
-                  <Icon name="plus" size={14} />
-                </button>
-              </div>
-              <div className="es-sec-list" id="es-sec-projects" hidden={!layout.projectsOpen}>
-                {props.hydrating ? (
-                  <div role="status" className="es-sec-empty">Restoring projects…</div>
-                ) : projects.length ? (
-                  projects.map((project) => projectRow(project))
-                ) : (
-                  <button className="echo-footer-action es-sec-cta" type="button" onClick={props.onAddFolder}>
-                    <span>Add your first Project</span>
-                    <small>Attach a local folder</small>
-                  </button>
-                )}
-              </div>
-            </section>
+            {present.map((key, index) => {
+              const next = present[index + 1];
+              const handle = next && layout.open[key] && layout.open[next] ? (
+                <SplitHandle
+                  key={`h-${key}`}
+                  label={`Resize ${SECTION_TITLES[key]} and ${SECTION_TITLES[next]}`}
+                  share={pairShare(layout, key, next)}
+                  measure={() => measurePair(key, next)}
+                  onShare={(share) => setLayout((value) => resizePair(value, key, next, share))}
+                  onReset={() => setLayout((value) => resetPair(value, key, next))}
+                  onDragging={setDragging}
+                />
+              ) : null;
+              return (
+                <React.Fragment key={key}>
+                  {renderSection(key)}
+                  {handle}
+                </React.Fragment>
+              );
+            })}
           </div>
         </div>
       ) : (
@@ -818,9 +909,9 @@ export function ProjectSidebar(props: SidebarProps) {
 
         <div className="echo-rail-divider" />
 
-        {props.roster ? (
+        {props.collapsedRoster ? (
           <>
-            {props.roster}
+            {props.collapsedRoster}
             <div className="echo-rail-divider" />
           </>
         ) : null}

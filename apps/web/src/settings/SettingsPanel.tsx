@@ -856,7 +856,8 @@ function when(iso: string | null): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" });
 }
 
-function AutomationsSection({ s, save, apiBase, agents }: { s: SettingsMap; save: Save; apiBase: string; agents: LeanPersona[] }) {
+/** Routines list + editor. Shared by Settings › Automations and the Routines page. */
+export function RoutinesGroup({ apiBase, agents, embedded = false }: { apiBase: string; agents: LeanPersona[]; embedded?: boolean }) {
   const [items, setItems] = useState<RoutineItem[]>([]);
   const [editing, setEditing] = useState<Partial<RoutineItem> | null>(null);
   const [error, setError] = useState("");
@@ -896,8 +897,8 @@ function AutomationsSection({ s, save, apiBase, agents }: { s: SettingsMap; save
   return (
     <>
       <Group
-        title="Routines"
-        description="Tasks your agents run on a schedule or when you tap Run. Results show up in their own chat."
+        title={embedded ? "Your routines" : "Routines"}
+        description={embedded ? undefined : "Tasks your agents run on a schedule or when you tap Run. Results show up in their own chat."}
         action={<button type="button" className="es-btn es-btn-sm es-btn-primary" onClick={() => setEditing({ name: "", prompt: "", schedule: "0 8 * * *", agent_id: "echo", delivery_channels: [] })}>New routine</button>}
       >
         {items.length === 0 && !editing ? <div className="st-empty-row">No routines yet. Try “Every morning, summarize today's weather and top tech news.”</div> : null}
@@ -936,6 +937,14 @@ function AutomationsSection({ s, save, apiBase, agents }: { s: SettingsMap; save
           />
         ) : null}
       </Group>
+    </>
+  );
+}
+
+function AutomationsSection({ s, save, apiBase, agents }: { s: SettingsMap; save: Save; apiBase: string; agents: LeanPersona[] }) {
+  return (
+    <>
+      <RoutinesGroup apiBase={apiBase} agents={agents} />
       <Group title="Heartbeat" description="A periodic check-in where Echo looks at your todos, projects, and activity and only speaks up if something matters.">
         <Row label="Enable heartbeat">
           <Toggle checked={asBool(s.heartbeat_enabled)} onChange={(v) => save({ heartbeat_enabled: v })} label="Enable heartbeat" />

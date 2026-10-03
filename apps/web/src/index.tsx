@@ -4,7 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate } from "react-router-dom";
 import { createEmptyTaskPlan, taskPlanReducer } from "./taskPlanProjection";
 import type { EchoReaction } from "./components/echoAnimationUtils";
-import { ProjectSidebar } from "./components/ProjectSidebar";
+import { ProjectSidebar, type SidebarPage } from "./components/ProjectSidebar";
 import { MediaLibraryView } from "./features/media/MediaLibraryView.tsx";
 import { useWorkStore } from "./features/work/store";
 import { loadRuntimeLayout, runtimeGridColumns, saveRuntimeLayout } from "./runtimeLayout";
@@ -41,7 +41,8 @@ import { isLeanEvent, messageFromTimeline } from "./lean/liveReducer";
 import { useLeanLive } from "./lean/useLeanLive";
 import { LiveStatusPill } from "./lean/LiveStatus";
 import { leanApi } from "./lean/api";
-import { RosterSections } from "./lean/Roster";
+import { AgentRows, CollapsedRoster } from "./lean/Roster";
+import { ArtifactsPage, GroupChatsPage, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { AgentEditor, MentionMenu, RoomDialog, RoomHeader, activeMention, mentionMatches } from "./lean/Dialogs";
 import type { LeanEvent, LeanPersona, LeanRoom } from "./lean/types";
 import {
@@ -106,6 +107,10 @@ export const Dashboard: React.FC<{
   const activeGroupMenuRef = useRef<HTMLDivElement | null>(null);
   const [activeGroupPos, setActiveGroupPos] = useState<{ top: number; left: number } | null>(null);
   const [showSidebar, setShowSidebar] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarVisible);
+  /** Which page the main area shows: the chat, or one of the sidebar nav pages. */
+  const [mainPage, setMainPage] = useState<SidebarPage>("chat");
+  /** The artifact shown in the side panel. */
+  const [openArtifact, setOpenArtifact] = useState<{ id: string; version?: number } | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarCollapsed);
   const [narrowLayout, setNarrowLayout] = useState<boolean>(() => typeof window !== "undefined" && window.innerWidth < 900);
   const [agentMode, setAgentMode] = useState<"idle" | "research" | "coding" | "working" | "thinking">("idle");
@@ -3362,6 +3367,41 @@ export const Dashboard: React.FC<{
       visualizerDensity: "normal",
     });
 
+  /** Open (or create) the one-to-one chat with an agent. Echo's chat is the most recent plain chat. */
+  const openAgentChat = async (agent: LeanPersona) => {
+    setMainPage("chat");
+    if (agent.id === "echo") {
+      const recent = threads.find((thread) => !roomThreadIds.has(thread.id));
+      if (recent) switchThread(recent.id);
+      else void createNewThread();
+      return;
+    }
+    let room = rooms.find((r) => r.kind === "direct" && r.agent_ids.length === 1 && r.agent_ids[0] === agent.id);
+    if (!room) {
+      try {
+        room = await leanClient.createRoom({ name: agent.name, agent_ids: [agent.id], kind: "direct" });
+        await refreshRoster();
+        await refreshThreads();
+      } catch (error) {
+        console.warn("Could not open a chat with", agent.name, error);
+        return;
+      }
+    }
+    const opened = room;
+    setThreads((prev) => (prev.some((t) => t.id === opened.thread_id) ? prev : [{ id: opened.thread_id, name: opened.name, at: Date.now() }, ...prev]));
+    switchThread(opened.thread_id);
+  };
+  const openRoom = (room: LeanRoom) => {
+    setMainPage("chat");
+    setThreads((prev) => (prev.some((t) => t.id === room.thread_id) ? prev : [{ id: room.thread_id, name: room.name, at: Date.now() }, ...prev]));
+    switchThread(room.thread_id);
+  };
+  const openArtifactFromPage = (item: ArtifactSummary) => {
+    setMainPage("chat");
+    if (item.session_id && item.session_id !== activeThreadId) switchThread(item.session_id);
+    setOpenArtifact({ id: item.id, version: item.version });
+  };
+
   return (
     <div
       className="echo-root"
@@ -3444,60 +3484,36 @@ export const Dashboard: React.FC<{
           collapsed={sidebarCollapsed || narrowLayout}
           projects={projects}
           sessions={threads.filter((thread) => !roomThreadIds.has(thread.id))}
-          roster={
-            agents.length ? (
-              <RosterSections
+          agents={agents.length ? {
+            count: agents.length,
+            onNew: () => setAgentEditor({ open: true, agent: null }),
+            list: (
+              <AgentRows
                 agents={agents}
                 rooms={rooms}
                 activeThreadId={activeThreadId}
-                collapsed={sidebarCollapsed || narrowLayout}
-                onOpenAgent={async (agent) => {
-                  if (agent.id === "echo") {
-                    const recent = threads.find((thread) => !roomThreadIds.has(thread.id));
-                    if (recent) switchThread(recent.id);
-                    else void createNewThread();
-                    return;
-                  }
-                  let room = rooms.find((r) => r.kind === "direct" && r.agent_ids.length === 1 && r.agent_ids[0] === agent.id);
-                  if (!room) {
-                    try {
-                      room = await leanClient.createRoom({ name: agent.name, agent_ids: [agent.id], kind: "direct" });
-                      await refreshRoster();
-                      await refreshThreads();
-                    } catch (error) {
-                      console.warn("Could not open a chat with", agent.name, error);
-                      return;
-                    }
-                  }
-                  setThreads((prev) => (prev.some((t) => t.id === room!.thread_id) ? prev : [{ id: room!.thread_id, name: room!.name, at: Date.now() }, ...prev]));
-                  switchThread(room.thread_id);
-                }}
+                onOpenAgent={(agent) => void openAgentChat(agent)}
                 onEditAgent={(agent) => setAgentEditor({ open: true, agent })}
-                onNewAgent={() => setAgentEditor({ open: true, agent: null })}
-                onOpenRoom={(room) => {
-                  setThreads((prev) => (prev.some((t) => t.id === room.thread_id) ? prev : [{ id: room.thread_id, name: room.name, at: Date.now() }, ...prev]));
-                  switchThread(room.thread_id);
-                }}
-                onNewRoom={() => setRoomDialog({ open: true, room: null })}
-                onDeleteRoom={async (room) => {
-                  try {
-                    await leanClient.deleteRoom(room.id);
-                  } catch (error) {
-                    console.warn("Delete room failed", error);
-                  }
-                  await refreshRoster();
-                  await refreshThreads();
-                }}
               />
-            ) : null
-          }
+            ),
+          } : undefined}
+          collapsedRoster={agents.length ? <CollapsedRoster agents={agents} onOpenAgent={(agent) => void openAgentChat(agent)} /> : undefined}
+          page={mainPage}
+          onPage={setMainPage}
+          pageCounts={{ groups: rooms.filter((r) => r.kind === "group").length, projects: projects.filter((p) => !p.archived).length }}
           activeProjectId={activeProjectId}
           activeSessionId={activeThreadId}
           activeView="chat"
           onToggleCollapsed={() => setSidebarCollapsed(v => !v)}
-          onNewSession={createNewThread}
+          onNewSession={(projectId) => {
+            setMainPage("chat");
+            void createNewThread(projectId);
+          }}
           onAddFolder={() => void attachFolder()}
-          onSelectSession={switchThread}
+          onSelectSession={(id) => {
+            setMainPage("chat");
+            switchThread(id);
+          }}
           onSearchChats={searchChats}
           onRenameSession={(id, title) => void renameThread(id, title)}
           onDeleteSession={(id) => void deleteThread(id)}
@@ -3541,7 +3557,52 @@ export const Dashboard: React.FC<{
             }}
           />
         ) : null}
-        <div className={`glow-panel${desktopContextualWorkspace ? " desktop-contextual-workspace" : desktopMode ? " desktop-chat-workspace" : ""}`}>
+        {mainPage !== "chat" ? (
+          <div className="glow-panel es-page-host" data-testid="sidebar-page">
+            {mainPage === "groups" ? (
+              <GroupChatsPage
+                agents={agents}
+                rooms={rooms}
+                activeThreadId={activeThreadId}
+                onOpen={openRoom}
+                onNew={() => setRoomDialog({ open: true, room: null })}
+                onDelete={async (room) => {
+                  try {
+                    await leanClient.deleteRoom(room.id);
+                  } catch (error) {
+                    console.warn("Delete room failed", error);
+                  }
+                  await refreshRoster();
+                  await refreshThreads();
+                }}
+              />
+            ) : mainPage === "projects" ? (
+              <ProjectsPage
+                projects={projects}
+                activeProjectId={activeProjectId}
+                chatCounts={threads.reduce<Record<string, number>>((acc, t) => {
+                  if (t.projectId) acc[t.projectId] = (acc[t.projectId] || 0) + 1;
+                  return acc;
+                }, {})}
+                onAdd={() => void attachFolder()}
+                onOpen={(project) => {
+                  setMainPage("chat");
+                  const recent = threads.find((t) => t.projectId === project.id);
+                  if (recent) switchThread(recent.id);
+                  else void createNewThread(project.id);
+                }}
+              />
+            ) : mainPage === "artifacts" ? (
+              <ArtifactsPage apiBase={apiBase} onOpen={openArtifactFromPage} />
+            ) : (
+              <RoutinesPage apiBase={apiBase} agents={agents} />
+            )}
+          </div>
+        ) : null}
+        <div
+          className={`glow-panel${desktopContextualWorkspace ? " desktop-contextual-workspace" : desktopMode ? " desktop-chat-workspace" : ""}`}
+          data-page-hidden={mainPage !== "chat" ? "true" : undefined}
+        >
           <div className="panel-header">
             <div className="title">
               <img src="/logo.png" alt="Logo" style={{ width: 14, height: 14, borderRadius: 2 }} />
@@ -3754,7 +3815,7 @@ export const Dashboard: React.FC<{
               {/* Chat Tab */}
               {true && (
                 <>
-                  <div key={activeThreadId || "quick-chat"} className="chat-scroll" style={{ flex: 1 }} ref={chatScrollRef} onScroll={onChatScroll}>
+                  <div key={activeThreadId || "quick-chat"} className="chat-scroll" data-live={streaming ? "true" : undefined} style={{ flex: 1 }} ref={chatScrollRef} onScroll={onChatScroll}>
                     {activeRoom ? (
                       <RoomHeader room={activeRoom} agents={agents} onEdit={() => setRoomDialog({ open: true, room: activeRoom })} />
                     ) : null}
