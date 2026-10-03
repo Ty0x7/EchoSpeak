@@ -72,7 +72,7 @@ const MODES: Mode[] = [
   { id: "chat", icon: "chat", label: "Talk it through", says: "Ask me anything.", caption: "Plans, advice, explanations: talk to Echo like a person." },
   { id: "see", icon: "chart", label: "Answers you can see", says: "Here's the week.", caption: "Weather, stocks, scores and more show up as cards, not walls of text." },
   { id: "research", icon: "research", label: "Look things up", says: "I read the sources.", caption: "Echo searches the web, reads the pages and shows where answers came from." },
-  { id: "build", icon: "code", label: "Build things", says: "Made you an app.", caption: "Ask for a calculator, a game or a document and use it right next to the chat." },
+  { id: "build", icon: "code", label: "Build things", says: "Shipped it.", caption: "Echo edits your files, runs the tests and tells you what changed." },
   { id: "team", icon: "team", label: "Bring the team", says: "Glados is on it.", caption: "Echo hands work to Jarvis and Glados and tells you when it's really done." },
   { id: "voice", icon: "voice", label: "Just say “Hey Echo”", says: "I'm listening.", caption: "Turn on Wake and just talk. Speech stays on your PC." },
 ];
@@ -92,64 +92,82 @@ const DEMO_WEATHER = {
   source: "Example",
 };
 
+type Step = { "--i": number };
+
+/** Your message: a bubble on the right. */
+function You({ children, i = 0 }: { children: React.ReactNode; i?: number }) {
+  return <p className="cm cm-you" style={{ "--i": i } as React.CSSProperties & Step}>{children}</p>;
+}
+
+/** An agent's reply: name header on the left, text underneath, like the app. */
+function Agent({ children, name = "Echo", tone = "light", i = 0 }: { children: React.ReactNode; name?: string; tone?: "light" | "dark"; i?: number }) {
+  return (
+    <div className="cm cm-agent" style={{ "--i": i } as React.CSSProperties & Step}>
+      <div className="cm-head"><Face tone={tone} size={20} /><b>{name}</b><time>now</time></div>
+      <div className="cm-body">{children}</div>
+    </div>
+  );
+}
+
 function Screen({ mode }: { mode: string }) {
   switch (mode) {
     case "chat":
       return (
-        <div className="scr scr-chat">
-          <p className="msg msg-you">Plan a cozy Saturday for two. Not too expensive.</p>
-          <div className="msg msg-echo">
-            <Face size={22} />
-            <div>
-              <p>Here's a relaxed day under $60:</p>
-              <ul>
-                <li>Morning coffee and a long walk somewhere green</li>
-                <li>A free museum or gallery in the afternoon</li>
-                <li>Dinner from a local market, picnic style</li>
-              </ul>
-              <p className="muted">Want me to check the weather first?</p>
-            </div>
-          </div>
+        <div className="thread">
+          <You>Plan a cozy Saturday for two. Not too expensive.</You>
+          <Agent i={1}>
+            <p>Here's a relaxed day for under $60:</p>
+            <ul>
+              <li>Morning coffee and a long walk somewhere green</li>
+              <li>A free museum or gallery in the afternoon</li>
+              <li>Dinner from a local market, picnic style</li>
+            </ul>
+            <p className="muted">Want me to check the weather first?</p>
+          </Agent>
         </div>
       );
     case "see":
       return (
-        <div className="scr scr-see">
-          <p className="msg msg-you">What's the weather in Denver this week?</p>
-          <WeatherCard data={DEMO_WEATHER} />
+        <div className="thread">
+          <You>What's the weather in Denver this week?</You>
+          <Agent i={1}>
+            <WeatherCard data={DEMO_WEATHER} />
+          </Agent>
         </div>
       );
     case "research":
       return (
-        <div className="scr scr-research">
-          <p className="msg msg-you">Is an air fryer actually healthier than an oven?</p>
-          <div className="msg msg-echo">
-            <Face size={22} />
-            <div>
-              <p>Mostly the same food, less oil: air fryers cook with hot moving air, so you get crispy results with a spoonful of oil instead of a pan of it.</p>
-              <div className="chips">
-                {["healthline.com", "mayoclinic.org", "seriouseats.com"].map((s, i) => <span key={s} className="chip"><b>{i + 1}</b>{s}</span>)}
-              </div>
+        <div className="thread">
+          <You>Is an air fryer actually healthier than an oven?</You>
+          <Agent i={1}>
+            <p>Mostly the same food with less oil. Air fryers cook with hot moving air, so you get crispy results from a spoonful of oil instead of a pan of it.</p>
+            <div className="chips">
+              {["healthline.com", "mayoclinic.org", "seriouseats.com"].map((src, n) => <span key={src} className="chip"><b>{n + 1}</b>{src}</span>)}
             </div>
-          </div>
+          </Agent>
         </div>
       );
     case "build":
       return (
-        <div className="scr scr-build">
-          <p className="msg msg-you">Build me a tip calculator.</p>
-          <div className="artifact-chip"><Icon name="code" size={16} /><span><strong>Tip calculator</strong><small>App · v1</small></span><em>Open</em></div>
-          <MiniTipCalc compact />
+        <div className="thread">
+          <You>Add a dark mode toggle to my website and test it.</You>
+          <Agent i={1}>
+            <div className="steps-mini">
+              <span><Icon name="check" size={12} /> Read <code>index.html</code> and <code>styles.css</code></span>
+              <span><Icon name="check" size={12} /> Edited <code>styles.css</code> (+24 lines)</span>
+              <span><Icon name="check" size={12} /> Ran the tests: 12 passed</span>
+            </div>
+            <p>Done. The toggle sits in the header and remembers your choice.</p>
+          </Agent>
         </div>
       );
     case "team":
       return (
-        <div className="scr scr-team">
-          <p className="msg msg-you">@Echo get Jarvis to find a good pasta recipe and have Glados save it to recipes.txt</p>
-          <div className="team-line"><Face size={20} /><span><b>Echo</b> Asking Jarvis to find a recipe…</span></div>
-          <div className="team-line"><Face tone="dark" size={20} /><span><b>Jarvis</b> Found a 20-minute garlic pasta (3 sources).</span></div>
-          <div className="team-line"><Face tone="dark" size={20} /><span><b>Glados</b> Saved to recipes.txt.</span></div>
-          <div className="done-line"><Icon name="check" size={14} /> Done: recipe found and saved.</div>
+        <div className="thread">
+          <You>@Echo get Jarvis to find a quick pasta recipe and have Glados save it to recipes.txt</You>
+          <Agent i={1}><p>On it. Jarvis, can you find a good one?</p></Agent>
+          <Agent i={2} name="Jarvis" tone="dark"><p>Found a 20-minute garlic pasta (3 sources).</p></Agent>
+          <Agent i={3} name="Glados" tone="dark"><p>Saved to <code>recipes.txt</code>.</p><span className="done-chip"><Icon name="check" size={13} /> Done</span></Agent>
         </div>
       );
     default:
@@ -276,27 +294,6 @@ function Team() {
 
 // ── Big ad panels ────────────────────────────────────────────────────
 
-function MiniTipCalc({ compact = false }: { compact?: boolean }) {
-  const [bill, setBill] = useState(64);
-  const [tip, setTip] = useState(18);
-  const [people, setPeople] = useState(2);
-  const total = bill * (1 + tip / 100);
-  return (
-    <div className={`tipcalc${compact ? " is-compact" : ""}`}>
-      <label>Bill <span>${bill}</span><input type="range" min={10} max={300} value={bill} onChange={(e) => setBill(Number(e.target.value))} aria-label="Bill amount" /></label>
-      <div className="tip-pills" role="radiogroup" aria-label="Tip">
-        {[15, 18, 20, 25].map((t) => (
-          <button key={t} type="button" role="radio" aria-checked={tip === t} className={tip === t ? "is-on" : ""} onClick={() => setTip(t)}>{t}%</button>
-        ))}
-      </div>
-      {!compact ? (
-        <label>People <span>{people}</span><input type="range" min={1} max={8} value={people} onChange={(e) => setPeople(Number(e.target.value))} aria-label="People" /></label>
-      ) : null}
-      <div className="tip-total"><span>{compact ? "Total" : "Each pays"}</span><strong>${(compact ? total : total / people).toFixed(2)}</strong></div>
-    </div>
-  );
-}
-
 function ApprovalDemo() {
   const [state, setState] = useState<"ask" | "allow" | "deny">("ask");
   return (
@@ -360,7 +357,17 @@ function useTween(value: number, ms = 450) {
   return shown;
 }
 
-const SPLIT_NAMES = ["You", "Sam", "Alex", "Jo", "Kim", "Lee"];
+const SPLIT_PEOPLE = [
+  { name: "You", hue: 252 },
+  { name: "Sam", hue: 330 },
+  { name: "Alex", hue: 22 },
+  { name: "Jo", hue: 160 },
+  { name: "Kim", hue: 200 },
+  { name: "Lee", hue: 290 },
+];
+const TIPS = [10, 15, 18, 20, 25];
+const BILL_MIN = 10;
+const BILL_MAX = 300;
 
 function SplitApp({ version }: { version: 1 | 2 }) {
   const [bill, setBill] = useState(84);
@@ -371,37 +378,53 @@ function SplitApp({ version }: { version: 1 | 2 }) {
   const each = split ? total / people : total;
   const shownMain = useTween(each);
   const shownTotal = useTween(total);
+  const fill = `${((bill - BILL_MIN) / (BILL_MAX - BILL_MIN)) * 100}%`;
   return (
     <div className="splitapp">
+      <div className="split-top">
+        <span className="split-logo"><Icon name="spark" size={13} /></span>
+        <b>Split</b>
+        <small>{split ? `${people} people` : "Tip calculator"}</small>
+      </div>
       <div className="split-hero">
         <span>{split ? "Each person pays" : "Total with tip"}</span>
         <strong>${shownMain.toFixed(2)}</strong>
-        <small>{split ? `Total $${shownTotal.toFixed(2)} · ${people} people` : `Tip $${(total - bill).toFixed(2)}`}</small>
+        <div className="split-break">
+          <span>Bill <b>${bill.toFixed(2)}</b></span>
+          <span>Tip <b>${(total - bill).toFixed(2)}</b></span>
+          {split ? <span>Total <b>${shownTotal.toFixed(2)}</b></span> : null}
+        </div>
       </div>
-      <label className="split-row">
+      <label className="split-field">
         <span>Bill</span>
         <b>${bill}</b>
-        <input type="range" min={10} max={300} value={bill} onChange={(e) => setBill(Number(e.target.value))} aria-label="Bill amount" />
+        <input className="split-range" type="range" min={BILL_MIN} max={BILL_MAX} value={bill} onChange={(e) => setBill(Number(e.target.value))} aria-label="Bill amount" style={{ "--fill": fill } as React.CSSProperties} />
       </label>
-      <div className="split-row">
+      <div className="split-field">
         <span>Tip</span>
-        <div className="split-seg" role="radiogroup" aria-label="Tip">
-          {[10, 15, 18, 20, 25].map((t) => (
+        <b>{tip}%</b>
+        <div className="split-seg" role="radiogroup" aria-label="Tip" style={{ "--i": TIPS.indexOf(tip), "--n": TIPS.length } as React.CSSProperties}>
+          <i className="split-seg-pill" aria-hidden="true" />
+          {TIPS.map((t) => (
             <button key={t} type="button" role="radio" aria-checked={tip === t} className={tip === t ? "is-on" : ""} onClick={() => setTip(t)}>{t}%</button>
           ))}
         </div>
       </div>
       {split ? (
-        <div className="split-row split-people">
-          <span>People</span>
+        <div className="split-field">
+          <span>Split between</span>
           <div className="split-stepper">
             <button type="button" onClick={() => setPeople((n) => Math.max(1, n - 1))} aria-label="Fewer people">−</button>
             <b>{people}</b>
-            <button type="button" onClick={() => setPeople((n) => Math.min(6, n + 1))} aria-label="More people">+</button>
+            <button type="button" onClick={() => setPeople((n) => Math.min(SPLIT_PEOPLE.length, n + 1))} aria-label="More people">+</button>
           </div>
           <div className="split-faces">
-            {SPLIT_NAMES.slice(0, people).map((n) => (
-              <span key={n} className="split-face"><i>{n[0]}</i><small>${each.toFixed(2)}</small></span>
+            {SPLIT_PEOPLE.slice(0, people).map((person) => (
+              <span key={person.name} className="split-face" style={{ "--h": person.hue } as React.CSSProperties}>
+                <i>{person.name[0]}</i>
+                <small>{person.name}</small>
+                <em>${each.toFixed(2)}</em>
+              </span>
             ))}
           </div>
         </div>
@@ -436,21 +459,17 @@ function BuildDemo() {
   return (
     <div className="build-demo">
       <div className="build-chat">
-        <p className="msg msg-you">Build me a tip calculator.</p>
-        <div className="msg msg-echo">
-          <Face size={22} />
-          <div>
+        <div className="thread">
+          <You>Build me a tip calculator.</You>
+          <Agent i={1}>
             <p>Here you go. It's open on the right.</p>
             <button type="button" className={`build-chip${version === 1 ? " is-on" : ""}`} onClick={() => setVersion(1)}><Icon name="code" size={14} /><span><strong>Tip calculator</strong><small>App · v1</small></span></button>
-          </div>
-        </div>
-        <p className="msg msg-you">Make it split the bill between friends.</p>
-        <div className="msg msg-echo">
-          <Face size={22} />
-          <div>
-            <p>Done. Version 2 splits it and shows what each person pays.</p>
+          </Agent>
+          <You i={2}>Make it split the bill between friends.</You>
+          <Agent i={3}>
+            <p>Done. Version 2 shows what each person pays.</p>
             <button type="button" className={`build-chip${version === 2 ? " is-on" : ""}`} onClick={() => setVersion(2)}><Icon name="code" size={14} /><span><strong>Tip & split</strong><small>App · v2</small></span></button>
-          </div>
+          </Agent>
         </div>
         <div className="chat-composer" aria-hidden="true"><span>Ask for a change...</span><b><Icon name="arrow" size={15} /></b></div>
       </div>
@@ -684,9 +703,9 @@ export function Home() {
         <Hero />
         <About />
         <WaysShowcase />
+        <BuildPanel />
         <HomePanel />
         <AnswerCards />
-        <BuildPanel />
         <Team />
         <SafePanels />
         <BringHome />
