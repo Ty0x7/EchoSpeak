@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest",
     "test:run": "vitest run",
-    "check": "npm run typecheck && npm run test:run"
+    "check": "npm run typecheck && npm run test:run",
+    "build:site": "vite build --config vite.site.config.ts",
+    "preview:site": "vite preview --config vite.site.config.ts --port 5175 --strictPort"
   },
   "dependencies": {
     "framer-motion": "^11.0.0",
