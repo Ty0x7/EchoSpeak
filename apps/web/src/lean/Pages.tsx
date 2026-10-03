@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState } from "react";
 import { RoutinesGroup } from "../settings/SettingsPanel";
 import { AvatarStack } from "./Roster";
 import type { LeanPersona, LeanRoom } from "./types";
@@ -18,7 +18,19 @@ export type ArtifactSummary = {
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean };
 
+/** Closes the open page and brings the chat back. Provided by the app shell. */
+export const PageCloseContext = createContext<(() => void) | null>(null);
+
 function PageShell({ title, lead, action, children }: { title: string; lead: string; action?: React.ReactNode; children: React.ReactNode }) {
+  const close = useContext(PageCloseContext);
+  useEffect(() => {
+    if (!close) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close]);
   return (
     <section className="es-page" aria-label={title}>
       <header className="es-page-head">
@@ -26,7 +38,14 @@ function PageShell({ title, lead, action, children }: { title: string; lead: str
           <h1>{title}</h1>
           <p>{lead}</p>
         </div>
-        {action}
+        <div className="es-page-actions">
+          {action}
+          {close ? (
+            <button type="button" className="es-page-close" onClick={close} title="Back to chat (Esc)" aria-label="Close and go back to the chat">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6 6 18" /></svg>
+            </button>
+          ) : null}
+        </div>
       </header>
       <div className="es-page-body">{children}</div>
     </section>
