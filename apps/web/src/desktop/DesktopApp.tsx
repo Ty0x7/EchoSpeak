@@ -34,6 +34,17 @@ export function DesktopApp() {
   const [boot, dispatch] = useReducer(reduceDesktopBootState, initialDesktopBootState);
   const startupStartedAtRef = useRef(Date.now());
   const bootstrappedInstanceRef = useRef("");
+  const [bootLeaving, setBootLeaving] = React.useState(false);
+
+  // The main window starts hidden; reveal it once the boot screen has painted
+  // so the first visible frame is never blank.
+  useEffect(() => {
+    if (windowKind !== "main") return;
+    const frame = requestAnimationFrame(() =>
+      requestAnimationFrame(() => void controlDesktopWindow("show").catch(() => undefined))
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [windowKind]);
 
   useEffect(() => {
     let disposed = false;
@@ -63,7 +74,7 @@ export function DesktopApp() {
         dispatch({ type: "snapshot", runtime });
         if (runtime.backend_phase === "ready") {
           const controller = new AbortController();
-          const timeout = window.setTimeout(() => controller.abort(), 6000);
+          const timeout = window.setTimeout(() => controller.abort(), 15000);
           try {
             const readiness = await readDesktopReadiness(runtime, controller.signal);
             if (readiness.core_ready && bootstrappedInstanceRef.current !== runtime.instance_id) {
@@ -124,6 +135,13 @@ export function DesktopApp() {
   };
 
   const showWorkspace = boot.hasBeenReady;
+  // Keep the boot screen mounted briefly so it fades into the workspace.
+  useEffect(() => {
+    if (!showWorkspace) return;
+    setBootLeaving(true);
+    const timer = window.setTimeout(() => setBootLeaving(false), 260);
+    return () => window.clearTimeout(timer);
+  }, [showWorkspace]);
   if (windowKind === null) return null;
   if (windowKind === "companion") {
     document.documentElement.classList.add("echospeak-companion-root");
@@ -146,13 +164,20 @@ export function DesktopApp() {
       </header>
 
       <main className="desktop-content">
-        {showWorkspace ? <Dashboard desktopSettingsWindow={settingsWindow} /> : (
-          <section className="desktop-boot-state" aria-live="polite">
-            <div className="desktop-boot-echo" aria-hidden><img src="/logo.png" alt="" draggable={false} /></div>
-            <div className="desktop-boot-progress" aria-hidden><span /></div>
-            <p className="desktop-boot-detail">{boot.detail}</p>
+        {showWorkspace ? <Dashboard desktopSettingsWindow={settingsWindow} /> : null}
+        {!showWorkspace || bootLeaving ? (
+          <section className={`desktop-boot-state${showWorkspace ? " is-leaving" : ""}`} aria-live="polite">
+            <div className="desktop-boot-face" aria-hidden><i /><i /></div>
+            <div
+              className={`desktop-boot-progress${boot.readiness?.total_steps ? " is-determinate" : ""}`}
+              aria-hidden
+              style={boot.readiness?.total_steps ? { ["--progress" as string]: `${Math.round((boot.readiness.completed_steps / boot.readiness.total_steps) * 100)}%` } : undefined}
+            >
+              <span />
+            </div>
+            <p className="desktop-boot-detail">{boot.phase === "failed" ? boot.detail : boot.detail || "Starting EchoSpeak"}</p>
             {boot.readiness && !boot.readiness.core_ready ? (
-              <p className="desktop-boot-step">{boot.readiness.completed_steps} of {boot.readiness.total_steps}</p>
+              <p className="desktop-boot-step">Step {boot.readiness.completed_steps} of {boot.readiness.total_steps}</p>
             ) : null}
             {boot.phase === "failed" ? (
               <div className="desktop-recovery-actions">
@@ -161,7 +186,7 @@ export function DesktopApp() {
               </div>
             ) : null}
           </section>
-        )}
+        ) : null}
         {showWorkspace && boot.phase !== "ready" ? (
           <aside className={`desktop-service-banner is-${boot.phase}`} role="status">
             <span>{boot.detail}</span>

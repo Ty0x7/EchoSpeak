@@ -1,5 +1,193 @@
 # Changes
 
+## v10.0.1 — 2026-10-03
+
+User-facing notes: `docs/releases/v10.0.1.md`. Research and design: `docs/research/visual-responses.md`.
+
+### Visual responses
+- **Widget channel.** Tools attach cards built from their own data (`agent/lean/widgets.py`). Each card is validated
+  on the server and again in the browser, and kept in the message timeline so it shows after a reload.
+- **Cards:** weather (hourly + 7-day), stock charts, product carousels, video cards, image galleries, source chips,
+  and score cards.
+- **New keyless tools:** `stock_history`, `product_search`, `video_search` and `image_search`
+  (`agent/lean/rich_tools.py`).
+- **Rich markdown:**
+  - highlighted code with diff view and copy;
+  - sortable, copyable tables;
+  - Mermaid diagrams;
+  - KaTeX math with `$$`;
+  - fenced JSON blocks: `chart`, `steps`, `timeline`, `comparison`, `stat`, `map`.
+- **Artifacts** (`agent/lean/artifacts.py`, `widgets/ArtifactPanel.tsx`):
+  - `create_artifact` / `update_artifact`, with versions and restore;
+  - a side panel and an Artifacts page;
+  - HTML/SVG served with a CSP sandbox (opaque origin, no network) and opened with a 5-minute, single-artifact
+    frame token.
+- **Image proxy** `/lean/media`: SSRF-checked, 6 s / 5 MB limits, images only, disk cache. On desktop, images load
+  as blobs.
+- **Links** open in the system browser (desktop `open_external_url`). The desktop CSP `frame-src` now allows only
+  the local backend.
+- **Prompt:** a "Showing answers" section saying when to use text, a card, a block or an artifact.
+- **Dependencies:** `katex`, `remark-math`, `rehype-katex`, `mermaid` (lazy) and `highlight.js` (lazy).
+
+### Sports
+- `sports_live` now uses ESPN's public feeds (`agent/sports_espn.py`): team search, scoreboards, schedules
+  (including soccer fixtures) and standings.
+- No `ODDS_API_KEY` needed. The Odds API is used only for odds when a key is set.
+
+### Sidebar
+- New chat, Search chats and a nav (Group chats, Projects, Artifacts, Routines) are pinned. The nav items open pages.
+- Agents / Chats / Projects form one resizable stack with two `SplitHandle` dividers. Storage moved to v2, migrated
+  from the old split.
+- Compact agent rows.
+- Fixed: list rows collapsing to 3px with many chats.
+- The streaming reply clears the Stop/timer pill.
+
+### Echo
+- `SOUL.md` is warm, patient and complete instead of "a little sassy" and "shortest answer".
+- The desktop's data-folder copy is refreshed only when it's an unedited old default (`agent/lean/soul_defaults.py`).
+- New Echo face icons (`apps/desktop/scripts/make-echo-icons.py`).
+
+### Tests
+- Backend 515 passed, web 95, desktop 12.
+- Live eval cases 23–30 (visual responses) on Gemma 4 E4B: 8/8.
+
+## v10.0.0 — 2026-10-02 (first official release)
+
+Version 9 was skipped. This release folds in all 8.1+ work since the 8.0
+baseline. User-facing notes: `docs/releases/v10.0.0.md`. Architecture:
+`docs/ARCHITECTURE.md`.
+
+### Runtime
+- **Lean runtime is the only runtime** (roadmap #1). `process_query` → `run_lean_query` for
+  every source. Deleted `semantic_runtime`, `turn_understanding`, `model_control_plane`,
+  `model_conformance`, `model_intelligence` and ten modules only they used; `core.py`
+  19.7k → 7.0k lines (253 unreachable methods, call-graph sweep + pyflakes).
+  `ECHOSPEAK_LEAN_RUNTIME` no longer switches anything.
+- **Caller roles** for channels: owner / trusted / public resolved from the source and
+  Discord identity. Guests get look-up tools only (no files, terminal, memory, chat search
+  or handoffs); Telegram is owner only with an allow-list. `tests/test_lean_caller_role.py`.
+- **Honest step limit** (#5): `stop_reason="max_steps"`, a "So far I: …" note and a
+  Continue button. Nudge budget removed.
+- **Summaries instead of trimming** (#3): rolling chat summary (`lean/summaries/`, 12 recent
+  turns kept, batches of 4, ≤250 words) in the system prompt; in-turn compaction of older
+  steps into a progress note (`context_compacted` event).
+- **Group chats**: handoff budget (6/message), no hand-back, user message in the brief,
+  sticky routing, parallel fan-out on a shared endpoint + lead summary, one message per
+  agent turn in order (A → B → A), "[Name]:" prefix stripped.
+- **Discussion mode** (#9): rooms gain `mode` (reply | discussion) and `max_messages`
+  (2–12, UI 4/6/8); agents take turns, `DONE` ends once ≥2 spoke, lead writes the conclusion.
+- Jarvis/Glados renames with an `agents.json` v2 migration (ids unchanged).
+- Group routing: plain-language "each of you", "all of you", "everyone", "you all" address
+  every member, like `@all` (explicit @names still win).
+- **Group chats finish the job.** Previously "Sure, I'll do that" ended the run as success.
+  - `complete_task(summary)` now ends a job; plain text never does.
+  - A promise guard re-prompts "I'll…" replies that come with no tool call.
+  - Job state tracks the goal, sub-tasks and their owners. Delegation results say
+    whether the work was done or is still open.
+  - A reviewer checks the result against the goal and names who continues.
+  - Backstops: `group_max_rounds` (4), `group_token_budget` (200k), and repeat detection.
+  - Every run ends with "✓ Done: …" or "Stopped: …", which persists after reload.
+  - Code: `agent/lean/job.py`; `tests/test_group_completion.py`.
+- **Tool definitions**: say when to use each tool (memory vs chat search, file search
+  tools, terminal vs background process, search vs fetch, delegate). Dropped `web_search`
+  params that did nothing; `process_id` instead of `id`. Bad arguments list the required
+  and optional ones. Old tool results are cleared above half the context budget.
+
+### Security
+- **Rule of Two policy** (Meta's Agents Rule of Two, enforced in code before every tool
+  call): `agent/lean/policy.py`.
+  - Once a request has read untrusted content (web, fetch, email, channels, MCP reads,
+    networked commands), external actions need approval: sends, posts, MCP actions,
+    desktop control, `memory_save`, host or networked commands.
+  - The approval is forced even with approvals off. Where nobody can approve, the call
+    is refused.
+  - Calls carrying a configured API key or token are always refused.
+  - Every decision goes to `DATA_DIR/security/tool-audit.jsonl`.
+  - Tests: `tests/test_security_policy.py`.
+- **Spotlighting**: untrusted tool output is wrapped in `<untrusted-content>`, and the
+  prompt says to treat it as data.
+- **Local API**: Host/Origin guard (403) against DNS rebinding and cross-site writes.
+  Webhooks are refused while `webhook_enabled` is off and always need a signature.
+- Research and verdicts: `docs/research/harness-review.md`.
+
+### Settings
+- **Settings › Advanced** replaces the classic settings window. It has four pages:
+  - Settings: less common options;
+  - Memory & documents;
+  - Connections & skills;
+  - Companion.
+  The other sections are unchanged. `index.tsx`: 9.0k → 4.4k lines.
+- 46 dead config keys were retired. Stored values are dropped from `settings.json` on
+  first read (`RETIRED_SETTING_KEYS`).
+- Routes that only the classic UI used were removed: `/routines*` (use `/lean/routines`),
+  `/traces`, `/observability`, `/research/artifacts*`, `/studio/overview`,
+  `/skills/executions*`, `/trigger/cron`, `/trigger/webhook`.
+- Full table: `docs/research/harness-review.md` §5.
+
+### Data
+- **SQLite state store** (#2): `phase3/state.db` (records, events, FTS5 `message_search`).
+  Same `StateStore` interface; writes only changed rows; one-time JSON import (files kept).
+  `GET /lean/search`, sidebar "Search chats", `chat_search` agent tool.
+- **One projects folder** (#8): `DATA_DIR/projects` in every mode; legacy projects copied
+  once into the default dev data dir.
+
+### Terminal
+- **Sandbox by default** (#10): `terminal_execution_mode` auto (Docker when running, else
+  host), `terminal_docker_network` ask/on/off (container network attached per command).
+  Approval only to leave the sandbox, go online, or delete project files. One-time
+  settings migration (`.settings-migrated-v10` marker).
+- Host terminal on Windows: `>` / `>>` / `Set-Content` now write UTF-8. Windows
+  PowerShell wrote UTF-16, which `file_read` refused as binary, so agents without Docker
+  wrote files they then couldn't read back. `file_read` now also decodes UTF-16 files.
+
+### Voice
+- **Guided setup + wake word** (#7): Settings › Voice downloads faster-whisper
+  tiny/base/small into `DATA_DIR/voice/models` and activates it. "Hey Echo" via
+  `WakeListener` (browser energy VAD) → `POST /media-runtime/voice/wake` (local
+  transcription). New dependency: `faster-whisper==1.1.1`.
+
+### Desktop
+- **In-app updates**: `tauri-plugin-updater` 2.12.0; `check_for_update` / `install_update`
+  commands (service stopped before the installer runs); Settings › About button;
+  `scripts/setup-updater-key.ps1` and `scripts/release-windows.ps1` (signed build,
+  `latest.json`, optional `gh release create`).
+- Boot: one-folder sidecar (no console, no per-launch extraction), `--self-check` in the
+  build, instant splash, real progress bar, spinning Echo face, readiness timeout 15 s, no
+  raw "signal is aborted" errors. Inline splash CSS moved out of `index.html` (CSP fix).
+- Version 10.0.0 everywhere; `apps/backend/version.py` is the backend constant (`/health`).
+
+### Web
+- `index.tsx` split (#6): 12.5k → 9.0k lines, helpers/types/CSS/chat components in `src/app/`.
+- Live status pill, portal mention menu, one-row composer toolbar, agent faces, resizable
+  sidebar sections, new Settings, polish pass (motion, focus, contrast, radii).
+- Cleanup: ~1,000 lines of unused components, 410 lines of commented-out voice code,
+  25 stale compiled twins, gsap.
+
+### Tooling
+- `apps/backend/scripts/eval_gemma.py`: 20 real prompts against a live backend + model
+  (#4), reports in `data/evals/`. First runs on Gemma 4 E4B: 20/20 (cases 1–17 in one
+  run, 18–20 after the routing fix below). It caught two bugs: `chat_search` was in no
+  toolset, and "each of you" in a group went to one agent.
+- Website refresh (animated Echo, accurate copy, Lighthouse 98–100) and
+  `docs/ARCHITECTURE.md`.
+
+### Tests
+- Backend suite is green again (it had 42 long-standing failures before this round).
+  Tests that drove the removed pipeline were reviewed one by one: behaviour the lean
+  runtime should still have was ported first (printed tool calls in Gemma's
+  `<|tool_call>` format, `<execute_tool>`, `<tool_code>`, `|TOOL|`; telling the agent who
+  it is talking to on a channel; memory lookups on the request, not the channel wrapper;
+  public-safe project updates for guests), then those tests were removed. Out-of-date
+  tests for live code were updated (sports schedules, skill tool risk, schema versions,
+  heartbeat on the lean loop, voice provider status, todo file location).
+
+### Known issues
+- The first sandboxed command builds the Docker image (~1 GB, a few minutes).
+- In-app updates need `setup-updater-key.ps1` once before the first signed release; builds
+  without the key run fine but can't update themselves.
+
+---
+
 ## Architecture note — unified coordination (docs)
 
 **Principle:** optimize for the next subsystem being easy to build, not for the

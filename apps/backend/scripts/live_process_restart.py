@@ -17,7 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 
 def http_json(method: str, url: str, body: Optional[dict] = None, timeout: float = 60.0):

@@ -495,6 +495,28 @@ class ModelRuntimeClient:
                 bind_parameters["thinking_budget"] = 0
                 bind_parameters["include_thoughts"] = False
                 applied = True
+        elif thinking_enabled:
+            # Local hosts generally do not implement a portable native
+            # reasoning-effort field.  Still honor the user's effort choice by
+            # changing the bounded generation budget through the parameter the
+            # selected provider actually supports.  This is an output budget,
+            # not private-thought exposure or a hidden model fallback.
+            output_parameter = str(resolved.get("output_parameter") or "")
+            if output_parameter:
+                try:
+                    context_limit = int(
+                        getattr(getattr(config, "local", None), "context_length", 0)
+                        or 32768
+                    )
+                except (TypeError, ValueError):
+                    context_limit = 32768
+                budget = max(1024, int(resolved.get("budget_tokens") or 4096))
+                # Keep enough room for the prompt and tools on local models.
+                budget = min(budget, max(4096, context_limit // 2), 65536)
+                bind_parameters[output_parameter] = budget
+                resolved["effective_output_budget"] = budget
+                resolved["control_kind"] = "bounded_output_budget"
+                applied = True
         note = str(resolved.get("note") or "")
         if not thinking_enabled and not applied:
             note = (
@@ -828,18 +850,7 @@ def resolve_model_profile(provider: str, model_id: str, configured: Optional[dic
     provider = str(provider or "unknown").strip().lower()
     model_id = str(model_id or "default").strip() or "default"
     meta = dict(configured or {})
-    conformance = _load_conformance_report(provider, model_id)
-    if conformance:
-        meta["measured_conformance"] = {
-            "created_at": conformance.get("created_at"),
-            "family": conformance.get("family"),
-            "adapter_version": conformance.get("adapter_version"),
-            "passed": bool(conformance.get("passed")),
-            "metrics": dict(conformance.get("metrics") or {}),
-            "recommended_max_exposed_tools": int(
-                conformance.get("recommended_max_exposed_tools") or 0
-            ),
-        }
+    conformance: Optional[dict[str, Any]] = None  # measured conformance reports were retired in 10.0
     local = bool(meta.get("local", provider not in _HOSTED_PROVIDERS))
     # Physical window only: explicit override or universal fallback. Callers
     # (process_query, /provider) should inject config.local.context_length /
@@ -904,33 +915,6 @@ def resolve_model_profile(provider: str, model_id: str, configured: Optional[dic
         ),
         metadata=meta,
     )
-
-
-def _load_conformance_report(
-    provider: str, model_id: str
-) -> Optional[dict[str, Any]]:
-    """Load exact-model evidence without making it an execution authority."""
-
-    try:
-        from agent.model_conformance import canonical_conformance_report_path
-
-        path = canonical_conformance_report_path(
-            provider, model_id, root=Path(DATA_DIR) / "model_conformance"
-        )
-        if not path.exists() or path.stat().st_size > 2_000_000:
-            return None
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        if (
-            not isinstance(payload, dict)
-            or str(payload.get("provider") or "").casefold()
-            != str(provider or "").casefold()
-            or str(payload.get("model_id") or "") != str(model_id or "")
-        ):
-            return None
-        return payload
-    except Exception as exc:
-        logger.debug("Model conformance evidence unavailable: {}", exc)
-        return None
 
 
 def get_model_adapter(provider: str, model_id: str = ""):

@@ -144,8 +144,20 @@ def _runtime_state() -> dict[str, Any]:
 def _memory() -> dict[str, Any]:
     root = Path(DATA_DIR) / "memory"
     root.mkdir(parents=True, exist_ok=True)
-    from agent import memory as memory_module
+    import sys
+
     from config import config
+
+    # Importing agent.memory pulls in torch/transformers (~17s). Readiness only
+    # reports whether memory is loaded yet; the background warmup loads it.
+    memory_module = sys.modules.get("agent.memory")
+    if memory_module is None:
+        return {
+            "root": str(root.resolve()),
+            "typed_memory_ready": True,
+            "semantic_retrieval_ready": False,
+            "detail": "Memory is loading in the background",
+        }
 
     instance = None
     configured = os.path.normcase(str(Path(config.memory_path).resolve(strict=False)))
@@ -179,7 +191,13 @@ def _model() -> dict[str, Any]:
 
 
 def _adapter() -> dict[str, Any]:
-    from agent.model_runtime import get_model_adapter
+    import sys
+
+    # The adapter modules chain into langchain/torch (~17s). This item is
+    # informational, so report it once the chat stack has loaded.
+    if "agent.model_adapters" not in sys.modules:
+        return {"detail": "Model adapter resolves on first use"}
+    from agent.model_adapters import get_provider_adapter as get_model_adapter
     from api.server import _resolve_runtime_provider
     from config import config
 
@@ -215,8 +233,11 @@ def _connections_mcp() -> dict[str, Any]:
 
 
 def _embeddings() -> dict[str, Any]:
-    from agent import memory as memory_module
+    import sys
 
+    memory_module = sys.modules.get("agent.memory")  # never import it here (~17s)
+    if memory_module is None:
+        return {"ready": False, "degraded": True, "detail": "Embedding runtime is loading in the background"}
     with memory_module._MEMORY_INSTANCES_GUARD:
         instances = list(memory_module._MEMORY_INSTANCES.values())
     if not instances:

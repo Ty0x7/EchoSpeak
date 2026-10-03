@@ -107,7 +107,17 @@ def resolve_reasoning_effort(
         "reasoning_effort": None,
         "budget_tokens": config["budget_tokens"],
         "supports_disable": False,
-        "note": "The active provider path has no documented native reasoning control; no unsupported parameter was sent.",
+        # Local OpenAI-compatible hosts and Ollama do not expose the same
+        # native reasoning controls as OpenAI/Gemini.  The runtime may still
+        # apply the selected effort as a bounded generation budget using the
+        # provider's documented output parameter.  It never labels this as
+        # native chain-of-thought control.
+        "output_parameter": (
+            "num_predict" if provider == "ollama"
+            else "max_tokens" if provider in {"lmstudio", "localai", "vllm", "llama_cpp"}
+            else ""
+        ),
+        "note": "Native reasoning control is unavailable; effort is applied as a bounded output budget when the provider supports one.",
     }
 
 

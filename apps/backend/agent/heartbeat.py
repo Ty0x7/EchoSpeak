@@ -268,7 +268,6 @@ class HeartbeatManager:
         # -- Current time --
         now = datetime.now(timezone.utc)
         try:
-            import locale
             local_now = datetime.now()
             sections.append(f"Current time: {local_now.strftime('%A, %B %d %Y %I:%M %p')} (local) / {now.strftime('%H:%M UTC')}")
         except Exception:
@@ -400,7 +399,7 @@ class HeartbeatManager:
     # ------------------------------------------------------------------
 
     def _tick(self) -> None:
-        """Materialize one Product Task and execute one governed heartbeat Turn."""
+        """Gather the system pulse and run one heartbeat check-in on the lean loop."""
         now = datetime.now(timezone.utc)
         self.last_tick = now.isoformat()
         logger.debug(f"HeartbeatManager: tick at {self.last_tick}")
@@ -421,238 +420,42 @@ class HeartbeatManager:
         else:
             enriched_prompt = self._prompt
 
-        # Stable task identity is followed by the normal, freshly validated
-        # Turn/Approval/ToolRun authority path.
-        from agent.automation_runtime import (
-            AutomationModelBinding,
-            AutomationRunStatus,
-            ModelBindingPolicy,
-            get_automation_run_store,
-        )
-        from agent.projects import get_project_manager
-        from agent.state import get_state_store
-        from agent.task_store import get_task_store
+        # Run on the lean loop in the dedicated Heartbeat chat (or a configured one).
+        from agent.lean.automations import heartbeat_session
 
-        project_id = str(self._project_id or "").strip()
-        session_id = str(self._session_id or "").strip()
-        state_store = get_state_store()
-        session_state = state_store.get_thread_state(session_id) if session_id else None
-        if (
-            not project_id
-            or not session_id
-            or get_project_manager().get_project(project_id) is None
-            or session_state is None
-            or str(session_state.active_project_id or "") != project_id
-        ):
-            logger.error("Heartbeat blocked: configured Project/Session scope is missing or stale")
-            return
-
-        interval_seconds = max(60, int(self._interval_minutes) * 60)
-        schedule_bucket = int(now.timestamp()) // interval_seconds
-        task_store = get_task_store()
-        task = task_store.create(
-            title="Heartbeat check-in",
-            description=self._prompt,
-            objective=self._prompt,
-            project_id=project_id,
-            session_id=session_id,
-            source="heartbeat",
-            source_id="heartbeat",
-            scheduled_for=str(schedule_bucket),
-            idempotency_key=f"heartbeat:{project_id}:{session_id}:{schedule_bucket}",
-        )
-        if task.status in {"complete", "done"}:
-            logger.debug("HeartbeatManager: stable schedule bucket already completed")
-            return
-        run_store = get_automation_run_store()
-        run = run_store.create_run(
-            idempotency_key=f"heartbeat:{project_id}:{session_id}:{schedule_bucket}",
-            project_id=project_id,
-            session_id=session_id,
-            task_id=task.id,
-            trigger_id=str(schedule_bucket),
-            source="heartbeat",
-            source_id="heartbeat",
-            objective=self._prompt,
-            model_binding=AutomationModelBinding(
-                policy=ModelBindingPolicy.SESSION_DEFAULT,
-                source_session_id=session_id,
-            ),
-        )
-        if run.status == AutomationRunStatus.COMPLETED:
-            return
-        claimed = run_store.claim(
-            run.id,
-            project_id=project_id,
-            session_id=session_id,
-            claimant_id="heartbeat-coordinator",
-            expected_revision=run.revision,
-            lease_seconds=300,
-        )
-        if claimed is None or claimed.lease is None:
-            logger.debug("Heartbeat occurrence already claimed or no longer queued")
-            return
-        lease_token = claimed.lease.token
-        provider = str(self._agent.llm_provider.value)
-        model_id = str(self._agent.provider_info.get("model") or "default")
-        run_store.bind_model(
-            run.id,
-            AutomationModelBinding(
-                policy=ModelBindingPolicy.SESSION_DEFAULT,
-                source_session_id=session_id,
-                resolved_provider=provider,
-                resolved_model_id=model_id,
-            ),
-            project_id=project_id,
-            session_id=session_id,
-            claimant_id="heartbeat-coordinator",
-            lease_token=lease_token,
-        )
-        run_store.transition(
-            run.id,
-            AutomationRunStatus.RUNNING,
-            project_id=project_id,
-            session_id=session_id,
-            claimant_id="heartbeat-coordinator",
-            lease_token=lease_token,
-        )
-        task_store.update(
-            task.id,
-            status="in_progress",
-            automation_run_ids=list(dict.fromkeys([*task.automation_run_ids, run.id])),
-        )
-
+        session_id = self._session_id or heartbeat_session()
         try:
-            response_text, success = self._agent.process_query(
-                enriched_prompt,
-                include_memory=False,
-                callbacks=[],
-                thread_id=session_id,
+            from agent.lean.runtime import run_lean_query
+
+            result_payload = run_lean_query(
+                self._agent,
+                message=enriched_prompt,
+                session_id=session_id,
+                request_id=f"heartbeat-{int(now.timestamp())}",
+                emit=lambda _event: None,
+                cancel=self._stop_event,
                 source="heartbeat",
             )
+            response_text = str(result_payload.get("response") or "")
+            success = bool(result_payload.get("success"))
         except Exception as exc:
-            try:
-                run_store.transition(
-                    run.id,
-                    AutomationRunStatus.FAILED,
-                    project_id=project_id,
-                    session_id=session_id,
-                    claimant_id="heartbeat-coordinator",
-                    lease_token=lease_token,
-                    error=str(exc),
-                )
-            except Exception as transition_exc:
-                logger.error("Heartbeat Run failure transition failed: {}", transition_exc)
-            task_store.update(
-                task.id,
-                status="failed",
-                verification={"verified": False, "error": str(exc)},
-            )
-            logger.warning(f"HeartbeatManager: governed Turn failed — {exc}")
+            logger.warning(f"HeartbeatManager: turn failed — {exc}")
             return
 
-        # Sanitize: strip plan noise, confirmation prompts, tool output
         response_stripped = self._sanitize_response(response_text)
-
-        # Detect silence sentinel
         is_silent = (
             not response_stripped
             or _NO_HEARTBEAT_SENTINEL in response_stripped.upper()
         )
-
-        blocked_channels = (
-            [str(channel).lower() for channel in self._channels if str(channel).lower() != "web"]
-            if not is_silent
-            else []
-        )
-        state = state_store.get_thread_state(session_id)
-        execution_id = str(state.last_execution_id or state.current_execution_id or "")
-        from agent.automation_projection import project_execution
-        canonical = project_execution(
-            project_id=project_id,
-            session_id=session_id,
-            execution_id=execution_id,
-            occurrence_id=run.id,
-        )
-        tool_run_ids = list(canonical.tool_run_ids) if canonical else []
-        approval_ids = [str(state.pending_approval_id)] if state.pending_approval_id else []
-        verified = bool(
-            canonical
-            and canonical.verified
-            and (is_silent or response_stripped)
-            and not blocked_channels
-        )
-        status = (
-            "complete" if verified
-            else "needs_permission" if canonical and canonical.automation_status == "waiting_for_approval"
-            else "blocked" if blocked_channels or (canonical and canonical.product_task_status == "blocked")
-            else "cancelled" if canonical and canonical.product_task_status == "cancelled"
-            else "failed"
-        )
-        run_status = AutomationRunStatus(
-            "completed" if verified
-            else "blocked" if blocked_channels
-            else canonical.automation_status if canonical
-            else "failed"
-        )
-        run_store.transition(
-            run.id,
-            run_status,
-            project_id=project_id,
-            session_id=session_id,
-            claimant_id="heartbeat-coordinator",
-            lease_token=lease_token,
-            execution_id=execution_id,
-            tool_run_ids=tool_run_ids,
-            approval_ids=approval_ids,
-            artifact_ids=list(canonical.artifact_ids) if canonical else [],
-            task_run_id=str(canonical.task_run_id) if canonical else "",
-            outcome={
-                "verified": verified,
-                "completion_authority": "task_run",
-                "canonical_task_status": canonical.canonical_status.value if canonical else "missing",
-                "canonical_completion_disposition": canonical.completion_disposition if canonical else "pending",
-                "silent": is_silent,
-                "response_present": bool(response_stripped),
-                "blocked_delivery_channels": blocked_channels,
-            },
-            error="" if verified else "Heartbeat Turn did not reach a verified terminal outcome",
-        )
-        task_store.update(
-            task.id,
-            status=status,
-            execution_ids=[execution_id] if execution_id else [],
-            task_run_ids=[canonical.task_run_id] if canonical else [],
-            tool_run_ids=tool_run_ids,
-            approval_ids=approval_ids,
-            verification={
-                "verified": verified,
-                "completion_authority": "task_run",
-                "canonical_task_status": canonical.canonical_status.value if canonical else "missing",
-                "silent": is_silent,
-                "response_present": bool(response_stripped),
-                "blocked_delivery_channels": blocked_channels,
-                "reason": (
-                    "External heartbeat delivery requires a governed communication ToolRun"
-                    if blocked_channels
-                    else "Heartbeat Turn completed"
-                    if verified
-                    else "Heartbeat Turn failed"
-                ),
-            },
-        )
-
         result = HeartbeatResult(
             response=response_stripped,
             timestamp=self.last_tick,
             channels=list(self._channels),
             was_silent=is_silent,
             pulse_context=pulse,
-            task_id=task.id,
-            status=status,
+            task_id=str(result_payload.get("execution_id") or ""),
+            status="complete" if success else "failed",
         )
-
-        # Store in history regardless (so UI can show "last check: nothing to report")
         with self._history_lock:
             self._history.append(result)
             if len(self._history) > self._history_max:
@@ -662,22 +465,8 @@ class HeartbeatManager:
             logger.debug("HeartbeatManager: silent tick — nothing to report")
             return
 
-        if blocked_channels:
-            # External delivery is an action, not a callback side effect. It
-            # must be requested and completed through the governed Turn,
-            # Approval, ToolRun, and current-authority boundary.
-            logger.info(
-                "HeartbeatManager: external delivery blocked pending governed ToolRun: {}",
-                blocked_channels,
-            )
-            return
-
         logger.info(f"HeartbeatManager: active tick — routing to {self._channels}")
-
-        # Route to channels
         self._route(result)
-
-        # Fire callback if registered
         if self._on_result:
             try:
                 self._on_result(result)
@@ -698,27 +487,12 @@ def route_message(
     channels: List[str],
     label: str = "Notification",
 ) -> None:
-    """Route a message to one or more output channels.
+    """Deliver a message to the user's own channels. "web" is the chat itself."""
+    from agent.lean.automations import deliver
 
-    The web projection is side-effect free. External delivery must be prepared
-    and executed as a governed communication ToolRun by the agent pipeline.
-    """
-    for channel in channels:
-        try:
-            if channel == "web":
-                # Web channel: caller is responsible for storing/broadcasting
-                pass
-            elif channel in {"discord", "telegram", "email", "whatsapp"}:
-                logger.warning(
-                    "route_message: blocked background %s delivery for %s; "
-                    "prepare it through a Turn/Approval/ToolRun instead",
-                    channel,
-                    label,
-                )
-            else:
-                logger.warning(f"route_message: unknown channel '{channel}'")
-        except Exception as exc:
-            logger.warning(f"route_message: routing to '{channel}' failed — {exc}")
+    external = [c for c in channels if str(c).lower() != "web"]
+    if external:
+        deliver(text, external, label)
 
 
 # ---------------------------------------------------------------------------

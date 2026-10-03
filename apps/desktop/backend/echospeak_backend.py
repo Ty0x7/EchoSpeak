@@ -59,7 +59,7 @@ def _seed_mutable_defaults(data_dir: Path) -> None:
     # Surface packaged identity in logs so stale AppData installs are obvious.
     if not os.environ.get("ECHOSPEAK_BUILD_ID"):
         stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        os.environ["ECHOSPEAK_BUILD_ID"] = f"desktop-sidecar-8.0.0+{stamp}"
+        os.environ["ECHOSPEAK_BUILD_ID"] = f"desktop-sidecar-10.0.1+{stamp}"
 
 
 def _watch_windows_parent(parent_pid: int) -> None:
@@ -91,7 +91,62 @@ def _start_parent_watchdog(parent_pid: int, name: str) -> None:
     threading.Thread(target=target, args=(parent_pid,), name=name, daemon=True).start()
 
 
+def _hide_child_consoles() -> None:
+    """The backend runs without a console window. On Windows, any console
+    program it starts (git, PowerShell, docker, ffprobe…) would otherwise pop
+    its own window, so default every child to CREATE_NO_WINDOW."""
+    if os.name != "nt":
+        return
+    import subprocess
+
+    create_no_window = 0x08000000
+    original_init = subprocess.Popen.__init__
+
+    def init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        if not kwargs.get("creationflags"):
+            kwargs["creationflags"] = create_no_window
+        original_init(self, *args, **kwargs)
+
+    subprocess.Popen.__init__ = init  # type: ignore[method-assign]
+
+
+def _start_file_log(logs_dir: Path) -> None:
+    """Rotating backend log that exists no matter how the process was started."""
+    try:
+        from loguru import logger
+
+        logger.add(
+            str(logs_dir / "backend.log"),
+            rotation="10 MB",
+            retention=5,
+            encoding="utf-8",
+            enqueue=True,
+            level="INFO",
+        )
+    except Exception:
+        pass
+    # Without a console, stray print()/tracebacks would be lost; keep them.
+    if sys.stdout is None or sys.stderr is None:
+        stream = open(logs_dir / "backend-console.log", "a", encoding="utf-8", buffering=1)
+        sys.stdout = sys.stdout or stream
+        sys.stderr = sys.stderr or stream
+
+
+def _self_check() -> int:
+    """Build-time smoke test: the bundle must contain the server and agent."""
+    backend_root = Path(__file__).resolve().parents[2] / "backend"
+    if backend_root.exists() and str(backend_root) not in sys.path:
+        sys.path.insert(0, str(backend_root))
+    import api.server  # noqa: F401
+    import agent.lean.runtime  # noqa: F401
+    import faster_whisper  # noqa: F401  (local speech; fails the build if not bundled)
+    print("echospeak-backend self-check ok")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    if (argv if argv is not None else sys.argv[1:]) == ["--self-check"]:
+        return _self_check()
     # Windows packaged logs often default to a legacy code page; force UTF-8
     # so pipeline markers and tool names are not replaced with U+FFFD.
     for stream in (sys.stdout, sys.stderr):
@@ -102,6 +157,8 @@ def main(argv: list[str] | None = None) -> int:
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
     args = _parser().parse_args(argv)
     data_dir, logs_dir = _validate_desktop_contract(args)
+    _hide_child_consoles()
+    _start_file_log(logs_dir)
     os.environ["ECHOSPEAK_RUNTIME_KIND"] = "desktop"
     os.environ["API_HOST"] = "127.0.0.1"
     os.environ["API_PORT"] = str(args.port)

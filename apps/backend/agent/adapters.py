@@ -25,7 +25,12 @@ class BaseAdapter:
             access_reason = str(info.get("access_reason") or "").strip().lower()
             user_id = str(info.get("user_id") or "").strip()
             owner_id = str(getattr(config, "discord_bot_owner_id", "") or "").strip()
-            trusted_ids = {str(x).strip() for x in (getattr(config, "discord_trusted_user_ids", []) or []) if str(x).strip()}
+            trusted_ids = {
+                str(x).strip()
+                for key in ("discord_bot_trusted_users", "discord_trusted_user_ids")
+                for x in (getattr(config, key, []) or [])
+                if str(x).strip()
+            }
             if access_reason == "owner_id" or (owner_id and user_id == owner_id):
                 return DiscordUserRole.OWNER
             if access_reason == "trusted_user" or user_id in trusted_ids:

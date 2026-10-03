@@ -4,7 +4,9 @@ import atexit
 import json
 import os
 import random
+import re
 import shutil
+import sqlite3
 import sys
 import threading
 import time
@@ -31,6 +33,29 @@ APPROVALS_PATH = PHASE3_DIR / "approvals.json"
 EXECUTIONS_PATH = PHASE3_DIR / "executions.json"
 THREAD_STATE_PATH = PHASE3_DIR / "thread_state.json"
 TRACE_DIR = PHASE3_DIR / "traces"
+
+# Record kinds stored in state.db, and the item types the chat search indexes.
+_RECORD_KINDS = ("approvals", "executions", "thread_state", "items", "tool_runs")
+_SEARCHABLE_ITEMS = frozenset({"user_message", "assistant_message"})
+_EVENTS_KEPT = 2000
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS records (
+    kind TEXT NOT NULL,
+    id TEXT NOT NULL,
+    session_id TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL DEFAULT 0,
+    body TEXT NOT NULL,
+    PRIMARY KEY (kind, id)
+);
+CREATE INDEX IF NOT EXISTS records_session ON records(kind, session_id, created_at);
+CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL);
+CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
+    text, item_id UNINDEXED, session_id UNINDEXED, turn_id UNINDEXED,
+    role UNINDEXED, agent UNINDEXED, created_at UNINDEXED,
+    tokenize = 'unicode61 remove_diacritics 2'
+);
+"""
 
 EXECUTION_STATES = frozenset({
     "ready",
@@ -546,6 +571,14 @@ class StateStore:
         self._tool_runs: dict[str, ToolRunRecord] = {}
         self._events: list[RuntimeEvent] = []
         self._quarantine: list[dict[str, Any]] = []
+        # SQLite holds the records; the dicts above are the in-memory working set.
+        self.db_path = self.root / "state.db"
+        self._db_lock = threading.RLock()
+        self._db: Optional[sqlite3.Connection] = None
+        # Last JSON written per (kind, id), so a persist only touches changed rows.
+        self._saved: dict[str, dict[str, str]] = {kind: {} for kind in _RECORD_KINDS}
+        self._events_saved = 0
+        self._open_db()
         self._load_all()
 
     def _backup_legacy_state_once(self) -> None:
@@ -696,52 +729,42 @@ class StateStore:
                 f"(pid={os.getpid()} thread={threading.get_ident()} store={store_id}): {last_error}"
             ) from last_error
 
-    def _load_all(self) -> None:
-        approvals_raw = self._require_mapping(self.approvals_path, self._read_json(self.approvals_path))
-        for approval_id, data in approvals_raw.items():
-            try:
-                record = ApprovalRecord(**data)
-                if record.id != approval_id:
-                    raise ValueError("ApprovalRecord id does not match its authority key")
-                self._approvals[approval_id] = record
-            except Exception as exc:
-                self._fail_corrupt_state(self.approvals_path, exc, kind=f"ApprovalRecord schema ({approval_id})")
-        executions_raw = self._require_mapping(self.executions_path, self._read_json(self.executions_path))
-        for execution_id, data in executions_raw.items():
-            try:
-                record = ExecutionRecord(**data)
-                if record.id != execution_id:
-                    raise ValueError("ExecutionRecord id does not match its authority key")
-                self._executions[execution_id] = record
-            except Exception as exc:
-                self._fail_corrupt_state(self.executions_path, exc, kind=f"ExecutionRecord schema ({execution_id})")
-        thread_raw = self._require_mapping(self.thread_state_path, self._read_json(self.thread_state_path))
-        for thread_id, data in thread_raw.items():
-            try:
-                state = ThreadSessionState(**data)
-                if state.thread_id != thread_id:
-                    raise ValueError("ThreadSessionState id does not match its authority key")
-                self._thread_state[thread_id] = state
-            except Exception as exc:
-                self._fail_corrupt_state(self.thread_state_path, exc, kind=f"ThreadSessionState schema ({thread_id})")
-        items_raw = self._require_mapping(self.items_path, self._read_json(self.items_path))
-        for key, data in items_raw.items():
-            try:
-                record = RuntimeItem(**data)
-                if record.id != key:
-                    raise ValueError("RuntimeItem id does not match its authority key")
-                self._items[key] = record
-            except Exception as exc:
-                self._fail_corrupt_state(self.items_path, exc, kind=f"RuntimeItem schema ({key})")
-        tool_runs_raw = self._require_mapping(self.tool_runs_path, self._read_json(self.tool_runs_path))
-        for key, data in tool_runs_raw.items():
-            try:
-                record = ToolRunRecord(**data)
-                if record.id != key:
-                    raise ValueError("ToolRunRecord id does not match its authority key")
-                self._tool_runs[key] = record
-            except Exception as exc:
-                self._fail_corrupt_state(self.tool_runs_path, exc, kind=f"ToolRunRecord schema ({key})")
+    # ── SQLite storage ──────────────────────────────────────────────────
+    def _open_db(self) -> None:
+        try:
+            db = sqlite3.connect(str(self.db_path), check_same_thread=False, timeout=10)
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=NORMAL")
+            db.executescript(_SCHEMA)
+            db.execute("SELECT count(*) FROM records").fetchone()
+        except sqlite3.DatabaseError as exc:
+            self._fail_corrupt_state(self.db_path, exc, kind="SQLite open")
+            raise
+        self._db = db
+
+    def _meta(self, key: str) -> str:
+        with self._db_lock:
+            row = self._db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return str(row[0]) if row else ""
+
+    def _db_raw(self) -> dict[str, Any]:
+        raw: dict[str, Any] = {kind: {} for kind in _RECORD_KINDS}
+        with self._db_lock:
+            for kind, record_id, body in self._db.execute("SELECT kind, id, body FROM records"):
+                if kind in raw:
+                    raw[kind][record_id] = json.loads(body)
+            raw["events"] = [json.loads(body) for (body,) in self._db.execute("SELECT body FROM events ORDER BY seq")]
+        return raw
+
+    def _json_raw(self) -> dict[str, Any]:
+        paths = {
+            "approvals": self.approvals_path,
+            "executions": self.executions_path,
+            "thread_state": self.thread_state_path,
+            "items": self.items_path,
+            "tool_runs": self.tool_runs_path,
+        }
+        raw: dict[str, Any] = {kind: self._require_mapping(path, self._read_json(path)) for kind, path in paths.items()}
         events_raw = self._read_json(self.events_path)
         if self.events_path.exists() and not isinstance(events_raw, list):
             self._fail_corrupt_state(
@@ -749,12 +772,181 @@ class StateStore:
                 ValueError("authoritative event JSON root must be an array"),
                 kind="RuntimeEvent schema",
             )
-        for data in events_raw if isinstance(events_raw, list) else []:
+        raw["events"] = events_raw if isinstance(events_raw, list) else []
+        return raw
+
+    def _persist_records(self, kind: str, mapping: dict[str, Any], ids: Optional[list[str]] = None) -> None:
+        """Write the records that changed since the last persist (only ``ids`` if given)."""
+        saved = self._saved[kind]
+        keys = list(ids) if ids is not None else list(mapping.keys())
+        upserts: list[tuple[str, str, str, float, str]] = []
+        for key in keys:
+            record = mapping.get(key)
+            if record is None:
+                continue
+            body = json.dumps(record.model_dump(), ensure_ascii=False)
+            if saved.get(key) == body:
+                continue
+            saved[key] = body
+            owner = str(getattr(record, "session_id", "") or getattr(record, "thread_id", "") or "")
+            upserts.append((kind, key, owner, float(getattr(record, "created_at", 0.0) or 0.0), body))
+        removed = [key for key in saved if key not in mapping] if ids is None else []
+        if not upserts and not removed:
+            return
+        with self._db_lock, self._db:
+            self._db.executemany(
+                "INSERT INTO records(kind, id, session_id, created_at, body) VALUES (?, ?, ?, ?, ?) "
+                "ON CONFLICT(kind, id) DO UPDATE SET session_id = excluded.session_id, body = excluded.body",
+                upserts,
+            )
+            for key in removed:
+                saved.pop(key, None)
+                self._db.execute("DELETE FROM records WHERE kind = ? AND id = ?", (kind, key))
+            if kind == "items":
+                self._index_messages([row[1] for row in upserts], removed)
+
+    def _index_messages(self, changed: list[str], removed: list[str]) -> None:
+        """Keep the full-text index of chat messages in step with the items table."""
+        for key in [*changed, *removed]:
+            self._db.execute("DELETE FROM message_search WHERE item_id = ?", (key,))
+        for key in changed:
+            item = self._items.get(key)
+            if item is None or item.item_type not in _SEARCHABLE_ITEMS:
+                continue
+            text = str((item.payload or {}).get("text") or "").strip()
+            if not text:
+                continue
+            role = "user" if item.item_type == "user_message" else "assistant"
+            agent = str((item.payload or {}).get("agent_name") or "")
+            self._db.execute(
+                "INSERT INTO message_search(text, item_id, session_id, turn_id, role, agent, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (text, key, item.session_id, item.turn_id, role, agent, item.created_at),
+            )
+
+    def _persist_events(self) -> None:
+        new = self._events[self._events_saved:]
+        if not new:
+            return
+        with self._db_lock, self._db:
+            self._db.executemany("INSERT INTO events(body) VALUES (?)",
+                                 [(json.dumps(event.model_dump(), ensure_ascii=False),) for event in new])
+            self._db.execute(
+                "DELETE FROM events WHERE seq <= (SELECT seq FROM events ORDER BY seq DESC LIMIT 1 OFFSET ?)",
+                (_EVENTS_KEPT,),
+            )
+        self._events_saved = len(self._events)
+        if len(self._events) > _EVENTS_KEPT * 2:
+            self._events = self._events[-_EVENTS_KEPT:]
+            self._events_saved = len(self._events)
+
+    def search_messages(self, query: str, *, limit: int = 20, session_id: str = "") -> list[dict[str, Any]]:
+        """Full-text search over every saved chat message, best matches first."""
+        terms = re.findall(r"\w+", str(query or ""), flags=re.UNICODE)
+        if not terms:
+            return []
+        # Quote each word and prefix-match the last one, so typing "deplo" finds "deploy".
+        match = " ".join([*(f'"{term}"' for term in terms[:-1]), f'"{terms[-1]}"*'])
+        sql = (
+            "SELECT item_id, session_id, turn_id, role, agent, created_at, "
+            "snippet(message_search, 0, '[', ']', ' … ', 12) FROM message_search WHERE message_search MATCH ?"
+        )
+        params: list[Any] = [match]
+        if session_id:
+            sql += " AND session_id = ?"
+            params.append(session_id)
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(max(1, min(int(limit or 20), 100)))
+        try:
+            with self._db_lock:
+                rows = self._db.execute(sql, params).fetchall()
+        except sqlite3.OperationalError as exc:
+            logger.debug("Message search failed for {!r}: {}", query, exc)
+            return []
+        return [
+            {"item_id": r[0], "session_id": r[1], "turn_id": r[2], "role": r[3], "agent": r[4],
+             "created_at": r[5], "snippet": r[6]}
+            for r in rows
+        ]
+
+    def _load_all(self) -> None:
+        imported = self._meta("imported_json") == "1"
+        raw = self._db_raw() if imported else self._json_raw()
+        source = self.db_path if imported else None
+        approvals_raw = raw["approvals"]
+        for approval_id, data in approvals_raw.items():
+            try:
+                record = ApprovalRecord(**data)
+                if record.id != approval_id:
+                    raise ValueError("ApprovalRecord id does not match its authority key")
+                self._approvals[approval_id] = record
+            except Exception as exc:
+                self._fail_corrupt_state(source or self.approvals_path, exc, kind=f"ApprovalRecord schema ({approval_id})")
+        executions_raw = raw["executions"]
+        for execution_id, data in executions_raw.items():
+            try:
+                record = ExecutionRecord(**data)
+                if record.id != execution_id:
+                    raise ValueError("ExecutionRecord id does not match its authority key")
+                self._executions[execution_id] = record
+            except Exception as exc:
+                self._fail_corrupt_state(source or self.executions_path, exc, kind=f"ExecutionRecord schema ({execution_id})")
+        thread_raw = raw["thread_state"]
+        for thread_id, data in thread_raw.items():
+            try:
+                state = ThreadSessionState(**data)
+                if state.thread_id != thread_id:
+                    raise ValueError("ThreadSessionState id does not match its authority key")
+                self._thread_state[thread_id] = state
+            except Exception as exc:
+                self._fail_corrupt_state(source or self.thread_state_path, exc, kind=f"ThreadSessionState schema ({thread_id})")
+        items_raw = raw["items"]
+        for key, data in items_raw.items():
+            try:
+                record = RuntimeItem(**data)
+                if record.id != key:
+                    raise ValueError("RuntimeItem id does not match its authority key")
+                self._items[key] = record
+            except Exception as exc:
+                self._fail_corrupt_state(source or self.items_path, exc, kind=f"RuntimeItem schema ({key})")
+        tool_runs_raw = raw["tool_runs"]
+        for key, data in tool_runs_raw.items():
+            try:
+                record = ToolRunRecord(**data)
+                if record.id != key:
+                    raise ValueError("ToolRunRecord id does not match its authority key")
+                self._tool_runs[key] = record
+            except Exception as exc:
+                self._fail_corrupt_state(source or self.tool_runs_path, exc, kind=f"ToolRunRecord schema ({key})")
+        for data in raw["events"]:
             try:
                 self._events.append(RuntimeEvent(**data))
             except Exception as exc:
-                self._fail_corrupt_state(self.events_path, exc, kind="RuntimeEvent schema")
+                self._fail_corrupt_state(source or self.events_path, exc, kind="RuntimeEvent schema")
+        if imported:
+            for kind in _RECORD_KINDS:
+                self._saved[kind] = {key: json.dumps(value, ensure_ascii=False) for key, value in raw[kind].items()}
+            self._events_saved = len(self._events)
+        else:
+            # First start on SQLite: copy the JSON records in once. The JSON
+            # files stay where they are as a fallback copy.
+            for kind, mapping in self._record_maps().items():
+                self._persist_records(kind, mapping)
+            self._persist_events()
+            with self._db_lock, self._db:
+                self._db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('imported_json', '1')")
+            if any(raw[kind] for kind in _RECORD_KINDS):
+                logger.info("Moved durable state from JSON files to {}", self.db_path)
         self._clear_legacy_implicit_self_scope()
+
+    def _record_maps(self) -> dict[str, dict[str, Any]]:
+        return {
+            "approvals": self._approvals,
+            "executions": self._executions,
+            "thread_state": self._thread_state,
+            "items": self._items,
+            "tool_runs": self._tool_runs,
+        }
 
     def _clear_legacy_implicit_self_scope(self) -> None:
         """Remove the old FILE_TOOL_ROOT-as-Project leak without touching real Projects."""
@@ -799,18 +991,19 @@ class StateStore:
             self._persist_thread_state()
 
     def _persist_approvals(self) -> None:
-        self._write_json(self.approvals_path, {key: value.model_dump() for key, value in self._approvals.items()})
+        self._persist_records("approvals", self._approvals)
 
     def _persist_executions(self) -> None:
-        self._write_json(self.executions_path, {key: value.model_dump() for key, value in self._executions.items()})
+        self._persist_records("executions", self._executions)
 
     def _persist_thread_state(self) -> None:
-        self._write_json(self.thread_state_path, {key: value.model_dump() for key, value in self._thread_state.items()})
+        self._persist_records("thread_state", self._thread_state)
 
-    def _persist_runtime_activity(self) -> None:
-        self._write_json(self.items_path, {key: value.model_dump() for key, value in self._items.items()})
-        self._write_json(self.tool_runs_path, {key: value.model_dump() for key, value in self._tool_runs.items()})
-        self._write_json(self.events_path, [event.model_dump() for event in self._events[-2000:]])
+    def _persist_runtime_activity(self, *, item_ids: Optional[list[str]] = None,
+                                  tool_run_ids: Optional[list[str]] = None) -> None:
+        self._persist_records("items", self._items, item_ids)
+        self._persist_records("tool_runs", self._tool_runs, tool_run_ids)
+        self._persist_events()
 
     def add_item(self, *, turn_id: str, item_type: str, status: str = "pending",
                  payload: Optional[dict[str, Any]] = None, session_id: str = "default",
@@ -826,7 +1019,7 @@ class StateStore:
                                              turn_id=turn_id, item_id=item.id, tool_run_id=tool_run_id,
                                              model_id=model_id, event_type=f"item.{item_type}",
                                              status=status, payload=item.payload))
-            self._persist_runtime_activity()
+            self._persist_runtime_activity(item_ids=[item.id], tool_run_ids=[])
         return RuntimeItem(**item.model_dump())
 
     # Terminal ToolRun statuses — once set, finish_tool_run is idempotent.
@@ -862,7 +1055,7 @@ class StateStore:
                                              turn_id=turn_id, item_id=item_id, tool_run_id=record.id,
                                              event_type="tool_run.started", status="started",
                                              payload={"tool_name": tool_name}))
-            self._persist_runtime_activity()
+            self._persist_runtime_activity(item_ids=[], tool_run_ids=[record.id])
             return ToolRunRecord(**record.model_dump())
 
     def finish_tool_run(self, run_id: str, outcome: ToolOutcome | dict[str, Any]) -> Optional[ToolRunRecord]:
@@ -895,7 +1088,7 @@ class StateStore:
                                              turn_id=record.turn_id, item_id=record.item_id,
                                              tool_run_id=record.id, event_type="tool_run.finished",
                                              status=record.status, payload=payload))
-            self._persist_runtime_activity()
+            self._persist_runtime_activity(item_ids=[], tool_run_ids=[record.id])
             return ToolRunRecord(**record.model_dump())
 
     def get_tool_run(self, run_id: str) -> Optional[ToolRunRecord]:
@@ -925,7 +1118,7 @@ class StateStore:
                     payload=dict(record.verification),
                 )
             )
-            self._persist_runtime_activity()
+            self._persist_runtime_activity(item_ids=[], tool_run_ids=[record.id])
             return ToolRunRecord(**record.model_dump())
 
     def list_items(self, turn_id: str) -> list[RuntimeItem]:
@@ -1232,7 +1425,9 @@ class StateStore:
                     })
             elif item.item_type == "assistant_message":
                 text = str((item.payload or {}).get("text") or "").strip()
-                if text:
+                # A lean message closed at a handoff can hold only tool cards.
+                handoff_part = bool((item.payload or {}).get("agent_id") and (item.payload or {}).get("timeline"))
+                if text or handoff_part:
                     messages.append({
                         "role": "assistant",
                         "text": text,
@@ -1242,6 +1437,17 @@ class StateStore:
                         "backend_success": (item.payload or {}).get("backend_success"),
                         "error": str((item.payload or {}).get("error") or ""),
                     })
+                    if (item.payload or {}).get("agent_id"):
+                        # Lean runtime: which agent spoke and what it did on the way.
+                        messages[-1].update({
+                            "agent_id": str(item.payload.get("agent_id") or ""),
+                            "agent_name": str(item.payload.get("agent_name") or ""),
+                            "message_id": str(item.payload.get("message_id") or ""),
+                            "timeline": list(item.payload.get("timeline") or []),
+                            "delegated_by": item.payload.get("delegated_by") or None,
+                            "agent_role": str(item.payload.get("role") or ""),
+                            "stop_reason": str(item.payload.get("stop_reason") or ""),
+                        })
         if not any(m["role"] == "user" for m in messages) and execution.query:
             messages.insert(0, {
                 "role": "user",
@@ -1378,7 +1584,7 @@ class StateStore:
             if state is None:
                 state = ThreadSessionState(thread_id=key, session_id=key)
                 self._thread_state[key] = state
-                self._persist_thread_state()
+                self._persist_records("thread_state", self._thread_state, [key])
             return ThreadSessionState(**state.model_dump())
 
     def update_thread_state(self, thread_id: Optional[str], **updates: Any) -> ThreadSessionState:
@@ -1404,7 +1610,7 @@ class StateStore:
             state.queued_turns = list(state.queued_turns or [])[-100:]
             state.updated_at = time.time()
             self._thread_state[key] = state
-            self._persist_thread_state()
+            self._persist_records("thread_state", self._thread_state, [key])
             return ThreadSessionState(**state.model_dump())
 
     def enqueue_turn(

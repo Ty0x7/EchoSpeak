@@ -320,4 +320,3 @@ export const CapabilityRegistryGroups: React.FC<{ registry?: Record<string, any>
   );
 };
 
-export default OperationalStateCard;

@@ -179,20 +179,6 @@ def test_allow_llm_tool_calling_is_equal_across_providers(monkeypatch):
     monkeypatch.setattr(config, "disable_native_tool_calling", False, raising=False)
 
 
-def test_effective_context_window_prefers_explicit_profile_then_trim(monkeypatch):
-    from agent.core import EchoSpeakAgent
-    from config import ModelProvider, config
-
-    agent = object.__new__(EchoSpeakAgent)
-    agent.llm_provider = ModelProvider.OLLAMA
-    agent._active_model_profile = resolve_model_profile("ollama", "x", {"context_limit": 8192})
-    monkeypatch.setattr(config, "llm_trim_max_tokens", 0, raising=False)
-    monkeypatch.setattr(config.local, "context_length", 65536, raising=False)
-    assert agent._resolve_effective_context_window() == 8192
-    monkeypatch.setattr(config, "llm_trim_max_tokens", 100000, raising=False)
-    assert agent._resolve_effective_context_window() == 100000
-
-
 def test_tool_repair_is_bounded_and_rejects_unknown_tools():
     assert repair_tool_call_once("prefix {'tool':'file_read','arguments':{'path':'x'},}", {"file_read"})["arguments"] == {"path": "x"}
     with pytest.raises(ValueError, match="Unknown tool"):

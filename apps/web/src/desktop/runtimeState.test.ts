@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DesktopProductReadiness, DesktopRuntime } from "./bridge";
-import { initialDesktopBootState, reduceDesktopBootState } from "./runtimeState";
+import { STILL_STARTING, initialDesktopBootState, reduceDesktopBootState } from "./runtimeState";
 
 const runtime = (backend_phase: DesktopRuntime["backend_phase"]): DesktopRuntime => ({
   environment: "desktop",
@@ -69,5 +69,13 @@ describe("desktop boot state", () => {
     const failed = reduceDesktopBootState(initialDesktopBootState, { type: "snapshot", runtime: runtime("failed") });
     expect(failed.phase).toEqual("failed");
     expect(failed.hasBeenReady).toEqual(false);
+  });
+  it("never shows a raw network error while starting, and keeps the last real step", () => {
+    const backend = reduceDesktopBootState(initialDesktopBootState, { type: "snapshot", runtime: runtime("ready") });
+    const aborted = reduceDesktopBootState(backend, { type: "readiness_error", message: "signal is aborted without reason" });
+    expect([aborted.phase, aborted.detail]).toEqual(["connecting", STILL_STARTING]);
+    const loading = reduceDesktopBootState(backend, { type: "readiness", readiness: readiness(false) });
+    const slow = reduceDesktopBootState(loading, { type: "readiness_error", message: "The operation was aborted." });
+    expect(slow.detail).toEqual("Restoring Sessions");
   });
 });

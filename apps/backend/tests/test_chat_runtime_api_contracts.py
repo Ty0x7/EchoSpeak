@@ -41,7 +41,6 @@ def test_chat_runtime_routes_have_one_owner():
         ("POST", "/query/queue/claim"),
         ("GET", "/provider"),
         ("POST", "/provider/switch"),
-        ("GET", "/studio/overview"),
         ("GET", "/startup/readiness"),
     ):
         assert route_pairs.count((method, path)) == 1

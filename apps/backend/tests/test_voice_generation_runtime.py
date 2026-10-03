@@ -101,11 +101,25 @@ def test_windows_sapi_produces_verified_project_audio(tmp_path: Path, monkeypatc
         submit_voice_job(job.model_copy(deep=True), store=VoiceJobStore(tmp_path / "voice"))
 
 
-def test_voice_capabilities_do_not_open_microphone_or_claim_missing_stt():
+def test_voice_capabilities_do_not_open_microphone_or_claim_missing_stt(monkeypatch: pytest.MonkeyPatch):
+    import agent.voice_runtime as voice_runtime
+
+    monkeypatch.setattr(voice_runtime.config, "voice_faster_whisper_model_path", "", raising=False)
+    monkeypatch.setattr(voice_runtime.config.openai, "api_key", "", raising=False)
+
+    # Without a Windows speech recognizer, SAPI must not claim speech-to-text or the microphone.
+    monkeypatch.setattr(voice_runtime, "_windows_sapi_recognizer_installed", lambda: False)
     providers = {item.id: item for item in voice_provider_statuses()}
-    assert providers["windows-sapi"].operations == ["text_to_speech"]
-    assert providers["faster-whisper-local"].execution_ready is False
-    assert providers["openai-audio"].execution_ready is False
+    sapi = providers["windows-sapi"]
+    assert sapi.operation_readiness["speech_to_text"] is False
+    assert sapi.requires_microphone_permission is False
+    assert providers["faster-whisper-local"].execution_ready is False  # no model downloaded
+    assert providers["openai-audio"].execution_ready is False  # no key
+
+    # With one installed (as on most Windows PCs), it is reported honestly.
+    monkeypatch.setattr(voice_runtime, "_windows_sapi_recognizer_installed", lambda: True)
+    sapi = {item.id: item for item in voice_provider_statuses()}["windows-sapi"]
+    assert sapi.operation_readiness["speech_to_text"] is (sys.platform == "win32" and sapi.operation_readiness["text_to_speech"])
 
 
 def test_generation_job_blocks_honestly_and_keeps_stable_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

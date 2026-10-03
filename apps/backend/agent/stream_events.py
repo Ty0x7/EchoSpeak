@@ -22,7 +22,6 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Any, AsyncIterator
 from threading import Lock
 
-from loguru import logger
 
 
 SEMANTIC_ACTIVITY_SCHEMA_VERSION = 1
@@ -86,8 +85,8 @@ def build_task_activity_event(task: Any) -> dict[str, Any]:
     """Build the one public TaskRun activity snapshot.
 
     Durable IDs remain on the compatibility event, while the nested activity
-    projection contains only bounded user-facing semantics.  Chat, Visualizer,
-    the avatar, and the desktop companion can therefore share the same live
+    projection contains only bounded user-facing semantics. Chat and the
+    desktop companion can therefore share the same live
     truth without learning private prompts, reasoning, or persistence IDs.
     """
 
@@ -249,19 +248,17 @@ def semantic_activity_from_stream_payload(payload: dict[str, Any]) -> Optional[d
     event_type = _activity_text(payload.get("type"), 80).lower()
     if event_type in {"agent_token", "memory_saved", "task_plan", "thinking_step"}:
         return None
+    if event_type == "turn_bound":
+        # Binding carries execution/model identity for the client, but it is
+        # not a second visible lifecycle stage. The canonical lifecycle event
+        # owns the single "Understanding the request" activity row.
+        return None
 
     activity: dict[str, Any] = {
         "schema_version": SEMANTIC_ACTIVITY_SCHEMA_VERSION,
         "kind": event_type or "status",
     }
-    if event_type == "turn_bound":
-        activity.update({
-            "stage": "understanding",
-            "status": "running",
-            "label": "Understanding the request",
-            "model": _activity_text(payload.get("model"), 180),
-        })
-    elif event_type == "iteration_boundary":
+    if event_type == "iteration_boundary":
         iteration = _activity_int(payload.get("iteration"))
         activity.update({
             "kind": "model",

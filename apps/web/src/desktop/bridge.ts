@@ -56,6 +56,9 @@ declare global {
   interface Window {
     __TAURI__?: {
       core?: { invoke?: Invoke };
+      event?: {
+        listen?: <T>(event: string, handler: (event: { payload: T }) => void) => Promise<() => void>;
+      };
     };
     __ECHOSPEAK_DESKTOP_RUNTIME__?: DesktopRuntime;
     __ECHOSPEAK_DESKTOP_BOOTSTRAP__?: DesktopBootstrap;
@@ -146,7 +149,10 @@ export const setDesktopCompanionAlwaysOnTop = (enabled: boolean): Promise<void> 
 
 export const readDesktopWindowLabel = (): Promise<string> => invoke<string>("desktop_window_label");
 
-export const controlDesktopWindow = (action: "minimize" | "toggle_maximize" | "close"): Promise<void> =>
+/** Open an http(s) link in the default browser (desktop); refused for anything else. */
+export const openDesktopExternalUrl = (url: string): Promise<void> => invoke<void>("open_external_url", { url });
+
+export const controlDesktopWindow = (action: "show" | "minimize" | "toggle_maximize" | "close"): Promise<void> =>
   invoke<void>("control_desktop_window", { action });
 
 const authenticatedRequest = (
@@ -190,4 +196,26 @@ export const createEchoSpeakWebSocket = (url: string): WebSocket => {
   const runtime = window.__ECHOSPEAK_DESKTOP_RUNTIME__;
   if (!runtime) return new WebSocket(url);
   return new WebSocket(url, ["echospeak", `echospeak-auth-${runtime.api_session_key}`]);
+};
+
+export type DesktopUpdateInfo = {
+  configured: boolean;
+  available: boolean;
+  current_version: string;
+  version: string;
+  notes: string;
+  date: string;
+};
+
+export type DesktopUpdateProgress = { phase: "downloading" | "installing"; downloaded: number; total: number | null };
+
+export const checkForDesktopUpdate = (): Promise<DesktopUpdateInfo> => invoke<DesktopUpdateInfo>("check_for_update");
+
+/** Downloads, verifies, and installs the update. EchoSpeak restarts when it finishes. */
+export const installDesktopUpdate = (): Promise<void> => invoke<void>("install_update");
+
+export const onDesktopUpdateProgress = async (handler: (progress: DesktopUpdateProgress) => void): Promise<() => void> => {
+  const listen = window.__TAURI__?.event?.listen;
+  if (!listen) return () => undefined;
+  return listen<DesktopUpdateProgress>("desktop-update-progress", (event) => handler(event.payload));
 };

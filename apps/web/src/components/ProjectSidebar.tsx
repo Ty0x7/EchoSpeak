@@ -1,7 +1,20 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  loadStackLayout,
+  pairShare,
+  resetPair,
+  resizePair,
+  saveStackLayout,
+  sectionFractions,
+  toggleSection,
+  type SectionKey,
+  type StackLayout,
+} from "./sidebarSections";
+import { SplitHandle, type SplitGeometry } from "./SplitHandle";
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any> };
 type Session = { id: string; name: string; at: number; projectId?: string };
+export type ChatSearchHit = { session_id: string; title: string; snippet: string; role: string; agent: string; created_at: number; matches: number };
 
 type SidebarProps = {
   desktop?: boolean;
@@ -19,10 +32,79 @@ type SidebarProps = {
   onRenameSession(id: string, title: string): void;
   onDeleteSession(id: string): void;
   onDeleteProject(id: string): void;
-  onView(view: "chat" | "avatar"): void;
+  onView(view: "chat"): void;
   onSettings(): void;
   settingsOpen?: boolean;
+  /** Agents section (lean runtime): compact rows, a count and a + action. */
+  agents?: { count: number; list: React.ReactNode; onNew(): void };
+  /** Agent faces for the icon-only sidebar. */
+  collapsedRoster?: React.ReactNode;
+  /** Pages listed under search (Group chats, Projects, Artifacts, Routines). */
+  page?: SidebarPage;
+  onPage?(page: SidebarPage): void;
+  pageCounts?: Partial<Record<SidebarPage, number>>;
+  /** Full-text search over past chats. */
+  onSearchChats?(query: string): Promise<ChatSearchHit[]>;
 };
+
+export type SidebarPage = "chat" | "groups" | "projects" | "artifacts" | "routines";
+
+const SECTION_TITLES: Record<SectionKey, string> = { agents: "Agents", chats: "Chats", projects: "Projects" };
+
+const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string }[] = [
+  { id: "groups", label: "Group chats", hint: "Chats with several agents" },
+  { id: "projects", label: "Projects", hint: "Your project folders" },
+  { id: "artifacts", label: "Artifacts", hint: "Apps, documents and diagrams your agents made" },
+  { id: "routines", label: "Routines", hint: "Tasks that run on a schedule" },
+];
+
+function NavIcon({ name }: { name: Exclude<SidebarPage, "chat"> }) {
+  const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+  switch (name) {
+    case "groups":
+      return (
+        <svg {...common}>
+          <circle cx="9" cy="9" r="3" />
+          <path d="M3.5 18.5c.6-2.8 2.8-4.5 5.5-4.5s4.9 1.7 5.5 4.5" />
+          <path d="M15.5 6.3a3 3 0 0 1 0 5.4M17.5 14.3c1.6.6 2.7 2 3 4.2" />
+        </svg>
+      );
+    case "projects":
+      return (
+        <svg {...common}>
+          <path d="M3.5 8V6.5A1.5 1.5 0 0 1 5 5h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 19H5a1.5 1.5 0 0 1-1.5-1.5V8z" />
+        </svg>
+      );
+    case "artifacts":
+      return (
+        <svg {...common}>
+          <rect x="4" y="4" width="7" height="7" rx="1.5" />
+          <rect x="13" y="4" width="7" height="7" rx="3.5" />
+          <path d="M4.5 19.5 7.5 14l3 5.5z" />
+          <rect x="13" y="13" width="7" height="7" rx="1.5" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" />
+          <path d="M12 7.5V12l3 2" />
+        </svg>
+      );
+  }
+}
+
+/** Snippets mark matches as [word]; render those as <mark>. */
+function Snippet({ text }: { text: string }) {
+  const parts = text.split(/(\[[^\]]*\])/g);
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.startsWith("[") && part.endsWith("]") ? <mark key={index}>{part.slice(1, -1)}</mark> : <React.Fragment key={index}>{part}</React.Fragment>,
+      )}
+    </>
+  );
+}
 
 const surface = "#0a0a0a";
 const border = "rgba(255,255,255,.10)";
@@ -141,19 +223,35 @@ function Icon({
   }
 }
 
-const primaryViewDefs: {
-  id: "chat" | "avatar";
-  label: string;
-  icon: "chat" | "avatar";
-  title: string;
-}[] = [
-  { id: "chat", label: "Chat", icon: "chat", title: "Conversation" },
-  { id: "avatar", label: "Visualizer", icon: "avatar", title: "Echo Visualizer" },
-];
 
 export function ProjectSidebar(props: SidebarProps) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [projectsOpen, setProjectsOpen] = useState(true);
+  const [layout, setLayout] = useState<StackLayout>(() => loadStackLayout());
+  const [dragging, setDragging] = useState(false);
+  const splitRef = useRef<HTMLDivElement | null>(null);
+  const sectionRefs = useRef<Partial<Record<SectionKey, HTMLElement | null>>>({});
+  useEffect(() => saveStackLayout(layout), [layout]);
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<ChatSearchHit[] | null>(null);
+  const searching = query.trim().length >= 2;
+  const onSearchChats = props.onSearchChats;
+  useEffect(() => {
+    if (!searching || !onSearchChats) {
+      setHits(null);
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      onSearchChats(query.trim())
+        .then((items) => live && setHits(items))
+        .catch(() => live && setHits([]));
+    }, 180);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [query, searching, onSearchChats]);
   const iconOnly = props.collapsed;
   const projects = useMemo(() => props.projects.filter((project) => !project.archived), [props.projects]);
   const sessions = props.sessions;
@@ -264,6 +362,202 @@ export function ProjectSidebar(props: SidebarProps) {
       )}
     </div>
   );
+
+  // Agents / Chats / Projects stack (full sidebar only). Sections share the
+  // space by flex-grow, so the browser sizes them and changes animate; only a
+  // drag needs to measure.
+  const SECTION_HEAD_PX = 30;
+  const present: SectionKey[] = props.agents ? ["agents", "chats", "projects"] : ["chats", "projects"];
+  const fractions = sectionFractions(layout, present);
+  const sectionFlex = (key: SectionKey): React.CSSProperties =>
+    layout.open[key] ? { flex: `${fractions[key] ?? 1} 1 0px` } : { flex: `0 0 ${SECTION_HEAD_PX}px` };
+  /** Where the upper list starts and how tall both lists are, for pointer/keyboard resizing. */
+  const measurePair = (a: SectionKey, b: SectionKey): SplitGeometry => {
+    const elA = sectionRefs.current[a];
+    const elB = sectionRefs.current[b];
+    if (!elA || !elB) return { top: 0, area: 0, scale: 1 };
+    const rect = elA.getBoundingClientRect();
+    // The app shell may be zoomed: convert screen px to layout px.
+    const scale = rect.height / (elA.clientHeight || 1) || 1;
+    const area = Math.max(0, elA.clientHeight + elB.clientHeight - SECTION_HEAD_PX * 2);
+    return { top: rect.top + SECTION_HEAD_PX * scale, area, scale };
+  };
+  const sectionHead = (key: SectionKey, count: number, actions: React.ReactNode) => (
+    <div className="es-sec-head">
+      <button
+        type="button"
+        className="es-sec-toggle"
+        aria-expanded={layout.open[key]}
+        aria-controls={`es-sec-${key}`}
+        onClick={() => setLayout((value) => toggleSection(value, key))}
+      >
+        <span className="es-sec-chev" aria-hidden><Icon name="chevron" size={12} /></span>
+        <span className="es-sec-title">{SECTION_TITLES[key]}</span>
+        <span className="es-sec-count">{count}</span>
+      </button>
+      {actions}
+    </div>
+  );
+  const renderSection = (key: SectionKey) => {
+    const sectionProps = {
+      className: "es-sec",
+      "aria-label": SECTION_TITLES[key],
+      "data-open": layout.open[key] ? "true" : "false",
+      "data-section": key,
+      style: sectionFlex(key),
+      ref: (el: HTMLElement | null) => {
+        sectionRefs.current[key] = el;
+      },
+    };
+    if (key === "agents" && props.agents) {
+      return (
+        <section {...sectionProps}>
+          {sectionHead("agents", props.agents.count, (
+            <button className="es-sec-action" type="button" onClick={props.agents.onNew} title="New agent" aria-label="New agent">
+              <Icon name="plus" size={14} />
+            </button>
+          ))}
+          <div className="es-sec-list es-agent-list" id="es-sec-agents" hidden={!layout.open.agents}>
+            {props.agents.list}
+          </div>
+        </section>
+      );
+    }
+    if (key === "chats") {
+      return (
+        <section {...sectionProps}>
+          {sectionHead("chats", looseSessions.length, (
+            <>
+              <button className="es-sec-action" type="button" onClick={() => { props.onPage?.("chat"); props.onNewSession(); }} title="Start new chat" aria-label="Start new chat">
+                <Icon name="plus" size={14} />
+              </button>
+              {props.desktop ? (
+                <button className="es-sec-action" type="button" onClick={props.onToggleCollapsed} title="Collapse sidebar" aria-label="Collapse sidebar">
+                  <Icon name="collapse" size={14} />
+                </button>
+              ) : null}
+            </>
+          ))}
+          <div className="es-sec-list" id="es-sec-chats" hidden={!layout.open.chats}>
+            {props.hydrating ? (
+              <div role="status" className="es-sec-empty">Restoring chats…</div>
+            ) : looseSessions.length ? (
+              looseSessions.map((session) => sessionRow(session))
+            ) : (
+              <div className="es-sec-empty">No chats yet. Start one with +.</div>
+            )}
+          </div>
+        </section>
+      );
+    }
+    return (
+      <section {...sectionProps}>
+        {sectionHead("projects", projects.length, (
+          <button className="es-sec-action" type="button" onClick={props.onAddFolder} title="Add Project folder" aria-label="Add Project folder">
+            <Icon name="plus" size={14} />
+          </button>
+        ))}
+        <div className="es-sec-list" id="es-sec-projects" hidden={!layout.open.projects}>
+          {props.hydrating ? (
+            <div role="status" className="es-sec-empty">Restoring projects…</div>
+          ) : projects.length ? (
+            projects.map((project) => projectRow(project))
+          ) : (
+            <button className="echo-footer-action es-sec-cta" type="button" onClick={props.onAddFolder}>
+              <span>Add your first Project</span>
+              <small>Attach a local folder</small>
+            </button>
+          )}
+        </div>
+      </section>
+    );
+  };
+
+  const projectRow = (project: Project) => {
+    const childSessions = sessions.filter((session) => session.projectId === project.id);
+    const open = expanded[project.id] ?? props.activeProjectId === project.id;
+    const isActive = props.activeProjectId === project.id;
+    return (
+      <div key={project.id} style={{ minWidth: 0, maxWidth: "100%" }}>
+        <div
+          className="echo-side-row"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            boxSizing: "border-box",
+          }}
+        >
+          <button
+            className={`echo-side-button ${isActive ? "is-active" : ""}`}
+            type="button"
+            style={{
+              ...railButton(isActive),
+              flex: "1 1 auto",
+              minWidth: 0,
+              width: "auto",
+            }}
+            onClick={() => {
+              setExpanded((value) => ({ ...value, [project.id]: !open }));
+              // A Project row is navigation, never Session creation.
+              // Select an existing child only; the adjacent + owns creation.
+              if (!isActive && childSessions[0]) props.onSelectSession(childSessions[0].id);
+            }}
+            title={project.workspace_root || project.name}
+            aria-label={`Project: ${project.name}`}
+          >
+            <span style={iconSlot(isActive)}>
+              <Icon name="folder" size={iconOnly ? 16 : 15} active={isActive} />
+            </span>
+            {!iconOnly && <span style={titleEllipsis}>{project.name}</span>}
+          </button>
+          {!iconOnly && (
+            <div className="echo-row-actions" aria-label="Project actions">
+              <button type="button" title="New Session in Project" aria-label={`New Session in ${project.name}`} onClick={() => props.onNewSession(project.id)}>
+                <Icon name="plus" size={14} />
+              </button>
+              <button
+                type="button"
+                title="Delete Project"
+                aria-label={`Delete ${project.name}`}
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Delete Project “${project.name}”? Its Sessions will become independent.`,
+                    )
+                  )
+                    props.onDeleteProject(project.id);
+                }}
+              >
+                <Icon name="trash" size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+        {/* Sessions under a project: hide in rail to keep icons clear; open sidebar to manage */}
+        {!props.hydrating && !iconOnly && open && childSessions.map((session) => sessionRow(session, true))}
+        {!iconOnly && open && !childSessions.length && (
+          <button
+            type="button"
+            className="echo-side-button"
+            onClick={() => props.onNewSession(project.id)}
+            style={{
+              ...railButton(),
+              width: "100%",
+              maxWidth: "100%",
+              boxSizing: "border-box",
+              paddingLeft: 21,
+              color: muted,
+            }}
+          >
+            + Session in Project
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <aside
@@ -427,14 +721,12 @@ export function ProjectSidebar(props: SidebarProps) {
               padding: 0,
             }}
           >
-            <img src="/logo.png" alt="EchoSpeak" style={{ width: 18, height: 18, borderRadius: 2, display: "block" }} />
+            <img src="/logo.png" alt="EchoSpeak" style={{ width: 20, height: 20, display: "block" }} />
           </button>
         ) : (
           <>
             <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-              <div style={{ width: 24, height: 24, display: "grid", placeItems: "center", border: "1px solid rgba(255,255,255,.1)", background: "rgba(255,255,255,.035)", borderRadius: 3 }}>
-                <img src="/logo.png" alt="" style={{ width: 15, height: 15, borderRadius: 2 }} />
-              </div>
+              <img src="/logo.png" alt="" style={{ width: 24, height: 24, display: "block", flex: "0 0 auto" }} />
               <div style={{ minWidth: 0, lineHeight: 1.05 }}>
                 <strong style={{ display: "block", fontFamily: "'Space Grotesk', sans-serif", fontSize: 15.5, letterSpacing: "-.01em" }}>EchoSpeak</strong>
                 <span style={{ display: "block", marginTop: 4, color: "rgba(255,255,255,.35)", fontSize: 8.5, letterSpacing: ".13em", textTransform: "uppercase" }}>Local workspace</span>
@@ -465,45 +757,162 @@ export function ProjectSidebar(props: SidebarProps) {
         )}
       </div> : null}
 
+      {!iconOnly ? (
+        <div className="es-side-body">
+          <div className="es-side-top">
+            <button
+              className="echo-side-button es-new-chat"
+              type="button"
+              onClick={() => {
+                props.onView("chat");
+                props.onPage?.("chat");
+                props.onNewSession();
+              }}
+              title="New chat"
+              aria-label="New chat"
+            >
+              <span style={iconSlot(false)}>
+                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+                </svg>
+              </span>
+              <span style={titleEllipsis}>New chat</span>
+            </button>
+            {props.onSearchChats ? (
+              <label className="es-chat-search">
+                <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-3.5-3.5" />
+                </svg>
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") setQuery("");
+                  }}
+                  placeholder="Search chats"
+                  aria-label="Search chats"
+                />
+              </label>
+            ) : null}
+            {props.onPage ? (
+              <nav className="es-nav" aria-label="Pages">
+                {NAV_ITEMS.map((item) => {
+                  const active = props.page === item.id;
+                  const count = props.pageCounts?.[item.id];
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`es-nav-item${active ? " is-active" : ""}`}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => props.onPage?.(active ? "chat" : item.id)}
+                      title={item.hint}
+                    >
+                      <NavIcon name={item.id} />
+                      <span>{item.label}</span>
+                      {count ? <small>{count}</small> : null}
+                    </button>
+                  );
+                })}
+              </nav>
+            ) : null}
+          </div>
+
+          {searching ? (
+            <section className="es-search-results" aria-label="Search results">
+              {hits === null ? (
+                <div role="status" className="es-sec-empty">Searching…</div>
+              ) : hits.length ? (
+                hits.map((hit) => (
+                  <button
+                    key={hit.session_id}
+                    type="button"
+                    className={`es-search-hit${props.activeSessionId === hit.session_id ? " is-active" : ""}`}
+                    onClick={() => {
+                      props.onView("chat");
+                      props.onPage?.("chat");
+                      props.onSelectSession(hit.session_id);
+                      setQuery("");
+                    }}
+                  >
+                    <span className="es-search-title">
+                      {hit.title}
+                      {hit.matches > 1 ? <small>{hit.matches} matches</small> : null}
+                    </span>
+                    <span className="es-search-snippet">
+                      <b>{hit.role === "user" ? "You" : hit.agent || "Echo"}:</b> <Snippet text={hit.snippet} />
+                    </span>
+                  </button>
+                ))
+              ) : (
+                <div className="es-sec-empty">No chats mention “{query.trim()}”.</div>
+              )}
+            </section>
+          ) : null}
+          <div className="es-split" ref={splitRef} data-dragging={dragging ? "true" : "false"} hidden={searching}>
+            {present.map((key, index) => {
+              const next = present[index + 1];
+              const handle = next && layout.open[key] && layout.open[next] ? (
+                <SplitHandle
+                  key={`h-${key}`}
+                  label={`Resize ${SECTION_TITLES[key]} and ${SECTION_TITLES[next]}`}
+                  share={pairShare(layout, key, next)}
+                  measure={() => measurePair(key, next)}
+                  onShare={(share) => setLayout((value) => resizePair(value, key, next, share))}
+                  onReset={() => setLayout((value) => resetPair(value, key, next))}
+                  onDragging={setDragging}
+                />
+              ) : null;
+              return (
+                <React.Fragment key={key}>
+                  {renderSection(key)}
+                  {handle}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
       <div className="echo-sidebar-scroll">
         <nav
           aria-label="Primary views"
           style={{
             display: "grid",
-            gridTemplateColumns: iconOnly ? "1fr" : "1fr 1fr",
+            gridTemplateColumns: "1fr",
             gap: 3,
             padding: iconOnly ? "0 1px 5px" : "0 1px 7px",
             flex: "0 0 auto",
           }}
         >
-          {primaryViewDefs.map((view) => {
-            const active = props.activeView === view.id;
-            return (
-              <button
-                className={`echo-side-button ${active ? "is-active" : ""}`}
-                type="button"
-                key={view.id}
-                style={{
-                  ...railButton(active),
-                  width: "100%",
-                  justifyContent: "center",
-                  border: `1px solid ${active ? "rgba(255,255,255,.18)" : "rgba(255,255,255,.08)"}`,
-                  background: active ? "rgba(255,255,255,.09)" : "rgba(255,255,255,.018)",
-                }}
-                onClick={() => props.onView(view.id)}
-                title={view.title}
-                aria-label={view.title}
-              >
-                <span style={iconSlot(active)}>
-                  <Icon name={view.icon} size={iconOnly ? 16 : 15} active={active} />
-                </span>
-                {!iconOnly && <span style={titleEllipsis}>{view.label}</span>}
-              </button>
-            );
-          })}
+          <button
+            className="echo-side-button es-new-chat"
+            type="button"
+            onClick={() => {
+              props.onView("chat");
+              props.onNewSession();
+            }}
+            title="New chat"
+            aria-label="New chat"
+          >
+            <span style={iconSlot(false)}>
+              <svg width={iconOnly ? 16 : 15} height={iconOnly ? 16 : 15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+              </svg>
+            </span>
+            {!iconOnly && <span style={titleEllipsis}>New chat</span>}
+          </button>
         </nav>
 
         <div className="echo-rail-divider" />
+
+        {props.collapsedRoster ? (
+          <>
+            {props.collapsedRoster}
+            <div className="echo-rail-divider" />
+          </>
+        ) : null}
 
         <section aria-label="Workspace" style={{ padding: iconOnly ? "0 1px" : 0, display: "grid", gap: 7, flex: "0 0 auto" }}>
           <div style={{ display: "grid", gap: 2 }}>
@@ -611,7 +1020,7 @@ export function ProjectSidebar(props: SidebarProps) {
               </button>
             )}
 
-            {looseSessions.map((session) => sessionRow(session))}
+            {!props.hydrating && looseSessions.map((session) => sessionRow(session))}
 
             <div className="echo-rail-divider" />
 
@@ -660,97 +1069,13 @@ export function ProjectSidebar(props: SidebarProps) {
               </div>
             ) : null}
 
-            {(iconOnly || projectsOpen) &&
-              projects.map((project) => {
-                const childSessions = sessions.filter((session) => session.projectId === project.id);
-                const open = expanded[project.id] ?? props.activeProjectId === project.id;
-                const isActive = props.activeProjectId === project.id;
-                return (
-                  <div key={project.id} style={{ minWidth: 0, maxWidth: "100%" }}>
-                    <div
-                      className="echo-side-row"
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        width: "100%",
-                        maxWidth: "100%",
-                        minWidth: 0,
-                        boxSizing: "border-box",
-                      }}
-                    >
-                      <button
-                        className={`echo-side-button ${isActive ? "is-active" : ""}`}
-                        type="button"
-                        style={{
-                          ...railButton(isActive),
-                          flex: "1 1 auto",
-                          minWidth: 0,
-                          width: "auto",
-                        }}
-                        onClick={() => {
-                          setExpanded((value) => ({ ...value, [project.id]: !open }));
-                          // A Project row is navigation, never Session creation.
-                          // Select an existing child only; the adjacent + owns creation.
-                          if (!isActive && childSessions[0]) props.onSelectSession(childSessions[0].id);
-                        }}
-                        title={project.workspace_root || project.name}
-                        aria-label={`Project: ${project.name}`}
-                      >
-                        <span style={iconSlot(isActive)}>
-                          <Icon name="folder" size={iconOnly ? 16 : 15} active={isActive} />
-                        </span>
-                        {!iconOnly && <span style={titleEllipsis}>{project.name}</span>}
-                      </button>
-                      {!iconOnly && (
-                        <div className="echo-row-actions" aria-label="Project actions">
-                          <button type="button" title="New Session in Project" aria-label={`New Session in ${project.name}`} onClick={() => props.onNewSession(project.id)}>
-                            <Icon name="plus" size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            title="Delete Project"
-                            aria-label={`Delete ${project.name}`}
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  `Delete Project “${project.name}”? Its Sessions will become independent.`,
-                                )
-                              )
-                                props.onDeleteProject(project.id);
-                            }}
-                          >
-                            <Icon name="trash" size={14} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                    {/* Sessions under a project: hide in rail to keep icons clear; open sidebar to manage */}
-                    {!iconOnly && open && childSessions.map((session) => sessionRow(session, true))}
-                    {!iconOnly && open && !childSessions.length && (
-                      <button
-                        type="button"
-                        className="echo-side-button"
-                        onClick={() => props.onNewSession(project.id)}
-                        style={{
-                          ...railButton(),
-                          width: "100%",
-                          maxWidth: "100%",
-                          boxSizing: "border-box",
-                          paddingLeft: 21,
-                          color: muted,
-                        }}
-                      >
-                        + Session in Project
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
+            {(iconOnly || projectsOpen) && projects.map((project) => projectRow(project))}
 
           </div>
         </section>
 
       </div>
+      )}
 
       {!iconOnly ? (
         <footer className="echo-sidebar-footer" style={{ padding: "6px 10px 0 0" }}>

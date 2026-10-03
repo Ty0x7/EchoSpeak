@@ -169,12 +169,13 @@ layout. Under Tauri, a MemoryRouter mounts `DesktopApp`, and the Dashboard uses 
 desktop-only explicit surface union:
 
 ```text
-Chat | Visualizer
+Chat
 ```
 
-Exactly one primary surface owns the main workspace. Work, Research, Code,
-Checklist, and Media are internal Visualizer panels over the same canonical
-Session/TaskRun state. Settings is a centered modal and not a third workspace.
+Chat is the only primary surface and owns the main workspace. Work, Research,
+Code, Checklist, and Media status are compact projections inside the same Chat
+surface over canonical Session/TaskRun state. Settings is a centered modal and
+not another workspace.
 Chat uses the full conversation surface and may show compact durable-work
 status. Navigation never creates a Session, TaskRun, Execution, or handoff.
 The composer remains the bottom row instead of a permanent third column.

@@ -481,3 +481,118 @@ export class LocalVoicePlayback {
 }
 
 export const localVoicePlayback = new LocalVoicePlayback();
+
+/**
+ * "Hey Echo": listens for short bursts of speech and asks the backend whether
+ * the wake word was said. Audio is checked by the local Whisper model and
+ * never stored. Stop it while a voice turn is recording or a reply is spoken.
+ */
+export class WakeListener {
+  private context: AudioContext | null = null;
+  private stream: MediaStream | null = null;
+  private processor: ScriptProcessorNode | null = null;
+  private sink: GainNode | null = null;
+  private preroll: Float32Array[] = [];
+  private burst: Float32Array[] = [];
+  private speaking = false;
+  private lastLoud = 0;
+  private burstStart = 0;
+  private checking = false;
+
+  get active(): boolean {
+    return Boolean(this.stream);
+  }
+
+  async start(options: { apiBase: string; onWake(): void; onUnavailable(message: string): void }): Promise<void> {
+    if (this.stream) return;
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("Microphone capture is unavailable in this window.");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false,
+    });
+    const AudioContextCtor = window.AudioContext || (window as any).webkitAudioContext;
+    const context: AudioContext = new AudioContextCtor();
+    await context.resume();
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const sink = context.createGain();
+    sink.gain.value = 0;
+    const rate = context.sampleRate;
+    processor.onaudioprocess = (event) => {
+      const input = event.inputBuffer.getChannelData(0);
+      const chunk = new Float32Array(input.length);
+      chunk.set(input);
+      let peak = 0;
+      for (let i = 0; i < chunk.length; i += 1) peak = Math.max(peak, Math.abs(chunk[i]));
+      const now = Date.now();
+      if (!this.speaking) {
+        // Keep ~0.3 s before speech so the start of "Hey" isn't cut off.
+        this.preroll.push(chunk);
+        while (this.preroll.length * chunk.length > rate * 0.3) this.preroll.shift();
+        if (peak >= 0.04) {
+          this.speaking = true;
+          this.burst = [...this.preroll];
+          this.burstStart = now;
+          this.lastLoud = now;
+        }
+        return;
+      }
+      this.burst.push(chunk);
+      if (peak >= 0.04) this.lastLoud = now;
+      const ended = now - this.lastLoud > 450 || now - this.burstStart > 3000;
+      if (!ended) return;
+      this.speaking = false;
+      this.preroll = [];
+      const samples = mergeSamples(this.burst);
+      this.burst = [];
+      // Ignore clicks and very short sounds; drop bursts while a check is still running.
+      if (samples.length < rate * 0.35 || this.checking) return;
+      this.checking = true;
+      const wav = encodeMonoWav(samples, rate);
+      void fetch(`${options.apiBase}/media-runtime/voice/wake`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio_base64: bytesToBase64(wav) }),
+      })
+        .then(async (response) => {
+          if (response.status === 409) {
+            const error = await apiError(response, "Set up voice in Settings > Voice first.");
+            options.onUnavailable(error.message);
+            return;
+          }
+          if (!response.ok) return;
+          const result = await response.json();
+          if (result?.wake && this.stream) options.onWake();
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          this.checking = false;
+        });
+    };
+    source.connect(processor);
+    processor.connect(sink);
+    sink.connect(context.destination);
+    this.context = context;
+    this.stream = stream;
+    this.processor = processor;
+    this.sink = sink;
+  }
+
+  stop(): void {
+    try {
+      this.processor?.disconnect();
+      this.sink?.disconnect();
+    } catch {
+      // already disconnected
+    }
+    this.stream?.getTracks().forEach((track) => track.stop());
+    void this.context?.close().catch(() => undefined);
+    this.context = null;
+    this.stream = null;
+    this.processor = null;
+    this.sink = null;
+    this.preroll = [];
+    this.burst = [];
+    this.speaking = false;
+  }
+}

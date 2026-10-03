@@ -3,12 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#050505" />
+    <meta name="description" content="EchoSpeak is a local-first personal agent runtime for conversation, research, memory, and project work." />
     <link rel="icon" type="image/png" href="/logo.png" />
     <link rel="apple-touch-icon" href="/logo.png" />
-    <title>EchoSpeak — Local-First Voice Assistant</title>
+    <!-- Must stay a file: an inline style tag here would disable 'unsafe-inline' in the desktop CSP. -->
+    <link rel="stylesheet" href="/splash.css" />
+    <title>EchoSpeak — Personal agent runtime</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Painted before any script loads; React replaces it on first render. -->
+    <div id="root"><div class="es-boot-splash"><div class="es-boot-face"><i></i><i></i></div></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

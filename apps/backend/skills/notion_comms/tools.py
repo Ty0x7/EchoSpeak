@@ -8,8 +8,7 @@ Requires:
 
 from __future__ import annotations
 
-import json
-from typing import Optional, List
+from typing import Optional
 
 from loguru import logger
 from pydantic import BaseModel, Field

@@ -27,67 +27,6 @@ def test_corrupt_session_registry_is_preserved_and_quarantined(tmp_path: Path):
     assert guides and "repair or restore" in guides[0].read_text(encoding="utf-8")
 
 
-def test_typed_context_filters_scope_lifecycle_and_budget():
-    from agent.context_chain import ContextAssembler, ContextItem
-
-    items = [
-        ContextItem(id="turn", source_type="current_turn", text="current", session_id="A", scope="session"),
-        ContextItem(id="wrong", source_type="memory", text="secret", project_id="P2", scope="project"),
-        ContextItem(id="forgotten", source_type="memory", text="old", session_id="A", lifecycle="forgotten"),
-        ContextItem(id="verified", source_type="tool_outcome", text="verified result", session_id="A", verified=True, trust="verified"),
-    ]
-    selected = ContextAssembler(project_id="P1", session_id="A").select(items, token_budget=8)
-    ids = [item.id for item in selected.selected]
-    assert "turn" in ids
-    assert "wrong" not in ids
-    assert "forgotten" not in ids
-    assert selected.used_tokens <= selected.token_budget
-    assert all("text" not in row for row in selected.redacted_manifest()["selected"])
-
-
-def test_resolution_is_bounded_advisory_and_cannot_expand_scope():
-    from agent.mode_controller import ModeDecision, TurnMode
-    from agent.resolution import EchoResolutionEngine, ResolutionRecommendation
-
-    decision = ModeDecision(
-        mode=TurnMode.CODING,
-        confidence=0.5,
-        reason="ambiguous",
-        user_text="delete that file",
-        ambiguous=True,
-        allowed_tool_names=frozenset({"file_delete"}),
-    )
-    engine = EchoResolutionEngine()
-    calls = 0
-
-    def adviser(_request):
-        nonlocal calls
-        calls += 1
-        return json.dumps({
-            "recommended_mode": "coding",
-            "interpreted_objective": "delete that file",
-            "project_id": "OTHER",
-            "session_id": "A",
-            "recommended_tools": ["file_delete", "unregistered"],
-            "recommendation": "proceed",
-        })
-
-    result = engine.resolve(
-        user_text="delete that file",
-        mode_decision=decision,
-        project_id="P1",
-        session_id="A",
-        available_tools={"file_delete"},
-        available_skills=set(),
-        adviser=adviser,
-    )
-    assert calls == 1
-    assert result.advice is not None
-    assert result.advice.project_id == "P1"
-    assert result.advice.recommendation == ResolutionRecommendation.CLARIFY
-    assert result.parse_error
-
-
 def test_startup_readiness_reports_real_steps_without_provider_gate(monkeypatch, tmp_path: Path):
     import agent.startup_readiness as readiness
 
@@ -103,3 +42,19 @@ def test_startup_readiness_reports_real_steps_without_provider_gate(monkeypatch,
     assert payload["instance_id"] == "instance-test"
     assert payload["completed_steps"] == payload["total_steps"]
     assert not any(item["key"] == "provider" for item in payload["components"])
+
+
+def test_browser_mode_also_keeps_projects_in_the_data_folder(monkeypatch, tmp_path: Path):
+    import config
+    from agent import projects as projects_mod
+
+    monkeypatch.delenv("ECHOSPEAK_RUNTIME_KIND", raising=False)
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    legacy = tmp_path / "legacy-projects"
+    legacy.mkdir()
+    (legacy / "p1.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(projects_mod, "LEGACY_PROJECTS_DIR", legacy)
+    manager = projects_mod.ProjectManager()
+    assert manager.projects_dir == tmp_path / "projects"
+    # A custom data folder never adopts the legacy dev projects.
+    assert not (tmp_path / "projects" / "p1.json").exists()

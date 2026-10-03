@@ -19,7 +19,6 @@ explicit sandbox_unavailable / fail status — never a quiet host execution.
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import subprocess
 import time

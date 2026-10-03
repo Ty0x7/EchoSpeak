@@ -452,11 +452,12 @@ def _faster_whisper_transcribe(audio_path: Path, language: str = "") -> tuple[st
     model_path = _existing_path(getattr(config, "voice_faster_whisper_model_path", ""))
     if model_path is None:
         raise VoiceRuntimeError("A local faster-whisper model path is not configured")
-    from faster_whisper import WhisperModel
+    from agent.voice_setup import load_wav_16k, whisper_model
 
-    model = WhisperModel(str(model_path), device="cpu", compute_type="int8")
+    # Cached: loading a model takes seconds, transcribing a short clip doesn't.
+    model = whisper_model(str(model_path))
     segments, info = model.transcribe(
-        str(audio_path),
+        load_wav_16k(audio_path),
         language=str(language or "").split("-", 1)[0] or None,
         vad_filter=True,
     )

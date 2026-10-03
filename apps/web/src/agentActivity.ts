@@ -92,7 +92,7 @@ export type AgentActivityState = {
   recoveryReason: string;
   nextAction: string;
   startTime: number;
-  tokenUsage: { prompt?: number; completion?: number; total?: number } | null;
+  tokenUsage: { prompt?: number; completion?: number; total?: number; reasoning?: number; approximate?: boolean } | null;
   iteration: number;
   requirements: SemanticRequirementActivity[];
   missingFields: string[];
@@ -219,7 +219,7 @@ export type ActivityAction =
   | { type: "step_update"; requirement?: string; nextAction?: string }
   | { type: "recovery"; reason: string }
   | { type: "steer"; instruction: string }
-  | { type: "token_usage"; prompt?: number; completion?: number; total?: number }
+  | { type: "token_usage"; prompt?: number; completion?: number; total?: number; reasoning?: number; approximate?: boolean }
   | { type: "iteration_boundary"; iteration: number; model?: string }
   | { type: "semantic"; activity: SemanticActivityEvent; at?: number }
   | { type: "final"; response: string; executionStatus?: string; success?: boolean }
@@ -338,7 +338,10 @@ export function agentActivityReducer(state: AgentActivityState, action: Activity
       const at = Number(action.at || Date.now());
       const previous = state.timeline[state.timeline.length - 1];
       const shouldAppend = Boolean(
-        label && (!previous || previous.label !== label || previous.status !== status),
+        label && (!previous || (
+          previous.label !== label &&
+          !(stage === "understanding" && previous.stage === "understanding")
+        )),
       );
       const timeline = shouldAppend
         ? [
@@ -440,6 +443,8 @@ export function agentActivityReducer(state: AgentActivityState, action: Activity
           prompt: action.prompt ?? state.tokenUsage?.prompt,
           completion: action.completion ?? state.tokenUsage?.completion,
           total: action.total ?? state.tokenUsage?.total,
+          reasoning: action.reasoning ?? state.tokenUsage?.reasoning,
+          approximate: action.approximate ?? state.tokenUsage?.approximate,
         },
       });
 
@@ -763,12 +768,18 @@ export function activityActionsFromStreamEvent(event: StreamActivityPacket): Act
       prompt: packetNumber(event, "prompt") || undefined,
       completion: packetNumber(event, "completion") || undefined,
       total: packetNumber(event, "total") || undefined,
+      reasoning: packetNumber(event, "reasoning") || undefined,
+      approximate: Boolean(event.approximate),
     });
   } else if (type === "reasoning_summary" || type === "thinking") {
     const content = packetString(event, "content");
     if (content) actions.push({ type: "thinking", content });
-  } else if (type === "recovery") {
-    actions.push({ type: "recovery", reason: packetString(event, "message") || "Trying another approach." });
+  } else if (type === "recovery" || type === "provider_retry") {
+    const retrying = event.retrying !== false;
+    actions.push({
+      type: "recovery",
+      reason: packetString(event, "message") || (retrying ? "Retrying the selected model step." : "The model attempt ended."),
+    });
   } else if (type === "lifecycle") {
     actions.push({
       type: "lifecycle",

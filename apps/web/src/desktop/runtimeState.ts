@@ -24,9 +24,12 @@ export const initialDesktopBootState: DesktopBootState = {
   phase: "connecting",
   runtime: null,
   readiness: null,
-  detail: "Starting the local EchoSpeak service",
+  detail: "Starting EchoSpeak",
   hasBeenReady: false,
 };
+
+/** Shown while a readiness check is slow or cut off. Raw network errors never reach the screen. */
+export const STILL_STARTING = "Still starting EchoSpeak";
 
 export function reduceDesktopBootState(state: DesktopBootState, event: DesktopBootEvent): DesktopBootState {
   if (event.type === "retry_requested") {
@@ -39,7 +42,9 @@ export function reduceDesktopBootState(state: DesktopBootState, event: DesktopBo
     return { ...state, phase: "failed", detail: "EchoSpeak could not restore its core workspace within 90 seconds" };
   }
   if (event.type === "readiness_error") {
-    return { ...state, phase: "connecting", detail: event.message || "Checking workspace readiness" };
+    // A slow or aborted check during startup is normal (heavy libraries are
+    // still loading). Keep the last real step on screen instead of the error.
+    return { ...state, phase: "connecting", detail: state.readiness?.status || STILL_STARTING };
   }
   if (event.type === "readiness") {
     if (event.readiness.protocol_version !== DESKTOP_PROTOCOL_VERSION) {

@@ -6,9 +6,9 @@ architecture document.
 
 ## Product model
 
-Echo is the user-facing personal agent. Chat is the conversational surface.
-Visualizer is a read-only projection of durable work. Work and Code are
-Visualizer panels, not separate agents or top-level desktop applications.
+Echo is the user-facing personal agent. Chat is the only product surface.
+Durable work, research, and Code state are compact read-only projections inside
+Chat, not separate agents or top-level desktop applications.
 Settings is a centered configuration modal.
 
 The governing rule is:
@@ -116,8 +116,8 @@ records remember execution.
 ## Frontend contract
 
 The frontend renders backend IDs and revisions. Navigation never creates a
-Session or starts work. The explicit plus button creates a Session. Visualizer
-may display graph, requirements, evidence, specialist events, waits, and
+Session or starts work. The explicit plus button creates a Session. Chat
+may display requirements, evidence, specialist events, waits, and
 recovery, but cannot advance them. Normal Chat language must not expose raw
 requirement, ToolRun, or internal diagnostic IDs.
 

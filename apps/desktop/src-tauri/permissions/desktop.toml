@@ -1,6 +1,6 @@
 [[permission]]
 identifier = "desktop-runtime"
-description = "Allows the EchoSpeak renderer to inspect or recover its owned local service, use explicit user-invoked folder pickers, and control its own window."
+description = "Allows the EchoSpeak renderer to inspect or recover its owned local service, use explicit user-invoked folder pickers, control its own window, open http(s) links in the default browser, and check for and install signed updates."
 commands.allow = [
   "desktop_runtime",
   "restart_desktop_backend",
@@ -11,5 +11,8 @@ commands.allow = [
   "open_settings_window",
   "open_companion_window",
   "set_companion_always_on_top",
-  "desktop_window_label"
+  "desktop_window_label",
+  "open_external_url",
+  "check_for_update",
+  "install_update"
 ]

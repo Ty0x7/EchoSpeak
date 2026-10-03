@@ -165,7 +165,7 @@ class RoutineManager:
         # Calculate next run time for scheduled routines
         if routine.trigger_type == "schedule" and routine.schedule and croniter:
             try:
-                cron = croniter(routine.schedule, datetime.now(timezone.utc))
+                cron = croniter(routine.schedule, datetime.now().astimezone())
                 routine.next_run = cron.get_next(datetime).isoformat()
             except Exception as e:
                 logger.warning(f"Invalid cron expression for routine {name}: {e}")
@@ -229,7 +229,7 @@ class RoutineManager:
         # Recalculate next run time
         if routine.trigger_type == "schedule" and routine.schedule and croniter:
             try:
-                cron = croniter(routine.schedule, datetime.now(timezone.utc))
+                cron = croniter(routine.schedule, datetime.now().astimezone())
                 routine.next_run = cron.get_next(datetime).isoformat()
             except Exception as e:
                 logger.warning(f"Invalid cron expression: {e}")
@@ -271,7 +271,7 @@ class RoutineManager:
         
         if routine.trigger_type == "schedule" and routine.schedule and croniter:
             try:
-                cron = croniter(routine.schedule, now)
+                cron = croniter(routine.schedule, now.astimezone())
                 routine.next_run = cron.get_next(datetime).isoformat()
             except Exception:
                 pass

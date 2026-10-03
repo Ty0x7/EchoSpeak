@@ -20,10 +20,11 @@ def test_live_intent_score_not_schedule():
     assert is_live_sports_data_intent("what's the oilers score right now") is True
     assert is_live_sports_data_intent("who won the lakers game") is True
     assert is_live_sports_data_intent("oilers moneyline odds") is True
-    # Schedule / slate stays on web search
-    assert is_live_sports_data_intent("who is playing tomorrow for fifa") is False
-    assert is_live_sports_data_intent("when do the oilers play next") is False
+    # Since 8.0 schedules use the provider's schedule operation (fetch_schedule).
+    assert live_sports_mode("who is playing tomorrow for fifa") == "schedule"
+    assert live_sports_mode("when do the oilers play next") == "schedule"
     assert is_live_sports_data_intent("weather in edmonton") is False
+    assert live_sports_mode("weather in edmonton") == "none"
 
 
 def test_live_mode_classification():

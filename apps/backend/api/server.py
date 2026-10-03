@@ -5,7 +5,6 @@ Provides FastAPI server for REST API access.
 
 import os
 import sys
-import base64
 import json
 import queue
 import asyncio
@@ -16,7 +15,6 @@ import time
 import uuid
 import hmac
 import hashlib
-from datetime import datetime
 from pathlib import Path
 from io import BytesIO
 from collections import deque, OrderedDict
@@ -33,7 +31,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from fastapi import FastAPI, HTTPException, Query, Response, Request, UploadFile, File, WebSocket, WebSocketDisconnect, Header, Depends, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
@@ -473,7 +471,6 @@ def _validate_settings_effective(effective: dict) -> list[dict]:
         "allow_terminal_commands",
         "allow_open_application",
         "allow_self_modification",
-        "allow_discord_webhook",
     ]
     if not enable_system_actions:
         for k in allow_flags:
@@ -506,19 +503,6 @@ def _validate_settings_effective(effective: dict) -> list[dict]:
         secret_path = str(s.get("webhook_secret_path") or "").strip()
         if not secret and not secret_path:
             issues.append({"key": "webhook_secret", "message": "Webhooks enabled but WEBHOOK_SECRET / WEBHOOK_SECRET_PATH is not set.", "severity": "error"})
-
-    if bool(s.get("allow_discord_webhook")):
-        url = str(s.get("discord_webhook_url") or "").strip()
-        if not url:
-            issues.append({"key": "discord_webhook_url", "message": "Allow Discord Webhook is enabled but DISCORD_WEBHOOK_URL is empty.", "severity": "error"})
-
-    if bool(s.get("cron_enabled")):
-        try:
-            from croniter import croniter as _ci  # type: ignore
-        except Exception:
-            _ci = None
-        if _ci is None:
-            issues.append({"key": "cron_enabled", "message": "Cron enabled but croniter is not installed on the backend.", "severity": "warning"})
 
     if bool(s.get("allow_open_application")):
         from config import _normalize_open_application_allowlist
@@ -949,38 +933,6 @@ def _verify_webhook_signature(secret: str, body: bytes, signature_header: Option
         return False
 
 
-_cron_state_lock = threading.Lock()
-
-
-def _load_cron_state() -> dict:
-    path_val = str(getattr(config, "cron_state_path", "") or "").strip()
-    if not path_val:
-        return {}
-    path = Path(path_val).expanduser()
-    try:
-        if not path.exists():
-            return {}
-        raw = path.read_text(encoding="utf-8").strip()
-        if not raw:
-            return {}
-        data = json.loads(raw)
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _save_cron_state(state: dict) -> None:
-    path_val = str(getattr(config, "cron_state_path", "") or "").strip()
-    if not path_val:
-        return
-    path = Path(path_val).expanduser()
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        return
-
-
 def get_vision_manager():
     """Get or create the vision manager instance."""
     global _vision_manager
@@ -1090,10 +1042,10 @@ def _safe_stream_failure(exc: BaseException) -> str:
     if "cancel" in name or "cancel" in detail:
         return "Stopped by Ty."
     if "timeout" in name or "stall" in name or "timed out" in detail:
-        return "The selected provider stalled. This run stopped cleanly."
+        return "Verified work is preserved; the remaining details were not reliable enough to state."
     if "connect" in name or "unavailable" in detail:
-        return "The selected model is unavailable right now."
-    return "Echo stopped this run safely after an internal problem."
+        return "The model is unavailable right now. Nothing was changed."
+    return "The turn ended with a scoped recovery result; verified work is preserved."
 
 
 class _StreamingHandler(BaseCallbackHandler):
@@ -1132,7 +1084,10 @@ class _StreamingHandler(BaseCallbackHandler):
         self._emit_synthetic_preamble = False
         self._iteration_count = 0
         self._seen_llm_run_ids: set[str] = set()
-        self._token_usage = {"prompt": 0, "completion": 0, "total": 0}
+        self._token_usage = {"prompt": 0, "completion": 0, "total": 0, "reasoning": 0}
+        self._stream_reasoning_chars = 0
+        self._stream_visible_chars = 0
+        self._last_token_progress_chars = 0
 
     def _put(self, event: dict) -> None:
         """Emit a stream event with monotonic seq for reconnect/reorder guards."""
@@ -1457,8 +1412,12 @@ class _StreamingHandler(BaseCallbackHandler):
     def on_llm_end(self, response: Any, run_id: str, parent_run_id: Optional[str] = None, **kwargs):
         usage = self._usage_from_response(response)
         if usage:
-            for key in self._token_usage:
+            for key in ("prompt", "completion", "total"):
                 self._token_usage[key] += int(usage.get(key) or 0)
+            self._token_usage["reasoning"] = max(
+                self._token_usage.get("reasoning", 0),
+                int(self._stream_reasoning_chars / 4),
+            )
             self._put({"type": "token_usage", **self._token_usage})
         expose_summary = bool(
             getattr(getattr(self, "_agent_ref", None), "_turn_thinking_enabled", True)
@@ -1491,6 +1450,32 @@ class _StreamingHandler(BaseCallbackHandler):
                 reasoning = token
                 visible_token = ""
 
+        # Count generation progress without exposing raw private reasoning.
+        # Providers may report exact usage at completion; while streaming we
+        # expose only bounded approximate counters so the Chat UI can show
+        # liveness and keep reasoning visually separate from the answer.
+        self._stream_reasoning_chars += len(str(reasoning or ""))
+        self._stream_visible_chars += len(str(visible_token or ""))
+        progress_chars = self._stream_reasoning_chars + self._stream_visible_chars
+        if progress_chars and (
+            progress_chars - self._last_token_progress_chars >= 48
+            or self._last_token_progress_chars == 0
+        ):
+            self._last_token_progress_chars = progress_chars
+            reasoning_tokens = int((self._stream_reasoning_chars + 3) / 4)
+            completion_tokens = int((self._stream_visible_chars + 3) / 4)
+            self._put({
+                "type": "token_usage",
+                "prompt": self._token_usage.get("prompt", 0),
+                "completion": completion_tokens,
+                "reasoning": reasoning_tokens,
+                "total": max(
+                    int(self._token_usage.get("total", 0)),
+                    int(self._token_usage.get("prompt", 0)) + completion_tokens + reasoning_tokens,
+                ),
+                "approximate": True,
+            })
+
         # 2. Push accumulated loops + current reasoning to UI
         if reasoning and self._expose_model_reasoning:
             self._current_reasoning += reasoning
@@ -1511,7 +1496,12 @@ class _StreamingHandler(BaseCallbackHandler):
 
         # 3. Stream non-reasoning answer tokens so the chat can show live text.
         # Buffer per generation so we can seal a partial spoken beat before tools.
-        if visible_token and not self._in_think_block and not reasoning:
+        # A provider chunk may carry a reasoning delta and visible answer text
+        # together.  The previous `and not reasoning` guard discarded the
+        # visible portion of those chunks, leaving Chat with a token counter but
+        # no live answer text.  Reasoning remains private; only the visible
+        # answer stream crosses this boundary.
+        if visible_token and not self._in_think_block:
             self._visible_gen += visible_token
             self._put({
                 "type": "agent_token",
@@ -1733,6 +1723,84 @@ class _StreamingHandler(BaseCallbackHandler):
         })
 
 
+def _run_lean_stream(
+    *,
+    agent,
+    message: str,
+    thread_id: Optional[str],
+    request_id: str,
+    q: queue.Queue,
+    cancel_event: threading.Event,
+    source: str,
+    voice_turn_id: str = "",
+    agent_id: str = "",
+    thinking_enabled: bool = True,
+    reasoning_effort: str = "medium",
+) -> None:
+    """Stream one lean-runtime turn as NDJSON events (see agent/lean/loop.py)."""
+    from agent.lean.runtime import run_lean_query
+
+    session_id = _normalize_thread_id(thread_id) or "default"
+    try:
+        result = run_lean_query(
+            agent,
+            message=message,
+            session_id=session_id,
+            request_id=request_id,
+            emit=q.put,
+            cancel=cancel_event,
+            source=source,
+            persona_id=agent_id,
+            thinking_enabled=thinking_enabled,
+            reasoning_effort=reasoning_effort,
+        )
+        state_store = get_state_store()
+        if voice_turn_id and result.get("execution_id"):
+            try:
+                from agent.voice_transport import bind_voice_turn_submission
+
+                bind_voice_turn_submission(
+                    voice_turn_id,
+                    session_id=session_id,
+                    request_id=request_id,
+                    execution_id=str(result["execution_id"]),
+                    task_run_id="",
+                    query_completed=True,
+                )
+            except Exception:
+                logger.warning("Voice turn binding failed for lean turn request_id={}", request_id)
+        memory_count = 0
+        try:
+            memory_count = int(agent.memory.count_items(thread_id=session_id) or 0)
+        except Exception:
+            pass
+        q.put({
+            "type": "final",
+            "runtime": "lean",
+            "response": str(result.get("response") or ""),
+            "messages": list(result.get("messages") or []),
+            "success": bool(result.get("success")),
+            "memory_count": memory_count,
+            "execution_id": result.get("execution_id"),
+            "thread_state": state_store.get_thread_state(session_id).model_dump(),
+            "voice_turn_id": voice_turn_id or None,
+            "request_id": request_id,
+            "at": time.time(),
+        })
+    except Exception as exc:
+        _metric_inc("errors", 1)
+        logger.exception("Lean stream worker failed request_id={}", request_id)
+        q.put({
+            "type": "error",
+            "message": _safe_stream_failure(exc),
+            "request_id": request_id,
+            "at": time.time(),
+        })
+    finally:
+        q.put({"type": "status", "agent_mode": "idle", "at": time.time(), "request_id": request_id})
+        q.put(None)
+
+
 def _start_agent_thread(
     *,
     agent,
@@ -1747,167 +1815,19 @@ def _start_agent_thread(
     reasoning_effort: str = "medium",
     source: str = "web",
     voice_turn_id: str = "",
+    agent_id: str = "",
 ) -> None:
-    def run_agent():
-        handler: Optional[_StreamingHandler] = None
-        try:
-            handler = _StreamingHandler(q, request_id)
-            handler._agent_ref = agent  # social-aware last-resort preambles
-            # Decision = code (on tool_start). Wording = free model generation when needed.
-            try:
-                # Fresh multi-beat state for this turn
-                agent._turn_partial_beats = []
-                agent._active_user_query = message
-                handler.set_on_partial(lambda text: agent.record_turn_partial_beat(text))
-            except Exception:
-                pass
-            # Scope was persisted before this worker started; process_query restores
-            # it once under the agent request lock.
-            thread_state = get_state_store().get_thread_state(thread_id).model_dump()
-            memory_before = int(agent.memory.count_items(thread_id=thread_id) or 0)
-            response, success = agent.process_query(
-                message,
-                include_memory=include_memory,
-                callbacks=[handler],
-                thread_id=thread_id,
-                source=source,
-                cancel_event=cancel_event,
-                request_id=request_id,
-                thinking_enabled=thinking_enabled,
-                reasoning_effort=reasoning_effort,
-            )
-            doc_sources = agent.get_last_doc_sources() if include_memory else []
-            state_store = get_state_store()
-            latest_state = state_store.get_thread_state(thread_id).model_dump()
-            worker_execution_id = str(
-                getattr(agent, "completed_execution_id_for_current_worker", lambda: "")() or ""
-            )
-            if not worker_execution_id and not voice_turn_id:
-                worker_execution_id = str(latest_state.get("last_execution_id") or "")
-            if voice_turn_id and not worker_execution_id:
-                raise RuntimeError("Voice query completed without an exact worker Execution identity")
-            execution = state_store.get_execution(worker_execution_id) if worker_execution_id else None
-            if voice_turn_id and execution is None:
-                raise RuntimeError("Voice query completed without its durable Execution")
-            if voice_turn_id and execution is not None:
-                from agent.voice_transport import bind_voice_turn_submission
-
-                bind_voice_turn_submission(
-                    voice_turn_id,
-                    session_id=str(thread_id or ""),
-                    request_id=request_id,
-                    execution_id=execution.id,
-                    task_run_id=str(execution.task_run_id or ""),
-                    query_completed=True,
-                )
-            turn_projection = state_store.turn_projection(execution.id) if execution is not None else None
-            execution_projection = dict((turn_projection or {}).get("execution_projection") or {})
-            response_render = None
-            try:
-                exec_meta = execution.metadata if execution is not None else {}
-                if isinstance(exec_meta, dict):
-                    response_render = exec_meta.get("response_render")
-            except Exception:
-                response_render = None
-            spoken_text = ""
-            try:
-                spoken_text = str(agent.get_last_tts_text() or "")
-            except Exception:
-                spoken_text = ""
-            # Prefer the last generation's visible text when partials already covered the preamble.
-            final_response = str(response or "")
-            if handler.partial_replies:
-                # Strip already-spoken beats from final so we don't re-say "I'm great" after weather.
-                trimmed = final_response
-                for part in handler.partial_replies:
-                    p = (part or "").strip()
-                    if not p:
-                        continue
-                    if trimmed.startswith(p):
-                        trimmed = trimmed[len(p):].lstrip(" \n\t-–—")
-                    elif p in trimmed:
-                        # Soft fallback: drop first occurrence only
-                        trimmed = trimmed.replace(p, "", 1).strip()
-                # If stripping wiped everything, keep last non-empty partial out and use leftover live gen
-                leftover_gen = (handler._visible_gen or "").strip()
-                if trimmed.strip():
-                    final_response = trimmed.strip()
-                elif leftover_gen:
-                    final_response = leftover_gen
-                # else keep original response (better than empty)
-            memory_after = int(agent.memory.count_items(thread_id=thread_id) or 0)
-            if memory_after > memory_before or bool(execution_projection.get("memory_records")):
-                handler._put({"type": "memory_saved", "memory_count": memory_after, "at": time.time()})
-            handler._put(
-                {
-                    "type": "final",
-                    "response": final_response,
-                    "success": success,
-                    "memory_count": memory_after,
-                    "doc_sources": doc_sources,
-                    "research": handler.research_runs,
-                    "response_render": response_render,
-                    "spoken_text": spoken_text if not handler.partial_replies else (final_response or spoken_text),
-                    "partial_replies": list(handler.partial_replies),
-                    "execution_id": execution.id if execution else None,
-                    "trace_id": execution.trace_id if execution else None,
-                    # A newer Turn may already own Session state. In that case,
-                    # this older stream receives its own Turn projection but no
-                    # stale Session projection capable of overwriting the UI.
-                    "thread_state": (
-                        latest_state
-                        if execution is not None
-                        and str(latest_state.get("last_execution_id") or latest_state.get("current_execution_id") or "") == execution.id
-                        else {}
-                    ),
-                    "execution_projection": execution_projection,
-                    "voice_turn_id": voice_turn_id or None,
-                    "at": time.time(),
-                }
-            )
-        except Exception as e:
-            if voice_turn_id:
-                try:
-                    from agent.voice_transport import fail_voice_turn
-
-                    fail_voice_turn(
-                        voice_turn_id,
-                        session_id=str(thread_id or ""),
-                        error_code="voice_query_failed",
-                    )
-                except Exception:
-                    pass
-            _metric_inc("errors", 1)
-            diagnostic_id = hashlib.sha256(
-                f"{request_id}:{type(e).__name__}:{e}".encode("utf-8", errors="ignore")
-            ).hexdigest()[:12]
-            logger.exception(
-                "Query stream worker failed request_id={} diagnostic_id={}",
-                request_id,
-                diagnostic_id,
-            )
-            event = {
-                "type": "error",
-                "message": _safe_stream_failure(e),
-                "diagnostic_id": diagnostic_id,
-                "at": time.time(),
-                "request_id": request_id,
-            }
-            if handler is not None:
-                handler._put(event)
-            else:
-                q.put(event)
-        finally:
-            # Provider, parser, and lifecycle failures must close the same UI
-            # activity state as successful turns.
-            idle_event = {"type": "status", "agent_mode": "idle", "at": time.time(), "request_id": request_id}
-            if handler is not None:
-                handler._put(idle_event)
-            else:
-                q.put(idle_event)
-            q.put(None)
-
-    threading.Thread(target=run_agent, daemon=True).start()
+    threading.Thread(
+        target=_run_lean_stream,
+        kwargs=dict(
+            agent=agent, message=message, thread_id=thread_id, request_id=request_id,
+            q=q, cancel_event=cancel_event, source=source,
+            voice_turn_id=voice_turn_id, agent_id=agent_id,
+            thinking_enabled=thinking_enabled, reasoning_effort=reasoning_effort,
+        ),
+        name="lean-turn",
+        daemon=True,
+    ).start()
 
 
 def _extract_text_from_upload(filename: str, content_type: Optional[str], data: bytes) -> str:
@@ -1935,12 +1855,48 @@ def _extract_text_from_upload(filename: str, content_type: Optional[str], data: 
         raise HTTPException(status_code=400, detail=f"Unsupported text encoding: {exc}") from exc
 
 
+_WARMUP_GATE = threading.Event()
+
+
+def _start_background_warmup() -> None:
+    """Load the heavy chat stack after the server is up, off the startup path.
+
+    The first agent needs langchain/torch/transformers (~15-20s to import) and
+    the memory store. Doing it here, a moment after readiness, means the UI is
+    interactive immediately and the first message rarely waits on imports.
+    """
+    if os.getenv("ECHOSPEAK_TESTING", "").strip().lower() in {"1", "true", "yes"}:
+        return
+    if os.getenv("ECHOSPEAK_DISABLE_WARMUP", "").strip().lower() in {"1", "true", "yes"}:
+        return
+
+    def warm() -> None:
+        # Wait until readiness has been reported once (or 20s), so the heavy
+        # imports never hold the import lock while readiness is being checked.
+        _WARMUP_GATE.wait(timeout=20)
+        time.sleep(1.0)  # let the UI hydrate first
+        started = time.perf_counter()
+        try:
+            get_agent("default")
+            logger.info("Background warmup finished in {:.1f}s", time.perf_counter() - started)
+        except Exception as exc:
+            logger.warning("Background warmup skipped: {}", exc)
+
+    threading.Thread(target=warm, name="echospeak-warmup", daemon=True).start()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
     # The API lifespan is the sole scheduler/coordinator owner in server and
     # desktop processes. Agent instances must not start competing daemons.
     os.environ["ECHOSPEAK_API_RUNTIME"] = "1"
+    try:
+        from agent.lean.soul_defaults import refresh_default_soul
+
+        refresh_default_soul()
+    except Exception:
+        logger.warning("SOUL.md default refresh failed", exc_info=True)
     build_id = (
         os.environ.get("ECHOSPEAK_BUILD_ID")
         or os.environ.get("ECHOSPEAK_DESKTOP_INSTANCE_ID")
@@ -1963,11 +1919,7 @@ async def lifespan(app: FastAPI):
         try:
             prewarmed_agent = await asyncio.to_thread(get_agent, "default")
             if prewarmed_agent.llm_provider == ModelProvider.LM_STUDIO:
-                from agent.model_runtime import (
-                    ensure_selected_model_ready,
-                    resolve_model_profile,
-                    resolve_structured_output_capability,
-                )
+                from agent.model_runtime import ensure_selected_model_ready, resolve_model_profile
                 model_id = str(prewarmed_agent._selected_model_id() or "default")
                 profile = resolve_model_profile(
                     ModelProvider.LM_STUDIO.value,
@@ -1985,18 +1937,6 @@ async def lifespan(app: FastAPI):
                         or 120.0
                     ),
                 )
-                capability = await asyncio.to_thread(
-                    resolve_structured_output_capability,
-                    ModelProvider.LM_STUDIO.value,
-                    model_id,
-                    llm=prewarmed_agent.model_runtime.llm,
-                    profile=profile,
-                    probe_timeout=float(getattr(config, "turn_understanding_probe_timeout_seconds", 8.0) or 8.0),
-                )
-                if capability.probed and capability.mode == "native_json_schema":
-                    prewarmed_agent._turn_understanding_warmed_models = {
-                        f"{ModelProvider.LM_STUDIO.value}:{model_id}"
-                    }
             logger.info("Default Session runtime and embeddings prewarmed")
         except Exception as exc:
             logger.warning("Runtime prewarm degraded; startup continues honestly: {}", exc)
@@ -2004,6 +1944,7 @@ async def lifespan(app: FastAPI):
         logger.info("Model prewarming disabled on startup; model loads on demand.")
     await _reconcile_discord_bot_runtime()
     await _reconcile_heartbeat_runtime()
+    _start_background_warmup()
     
     # --- Telegram Bot startup (v5.4.0) ---
     if bool(getattr(config, "allow_telegram_bot", False)):
@@ -2043,269 +1984,12 @@ async def lifespan(app: FastAPI):
     try:
         from agent.routines import get_routine_manager
 
-        def _routine_callback(routine):
-            """Claim one durable Run, then execute one governed Turn."""
-            from agent.automation_runtime import (
-                AutomationModelBinding,
-                AutomationRunStatus,
-                ModelBindingPolicy,
-                get_automation_run_store,
-            )
-            from agent.projects import get_project_manager
-            from agent.task_store import get_task_store
+        from agent.lean.automations import routine_runner
 
-            scheduled_for = str(getattr(routine, "next_run", "") or f"run:{int(getattr(routine, 'run_count', 0)) + 1}")
-            session_id = str(getattr(routine, "session_id", "") or "").strip()
-            project_id = str(getattr(routine, "project_id", "") or "").strip()
-            query = str(routine.action_config.get("query") or routine.action_config.get("message") or routine.name).strip()
-            if not project_id or not session_id:
-                return {
-                    "success": False,
-                    "error": "Routine requires an explicit Project and Session",
-                }
-            project = get_project_manager().get_project(project_id)
-            session = get_state_store().get_thread_state(session_id)
-            if project is None or str(session.active_project_id or "") != project_id:
-                return {
-                    "success": False,
-                    "error": "Routine Project/Session binding is missing or stale",
-                }
-            task = get_task_store().create(
-                title=f"Routine: {routine.name}",
-                description=query,
-                objective=query,
-                project_id=project_id,
-                session_id=session_id,
-                source="routine",
-                source_id=routine.id,
-                scheduled_for=scheduled_for,
-                idempotency_key=f"routine:{routine.id}:{scheduled_for}",
-            )
-            if task.status in {"complete", "done"}:
-                return {"success": True, "task_id": task.id}
-            run_store = get_automation_run_store()
-            run = run_store.create_run(
-                idempotency_key=f"routine:{routine.id}:{scheduled_for}",
-                project_id=project_id,
-                session_id=session_id,
-                task_id=task.id,
-                routine_id=str(routine.id),
-                trigger_id=scheduled_for,
-                source="routine",
-                source_id=str(routine.id),
-                objective=query,
-                model_binding=AutomationModelBinding(
-                    policy=ModelBindingPolicy.SESSION_DEFAULT,
-                    source_session_id=session_id,
-                ),
-            )
-            from agent.automation_runtime import (
-                AutomationModelBinding,
-                AutomationRunStatus,
-                ModelBindingPolicy,
-                get_automation_run_store,
-            )
-            from agent.projects import get_project_manager
-            from agent.task_store import get_task_store
-
-            scheduled_for = str(getattr(routine, "next_run", "") or f"run:{int(getattr(routine, 'run_count', 0)) + 1}")
-            session_id = str(getattr(routine, "session_id", "") or "").strip()
-            project_id = str(getattr(routine, "project_id", "") or "").strip()
-            query = str(routine.action_config.get("query") or routine.action_config.get("message") or routine.name).strip()
-            if not project_id or not session_id:
-                return {
-                    "success": False,
-                    "error": "Routine requires an explicit Project and Session",
-                }
-            project = get_project_manager().get_project(project_id)
-            session = get_state_store().get_thread_state(session_id)
-            if project is None or str(session.active_project_id or "") != project_id:
-                return {
-                    "success": False,
-                    "error": "Routine Project/Session binding is missing or stale",
-                }
-            task = get_task_store().create(
-                title=f"Routine: {routine.name}",
-                description=query,
-                objective=query,
-                project_id=project_id,
-                session_id=session_id,
-                source="routine",
-                source_id=routine.id,
-                scheduled_for=scheduled_for,
-                idempotency_key=f"routine:{routine.id}:{scheduled_for}",
-            )
-            if task.status in {"complete", "done"}:
-                return {"success": True, "task_id": task.id}
-            run_store = get_automation_run_store()
-            run = run_store.create_run(
-                idempotency_key=f"routine:{routine.id}:{scheduled_for}",
-                project_id=project_id,
-                session_id=session_id,
-                task_id=task.id,
-                routine_id=str(routine.id),
-                trigger_id=scheduled_for,
-                source="routine",
-                source_id=str(routine.id),
-                objective=query,
-                model_binding=AutomationModelBinding(
-                    policy=ModelBindingPolicy.SESSION_DEFAULT,
-                    source_session_id=session_id,
-                ),
-            )
-            if run.status == AutomationRunStatus.COMPLETED:
-                return {"success": True, "task_id": task.id, "run_id": run.id}
-            claimed = run_store.claim(
-                run.id,
-                project_id=project_id,
-                session_id=session_id,
-                claimant_id="api-routine-coordinator",
-                expected_revision=run.revision,
-                lease_seconds=300,
-            )
-            if claimed is None or claimed.lease is None:
-                return {
-                    "success": False,
-                    "task_id": task.id,
-                    "run_id": run.id,
-                    "error": "Routine occurrence is already claimed or no longer queued",
-                }
-            lease_token = claimed.lease.token
-            get_task_store().update(
-                task.id,
-                status="in_progress",
-                automation_run_ids=list(dict.fromkeys([*task.automation_run_ids, run.id])),
-            )
-            try:
-                r_agent = get_agent(session_id)
-                provider = str(r_agent.llm_provider.value)
-                model_id = str(r_agent.provider_info.get("model") or "default")
-                claimed = run_store.bind_model(
-                    run.id,
-                    AutomationModelBinding(
-                        policy=ModelBindingPolicy.SESSION_DEFAULT,
-                        source_session_id=session_id,
-                        resolved_provider=provider,
-                        resolved_model_id=model_id,
-                    ),
-                    project_id=project_id,
-                    session_id=session_id,
-                    claimant_id="api-routine-coordinator",
-                    lease_token=lease_token,
-                )
-                claimed = run_store.transition(
-                    run.id,
-                    AutomationRunStatus.RUNNING,
-                    project_id=project_id,
-                    session_id=session_id,
-                    claimant_id="api-routine-coordinator",
-                    lease_token=lease_token,
-                )
-                response, success = r_agent.process_query(
-                    query, source="routine", thread_id=session_id, callbacks=[],
-                )
-                state = get_state_store().get_thread_state(session_id)
-                from agent.automation_projection import project_execution
-                channels = list(getattr(routine, "delivery_channels", None) or ["web"])
-                blocked_channels = [channel for channel in channels if str(channel).lower() != "web"]
-                execution_id = str(state.last_execution_id or state.current_execution_id or "")
-                canonical = project_execution(
-                    project_id=project_id,
-                    session_id=session_id,
-                    execution_id=execution_id,
-                    occurrence_id=run.id,
-                )
-                tool_run_ids = list(canonical.tool_run_ids) if canonical else []
-                approval_ids = [str(state.pending_approval_id)] if state.pending_approval_id else []
-                verified = bool(canonical and canonical.verified and response and not blocked_channels)
-                status = (
-                    "complete" if verified
-                    else "needs_permission" if canonical and canonical.automation_status == "waiting_for_approval"
-                    else "blocked" if blocked_channels or (canonical and canonical.product_task_status == "blocked")
-                    else "cancelled" if canonical and canonical.product_task_status == "cancelled"
-                    else "failed"
-                )
-                run_status = AutomationRunStatus(
-                    "completed" if verified
-                    else "blocked" if blocked_channels
-                    else canonical.automation_status if canonical
-                    else "failed"
-                )
-                run_store.transition(
-                    run.id,
-                    run_status,
-                    project_id=project_id,
-                    session_id=session_id,
-                    claimant_id="api-routine-coordinator",
-                    lease_token=lease_token,
-                    execution_id=execution_id,
-                    tool_run_ids=tool_run_ids,
-                    approval_ids=approval_ids,
-                    artifact_ids=list(canonical.artifact_ids) if canonical else [],
-                    task_run_id=str(canonical.task_run_id) if canonical else "",
-                    outcome={
-                        "verified": verified,
-                        "completion_authority": "task_run",
-                        "canonical_task_status": canonical.canonical_status.value if canonical else "missing",
-                        "canonical_completion_disposition": canonical.completion_disposition if canonical else "pending",
-                        "response_present": bool(response),
-                        "blocked_delivery_channels": blocked_channels,
-                    },
-                    error="" if verified else "Governed Turn did not reach a verified terminal outcome",
-                )
-                get_task_store().update(
-                    task.id,
-                    status=status,
-                    execution_ids=[execution_id] if execution_id else [],
-                    task_run_ids=[canonical.task_run_id] if canonical else [],
-                    tool_run_ids=tool_run_ids,
-                    approval_ids=approval_ids,
-                    verification={
-                        "verified": verified,
-                        "completion_authority": "task_run",
-                        "canonical_task_status": canonical.canonical_status.value if canonical else "missing",
-                        "response_present": bool(response),
-                        "blocked_delivery_channels": blocked_channels,
-                        "reason": (
-                            "External routine delivery requires a governed communication ToolRun"
-                            if blocked_channels else "Turn completed" if verified else "Turn failed"
-                        ),
-                    },
-                )
-                return {
-                    "success": verified,
-                    "task_id": task.id,
-                    "run_id": run.id,
-                    "error": "External delivery awaits governed approval" if blocked_channels else "" if verified else str(response or "Routine failed"),
-                }
-            except Exception as exc:
-                try:
-                    current_run = run_store.get_run(run.id, project_id=project_id, session_id=session_id)
-                    if current_run and current_run.status in {
-                        AutomationRunStatus.PREPARING,
-                        AutomationRunStatus.RUNNING,
-                    }:
-                        run_store.transition(
-                            run.id,
-                            AutomationRunStatus.FAILED,
-                            project_id=project_id,
-                            session_id=session_id,
-                            claimant_id="api-routine-coordinator",
-                            lease_token=lease_token,
-                            error=str(exc),
-                        )
-                except Exception as transition_exc:
-                    logger.error(f"Routine Run failure transition failed: {transition_exc}")
-                get_task_store().update(task.id, status="failed", verification={"verified": False, "error": str(exc)})
-                logger.warning(f"Routine callback error ({routine.name}): {exc}")
-                return {"success": False, "task_id": task.id, "run_id": run.id, "error": str(exc)}
+        # Routines run on the lean loop and post into their own chat.
+        _routine_callback = routine_runner(get_agent)
 
         rm = get_routine_manager()
-        from agent.automation_runtime import get_automation_run_store
-
-        recovered_runs = get_automation_run_store().recover_expired()
-        if recovered_runs:
-            logger.info("Recovered {} expired Automation Runs", len(recovered_runs))
         rm.set_run_callback(_routine_callback)
         rm.start_scheduler()
         logger.info("Routine scheduler started")
@@ -2323,6 +2007,12 @@ async def lifespan(app: FastAPI):
         logger.info("Spotify playback monitor started")
 
     yield
+    try:
+        from agent.lean.terminal import stop_all_processes
+
+        stop_all_processes()
+    except Exception:
+        pass
     
     # Shutdown heartbeat scheduler
     try:
@@ -2403,6 +2093,10 @@ from api.media_runtime import router as media_runtime_router
 
 app.include_router(media_router)
 app.include_router(media_runtime_router)
+
+from api.lean_routes import router as lean_router
+
+app.include_router(lean_router)
 # Ensure domain ToolRegistry entries load independently of agent import order.
 for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):
     try:
@@ -2410,21 +2104,23 @@ for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):
     except Exception:
         pass
 
+_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://localhost:5175",
+    "http://localhost:5176",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "http://127.0.0.1:5175",
+    "http://127.0.0.1:5176",
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+] + [o.strip() for o in os.getenv("ECHOSPEAK_ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:5175",
-        "http://localhost:5176",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:5174",
-        "http://127.0.0.1:5175",
-        "http://127.0.0.1:5176",
-        "tauri://localhost",
-        "http://tauri.localhost",
-        "https://tauri.localhost",
-    ],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -2570,11 +2266,70 @@ def _mcp_trust_summary(
     return out
 
 
+_LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1", "tauri.localhost"}
+
+
+def _request_hostname(host_header: str) -> str:
+    host = str(host_header or "").strip().lower()
+    if host.startswith("["):  # [::1]:8000
+        return host[1:host.find("]")] if "]" in host else host
+    return host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+
+
+def _origin_allowed(origin: str, host_header: str) -> bool:
+    origin = str(origin or "").strip().rstrip("/")
+    if origin in _ALLOWED_ORIGINS:
+        return True
+    # The page the backend serves itself (same origin).
+    netloc = origin.split("://", 1)[-1]
+    return bool(netloc) and netloc.lower() == str(host_header or "").strip().lower()
+
+
+def _local_request_guard(method: str, host_header: str, origin: str, client_ip: str) -> str:
+    """Reason to refuse a request to the local API, or ''.
+
+    - DNS rebinding: a web page whose domain is re-pointed at 127.0.0.1 sends
+      its own name in the Host header. Local requests must name this machine.
+    - Cross-site requests: browsers always send Origin on cross-origin writes;
+      only the app's own origins may change anything. Clients without an
+      Origin header (curl, bots, scripts) are unaffected.
+    """
+    if _is_local_client(client_ip) and not _api_auth_required_for_host(client_ip):
+        extra = {h.strip().lower() for h in os.getenv("ECHOSPEAK_ALLOWED_HOSTS", "").split(",") if h.strip()}
+        hostname = _request_hostname(host_header)
+        if hostname and hostname not in _LOCAL_HOSTNAMES | extra:
+            return f"Host '{hostname}' is not allowed"
+    if origin and method.upper() not in {"GET", "HEAD", "OPTIONS"} and not _origin_allowed(origin, host_header):
+        return f"Origin '{origin}' is not allowed"
+    return ""
+
+
+@app.middleware("http")
+async def local_request_guard_middleware(request: Request, call_next):
+    client_ip = request.client.host if request.client else ""
+    problem = _local_request_guard(
+        request.method, request.headers.get("host", ""), request.headers.get("origin", ""), client_ip
+    )
+    if problem:
+        logger.warning("Refused request to {}: {} (client {})", request.url.path, problem, client_ip)
+        return JSONResponse({"detail": f"Request refused: {problem}."}, status_code=403)
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def api_auth_middleware(request: Request, call_next):
     """Optional shared-key auth for network/remote EchoSpeak access."""
     if request.method.upper() == "OPTIONS" or request.url.path in _PUBLIC_AUTH_PATHS:
         return await call_next(request)
+    if request.method.upper() == "GET":
+        # Artifact frames load in an <iframe>, which can't send the auth header;
+        # a short-lived token from an authenticated call opens that one frame.
+        frame = re.fullmatch(r"/lean/artifacts/([a-f0-9]{12})/frame", request.url.path)
+        if frame:
+            from agent.lean.artifacts import frame_token_ok
+
+            if frame_token_ok(frame.group(1), request.query_params.get("t", "")):
+                return await call_next(request)
     client_ip = _get_client_ip(request)
     if not _api_auth_ok(request.headers, client_ip):
         return Response(
@@ -2872,6 +2627,11 @@ class QueryRequest(BaseModel):
         max_length=200,
         pattern=r"^[A-Za-z0-9._:-]+$",
         description="Durable local Voice transport turn whose final transcript equals message",
+    )
+    agent_id: Optional[str] = Field(
+        default=None,
+        max_length=80,
+        description="Lean runtime: which agent persona answers in a direct chat (default Echo)",
     )
 
 
@@ -3642,12 +3402,19 @@ class SettingsTestResponse(BaseModel):
     latency_ms: Optional[float] = None
 
 
+def _settings_response() -> "SettingsResponse":
+    """Effective settings (redacted), the current override patch and any issues."""
+    s = config.to_public_dict()
+    # Not a config field: lives only in the override file (or LM_STUDIO_ONLY), so add it here.
+    s["lm_studio_only"] = _is_lmstudio_only_enabled()
+    overrides = _redact_settings_payload(_sanitize_incoming_settings(_read_runtime_settings()))
+    return SettingsResponse(settings=s, overrides=overrides, issues=_validate_settings_effective(s))
+
+
 @app.get("/settings", response_model=SettingsResponse)
 async def get_settings():
     """Return the effective settings (redacted) and the current override patch."""
-    s = config.to_public_dict()
-    overrides = _redact_settings_payload(_sanitize_incoming_settings(_read_runtime_settings()))
-    return SettingsResponse(settings=s, overrides=overrides, issues=_validate_settings_effective(s))
+    return _settings_response()
 
 
 def _http_get_json(url: str, headers: Optional[dict] = None, timeout_s: float = 6.0) -> tuple[int, Any]:
@@ -3806,9 +3573,7 @@ async def put_settings(req: Request):
     except Exception as exc:
         logger.warning(f"Heartbeat reconcile after settings save failed: {exc}")
 
-    s = config.to_public_dict()
-    overrides = _redact_settings_payload(_sanitize_incoming_settings(_read_runtime_settings()))
-    return SettingsResponse(settings=s, overrides=overrides, issues=_validate_settings_effective(s))
+    return _settings_response()
 
 
 class SoulResponse(BaseModel):
@@ -3926,14 +3691,6 @@ class SessionsResponse(BaseModel):
     thread_ids: List[str]
     lm_studio_only: bool
     runtime_provider: Optional[str] = None
-
-
-class CronTickRequest(BaseModel):
-    job_id: str = Field(..., description="Job identifier")
-    cron: str = Field(..., description="Cron schedule (5-field)")
-    message: str = Field(..., description="Message to run when due")
-    thread_id: Optional[str] = Field(default=None, description="Session/thread id")
-    include_memory: bool = Field(default=True, description="Include memory")
 
 
 class ScreenAnalysisResponse(BaseModel):
@@ -4917,7 +4674,6 @@ async def create_specialist_run_api(request: SpecialistRunCreateRequest):
 
     from agent.execution_graph import ExecutionProfile
     from agent.research_runtime import RequirementKind, TurnRequirement
-    from agent.semantic_runtime import get_canonical_semantic_runtime
     from agent.specialist_authority import (
         SpecialistAuthorityError,
         validate_specialist_delegation_policy,
@@ -5037,11 +4793,6 @@ async def create_specialist_run_api(request: SpecialistRunCreateRequest):
             model_id=request.model_id,
             local_base_url=local_base_url,
             authority_validator=_validate_specialist_run_authority,
-            continuation_scheduler=lambda finished: (
-                get_canonical_semantic_runtime().schedule_specialist_continuation(
-                    get_agent(request.session_id), finished
-                )
-            ),
         )
     except HTTPException:
         raise
@@ -5061,7 +4812,6 @@ async def continue_specialist_run_api(
     run_id: str, request: SpecialistTurnRequest
 ):
     _specialist_project_scope(request.session_id, request.project_id)
-    from agent.semantic_runtime import get_canonical_semantic_runtime
     from agent.specialist_runtime import get_specialist_runtime_manager
     from agent.specialist_store import get_specialist_run_store
 
@@ -5077,11 +4827,6 @@ async def continue_specialist_run_api(
             run.id,
             prompt=request.prompt,
             authority_validator=_validate_specialist_run_authority,
-            continuation_scheduler=lambda finished: (
-                get_canonical_semantic_runtime().schedule_specialist_continuation(
-                    get_agent(request.session_id), finished
-                )
-            ),
         )
     except HTTPException:
         raise
@@ -5447,15 +5192,6 @@ async def list_execution_tool_runs(
     )
 
 
-@app.get("/traces/{trace_id}")
-async def get_trace(trace_id: str):
-    store = get_state_store()
-    trace = store.read_trace(trace_id)
-    if trace is None:
-        raise HTTPException(status_code=404, detail="Trace not found")
-    return trace
-
-
 # === Project Management Endpoints ===
 
 class ProjectResponse(BaseModel):
@@ -5659,69 +5395,7 @@ async def deactivate_project(thread_id: Optional[str] = Query(default=None)):
     return {"ok": True, "deactivated": True, "thread_state": get_state_store().get_thread_state(thread_id).model_dump()}
 
 
-# === Routine Management Endpoints ===
-
-class RoutineResponse(BaseModel):
-    id: str
-    name: str
-    description: Optional[str] = ""
-    enabled: bool = True
-    trigger_type: str = "schedule"
-    schedule: Optional[str] = None
-    webhook_path: Optional[str] = None
-    action_type: str = "query"
-    action_config: Dict[str, Any] = Field(default_factory=dict)
-    last_run: Optional[str] = None
-    next_run: Optional[str] = None
-    run_count: int = 0
-    created_at: str
-    updated_at: str
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    delivery_channels: List[str] = Field(default_factory=lambda: ["web"])
-    project_id: str = ""
-    session_id: str = ""
-    missed_run_policy: str = "run_next"
-    last_task_id: str = ""
-    last_result_status: str = ""
-    last_error: str = ""
-
-
-class RoutineListResponse(BaseModel):
-    items: List[RoutineResponse]
-    count: int
-
-
-class RoutineCreateRequest(BaseModel):
-    name: str
-    description: Optional[str] = ""
-    enabled: Optional[bool] = True
-    trigger_type: Optional[str] = "schedule"
-    schedule: Optional[str] = None
-    webhook_path: Optional[str] = None
-    action_type: Optional[str] = "query"
-    action_config: Optional[Dict[str, Any]] = None
-    metadata: Optional[Dict[str, Any]] = None
-    delivery_channels: Optional[List[str]] = None
-    project_id: str = ""
-    session_id: str = ""
-    missed_run_policy: str = "run_next"
-
-
-class RoutineUpdateRequest(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    enabled: Optional[bool] = None
-    trigger_type: Optional[str] = None
-    schedule: Optional[str] = None
-    webhook_path: Optional[str] = None
-    action_type: Optional[str] = None
-    action_config: Optional[Dict[str, Any]] = None
-    metadata: Optional[Dict[str, Any]] = None
-    delivery_channels: Optional[List[str]] = None
-    project_id: Optional[str] = None
-    session_id: Optional[str] = None
-    missed_run_policy: Optional[str] = None
-
+# === Automation scope ===
 
 def _require_automation_project_scope(session_id: str, project_id: str = "") -> str:
     key = str(session_id or "").strip()
@@ -5739,158 +5413,25 @@ def _require_automation_project_scope(session_id: str, project_id: str = "") -> 
     return requested_project_id
 
 
-@app.get("/routines", response_model=RoutineListResponse)
-async def list_routines(
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-    enabled_only: bool = False,
-):
-    """List Routines in the exact active Project/Session scope."""
-    from agent.routines import get_routine_manager
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    manager = get_routine_manager()
-    routines = [
-        routine for routine in manager.list_routines(enabled_only=enabled_only)
-        if routine.project_id == scoped_project_id and routine.session_id == session_id
-    ]
-    return RoutineListResponse(
-        items=[RoutineResponse(**r.model_dump()) for r in routines],
-        count=len(routines),
-    )
-
-
-@app.get("/routines/{routine_id}", response_model=RoutineResponse)
-async def get_routine(
-    routine_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Get a routine by ID."""
-    from agent.routines import get_routine_manager
-    manager = get_routine_manager()
-    routine = manager.get_routine(routine_id)
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    if not routine or routine.project_id != scoped_project_id or routine.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    return RoutineResponse(**routine.model_dump())
-
-
-@app.post("/routines", response_model=RoutineResponse)
-async def create_routine(request: RoutineCreateRequest):
-    """Create a new routine."""
-    from agent.routines import get_routine_manager
-    scoped_project_id = _require_automation_project_scope(request.session_id, request.project_id)
-    manager = get_routine_manager()
-    routine = manager.create_routine(
-        name=request.name,
-        description=request.description,
-        enabled=request.enabled,
-        trigger_type=request.trigger_type,
-        schedule=request.schedule,
-        webhook_path=request.webhook_path,
-        action_type=request.action_type,
-        action_config=request.action_config,
-        metadata=request.metadata,
-        delivery_channels=request.delivery_channels,
-        project_id=scoped_project_id,
-        session_id=request.session_id,
-        missed_run_policy=request.missed_run_policy,
-    )
-    return RoutineResponse(**routine.model_dump())
-
-
-@app.put("/routines/{routine_id}", response_model=RoutineResponse)
-async def update_routine(
-    routine_id: str,
-    request: RoutineUpdateRequest,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Update an existing routine."""
-    from agent.routines import get_routine_manager
-    manager = get_routine_manager()
-    existing = manager.get_routine(routine_id)
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    if not existing or existing.project_id != scoped_project_id or existing.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    if request.project_id is not None and str(request.project_id) != scoped_project_id:
-        raise HTTPException(status_code=409, detail="Routine Project cannot change outside its scope")
-    if request.session_id is not None and str(request.session_id) != session_id:
-        raise HTTPException(status_code=409, detail="Routine Session cannot change outside its scope")
-    routine = manager.update_routine(
-        routine_id=routine_id,
-        name=request.name,
-        description=request.description,
-        enabled=request.enabled,
-        trigger_type=request.trigger_type,
-        schedule=request.schedule,
-        webhook_path=request.webhook_path,
-        action_type=request.action_type,
-        action_config=request.action_config,
-        metadata=request.metadata,
-        delivery_channels=request.delivery_channels,
-        project_id=request.project_id,
-        session_id=request.session_id,
-        missed_run_policy=request.missed_run_policy,
-    )
-    if not routine:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    return RoutineResponse(**routine.model_dump())
-
-
-@app.delete("/routines/{routine_id}")
-async def delete_routine(
-    routine_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Delete a routine."""
-    from agent.routines import get_routine_manager
-    manager = get_routine_manager()
-    routine = manager.get_routine(routine_id)
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    if not routine or routine.project_id != scoped_project_id or routine.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    success = manager.delete_routine(routine_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    return {"ok": True, "deleted": routine_id}
-
-
-@app.post("/routines/{routine_id}/run")
-async def run_routine(
-    routine_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Manually run a routine."""
-    from agent.routines import get_routine_manager
-    manager = get_routine_manager()
-    routine = manager.get_routine(routine_id)
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    if not routine or routine.project_id != scoped_project_id or routine.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Routine not found")
-    success = manager.run_routine(routine_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Routine not found or run failed")
-    return {"ok": True, "run": routine_id}
-
-
 @app.post("/webhooks/{path:path}")
 async def webhook_trigger(path: str, request: Request):
     """Trigger a routine via webhook."""
     from agent.routines import get_routine_manager
     manager = get_routine_manager()
     
+    if not bool(getattr(config, "webhook_enabled", False)):
+        raise HTTPException(status_code=403, detail="Webhooks are turned off (Settings > Advanced).")
     routine = manager.get_routine_by_webhook(f"/{path}")
     if not routine:
         raise HTTPException(status_code=404, detail="Webhook not found")
     raw_body = await request.body()
     secret = _load_webhook_secret()
-    if secret:
-        sig = request.headers.get("x-echospeak-signature") or request.headers.get("x-signature") or ""
-        if not _verify_webhook_signature(secret, raw_body, sig):
-            raise HTTPException(status_code=401, detail="Invalid signature")
+    if not secret:
+        # Unsigned webhooks would let any local program or web page run a routine.
+        raise HTTPException(status_code=403, detail="Set a webhook secret in Settings > Advanced before using webhooks.")
+    sig = request.headers.get("x-echospeak-signature") or request.headers.get("x-signature") or ""
+    if not _verify_webhook_signature(secret, raw_body, sig):
+        raise HTTPException(status_code=401, detail="Invalid signature")
     
     # Get request body if any — validate type and size
     try:
@@ -6409,14 +5950,6 @@ async def list_documents(
 
 # ── Observability Dashboard (v6.0.0) ────────────────────────────────
 
-@app.get("/observability")
-async def observability_dashboard():
-    """Get the observability dashboard with system metrics, tool stats, and errors."""
-    from agent.observability import get_observability_collector
-    collector = get_observability_collector()
-    return collector.get_dashboard()
-
-
 # ── NDJSON Streaming (v6.0.0) ────────────────────────────────────────
 
 @app.get("/stream/{request_id}")
@@ -6642,6 +6175,7 @@ async def query_stream(request: QueryRequest):
             reasoning_effort=request.reasoning_effort,
             source=source,
             voice_turn_id=str(request.voice_turn_id or ""),
+            agent_id=str(request.agent_id or ""),
         )
     except Exception as exc:
         cancel_event.set()
@@ -7185,20 +6719,6 @@ async def browse_workspace(path: str = Query(default="", description="Relative p
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/trigger/cron")
-async def trigger_cron(_request: CronTickRequest):
-    raise HTTPException(
-        status_code=410,
-        detail="Legacy cron trigger retired; create a Project/Session-scoped Routine",
-    )
-
-
-@app.post("/trigger/webhook")
-async def trigger_webhook(_request: Request):
-    raise HTTPException(
-        status_code=410,
-        detail="Legacy generic webhook retired; use a signed Project/Session-scoped Routine webhook",
-    )
 @app.get("/history", response_model=HistoryResponse)
 def get_history(thread_id: Optional[str] = Query(default=None)):
     """
@@ -7315,83 +6835,10 @@ def clear_history(thread_id: Optional[str] = Query(default=None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/research/artifacts")
-async def list_research_artifacts_api(
-    project_id: str = Query(default=""),
-    session_id: str = Query(...),
-    limit: int = Query(default=50, ge=1, le=200),
-):
-    from agent.research_artifacts import list_research_artifacts_for_scope
-
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    rows = list_research_artifacts_for_scope(
-        project_id=scoped_project_id,
-        session_id=session_id,
-        limit=limit,
-    )
-    return {"items": [r.model_dump(mode="json") for r in rows], "count": len(rows)}
-
-
-@app.get("/research/artifacts/{artifact_id}")
-async def get_research_artifact_api(
-    artifact_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    from agent.research_artifacts import get_research_artifact_for_scope
-
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    art = get_research_artifact_for_scope(
-        artifact_id,
-        project_id=scoped_project_id,
-        session_id=session_id,
-    )
-    if art is None:
-        raise HTTPException(status_code=404, detail="Research artifact not found")
-    return art.model_dump(mode="json")
-
-
-@app.post("/research/artifacts/lookup")
-async def lookup_research_artifact_api(payload: Dict[str, Any] = Body(default_factory=dict)):
-    from agent.research_artifacts import find_compatible_research_artifact
-
-    session_id = str(payload.get("session_id") or "")
-    project_id = _require_automation_project_scope(session_id, str(payload.get("project_id") or ""))
-    art = find_compatible_research_artifact(
-        project_id=project_id,
-        session_id=session_id,
-        objective=str(payload.get("objective") or ""),
-        require_project=bool(payload.get("require_project", True)),
-    )
-    if art is None:
-        return {"ok": False, "error_code": "not_found", "artifact": None}
-    return {"ok": True, "artifact": art.model_dump(mode="json")}
-
-
-@app.post("/research/artifacts/{artifact_id}/consume")
-async def consume_research_artifact_api(artifact_id: str, payload: Dict[str, Any] = Body(default_factory=dict)):
-    """Skill handoff: structured artifact only (never invent citations from prose)."""
-    from agent.research_artifacts import consume_research_artifact_for_skill
-
-    session_id = str(payload.get("session_id") or "")
-    project_id = _require_automation_project_scope(session_id, str(payload.get("project_id") or ""))
-    result = consume_research_artifact_for_skill(
-        artifact_id,
-        project_id=project_id,
-        session_id=session_id,
-        skill_id=str(payload.get("skill_id") or ""),
-        objective=str(payload.get("objective") or ""),
-    )
-    if not result.get("ok"):
-        raise HTTPException(status_code=409, detail=result)
-    return result
-
-
 @app.get("/skills/status")
 async def skills_status_api():
     """Truthful skill executable classification (prompt-only never marked executable)."""
     from agent.skill_status_audit import audit_all_skills
-    from agent.specialist_runtime import get_specialist_runtime_manager
 
     rows = audit_all_skills(
         available_capabilities={"approvals", "research"},
@@ -7407,125 +6854,6 @@ async def skills_status_api():
             for r in rows
             if str(r.get("status") or "").startswith("blocked") or r.get("status") in {"disabled", "invalid", "deprecated"}
         ],
-    }
-
-
-@app.get("/studio/overview")
-async def studio_overview_api(session_id: Optional[str] = Query(default=None)):
-    """Read-only Studio/Viewer projection over canonical backend owners."""
-    from agent.heartbeat import get_heartbeat_manager
-    from agent.automation_runtime import get_automation_run_store
-    from agent.connections import get_connection_registry
-    from agent.projects import get_project_manager
-    from agent.routines import get_routine_manager
-    from agent.skill_execution import list_skill_executions_for_session, list_skill_proposals
-    from agent.skill_status_audit import audit_all_skills
-    from agent.specialist_runtime import get_specialist_runtime_manager
-    from agent.task_store import get_task_store
-    from agent.tool_registry import ToolRegistry
-
-    key = _normalize_thread_id(session_id)
-    state_store = get_state_store()
-    state = state_store.get_thread_state(key)
-    enabled_funcs = {
-        str(getattr(func, "name", None) or getattr(func, "__name__", ""))
-        for func in ToolRegistry.get_config_filtered_funcs(config)
-    }
-    selected = set(state.allowed_tool_names or [])
-    tools = []
-    for name, entry in sorted(ToolRegistry.get_all().items()):
-        missing_flags = [
-            flag for flag in entry.policy_flags
-            if not bool(getattr(config, str(flag).lower(), False))
-        ]
-        tools.append(
-            {
-                "name": name,
-                "description": entry.description,
-                "owner": entry.owner,
-                "category": entry.category,
-                "registered": True,
-                "available": name in enabled_funcs,
-                "executable": name in enabled_funcs,
-                "selected": name in selected,
-                "running": False,
-                "risk_level": entry.risk_level,
-                "is_action": entry.is_action,
-                "policy_flags": list(entry.policy_flags),
-                "blocked_reason": f"Missing configuration: {', '.join(missing_flags)}" if missing_flags else "",
-            }
-        )
-
-    skills = audit_all_skills(
-        available_capabilities={"approvals", "research"},
-        available_artifacts=set(),
-    )
-    active_project_id = str(state.active_project_id or "")
-    tasks = (
-        get_task_store().list(project_id=active_project_id, session_id=key)
-        if active_project_id else []
-    )
-    routines = [
-        routine for routine in get_routine_manager().list_routines()
-        if routine.project_id == active_project_id and routine.session_id == key
-    ] if active_project_id else []
-    automation_runs = (
-        get_automation_run_store().list_runs(project_id=active_project_id, session_id=key)
-        if active_project_id else []
-    )
-    connections = (
-        get_connection_registry().list(project_id=active_project_id, session_id=key)
-        if active_project_id else []
-    )
-    projects = get_project_manager().list_projects()
-    executions = state_store.list_executions(thread_id=key, limit=30)
-    heartbeat = get_heartbeat_manager()
-    resolution = {}
-    if executions:
-        resolution = dict((executions[0].metadata or {}).get("echo_resolution") or {})
-
-    return {
-        "schema_version": 1,
-        "session": state.model_dump(mode="json"),
-        "active_project_id": active_project_id,
-        "projects": [item.model_dump(mode="json") for item in projects],
-        "tasks": [item.model_dump(mode="json") for item in tasks],
-        "routines": [item.model_dump(mode="json") for item in routines],
-        "automation_runs": [item.model_dump(mode="json") for item in automation_runs],
-        "connections": [item.model_dump(mode="json") for item in connections],
-        "heartbeat": {
-            "enabled": bool(getattr(config, "heartbeat_enabled", False)),
-            "running": bool(heartbeat and heartbeat.is_running),
-            "last_tick": heartbeat.last_tick if heartbeat else None,
-            "next_tick": heartbeat.next_tick if heartbeat else None,
-            "history": heartbeat.get_history(limit=10) if heartbeat else [],
-        },
-        "tools": tools,
-        "skills": skills,
-        "specialist_runtimes": [
-            item.model_dump(mode="json")
-            for item in get_specialist_runtime_manager().catalog()
-        ],
-        "skill_proposals": [item.model_dump(mode="json") for item in list_skill_proposals()],
-        "skill_executions": [
-            item.model_dump(mode="json")
-            for item in list_skill_executions_for_session(key, limit=30)
-        ],
-        "executions": [item.model_dump(mode="json") for item in executions],
-        "resolution": resolution,
-        "owners": {
-            "projects": "ProjectManager",
-            "sessions": "ThreadSessionState",
-            "tasks": "TaskStore",
-            "routines": "RoutineManager",
-            "automation_runs": "AutomationRunStore",
-            "connections": "ConnectionRegistry",
-            "heartbeat": "HeartbeatManager",
-            "tools": "ToolRegistry",
-            "skills": "SkillsRegistry",
-            "specialist_runtimes": "SpecialistRuntimeManager",
-            "executions": "StateStore",
-        },
     }
 
 
@@ -7892,35 +7220,6 @@ async def disconnect_connection_api(
         raise _connection_api_error(exc) from exc
 
 
-@app.get("/skills/executions")
-async def skill_executions_api(session_id: str = Query(...), limit: int = Query(default=40, ge=1, le=200)):
-    """Session-scoped projection of durable governed SkillExecution records."""
-    from agent.skill_execution import list_skill_executions_for_session
-    from agent.threads import get_thread_manager
-
-    key = str(session_id or "").strip()
-    if not key or get_thread_manager().get_thread(key) is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    rows = list_skill_executions_for_session(key, limit=limit)
-    return {"items": [row.model_dump(mode="json") for row in rows], "count": len(rows)}
-
-
-@app.post("/skills/executions/{skill_execution_id}/cancel")
-async def cancel_skill_execution_api(skill_execution_id: str, session_id: str = Query(...)):
-    from agent.skill_execution import SkillExecutionError, cancel_skill_execution, get_skill_execution
-
-    record = get_skill_execution(skill_execution_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="SkillExecutionRecord not found")
-    if record.session_id != str(session_id or "").strip():
-        raise HTTPException(status_code=403, detail="SkillExecution belongs to another Session")
-    try:
-        updated = cancel_skill_execution(record.id, state_store=get_state_store())
-    except SkillExecutionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return updated.model_dump(mode="json")
-
-
 @app.get("/diagnostics/tool-calling")
 async def tool_calling_diagnostics_api(thread_id: Optional[str] = Query(default=None)):
     """Honest provider tool-calling capability matrix for operators."""
@@ -7932,7 +7231,7 @@ async def tool_calling_diagnostics_api(thread_id: Optional[str] = Query(default=
     native_enabled = bool(diag.get("native_tool_calling_enabled")) and not disabled
     matrix = {
         "provider": provider,
-        "execution_loop": "canonical_model_control_plane",
+        "execution_loop": "lean",
         "native_tool_calls": native_enabled,
         "native_tool_calls_supported": native_supported,
         "strict_agent_decision_validation": True,
@@ -8822,15 +8121,22 @@ async def get_screen_info():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy"}
+    from version import APP_VERSION
+
+    return {"status": "healthy", "version": APP_VERSION}
 
 
 @app.get("/startup/readiness")
-async def startup_readiness():
+def startup_readiness():
+    # Sync on purpose: FastAPI runs it in a worker thread, so readiness checks
+    # (file reads, provider probe) never block the event loop.
     """Authoritative durable-owner readiness; optional providers never block it."""
     from agent.startup_readiness import build_startup_readiness
 
-    return build_startup_readiness()
+    result = build_startup_readiness()
+    if result.get("core_ready"):
+        _WARMUP_GATE.set()
+    return result
 
 
 @app.get("/metrics")

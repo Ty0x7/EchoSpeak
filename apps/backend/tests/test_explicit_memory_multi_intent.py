@@ -177,26 +177,6 @@ def test_command_only_after_remember_is_not_stored(tmp_path, monkeypatch):
     )
 
 
-def test_same_turn_city_available_via_memory_lookup(tmp_path, monkeypatch):
-    monkeypatch.setenv("ECHOSPEAK_DATA_DIR", str(tmp_path / "mem4"))
-    from agent.core import EchoSpeakAgent
-
-    memory = _make_memory(tmp_path)
-    curator = MemoryCurator(memory, llm_invoke=None)
-    result = curator.curate_and_persist(
-        user_text="I'm from Edmonton, remember that",
-        explicit=True,
-        session_id="s",
-        execution_id="e",
-        allow_implicit_auto=True,
-    )
-    assert result.persisted_ids
-    agent = object.__new__(EchoSpeakAgent)
-    agent.memory = memory
-    city = agent._default_departure_city_from_memory()
-    assert city == "Edmonton"
-
-
 def test_user_scoped_home_city_not_project_trapped(tmp_path, monkeypatch):
     monkeypatch.setenv("ECHOSPEAK_DATA_DIR", str(tmp_path / "mem5"))
     memory = _make_memory(tmp_path)
@@ -272,44 +252,6 @@ def test_duplicate_home_city_does_not_duplicate_active(tmp_path, monkeypatch):
         assert "retry" not in str(r.get("text") or "").casefold()
 
 
-def test_conflicting_city_supersedes_without_erasing_history(tmp_path, monkeypatch):
-    monkeypatch.setenv("ECHOSPEAK_DATA_DIR", str(tmp_path / "mem8"))
-    memory = _make_memory(tmp_path)
-    curator = MemoryCurator(memory, llm_invoke=None)
-    r1 = curator.curate_and_persist(
-        user_text="I'm from Edmonton, remember that",
-        explicit=True,
-        session_id="s",
-        allow_implicit_auto=True,
-    )
-    r2 = curator.curate_and_persist(
-        user_text="I'm from Calgary, remember that",
-        explicit=True,
-        session_id="s",
-        allow_implicit_auto=True,
-    )
-    assert r1.persisted_ids and r2.persisted_ids
-    # History retained: old record still present (inactive or superseded)
-    all_ids = set(memory._records.keys())
-    assert r1.persisted_ids[0] in all_ids
-    assert r2.persisted_ids[0] in all_ids
-    # Active default should favor the newer city when lookup runs
-    from agent.core import EchoSpeakAgent
-
-    agent = object.__new__(EchoSpeakAgent)
-    agent.memory = memory
-    city = agent._default_departure_city_from_memory()
-    # Accept either if both active; prefer Calgary when supersede works
-    assert city in {"Edmonton", "Calgary"}
-    if r1.persisted_ids[0] != r2.persisted_ids[0]:
-        old = memory._records[r1.persisted_ids[0]]
-        new = memory._records[r2.persisted_ids[0]]
-        # If conflict handling supersedes, old may be inactive
-        if not old.get("active", True):
-            assert new.get("active", True)
-            assert city == "Calgary"
-
-
 def test_failed_persistence_reports_no_claim(tmp_path, monkeypatch):
     monkeypatch.setenv("ECHOSPEAK_DATA_DIR", str(tmp_path / "mem9"))
     memory = _make_memory(tmp_path)
@@ -327,39 +269,6 @@ def test_failed_persistence_reports_no_claim(tmp_path, monkeypatch):
     )
     assert not result.persisted_ids
     assert result.errors
-
-
-def test_recover_prior_search_anchor_injects_edmonton(tmp_path, monkeypatch):
-    """Retried flight search must receive Edmonton as origin from durable memory."""
-    monkeypatch.setenv("ECHOSPEAK_DATA_DIR", str(tmp_path / "mem10"))
-    from agent.core import EchoSpeakAgent
-
-    memory = _make_memory(tmp_path)
-    curator = MemoryCurator(memory, llm_invoke=None)
-    result = curator.curate_and_persist(
-        user_text="Sorry, I'm from Edmonton, remember that, and retry that search",
-        explicit=True,
-        session_id="s",
-        allow_implicit_auto=True,
-    )
-    assert result.persisted_ids
-    rec = memory._records[result.persisted_ids[0]]
-    assert "retry" not in str(rec.get("text") or "").casefold()
-
-    agent = object.__new__(EchoSpeakAgent)
-    agent.memory = memory
-    agent._last_web_query_context = ""
-    agent._current_subject_text = ""
-    agent._state_store = MagicMock()
-    agent._state_store.list_executions.return_value = []
-    agent._thread_key = lambda: "t1"  # type: ignore
-
-    prior = "flights to Las Vegas for 7 days"
-    resolved = agent._recover_prior_search_anchor(subject=prior)
-    assert "edmonton" in resolved.casefold()
-    assert "las vegas" in resolved.casefold()
-    # Prove only origin enrichment — not the command phrase
-    assert "retry that search" not in resolved.casefold()
 
 
 def test_edmonton_flight_regression_canonical_record(tmp_path, monkeypatch):

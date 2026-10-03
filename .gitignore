@@ -95,3 +95,11 @@ apps/web/pnpm-workspace.yaml
 apps/desktop/node_modules/
 apps/desktop/src-tauri/binaries/
 
+
+# Local debug/launch scratch
+.launch-debug-data*/
+.launch-debug-logs*/
+.claude/launch.json
+apps/desktop/src-tauri/backend-dist/
+apps/desktop/.build/
+release/

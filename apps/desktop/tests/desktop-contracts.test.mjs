@@ -33,7 +33,7 @@ test("custom chrome can drag while controls and composer remain interactive", ()
   assert.ok(capability.permissions.includes("core:window:allow-start-dragging"));
   assert.ok(desktopApp.includes('className="desktop-titlebar" data-tauri-drag-region'));
   assert.ok(!desktopApp.includes('className="desktop-window-controls" data-tauri-drag-region'));
-  const composer = dashboard.match(/<textarea[\s\S]{0,1600}aria-label="Ask Echo anything"/i)?.[0] || "";
+  const composer = dashboard.match(/<textarea\s+ref=\{textareaRef\}[\s\S]{0,4000}?aria-label="Message"/i)?.[0] || "";
   assert.ok(composer, "canonical composer textarea was not found");
   assert.ok(composer.includes("disabled={!activeThreadId}"), "composer must require an explicitly created Session");
   assert.ok(desktopCss.includes("pointer-events: auto"));
@@ -51,11 +51,12 @@ test("desktop composer submits only into an explicitly selected Session", () => 
 });
 
 test("desktop startup and sidebar use one monochrome Echo identity", () => {
-  assert.ok(desktopApp.includes('className="desktop-boot-echo"'));
-  assert.ok(desktopApp.includes('className="desktop-boot-progress"'));
+  // Echo's face spins on the boot screen (same face as the splash).
+  assert.ok(desktopApp.includes('className="desktop-boot-face"'));
+  assert.ok(desktopApp.includes("desktop-boot-progress"));
   assert.ok(!desktopApp.includes("desktop-boot-mark"));
   assert.ok(!desktopApp.includes("desktop-boot-orbit"));
-  assert.ok(desktopCss.includes("@keyframes desktop-echo-rotate"));
+  assert.ok(desktopCss.includes("@keyframes echo-face-spin"));
   assert.ok(desktopCss.includes("@keyframes desktop-progress"));
   assert.ok(sidebar.includes("{!props.desktop ? <div"));
   assert.ok(sidebar.includes("Desktop identity belongs to the native title bar"));
@@ -124,4 +125,34 @@ test("native contract is reproducible and supports disposable acceptance data", 
   assert.ok(host.includes("TargetKind::Folder"));
   assert.ok(rust.includes('.env("ECHOSPEAK_DATA_DIR", &data_dir)'));
   assert.ok(rust.includes('.env("ECHOSPEAK_LOGS_DIR", &log_dir)'));
+});
+
+test("index.html has no inline style or script blocks (they would break the desktop CSP)", async () => {
+  // Tauri hashes inline <style>/<script> tags into the CSP at build time. A
+  // hash in style-src makes the webview ignore 'unsafe-inline', which blocks
+  // every <style> the app injects at runtime and leaves it unstyled.
+  const html = await readFile(new URL("../../web/index.html", import.meta.url), "utf8");
+  assert.doesNotMatch(html, /<style[\s>]/i);
+  assert.doesNotMatch(html, /<script(?![^>]*\bsrc=)[^>]*>/i);
+  assert.doesNotMatch(html, /\sstyle="/i);
+  assert.match(config.app.security.csp, /style-src[^;]*'unsafe-inline'/);
+});
+
+test("in-app updates verify signed GitHub releases and stop the service before installing", async () => {
+  const updates = await readFile(new URL("../src-tauri/src/updates.rs", import.meta.url), "utf8");
+  const permissions = await readFile(new URL("../src-tauri/permissions/desktop.toml", import.meta.url), "utf8");
+  const updater = config.plugins.updater;
+  assert.equal(typeof updater.pubkey, "string");
+  assert.deepEqual(updater.endpoints, ["https://github.com/Ty0x7/EchoSpeak/releases/latest/download/latest.json"]);
+  assert.equal(updater.windows.installMode, "passive");
+  // Ordinary builds must not need the private signing key; only the release script turns this on.
+  assert.notEqual(config.bundle.createUpdaterArtifacts, true);
+  assert.ok(cargo.includes('tauri-plugin-updater = "=2.12.0"'));
+  assert.ok(host.includes("tauri_plugin_updater::Builder::new().build()"));
+  assert.ok(host.includes("updates::check_for_update") && host.includes("updates::install_update"));
+  assert.ok(permissions.includes('"check_for_update"') && permissions.includes('"install_update"'));
+  // The installer replaces the Python service's files, so it must be stopped first.
+  assert.ok(updates.indexOf("shutdown_backend") < updates.indexOf("update.install("));
+  // No updater: permissions for the renderer; it goes through the two commands above.
+  assert.ok(!capability.permissions.some((permission) => String(permission).startsWith("updater:")));
 });
