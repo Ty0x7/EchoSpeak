@@ -30,6 +30,7 @@ from loguru import logger
 from agent.lean import policy, settings
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean.job import claim_nudge, is_promise_without_action, promise_nudge, unbacked_claim
+from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
 from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
 from agent.lean.toolbox import Toolbox, describe_call, safe_args_preview
@@ -93,7 +94,11 @@ class LeanTurn:
         meta: Optional[dict[str, Any]] = None,
         promise_guard: bool = True,
         taint: Optional[list[str]] = None,
+        goal: str = "",
     ) -> None:
+        # What this turn is for, restated every few steps of a long turn (recall.reminder).
+        self.goal = goal
+        self._outcomes: list[bool] = []
         # Tools that brought outside content into this request (shared by every
         # agent working on it). Drives the Rule-of-Two policy in agent/lean/policy.py.
         self.taint: list[str] = taint if taint is not None else []
@@ -320,6 +325,12 @@ class LeanTurn:
                 break
 
             self._run_tools(calls, messages, step, call_counts)
+            if self.goal and step % REMIND_EVERY == 0 and messages[-1].get("role") == "tool":
+                # Appended to the tool result, not sent as its own message: some chat
+                # templates (Gemma) require strict user/assistant alternation.
+                messages[-1]["content"] = (str(messages[-1].get("content") or "") + "\n\n"
+                                           + reminder(self.goal, step, self._outcomes[-REMIND_EVERY:]))
+                self.emit({"type": "goal_reminder", "step": step})
             completed = self._completion_from(calls, messages)
             if completed is not None:
                 # complete_task is a final-output tool: the agent's work is marked done.
@@ -627,6 +638,7 @@ class LeanTurn:
         if len(preview) > 1600:
             preview = preview[:1600] + "…"
         cards = list(widgets or []) if ok else []
+        self._outcomes.append(bool(ok))
         if ok:
             self.succeeded.add(name)
         for item in self.timeline:

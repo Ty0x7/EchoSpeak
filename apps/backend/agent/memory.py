@@ -1692,7 +1692,11 @@ class AgentMemory:
     ) -> List[Dict[str, Any]]:
         """Compile one authorized deterministic projection for both model stages."""
         owner = self._owner_id(owner_id)
-        query_tokens = set(re.findall(r"[a-z0-9]{2,}", str(query or "").casefold()))
+        from agent.stopwords import STOPWORDS
+
+        all_tokens = set(re.findall(r"[a-z0-9]{2,}", str(query or "").casefold()))
+        # "is", "my", "the" would make every memory look related and crowd out the real matches.
+        query_tokens = (all_tokens - STOPWORDS) or all_tokens
         active_project_id = str(project_id or "").strip()
         active_project_path = str(project_path or "").strip()
         rows: list[tuple[int, float, str, Dict[str, Any]]] = []

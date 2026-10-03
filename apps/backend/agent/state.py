@@ -840,13 +840,19 @@ class StateStore:
             self._events = self._events[-_EVENTS_KEPT:]
             self._events_saved = len(self._events)
 
-    def search_messages(self, query: str, *, limit: int = 20, session_id: str = "") -> list[dict[str, Any]]:
-        """Full-text search over every saved chat message, best matches first."""
+    def search_messages(self, query: str, *, limit: int = 20, session_id: str = "", any_term: bool = False) -> list[dict[str, Any]]:
+        """Full-text search over every saved chat message, best matches first.
+
+        By default every word must match; ``any_term`` ranks messages matching any of them.
+        """
         terms = re.findall(r"\w+", str(query or ""), flags=re.UNICODE)
         if not terms:
             return []
-        # Quote each word and prefix-match the last one, so typing "deplo" finds "deploy".
-        match = " ".join([*(f'"{term}"' for term in terms[:-1]), f'"{terms[-1]}"*'])
+        if any_term:
+            match = " OR ".join(f'"{term}"' for term in terms)
+        else:
+            # Quote each word and prefix-match the last one, so typing "deplo" finds "deploy".
+            match = " ".join([*(f'"{term}"' for term in terms[:-1]), f'"{terms[-1]}"*'])
         sql = (
             "SELECT item_id, session_id, turn_id, role, agent, created_at, "
             "snippet(message_search, 0, '[', ']', ' … ', 12) FROM message_search WHERE message_search MATCH ?"

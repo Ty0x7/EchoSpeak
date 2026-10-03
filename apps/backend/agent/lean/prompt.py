@@ -115,6 +115,7 @@ def build_system_prompt(
     terminal_note: str = "",
     project_overview: str = "",
     caller_note: str = "",
+    past_chats: Optional[list[str]] = None,
 ) -> str:
     identity = (persona.soul or "").strip() or (soul_text or "").strip()
     if not identity:
@@ -129,6 +130,8 @@ def build_system_prompt(
         _environment(project_root=project_root, notes=list(notes or []), terminal_note=terminal_note, project_overview=project_overview),
         _memory(list(memories or [])),
         ("## Earlier in this chat (summary)\n" + chat_summary.strip()) if chat_summary.strip() else "",
+        ("## From past conversations (they match what the user is referring to)\n"
+         + "\n".join(f"- {line}" for line in past_chats)) if past_chats else "",
         ("## Who you're talking to\n" + caller_note.strip()) if caller_note.strip() else "",
     ]
     return "\n\n".join(section for section in sections if section).strip()

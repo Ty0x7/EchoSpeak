@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import settings, soul, summaries
+from agent.lean import recall, settings, soul, summaries
 from agent.lean.job import ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, needs_action, parse_review
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import AgentPersona, get_persona_store
@@ -25,6 +25,7 @@ from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
 from agent.lean.toolbox import DEFAULT_TOOLSETS, NativeTool, Toolbox, project_root_for_session
+from agent.stopwords import keywords
 
 Emit = Callable[[dict[str, Any]], None]
 
@@ -126,6 +127,7 @@ class LeanSession:
         self.results: list[TurnResult] = []
         self._clients: dict[str, ChatClient] = {}
         self._soul_text: Optional[str] = None
+        self._past_chat_lines: Optional[list[str]] = None
         self._user_message = ""
         self._handoffs = 0
         # Completion tracking for group chats and handed-off work (agent/lean/job.py).
@@ -355,7 +357,8 @@ class LeanSession:
             owned = next((item for item in job.open_subtasks() if item.owner == persona.name), None)
             previous_active, self._active_subtask = self._active_subtask, owned
             try:
-                result = self._run_agent(persona, brief, history=continue_history, depth=0, meta={"continuation": job.rounds})
+                result = self._run_agent(persona, brief, history=continue_history, depth=0, meta={"continuation": job.rounds},
+                                         task=instruction or missing)
                 if not result.empty:
                     self._add_result(result)
             finally:
@@ -545,8 +548,10 @@ class LeanSession:
         depth: int,
         delegated_by: Optional[AgentPersona] = None,
         meta: Optional[dict[str, Any]] = None,
+        task: str = "",
     ) -> TurnResult:
-        turn = self._build_turn(persona, message, history=history, depth=depth, delegated_by=delegated_by, meta=meta)
+        turn = self._build_turn(persona, message, history=history, depth=depth, delegated_by=delegated_by, meta=meta,
+                                task=task)
         result = turn.run(message)
         if not result.empty:
             self._persist(persona, result, depth, meta=turn.meta)
@@ -596,7 +601,7 @@ class LeanSession:
                 meta=meta, allow_complete=allow_complete, allow_assign=allow_assign,
                 # Planning turns may look things up but not act, and "I'll run the tests once
                 # it exists" is a plan there, not a broken promise.
-                read_only=planning, promise_guard=not planning,
+                read_only=planning, promise_guard=not planning, task=task.task if task else "",
             )
             previous_active, self._active_subtask = self._active_subtask, task
             try:
@@ -798,6 +803,7 @@ class LeanSession:
         allow_assign: bool = False,
         read_only: bool = False,
         promise_guard: bool = True,
+        task: str = "",
     ) -> LeanTurn:
         meta = dict(meta or {})
         if delegated_by is not None:
@@ -825,7 +831,10 @@ class LeanSession:
         if read_only:
             # Planning turns: look things up, but nothing that changes state.
             toolbox.restrict_to_read_only()
-        memories = [] if guest else self._recall(request_text(message))
+        # Recall from what is actually being asked (the user's request, plus the task this
+        # agent was given), never from a "[System]: ..." brief full of boilerplate words.
+        goal = self._goal(message, task)
+        memories = [] if guest else self._recall(goal)
         prompt = build_system_prompt(
             persona=persona,
             soul_text=self._soul() if persona.id == "echo" else "",
@@ -836,8 +845,10 @@ class LeanSession:
             teammates=teammates if can_hand_off else [],
             room_name=self.room.name if self.room and self.room.kind == "group" else "",
             memories=memories,
-            chat_summary=summaries.summary_text(self.session_id) if depth == 0 else "",
+            # Teammates start with a clean history, not without the story so far.
+            chat_summary=summaries.summary_text(self.session_id),
             caller_note=caller_note(self.source, self.caller_role),
+            past_chats=[] if guest else self._past_chats(),
         )
         turn = LeanTurn(
             client=self._client_for(persona),
@@ -856,6 +867,7 @@ class LeanSession:
             meta=meta,
             promise_guard=promise_guard,
             taint=self._taint,
+            goal=goal,
         )
         return turn
 
@@ -1093,7 +1105,7 @@ class LeanSession:
                         brief += f"\n\nFor context, the user's message was:\n{self._user_message[:800]}"
                     previous_active, self._active_subtask = self._active_subtask, subtask
                     try:
-                        result = self._run_agent(target, brief, history=[], depth=depth + 1, delegated_by=persona)
+                        result = self._run_agent(target, brief, history=[], depth=depth + 1, delegated_by=persona, task=task)
                         if not result.empty:
                             self._add_result(result)
                     finally:
@@ -1222,6 +1234,47 @@ class LeanSession:
             except Exception:
                 self._soul_text = ""
         return self._soul_text
+
+    def _goal(self, message: str, task: str = "") -> str:
+        """What this agent is working toward: its task (if it was given one) and the user's request."""
+        request = request_text(self._user_message or message).strip()
+        task = str(task or "").strip()
+        return f"{task}\n(The user asked: {request})" if task and task not in request else request
+
+    def _past_chats(self) -> list[str]:
+        """When the user points back ("last time", "what we discussed"), the matching past messages.
+
+        Retrieval in code rather than hoping the agent calls chat_search: this is
+        exactly the moment agents otherwise act lost. Other chats only; this one
+        is already in the history and its summary.
+        """
+        if self._past_chat_lines is not None:
+            return self._past_chat_lines
+        self._past_chat_lines = []
+        request = request_text(self._user_message)
+        if not recall.points_back(request):
+            return self._past_chat_lines
+        terms = keywords(request, limit=8)
+        if not terms:
+            return self._past_chat_lines
+        try:
+            from agent.state import get_state_store
+
+            hits = get_state_store().search_messages(" ".join(terms), limit=12, any_term=True)
+        except Exception:
+            logger.debug("Past-chat lookup failed", exc_info=True)
+            return self._past_chat_lines
+        lines: list[str] = []
+        for hit in hits:
+            if hit["session_id"] == self.session_id or hit["turn_id"] == self.execution_id:
+                continue
+            when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
+            who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
+            lines.append(f"{when} {who}: {hit['snippet']}")
+            if len(lines) >= 5:
+                break
+        self._past_chat_lines = lines
+        return lines
 
     def _recall(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
         memory = getattr(self.agent, "memory", None)
