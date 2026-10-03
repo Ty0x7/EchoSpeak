@@ -173,13 +173,9 @@ function WaysShowcase() {
   }, [active, paused]);
   const mode = MODES[active];
   return (
-    <section className="ways shell" id="ways" aria-labelledby="ways-title">
+    <section className="ways shell" id="ways" aria-label="What Echo does">
       <div className="ways-grid" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
         <Reveal className="ways-side" anim="left">
-        <div className="section-head">
-          <span className="kicker">What Echo does</span>
-          <h2 id="ways-title">One Echo.<br /><span className="dim">Many ways.</span></h2>
-        </div>
         <div className="ways-tabs" role="tablist" aria-label="Ways Echo helps">
           {MODES.map((m, i) => (
             <button key={m.id} type="button" role="tab" aria-selected={i === active} className={i === active ? "is-on" : ""} onClick={() => setActive(i)}>
@@ -195,8 +191,9 @@ function WaysShowcase() {
           <div className="screen-body" key={mode.id}>
             <Screen mode={mode.id} />
           </div>
-          <p className="ways-caption" key={`c-${mode.id}`}><Face size={20} /><span><b>{mode.says}</b> {mode.caption}</span></p>
+          <div className="chat-composer" aria-hidden="true"><span>Ask Echo anything...</span><b><Icon name="arrow" size={15} /></b></div>
         </div>
+        <p className="ways-caption" key={`c-${mode.id}`}><Face size={18} /><span><b>{mode.says}</b> {mode.caption}</span></p>
         </Reveal>
       </div>
     </section>
@@ -335,12 +332,145 @@ function HomePanel() {
             <path d="M30 120 150 28l120 92" />
             <path d="M58 100v118h184V100" />
           </svg>
-          <div className="house-face"><Face tone="dark" size={86} /></div>
-          <span className="house-chip c1">Chats</span>
-          <span className="house-chip c2">Memory</span>
-          <span className="house-chip c3">Files</span>
+          <div className="house-face"><Face tone="dark" size={92} /></div>
         </div>
       </Reveal>
+    </div>
+  );
+}
+
+/** Smoothly counts a number toward its new value. */
+function useTween(value: number, ms = 450) {
+  const [shown, setShown] = useState(value);
+  const from = useRef(value);
+  useEffect(() => {
+    const start = performance.now();
+    const begin = from.current;
+    let raf = 0;
+    const step = (now: number) => {
+      const t = Math.min(1, (now - start) / ms);
+      const v = begin + (value - begin) * (1 - Math.pow(1 - t, 3));
+      from.current = v;
+      setShown(v);
+      if (t < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value, ms]);
+  return shown;
+}
+
+const SPLIT_NAMES = ["You", "Sam", "Alex", "Jo", "Kim", "Lee"];
+
+function SplitApp({ version }: { version: 1 | 2 }) {
+  const [bill, setBill] = useState(84);
+  const [tip, setTip] = useState(18);
+  const [people, setPeople] = useState(3);
+  const total = bill * (1 + tip / 100);
+  const split = version === 2;
+  const each = split ? total / people : total;
+  const shownMain = useTween(each);
+  const shownTotal = useTween(total);
+  return (
+    <div className="splitapp">
+      <div className="split-hero">
+        <span>{split ? "Each person pays" : "Total with tip"}</span>
+        <strong>${shownMain.toFixed(2)}</strong>
+        <small>{split ? `Total $${shownTotal.toFixed(2)} · ${people} people` : `Tip $${(total - bill).toFixed(2)}`}</small>
+      </div>
+      <label className="split-row">
+        <span>Bill</span>
+        <b>${bill}</b>
+        <input type="range" min={10} max={300} value={bill} onChange={(e) => setBill(Number(e.target.value))} aria-label="Bill amount" />
+      </label>
+      <div className="split-row">
+        <span>Tip</span>
+        <div className="split-seg" role="radiogroup" aria-label="Tip">
+          {[10, 15, 18, 20, 25].map((t) => (
+            <button key={t} type="button" role="radio" aria-checked={tip === t} className={tip === t ? "is-on" : ""} onClick={() => setTip(t)}>{t}%</button>
+          ))}
+        </div>
+      </div>
+      {split ? (
+        <div className="split-row split-people">
+          <span>People</span>
+          <div className="split-stepper">
+            <button type="button" onClick={() => setPeople((n) => Math.max(1, n - 1))} aria-label="Fewer people">−</button>
+            <b>{people}</b>
+            <button type="button" onClick={() => setPeople((n) => Math.min(6, n + 1))} aria-label="More people">+</button>
+          </div>
+          <div className="split-faces">
+            {SPLIT_NAMES.slice(0, people).map((n) => (
+              <span key={n} className="split-face"><i>{n[0]}</i><small>${each.toFixed(2)}</small></span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function SplitCode({ version }: { version: 1 | 2 }) {
+  return (
+    <pre className="split-code" aria-label="App code">
+      <code>
+        <span className="c-k">const</span> total = bill * (<span className="c-n">1</span> + tip / <span className="c-n">100</span>);{"\n"}
+        {version === 2 ? <><span className="c-k">const</span> each = total / people;{"\n"}</> : null}
+        {"\n"}
+        <span className="c-k">return</span> ({"\n"}
+        {"  "}&lt;<span className="c-t">Card</span>&gt;{"\n"}
+        {"    "}&lt;<span className="c-t">Big</span>&gt;{"{"}money({version === 2 ? "each" : "total"}){"}"}&lt;/<span className="c-t">Big</span>&gt;{"\n"}
+        {"    "}&lt;<span className="c-t">Slider</span> label=<span className="c-s">"Bill"</span> /&gt;{"\n"}
+        {"    "}&lt;<span className="c-t">Pills</span> options={"{"}[<span className="c-n">10</span>, <span className="c-n">15</span>, <span className="c-n">18</span>, <span className="c-n">20</span>]{"}"} /&gt;{"\n"}
+        {version === 2 ? <>{"    "}&lt;<span className="c-t">People</span> max={"{"}<span className="c-n">6</span>{"}"} /&gt;{"\n"}</> : null}
+        {"  "}&lt;/<span className="c-t">Card</span>&gt;{"\n"}
+        );
+      </code>
+    </pre>
+  );
+}
+
+function BuildDemo() {
+  const [version, setVersion] = useState<1 | 2>(2);
+  const [view, setView] = useState<"preview" | "code">("preview");
+  return (
+    <div className="build-demo">
+      <div className="build-chat">
+        <p className="msg msg-you">Build me a tip calculator.</p>
+        <div className="msg msg-echo">
+          <Face size={22} />
+          <div>
+            <p>Here you go. It's open on the right.</p>
+            <button type="button" className={`build-chip${version === 1 ? " is-on" : ""}`} onClick={() => setVersion(1)}><Icon name="code" size={14} /><span><strong>Tip calculator</strong><small>App · v1</small></span></button>
+          </div>
+        </div>
+        <p className="msg msg-you">Make it split the bill between friends.</p>
+        <div className="msg msg-echo">
+          <Face size={22} />
+          <div>
+            <p>Done. Version 2 splits it and shows what each person pays.</p>
+            <button type="button" className={`build-chip${version === 2 ? " is-on" : ""}`} onClick={() => setVersion(2)}><Icon name="code" size={14} /><span><strong>Tip & split</strong><small>App · v2</small></span></button>
+          </div>
+        </div>
+        <div className="chat-composer" aria-hidden="true"><span>Ask for a change...</span><b><Icon name="arrow" size={15} /></b></div>
+      </div>
+      <div className="build-artifact">
+        <div className="build-bar">
+          <strong>{version === 2 ? "Tip & split" : "Tip calculator"}</strong>
+          <div className="build-versions" role="group" aria-label="Version">
+            {[1, 2].map((v) => (
+              <button key={v} type="button" className={version === v ? "is-on" : ""} onClick={() => setVersion(v as 1 | 2)}>v{v}</button>
+            ))}
+          </div>
+          <div className="build-tabs" role="tablist" aria-label="View">
+            <button type="button" role="tab" aria-selected={view === "preview"} className={view === "preview" ? "is-on" : ""} onClick={() => setView("preview")}>Preview</button>
+            <button type="button" role="tab" aria-selected={view === "code"} className={view === "code" ? "is-on" : ""} onClick={() => setView("code")}>Code</button>
+          </div>
+        </div>
+        <div className="build-stage" key={`${version}-${view}`}>
+          {view === "preview" ? <SplitApp version={version} /> : <SplitCode version={version} />}
+        </div>
+      </div>
     </div>
   );
 }
@@ -351,13 +481,10 @@ function BuildPanel() {
       <Reveal as="section" className="panel panel-dark panel-build" anim="zoom">
         <div className="panel-copy">
           <span className="kicker">Artifacts</span>
-          <h2>Ask for an app.<br /><span className="dim">Get an app.</span></h2>
-          <p>Calculators, games, documents, diagrams. They open next to the chat, and “make it also split the bill” gives you version 2. Try this one:</p>
+          <h2>Ask for an app. <span className="dim">Get an app.</span></h2>
         </div>
-        <div className="artifact-frame">
-          <div className="artifact-bar"><strong>Tip & split calculator</strong><small>App · v2 of 2</small></div>
-          <MiniTipCalc />
-        </div>
+        <BuildDemo />
+        <p className="build-hint">It's live. Drag the bill, add people, flip between versions.</p>
       </Reveal>
     </div>
   );
