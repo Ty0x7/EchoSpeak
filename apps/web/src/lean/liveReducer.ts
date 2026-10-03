@@ -134,7 +134,13 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
         ...m,
         segments: m.segments.map((s) =>
           s.kind === "tool" && s.id === evt.id
-            ? { ...s, status: evt.ok ? "done" : "failed", output: String(evt.output || ""), durationMs: Number(evt.duration_ms || 0) }
+            ? {
+                ...s,
+                status: evt.ok ? "done" : "failed",
+                output: String(evt.output || ""),
+                durationMs: Number(evt.duration_ms || 0),
+                widgets: Array.isArray(evt.widgets) && evt.widgets.length ? evt.widgets : undefined,
+              }
             : s
         ),
       }));
@@ -222,6 +228,7 @@ export function messageFromTimeline(args: {
         output: String(row.output || ""),
         durationMs: Number(row.duration_ms || 0),
         startedAt,
+        widgets: Array.isArray(row.widgets) && row.widgets.length ? row.widgets : undefined,
       });
     else if (row?.kind === "approval")
       segments.push({

@@ -149,6 +149,9 @@ export const setDesktopCompanionAlwaysOnTop = (enabled: boolean): Promise<void> 
 
 export const readDesktopWindowLabel = (): Promise<string> => invoke<string>("desktop_window_label");
 
+/** Open an http(s) link in the default browser (desktop); refused for anything else. */
+export const openDesktopExternalUrl = (url: string): Promise<void> => invoke<void>("open_external_url", { url });
+
 export const controlDesktopWindow = (action: "show" | "minimize" | "toggle_maximize" | "close"): Promise<void> =>
   invoke<void>("control_desktop_window", { action });
 

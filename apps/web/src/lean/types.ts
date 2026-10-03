@@ -22,6 +22,8 @@ export type LeanSegment =
       output: string;
       durationMs?: number;
       startedAt: number;
+      /** Cards built from the tool's own data (weather, products, sources...). Validated before rendering. */
+      widgets?: unknown[];
     }
   | {
       kind: "approval";

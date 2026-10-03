@@ -1,6 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { RichMarkdown } from "../widgets/RichMarkdown";
+import { WidgetView } from "../widgets/WidgetView";
 import type { LeanMessageData, LeanSegment } from "./types";
 
 /**
@@ -178,20 +180,25 @@ function ApprovalCard({
   );
 }
 
-const Markdown = React.memo(function Markdown({ text }: { text: string }) {
-  return (
-    <div className="chat-markdown lm-text">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
-        }}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
-});
+/** Sources from every search/fetch in the message, merged and de-duplicated, shown once at the end. */
+function mergedCitations(segments: LeanSegment[]): unknown | null {
+  const seen = new Set<string>();
+  const items: unknown[] = [];
+  for (const seg of segments) {
+    if (seg.kind !== "tool" || !seg.widgets) continue;
+    for (const widget of seg.widgets as { type?: string; data?: { items?: { url?: string }[] } }[]) {
+      if (widget?.type !== "citations") continue;
+      for (const item of widget.data?.items || []) {
+        const url = String(item?.url || "");
+        if (url && !seen.has(url)) {
+          seen.add(url);
+          items.push(item);
+        }
+      }
+    }
+  }
+  return items.length ? { type: "citations", data: { items: items.slice(0, 12) } } : null;
+}
 
 export function LeanMessage({
   data,
@@ -213,6 +220,7 @@ export function LeanMessage({
   const segments = data.segments;
   const lastText = [...segments].reverse().find((s) => s.kind === "text");
   const waiting = streaming && segments.length === 0;
+  const sources = React.useMemo(() => mergedCitations(segments), [segments]);
   return (
     <article className="lm" data-status={data.status} data-live={streaming ? "true" : "false"} data-role={data.role || undefined}>
       {showHeader ? (
@@ -231,17 +239,26 @@ export function LeanMessage({
         ) : null}
         {segments.map((seg, index) => {
           if (seg.kind === "thinking") return <ThinkingBlock key={`t${index}`} seg={seg} live={streaming} />;
-          if (seg.kind === "tool") return <ToolRow key={`x${seg.id || index}`} seg={seg} />;
+          if (seg.kind === "tool") {
+            const cards = (seg.widgets || []).filter((w) => (w as { type?: string })?.type !== "citations");
+            return (
+              <React.Fragment key={`x${seg.id || index}`}>
+                <ToolRow seg={seg} />
+                {cards.map((widget, k) => <WidgetView key={k} widget={widget} />)}
+              </React.Fragment>
+            );
+          }
           if (seg.kind === "approval") return <ApprovalCard key={`a${seg.id}`} seg={seg} onDecide={onDecide} />;
           if (seg.kind === "note") return <div key={`n${index}`} className="lm-note">{seg.text}</div>;
           if (!seg.text.trim()) return null;
           const isTail = seg === lastText && streaming;
           return (
             <div key={`m${index}`} className="lm-text-wrap" data-tail={isTail ? "true" : "false"}>
-              <Markdown text={seg.text} />
+              <RichMarkdown text={seg.text} streaming={isTail} />
             </div>
           );
         })}
+        {!streaming && sources ? <WidgetView widget={sources} /> : null}
         {data.outcome && !streaming ? (
           <div className="lm-outcome" data-status={data.outcome.status} role="status">
             {data.outcome.status === "done" ? (

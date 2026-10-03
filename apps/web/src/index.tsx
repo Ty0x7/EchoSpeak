@@ -42,6 +42,8 @@ import { useLeanLive } from "./lean/useLeanLive";
 import { LiveStatusPill } from "./lean/LiveStatus";
 import { leanApi } from "./lean/api";
 import { AgentRows, CollapsedRoster } from "./lean/Roster";
+import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
+import { ArtifactPanel } from "./widgets/ArtifactPanel";
 import { ArtifactsPage, GroupChatsPage, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { AgentEditor, MentionMenu, RoomDialog, RoomHeader, activeMention, mentionMatches } from "./lean/Dialogs";
 import type { LeanEvent, LeanPersona, LeanRoom } from "./lean/types";
@@ -3358,15 +3360,40 @@ export const Dashboard: React.FC<{
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [desktopMode, studioOpen]);
 
-  const shellColumns = desktopMode
-    ? [showSidebar ? (sidebarCollapsed || narrowLayout ? "56px" : "288px") : null, "minmax(0, 1fr)"].filter(Boolean).join(" ")
-    : runtimeGridColumns({
-      sidebarVisible: showSidebar,
-      sidebarCollapsed: sidebarCollapsed || narrowLayout,
-      visualizerVisible: false,
-      visualizerDensity: "normal",
-    });
+  const artifactDocked = Boolean(openArtifact && mainPage === "chat" && !narrowLayout);
+  const shellColumns = [
+    desktopMode
+      ? [showSidebar ? (sidebarCollapsed || narrowLayout ? "56px" : "288px") : null, "minmax(0, 1fr)"].filter(Boolean).join(" ")
+      : runtimeGridColumns({
+        sidebarVisible: showSidebar,
+        sidebarCollapsed: sidebarCollapsed || narrowLayout,
+        visualizerVisible: false,
+        visualizerDensity: "normal",
+      }),
+    artifactDocked ? "minmax(340px, 46%)" : "",
+  ].filter(Boolean).join(" ");
 
+  const seenArtifactsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const live = lean.live;
+    if (!live) return;
+    for (const id of live.order) {
+      for (const seg of live.messages[id]?.segments || []) {
+        if (seg.kind !== "tool" || !seg.widgets) continue;
+        for (const widget of seg.widgets as { type?: string; data?: { id?: string; version?: number } }[]) {
+          if (widget?.type !== "artifact" || !widget.data?.id) continue;
+          const key = `${widget.data.id}@${widget.data.version}`;
+          if (seenArtifactsRef.current.has(key)) continue;
+          seenArtifactsRef.current.add(key);
+          setOpenArtifact({ id: widget.data.id });
+        }
+      }
+    }
+  }, [lean.live]);
+  const widgetEnv = useMemo<WidgetEnv>(
+    () => ({ apiBase, openArtifact: (id, version) => setOpenArtifact({ id, version }) }),
+    [apiBase],
+  );
   /** Open (or create) the one-to-one chat with an agent. Echo's chat is the most recent plain chat. */
   const openAgentChat = async (agent: LeanPersona) => {
     setMainPage("chat");
@@ -3555,6 +3582,15 @@ export const Dashboard: React.FC<{
             onMouseDown={(event) => {
               if (event.target === event.currentTarget) closeStudio();
             }}
+          />
+        ) : null}
+        {openArtifact && mainPage === "chat" ? (
+          <ArtifactPanel
+            apiBase={apiBase}
+            artifactId={openArtifact.id}
+            version={openArtifact.version}
+            overlay={narrowLayout}
+            onClose={() => setOpenArtifact(null)}
           />
         ) : null}
         {mainPage !== "chat" ? (
@@ -3815,6 +3851,7 @@ export const Dashboard: React.FC<{
               {/* Chat Tab */}
               {true && (
                 <>
+                  <WidgetEnvProvider value={widgetEnv}>
                   <div key={activeThreadId || "quick-chat"} className="chat-scroll" data-live={streaming ? "true" : undefined} style={{ flex: 1 }} ref={chatScrollRef} onScroll={onChatScroll}>
                     {activeRoom ? (
                       <RoomHeader room={activeRoom} agents={agents} onEdit={() => setRoomDialog({ open: true, room: activeRoom })} />
@@ -3949,6 +3986,7 @@ export const Dashboard: React.FC<{
                       />
                     ) : null}
                   </div>
+                  </WidgetEnvProvider>
                   <div className="input-bar">
                     <LiveStatusPill live={streaming ? lean.live : null} onStop={stopActiveTurn} />
                     {/* Row 1: session strip stacked on input (same column width) + context + send */}
