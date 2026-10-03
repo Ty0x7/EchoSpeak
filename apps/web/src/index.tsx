@@ -43,8 +43,8 @@ import { LiveStatusPill } from "./lean/LiveStatus";
 import { leanApi } from "./lean/api";
 import { AgentRows, CollapsedRoster } from "./lean/Roster";
 import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
-import { ArtifactPanel } from "./widgets/ArtifactPanel";
-import { ArtifactsPage, GroupChatsPage, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
+import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
+import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { AgentEditor, MentionMenu, RoomDialog, RoomHeader, activeMention, mentionMatches } from "./lean/Dialogs";
 import type { LeanEvent, LeanPersona, LeanRoom } from "./lean/types";
 import {
@@ -113,6 +113,11 @@ export const Dashboard: React.FC<{
   const [mainPage, setMainPage] = useState<SidebarPage>("chat");
   /** The artifact shown in the side panel. */
   const [openArtifact, setOpenArtifact] = useState<{ id: string; version?: number } | null>(null);
+  /** Right side panel: which tab, whether Activity was opened, and its width. */
+  const [rightTab, setRightTab] = useState<RightTab>("artifact");
+  const [activityOpen, setActivityOpen] = useState(false);
+  const [panelWidth, setPanelWidth] = useState<number>(() => loadPanelWidth());
+  const shellRef = useRef<HTMLDivElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarCollapsed);
   const [narrowLayout, setNarrowLayout] = useState<boolean>(() => typeof window !== "undefined" && window.innerWidth < 900);
   const [agentMode, setAgentMode] = useState<"idle" | "research" | "coding" | "working" | "thinking">("idle");
@@ -3360,7 +3365,8 @@ export const Dashboard: React.FC<{
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [desktopMode, studioOpen]);
 
-  const artifactDocked = Boolean(openArtifact && mainPage === "chat" && !narrowLayout);
+  const rightOpen = mainPage === "chat" && Boolean(openArtifact || activityOpen);
+  const rightDocked = rightOpen && !narrowLayout;
   const shellColumns = [
     desktopMode
       ? [showSidebar ? (sidebarCollapsed || narrowLayout ? "56px" : "288px") : null, "minmax(0, 1fr)"].filter(Boolean).join(" ")
@@ -3370,15 +3376,45 @@ export const Dashboard: React.FC<{
         visualizerVisible: false,
         visualizerDensity: "normal",
       }),
-    artifactDocked ? "minmax(340px, 46%)" : "",
+    rightDocked ? `${panelWidth}px` : "",
   ].filter(Boolean).join(" ");
 
+  const closePage = useCallback(() => setMainPage("chat"), []);
+  const sidebarWidthPx = showSidebar ? (sidebarCollapsed || narrowLayout ? 56 : desktopMode ? 288 : 252) : 0;
+  /** Room chat + side panel share (the shell minus the left sidebar). */
+  const measurePanelRoom = useCallback(() => {
+    const el = shellRef.current;
+    const layoutWidth = el?.clientWidth || window.innerWidth;
+    const scale = el ? el.getBoundingClientRect().width / (layoutWidth || 1) || 1 : 1;
+    return { room: layoutWidth - sidebarWidthPx, scale };
+  }, [sidebarWidthPx]);
+  useEffect(() => savePanelWidth(panelWidth), [panelWidth]);
+  useEffect(() => {
+    // Keep the chat usable when the window shrinks.
+    const fit = () => setPanelWidth((w) => clampPanelWidth(w, measurePanelRoom().room));
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [measurePanelRoom, rightOpen]);
+  useEffect(() => {
+    if (openArtifact) setRightTab("artifact");
+  }, [openArtifact]);
+  const activityItems = useMemo(() => {
+    const live = lean.live ? lean.live.order.map((id) => lean.live!.messages[id]) : [];
+    return collectActivity([...messages.map((m) => m.lean), ...live]);
+  }, [messages, lean.live]);
+  const seenTerminalRef = useRef<Set<string>>(new Set());
   const seenArtifactsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const live = lean.live;
     if (!live) return;
     for (const id of live.order) {
       for (const seg of live.messages[id]?.segments || []) {
+        if (seg.kind === "tool" && TERMINAL_TOOLS.has(seg.name) && seg.status === "running" && !seenTerminalRef.current.has(seg.id)) {
+          seenTerminalRef.current.add(seg.id);
+          setActivityOpen(true);
+          if (!openArtifact) setRightTab("activity");
+        }
         if (seg.kind !== "tool" || !seg.widgets) continue;
         for (const widget of seg.widgets as { type?: string; data?: { id?: string; version?: number } }[]) {
           if (widget?.type !== "artifact" || !widget.data?.id) continue;
@@ -3389,7 +3425,7 @@ export const Dashboard: React.FC<{
         }
       }
     }
-  }, [lean.live]);
+  }, [lean.live]); // eslint-disable-line react-hooks/exhaustive-deps
   const widgetEnv = useMemo<WidgetEnv>(
     () => ({ apiBase, openArtifact: (id, version) => setOpenArtifact({ id, version }) }),
     [apiBase],
@@ -3495,6 +3531,7 @@ export const Dashboard: React.FC<{
         </button>
       ) : null}
       <div
+        ref={shellRef}
         className={
           "app-shell" +
           (studioOpen && !desktopMode ? " is-studio-covered" : "") +
@@ -3584,16 +3621,25 @@ export const Dashboard: React.FC<{
             }}
           />
         ) : null}
-        {openArtifact && mainPage === "chat" ? (
-          <ArtifactPanel
+        {rightOpen ? (
+          <RightPanel
             apiBase={apiBase}
-            artifactId={openArtifact.id}
-            version={openArtifact.version}
+            tab={rightTab}
+            onTab={setRightTab}
+            artifact={openArtifact}
+            activity={activityItems}
+            width={panelWidth}
+            onWidth={setPanelWidth}
+            measureRoom={measurePanelRoom}
             overlay={narrowLayout}
-            onClose={() => setOpenArtifact(null)}
+            onClose={() => {
+              setOpenArtifact(null);
+              setActivityOpen(false);
+            }}
           />
         ) : null}
         {mainPage !== "chat" ? (
+          <PageCloseContext.Provider value={closePage}>
           <div className="glow-panel es-page-host" data-testid="sidebar-page">
             {mainPage === "groups" ? (
               <GroupChatsPage
@@ -3634,6 +3680,7 @@ export const Dashboard: React.FC<{
               <RoutinesPage apiBase={apiBase} agents={agents} />
             )}
           </div>
+          </PageCloseContext.Provider>
         ) : null}
         <div
           className={`glow-panel${desktopContextualWorkspace ? " desktop-contextual-workspace" : desktopMode ? " desktop-chat-workspace" : ""}`}
@@ -3852,6 +3899,21 @@ export const Dashboard: React.FC<{
               {true && (
                 <>
                   <WidgetEnvProvider value={widgetEnv}>
+                  {!rightOpen && activityItems.length ? (
+                    <button
+                      type="button"
+                      className="rp-toggle"
+                      onClick={() => {
+                        setActivityOpen(true);
+                        setRightTab("activity");
+                      }}
+                      title="Show what the agents did: commands, files, searches"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12h3l2-6 4 12 2-6h5" /></svg>
+                      Activity
+                      <small>{activityItems.length}</small>
+                    </button>
+                  ) : null}
                   <div key={activeThreadId || "quick-chat"} className="chat-scroll" data-live={streaming ? "true" : undefined} style={{ flex: 1 }} ref={chatScrollRef} onScroll={onChatScroll}>
                     {activeRoom ? (
                       <RoomHeader room={activeRoom} agents={agents} onEdit={() => setRoomDialog({ open: true, room: activeRoom })} />

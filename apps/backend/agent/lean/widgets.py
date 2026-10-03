@@ -209,8 +209,13 @@ def _score(data: dict[str, Any]) -> Optional[dict[str, Any]]:
         home, away = _s(game.get("home"), 60), _s(game.get("away"), 60)
         if not home or not away:
             continue
+        state = str(game.get("state") or "")
         games.append({"home": home, "away": away, "home_score": _num(game.get("home_score")), "away_score": _num(game.get("away_score")),
-                      "status": _s(game.get("status"), 40), "start": _s(game.get("start"), 40), "league": _s(game.get("league"), 60)})
+                      "status": _s(game.get("status"), 40), "start": _s(game.get("start"), 40), "league": _s(game.get("league"), 60),
+                      "state": state if state in {"pre", "in", "post"} else "", "venue": _s(game.get("venue"), 80), "line": _s(game.get("line"), 40),
+                      "home_logo": safe_url(game.get("home_logo")), "away_logo": safe_url(game.get("away_logo")),
+                      "home_abbr": _s(game.get("home_abbr"), 6), "away_abbr": _s(game.get("away_abbr"), 6),
+                      "home_record": _s(game.get("home_record"), 16), "away_record": _s(game.get("away_record"), 16)})
     return {"title": _s(data.get("title"), 120), "games": games, "as_of": _s(data.get("as_of"), 40)} if games else None
 
 

@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
+  fitLayout,
   loadStackLayout,
   pairShare,
-  resetPair,
+  resetLayout,
   resizePair,
   saveStackLayout,
   sectionFractions,
@@ -232,6 +233,17 @@ export function ProjectSidebar(props: SidebarProps) {
   const splitRef = useRef<HTMLDivElement | null>(null);
   const sectionRefs = useRef<Partial<Record<SectionKey, HTMLElement | null>>>({});
   useEffect(() => saveStackLayout(layout), [layout]);
+  // Height of the stack, so the default layout can fit the Agents list to its rows.
+  const [splitHeight, setSplitHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = splitRef.current;
+    if (!el) return;
+    setSplitHeight(el.clientHeight);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => setSplitHeight(el.clientHeight));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [props.collapsed]);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null);
   const searching = query.trim().length >= 2;
@@ -368,9 +380,11 @@ export function ProjectSidebar(props: SidebarProps) {
   // drag needs to measure.
   const SECTION_HEAD_PX = 30;
   const present: SectionKey[] = props.agents ? ["agents", "chats", "projects"] : ["chats", "projects"];
-  const fractions = sectionFractions(layout, present);
+  const listArea = Math.max(0, splitHeight - SECTION_HEAD_PX * present.length - 9 * (present.length - 1));
+  const effective = fitLayout(layout, props.agents?.count || 0, listArea);
+  const fractions = sectionFractions(effective, present);
   const sectionFlex = (key: SectionKey): React.CSSProperties =>
-    layout.open[key] ? { flex: `${fractions[key] ?? 1} 1 0px` } : { flex: `0 0 ${SECTION_HEAD_PX}px` };
+    effective.open[key] ? { flex: `${fractions[key] ?? 1} 1 0px` } : { flex: `0 0 ${SECTION_HEAD_PX}px` };
   /** Where the upper list starts and how tall both lists are, for pointer/keyboard resizing. */
   const measurePair = (a: SectionKey, b: SectionKey): SplitGeometry => {
     const elA = sectionRefs.current[a];
@@ -858,10 +872,10 @@ export function ProjectSidebar(props: SidebarProps) {
                 <SplitHandle
                   key={`h-${key}`}
                   label={`Resize ${SECTION_TITLES[key]} and ${SECTION_TITLES[next]}`}
-                  share={pairShare(layout, key, next)}
+                  share={pairShare(effective, key, next)}
                   measure={() => measurePair(key, next)}
-                  onShare={(share) => setLayout((value) => resizePair(value, key, next, share))}
-                  onReset={() => setLayout((value) => resetPair(value, key, next))}
+                  onShare={(share) => setLayout(() => resizePair(effective, key, next, share))}
+                  onReset={() => setLayout((value) => resetLayout(value))}
                   onDragging={setDragging}
                 />
               ) : null;

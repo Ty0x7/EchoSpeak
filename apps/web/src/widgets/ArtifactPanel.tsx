@@ -72,6 +72,7 @@ export function ArtifactPanel({
   artifactId,
   version,
   overlay = false,
+  embedded = false,
   onClose,
 }: {
   apiBase: string;
@@ -79,6 +80,8 @@ export function ArtifactPanel({
   /** Version to show; undefined follows the latest. */
   version?: number;
   overlay?: boolean;
+  /** Inside the right panel, which has its own close button and placement. */
+  embedded?: boolean;
   onClose(): void;
 }) {
   const [detail, setDetail] = useState<ArtifactDetail | null>(null);
@@ -135,7 +138,7 @@ export function ArtifactPanel({
   };
 
   return (
-    <aside className={`ap${overlay ? " is-overlay" : ""}${fullscreen ? " is-fullscreen" : ""}`} aria-label="Artifact">
+    <section className={`ap${embedded ? " is-embedded" : ""}${overlay ? " is-overlay" : ""}${fullscreen ? " is-fullscreen" : ""}`} aria-label="Artifact">
       <header className="ap-head">
         <div className="ap-title">
           <strong title={current?.title || detail?.title}>{current?.title || detail?.title || "Artifact"}</strong>
@@ -147,7 +150,7 @@ export function ArtifactPanel({
           <button type="button" className="wg-ghost" disabled={!detail || n <= (detail.history[0]?.n || 1)} onClick={() => setShown(Math.max(1, n - 1))} aria-label="Previous version">‹</button>
           <button type="button" className="wg-ghost" disabled={!detail || n >= latest} onClick={() => setShown(n + 1 >= latest ? undefined : n + 1)} aria-label="Next version">›</button>
         </div>
-        <button type="button" className="wg-ghost ap-close" onClick={onClose} aria-label="Close artifact">✕</button>
+        {!embedded ? <button type="button" className="wg-ghost ap-close" onClick={onClose} aria-label="Close artifact">✕</button> : null}
       </header>
       <div className="ap-tools">
         {hasPreview ? (
@@ -181,6 +184,6 @@ export function ArtifactPanel({
           <div className="ap-scroll ap-doc"><RichMarkdown text={current.content} /></div>
         )}
       </div>
-    </aside>
+    </section>
   );
 }

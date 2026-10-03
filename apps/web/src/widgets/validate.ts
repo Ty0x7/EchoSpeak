@@ -169,7 +169,16 @@ export function validateWidget(raw: unknown): Widget | null {
       return items.length ? { type, data: { items } } : null;
     }
     case "score_card": {
-      const games = arr(data.games).map(obj).map((g) => ({ home: str(g.home, 60), away: str(g.away, 60), home_score: num(g.home_score), away_score: num(g.away_score), status: str(g.status, 40), start: str(g.start, 40), league: str(g.league, 60) })).filter((g) => g.home && g.away);
+      const games = arr(data.games)
+        .map(obj)
+        .map((g) => ({
+          home: str(g.home, 60), away: str(g.away, 60), home_score: num(g.home_score), away_score: num(g.away_score),
+          status: str(g.status, 40), start: str(g.start, 40), league: str(g.league, 60),
+          state: ["pre", "in", "post"].includes(String(g.state)) ? String(g.state) : "", venue: str(g.venue, 80), line: str(g.line, 40),
+          home_logo: safeUrl(g.home_logo), away_logo: safeUrl(g.away_logo), home_abbr: str(g.home_abbr, 6), away_abbr: str(g.away_abbr, 6),
+          home_record: str(g.home_record, 16), away_record: str(g.away_record, 16),
+        }))
+        .filter((g) => g.home && g.away);
       return games.length ? { type, data: { title: str(data.title, 120), games, as_of: str(data.as_of, 40) } } : null;
     }
     case "timeline": {

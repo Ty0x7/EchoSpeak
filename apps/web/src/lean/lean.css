@@ -1136,8 +1136,15 @@
 .es-search-snippet mark { background: rgba(255, 255, 255, 0.14); color: var(--es-text); border-radius: 3px; padding: 0 2px; }
 
 /* ── Sidebar pages (Group chats, Projects, Artifacts, Routines) ─────── */
-.glow-panel[data-page-hidden="true"] { display: none !important; }
-.es-page-host { overflow: hidden; }
+.glow-panel[data-page-hidden="true"],
+.desktop-window .desktop-single-workspace > .glow-panel.glow-panel[data-page-hidden="true"] { display: none !important; }
+.es-page-host { overflow: hidden; min-width: 0; min-height: 0; }
+/* Desktop shell: the page takes the chat's place (content + composer rows), never the sidebar column. */
+.desktop-window .desktop-single-workspace > .es-page-host { grid-column: 2; grid-row: 1 / 3; display: block !important; background: #070707; }
+.es-page-actions { display: flex; align-items: center; gap: 8px; }
+.es-page-close { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--es-line-2); border-radius: 10px; background: transparent; color: var(--es-dim); cursor: pointer; }
+.es-page-close:hover { color: var(--es-text); background: var(--es-glass); }
+.es-page-close:focus-visible { outline: 2px solid var(--es-focus); outline-offset: 2px; }
 .es-page { height: 100%; overflow-y: auto; padding: 28px clamp(16px, 4vw, 48px) 40px; color: var(--es-text); font-family: var(--es-font); }
 .es-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; max-width: 920px; margin: 0 auto 20px; }
 .es-page-head h1 { margin: 0; font: 650 22px/1.2 var(--es-font); letter-spacing: -0.01em; }

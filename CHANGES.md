@@ -1,5 +1,19 @@
 # Changes
 
+## v10.0.2 — 2026-10-03
+
+User-facing notes: `docs/releases/v10.0.2.md`.
+
+- **Desktop layout fix.** The sidebar pages were auto-placed into the sidebar column of the desktop grid. They now
+  take the chat's place (content and composer rows), with a close button and Esc.
+- **Right side panel** (`widgets/RightPanel.tsx`):
+  - Artifact and Activity tabs. Activity lists terminal commands with output, file edits and searches, with filters.
+  - Full height, resizable (drag, arrow keys, double-click to reset), width remembered.
+  - The chat keeps at least 460px; dragging accounts for the shell's zoom.
+- **Score cards:** ESPN logos, records, abbreviations, a LIVE badge, local start times, venue and line.
+- **First-run sidebar:** sizes are fitted to the content until the user changes them (`fitLayout`). Storage is now v3.
+- **Research:** `docs/research/tools-and-mcp.md`.
+
 ## v10.0.1 — 2026-10-03
 
 User-facing notes: `docs/releases/v10.0.1.md`. Research and design: `docs/research/visual-responses.md`.

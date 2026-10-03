@@ -132,25 +132,54 @@ export function CitationChips({ data }: { data: CitationsData }) {
   );
 }
 
+function startLabel(iso?: string, fallback?: string): string {
+  if (!iso) return fallback || "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return fallback || iso;
+  const today = new Date();
+  const sameDay = d.toDateString() === today.toDateString();
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  return sameDay ? `Today ${time}` : `${d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}, ${time}`;
+}
+
+function TeamLine({ name, abbr, logo, record, score, win, dim }: { name: string; abbr?: string; logo?: string; record?: string; score?: number | null; win: boolean; dim: boolean }) {
+  return (
+    <div className={`wg-team${win ? " is-win" : ""}${dim ? " is-dim" : ""}`}>
+      <span className="wg-team-logo">{logo ? <RemoteImage src={logo} alt="" fit="contain" /> : <span className="wg-team-initial">{(abbr || name).slice(0, 3)}</span>}</span>
+      <span className="wg-team-name">
+        <strong title={name}>{name}</strong>
+        {record ? <small>{record}</small> : null}
+      </span>
+      <b className="wg-team-score">{score ?? ""}</b>
+    </div>
+  );
+}
+
 export function ScoreCard({ data }: { data: ScoreData }) {
   return (
     <section className="wg wg-scores" aria-label={data.title || "Scores"}>
       {data.title ? <header className="wg-head"><figcaption>{data.title}</figcaption></header> : null}
       <div className="wg-score-list">
         {data.games.map((g, i) => {
-          const final = g.home_score != null && g.away_score != null;
-          const awayWins = final && (g.away_score as number) > (g.home_score as number);
-          const homeWins = final && (g.home_score as number) > (g.away_score as number);
+          const final = g.state === "post" || (!g.state && g.home_score != null && g.away_score != null && /final|ft/i.test(g.status || ""));
+          const live = g.state === "in";
+          const played = g.home_score != null && g.away_score != null;
+          const awayWins = final && played && (g.away_score as number) > (g.home_score as number);
+          const homeWins = final && played && (g.home_score as number) > (g.away_score as number);
           return (
-            <div key={i} className="wg-score">
-              <div className={`wg-score-team${awayWins ? " is-win" : ""}`}><span>{g.away}</span><b>{g.away_score ?? ""}</b></div>
-              <div className={`wg-score-team${homeWins ? " is-win" : ""}`}><span>{g.home}</span><b>{g.home_score ?? ""}</b></div>
-              <small>{[g.league, g.status || g.start].filter(Boolean).join(" · ")}</small>
-            </div>
+            <article key={i} className={`wg-game${live ? " is-live" : ""}`}>
+              <header className="wg-game-head">
+                <span>{g.league}</span>
+                {live ? <em className="wg-live"><i aria-hidden />LIVE · {g.status}</em> : final ? <em>{g.status || "Final"}</em> : <em>{startLabel(g.start, g.status)}</em>}
+              </header>
+              <TeamLine name={g.away} abbr={g.away_abbr} logo={g.away_logo} record={g.away_record} score={played && g.state !== "pre" ? g.away_score : null} win={awayWins} dim={homeWins} />
+              <TeamLine name={g.home} abbr={g.home_abbr} logo={g.home_logo} record={g.home_record} score={played && g.state !== "pre" ? g.home_score : null} win={homeWins} dim={awayWins} />
+              {g.venue || g.line ? <footer className="wg-game-foot">{[g.venue, g.line ? `Line ${g.line}` : ""].filter(Boolean).join(" · ")}</footer> : null}
+            </article>
           );
         })}
       </div>
-      {data.as_of ? <footer className="wg-foot">As of {data.as_of}</footer> : null}
+      {data.as_of ? <footer className="wg-foot">ESPN · as of {data.as_of}</footer> : null}
     </section>
   );
 }
