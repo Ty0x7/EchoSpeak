@@ -621,8 +621,7 @@ export function Home() {
         <div className="snap"><BuildPanel /></div>
         <div className="snap"><AnswerCards /></div>
         <div className="snap"><Team /></div>
-        <div className="snap"><ModelsPanel /></div>
-        <div className="snap snap-last"><BringHome /><SiteFooter /></div>
+        <div className="snap snap-last"><div className="last-pair"><ModelsPanel /><BringHome /></div><SiteFooter /></div>
       </main>
     </div>
   );
