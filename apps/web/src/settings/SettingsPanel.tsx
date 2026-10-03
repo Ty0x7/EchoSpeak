@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentAvatar } from "../lean/LeanMessage";
 import type { LeanPersona } from "../lean/types";
 import {
@@ -396,15 +396,31 @@ const LOCAL_PROVIDERS = [
   { value: "vllm", label: "vLLM" },
 ];
 
+const LOCAL_DEFAULT_URLS: Record<string, string> = {
+  lmstudio: "http://localhost:1234",
+  ollama: "http://localhost:11434",
+  localai: "http://localhost:8080",
+  vllm: "http://localhost:8000",
+};
+
+type DetectRow = { provider: string; base_url: string; running: boolean; models: string[] };
+
 function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBase: string }) {
   const local = s.local || {};
   const useLocal = asBool(s.use_local_models);
   const provider = useLocal ? String(local.provider || "lmstudio") : String(s.default_cloud_provider || "openai");
-  const [models, setModels] = useState<string[]>([]);
+  const providerLabel = LOCAL_PROVIDERS.find((p) => p.value === provider)?.label || provider;
+  const [models, setModels] = useState<string[] | null>(null);
+  const [detected, setDetected] = useState<DetectRow[] | null>(null);
+  const [detecting, setDetecting] = useState(false);
   const [test, setTest] = useState<{ busy: boolean; ok?: boolean; message?: string }>({ busy: false });
+  const [reloadKey, setReloadKey] = useState(0);
+  // Once the user picks an app themselves, never switch it for them.
+  const userPicked = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    setModels(null);
     fetch(`${apiBase}/provider/models?provider=${encodeURIComponent(provider)}`)
       .then((r) => (r.ok ? r.json() : { models: [] }))
       .then((d) => !cancelled && setModels(Array.isArray(d.models) ? d.models.map(String).filter((m: string) => !m.includes("embed")) : []))
@@ -412,7 +428,51 @@ function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBa
     return () => {
       cancelled = true;
     };
-  }, [apiBase, provider]);
+  }, [apiBase, provider, local.base_url, reloadKey]);
+
+  // A model that this app doesn't have can't work: pick the first one it does have.
+  useEffect(() => {
+    if (!useLocal || !models || !models.length) return;
+    if (!models.includes(String(local.model_name || ""))) void save({ local: { model_name: models[0] } });
+  }, [models, useLocal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const detect = async () => {
+    setDetecting(true);
+    try {
+      const resp = await fetch(`${apiBase}/provider/detect`);
+      const data = resp.ok ? await resp.json() : { providers: [] };
+      setDetected(Array.isArray(data.providers) ? data.providers : []);
+    } catch {
+      setDetected([]);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  // Look for running apps whenever this page opens on local models.
+  useEffect(() => {
+    if (useLocal) void detect();
+  }, [useLocal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const running = (detected || []).filter((row) => row.running);
+
+  // The chosen app isn't answering but another one is running: use that one.
+  useEffect(() => {
+    if (userPicked.current || !useLocal || !detected || models === null || models.length) return;
+    const other = detected.find((row) => row.running && row.provider !== provider);
+    if (other) void useDetected(other);
+  }, [detected, models, useLocal, provider]); // eslint-disable-line react-hooks/exhaustive-deps
+  const useDetected = (row: DetectRow) =>
+    save({ use_local_models: true, local: { provider: row.provider, base_url: row.base_url, model_name: row.models[0] || "" } });
+
+  const pickApp = (value: string) => {
+    userPicked.current = true;
+    // Switching apps moves to that app's address, unless a custom address was typed.
+    const current = String(local.base_url || "").trim();
+    const isStock = !current || Object.values(LOCAL_DEFAULT_URLS).some((u) => current.replace(/\/v1\/?$/, "").replace("127.0.0.1", "localhost") === u);
+    const row = running.find((r) => r.provider === value);
+    void save({ local: { provider: value, ...(isStock ? { base_url: LOCAL_DEFAULT_URLS[value] || current } : {}), model_name: row?.models[0] || "" } });
+  };
 
   const runTest = async () => {
     setTest({ busy: true });
@@ -445,18 +505,50 @@ function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBa
         </Row>
       </Group>
       {useLocal ? (
-        <Group title="Local model" description="The default for new chats. You can still switch models per chat from the composer.">
+        <Group title="Local model" description="The default for chats. You can still switch models per chat from the composer.">
+          <Row
+            label="Running on this PC"
+            help={
+              detecting
+                ? "Looking for LM Studio, Ollama and others…"
+                : detected === null
+                  ? "Checks the usual ports for local model apps."
+                  : running.length
+                    ? running.map((r) => `${LOCAL_PROVIDERS.find((p) => p.value === r.provider)?.label || r.provider} (${r.models.length} model${r.models.length === 1 ? "" : "s"})`).join(" · ")
+                    : <span className="st-err">Nothing found. Open LM Studio, load a model and turn on its local server (Developer tab), then check again.</span>
+            }
+          >
+            <div style={{ display: "flex", gap: 6 }}>
+              {running.length && running[0].provider !== provider ? (
+                <button type="button" className="es-btn es-btn-sm" onClick={() => void useDetected(running[0])}>
+                  Use {LOCAL_PROVIDERS.find((p) => p.value === running[0].provider)?.label || running[0].provider}
+                </button>
+              ) : null}
+              <button type="button" className="es-btn es-btn-sm" disabled={detecting} onClick={() => { void detect(); setReloadKey((k) => k + 1); }}>
+                {detecting ? "Checking…" : "Check again"}
+              </button>
+            </div>
+          </Row>
           <Row label="App">
-            <Select value={provider} options={LOCAL_PROVIDERS} onChange={(v) => save({ local: { provider: v } })} />
+            <Select value={provider} options={LOCAL_PROVIDERS} onChange={pickApp} />
           </Row>
-          <Row label="Server address" help="Where the app's API is listening.">
-            <TextField mono value={local.base_url || ""} placeholder="http://localhost:1234" onCommit={(v) => save({ local: { base_url: v } })} />
+          <Row label="Server address" help={`Where ${providerLabel}'s server listens. Usually ${LOCAL_DEFAULT_URLS[provider] || "set by the app"}.`}>
+            <TextField mono value={local.base_url || ""} placeholder={LOCAL_DEFAULT_URLS[provider] || "http://localhost:1234"} onCommit={(v) => save({ local: { base_url: v } })} />
           </Row>
-          <Row label="Default model">
+          <Row
+            label="Default model"
+            help={
+              models === null
+                ? "Loading models…"
+                : models.length
+                  ? undefined
+                  : <span className="st-err">{providerLabel} isn't answering at {local.base_url || LOCAL_DEFAULT_URLS[provider]}. Start its server and load a model.</span>
+            }
+          >
             <Select
               wide
               value={String(local.model_name || "")}
-              options={models.map((m) => ({ value: m, label: m }))}
+              options={(models || []).map((m) => ({ value: m, label: m }))}
               onChange={(v) => save({ local: { model_name: v } })}
             />
           </Row>
@@ -1158,7 +1250,7 @@ function AboutSection({ apiBase, openAdvanced, reload }: { apiBase: string; open
     <>
       <Group>
         <Row label="EchoSpeak" help="Local-first agents. Your data stays on this PC.">
-          <span className="st-muted is-mono">{String(import.meta.env.VITE_APP_VERSION || "10.0.2")}</span>
+          <span className="st-muted is-mono">{String(import.meta.env.VITE_APP_VERSION || "10.0.3")}</span>
         </Row>
         {isDesktopRuntime() ? <UpdateRow /> : null}
         <Row label="Agent runtime" help={status ? `Lean loop · up to ${status.max_iterations} steps · ${Math.round((status.context_tokens || 0) / 1000)}k context` : "…"}>

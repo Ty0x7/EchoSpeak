@@ -1,5 +1,24 @@
 # Changes
 
+## v10.0.3 — 2026-10-03
+
+User-facing notes: `docs/releases/v10.0.3.md`.
+
+- **First-run local model setup** (`api/server.py` `_autoconfigure_local_provider`, `agent/model_runtime.py`
+  `detect_local_providers`): probes LM Studio, Ollama, LocalAI and vLLM on their stock ports at startup and on
+  `/provider` until a choice exists; picks the first running app and its first chat model. `GET /provider/detect`.
+- **Ports follow the provider:** `resolve_local_provider_base_url` treats every spelling of a stock address
+  (`127.0.0.1`, trailing `/v1`) as a default; Settings app changes move a stock address to the new app's port.
+- **Composer picker:** a provider change clears model and address, waits for that provider's model list, never sends
+  the old address, ignores late responses for a provider already left, and shows `providerError` (it was never
+  rendered). `/provider/switch` ignores a stale stock `base_url` instead of returning 409.
+- **Settings ↔ chat:** `_apply_settings_patch` moves Sessions still on the old default to the new one
+  (`StateStore.retarget_default_bindings`); the picker refreshes on `echospeak:settings-saved`, and loads the
+  provider even before the first chat exists.
+- **Defaults:** `LocalModelConfig` defaults to LM Studio at `localhost:1234` with an empty model name; an empty or
+  `default` model resolves to the app's first loaded model (`first_local_model`).
+- Tests: `tests/test_local_provider_setup.py`.
+
 ## v10.0.2 — 2026-10-03
 
 User-facing notes: `docs/releases/v10.0.2.md`.

@@ -251,10 +251,121 @@ def resolve_local_provider_base_url(
     resolved = provider if isinstance(provider, ModelProvider) else ModelProvider(str(provider))
     configured = str(configured_base_url or "").strip().rstrip("/")
     selected_default = _LOCAL_PROVIDER_DEFAULT_URLS.get(resolved, "")
-    known_defaults = {url.rstrip("/") for url in _LOCAL_PROVIDER_DEFAULT_URLS.values()}
-    if not configured or configured in known_defaults:
+    if not configured or is_known_local_default_url(configured):
         return selected_default or configured
     return configured
+
+
+def _endpoint_key(url: str) -> str:
+    """Compare endpoints by port and path, ignoring localhost spelling and a trailing /v1."""
+
+    from urllib.parse import urlsplit
+
+    text = str(url or "").strip().rstrip("/")
+    if not text:
+        return ""
+    if "://" not in text:
+        text = f"http://{text}"
+    parts = urlsplit(text)
+    host = (parts.hostname or "").lower()
+    if host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}:
+        host = "localhost"
+    path = parts.path.rstrip("/")
+    if path.endswith("/v1"):
+        path = path[: -len("/v1")]
+    return f"{host}:{parts.port or ''}{path}"
+
+
+def is_known_local_default_url(url: str) -> bool:
+    """True when ``url`` is just some local provider's stock address (not a custom one)."""
+
+    key = _endpoint_key(url)
+    return bool(key) and key in {_endpoint_key(u) for u in _LOCAL_PROVIDER_DEFAULT_URLS.values()}
+
+
+def local_provider_default_url(provider: ModelProvider | str) -> str:
+    try:
+        resolved = provider if isinstance(provider, ModelProvider) else ModelProvider(str(provider))
+    except ValueError:
+        return ""
+    return _LOCAL_PROVIDER_DEFAULT_URLS.get(resolved, "")
+
+
+def _is_chat_model(model_id: str) -> bool:
+    low = model_id.lower()
+    return not any(tag in low for tag in ("embed", "embedding", "rerank", "whisper", "tts"))
+
+
+def list_local_models(provider: ModelProvider | str, base_url: str = "", timeout: float = 2.5) -> list[str]:
+    """Chat models a local server currently offers ([] when it is not reachable)."""
+
+    import json as _json
+    from urllib.request import Request as _Request, urlopen as _urlopen
+
+    try:
+        resolved = provider if isinstance(provider, ModelProvider) else ModelProvider(str(provider))
+    except ValueError:
+        return []
+    base = resolve_local_provider_base_url(resolved, base_url).rstrip("/")
+    if not base:
+        return []
+    if resolved == ModelProvider.OLLAMA:
+        url = f"{base[:-3] if base.endswith('/v1') else base}/api/tags"
+    else:
+        url = f"{base}/models" if base.endswith("/v1") else f"{base}/v1/models"
+    try:
+        with _urlopen(_Request(url, headers={"Accept": "application/json"}), timeout=timeout) as resp:
+            raw = resp.read(512_001)
+        if len(raw) > 512_000:
+            return []
+        payload = _json.loads(raw.decode("utf-8") or "{}")
+    except Exception:
+        return []
+    rows = payload.get("models") if resolved == ModelProvider.OLLAMA else payload.get("data")
+    names: list[str] = []
+    for item in rows if isinstance(rows, list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("id") or item.get("name") or item.get("model") or "").strip()
+        if name and _is_chat_model(name) and name not in names:
+            names.append(name)
+    return names
+
+
+def detect_local_providers(timeout: float = 1.2) -> list[dict[str, Any]]:
+    """Probe every local app on its stock port at once. LM Studio first, then Ollama."""
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    order = [ModelProvider.LM_STUDIO, ModelProvider.OLLAMA, ModelProvider.LOCALAI, ModelProvider.VLLM]
+    with ThreadPoolExecutor(max_workers=len(order)) as pool:
+        results = list(pool.map(lambda p: (p, list_local_models(p, "", timeout)), order))
+    found: list[dict[str, Any]] = []
+    for provider, models in results:
+        found.append({
+            "provider": provider.value,
+            "base_url": _LOCAL_PROVIDER_DEFAULT_URLS[provider],
+            "running": bool(models),
+            "models": models,
+        })
+    return found
+
+
+_FIRST_MODEL_CACHE: dict[str, tuple[float, str]] = {}
+
+
+def first_local_model(provider: ModelProvider | str, base_url: str = "") -> str:
+    """The first loaded chat model, cached for a few seconds. Used when no model is chosen yet."""
+
+    key = f"{provider}|{base_url}"
+    hit = _FIRST_MODEL_CACHE.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < 10:
+        return hit[1]
+    models = list_local_models(provider, base_url)
+    model = models[0] if models else ""
+    _FIRST_MODEL_CACHE[key] = (now, model)
+    return model
 
 
 def list_available_providers() -> list[dict[str, Any]]:

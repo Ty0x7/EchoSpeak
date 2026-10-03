@@ -46,6 +46,8 @@ export function useSettings(apiBase: string) {
         }
         const data = await resp.json();
         setSettings(data.settings || {});
+        // The chat's model picker listens so a new default shows up there too.
+        window.dispatchEvent(new CustomEvent("echospeak:settings-saved", { detail: patch }));
         setSaveState("saved");
         window.clearTimeout(savedTimer.current);
         savedTimer.current = window.setTimeout(() => setSaveState("idle"), 1800);
