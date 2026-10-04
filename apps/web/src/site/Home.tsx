@@ -4,7 +4,7 @@ import { EchoFace, echoFaceStyles } from "../components/EchoFace";
 import { ChartView } from "../widgets/Chart";
 import { WeatherCard } from "../widgets/Weather";
 import "../widgets/widgets.css";
-import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
+import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, useScrollTo, type IconName } from "./Chrome";
 import { GITHUB_URL, useLatestRelease } from "./release";
 import "./site.css";
 
@@ -45,9 +45,11 @@ function Reveal({ children, className = "", as: Tag = "div", id, anim = "up", de
 // ── Hero ─────────────────────────────────────────────────────────────
 
 function Hero() {
+  const scrollTo = useScrollTo();
   return (
     <section className="hero shell">
       <div className="hero-copy">
+        <p className="hero-eyebrow"><span aria-hidden="true" /> A little personality. A lot of possibility.</p>
         <h1>Meet <span className="hl">Echo</span>, the AI that lives on your computer.</h1>
         <p className="hero-lede">Ask anything, get answers you can see, and let Echo and his team actually do the work. Your data stays with you.</p>
         <div className="hero-actions">
@@ -60,7 +62,13 @@ function Hero() {
           <li><Icon name="model" size={15} /> Local or cloud models</li>
         </ul>
       </div>
-      <div className="hero-face"><EchoFace size="clamp(180px, 24vw, 300px)" /></div>
+      <div className="hero-face">
+        <div className="hero-orbit" aria-hidden="true" />
+        <div className="hero-character"><EchoFace size="clamp(180px, 24vw, 300px)" /></div>
+      </div>
+      <button className="hero-explore" type="button" onClick={() => scrollTo("about")}>
+        Meet your new teammate <Icon name="arrow" size={16} />
+      </button>
     </section>
   );
 }
