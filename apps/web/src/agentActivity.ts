@@ -1,6 +1,6 @@
 /**
  * Shared agent activity state machine for chat + avatar.
- * Derive phase only from real stream signals — see docs/UI_AGENT_STATE_MAP.md.
+ * Derive phase only from real stream signals (the lean event stream).
  */
 
 export type AgentPhase =

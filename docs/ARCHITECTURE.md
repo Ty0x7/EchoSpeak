@@ -1,9 +1,8 @@
 # EchoSpeak architecture
 
-How EchoSpeak 10.0 works (2026-10-02, branch `echospeak-8.0`). This file is the
-source of truth for the website's "How it works" diagram and copy
-(`apps/web/src/marketing.tsx`). Older design documents in `docs/` and the root
-`ARCHITECTURE.md` describe earlier runtimes and are kept for history.
+How EchoSpeak works today (10.2). For setup and day-to-day use see [GUIDE.md](GUIDE.md);
+for what's next see [ROADMAP.md](ROADMAP.md). Older design documents are in
+[archive/](archive/) and describe runtimes that no longer exist.
 
 ## 1. System overview
 
@@ -17,7 +16,7 @@ flowchart LR
     end
     UI["Web UI (React + Vite)<br/>apps/web/src"]
     subgraph Backend["Local backend (Python, FastAPI)<br/>apps/backend"]
-      API["api/server.py<br/>/query/stream · /lean/* · /media-runtime/*"]
+      API["api/server.py + api/routes/*<br/>/query/stream · /lean/* · /media-runtime/*"]
       Lean["Lean runtime<br/>agent/lean/"]
       Tools["Tools<br/>files · terminal · web · memory · MCP"]
       Voice["Voice runtime<br/>agent/voice_runtime.py"]
@@ -46,7 +45,7 @@ flowchart LR
 
 - **Desktop shell.** `apps/desktop/src-tauri` is a Tauri 2 app with three windows: main, settings and companion. On launch, `backend.rs` reserves a free loopback port and generates a per-launch session key. It then starts the bundled backend (`backend-dist/echospeak-backend.exe`, a one-folder PyInstaller build) with `CREATE_NO_WINDOW`. It polls `/health`, then `/startup/readiness`, and only then shows the window. The backend is given the app's process id and exits when the app does.
 - **Web UI.** `apps/web` is a single React app. In the desktop window it runs as `DesktopApp`; in a browser it runs at `/app` (the website lives at `/`). Both use the same `Dashboard` (`apps/web/src/index.tsx`) and the lean chat components in `apps/web/src/lean/`.
-- **Backend.** `apps/desktop/backend/echospeak_backend.py` is the packaged entry and `apps/backend/app.py --mode api` is the dev entry. Both serve `api/server.py`. The lean runtime is the only runtime: every source (app, voice, Discord, Telegram, routines) goes through `EchoSpeakAgent.process_query` → `run_lean_query`. `agent/core.py` (7k lines) now only builds the agent: tools, memory, model client.
+- **Backend.** `apps/desktop/backend/echospeak_backend.py` is the packaged entry and `apps/backend/app.py --mode api` is the dev entry. Both serve `api/server.py`, which holds the app, lifespan and middleware and includes one router per area from `api/routes/`. The lean runtime is the only runtime: every source (app, voice, Discord, Telegram, routines) goes through `EchoSpeakAgent.process_query` → `run_lean_query`. `agent/core.py` (~1k lines) is the app object: model client, memory, soul, skill workspace, Project scope and the doctor report.
 - **Updates.** `src-tauri/src/updates.rs` reads `latest.json` from the newest GitHub release (`tauri-plugin-updater`), verifies the installer's signature against the public key in `tauri.conf.json`, stops the backend, and runs the installer, which restarts the app. `apps/desktop/scripts/release-windows.ps1` produces the signed installer and `latest.json`.
 - **Models.** Every agent turn calls an OpenAI-compatible `/chat/completions` endpoint (`agent/lean/provider.py`). That's a local server or a cloud API, and each persona can name its own provider and model.
 
@@ -215,7 +214,7 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  Mic["Mic button / voice mode<br/>voiceTransport.ts (Web Audio capture)"] -- "WAV, base64" --> STT["POST /media-runtime/voice/transcribe<br/>api/media_runtime.py"]
+  Mic["Mic button / voice mode<br/>voiceTransport.ts (Web Audio capture)"] -- "WAV, base64" --> STT["POST /media-runtime/voice/transcribe<br/>api/routes/media_runtime.py"]
   STT --> Pick{"voice_runtime.py<br/>provider status"}
   Pick -- configured --> FW["faster-whisper (local)"]
   Pick -- configured --> WC["whisper.cpp (local)"]
@@ -262,27 +261,22 @@ Reloading a chat calls the Session timeline (`StateStore.session_timeline`). Eac
 | `apps/desktop/src-tauri/src/` | Window shell (`lib.rs`), backend supervisor (`backend.rs`), updates (`updates.rs`), window state, single instance |
 | `apps/desktop/backend/` | Packaged backend entry, PyInstaller spec, `--self-check` |
 | `apps/desktop/scripts/` | `build-sidecar.ps1` (backend bundle + self-check), `build-windows.ps1` (full installer), `setup-updater-key.ps1` (signing key, once), `release-windows.ps1` (signed release + `latest.json`, optional GitHub publish) |
-| `apps/backend/api/` | FastAPI app (`server.py`), lean routes (`lean_routes.py`), voice/media routes (`media_runtime.py`) |
+| `apps/backend/api/` | `server.py` (app, lifespan, middleware), `deps.py` (agent pool, model binding, stream runner), `auth.py` (loopback, API key, host and origin checks), `routes/` (chat, sessions, projects, memory, settings, capabilities, channels, gateway, system, lean, media, media_runtime) |
 | `apps/backend/agent/lean/` | **The agent runtime:** loop, session/routing/fan-out, provider client, toolbox, approvals, prompt, personas, rooms, coding tools, terminal, automations, settings |
 | `apps/backend/agent/state.py` | Durable turns, items, tool runs; Session timeline projection |
 | `apps/backend/agent/tools.py`, `tool_registry.py` | Registered tools (web search, files, desktop, integrations) used by toolsets |
 | `apps/backend/agent/memory.py` | Long-term memory (FAISS) |
 | `apps/backend/agent/voice_runtime.py`, `voice_setup.py` | Voice provider detection and selection; guided Whisper download and the wake check |
 | `apps/backend/scripts/eval_gemma.py` | The 20-prompt evaluation against a live backend and model |
-| `apps/backend/agent/core.py` | `EchoSpeakAgent`: builds tools, memory and the model client; `process_query` is the one entry for every channel and hands the turn to the lean runtime |
+| `apps/backend/agent/core.py` | `EchoSpeakAgent`: model client, memory, soul, workspace and Project scope; `process_query` is the one entry for every channel and hands the turn to the lean runtime |
 | `apps/web/src/index.tsx` | Dashboard: chat, composer, history load, streaming glue |
 | `apps/web/src/app/` | Split out of `index.tsx`: shared types, tool display helpers, fetch helpers and store, global CSS, chat bubble and activity cards |
 | `apps/web/src/lean/` | Agent messages, live reducer, status pill, mention menu, roster, dialogs, styles |
 | `apps/web/src/components/` | Sidebar (`ProjectSidebar.tsx` + `sidebarSections.ts`), Echo face, avatar |
 | `apps/web/src/settings/` | Settings app |
-| `apps/web/src/marketing.tsx` | Website |
-| `docs/research/`, `docs/audit/` | Research reports and the cleanup report |
+| `apps/web/src/site/` | Website |
+| `docs/` | `GUIDE.md`, `ARCHITECTURE.md`, `ROADMAP.md`, release notes, research reports, and the archive |
 
 ## 8. What to work on next
 
-The 10.0 roadmap is done: legacy runtime retired, SQLite store with chat search, summaries instead of trimming, the evaluation set, honest step limit, `index.tsx` split (first pass), voice setup and wake word, one projects folder, discussion mode, sandbox by default, and in-app updates. The backend test suite is green. Next, in priority order:
-
-1. **Shrink the backend bundle.** With the legacy pipeline gone, audit what still pulls `torch`/`transformers` into the 1.1 GB sidecar (embeddings, document retrieval) and make those optional downloads like the voice models. **M, high.**
-2. **Split `Dashboard`.** `index.tsx` is still one ~4.4k-line component (the classic settings window is gone). Move its state into hooks (session/history, streaming, voice, settings) and the JSX into chat, composer and sidebar components. **M–L, medium.**
-3. **Run the evaluation before every release.** `scripts/eval_gemma.py` needs a live model, so run it on a self-hosted runner or from the release script. **S, medium.**
-4. **Build releases on GitHub Actions.** The release script runs locally today; a tagged workflow on `windows-latest` with the signing key as a secret would make a release one `git tag` away. **M, medium.**
+See [ROADMAP.md](ROADMAP.md).

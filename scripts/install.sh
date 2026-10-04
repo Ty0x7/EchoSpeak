@@ -9,8 +9,7 @@
 # 1. Checks prerequisites (Python 3.11+, Node.js 18+)
 # 2. Creates virtual environment
 # 3. Installs dependencies
-# 4. Runs the onboarding wizard
-# 5. Starts EchoSpeak
+# 4. Creates a start script (setup happens in the app on first run)
 
 set -e
 
@@ -182,24 +181,6 @@ main() {
     
     cd "$INSTALL_DIR"
     
-    # echospeak command
-    cat > echospeak << 'EOF'
-#!/bin/bash
-cd "$(dirname "$0")/apps/backend"
-source .venv/bin/activate 2>/dev/null || source .venv/Scripts/activate 2>/dev/null
-if command -v node >/dev/null 2>&1; then
-  cd "$(dirname "$0")/apps/onboard-tui" || exit 1
-  if [ ! -d "node_modules" ]; then
-    npm install
-  fi
-  npm run -s start
-else
-  echo "Error: Node.js is required for onboarding. Install Node.js 18+ and try again."
-  exit 1
-fi
-EOF
-    chmod +x echospeak
-    
     # start command
     cat > start << 'EOF'
 #!/bin/bash
@@ -226,30 +207,12 @@ EOF
     echo -e "${GREEN}│${NC}                                                             ${GREEN}│${NC}"
     echo -e "${GREEN}│${NC}   Next steps:                                                ${GREEN}│${NC}"
     echo -e "${GREEN}│${NC}                                                             ${GREEN}│${NC}"
-    echo -e "${GREEN}│${NC}   1. Run the setup wizard:                                   ${GREEN}│${NC}"
-    echo -e "${GREEN}│${NC}      $INSTALL_DIR/echospeak onboard          ${GREEN}│${NC}"
-    echo -e "${GREEN}│${NC}                                                             ${GREEN}│${NC}"
-    echo -e "${GREEN}│${NC}   2. Or start directly:                                      ${GREEN}│${NC}"
+    echo -e "${GREEN}│${NC}   Start it:                                                  ${GREEN}│${NC}"
     echo -e "${GREEN}│${NC}      $INSTALL_DIR/start                      ${GREEN}│${NC}"
+    echo -e "${GREEN}│${NC}   then open http://localhost:5174/app and follow the setup. ${GREEN}│${NC}"
     echo -e "${GREEN}│${NC}                                                             ${GREEN}│${NC}"
     echo -e "${GREEN}╰─────────────────────────────────────────────────────────────╯${NC}"
     echo ""
-
-    # Run wizard?
-    read -p "Run setup wizard now? [Y/n] " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
-        if command_exists node; then
-            cd "$INSTALL_DIR/apps/onboard-tui"
-            if [ ! -d "node_modules" ]; then
-                npm install
-            fi
-            npm run -s start
-        else
-            print_warning "Node.js not found. Cannot run onboarding wizard."
-            echo "  Install Node.js 18+ to use the setup wizard."
-        fi
-    fi
 }
 
 # Run main
