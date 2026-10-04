@@ -49,7 +49,9 @@ for distribution in (
 hiddenimports = (
     collect_submodules("agent")
     + collect_submodules("api")
-    + collect_submodules("mcp")
+    # MCP's optional CLI exits during import without its CLI extras installed.
+    # EchoSpeak uses the SDK, so avoid scanning or bundling the CLI package.
+    + collect_submodules("mcp", filter=lambda name: name != "mcp.cli" and not name.startswith("mcp.cli."))
     + ["onnxruntime", "tokenizers"]
 )
 
@@ -64,7 +66,7 @@ a = Analysis(
     runtime_hooks=[],
     # PyTorch is not used: embeddings run on onnxruntime. Excluding it keeps a dev
     # venv that happens to have torch installed from adding ~1 GB to the bundle.
-    excludes=["pytest", "torch", "torchvision", "torchaudio", "transformers", "sentence_transformers"],
+    excludes=["pytest", "mcp.cli", "torch", "torchvision", "torchaudio", "transformers", "sentence_transformers"],
     noarchive=False,
     optimize=1,
 )
