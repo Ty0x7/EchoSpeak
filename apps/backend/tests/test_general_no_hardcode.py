@@ -176,38 +176,6 @@ def test_weather_place_structural_not_city_list():
     assert "weather" in bare.lower()
 
 
-def test_active_work_store_disk_roundtrip():
-    """ActiveWorkStore is the continuity layer independent of agent instance."""
-    import tempfile
-    from pathlib import Path
-    from agent.active_work import ActiveWorkState, ActiveWorkStore, next_step_for_phase
-
-    root = Path(tempfile.mkdtemp())
-    store = ActiveWorkStore(root=root)
-    tid = "disk-roundtrip"
-    s = ActiveWorkState(
-        thread_id=tid,
-        kind="coding_project",
-        phase="ready",
-        project_path=r"C:\Users\me\Desktop\my-app",
-        project_name="my-app",
-        goal="open and understand my-app",
-        next_step=next_step_for_phase("ready", has_samples=True, goal="open and understand my-app"),
-        files_known=["main.py", "readme.md"],
-        listing="main.py\nreadme.md\n",
-        code_digest="### main.py\nprint('hi')\n",
-    )
-    store.save(s)
-    loaded = store.load(tid)
-    assert loaded.is_active()
-    assert loaded.project_path == s.project_path
-    assert "main.py" in loaded.files_known
-    block = store.context_block(tid)
-    assert "ACTIVE WORK" in block
-    assert "Do NOT re-list" in block
-    assert "my-app" in block
-
-
 def test_file_edit_resolves_desktop_project_not_echospeak_root():
     """index.html edit during shooter work must hit Desktop/2d-shooter-game, not EchoSpeak."""
     from pathlib import Path
@@ -225,23 +193,6 @@ def test_file_edit_resolves_desktop_project_not_echospeak_root():
     assert "2d-shooter-game" in str(p).replace("\\", "/")
     assert "echospeak" not in str(p).lower() or "2d-shooter" in str(p).lower()
     assert p.name == "index.html"
-
-
-def test_web_evidence_heuristics_accept_grounded_packet():
-    from agent.core import EchoSpeakAgent, WebEvidenceHeuristics
-    import tempfile
-
-    agent = EchoSpeakAgent(memory_path=tempfile.mkdtemp())
-    heuristics = WebEvidenceHeuristics(agent)
-    packet = (
-        "[GROUNDED_SEARCH] accepted=true query=FIFA World Cup matches today\n"
-        "France vs Morocco 4:00 PM ET\n"
-        "evidence ok"
-    )
-    assert heuristics._is_grounded_packet_acceptable(
-        "FIFA World Cup matches today",
-        packet,
-    )
 
 
 def test_search_query_quality_gate_rejects_fragments():

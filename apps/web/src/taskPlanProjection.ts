@@ -1,8 +1,8 @@
 /**
- * Read-only projection of the selected model's descriptive TaskRun plan.
+ * Read-only projection of the plan steps a turn reports while it runs.
  *
- * TaskRun requirements and its execution graph own progress and completion.
- * These rows exist only to provide a compact current-step label in Chat.
+ * The backend job board owns progress and completion. These rows exist only
+ * to provide a compact current-step label in Chat.
  */
 
 export type TaskPlanStepStatus =

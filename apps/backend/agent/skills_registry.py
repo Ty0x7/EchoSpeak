@@ -596,9 +596,6 @@ def load_skill_tools(skill_dir: Path) -> List[str]:
         return []
 
 
-_loaded_skill_plugin_modules: set[str] = set()
-
-
 class SkillsRegistry:
     """Canonical in-process registry of SkillManifest rows.
 
@@ -701,47 +698,4 @@ class SkillsRegistry:
         # Instance API for a2a.py compatibility
         self.refresh(skills_dir)
 
-
-def load_skill_plugin(skill_dir: Path) -> bool:
-    """Load a pipeline plugin from a skill's ``plugin.py`` file.
-
-    If ``<skill_dir>/plugin.py`` exists, it is dynamically imported.
-    The module should register plugins via ``PluginRegistry.register(MyPlugin())``.
-
-    Args:
-        skill_dir: Path to the skill directory.
-
-    Returns:
-        True if a plugin module was loaded, False otherwise.
-    """
-    plugin_file = skill_dir / "plugin.py"
-    if not plugin_file.exists():
-        return False
-    manifest = executable_package_manifest(skill_dir)
-    if manifest is None:
-        return False
-
-    module_key = str(plugin_file.resolve())
-    if module_key in _loaded_skill_plugin_modules:
-        logger.debug(f"Skill plugin already loaded: {skill_dir.name}")
-        return False
-
-    import importlib.util
-    try:
-        spec = importlib.util.spec_from_file_location(
-            f"skill_plugin_{skill_dir.name}",
-            str(plugin_file),
-        )
-        if spec is None or spec.loader is None:
-            logger.warning(f"Could not load spec for {plugin_file}")
-            return False
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        _loaded_skill_plugin_modules.add(module_key)
-        logger.info(f"Loaded pipeline plugin from skill '{skill_dir.name}'")
-        return True
-
-    except Exception as exc:
-        logger.warning(f"Failed to load skill plugin from {plugin_file}: {exc}")
-        return False
 

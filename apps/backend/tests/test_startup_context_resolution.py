@@ -34,7 +34,7 @@ def test_startup_readiness_reports_real_steps_without_provider_gate(monkeypatch,
     monkeypatch.setenv("ECHOSPEAK_DESKTOP_INSTANCE_ID", "instance-test")
     for name in (
         "_projects", "_sessions", "_active_scope", "_tools", "_skills", "_runtime_state",
-        "_memory", "_jobs", "_media", "_tasks", "_routines", "_heartbeat", "_schema",
+        "_memory", "_jobs", "_media", "_routines", "_heartbeat", "_schema",
     ):
         monkeypatch.setattr(readiness, name, lambda: {"detail": "Ready"})
     payload = readiness.build_startup_readiness()

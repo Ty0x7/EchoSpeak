@@ -148,7 +148,7 @@ def _memory() -> dict[str, Any]:
 
     from config import config
 
-    # Importing agent.memory pulls in torch/transformers (~17s). Readiness only
+    # Importing agent.memory pulls in langchain and FAISS (seconds). Readiness only
     # reports whether memory is loaded yet; the background warmup loads it.
     memory_module = sys.modules.get("agent.memory")
     if memory_module is None:
@@ -175,7 +175,7 @@ def _memory() -> dict[str, Any]:
 
 
 def _model() -> dict[str, Any]:
-    from api.server import _check_provider_readiness, _resolve_runtime_provider
+    from api.routes.settings import _check_provider_readiness, _resolve_runtime_provider
     from config import config
 
     provider = _resolve_runtime_provider()
@@ -191,14 +191,8 @@ def _model() -> dict[str, Any]:
 
 
 def _adapter() -> dict[str, Any]:
-    import sys
-
-    # The adapter modules chain into langchain/torch (~17s). This item is
-    # informational, so report it once the chat stack has loaded.
-    if "agent.model_adapters" not in sys.modules:
-        return {"detail": "Model adapter resolves on first use"}
     from agent.model_adapters import get_provider_adapter as get_model_adapter
-    from api.server import _resolve_runtime_provider
+    from api.routes.settings import _resolve_runtime_provider
     from config import config
 
     provider = _resolve_runtime_provider().value
@@ -248,7 +242,7 @@ def _embeddings() -> dict[str, Any]:
 
 
 def _document_retrieval() -> dict[str, Any]:
-    from api.server import get_existing_agent
+    from api.deps import get_existing_agent
     from config import config
 
     enabled = bool(getattr(config, "document_rag_enabled", False))
@@ -280,13 +274,6 @@ def _media() -> dict[str, Any]:
 
     store = get_media_library_store()
     return {"count": len(store.list(limit=10000)), "root": str(store.root), "detail": "Media catalog loaded"}
-
-
-def _tasks() -> dict[str, Any]:
-    from agent.task_store import get_task_store
-
-    store = get_task_store()
-    return {"count": len(store.list()), "root": str(store.path), "detail": "Tasks restored"}
 
 
 def _routines() -> dict[str, Any]:
@@ -346,7 +333,6 @@ def build_startup_readiness() -> dict[str, Any]:
         _component("runtime_state", "Restoring work", _runtime_state),
         _component("jobs", "Restoring jobs", _jobs),
         _component("media", "Loading Media", _media),
-        _component("tasks", "Restoring Tasks", _tasks),
         _component("routines", "Restoring Routines", _routines),
         _component("heartbeat", "Restoring Heartbeat", _heartbeat),
         _component("schema", "Checking data compatibility", _schema),

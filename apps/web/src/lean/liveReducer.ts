@@ -172,6 +172,7 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
             toolCallId: String(evt.tool_call_id || ""),
             tool: String(evt.tool || ""),
             summary: String(evt.summary || ""),
+            args: evt.args && typeof evt.args === "object" ? (evt.args as Record<string, unknown>) : undefined,
             reason: String(evt.reason || ""),
             decision: "",
           },

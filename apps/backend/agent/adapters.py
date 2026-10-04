@@ -12,12 +12,17 @@ from typing import Any, Optional
 from config import DiscordUserRole, config
 
 
+# The app itself (chat, voice), and work the owner set up (routines, heartbeat).
+OWNER_SOURCES = {"web", "voice", "twitter_autonomous", "proactive", "heartbeat", "routine", "system", "room"}
+
+
 class BaseAdapter:
     def resolve_role(self, source: Optional[str], discord_user_info: Optional[dict[str, Any]] = None) -> str:
         src = str(source or "web").strip().lower()
-        if src in {"twitter", "twitch"}:
+        if src in {"twitter", "twitch", "a2a"}:
+            # Other agents (A2A) and public social channels get look-up tools only.
             return DiscordUserRole.PUBLIC
-        if src in {"twitter_autonomous", "proactive", "heartbeat", "routine", "system", "web"}:
+        if src in OWNER_SOURCES:
             return DiscordUserRole.OWNER
 
         if src in {"discord_bot", "discord_bot_dm"}:
@@ -37,7 +42,8 @@ class BaseAdapter:
                 return DiscordUserRole.TRUSTED
             return DiscordUserRole.PUBLIC
 
-        return DiscordUserRole.OWNER
+        # Fail closed: a source nobody listed (a new integration, a typo) is a guest.
+        return DiscordUserRole.PUBLIC
 
     def preprocess_query(self, agent: Any, user_input: str, callbacks: Optional[list] = None):
         return None

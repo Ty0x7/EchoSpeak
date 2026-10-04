@@ -1,10 +1,12 @@
 from pathlib import Path
 import importlib.util
 
-from agent import git_changelog, heartbeat, security, task_store
+from agent import git_changelog, heartbeat, security
 from api import server
 from config import DATA_DIR
 import twitter_bot
+import api.auth as api_auth
+import api.routes.settings as settings_routes
 
 
 _ENTRY_PATH = Path(__file__).resolve().parents[2] / "desktop" / "backend" / "echospeak_backend.py"
@@ -16,7 +18,7 @@ _ENTRY_SPEC.loader.exec_module(desktop_entry)
 
 def test_desktop_websocket_subprotocol_extracts_ephemeral_key():
     headers = {"sec-websocket-protocol": "echospeak, echospeak-auth-launch-secret"}
-    assert server._extract_api_auth_key_from_headers(headers) == "launch-secret"
+    assert api_auth._extract_api_auth_key_from_headers(headers) == "launch-secret"
 
 
 def test_desktop_loopback_auth_is_required_when_bypass_is_disabled(monkeypatch):
@@ -24,16 +26,15 @@ def test_desktop_loopback_auth_is_required_when_bypass_is_disabled(monkeypatch):
     monkeypatch.setattr(server.config, "api_auth_localhost_bypass", False)
     monkeypatch.setattr(server.config, "api_auth_key", "launch-secret")
 
-    assert server._api_auth_required_for_host("127.0.0.1") is True
-    assert server._api_auth_ok({"x-echospeak-key": "launch-secret"}, "127.0.0.1") is True
-    assert server._api_auth_ok({"x-echospeak-key": "wrong"}, "127.0.0.1") is False
+    assert api_auth._api_auth_required_for_host("127.0.0.1") is True
+    assert api_auth._api_auth_ok({"x-echospeak-key": "launch-secret"}, "127.0.0.1") is True
+    assert api_auth._api_auth_ok({"x-echospeak-key": "wrong"}, "127.0.0.1") is False
 
 
 def test_desktop_mutable_state_uses_the_configured_data_root():
     root = Path(DATA_DIR).resolve()
     owned_paths = (
-        task_store.get_task_store().path,
-        server._AVATAR_CONFIG_FILE,
+        settings_routes._AVATAR_CONFIG_FILE,
         heartbeat._DATA_DIR,
         git_changelog._CHANGELOG_STATE_PATH,
         security.AUDIT_LOG_PATH,

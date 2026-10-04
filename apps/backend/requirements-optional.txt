@@ -1,0 +1,5 @@
+# Optional extras. None are needed for EchoSpeak to run.
+
+# Re-rank document search results with a cross-encoder (DOC_RERANK_ENABLED=true).
+# Pulls in PyTorch (~1 GB).
+sentence-transformers>=2.2.2

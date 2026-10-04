@@ -265,6 +265,9 @@ function MemoryPage({ apiBase, sessionId, projectId }: { apiBase: string; sessio
   const [error, setError] = useState("");
   const [docs, setDocs] = useState<{ enabled: boolean; items: any[] } | null>(null);
   const [docBusy, setDocBusy] = useState(false);
+  const [embeddingStatus, setEmbeddingStatus] = useState<{ runtime_available: boolean; installed: boolean; size_bytes: number } | null>(null);
+  const [embeddingBusy, setEmbeddingBusy] = useState(false);
+  const [embeddingRestart, setEmbeddingRestart] = useState(false);
   const [obsidian, setObsidian] = useState<{ plan: any; status: string; busy: boolean }>({ plan: null, status: "", busy: false });
 
   const load = useCallback(async () => {
@@ -292,6 +295,12 @@ function MemoryPage({ apiBase, sessionId, projectId }: { apiBase: string; sessio
       setDocs({ enabled: Boolean(data.enabled), items: Array.isArray(data.items) ? data.items : [] });
     } catch {
       setDocs({ enabled: false, items: [] });
+    }
+    try {
+      const response = await fetch(`${apiBase}/embeddings/local/status`);
+      if (response.ok) setEmbeddingStatus(await response.json());
+    } catch {
+      setEmbeddingStatus(null);
     }
   }, [apiBase, sessionId, projectId]);
 
@@ -330,6 +339,22 @@ function MemoryPage({ apiBase, sessionId, projectId }: { apiBase: string; sessio
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setDocBusy(false);
+    }
+  };
+
+  const installEmbeddings = async () => {
+    setEmbeddingBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`${apiBase}/embeddings/local/download`, { method: "POST" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(String(data?.detail || `Download failed (${response.status})`));
+      setEmbeddingStatus(data);
+      setEmbeddingRestart(Boolean(data.restart_required));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEmbeddingBusy(false);
     }
   };
 
@@ -388,6 +413,14 @@ function MemoryPage({ apiBase, sessionId, projectId }: { apiBase: string; sessio
             <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => void act(() => post(`${apiBase}/memory/delete`, { ids: [m.id], thread_id: sessionId, project_id: projectId }))}>Delete</button>
           </Row>
         ))}
+      </Group>
+
+      <Group title="Local search model" description="Optional ONNX model for private memory and document search. Model-server embeddings can be used instead.">
+        <Row label={<Status tone={embeddingStatus?.installed ? "ok" : "idle"}>{embeddingStatus?.installed ? "Installed" : "Not installed"}</Status>}
+          help={embeddingRestart ? "Restart EchoSpeak to use the newly installed model." : "About 90 MB; downloaded only when you choose Install."}>
+          {!embeddingStatus?.installed ? <button type="button" className="es-btn es-btn-sm" disabled={!embeddingStatus?.runtime_available || embeddingBusy}
+            onClick={() => void installEmbeddings()}>{embeddingBusy ? "Downloading…" : "Install"}</button> : null}
+        </Row>
       </Group>
 
       <Group title="Documents" description="Files agents can search when answering. Turn document search on in Memory.">

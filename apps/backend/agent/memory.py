@@ -12,7 +12,6 @@ import hashlib
 import time
 import shutil
 import threading
-import importlib
 from functools import wraps
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Iterable, Tuple
@@ -41,19 +40,6 @@ _RECORD_LOCKS_GUARD = threading.Lock()
 _RECORD_LOCKS: Dict[str, threading.RLock] = {}
 _MEMORY_INSTANCES_GUARD = threading.Lock()
 _MEMORY_INSTANCES: Dict[str, "AgentMemory"] = {}
-
-
-def _require_complete_torch() -> None:
-    """Repair PyInstaller's known partial torch import before sentence-transformers loads."""
-    loaded = sys.modules.get("torch")
-    if loaded is not None and not hasattr(loaded, "autograd"):
-        for name in [key for key in sys.modules if key == "torch" or key.startswith("torch.")]:
-            sys.modules.pop(name, None)
-        importlib.invalidate_caches()
-    torch = importlib.import_module("torch")
-    autograd = importlib.import_module("torch.autograd")
-    if not hasattr(torch, "autograd") or autograd is None:
-        raise RuntimeError("PyTorch is incomplete: torch.autograd is unavailable")
 
 
 def _record_lock_for(path: Path) -> threading.RLock:
@@ -103,7 +89,7 @@ class AgentMemory:
         try:
             embed_query = getattr(self.embeddings, "embed_query", None)
             if callable(embed_query):
-                embed_query("healthcheck")
+                self._embedding_dim = len(embed_query("healthcheck"))
         except Exception as e:
             logger.warning(f"Embeddings validation failed ({e}); disabling embeddings so we can fall back")
             self.embedding_health = {
@@ -137,6 +123,8 @@ class AgentMemory:
         embedding_model = getattr(getattr(config, "embedding", None), "model", None) or "text-embedding-3-small"
 
         self.embeddings = None
+        self._embedding_dim = 0
+        self._index_needs_rebuild = False
         if embedding_provider in {ModelProvider.OPENAI, ModelProvider.LM_STUDIO}:
             if OpenAIEmbeddings is None:
                 logger.warning("langchain-openai not installed; falling back to local embeddings")
@@ -183,25 +171,16 @@ class AgentMemory:
         self._validate_embeddings()
 
         if self.embeddings is None:
-            try:
-                _require_complete_torch()
-                from langchain_huggingface import HuggingFaceEmbeddings
-                self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-                self.embedding_health = {
-                    "available": True,
-                    "provider": "huggingface_local",
-                    "model": "sentence-transformers/all-MiniLM-L6-v2",
-                    "detail": "Ready",
-                }
-                logger.info("Using local HuggingFace embeddings for memory (no OpenAI key)")
-            except Exception as e:
-                logger.warning(f"No OpenAI key and local embeddings unavailable ({e}). Using simple memory storage (FAISS disabled).")
-                self.embedding_health = {
-                    "available": False,
-                    "provider": "huggingface_local",
-                    "model": "sentence-transformers/all-MiniLM-L6-v2",
-                    "detail": str(e),
-                }
+            from agent.embeddings import local_embeddings
+
+            self.embeddings, self.embedding_health = local_embeddings()
+            if self.embeddings is not None:
+                logger.info("Using the local ONNX embedding model for memory")
+            else:
+                logger.warning(
+                    "No embedding provider available ({}); memory uses keyword recall only.",
+                    self.embedding_health.get("detail"),
+                )
                 self.use_faiss = False
                 self.simple_memory = []
 
@@ -229,6 +208,11 @@ class AgentMemory:
         with self._records_lock:
             self._load_records()
             self._migrate_legacy_memory_records()
+        if self._index_needs_rebuild:
+            try:
+                self.rebuild_faiss_from_canonical()
+            except Exception as exc:
+                logger.warning("Memory index rebuild failed: {}", exc)
 
     def capability_status(self) -> Dict[str, Any]:
         """Safe structural readiness; canonical typed records remain available without FAISS."""
@@ -951,8 +935,19 @@ class AgentMemory:
                     self.embeddings,
                     allow_dangerous_deserialization=True,
                 )
-                logger.info("Loaded existing memory from disk")
-                return vector_store
+                stored_dim = int(getattr(getattr(vector_store, "index", None), "d", 0) or 0)
+                if self._embedding_dim and stored_dim and stored_dim != self._embedding_dim:
+                    # A different embedding model: the old vectors can't be searched
+                    # with the new one. records.json is the source of truth, so rebuild.
+                    logger.warning(
+                        "Memory index has {}-d vectors but the embedding model makes {}-d; rebuilding from records",
+                        stored_dim,
+                        self._embedding_dim,
+                    )
+                    self._index_needs_rebuild = True
+                else:
+                    logger.info("Loaded existing memory from disk")
+                    return vector_store
             except Exception as e:
                 logger.warning(f"Failed to load existing memory: {e}. Creating new memory.")
         if not create_if_missing:

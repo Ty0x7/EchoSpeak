@@ -1802,7 +1802,7 @@ class StateStore:
         """Clear a deleted Project from every Session while preserving Session history.
 
         Also cancels pending approvals and clears retry targets for those Sessions.
-        Callers should still clear ActiveWork + preview processes (see agent.activate_project).
+        Callers should still stop preview processes (see agent.activate_project).
         """
         target = str(project_id or "").strip()
         if not target:
@@ -1833,14 +1833,8 @@ class StateStore:
             if changed:
                 self._persist_approvals()
                 self._persist_thread_state()
-        # Outside lock: clear ActiveWork + previews for each affected Session.
+        # Outside lock: stop previews for each affected Session.
         for tid in affected:
-            try:
-                from agent.active_work import ActiveWorkStore
-
-                ActiveWorkStore().clear(tid)
-            except Exception:
-                pass
             try:
                 from agent.project_preview import stop_preview_for_scope_change
 

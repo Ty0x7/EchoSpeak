@@ -1,9 +1,4 @@
-export type VoiceControlHint =
-  | "message"
-  | "cancel_active"
-  | "canonical_continue"
-  | "canonical_steer"
-  | "canonical_inspect";
+export type VoiceControlHint = "message" | "cancel_active";
 
 export type VoiceTransportPhase =
   | "idle"
@@ -35,7 +30,6 @@ export type SpeechScope = VoiceScope & {
   clientTurnId: string;
   requestId?: string;
   executionId?: string;
-  taskRunId?: string;
   completeTurn?: boolean;
 };
 
@@ -417,7 +411,6 @@ export class LocalVoicePlayback {
           sequence: chunkSequence,
           request_id: scope.requestId || "",
           execution_id: scope.executionId || "",
-          task_run_id: scope.taskRunId || "",
           settings: {},
         }),
       });

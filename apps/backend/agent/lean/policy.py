@@ -36,6 +36,8 @@ UNTRUSTED_SOURCES = {
     "analyze_screen", "vision_qa",
     # Titles, prices and pages from the web.
     "stock_history", "product_search", "video_search", "image_search",
+    # Uploaded documents can come from anywhere (a downloaded PDF, a forwarded email).
+    "document_search",
 }
 
 # (C) Actions that leave the machine, speak for the user, or persist something
@@ -128,6 +130,30 @@ def _secret_values() -> list[str]:
 def contains_secret(args: dict[str, Any], secrets: Optional[list[str]] = None) -> bool:
     blob = json.dumps(args, ensure_ascii=False, default=str)
     return any(secret in blob for secret in (secrets if secrets is not None else _secret_values()))
+
+
+def redact_secrets(text: str, secrets: Optional[list[str]] = None) -> str:
+    """Replace stored credentials in tool output (e.g. `cat settings.secrets.json`, `printenv`)
+    so they never reach the model, the chat, or the saved timeline."""
+    out = str(text or "")
+    for secret in (secrets if secrets is not None else _secret_values()):
+        if secret and secret in out:
+            out = out.replace(secret, "[redacted secret]")
+    return out
+
+
+def redact_payload(value: Any, secrets: Optional[list[str]] = None) -> Any:
+    """Scrub structured tool cards before they reach events or saved timelines."""
+    values = secrets if secrets is not None else _secret_values()
+    if isinstance(value, str):
+        return redact_secrets(value, values)
+    if isinstance(value, list):
+        return [redact_payload(item, values) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_payload(item, values) for item in value)
+    if isinstance(value, dict):
+        return {key: redact_payload(item, values) for key, item in value.items()}
+    return value
 
 
 # ── the decision ────────────────────────────────────────────────────────

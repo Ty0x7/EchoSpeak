@@ -20,7 +20,7 @@ from agent.mcp_client import (
 from agent.tool_registry import ToolRegistry
 
 # Import server helper after path setup
-import api.server as server_mod  # noqa: E402
+import api.routes.capabilities as server_mod  # noqa: E402
 
 FIXTURE_SERVER = Path(__file__).resolve().parent / "fixtures" / "mock_mcp_server.py"
 PY = sys.executable

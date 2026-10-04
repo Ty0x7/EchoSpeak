@@ -546,60 +546,6 @@ def _provider_registry(config: Any) -> Dict[str, Any]:
     }
 
 
-def run_web_search_attempt(
-    query: str,
-    *,
-    provider_name: str,
-    config: Any = None,
-    max_hits: int = 10,
-) -> SearchProviderResult:
-    """Run one query through one provider adapter.
-
-    This is the canonical TaskRun acquisition boundary. It deliberately owns no
-    cross-provider cascade, query-variant fan-out, page extraction, or completion
-    decision. Those recovery choices remain visible to the TaskRun scheduler as
-    separate governed attempts.
-    """
-
-    if config is None:
-        from config import config as config  # noqa: A001
-
-    normalized_query = normalize_provider_query(query)
-    if is_vague_search_query(normalized_query):
-        return SearchProviderResult(
-            provider="none",
-            errors=["Search query is too vague; provide a concrete subject, entity, or question."],
-            queries_used=[],
-        )
-    selected = str(provider_name or "").strip().casefold()
-    if selected == "ddg":
-        selected = "duckduckgo"
-    provider = _provider_registry(config).get(selected)
-    if provider is None:
-        return SearchProviderResult(
-            provider=selected or "none",
-            errors=[f"Search provider {selected or 'none'} is not registered"],
-            queries_used=[normalized_query],
-        )
-    if selected in {"brave", "searxng"} and not getattr(provider, "available", False):
-        return SearchProviderResult(
-            provider=selected,
-            errors=[f"Search provider {selected} is not configured"],
-            queries_used=[normalized_query],
-        )
-    result = provider.search(
-        normalized_query,
-        news=_is_newsish(normalized_query),
-        allow_simplified_retry=False,
-    )
-    return SearchProviderResult(
-        hits=_dedupe_hits(result.hits)[: max(1, int(max_hits))],
-        provider=str(result.provider or selected),
-        errors=list(result.errors or [])[:8],
-        queries_used=list(result.queries_used or [normalized_query])[:8],
-    )
-
-
 def run_web_search(
     query: str,
     *,

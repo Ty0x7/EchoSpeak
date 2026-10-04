@@ -7,6 +7,7 @@ import { parseFence } from "./CodeBlock";
 import { compareCells } from "./DataTable";
 import { WidgetEnvProvider } from "./env";
 import { RichMarkdown } from "./RichMarkdown";
+import { SafeImage } from "./SafeImage";
 import { safeUrl, validateWidget, widgetFromFence } from "./validate";
 import { WidgetView } from "./WidgetView";
 
@@ -44,6 +45,14 @@ describe("widget validation", () => {
 });
 
 describe("widget rendering", () => {
+  it("requires a click for protocol-relative and local proxy images in model text", () => {
+    for (const src of ["https://outside.example/a.png", "//outside.example/a.png", "/lean/media?url=https%3A%2F%2Foutside.example%2Fa.png"]) {
+      const html = renderToStaticMarkup(<SafeImage src={src} alt="remote" />);
+      expect(html.includes("<img")).toBe(false);
+      expect(html.includes("Show image")).toBe(true);
+    }
+    expect(renderToStaticMarkup(<SafeImage src="data:image/png;base64,AA" alt="inline" />).includes("<img")).toBe(true);
+  });
   it("draws a weather card even with missing forecast fields", () => {
     const html = render(<WidgetView widget={{ type: "weather", data: { location: "Denver, Colorado", units: "F", current: { temp: 59.4, code: 0 }, hourly: [], daily: [{ date: "2026-10-03", max: 83, min: 50, code: 61 }] } }} />);
     expect(html.includes("Denver, Colorado")).toBe(true);

@@ -83,7 +83,6 @@ export type AgentStreamEvent = (
   | { type: "partial_reply"; response: string; speak?: boolean; segment?: number; reason?: string; request_id?: string; at: number }
   | { type: "final"; response: string; spoken_text?: string; success: boolean; memory_count: number; doc_sources?: DocSource[]; research?: ResearchRun[]; response_render?: ResponseRenderIntent; execution_id?: string; trace_id?: string; thread_state?: ThreadSessionState | null; execution_projection?: Record<string, any>; partial_replies?: string[]; voice_turn_id?: string; request_id?: string; at: number }
   | { type: "turn_bound"; request_id?: string; execution_id?: string; turn_id?: string; thread_id?: string; active_project_id?: string; model?: string; reasoning_control?: Record<string, unknown>; at: number }
-  | { type: "task_bound"; task_run_id: string; task_revision: number; objective?: string; active_requirement?: string; status?: string; request_id?: string; at: number }
   | { type: "iteration_boundary"; iteration: number; phase?: string; model?: string; request_id?: string; at: number }
   | { type: "token_usage"; prompt?: number; completion?: number; total?: number; reasoning?: number; approximate?: boolean; request_id?: string; at: number }
   | { type: "reasoning_summary"; content: string; iteration?: number; request_id?: string; at: number }

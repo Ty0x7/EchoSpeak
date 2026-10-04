@@ -52,7 +52,7 @@ def test_wake_route_says_to_set_up_voice_first(monkeypatch):
     from fastapi.testclient import TestClient
     from fastapi import FastAPI
 
-    from api.media_runtime import router
+    from api.routes.media_runtime import router
     from config import config
 
     monkeypatch.setattr(config, "voice_faster_whisper_model_path", "", raising=False)

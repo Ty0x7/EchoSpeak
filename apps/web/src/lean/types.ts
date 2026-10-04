@@ -32,6 +32,7 @@ export type LeanSegment =
       toolCallId?: string;
       tool: string;
       summary: string;
+      args?: Record<string, unknown>;
       reason: string;
       decision: "" | "allow" | "deny" | "timeout" | "cancelled";
     };

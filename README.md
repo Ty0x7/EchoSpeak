@@ -10,20 +10,14 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11+-blue.svg" alt="Python 3.11+" /></a>
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-18+-339933.svg" alt="Node 18+" /></a>
-  <a href="https://go.dev/dl/"><img src="https://img.shields.io/badge/go-1.21+-00ADD8.svg" alt="Go 1.21+" /></a>
 </p>
 
 <p align="center">
-  <a href="docs/GETTING_STARTED.md">Getting Started</a> ·
+  <a href="docs/GUIDE.md">Guide</a> ·
   <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/ROADMAP.md">Roadmap</a> ·
   <a href="CHANGES.md">Changelog</a> ·
-  <a href="docs/releases/v10.1.0.md">10.1 release notes</a> ·
-  <a href="ROADMAP.md">Roadmap</a> ·
-  <a href="docs/AGENT.md">Agent Guide</a> ·
-  <a href="docs/INTEGRATIONS.md">Integrations</a> ·
-  <a href="docs/UNIFIED_COORDINATION.md">Coordination</a> ·
-  <a href="docs/RUNTIME_CONTRACTS.md">Runtime contracts</a> ·
-  <a href="docs/LIFECYCLE_TRUTHFULNESS.md">Lifecycle honesty</a>
+  <a href="docs/releases/v10.2.0.md">10.2 release notes</a>
 </p>
 
 ---
@@ -34,7 +28,7 @@ If you want an AI assistant that feels local, fast, and always-on — this is it
 
 ## Download
 
-**Windows 10/11 (64-bit):** get the installer from the [latest release](https://github.com/Ty0x7/EchoSpeak/releases/latest) (`EchoSpeak_10.1.0_x64-setup.exe`). Later versions install from inside the app: **Settings › About › Update**.
+**Windows 10/11 (64-bit):** get `EchoSpeak_<version>_x64-setup.exe` from the [latest release](https://github.com/Ty0x7/EchoSpeak/releases/latest). Later versions install from inside the app: **Settings › About › Update**.
 
 For a local model, install [LM Studio](https://lmstudio.ai) or Ollama (Gemma 4 E4B is the tested default). Docker Desktop is optional; when it's running, terminal commands run in a sandbox.
 
@@ -102,7 +96,6 @@ The full walkthrough, with diagrams, is in [docs/ARCHITECTURE.md](docs/ARCHITECT
 | Windows desktop | Tauri 2 · Rust host · packaged Python sidecar · signed in-app updates |
 | Voice | faster-whisper (local) · Windows SAPI · Piper · OpenAI audio |
 | Models | Any OpenAI-compatible endpoint: LM Studio · Ollama · llama.cpp · vLLM · LocalAI · OpenAI · Gemini |
-| TUI | Go · Bubble Tea · Lipgloss |
 
 ## Project structure
 
@@ -112,19 +105,20 @@ EchoSpeak/
 │   ├── backend/
 │   │   ├── agent/lean/      # The agent runtime: loop, sessions, toolbox, approvals, personas, rooms
 │   │   ├── agent/           # Tools, memory, state store (SQLite), voice, projects
-│   │   ├── api/             # FastAPI server
+│   │   ├── api/             # FastAPI app (server.py), routes/ by area, deps.py, auth.py
 │   │   ├── scripts/         # eval_gemma.py (20-prompt evaluation) and tools
 │   │   ├── discord_bot.py, telegram_bot.py, twitch_bot.py, twitter_bot.py
 │   │   └── SOUL.md          # Echo's personality
 │   ├── web/                 # React app (and the website)
-│   ├── desktop/             # Tauri Windows app, sidecar packaging, release scripts
-│   ├── tui/                 # Go terminal UI
-│   └── onboard-tui/         # Setup wizard
+│   └── desktop/             # Tauri Windows app, sidecar packaging, release scripts
 ├── docs/
+│   ├── GUIDE.md             # Install, set up, use
 │   ├── ARCHITECTURE.md      # How EchoSpeak works
-│   └── releases/            # Release notes
-├── CHANGES.md               # Changelog
-└── ROADMAP.md
+│   ├── ROADMAP.md           # What's next
+│   ├── releases/            # Release notes
+│   ├── research/            # Research behind design decisions
+│   └── archive/             # Older design docs, kept for history
+└── CHANGES.md               # Changelog
 ```
 
 ## Configuration
@@ -135,7 +129,7 @@ Most settings can be changed from the **Web UI Settings tab** without editing fi
 |-------|------|---------|
 | Static | `apps/backend/.env` | API keys, master switches |
 | Runtime | `data/settings.json` | Persisted overrides (provider, toggles) |
-| Secrets | `data/settings.secrets.json` | Credentials written by onboarding |
+| Secrets | `data/settings.secrets.json` | API keys and tokens saved from Settings |
 | Personality | `apps/backend/SOUL.md` | Agent voice and boundaries |
 
 ## Safety model
@@ -150,14 +144,11 @@ Most settings can be changed from the **Web UI Settings tab** without editing fi
 
 | Document | Description |
 |----------|-------------|
-| [Getting Started](docs/GETTING_STARTED.md) | 5-minute setup guide |
+| [Guide](docs/GUIDE.md) | Install, set up and use EchoSpeak |
 | [Architecture](docs/ARCHITECTURE.md) | How EchoSpeak works, with diagrams |
-| [10.0 release notes](docs/releases/v10.0.0.md) | What's new in 10.0 |
-| [Desktop Architecture](docs/DESKTOP_ARCHITECTURE.md) | Windows host, sidecar, transport, lifecycle, and native gates |
+| [Roadmap](docs/ROADMAP.md) | What's next |
 | [Changelog](CHANGES.md) | Full version history |
-| [Roadmap](ROADMAP.md) | What's next |
-| [Agent Guide](docs/AGENT.md) | Extending the agent |
-| [Integrations](docs/INTEGRATIONS.md) | Tool and service details |
+| [Release notes](docs/releases/) | One page per release |
 
 ## Contributing
 
@@ -169,7 +160,7 @@ Contributions welcome.
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-See [Agent Guide](docs/AGENT.md) for details on extending the agent.
+See [Architecture](docs/ARCHITECTURE.md) for how the pieces fit before extending the agent.
 
 ## License
 
@@ -177,7 +168,5 @@ MIT — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- [LangChain](https://github.com/langchain-ai/langchain) — LLM orchestration
 - [FastAPI](https://fastapi.tiangolo.com/) — Backend framework
 - [FAISS](https://github.com/facebookresearch/faiss) — Vector similarity search
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) — Go TUI framework

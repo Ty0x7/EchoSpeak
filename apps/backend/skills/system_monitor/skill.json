@@ -1,5 +1,5 @@
 {
     "name": "System Monitor",
-    "description": "System health checks and status monitoring. Intercepts status queries via pipeline plugin for instant response.",
+    "description": "System health checks and status monitoring through the system_info tool.",
     "prompt_file": "SKILL.md"
 }

@@ -110,6 +110,7 @@ class LeanSession:
         thinking_enabled: bool = True,
         reasoning_effort: str = "medium",
         caller_role: str = "owner",
+        untrusted_sources: Optional[list[str]] = None,
     ) -> None:
         self.caller_role = caller_role if caller_role in CALLER_ROLES else "public"
         self.thinking_enabled = thinking_enabled
@@ -137,7 +138,8 @@ class LeanSession:
         # Outside content read anywhere in this request (agent/lean/policy.py). Shared
         # by every agent on it: a handoff brief written after reading a web page can
         # carry that page's instructions.
-        self._taint: list[str] = []
+        # A channel can hand over outside text with the message (e.g. Discord channel history).
+        self._taint: list[str] = list(untrusted_sources or [])
         # Parallel agents share these.
         self._emit_lock = threading.Lock()
         self._state_lock = threading.Lock()
@@ -1056,6 +1058,29 @@ class LeanSession:
                 lines.append(f"- {when}{here} {who}: {hit['snippet']}")
             return "\n".join(lines)
 
+        store = getattr(self.agent, "document_store", None)
+        if store is not None and getattr(store, "enabled", False):
+            def document_search(args: dict[str, Any]) -> str:
+                from agent.state import get_state_store
+
+                query = str(args.get("query") or "").strip()
+                if not query:
+                    return "Give a query."
+                project_id = str(get_state_store().get_thread_state(self.session_id).active_project_id or "")
+                context, sources = store.query(query, k=5, project_id=project_id, session_id=self.session_id)
+                if not sources:
+                    return "No uploaded document matches."
+                return context
+
+            tools.append(NativeTool(
+                name="document_search",
+                description="Search the documents the user uploaded (PDFs, notes, text files) for passages about a topic. "
+                "Results name the document they came from.",
+                parameters={"type": "object", "properties": {"query": {"type": "string", "description": "What to look for."}}, "required": ["query"]},
+                func=document_search,
+                parallel_safe=True,
+            ))
+
         tools.append(NativeTool(
             name="chat_search",
             description="Search the words of every past conversation with the user (all chats, including group chats). "
@@ -1423,6 +1448,7 @@ def run_lean_query(
     thinking_enabled: bool = True,
     reasoning_effort: str = "medium",
     caller_role: str = "owner",
+    untrusted_sources: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     room = get_room_store().by_thread(session_id)
     session = LeanSession(
@@ -1436,6 +1462,7 @@ def run_lean_query(
         thinking_enabled=thinking_enabled,
         reasoning_effort=reasoning_effort,
         caller_role=caller_role,
+        untrusted_sources=untrusted_sources,
     )
     return session.run(message, persona_id=persona_id)
 

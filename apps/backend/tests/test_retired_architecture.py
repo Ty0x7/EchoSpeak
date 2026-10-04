@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from api.server import app
+from tests.route_paths import route_paths as _route_paths
 
 
 def test_retired_editor_routes_and_duplicate_search_modules_are_absent() -> None:
-    paths = {route.path for route in app.routes}
+    paths = _route_paths(app)
     assert not any(path.startswith("/video") for path in paths)
     assert not any(path.startswith("/image-editor") for path in paths)
 

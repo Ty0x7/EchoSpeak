@@ -1,6 +1,6 @@
 /**
  * Shared agent activity state machine for chat + avatar.
- * Derive phase only from real stream signals — see docs/UI_AGENT_STATE_MAP.md.
+ * Derive phase only from real stream signals (the lean event stream).
  */
 
 export type AgentPhase =
@@ -218,7 +218,6 @@ export type ActivityAction =
   | { type: "turn_bound"; model?: string; objective?: string }
   | { type: "step_update"; requirement?: string; nextAction?: string }
   | { type: "recovery"; reason: string }
-  | { type: "steer"; instruction: string }
   | { type: "token_usage"; prompt?: number; completion?: number; total?: number; reasoning?: number; approximate?: boolean }
   | { type: "iteration_boundary"; iteration: number; model?: string }
   | { type: "semantic"; activity: SemanticActivityEvent; at?: number }
@@ -425,15 +424,6 @@ export function agentActivityReducer(state: AgentActivityState, action: Activity
       return withLabel({
         ...state,
         recoveryReason: action.reason || "",
-      });
-
-    case "steer":
-      return withLabel({
-        ...state,
-        objective: state.objective
-          ? `${state.objective}\n[Steer]: ${action.instruction}`
-          : action.instruction,
-        recoveryReason: "",
       });
 
     case "token_usage":
@@ -749,13 +739,6 @@ export function activityActionsFromStreamEvent(event: StreamActivityPacket): Act
   // Compatibility-only semantic mapping for an older local sidecar.
   if (type === "turn_bound") {
     actions.push({ type: "turn_bound", model: packetString(event, "model") });
-  } else if (type === "task_bound") {
-    actions.push({ type: "turn_bound", objective: packetString(event, "objective") });
-    actions.push({
-      type: "step_update",
-      requirement: packetString(event, "active_requirement"),
-      nextAction: packetString(event, "next_action"),
-    });
   } else if (type === "iteration_boundary") {
     actions.push({
       type: "iteration_boundary",

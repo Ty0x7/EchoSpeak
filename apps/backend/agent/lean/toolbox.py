@@ -17,6 +17,8 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from agent.lean.policy import redact_payload, redact_secrets
+
 from agent.lean.widgets import collect as collect_widgets
 from config import config
 
@@ -49,7 +51,7 @@ TOOLSETS: dict[str, list[str]] = {
         "discord_web_send", "discord_contacts_add", "discord_contacts_discover",
     ],
     "self": ["self_list", "self_read", "self_grep", "self_git_status", "self_edit", "self_rollback", "project_update_context"],
-    "memory": ["memory_save", "memory_search", "chat_search", "soul_update"],
+    "memory": ["memory_save", "memory_search", "chat_search", "document_search", "soul_update"],
     # Skill, MCP, and Connection tools that registered at runtime.
     "skills": ["@external"],
 }
@@ -357,6 +359,12 @@ class Toolbox:
         for old, new in ARG_ALIASES.get(resolved, {}).items():
             if old in args and new not in args:
                 args[new] = args.pop(old)
+        if resolved == "terminal" and resolved in self.native:
+            terminal = getattr(self.native[resolved].func, "__self__", None)
+            if terminal is not None and hasattr(terminal, "effective_where"):
+                # The policy sees the destination the Terminal instance will use,
+                # including Auto's host fallback when Docker is unavailable.
+                args["where"] = terminal.effective_where(args)
         return resolved, args
 
     def tool_context(self) -> dict[str, Any]:
@@ -394,7 +402,8 @@ class Toolbox:
             except Exception as exc:
                 logger.warning("Lean native tool {} failed: {}", name, exc)
                 output, ok = f"Error: {exc}", False
-            return ToolResult(ok, output, int((time.perf_counter() - started) * 1000), widgets if ok else [])
+            return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000),
+                              redact_payload(widgets) if ok else [])
         entry = self.entries.get(name)
         if entry is None:
             close = ", ".join(sorted(self.names)[:40])
@@ -438,7 +447,8 @@ class Toolbox:
                 output = f"{first_line}\n{body}" if not first_line.startswith("<<<") else body
             except Exception:
                 pass
-        return ToolResult(ok, output, int((time.perf_counter() - started) * 1000), widgets if ok else [])
+        return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000),
+                          redact_payload(widgets) if ok else [])
 
 
 def describe_call(name: str, args: dict[str, Any]) -> str:
@@ -487,6 +497,8 @@ def describe_call(name: str, args: dict[str, Any]) -> str:
         return "Saving to memory"
     if name == "memory_search":
         return f"Recalling “{pick('query')}”"
+    if name == "document_search":
+        return f"Searching your documents for “{pick('query')}”"
     if name == "soul_update":
         from agent.lean.soul import describe
 

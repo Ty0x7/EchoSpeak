@@ -31,15 +31,14 @@ datas += data_tree(backend_root / "workspaces", "workspaces")
 # Local speech (faster-whisper): its VAD model files and CTranslate2's native DLLs.
 datas += collect_data_files("faster_whisper")
 binaries_extra = collect_dynamic_libs("ctranslate2")
+# Local embeddings (agent/embeddings.py) and the voice VAD run on onnxruntime.
+binaries_extra += collect_dynamic_libs("onnxruntime")
 
 for distribution in (
     "langchain",
     "langchain-core",
     "langchain-community",
     "langchain-openai",
-    "transformers",
-    "sentence-transformers",
-    "langchain-huggingface",
     "mcp",
 ):
     try:
@@ -51,15 +50,7 @@ hiddenimports = (
     collect_submodules("agent")
     + collect_submodules("api")
     + collect_submodules("mcp")
-    + [
-        "langchain_huggingface",
-        "langchain_huggingface.embeddings",
-        "langchain_huggingface.embeddings.huggingface",
-        "torch",
-        "torch.autograd",
-        "torch.autograd.graph",
-        "sentence_transformers",
-    ]
+    + ["onnxruntime", "tokenizers"]
 )
 
 a = Analysis(
@@ -71,7 +62,9 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["pytest"],
+    # PyTorch is not used: embeddings run on onnxruntime. Excluding it keeps a dev
+    # venv that happens to have torch installed from adding ~1 GB to the bundle.
+    excludes=["pytest", "torch", "torchvision", "torchaudio", "transformers", "sentence_transformers"],
     noarchive=False,
     optimize=1,
 )

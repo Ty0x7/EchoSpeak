@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import { safeMarkdownComponents } from "../widgets/SafeImage";
 import remarkGfm from "remark-gfm";
 import { RichMarkdown } from "../widgets/RichMarkdown";
 import { WidgetView } from "../widgets/WidgetView";
@@ -52,7 +53,7 @@ function Chevron({ open }: { open: boolean }) {
 const ThoughtText = React.memo(function ThoughtText({ text }: { text: string }) {
   return (
     <div className="lm-thought-md">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>{text}</ReactMarkdown>
     </div>
   );
 });
@@ -168,6 +169,9 @@ function ApprovalCard({
         <span className="lm-approval-kicker">{decided ? verdict : "Needs your OK"}</span>
         <strong>{seg.summary}</strong>
         {seg.reason && !decided ? <span className="lm-approval-reason">Asking because {seg.reason}.</span> : null}
+        {seg.args && Object.keys(seg.args).length ? (
+          <pre className="lm-approval-args" aria-label="Exactly what will run">{JSON.stringify(seg.args, null, 2)}</pre>
+        ) : null}
       </div>
       {!decided ? (
         <div className="lm-approval-actions">

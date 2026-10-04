@@ -10,6 +10,7 @@ import json
 import subprocess
 import shutil
 import platform
+import math
 import re
 import time
 import hashlib
@@ -562,7 +563,6 @@ class WebSearchArgs(BaseModel):
         validation_alias=AliasChoices("freshness", "recency", "time_range"),
         description="Optional freshness hint (e.g. latest, today). Informational only.",
     )
-
 
 
 class AnalyzeScreenArgs(BaseModel):
@@ -2643,20 +2643,87 @@ def calculate(expression: str) -> str:
         Result of the calculation.
     """
     try:
-        import math
-
-        safe_dict = {
-            'abs': abs, 'max': max, 'min': min, 'pow': pow,
-            'round': round, 'sum': sum, 'len': len,
-            'sqrt': math.sqrt, 'sin': math.sin, 'cos': math.cos,
-            'tan': math.tan, 'log': math.log, 'log10': math.log10,
-            'pi': math.pi, 'e': math.e
-        }
-
-        result = eval(expression, {"__builtins__": {}}, safe_dict)
-        return str(result)
+        return _format_number(_safe_math(str(expression or "")))
     except Exception as e:
         return f"Calculation error: {str(e)}"
+
+
+_MATH_FUNCS = {
+    "abs": abs, "max": max, "min": min, "round": round, "sum": lambda *a: sum(a[0] if len(a) == 1 else a),
+    "sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan, "asin": math.asin,
+    "acos": math.acos, "atan": math.atan, "log": math.log, "log10": math.log10, "log2": math.log2,
+    "exp": math.exp, "floor": math.floor, "ceil": math.ceil, "factorial": math.factorial,
+    "pow": None,  # handled as the ** operator so the same limits apply
+}
+_MATH_CONSTS = {"pi": math.pi, "e": math.e, "tau": math.tau}
+_MAX_NUMBER = 10 ** 100
+_MAX_EXPONENT = 1000
+
+
+def _safe_math(expression: str) -> float | int:
+    """Evaluate arithmetic without eval(): numbers, + - * / // % **, and a few math functions.
+
+    eval() with empty builtins is escapable (``().__class__.__mro__...``), and this tool is
+    reachable from guest channels and from prompt-injected text.
+    """
+    import ast
+    import operator
+
+    if len(expression) > 500:
+        raise ValueError("expression is too long")
+    binops = {
+        ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow,
+    }
+
+    def check(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("only numbers are allowed")
+        if isinstance(value, int) and abs(value) > _MAX_NUMBER:
+            raise ValueError("number is too large")
+        return value
+
+    def power(base, exponent):
+        if abs(exponent) > _MAX_EXPONENT:
+            raise ValueError("exponent is too large")
+        return check(operator.pow(base, exponent))
+
+    def ev(node):
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+        if isinstance(node, ast.Constant):
+            return check(node.value)
+        if isinstance(node, ast.Name) and node.id in _MATH_CONSTS:
+            return _MATH_CONSTS[node.id]
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = ev(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp) and type(node.op) in binops:
+            left, right = ev(node.left), ev(node.right)
+            if isinstance(node.op, ast.Pow):
+                return power(left, right)
+            return check(binops[type(node.op)](left, right))
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return [ev(item) for item in node.elts]
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _MATH_FUNCS
+                and not node.keywords):
+            args = [ev(arg) for arg in node.args]
+            if node.func.id == "pow":
+                if len(args) != 2:
+                    raise ValueError("pow takes two numbers")
+                return power(*args)
+            if node.func.id == "factorial" and (not args or args[0] > 1000):
+                raise ValueError("factorial argument is too large")
+            return check(_MATH_FUNCS[node.func.id](*args))
+        raise ValueError(f"unsupported expression: {type(node).__name__}")
+
+    return ev(ast.parse(expression.strip(), mode="eval"))
+
+
+def _format_number(value) -> str:
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e15:
+        return str(int(value))
+    return str(value)
 
 
 class YouTubeTranscriptArgs(BaseModel):
@@ -4396,91 +4463,6 @@ class TodoManageArgs(BaseModel):
     priority: str = Field(default="medium", description="Priority: 'low', 'medium', 'high'")
 
 
-@tool(args_schema=TodoManageArgs, description="Manage the shared todo list. Actions: list (show all), add (create new), update (change status/title/description), delete (remove by id).")
-def todo_manage(action: str, title: str = "", description: str = "", todo_id: str = "", status: str = "pending", priority: str = "medium") -> str:
-    """Manage the shared todo list that is visible in the Web UI."""
-    import json as _json
-    import uuid as _uuid
-    from datetime import datetime as _dt
-    from pathlib import Path as _Path
-
-    todo_file = _Path(DATA_DIR) / "todos.json"
-
-    def _load() -> list:
-        if todo_file.exists():
-            try:
-                return _json.loads(todo_file.read_text(encoding="utf-8"))
-            except Exception:
-                return []
-        return []
-
-    def _save(items: list) -> None:
-        todo_file.parent.mkdir(parents=True, exist_ok=True)
-        todo_file.write_text(_json.dumps(items, indent=2, default=str), encoding="utf-8")
-
-    action = (action or "list").lower().strip()
-
-    if action == "list":
-        todos = _load()
-        if not todos:
-            return "Todo list is empty."
-        lines = []
-        for t in todos:
-            mark = "✅" if t.get("status") == "done" else "🔄" if t.get("status") == "in_progress" else "⬜"
-            pri = t.get("priority", "medium")
-            lines.append(f"{mark} [{pri.upper()}] {t.get('title', '?')} (id: {t.get('id', '?')}, status: {t.get('status', '?')})")
-            if t.get("description"):
-                lines.append(f"   {t['description']}")
-        return "\n".join(lines)
-
-    elif action == "add":
-        if not title:
-            return "Error: 'title' is required to add a todo."
-        todos = _load()
-        now = _dt.utcnow().isoformat()
-        entry = {
-            "id": str(_uuid.uuid4())[:8],
-            "title": title,
-            "description": description,
-            "status": status,
-            "priority": priority,
-            "created_at": now,
-            "updated_at": now,
-        }
-        todos.append(entry)
-        _save(todos)
-        return f"Added todo '{title}' (id: {entry['id']}, priority: {priority}, status: {status})"
-
-    elif action == "update":
-        if not todo_id:
-            return "Error: 'todo_id' is required to update a todo."
-        todos = _load()
-        for t in todos:
-            if t.get("id") == todo_id:
-                if title:
-                    t["title"] = title
-                if description:
-                    t["description"] = description
-                t["status"] = status
-                t["priority"] = priority
-                t["updated_at"] = _dt.utcnow().isoformat()
-                _save(todos)
-                return f"Updated todo '{t['title']}' (id: {todo_id}) -> status: {status}, priority: {priority}"
-        return f"Error: Todo with id '{todo_id}' not found."
-
-    elif action == "delete":
-        if not todo_id:
-            return "Error: 'todo_id' is required to delete a todo."
-        todos = _load()
-        filtered = [t for t in todos if t.get("id") != todo_id]
-        if len(filtered) == len(todos):
-            return f"Error: Todo with id '{todo_id}' not found."
-        _save(filtered)
-        return f"Deleted todo with id '{todo_id}'."
-
-    return f"Unknown action '{action}'. Use: list, add, update, delete."
-
-
 TOOL_METADATA: Dict[str, Dict[str, Any]] = {
     # Read-only / safe tools
     "web_search": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
@@ -4490,7 +4472,6 @@ TOOL_METADATA: Dict[str, Dict[str, Any]] = {
     "get_system_time": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
     "calculate": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
     "project_update_context": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
-    "todo_manage": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
     "youtube_transcript": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
     "desktop_list_windows": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": ["ENABLE_SYSTEM_ACTIONS", "ALLOW_DESKTOP_AUTOMATION"]},
     "desktop_find_control": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": ["ENABLE_SYSTEM_ACTIONS", "ALLOW_DESKTOP_AUTOMATION"]},

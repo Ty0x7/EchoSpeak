@@ -219,7 +219,10 @@ class DocumentStore:
 
             self._reranker = CrossEncoder(self.rerank_model)
         except Exception as exc:
-            logger.warning(f"Failed to load reranker model: {exc}")
+            logger.warning(
+                f"Document reranking is on but unavailable ({exc}). It is optional: "
+                "pip install -r requirements-optional.txt, or set DOC_RERANK_ENABLED=false."
+            )
             self._reranker = None
         return self._reranker
 
@@ -414,6 +417,10 @@ class DocumentStore:
                     self.embeddings,
                     allow_dangerous_deserialization=True,
                 )
+                stored_dim = int(getattr(getattr(vs, "index", None), "d", 0) or 0)
+                current_dim = len(self.embeddings.embed_query("EchoSpeak document index healthcheck"))
+                if stored_dim and current_dim != stored_dim:
+                    raise ValueError(f"index has {stored_dim}-d vectors but the embedder returns {current_dim}-d vectors")
                 logger.info("Loaded existing document index")
                 self.index_health = "healthy"
                 self.index_detail = "Index loaded"

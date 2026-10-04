@@ -587,12 +587,17 @@ class LeanTurn:
                 f"{name} needs the user's approval, which can only be given in the EchoSpeak app. "
                 "It was not run. Tell the user to ask for it from the app."
             )
+        # The approval card promises exact arguments. Refuse calls too large to
+        # present intact instead of approving a truncated command or hidden key.
+        if len(json.dumps(args, ensure_ascii=False, default=str).encode("utf-8")) > 65536:
+            return False, f"{name} has more than 64 KiB of arguments and cannot be shown safely for approval."
         approval = broker.open(
             session_id=self.session_id,
             request_id=self.request_id,
             tool=name,
             summary=describe_call(name, args),
-            args=safe_args_preview(args),
+            # The card shows these in full: a summary can hide "; iwr … | iex" after padding.
+            args=args,
             reason=reason,
         )
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
