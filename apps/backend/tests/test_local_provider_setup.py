@@ -6,6 +6,9 @@ from __future__ import annotations
 import pytest
 
 from config import ModelProvider
+import api.deps as deps
+import api.routes.settings as settings_routes
+from tests.route_paths import patch_api
 
 
 def test_stock_addresses_follow_the_selected_app():
@@ -84,17 +87,17 @@ def test_settings_app_change_moves_the_port_with_it(monkeypatch):
     from api import server
 
     stored: dict = {"use_local_models": True, "local": {"provider": "ollama", "base_url": "http://localhost:11434", "model_name": "llama3.2"}}
-    monkeypatch.setattr(server, "_read_runtime_settings", lambda: stored)
-    monkeypatch.setattr(server, "write_runtime_override_payload", lambda payload: stored.update(payload))
+    patch_api(monkeypatch, "_read_runtime_settings", lambda: stored)
+    monkeypatch.setattr(settings_routes, "write_runtime_override_payload", lambda payload: stored.update(payload))
     monkeypatch.setattr(server.config, "reload", lambda: None)
 
-    server._apply_settings_patch({"local": {"provider": "lmstudio"}})
+    settings_routes._apply_settings_patch({"local": {"provider": "lmstudio"}})
     assert stored["local"]["provider"] == "lmstudio"
     assert stored["local"]["base_url"] == "http://localhost:1234"
 
     # A custom address stays put when the app changes.
     stored["local"]["base_url"] = "http://192.168.1.20:9000"
-    server._apply_settings_patch({"local": {"provider": "ollama"}})
+    settings_routes._apply_settings_patch({"local": {"provider": "ollama"}})
     assert stored["local"]["base_url"] == "http://192.168.1.20:9000"
 
 
@@ -110,14 +113,14 @@ def test_first_run_setup_picks_the_running_app_once(monkeypatch):
     from api import server
 
     stored: dict = {}
-    monkeypatch.setattr(server, "_read_runtime_settings", lambda: stored)
-    monkeypatch.setattr(server, "write_runtime_override_payload", lambda payload: (stored.clear(), stored.update(payload)))
+    patch_api(monkeypatch, "_read_runtime_settings", lambda: stored)
+    monkeypatch.setattr(settings_routes, "write_runtime_override_payload", lambda payload: (stored.clear(), stored.update(payload)))
     monkeypatch.setattr(server.config, "reload", lambda: None)
     monkeypatch.setattr(server.config.openai, "api_key", "", raising=False)
     monkeypatch.setattr(server.config.gemini, "api_key", "", raising=False)
     monkeypatch.delenv("USE_LOCAL_MODELS", raising=False)
     monkeypatch.delenv("LOCAL_MODEL_NAME", raising=False)
-    monkeypatch.setattr(server, "_AUTOCONFIG_LAST", 0.0)
+    monkeypatch.setattr(settings_routes, "_AUTOCONFIG_LAST", 0.0)
     monkeypatch.setattr(
         model_runtime,
         "detect_local_providers",
@@ -126,10 +129,10 @@ def test_first_run_setup_picks_the_running_app_once(monkeypatch):
             {"provider": "ollama", "base_url": "http://localhost:11434", "running": False, "models": []},
         ],
     )
-    found = server._autoconfigure_local_provider()
+    found = settings_routes._autoconfigure_local_provider()
     assert found and found["provider"] == "lmstudio"
     assert stored["use_local_models"] is True
     assert stored["local"] == {"provider": "lmstudio", "base_url": "http://localhost:1234", "model_name": "google/gemma-4-e4b"}
     # The choice is now made, so it never runs again on its own.
-    assert server._local_setup_chosen()
-    assert server._autoconfigure_local_provider() is None
+    assert settings_routes._local_setup_chosen()
+    assert settings_routes._autoconfigure_local_provider() is None

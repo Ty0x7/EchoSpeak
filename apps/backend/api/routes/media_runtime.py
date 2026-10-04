@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from agent.generation_runtime import generation_provider_statuses, get_generation_job_store
+from agent.generation_runtime import get_generation_job_store
 from agent.state import get_state_store
 from agent.threads import get_thread_manager
-from agent.voice_runtime import default_voice_provider, get_voice_job_store, voice_provider_statuses
+from agent.voice_runtime import get_voice_job_store
 from agent.voice_transport import (
     VoiceTransportError,
     cancel_voice_playback,

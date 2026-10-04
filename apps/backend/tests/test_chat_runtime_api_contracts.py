@@ -6,10 +6,11 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+import api.routes.chat as chat_routes
 
 
 def test_query_request_accepts_exact_chat_controls():
-    from api.server import QueryRequest
+    from api.routes.chat import QueryRequest
 
     request = QueryRequest(
         message="hello",
@@ -26,9 +27,11 @@ def test_query_request_accepts_exact_chat_controls():
 def test_chat_runtime_routes_have_one_owner():
     from api.server import app
 
+    from tests.route_paths import iter_routes
+
     route_pairs = [
-        (method, route.path)
-        for route in app.routes
+        (method, path)
+        for path, route in iter_routes(app)
         for method in list(getattr(route, "methods", None) or [])
     ]
     for method, path in (
@@ -46,17 +49,13 @@ def test_chat_runtime_routes_have_one_owner():
 
 
 def test_cancel_matches_exact_session_and_execution(monkeypatch: pytest.MonkeyPatch):
-    from api import server
+    from api import deps
 
     event = threading.Event()
-    monkeypatch.setattr(
-        server,
-        "_ACTIVE_QUERY_CANCELLATIONS",
-        {"request-1234": ("session-a", event, "execution-a")},
-    )
+    monkeypatch.setitem(deps._ACTIVE_QUERY_CANCELLATIONS, "request-1234", ("session-a", event, "execution-a"))
     result = asyncio.run(
-        server.cancel_query(
-            server.QueryCancelRequest(
+        chat_routes.cancel_query(
+            chat_routes.QueryCancelRequest(
                 request_id="request-1234",
                 thread_id="session-a",
                 execution_id="execution-a",

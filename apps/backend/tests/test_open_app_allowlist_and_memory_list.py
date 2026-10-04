@@ -4,6 +4,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import api.deps as deps
+import api.routes.memory as memory_routes
+from tests.route_paths import patch_api
 
 
 def test_normalize_open_application_allowlist_spaces_hyphens_and_legacy_string():
@@ -53,10 +56,10 @@ def test_memory_list_does_not_require_bound_project(monkeypatch, tmp_path):
     class _Agent:
         memory = _Mem()
 
-    monkeypatch.setattr(server_mod, "get_state_store", lambda: _Store())
-    monkeypatch.setattr(server_mod, "get_agent", lambda _tid=None: _Agent())
+    monkeypatch.setattr(memory_routes, "get_state_store", lambda: _Store())
+    patch_api(monkeypatch, "get_agent", lambda _tid=None: _Agent())
 
-    result = asyncio.run(server_mod.list_memory(offset=0, limit=20, thread_id="s1", project_id=""))
+    result = asyncio.run(memory_routes.list_memory(offset=0, limit=20, thread_id="s1", project_id=""))
     assert result.items == []
     assert result.count == 0
     assert result.use_faiss is False
@@ -94,10 +97,10 @@ def test_memory_list_skips_corrupt_rows_without_erasing(monkeypatch, tmp_path):
     class _Agent:
         memory = _Mem()
 
-    monkeypatch.setattr(server_mod, "get_state_store", lambda: _Store())
-    monkeypatch.setattr(server_mod, "get_agent", lambda _tid=None: _Agent())
+    monkeypatch.setattr(memory_routes, "get_state_store", lambda: _Store())
+    patch_api(monkeypatch, "get_agent", lambda _tid=None: _Agent())
 
-    result = asyncio.run(server_mod.list_memory(offset=0, limit=20, thread_id="s1", project_id=""))
+    result = asyncio.run(memory_routes.list_memory(offset=0, limit=20, thread_id="s1", project_id=""))
     assert len(result.items) == 1
     assert result.items[0].id == "ok1"
     assert result.items[0].text == "hello"
@@ -116,7 +119,7 @@ def test_memory_read_scope_mismatch_is_409_not_500(monkeypatch, tmp_path):
         def get_thread_state(self, _tid):
             return _State()
 
-    monkeypatch.setattr(server_mod, "get_state_store", lambda: _Store())
+    monkeypatch.setattr(memory_routes, "get_state_store", lambda: _Store())
     with pytest.raises(HTTPException) as ei:
-        server_mod._resolve_memory_read_scope("s1", "proj-b")
+        memory_routes._resolve_memory_read_scope("s1", "proj-b")
     assert ei.value.status_code == 409

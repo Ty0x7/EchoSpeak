@@ -9,6 +9,7 @@ import pytest
 
 from agent.lean import artifacts, widgets
 from agent.lean.rich_tools import _product_from_jsonld, _product_from_walmart
+import api.auth as api_auth
 
 
 # ── widgets ───────────────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ def test_artifact_frames_are_sandboxed_and_need_a_token(store, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from api.lean_routes import router
+    from api.routes.lean import router
 
     record = artifacts.create(title="App", kind="html", content="<html><head><title>x</title></head><body><script>fetch('http://evil')</script></body></html>")
     page = artifacts.frame_html(record)
@@ -150,7 +151,7 @@ def test_server_lets_a_frame_token_through_only_for_its_frame(store, monkeypatch
 
     monkeypatch.setattr(server.config, "api_auth_enabled", True, raising=False)
     monkeypatch.setattr(server.config, "api_auth_localhost_bypass", False, raising=False)
-    monkeypatch.setattr(server, "_configured_api_auth_key", lambda: "secret-key")
+    monkeypatch.setattr(api_auth, "_configured_api_auth_key", lambda: "secret-key")
     record = artifacts.create(title="App", kind="html", content="<p>x</p>")
     token = artifacts.issue_frame_token(record["id"])
     client = TestClient(server.app)

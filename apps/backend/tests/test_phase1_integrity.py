@@ -7,12 +7,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from api import server as server_mod
 from api.server import app
 from config import ModelProvider, config, get_llm_config
+import api.auth as api_auth
+import api.routes.capabilities as capabilities_routes
+import api.deps as deps
+import api.routes.gateway as gateway_routes
+import api.routes.memory as memory_routes
+import api.routes.settings as settings_routes
+from tests.route_paths import patch_api
 
 
 def _routes_for(path: str, method: str):
     matches = []
-    for route in app.router.routes:
-        route_path = getattr(route, "path", None)
+    from tests.route_paths import iter_routes
+
+    for route_path, route in iter_routes(app):
         route_methods = getattr(route, "methods", None) or set()
         if route_path == path and method in route_methods:
             matches.append(route)
@@ -40,9 +48,9 @@ def test_provider_readiness_reports_lmstudio_unreachable(monkeypatch):
     def fake_urlopen(req, timeout=0):
         raise server_mod.URLError("connection refused")
 
-    monkeypatch.setattr(server_mod, "urlopen", fake_urlopen, raising=True)
+    monkeypatch.setattr(settings_routes, "urlopen", fake_urlopen, raising=True)
 
-    readiness = server_mod._check_provider_readiness(ModelProvider.LM_STUDIO)
+    readiness = settings_routes._check_provider_readiness(ModelProvider.LM_STUDIO)
 
     assert readiness["ok"] is False
     assert readiness["provider"] == "lmstudio"
@@ -53,13 +61,13 @@ def test_provider_readiness_reports_lmstudio_unreachable(monkeypatch):
 def test_provider_readiness_accepts_openai_when_key_exists(monkeypatch):
     monkeypatch.setattr(config.openai, "api_key", "sk-test", raising=False)
 
-    readiness = server_mod._check_provider_readiness(ModelProvider.OPENAI)
+    readiness = settings_routes._check_provider_readiness(ModelProvider.OPENAI)
 
     assert readiness == {"ok": True, "provider": "openai", "message": "", "detail": ""}
 
 
 def test_mcp_trust_summary_does_not_claim_missing_client_available():
-    summary = server_mod._mcp_trust_summary(
+    summary = capabilities_routes._mcp_trust_summary(
         {"filesystem": {"transport": "stdio", "trust": "trusted"}},
         mcp_client_present=False,
         mcp_tool_count=2,
@@ -78,8 +86,8 @@ def test_api_auth_requires_key_when_enabled_for_nonlocal_host(monkeypatch):
     monkeypatch.setattr(config, "api_auth_key", "secret-key", raising=False)
     monkeypatch.setattr(config, "api_auth_localhost_bypass", False, raising=False)
 
-    assert server_mod._api_auth_ok({}, "192.168.1.20") is False
-    assert server_mod._api_auth_ok({"x-echospeak-key": "secret-key"}, "192.168.1.20") is True
+    assert api_auth._api_auth_ok({}, "192.168.1.20") is False
+    assert api_auth._api_auth_ok({"x-echospeak-key": "secret-key"}, "192.168.1.20") is True
 
 
 def test_api_auth_localhost_bypass(monkeypatch):
@@ -87,7 +95,7 @@ def test_api_auth_localhost_bypass(monkeypatch):
     monkeypatch.setattr(config, "api_auth_key", "secret-key", raising=False)
     monkeypatch.setattr(config, "api_auth_localhost_bypass", True, raising=False)
 
-    assert server_mod._api_auth_ok({}, "127.0.0.1") is True
+    assert api_auth._api_auth_ok({}, "127.0.0.1") is True
 
 
 def test_memory_doctor_flags_duplicates_and_conversation_dominance(monkeypatch):
@@ -114,7 +122,7 @@ def test_memory_doctor_flags_duplicates_and_conversation_dominance(monkeypatch):
 
     monkeypatch.setattr(config, "memory_auto_store_conversations", True, raising=False)
 
-    report = server_mod._build_memory_doctor_report(FakeAgent(), thread_id=None, project_id="project-a", max_scan=10)
+    report = memory_routes._build_memory_doctor_report(FakeAgent(), thread_id=None, project_id="project-a", max_scan=10)
 
     assert report.ok is False
     assert report.type_counts["conversation"] == 2
@@ -144,16 +152,16 @@ def test_broadcast_discord_event_uses_gateway_loop(monkeypatch):
         return StubFuture()
 
     loop = StubLoop()
-    monkeypatch.setattr(server_mod, "_gateway_loop", loop, raising=False)
+    monkeypatch.setattr(gateway_routes, "_gateway_loop", loop, raising=False)
     monkeypatch.setattr(server_mod.asyncio, "run_coroutine_threadsafe", fake_run_coroutine_threadsafe, raising=True)
 
-    server_mod.broadcast_discord_event({"type": "discord_activity", "tool": "discord_read_channel"})
+    gateway_routes.broadcast_discord_event({"type": "discord_activity", "tool": "discord_read_channel"})
 
     assert captured.get("loop") is loop
 
 
 def test_sanitize_incoming_settings_ignores_redacted_secret_placeholders():
-    out = server_mod._sanitize_incoming_settings(
+    out = settings_routes._sanitize_incoming_settings(
         {
             "allow_discord_bot": True,
             "discord_bot_token": "***",
@@ -200,18 +208,18 @@ def test_reconcile_discord_bot_runtime_starts_when_enabled(monkeypatch):
 
     monkeypatch.setattr(config, "allow_discord_bot", True, raising=False)
     monkeypatch.setattr(config, "discord_bot_token", "x" * 60, raising=False)
-    monkeypatch.setattr(server_mod, "_discord_bot_token_value", "", raising=False)
-    monkeypatch.setattr(server_mod, "_discord_bot_task", None, raising=False)
+    patch_api(monkeypatch, "_discord_bot_token_value", "")
+    patch_api(monkeypatch, "_discord_bot_task", None)
     monkeypatch.setattr(discord_bot, "get_bot", lambda: None, raising=True)
     monkeypatch.setattr(discord_bot, "start_discord_bot", fake_start_discord_bot, raising=True)
     monkeypatch.setattr(discord_bot, "stop_discord_bot", fake_stop_discord_bot, raising=True)
     monkeypatch.setattr(server_mod.asyncio, "create_task", fake_create_task, raising=True)
 
-    asyncio.run(server_mod._reconcile_discord_bot_runtime())
+    asyncio.run(deps._reconcile_discord_bot_runtime())
 
     assert calls == [("x" * 60, "EchoSpeak", True)]
-    assert server_mod._discord_bot_task == "discord-task"
-    assert server_mod._discord_bot_token_value == "x" * 60
+    assert deps._discord_bot_task == "discord-task"
+    assert deps._discord_bot_token_value == "x" * 60
     assert len(scheduled) == 1
 
 
@@ -228,14 +236,14 @@ def test_put_settings_persists_incomplete_draft_and_returns_issues(monkeypatch):
     async def fake_reconcile():
         return None
 
-    monkeypatch.setattr(server_mod, "_read_runtime_settings", lambda: dict(saved["payload"]), raising=True)
-    monkeypatch.setattr(server_mod, "write_runtime_override_payload", fake_write, raising=True)
-    monkeypatch.setattr(server_mod, "_reconcile_discord_bot_runtime", fake_reconcile, raising=True)
-    monkeypatch.setattr(server_mod, "_validate_settings_effective", lambda effective: [{"key": "discord_bot_token", "message": "missing", "severity": "error"}], raising=True)
+    patch_api(monkeypatch, "_read_runtime_settings", lambda: dict(saved["payload"]))
+    monkeypatch.setattr(settings_routes, "write_runtime_override_payload", fake_write, raising=True)
+    patch_api(monkeypatch, "_reconcile_discord_bot_runtime", fake_reconcile)
+    monkeypatch.setattr(settings_routes, "_validate_settings_effective", lambda effective: [{"key": "discord_bot_token", "message": "missing", "severity": "error"}], raising=True)
     monkeypatch.setattr(config, "reload", lambda: None, raising=False)
     monkeypatch.setattr(config, "to_public_dict", lambda: {"allow_discord_bot": True}, raising=False)
 
-    resp = asyncio.run(server_mod.put_settings(StubRequest()))
+    resp = asyncio.run(settings_routes.put_settings(StubRequest()))
 
     assert saved["payload"] == {"allow_discord_bot": True}
     assert resp.overrides == {"allow_discord_bot": True}
@@ -356,9 +364,9 @@ def test_memory_compact_accepts_query_params(monkeypatch):
     class FakeAgent:
         memory = FakeMemory()
 
-    monkeypatch.setattr(server_mod, "get_agent", lambda thread_id=None: FakeAgent(), raising=True)
-    monkeypatch.setattr(server_mod, "_require_automation_project_scope", lambda session_id, project_id: project_id, raising=True)
+    patch_api(monkeypatch, "get_agent", lambda thread_id=None: FakeAgent())
+    patch_api(monkeypatch, "_require_automation_project_scope", lambda session_id, project_id: project_id)
 
-    resp = asyncio.run(server_mod.compact_memory(request=None, thread_id="t1", project_id="project-a", similarity=0.94, max_scan=50))
+    resp = asyncio.run(memory_routes.compact_memory(request=None, thread_id="t1", project_id="project-a", similarity=0.94, max_scan=50))
     assert resp["success"] is True
     assert resp["deleted"] == 0

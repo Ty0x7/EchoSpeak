@@ -345,7 +345,7 @@ class EchoSpeakDiscordBot:
         def on_tool_end(self, output: str, run_id: str, parent_run_id: Optional[str] = None, **_: Any) -> None:
             # Broadcast tool activity to Web UI via gateway WebSocket (Fix 5)
             try:
-                from api.server import broadcast_discord_event
+                from api.routes.gateway import broadcast_discord_event
                 broadcast_discord_event({
                     "type": "discord_activity",
                     "tool": self._last_tool_name if hasattr(self, "_last_tool_name") else "unknown",

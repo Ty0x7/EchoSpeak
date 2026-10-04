@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
 from tests.route_paths import route_paths as _route_paths
+import api.deps as deps
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -644,11 +645,11 @@ class TestAPI:
         monkeypatch.setattr(server, "_runtime_provider", None, raising=False)
         monkeypatch.setattr(core_mod, "EchoSpeakAgent", StubAgent, raising=True)
 
-        with server._agent_pool_lock:
-            server._agent_pool.clear()
+        with deps._agent_pool_lock:
+            deps._agent_pool.clear()
 
-        server.get_agent("thread-x")
-        server.get_agent(None)
+        deps.get_agent("thread-x")
+        deps.get_agent(None)
 
         assert len(created) == 2
         assert created[0]["manage_background_services"] is False

@@ -526,7 +526,7 @@ class EchoSpeakTwitchBot:
 
         # Fire a routine/heartbeat-style notification
         try:
-            from api.server import broadcast_discord_event
+            from api.routes.gateway import broadcast_discord_event
             broadcast_discord_event({
                 "type": "twitch_stream_online",
                 "broadcaster": broadcaster,
@@ -543,7 +543,7 @@ class EchoSpeakTwitchBot:
         logger.info(f"[TWITCH] Stream OFFLINE: {broadcaster}")
 
         try:
-            from api.server import broadcast_discord_event
+            from api.routes.gateway import broadcast_discord_event
             broadcast_discord_event({
                 "type": "twitch_stream_offline",
                 "broadcaster": broadcaster,

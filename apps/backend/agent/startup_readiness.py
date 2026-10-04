@@ -175,7 +175,7 @@ def _memory() -> dict[str, Any]:
 
 
 def _model() -> dict[str, Any]:
-    from api.server import _check_provider_readiness, _resolve_runtime_provider
+    from api.routes.settings import _check_provider_readiness, _resolve_runtime_provider
     from config import config
 
     provider = _resolve_runtime_provider()
@@ -198,7 +198,7 @@ def _adapter() -> dict[str, Any]:
     if "agent.model_adapters" not in sys.modules:
         return {"detail": "Model adapter resolves on first use"}
     from agent.model_adapters import get_provider_adapter as get_model_adapter
-    from api.server import _resolve_runtime_provider
+    from api.routes.settings import _resolve_runtime_provider
     from config import config
 
     provider = _resolve_runtime_provider().value
@@ -248,7 +248,7 @@ def _embeddings() -> dict[str, Any]:
 
 
 def _document_retrieval() -> dict[str, Any]:
-    from api.server import get_existing_agent
+    from api.deps import get_existing_agent
     from config import config
 
     enabled = bool(getattr(config, "document_rag_enabled", False))

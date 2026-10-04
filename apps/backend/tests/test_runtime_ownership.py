@@ -196,7 +196,7 @@ def test_projects_bind_exact_folders_and_read_only_git_scope(tmp_path: Path):
 def test_query_message_recording_never_creates_a_session(tmp_path: Path, monkeypatch):
     import agent.threads as threads_mod
     from agent.threads import ThreadManager
-    from api.server import _record_session_message
+    from api.routes.chat import _record_session_message
 
     manager = ThreadManager(tmp_path / "threads.json")
     monkeypatch.setattr(threads_mod, "_thread_manager", manager)

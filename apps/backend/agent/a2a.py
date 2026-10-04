@@ -296,7 +296,7 @@ class A2ATaskManager:
 
         try:
             # Lazy import to avoid circular dep
-            from api.server import get_agent
+            from api.deps import get_agent
             agent = get_agent(task.id)
             response, success = agent.process_query(
                 user_text,
