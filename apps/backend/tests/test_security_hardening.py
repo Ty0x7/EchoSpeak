@@ -76,6 +76,8 @@ def test_child_processes_do_not_get_echospeak_keys(monkeypatch):
     env = child_env({"EXTRA": "1"})
     assert "API_AUTH_KEY" not in env and "ADMIN_API_KEY" not in env
     assert env["PATH_FOR_TEST"] == "kept" and env["EXTRA"] == "1"
+    injected = child_env({"api_auth_key": "injected", "TAURI_SIGNING_PRIVATE_KEY": "injected"})
+    assert not any(key.upper() in {"API_AUTH_KEY", "TAURI_SIGNING_PRIVATE_KEY"} for key in injected)
 
 
 def test_tool_output_never_carries_stored_secrets():

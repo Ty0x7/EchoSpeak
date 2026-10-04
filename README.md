@@ -17,7 +17,7 @@
   <a href="docs/ARCHITECTURE.md">Architecture</a> ·
   <a href="docs/ROADMAP.md">Roadmap</a> ·
   <a href="CHANGES.md">Changelog</a> ·
-  <a href="docs/releases/v10.1.0.md">10.1 release notes</a>
+  <a href="docs/releases/v10.2.0.md">10.2 release notes</a>
 </p>
 
 ---
@@ -28,7 +28,7 @@ If you want an AI assistant that feels local, fast, and always-on — this is it
 
 ## Download
 
-**Windows 10/11 (64-bit):** get the installer from the [latest release](https://github.com/Ty0x7/EchoSpeak/releases/latest) (`EchoSpeak_10.1.0_x64-setup.exe`). Later versions install from inside the app: **Settings › About › Update**.
+**Windows 10/11 (64-bit):** get `EchoSpeak_<version>_x64-setup.exe` from the [latest release](https://github.com/Ty0x7/EchoSpeak/releases/latest). Later versions install from inside the app: **Settings › About › Update**.
 
 For a local model, install [LM Studio](https://lmstudio.ai) or Ollama (Gemma 4 E4B is the tested default). Docker Desktop is optional; when it's running, terminal commands run in a sandbox.
 

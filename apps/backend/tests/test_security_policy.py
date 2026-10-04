@@ -73,6 +73,53 @@ def test_rule_of_two_decisions():
     assert policy.evaluate("file_write", {"path": "a.py", "content": "x"}, tainted_by=web).action == "allow"
 
 
+def test_auto_terminal_host_fallback_is_visible_to_policy(monkeypatch):
+    from agent.lean import terminal as terminal_mod
+
+    monkeypatch.setattr(terminal_mod, "resolved_mode", lambda: "host")
+    terminal = terminal_mod.Terminal(project_root="")
+    box = _box({"terminal": terminal.run})
+    name, args = box.normalize_call("terminal", {"command": "python -c 'print(1)'"})
+    assert args["where"] == "host" and terminal.effective_where(args) == "host"
+    assert policy.evaluate(name, args, tainted_by=["web_search"]).action == "ask"
+    assert policy.evaluate(name, args, tainted_by=["web_search"], interactive=False).action == "deny"
+
+    # Exercise the actual call-normalization → policy → tool path. The host
+    # launcher must never be reached when no approval UI exists.
+    monkeypatch.setattr(terminal, "_start", lambda *_args, **_kwargs: pytest.fail("terminal launched without approval"))
+    events: list[dict[str, Any]] = []
+    client = ScriptedClient([
+        ModelTurn(tool_calls=[_call("host-call", "terminal", command="python -c 'print(1)'")]),
+        ModelTurn(content="blocked"),
+    ])
+    _turn(client, box, events, interactive=False, taint=["web_search"]).run("x")
+    assert any("Blocked by EchoSpeak's safety policy" in m.get("content", "")
+               for m in client.calls[1] if m.get("role") == "tool")
+
+
+def test_approval_arguments_are_exact_and_oversized_calls_are_refused():
+    command = "echo " + "x" * 4100 + " FINAL_MARKER"
+    args = {"command": command, **{f"field{i}": i for i in range(15)}}
+    box = _box({"terminal": lambda _args: "ran"})
+    events = []
+    turn = _turn(ScriptedClient([]), box, events)
+    call = _call("long", "terminal", **args)
+    turn._policy_reasons[call.id] = "outside content requires approval"
+    def on(event):
+        events.append(event)
+        if event["type"] == "approval_request":
+            get_approval_broker().resolve(event["id"], "deny")
+    turn._emit = on
+    allowed, _ = turn._approve(call, "terminal", args, 1)
+    assert not allowed
+    approval = next(event for event in events if event["type"] == "approval_request")
+    assert approval["args"] == args and approval["args"]["command"].endswith("FINAL_MARKER")
+    events.clear()
+    oversized = {"command": "x" * 65537}
+    allowed, reason = turn._approve(call, "terminal", oversized, 1)
+    assert not allowed and "64 KiB" in reason and not events
+
+
 def test_mcp_actions_count_as_external_and_mcp_reads_as_untrusted():
     action = type("E", (), {"origin": "mcp", "is_action": True})()
     read = type("E", (), {"origin": "mcp", "is_action": False})()

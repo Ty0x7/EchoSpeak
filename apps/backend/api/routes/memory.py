@@ -15,6 +15,29 @@ from api.deps import _normalize_thread_id, _require_automation_project_scope, ge
 router = APIRouter()
 
 
+@router.get("/embeddings/local/status")
+def local_embedding_status():
+    """Read-only setup state for the optional local embedding model."""
+    from agent.embeddings import local_status
+
+    return local_status()
+
+
+@router.post("/embeddings/local/download")
+def install_local_embedding_model():
+    """Download the local ONNX model only after an explicit Settings action."""
+    from agent.embeddings import download_local_model, local_runtime_available, local_status
+
+    if not local_runtime_available():
+        raise HTTPException(status_code=503, detail="Local embedding runtime is unavailable")
+    try:
+        download_local_model()
+    except Exception as exc:
+        logger.warning("Local embedding model download failed: {}", exc)
+        raise HTTPException(status_code=503, detail="Could not download the local embedding model") from exc
+    return {**local_status(), "restart_required": True}
+
+
 def get_document_store():
     agent = get_agent()
     if not bool(getattr(config, "document_rag_enabled", False)):

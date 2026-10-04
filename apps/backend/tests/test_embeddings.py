@@ -58,6 +58,24 @@ def test_without_the_model_and_no_download_memory_falls_back_quietly(tmp_path, m
     assert "not downloaded" in health["detail"]
 
 
+def test_local_embedding_download_requires_explicit_post(tmp_path, monkeypatch):
+    from api.routes import memory as memory_routes
+
+    monkeypatch.setenv("ECHOSPEAK_EMBEDDINGS_AUTO_DOWNLOAD", "true")
+    monkeypatch.delenv("ECHOSPEAK_TESTING", raising=False)
+    monkeypatch.setattr(emb, "local_model_dir", lambda: tmp_path / "model")
+    calls = []
+    monkeypatch.setattr(emb, "download_local_model", lambda: calls.append(True) or tmp_path / "model")
+    embedder, health = emb.local_embeddings()
+    assert embedder is None and not calls and "not downloaded" in health["detail"]
+
+    monkeypatch.setattr(emb, "local_runtime_available", lambda: True)
+    status = memory_routes.local_embedding_status()
+    assert status["installed"] is False
+    result = memory_routes.install_local_embedding_model()
+    assert calls == [True] and result["restart_required"] is True
+
+
 def test_memory_uses_the_local_model_and_rebuilds_the_index_when_the_size_changes(tmp_path, monkeypatch):
     from agent import memory as memory_mod
     from config import config, ModelProvider
@@ -87,6 +105,34 @@ def test_memory_uses_the_local_model_and_rebuilds_the_index_when_the_size_change
 
 def test_uploaded_documents_count_as_outside_content():
     assert is_untrusted_source("document_search")
+
+
+def test_document_index_rebuilds_from_canonical_text_after_embedding_size_change(tmp_path):
+    from agent.document_store import DocumentStore
+    from langchain_core.embeddings import Embeddings
+
+    class FixedEmbeddings(Embeddings):
+        def __init__(self, dim):
+            self.dim = dim
+
+        def embed_documents(self, texts):
+            return [self.embed_query(text) for text in texts]
+
+        def embed_query(self, text):
+            return [float(len(text) % 13 + 1)] + [0.0] * (self.dim - 1)
+
+    index = str(tmp_path / "index")
+    meta = str(tmp_path / "documents.json")
+    original = DocumentStore(FixedEmbeddings(8), index, meta)
+    doc = original.add_document("notes.txt", "EchoSpeak launch is Friday", project_id="project-1")
+    assert original.vector_store.index.d == 8
+
+    reopened = DocumentStore(FixedEmbeddings(384), index, meta)
+    assert reopened.index_health == "healthy"
+    assert reopened.vector_store.index.d == 384
+    assert reopened._docs[doc["id"]]["project_id"] == "project-1"
+    hits = reopened.vector_store.similarity_search("launch", k=3)
+    assert any("Friday" in hit.page_content for hit in hits)
 
 
 def test_agents_can_search_uploaded_documents_in_their_project(monkeypatch):

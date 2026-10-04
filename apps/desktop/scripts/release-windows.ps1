@@ -7,7 +7,7 @@
 #      latest.json attached (needs the GitHub CLI, `gh auth login` once).
 #
 # After that, every installed EchoSpeak shows "Update to <version>" in
-# Settings > About. Bump the version in the four version files before the next
+# Settings > About. Bump the backend, web, desktop, Cargo and Tauri versions before the next
 # release; the app only offers versions newer than its own.
 param(
     [string]$PythonExecutable = "python",

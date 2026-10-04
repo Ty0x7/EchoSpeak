@@ -7,7 +7,7 @@ Order of preference:
 2. A small local ONNX model: all-MiniLM-L6-v2 (384 dimensions, ~90 MB), run with
    onnxruntime and tokenizers. It is the same model the 10.x builds ran through
    PyTorch, so existing memory indexes keep working. It downloads once into the
-   data folder the first time it is needed.
+   data folder only when the user requests its installation in Settings.
 3. Nothing: memory still works from its records, with keyword recall only.
 """
 
@@ -28,6 +28,7 @@ except ImportError:  # pragma: no cover - langchain is a hard dependency today
 from config import DATA_DIR
 
 LOCAL_MODEL_REPO = "sentence-transformers/all-MiniLM-L6-v2"
+LOCAL_MODEL_REVISION = "d83dd3760b5bfe921f2fe125446b17bf0b7eda8c"
 LOCAL_MODEL_NAME = "all-MiniLM-L6-v2"
 LOCAL_MODEL_FILES = ("onnx/model.onnx", "tokenizer.json")
 LOCAL_MODEL_DIM = 384
@@ -58,18 +59,13 @@ def local_status() -> dict[str, Any]:
     size = sum((folder / name).stat().st_size for name in LOCAL_MODEL_FILES if (folder / name).is_file())
     return {
         "model": LOCAL_MODEL_REPO,
+        "revision": LOCAL_MODEL_REVISION,
         "runtime": "onnxruntime",
         "runtime_available": local_runtime_available(),
         "installed": local_model_installed(),
         "path": str(folder),
         "size_bytes": size,
     }
-
-
-def _auto_download_allowed() -> bool:
-    if os.getenv("ECHOSPEAK_TESTING", "").strip().lower() in {"1", "true", "yes"}:
-        return False
-    return os.getenv("ECHOSPEAK_EMBEDDINGS_AUTO_DOWNLOAD", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def download_local_model() -> Path:
@@ -83,7 +79,8 @@ def download_local_model() -> Path:
         folder.mkdir(parents=True, exist_ok=True)
         for name in LOCAL_MODEL_FILES:
             # hf_hub_download writes to a temporary file and renames it into place.
-            hf_hub_download(repo_id=LOCAL_MODEL_REPO, filename=name, local_dir=str(folder))
+            hf_hub_download(repo_id=LOCAL_MODEL_REPO, filename=name, revision=LOCAL_MODEL_REVISION,
+                            local_dir=str(folder))
         logger.info("Local embedding model ready at {}", folder)
         return folder
 
@@ -147,20 +144,14 @@ class OnnxEmbeddings(Embeddings):
 
 
 def local_embeddings() -> tuple[Optional[OnnxEmbeddings], dict[str, Any]]:
-    """The local ONNX embedder, downloading it on first use when allowed."""
+    """The local ONNX embedder; no network call unless explicitly enabled."""
     health = {"available": False, "provider": "onnx_local", "model": LOCAL_MODEL_REPO, "detail": ""}
     if not local_runtime_available():
         health["detail"] = "onnxruntime/tokenizers are not installed"
         return None, health
     if not local_model_installed():
-        if not _auto_download_allowed():
-            health["detail"] = "The local embedding model is not downloaded"
-            return None, health
-        try:
-            download_local_model()
-        except Exception as exc:
-            health["detail"] = f"Could not download the local embedding model: {exc}"
-            return None, health
+        health["detail"] = "The local embedding model is not downloaded"
+        return None, health
     try:
         embedder = OnnxEmbeddings()
         embedder.embed_query("healthcheck")

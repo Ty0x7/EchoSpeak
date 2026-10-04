@@ -116,7 +116,10 @@ Dangerous commands ask first in every mode.
   **Settings › Memory** lists, edits and deletes them.
 - Long chats get a rolling summary so earlier context isn't lost.
 - **Settings › Advanced › Memory & documents** has the full list, compaction, the Obsidian sync
-  and uploaded documents.
+  and uploaded documents. Search can use an embedding model already loaded in your model server.
+  For private local search, select **Install** under **Local search model** to download the
+  optional ONNX model (about 90 MB), then restart EchoSpeak. The installer does not include
+  this model and EchoSpeak never downloads it automatically.
 
 ## 7. Channels and automations
 

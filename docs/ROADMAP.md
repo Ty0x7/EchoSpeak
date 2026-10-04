@@ -12,10 +12,11 @@ What's next, in priority order. Each item says why it matters and roughly how bi
       `api/deps.py` and access rules in `api/auth.py`.
 - [x] Go TUI and the terminal setup wizard removed; setup happens in the app.
 - [x] Docs: one guide, one architecture doc, this roadmap; the rest archived.
-- [ ] PyTorch out of the default install: embeddings from the model server or a small ONNX
+- [x] PyTorch out of the default install: embeddings from the model server or a small ONNX
       model; document search as an optional download.
-- [ ] `Dashboard` (`apps/web/src/index.tsx`) split into hooks and components.
-- [ ] Security audit fixes.
+- [x] `Dashboard` (`apps/web/src/index.tsx`) split into hooks and chat/composer components.
+- [x] Security audit fixes: terminal destination checks, complete approval arguments,
+      image click gating, structured-output redaction and document-index migration.
 
 ## Next
 

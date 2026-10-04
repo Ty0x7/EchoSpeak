@@ -142,6 +142,20 @@ def redact_secrets(text: str, secrets: Optional[list[str]] = None) -> str:
     return out
 
 
+def redact_payload(value: Any, secrets: Optional[list[str]] = None) -> Any:
+    """Scrub structured tool cards before they reach events or saved timelines."""
+    values = secrets if secrets is not None else _secret_values()
+    if isinstance(value, str):
+        return redact_secrets(value, values)
+    if isinstance(value, list):
+        return [redact_payload(item, values) for item in value]
+    if isinstance(value, tuple):
+        return tuple(redact_payload(item, values) for item in value)
+    if isinstance(value, dict):
+        return {key: redact_payload(item, values) for key, item in value.items()}
+    return value
+
+
 # ── the decision ────────────────────────────────────────────────────────
 
 def evaluate(

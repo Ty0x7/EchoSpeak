@@ -44,7 +44,7 @@ flowchart LR
 ```
 
 - **Desktop shell.** `apps/desktop/src-tauri` is a Tauri 2 app with three windows: main, settings and companion. On launch, `backend.rs` reserves a free loopback port and generates a per-launch session key. It then starts the bundled backend (`backend-dist/echospeak-backend.exe`, a one-folder PyInstaller build) with `CREATE_NO_WINDOW`. It polls `/health`, then `/startup/readiness`, and only then shows the window. The backend is given the app's process id and exits when the app does.
-- **Web UI.** `apps/web` is a single React app. In the desktop window it runs as `DesktopApp`; in a browser it runs at `/app` (the website lives at `/`). Both use the same `Dashboard` (`apps/web/src/index.tsx`) and the lean chat components in `apps/web/src/lean/`.
+- **Web UI.** `apps/web` is a single React app. In the desktop window it runs as `DesktopApp`; in a browser it runs at `/app` (the website lives at `/`). Both use the same `Dashboard` (`apps/web/src/index.tsx`), with chat and composer components in `dashboard/`, the Project sidebar in `components/`, and streamed messages in `lean/`.
 - **Backend.** `apps/desktop/backend/echospeak_backend.py` is the packaged entry and `apps/backend/app.py --mode api` is the dev entry. Both serve `api/server.py`, which holds the app, lifespan and middleware and includes one router per area from `api/routes/`. The lean runtime is the only runtime: every source (app, voice, Discord, Telegram, routines) goes through `EchoSpeakAgent.process_query` → `run_lean_query`. `agent/core.py` (~1k lines) is the app object: model client, memory, soul, skill workspace, Project scope and the doctor report.
 - **Updates.** `src-tauri/src/updates.rs` reads `latest.json` from the newest GitHub release (`tauri-plugin-updater`), verifies the installer's signature against the public key in `tauri.conf.json`, stops the backend, and runs the installer, which restarts the app. `apps/desktop/scripts/release-windows.ps1` produces the signed installer and `latest.json`.
 - **Models.** Every agent turn calls an OpenAI-compatible `/chat/completions` endpoint (`agent/lean/provider.py`). That's a local server or a cloud API, and each persona can name its own provider and model.
@@ -269,7 +269,8 @@ Reloading a chat calls the Session timeline (`StateStore.session_timeline`). Eac
 | `apps/backend/agent/voice_runtime.py`, `voice_setup.py` | Voice provider detection and selection; guided Whisper download and the wake check |
 | `apps/backend/scripts/eval_gemma.py` | The 20-prompt evaluation against a live backend and model |
 | `apps/backend/agent/core.py` | `EchoSpeakAgent`: model client, memory, soul, workspace and Project scope; `process_query` is the one entry for every channel and hands the turn to the lean runtime |
-| `apps/web/src/index.tsx` | Dashboard: chat, composer, history load, streaming glue |
+| `apps/web/src/index.tsx` | Dashboard: Session state, history load, streaming glue and workspace layout |
+| `apps/web/src/dashboard/` | Chat timeline, composer input and controls, provider/voice hooks, history projection |
 | `apps/web/src/app/` | Split out of `index.tsx`: shared types, tool display helpers, fetch helpers and store, global CSS, chat bubble and activity cards |
 | `apps/web/src/lean/` | Agent messages, live reducer, status pill, mention menu, roster, dialogs, styles |
 | `apps/web/src/components/` | Sidebar (`ProjectSidebar.tsx` + `sidebarSections.ts`), Echo face, avatar |

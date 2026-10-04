@@ -19,5 +19,5 @@ PRIVATE_VARS = frozenset({
 def child_env(extra: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     env = {key: value for key, value in os.environ.items() if key.upper() not in PRIVATE_VARS}
     if extra:
-        env.update({str(k): str(v) for k, v in extra.items()})
+        env.update({str(k): str(v) for k, v in extra.items() if str(k).upper() not in PRIVATE_VARS})
     return env

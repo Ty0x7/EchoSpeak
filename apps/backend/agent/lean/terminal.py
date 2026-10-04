@@ -695,6 +695,10 @@ class Terminal:
                 "Windows paths in commands are translated automatically. Only if a task truly needs this PC "
                 "(Windows apps, installed tools), set where=\"host\"; that asks the user first.")
 
+    def effective_where(self, args: dict[str, Any]) -> str:
+        """Use the same destination for policy checks and process launch."""
+        return "host" if self.mode == "host" or str(args.get("where") or "").lower() == "host" else "docker"
+
     def _checkpoint_redirects(self, command: str, cwd: Path) -> None:
         """Back up files the command overwrites via redirection, so undo covers them like file_write."""
         targets = redirect_targets(command)
@@ -746,7 +750,7 @@ class Terminal:
         cwd, error = self._cwd(args.get("cwd"))
         if error:
             return None, error, Path("."), ""
-        where = "host" if self.mode == "host" or str(args.get("where") or "").lower() == "host" else "docker"
+        where = self.effective_where(args)
         want_net = False
         if where == "docker":
             ok, detail = _SANDBOX.ensure_container(mount_plan(self.project_root))

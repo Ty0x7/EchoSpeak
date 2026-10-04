@@ -73,6 +73,40 @@ def test_loop_sends_widgets_with_the_tool_result(monkeypatch):
     assert row["widgets"][0]["data"]["location"] == "Denver"  # kept for reload
 
 
+def test_tool_widget_secrets_are_scrubbed_before_emit_and_persist(monkeypatch):
+    from agent.lean import policy
+    from agent.lean.loop import LeanTurn
+    from agent.lean.personas import AgentPersona
+    from agent.lean.provider import ModelTurn, ToolCall
+    from agent.lean.toolbox import NativeTool, Toolbox
+    from tests.test_lean_runtime import ScriptedClient
+
+    secret = "sk-test-widget-secret-123456"
+    monkeypatch.setattr(policy, "_secret_values", lambda: [secret])
+
+    def lookup(_args):
+        widgets.attach({"type": "citations", "data": {"items": [
+            {"url": f"https://example.test/?key={secret}", "title": f"source {secret}"}
+        ]}})
+        return f"result {secret}"
+
+    events: list[dict] = []
+    box = Toolbox(toolsets=["lookup"], extra_tools=[NativeTool(
+        name="lookup", description="d", parameters={"type": "object", "properties": {}}, func=lookup,
+    )])
+    turn = LeanTurn(
+        client=ScriptedClient([ModelTurn(tool_calls=[ToolCall(id="c1", name="lookup", arguments="{}")]),
+                               ModelTurn(content="done")]),
+        persona=AgentPersona(id="echo", name="Echo"), system_prompt="s", history=[], toolbox=box,
+        session_id="s1", request_id="r", execution_id="e", emit=events.append,
+        cancel=threading.Event(), persist_tool_runs=False,
+    )
+    result = turn.run("look up")
+    assert secret not in str(next(e for e in events if e["type"] == "tool_end"))
+    assert secret not in str(result.timeline)
+    assert "[redacted secret]" in str(result.timeline)
+
+
 # ── product page parsing ─────────────────────────────────────────────────
 
 def test_products_are_read_from_schema_org_and_walmart_data():

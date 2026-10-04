@@ -11,6 +11,7 @@ const cargo = await readFile(new URL("../src-tauri/Cargo.toml", import.meta.url)
 const desktopApp = await readFile(new URL("../../web/src/desktop/DesktopApp.tsx", import.meta.url), "utf8");
 const desktopCss = await readFile(new URL("../../web/src/desktop/desktop.css", import.meta.url), "utf8");
 const dashboard = await readFile(new URL("../../web/src/index.tsx", import.meta.url), "utf8");
+const composerInput = await readFile(new URL("../../web/src/dashboard/ComposerInput.tsx", import.meta.url), "utf8");
 const sidebar = await readFile(new URL("../../web/src/components/ProjectSidebar.tsx", import.meta.url), "utf8");
 
 test("desktop window is a bounded native shell over the shared frontend", () => {
@@ -33,7 +34,7 @@ test("custom chrome can drag while controls and composer remain interactive", ()
   assert.ok(capability.permissions.includes("core:window:allow-start-dragging"));
   assert.ok(desktopApp.includes('className="desktop-titlebar" data-tauri-drag-region'));
   assert.ok(!desktopApp.includes('className="desktop-window-controls" data-tauri-drag-region'));
-  const composer = dashboard.match(/<textarea\s+ref=\{textareaRef\}[\s\S]{0,4000}?aria-label="Message"/i)?.[0] || "";
+  const composer = composerInput.match(/<textarea\s+ref=\{textareaRef\}[\s\S]{0,4000}?aria-label="Message"/i)?.[0] || "";
   assert.ok(composer, "canonical composer textarea was not found");
   assert.ok(composer.includes("disabled={!activeThreadId}"), "composer must require an explicitly created Session");
   assert.ok(desktopCss.includes("pointer-events: auto"));
@@ -44,10 +45,11 @@ test("desktop composer submits only into an explicitly selected Session", () => 
   assert.ok(dashboard.includes("Session creation has one explicit owner: the + controls in the sidebar."));
   assert.ok(dashboard.includes('const streamThreadId = String(activeThreadIdRef.current || activeThreadId || "").trim()'));
   assert.ok(dashboard.includes("if (!streamThreadId) return"));
-  assert.ok(dashboard.includes('e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing'));
-  assert.ok(dashboard.includes("void sendText()"));
-  assert.ok(dashboard.includes("disabled={!activeThreadId || !input.trim()}"));
-  assert.ok(dashboard.includes("disabled={!activeThreadId}"));
+  assert.ok(composerInput.includes('e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing'));
+  assert.ok(composerInput.includes("void onSend()"));
+  assert.ok(composerInput.includes("disabled={!activeThreadId || !input.trim()}"));
+  assert.ok(composerInput.includes("disabled={!activeThreadId}"));
+  assert.ok(dashboard.includes("onSend={() => void sendText()}"));
 });
 
 test("desktop startup and sidebar use one monochrome Echo identity", () => {

@@ -58,8 +58,10 @@ def _seed_mutable_defaults(data_dir: Path) -> None:
     os.environ["SOUL_PATH"] = str(target_soul)
     # Surface packaged identity in logs so stale AppData installs are obvious.
     if not os.environ.get("ECHOSPEAK_BUILD_ID"):
+        from version import APP_VERSION
+
         stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        os.environ["ECHOSPEAK_BUILD_ID"] = f"desktop-sidecar-10.1.0+{stamp}"
+        os.environ["ECHOSPEAK_BUILD_ID"] = f"desktop-sidecar-{APP_VERSION}+{stamp}"
 
 
 def _watch_windows_parent(parent_pid: int) -> None:

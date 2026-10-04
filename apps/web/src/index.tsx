@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ProjectSidebar, type SidebarPage } from "./components/ProjectSidebar";
 import { MediaLibraryView } from "./features/media/MediaLibraryView.tsx";
@@ -29,7 +28,7 @@ import { AgentRows, CollapsedRoster } from "./lean/Roster";
 import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
 import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
-import { AgentEditor, MentionMenu, RoomDialog, RoomHeader, activeMention, mentionMatches } from "./lean/Dialogs";
+import { AgentEditor, RoomDialog } from "./lean/Dialogs";
 import type { LeanEvent, LeanPersona, LeanRoom } from "./lean/types";
 import {
   desktopExecutionProfile,
@@ -38,12 +37,14 @@ import {
 import { isStreamThreadCurrent } from "./agentActivity";
 import { type ActivityItem, type AgentStreamEvent, type ApprovalDecisionEnvelope, type Message, type PendingActionEnvelope, type Role, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse } from "./app/types";
 import { buildMessageUsage } from "./app/toolDisplay";
-import { colors, fallbackProviders, fetchWithTimeout, geminiModelOptions, isEmptySessionDraft, normalizeTimestampMs, openaiModelOptions, stopTts, useAppStore } from "./app/runtime";
+import { colors, fetchWithTimeout, isEmptySessionDraft, normalizeTimestampMs, stopTts, useAppStore } from "./app/runtime";
+import { ComposerToolbar, type ReasoningEffort } from "./dashboard/ComposerToolbar";
 import { globalCss } from "./app/globalCss";
 import { useProviderSettings } from "./dashboard/useProviderSettings";
 import { useVoice } from "./dashboard/useVoice";
 import { projectSessionHistory } from "./dashboard/historyProjection";
-import { ActivityCard, ChatBubble, ContextMeter } from "./app/chatComponents";
+import { ComposerInput } from "./dashboard/ComposerInput";
+import { ChatThread } from "./dashboard/ChatThread";
 
 type DashboardTab = "chat" | "research" | "overview" | "skills" | "memory" | "docs" | "settings" | "search_settings" | "mcp_settings" | "advanced_settings" | "system_services" | "capabilities" | "approvals" | "executions" | "projects" | "automations" | "connections" | "soul" | "services" | "avatar_editor";
 
@@ -83,10 +84,6 @@ export const Dashboard: React.FC<{
     desktopSettingsWindow ? "settings" : initialView
   );
 
-  const [activeGroup, setActiveGroup] = useState<string | null>(null);
-  const activeGroupButtonRef = useRef<HTMLButtonElement | null>(null);
-  const activeGroupMenuRef = useRef<HTMLDivElement | null>(null);
-  const [activeGroupPos, setActiveGroupPos] = useState<{ top: number; left: number } | null>(null);
   const [showSidebar, setShowSidebar] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarVisible);
   /** Which page the main area shows: the chat, or one of the sidebar nav pages. */
   const [mainPage, setMainPage] = useState<SidebarPage>("chat");
@@ -114,7 +111,6 @@ export const Dashboard: React.FC<{
   }[]>(() => (desktopBootstrap?.projects || []) as any[]);
   const [activeProjectId, setActiveProjectId] = useState<string>(() => desktopBootstrap?.active_project_id || "");
   const activeProjectIdRef = useRef<string>(desktopBootstrap?.active_project_id || "");
-  const [folderDropActive, setFolderDropActive] = useState(false);
   // Bootstrap data is only a startup hint.  Do not paint it as authoritative
   // chat history: the first scoped /threads read reconciles the durable list.
   // Keeping this false until that read completes prevents transient sessions,
@@ -704,9 +700,7 @@ export const Dashboard: React.FC<{
   const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(
     () => window.localStorage.getItem("echospeak.chat.thinking_enabled") !== "false",
   );
-  const [reasoningEffort, setReasoningEffort] = useState<
-    "minimal" | "low" | "medium" | "high" | "extra_high" | "max" | "ultra"
-  >(() => {
+  const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(() => {
     const stored = window.localStorage.getItem("echospeak.chat.reasoning_effort");
     return stored === "minimal" || stored === "low" || stored === "medium" || stored === "high" ||
       stored === "extra_high" || stored === "max" || stored === "ultra"
@@ -1242,38 +1236,6 @@ export const Dashboard: React.FC<{
     }
   };
 
-  // ── Composer toolbar: always one row; collapses by its own width ──
-  const [toolbarSize, setToolbarSize] = useState<"full" | "icons" | "compact" | "mini">("full");
-  const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
-  const toolbarObserverRef = useRef<ResizeObserver | null>(null);
-  const toolbarRef = useCallback((el: HTMLDivElement | null) => {
-    toolbarObserverRef.current?.disconnect();
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(([entry]) => {
-      const width = entry.contentRect.width;
-      setToolbarSize(width >= 960 ? "full" : width >= 760 ? "icons" : width >= 600 ? "compact" : "mini");
-    });
-    observer.observe(el);
-    toolbarObserverRef.current = observer;
-  }, []);
-  useEffect(() => {
-    if (toolbarSize !== "mini") setToolbarMenuOpen(false);
-  }, [toolbarSize]);
-  useEffect(() => {
-    if (!toolbarMenuOpen) return;
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      const outside = event instanceof KeyboardEvent
-        ? event.key === "Escape"
-        : !(event.target as HTMLElement | null)?.closest?.(".toolbar-overflow");
-      if (outside) setToolbarMenuOpen(false);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", close);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", close);
-    };
-  }, [toolbarMenuOpen]);
   const toggleMonitor = () =>
     setMonitoring((v) => {
       const next = !v;
@@ -1291,7 +1253,7 @@ export const Dashboard: React.FC<{
     if (!streaming) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (mention || toolbarMenuOpen || document.querySelector(".es-modal-scrim, .st-root")) return;
+      if (mention || document.querySelector(".toolbar-menu, .es-modal-scrim, .st-root")) return;
       stopActiveTurn();
     };
     window.addEventListener("keydown", onKey);
@@ -1387,55 +1349,6 @@ export const Dashboard: React.FC<{
   }, [apiBase, activeThreadId, initialHydrationComplete]);
 
 
-
-  useEffect(() => {
-    if (!activeGroup) {
-      setActiveGroupPos(null);
-      return;
-    }
-
-    const computePos = () => {
-      const btn = activeGroupButtonRef.current;
-      if (!btn) return;
-      const r = btn.getBoundingClientRect();
-      setActiveGroupPos({
-        top: Math.round(r.bottom + 8),
-        left: Math.round(r.left),
-      });
-    };
-
-    computePos();
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setActiveGroup(null);
-    };
-
-    const onPointerDown = (e: MouseEvent | PointerEvent) => {
-      const t = e.target as Node | null;
-      if (!t) return;
-      const menu = activeGroupMenuRef.current;
-      const btn = activeGroupButtonRef.current;
-      if (menu && menu.contains(t)) return;
-      if (btn && btn.contains(t)) return;
-      setActiveGroup(null);
-    };
-
-    const onWindowChange = () => {
-      // Reposition on scroll/resize so the menu doesn't look "stuck".
-      computePos();
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("pointerdown", onPointerDown, true);
-    window.addEventListener("resize", onWindowChange);
-    window.addEventListener("scroll", onWindowChange, true);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("pointerdown", onPointerDown, true);
-      window.removeEventListener("resize", onWindowChange);
-      window.removeEventListener("scroll", onWindowChange, true);
-    };
-  }, [activeGroup]);
 
   useEffect(() => {
     if (!monitoring) return;
@@ -1892,150 +1805,7 @@ export const Dashboard: React.FC<{
           </div>
           <div className="panel-body">
             <div className="research-panel">
-              <div className="tab-bar" style={{
-                display: "none",
-                position: "relative",
-                overflow: "visible",
-                marginBottom: "16px",
-              }}>
-                <div className="top-tab-groups" style={{
-                  alignItems: "center",
-                  padding: 0,
-                  background: "transparent",
-                  borderRadius: 0,
-                  border: "none",
-                  boxShadow: "none",
-                  backdropFilter: "none",
-                  WebkitBackdropFilter: "none",
-                  overflowY: "hidden",
-                  scrollbarWidth: "none",
-                }}>
-                  {[
-                    { id: 'core', label: 'Core', icon: '⚡', tabs: [{ id: 'chat', label: 'Chat' }, { id: 'research', label: 'Research' }] },
-                    { id: 'knowledge', label: 'Knowledge', icon: '📚', tabs: [{ id: 'memory', label: 'Memory' }, { id: 'docs', label: 'Docs' }] },
-                    { id: 'config', label: 'Config', icon: '⚙️', tabs: [{ id: 'settings', label: 'Settings' }, { id: 'capabilities', label: 'Tools' }, { id: 'soul', label: 'Soul' }, { id: 'avatar_editor', label: 'Avatar' }] },
-                    { id: 'operations', label: 'Operations', icon: '🤖', tabs: [{ id: 'overview', label: 'Overview' }, { id: 'skills', label: 'Skills' }, { id: 'executions', label: 'Viewer' }, { id: 'approvals', label: 'Approvals' }, { id: 'projects', label: 'Projects' }, { id: 'automations', label: 'Automations' }, { id: 'connections', label: 'Connections' }, { id: 'services', label: 'Services' }] },
-                  ].map((group) => {
-                    const isGroupActive = group.tabs.some(t => t.id === leftTab);
-                    return (
-                      <div key={group.id} className="top-tab-group">
-                        <button
-                          type="button"
-                          className={`tab-button ${isGroupActive ? "active" : ""}`}
-                          ref={(el) => {
-                            if (activeGroup === group.id) activeGroupButtonRef.current = el;
-                          }}
-                          onClick={(e) => {
-                            if (group.tabs.length === 1) {
-                              setLeftTab(group.tabs[0].id as any);
-                              setActiveGroup(null);
-                            } else {
-                              activeGroupButtonRef.current = e.currentTarget as HTMLButtonElement;
-                              setActiveGroup(activeGroup === group.id ? null : group.id);
-                            }
-                          }}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 6,
-                            padding: "8px 16px",
-                            borderRadius: "12px",
-                            fontSize: "13px",
-                            fontWeight: 600,
-                            background: isGroupActive ? "linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%)" : "transparent",
-                            border: isGroupActive ? "1px solid rgba(255,255,255,0.2)" : "1px solid transparent",
-                            boxShadow: isGroupActive ? "inset 0 1px 1px rgba(255,255,255,0.3), 0 2px 8px rgba(0,0,0,0.2)" : "none",
-                            color: isGroupActive ? "#ffffff" : "rgba(255,255,255,0.6)",
-                            transition: "all 0.25s cubic-bezier(0.4, 0, 0.2, 1)",
-                            cursor: "pointer",
-                            whiteSpace: "nowrap"
-                          }}
-                        >
-                          <span style={{ fontSize: "16px", filter: "brightness(0) invert(1)", opacity: isGroupActive ? 1 : 0.7 }}>{group.icon}</span>
-                          <span style={{ textShadow: isGroupActive ? "0 0 8px rgba(255,255,255,0.4)" : "none" }}>{group.label}</span>
-                          {group.tabs.length > 1 && (
-                            <span style={{ fontSize: "10px", opacity: 0.5, marginLeft: 4 }}>{activeGroup === group.id ? '▲' : '▼'}</span>
-                          )}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {activeGroup && activeGroupPos
-                ? createPortal(
-                  <AnimatePresence>
-                    <motion.div
-                      ref={(el) => {
-                        activeGroupMenuRef.current = el;
-                      }}
-                      initial={{ opacity: 0, y: 8, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 4, scale: 0.95 }}
-                      transition={{ duration: 0.15 }}
-                      style={{
-                        position: "fixed",
-                        top: activeGroupPos.top,
-                        left: activeGroupPos.left,
-                        zIndex: 2147483647,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 2,
-                        padding: "6px",
-                        background: "rgba(20, 20, 20, 0.95)",
-                        backdropFilter: "blur(16px)",
-                        WebkitBackdropFilter: "blur(16px)",
-                        borderRadius: "12px",
-                        border: `1px solid ${colors.line}`,
-                        boxShadow:
-                          "0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)",
-                        minWidth: "140px",
-                      }}
-                    >
-                      {(
-                        [
-                          { id: 'core', label: 'Core', icon: '⚡', tabs: [{ id: 'chat', label: 'Chat' }, { id: 'research', label: 'Research' }] },
-                          { id: 'knowledge', label: 'Knowledge', icon: '📚', tabs: [{ id: 'memory', label: 'Memory' }, { id: 'docs', label: 'Docs' }] },
-                          { id: 'config', label: 'Config', icon: '⚙️', tabs: [{ id: 'settings', label: 'Settings' }, { id: 'capabilities', label: 'Tools' }, { id: 'soul', label: 'Soul' }, { id: 'avatar_editor', label: 'Avatar' }] },
-                          { id: 'operations', label: 'Operations', icon: '🤖', tabs: [{ id: 'overview', label: 'Overview' }, { id: 'skills', label: 'Skills' }, { id: 'executions', label: 'Viewer' }, { id: 'approvals', label: 'Approvals' }, { id: 'projects', label: 'Projects' }, { id: 'automations', label: 'Automations' }, { id: 'connections', label: 'Connections' }, { id: 'services', label: 'Services' }] },
-                        ].find((g) => g.id === activeGroup)?.tabs || []
-                      ).map((tab) => (
-                        <button
-                          key={tab.id}
-                          type="button"
-                          className={`tab-button ${leftTab === tab.id ? "active" : ""}`}
-                          onClick={() => {
-                            setLeftTab(tab.id as any);
-                            setActiveGroup(null);
-                          }}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            padding: "8px 12px",
-                            borderRadius: "8px",
-                            fontSize: "12px",
-                            fontWeight: 500,
-                            textAlign: "left",
-                            background: leftTab === tab.id ? "rgba(255,255,255,0.1)" : "transparent",
-                            color: leftTab === tab.id ? colors.text : colors.textDim,
-                            border: "none",
-                            cursor: "pointer",
-                            transition: "all 0.15s ease",
-                            width: "100%",
-                          }}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </motion.div>
-                  </AnimatePresence>,
-                  document.body
-                )
-                : null}
-
               {/* Chat Tab */}
-              {true && (
                 <>
                   <WidgetEnvProvider value={widgetEnv}>
                   {!rightOpen && activityItems.length ? (
@@ -2053,484 +1823,54 @@ export const Dashboard: React.FC<{
                       <small>{activityItems.length}</small>
                     </button>
                   ) : null}
-                  <div key={activeThreadId || "quick-chat"} className="chat-scroll" data-live={streaming ? "true" : undefined} style={{ flex: 1 }} ref={chatScrollRef} onScroll={onChatScroll} onWheel={onChatWheel} onKeyDown={onChatKeyDown} onTouchStart={onChatTouchStart} onTouchEnd={onChatTouchEnd} onTouchCancel={onChatTouchEnd}>
-                    {activeRoom ? (
-                      <RoomHeader room={activeRoom} agents={agents} onEdit={() => setRoomDialog({ open: true, room: activeRoom })} />
-                    ) : null}
-                    {!timeline.length && !streaming && !lean.live ? (
-                      <div className="es-chat-empty">
-                        <strong>{activeRoom ? activeRoom.name : "What can I help with?"}</strong>
-                        <span>
-                          {activeRoom?.kind === "group"
-                            ? "Write to the whole group, or @mention an agent to pick who answers."
-                            : "Ask anything, or drop a folder on the composer to work inside a project."}
-                        </span>
-                      </div>
-                    ) : null}
-                    <AnimatePresence initial={false}>
-                      {timeline.map((t) =>
-                        t.kind === "message" ? (
-                          <ChatBubble
-                            key={`msg-${t.id}`}
-                            msg={t.msg}
-                            streaming={streaming}
-                            typewriter={t.msg.role === "assistant" && !t.msg.skipTypewriter}
-                            contextWindow={Number(providerInfo?.context_window || 0) || 32768}
-                            providerLabel={providerInfo?.provider}
-                            modelLabel={providerInfo?.model}
-                            onQuickReply={(text) => {
-                              try {
-                                stopTts();
-                              } catch {
-                                // ignore
-                              }
-                              sendText(text);
-                            }}
-                          />
-                        ) : (
-                          <ActivityCard
-                            key={`act-${t.id}`}
-                            item={t.item}
-                            // Step list uses static marks when the hero strip owns the Echo spinner.
-                            primarySpinner={!streaming}
-                          />
-                        )
-                      )}
-                    </AnimatePresence>
-                    {pendingApproval?.has_pending && pendingApproval.action ? (
-                      <div
-                        style={{ width: "100%", padding: "2px 4px 4px", position: "relative", zIndex: 20 }}
-                        data-testid="chat-pending-approval"
-                        data-approval-id={String(pendingApproval.approval_id || pendingApproval.action.id || "")}
-                      >
-                        <OperationalStateCard
-                          state={threadState}
-                          approval={{
-                            ...pendingApproval.action,
-                            id: String(pendingApproval.approval_id || pendingApproval.action.id || ""),
-                            status: String(pendingApproval.action.status || "pending"),
-                            policy_flags: pendingApproval.policy_flags || pendingApproval.action.policy_flags,
-                            session_permissions: pendingApproval.session_permissions || pendingApproval.action.session_permissions,
-                          }}
-                          busy={approvalDecisionBusy}
-                          onDecision={decideApproval}
-                          compact
-                        />
-                      </div>
-                    ) : null}
-                    {lean.live ? (
-                      <div data-testid="lean-live-turn">
-                        {lean.live.routing && !lean.live.order.length ? (
-                          <div className="lm-routing" aria-hidden>
-                            <span className="lm-dots"><i /><i /><i /></span>
-                          </div>
-                        ) : null}
-                        {lean.live.order.map((id) => {
-                          const item = lean.live!.messages[id];
-                          return item ? <LeanMessage key={id} data={item} live onDecide={decideLeanApproval} at={item.startedAt} /> : null;
-                        })}
-                        {!lean.live.order.length && !lean.live.routing ? (
-                          <div className="lm-routing" aria-hidden>
-                            <span className="lm-dots"><i /><i /><i /></span>
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
+                  <ChatThread
+                    activeThreadId={activeThreadId} streaming={streaming} scrollRef={chatScrollRef}
+                    onScroll={onChatScroll} onWheel={onChatWheel} onKeyDown={onChatKeyDown}
+                    onTouchStart={onChatTouchStart} onTouchEnd={onChatTouchEnd}
+                    activeRoom={activeRoom} agents={agents}
+                    onEditRoom={(room) => setRoomDialog({ open: true, room })}
+                    timeline={timeline} live={lean.live} providerInfo={providerInfo}
+                    onQuickReply={(text) => void sendText(text)}
+                    pendingApproval={pendingApproval} threadState={threadState}
+                    approvalDecisionBusy={approvalDecisionBusy} onApprovalDecision={decideApproval}
+                    onLeanApproval={decideLeanApproval}
+                  />
                   </WidgetEnvProvider>
                   <div className="input-bar">
                     <LiveStatusPill live={streaming ? lean.live : null} onStop={stopActiveTurn} />
                     {/* Row 1: session strip stacked on input (same column width) + context + send */}
-                    <div className="input-row">
-                      <div className="composer-input-stack">
-                        <div
-                          className={"session-folder-strip" + (folderDropActive ? " is-drop-active" : "")}
-                          aria-label="Session and Project folder attachment. Drop a local folder here to create or select its Project."
-                          onDragEnter={(event) => { event.preventDefault(); setFolderDropActive(true); }}
-                          onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "link"; setFolderDropActive(true); }}
-                          onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setFolderDropActive(false); }}
-                          onDrop={(event) => { event.preventDefault(); setFolderDropActive(false); const path = folderPathFromDrop(event); if (path) void attachFolder(path); else void attachFolder(); }}
-                        >
-                          <span style={{ whiteSpace: "nowrap" }}>
-                            Session: <b style={{ color: "rgba(255,255,255,.8)" }}>{threads.find(t => t.id === activeThreadId)?.name || activeThreadId}</b>
-                          </span>
-                          {(() => {
-                            const folderFull =
-                              String(threadState?.workspace_root || threadState?.project_path || "").trim();
-                            const folderName = folderFull
-                              ? folderFull.replace(/[\\/]+$/, "").split(/[/\\]/).filter(Boolean).pop() || folderFull
-                              : "";
-                            const gitBranch = projects.find(project => project.id === activeProjectId)?.git_metadata?.is_repository
-                              ? String(projects.find(project => project.id === activeProjectId)?.git_metadata?.branch || "repository")
-                              : "";
-                            return (
-                              <button
-                                type="button"
-                                onClick={() => void attachFolder()}
-                                title={
-                                  folderFull
-                                    ? folderFull
-                                    : "Choose or drop a local folder; folders become Projects automatically"
-                                }
-                                style={{
-                                  border: 0,
-                                  background: "transparent",
-                                  color: "inherit",
-                                  padding: 0,
-                                  font: "inherit",
-                                  cursor: "pointer",
-                                  textAlign: "left",
-                                  whiteSpace: "nowrap",
-                                }}
-                              >
-                                Folder:{" "}
-                                <b style={{ color: "rgba(255,255,255,.8)" }}>
-                                  {folderName || "drop folder to start Project"}
-                                  {gitBranch ? ` · git:${gitBranch}` : ""}
-                                </b>
-                              </button>
-                            );
-                          })()}
-                          {(threadState?.workspace_root || threadState?.project_path) && (
-                            <button
-                              type="button"
-                              aria-label="Remove folder from this Session"
-                              title="Remove folder from this Session"
-                              onClick={async () => {
-                                const response = await fetch(`${apiBase}/projects/deactivate?thread_id=${encodeURIComponent(activeThreadId)}`, { method: "POST" });
-                                if (!response.ok) return;
-                                const data = await response.json();
-                                setActiveProjectId(""); setThreadState(data.thread_state || null);
-                                setThreads(items => items.map(item => item.id === activeThreadId ? { ...item, projectId: "" } : item));
-                              }}
-                              style={{ width: 18, height: 18, border: 0, background: "transparent", color: "rgba(255,255,255,.65)", borderRadius: 2, cursor: "pointer", lineHeight: 1, flexShrink: 0 }}
-                            >
-                              ×
-                            </button>
-                          )}
-                          {providerError ? (
-                            <span role="status" title={providerError} style={{ marginLeft: 8, color: "#e8b86a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
-                              {providerError}
-                            </span>
-                          ) : null}
-                        </div>
-                        <textarea
-                          ref={textareaRef}
-                          className="input-field"
-                          value={input}
-                          rows={1}
-                          disabled={!activeThreadId}
-                          onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-                            updateComposerInput(e.target.value);
-                            if (activeRoom?.kind === "group") {
-                              const found = activeMention(e.target.value, e.target.selectionStart ?? e.target.value.length);
-                              setMention(found && mentionMatches(found.query, roomMembers).length ? { ...found, index: 0 } : null);
-                            }
-                          }}
-                          onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-                            if (mention) {
-                              const matches = mentionMatches(mention.query, roomMembers);
-                              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                                e.preventDefault();
-                                const step = e.key === "ArrowDown" ? 1 : -1;
-                                setMention({ ...mention, index: (mention.index + step + matches.length) % Math.max(1, matches.length) });
-                                return;
-                              }
-                              if ((e.key === "Enter" || e.key === "Tab") && matches[mention.index]) {
-                                e.preventDefault();
-                                const pick = matches[mention.index];
-                                const caret = e.currentTarget.selectionStart ?? input.length;
-                                const next = `${input.slice(0, mention.start)}@${pick.name} ${input.slice(caret)}`;
-                                updateComposerInput(next);
-                                setMention(null);
-                                return;
-                              }
-                              if (e.key === "Escape") {
-                                setMention(null);
-                                return;
-                              }
-                            }
-                            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                              e.preventDefault();
-                              void sendText();
-                            }
-                          }}
-                          onBlur={() => window.setTimeout(() => setMention(null), 120)}
-                          placeholder={
-                            !activeThreadId
-                              ? "Create a Session with + to chat"
-                              : activeRoom?.kind === "group"
-                              ? `Message ${activeRoom.name}  ·  @ to pick who answers`
-                              : activeRoom
-                              ? `Message ${roomMembers[0]?.name || activeRoom.name}`
-                              : "Ask Echo anything..."
-                          }
-                          aria-label="Message"
-                        />
-                        {mention && activeRoom?.kind === "group" ? (
-                          <MentionMenu
-                            anchor={textareaRef.current}
-                            query={mention.query}
-                            agents={roomMembers}
-                            activeIndex={mention.index}
-                            onPick={(pick) => {
-                              const caret = textareaRef.current?.selectionStart ?? input.length;
-                              updateComposerInput(`${input.slice(0, mention.start)}@${pick.name} ${input.slice(caret)}`);
-                              setMention(null);
-                              textareaRef.current?.focus();
-                            }}
-                          />
-                        ) : null}
-                      </div>
-                      <div className="composer-trailing">
-                        <ContextMeter messages={messages} contextWindow={providerInfo?.context_window || 0} />
-                        <button
-                          className="send-button"
-                          onClick={() => void sendText()}
-                          type="button"
-                          disabled={!activeThreadId || !input.trim()}
-                          title="Send"
-                          aria-label="Send message"
-                        >
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                            <path d="M5 12L19 12M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
+                    <ComposerInput
+                      threads={threads} projects={projects} activeThreadId={activeThreadId}
+                      activeProjectId={activeProjectId} threadState={threadState} providerError={providerError}
+                      folderPathFromDrop={folderPathFromDrop} attachFolder={attachFolder} onRemoveFolder={async () => {
+                        const response = await fetch(`${apiBase}/projects/deactivate?thread_id=${encodeURIComponent(activeThreadId)}`, { method: "POST" });
+                        if (!response.ok) return;
+                        const data = await response.json();
+                        setActiveProjectId(""); setThreadState(data.thread_state || null);
+                        setThreads(items => items.map(item => item.id === activeThreadId ? { ...item, projectId: "" } : item));
+                      }}
+                      textareaRef={textareaRef} input={input} onInput={updateComposerInput} onSend={() => void sendText()}
+                      activeRoom={activeRoom} roomMembers={roomMembers} mention={mention} setMention={setMention}
+                      messages={messages} providerInfo={providerInfo}
+                    />
                     {/* Row 2: mic mon viz | Provider | Model */}
-                    <div className="controls-row" ref={toolbarRef} data-size={toolbarSize}>
-                      <div className="composer-primary-controls">
-                        <div className="composer-tools-slot" role="group" aria-label="Input tools">
-                        <button
-                          className={`mic-button ${listening ? "active" : ""}`}
-                          type="button"
-                          title={listening ? "Stop microphone" : "Start microphone"}
-                          aria-label={listening ? "Stop microphone" : "Start microphone"}
-                          disabled={voicePhase === "transcribing" || voicePhase === "requesting_permission"}
-                          onClick={() => listening ? void stop() : void start()}
-                        >
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" fill="currentColor" />
-                            <path d="M19 10v2a7 7 0 0 1-14 0v-2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                          </svg>
-                        </button>
-                        {(voicePhase !== "idle" || voiceNotice) ? (
-                          <span
-                            className="voice-transport-status"
-                            data-state={voicePhase}
-                            title={voiceNotice || voicePhase}
-                            aria-live="polite"
-                          >
-                            <i style={{ transform: `scale(${1 + voiceInputLevel * 0.55})` }} />
-                            {voicePhase === "requesting_permission"
-                              ? "Mic access"
-                              : voicePhase === "listening"
-                              ? "Listening"
-                              : voicePhase === "transcribing"
-                              ? "Local transcript"
-                              : voicePhase === "speaking"
-                              ? "Speaking"
-                              : voicePhase === "error"
-                              ? "Voice setup"
-                              : voiceNotice || "Voice ready"}
-                          </span>
-                        ) : null}
-                        <button
-                          className={`composer-square is-overflowable ${monitoring ? "active" : ""}`}
-                          type="button"
-                          title={monitoring ? "Stop screen monitor" : "Screen monitor"}
-                          aria-label={monitoring ? "Stop screen monitor" : "Screen monitor"}
-                          onClick={toggleMonitor}
-                        >
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                            <rect x="2" y="4" width="20" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
-                            <path d="M12 16v4M8 20h8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                          </svg>
-                        </button>
-                        <button
-                          className={`composer-square is-overflowable ${!speechEnabled ? "active" : ""}`}
-                          type="button"
-                          title={speechEnabled ? "Sound on · click to mute" : "Sound off · click to unmute"}
-                          aria-label={speechEnabled ? "Mute sound" : "Unmute sound"}
-                          onClick={() => setSpeechEnabled(!speechEnabled)}
-                        >
-                          {speechEnabled ? (
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                              <path d="M4.5 10.5h3l4-3.5v10l-4-3.5h-3z" />
-                              <path d="M15.5 9.5a4 4 0 0 1 0 5" />
-                              <path d="M17.5 7.5a7 7 0 0 1 0 9" />
-                            </svg>
-                          ) : (
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                              <path d="M4.5 10.5h3l4-3.5v10l-4-3.5h-3z" />
-                              <path d="M16 9.5 20 14.5M20 9.5 16 14.5" />
-                            </svg>
-                          )}
-                        </button>
-                        </div>
-                        <div className="control-slot provider-slot" data-label="Provider">
-                        <div className="inline-switcher">
-                          <select
-                            className="provider-picker"
-                            value={providerDraft.provider}
-                            onChange={(e) => {
-                              const p = e.target.value;
-                              setProviderModels([]);
-                              setProviderDraft((d) => ({
-                                ...d,
-                                provider: p,
-                                base_url: "",
-                                model: p === "openai" ? openaiModelOptions[0] : p === "gemini" ? geminiModelOptions[0] : "",
-                              }));
-                            }}
-                            disabled={switchingProvider || lmStudioOnly}
-                            title="Model provider"
-                            aria-label="Model provider"
-                          >
-                            {(providerInfo?.available_providers || fallbackProviders)
-                              .filter((p) => !lmStudioOnly || p.id === "lmstudio")
-                              .map((p) => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name}
-                                </option>
-                              ))}
-                          </select>
-                        </div>
-                        </div>
-                        <div className="control-slot model-slot" data-label="Model">
-                        <select
-                          className="model-picker"
-                          value={modelPickerValue}
-                          onChange={(e) => {
-                            if (!showModelPicker) return;
-                            setProviderDraft((d) => ({ ...d, model: e.target.value }));
-                          }}
-                          disabled={switchingProvider || !showModelPicker}
-                          title="Model"
-                          aria-label="Model"
-                        >
-                          {modelPickerOptions.map((m) => (
-                            <option key={m} value={m}>
-                              {m}
-                            </option>
-                          ))}
-                        </select>
-                        </div>
-                        <div className="control-slot effort-slot is-overflowable" data-label="Effort">
-                        <select
-                          className="model-picker"
-                          value={reasoningEffort}
-                          onChange={(e: any) => setReasoningEffort(e.target.value)}
-                          title="Reasoning effort"
-                          aria-label="Reasoning effort"
-                        >
-                          <option value="minimal">Minimal</option>
-                          <option value="low">Low</option>
-                          <option value="medium">Medium</option>
-                          <option value="high">High</option>
-                          <option value="extra_high">Extra High</option>
-                          <option value="max">Max</option>
-                          <option value="ultra">Ultra</option>
-                        </select>
-                      </div>
-                      </div>
-                      <div className="composer-mode-controls" role="group" aria-label="Thinking and voice controls">
-                      <button
-                        className={`composer-mode-button ${thinkingEnabled ? "active" : ""}`}
-                        type="button"
-                        title={thinkingEnabled ? "Thinking: on" : "Thinking: off"}
-                        aria-label="Thinking"
-                        aria-pressed={thinkingEnabled}
-                        onClick={() => setThinkingEnabled(!thinkingEnabled)}
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/><circle cx="12" cy="12" r="3"/></svg>
-                        <span className="composer-mode-label">Think</span>
-                      </button>
-                      <button
-                        className={`composer-mode-button is-overflowable ${voiceReadAloud ? "active" : ""}`}
-                        type="button"
-                        title={voiceReadAloud ? "Read replies aloud: on" : "Read replies aloud: off"}
-                        aria-label="Read replies aloud"
-                        aria-pressed={voiceReadAloud}
-                        onClick={toggleReadAloud}
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 10h3l4-3v10l-4-3H4zM15 9a4 4 0 0 1 0 6M18 6a8 8 0 0 1 0 12"/></svg>
-                        <span className="composer-mode-label">Read</span>
-                      </button>
-                      <button
-                        className={`composer-mode-button is-overflowable ${voiceConversationMode ? "active" : ""}`}
-                        type="button"
-                        title={voiceConversationMode ? "Voice conversation: on" : "Voice conversation: off"}
-                        aria-label="Voice conversation mode"
-                        aria-pressed={voiceConversationMode}
-                        onClick={toggleVoiceMode}
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M5 10v4M9 7v10M13 4v16M17 7v10M21 10v4"/></svg>
-                        <span className="composer-mode-label">Voice</span>
-                      </button>
-                      <button
-                        className={`composer-mode-button is-overflowable ${wakeWordEnabled ? "active" : ""}`}
-                        type="button"
-                        title={wakeWordEnabled ? "Wake word: on (say “Hey Echo”)" : "Wake word: off"}
-                        aria-label="Wake word"
-                        aria-pressed={wakeWordEnabled}
-                        onClick={toggleWakeWord}
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="3"/><path d="M12 2a10 10 0 0 1 10 10M12 22A10 10 0 0 1 2 12M5 5a10 10 0 0 1 14 14"/></svg>
-                        <span className="composer-mode-label">Wake</span>
-                      </button>
-                      {toolbarSize === "mini" ? (
-                        <div className="toolbar-overflow">
-                          <button
-                            type="button"
-                            className={`composer-mode-button${toolbarMenuOpen ? " active" : ""}`}
-                            title="More controls"
-                            aria-label="More controls"
-                            aria-haspopup="menu"
-                            aria-expanded={toolbarMenuOpen}
-                            onClick={() => setToolbarMenuOpen((v) => !v)}
-                          >
-                            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden><circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" /></svg>
-                          </button>
-                          {toolbarMenuOpen ? (
-                            <div className="toolbar-menu" role="menu" aria-label="More controls">
-                              <button type="button" role="menuitemcheckbox" aria-checked={voiceReadAloud} onClick={toggleReadAloud}>
-                                <span>Read replies aloud</span><i data-on={voiceReadAloud ? "true" : "false"} />
-                              </button>
-                              <button type="button" role="menuitemcheckbox" aria-checked={voiceConversationMode} onClick={toggleVoiceMode}>
-                                <span>Voice conversation</span><i data-on={voiceConversationMode ? "true" : "false"} />
-                              </button>
-                              <button type="button" role="menuitemcheckbox" aria-checked={monitoring} onClick={toggleMonitor}>
-                                <span>Screen monitor</span><i data-on={monitoring ? "true" : "false"} />
-                              </button>
-                              <button type="button" role="menuitemcheckbox" aria-checked={speechEnabled} onClick={() => setSpeechEnabled(!speechEnabled)}>
-                                <span>Sound</span><i data-on={speechEnabled ? "true" : "false"} />
-                              </button>
-                              <button type="button" role="menuitemcheckbox" aria-checked={wakeWordEnabled} onClick={toggleWakeWord}>
-                                <span>Wake word</span><i data-on={wakeWordEnabled ? "true" : "false"} />
-                              </button>
-                              <label className="toolbar-menu-select">
-                                <span>Effort</span>
-                                <select value={reasoningEffort} onChange={(e: any) => setReasoningEffort(e.target.value)} aria-label="Reasoning effort">
-                                  <option value="minimal">Minimal</option>
-                                  <option value="low">Low</option>
-                                  <option value="medium">Medium</option>
-                                  <option value="high">High</option>
-                                  <option value="extra_high">Extra High</option>
-                                  <option value="max">Max</option>
-                                  <option value="ultra">Ultra</option>
-                                </select>
-                              </label>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                      </div>
-                    </div>
+                    <ComposerToolbar
+                      listening={listening} voicePhase={voicePhase} voiceNotice={voiceNotice}
+                      voiceInputLevel={voiceInputLevel} startMic={() => void start()} stopMic={() => void stop()}
+                      monitoring={monitoring} toggleMonitor={toggleMonitor}
+                      speechEnabled={speechEnabled} setSpeechEnabled={setSpeechEnabled}
+                      providerDraft={providerDraft} setProviderDraft={setProviderDraft}
+                      setProviderModels={setProviderModels} switchingProvider={switchingProvider}
+                      lmStudioOnly={lmStudioOnly} providerInfo={providerInfo}
+                      modelPickerValue={modelPickerValue} modelPickerOptions={modelPickerOptions}
+                      showModelPicker={showModelPicker} reasoningEffort={reasoningEffort}
+                      setReasoningEffort={setReasoningEffort} thinkingEnabled={thinkingEnabled}
+                      setThinkingEnabled={setThinkingEnabled} voiceReadAloud={voiceReadAloud}
+                      toggleReadAloud={toggleReadAloud} voiceConversationMode={voiceConversationMode}
+                      toggleVoiceMode={toggleVoiceMode} wakeWordEnabled={wakeWordEnabled} toggleWakeWord={toggleWakeWord}
+                    />
                   </div>
                 </>
-              )}
 
               {studioOpen && (!desktopMode || desktopStudioHost) && createPortal(
                 <SettingsPanel

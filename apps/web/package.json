@@ -1,7 +1,7 @@
 {
   "name": "echospeak-web",
   "private": true,
-  "version": "10.1.0",
+  "version": "10.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -29,11 +29,12 @@
     "zustand": "^4.5.0"
   },
   "devDependencies": {
+    "@types/node": "^24.19.1",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.7.0",
     "typescript": "^5.3.3",
     "vite": "^6.4.3",
-    "vitest": "^3.2.7"
+    "vitest": "^4.1.11"
   }
 }
