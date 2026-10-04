@@ -1,26 +1,22 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate } from "react-router-dom";
-import { createEmptyTaskPlan, taskPlanReducer } from "./taskPlanProjection";
-import type { EchoReaction } from "./components/echoAnimationUtils";
 import { ProjectSidebar, type SidebarPage } from "./components/ProjectSidebar";
 import { MediaLibraryView } from "./features/media/MediaLibraryView.tsx";
 import { loadRuntimeLayout, runtimeGridColumns, saveRuntimeLayout } from "./runtimeLayout";
 import {
-  buildLiveOperationalStatus,
   canApplyFinalToChat,
-  mergeFinalReply,
   shouldIncludeChatActivity,
 } from "./chatPresentation";
-import { buildResearchRunFromToolEvent, normalizeResearchRun } from "./features/research/buildResearchRun";
+import { normalizeResearchRun } from "./features/research/buildResearchRun";
 import { useResearchStore } from "./features/research/store";
 import type { ResearchRun } from "./features/research/types";
 import { buildResponseRenderPlan } from "./features/responseRenderer/buildResponseRenderPlan";
 import { buildChatEmbeds } from "./features/embeds/buildChatEmbeds";
 import { OperationalStateCard } from "./features/operations/OperationalStateCard";
 import type { OperationalThreadState } from "./features/operations/OperationalStateCard";
-import { createEchoSpeakWebSocket, controlDesktopWindow, getEchoSpeakApiBase, isDesktopRuntime, openDesktopSettingsWindow, pickDesktopProjectFolder } from "./desktop/bridge";
+import { controlDesktopWindow, getEchoSpeakApiBase, isDesktopRuntime, openDesktopSettingsWindow, pickDesktopProjectFolder } from "./desktop/bridge";
 import {
   LocalVoiceInput,
   WakeListener,
@@ -51,12 +47,12 @@ import {
   desktopExecutionProfile,
   type DesktopWorkspaceSurface,
 } from "./desktop/workspaceState";
-import { activityActionsFromStreamEvent, agentActivityReducer, initialAgentActivity, isStreamThreadCurrent } from "./agentActivity";
-import { type ActivityItem, type AgentStreamEvent, type ApprovalDecisionEnvelope, type ApprovalRecord, type AvatarConfig, type DiscordLiveEvent, type DocSource, type ExecutionListResponse, type ExecutionRecord, type GatewayEvent, type Message, type PendingActionEnvelope, type ProviderInfo, type Role, type TaskPlanEntry, type ThinkingStep, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse, type ProviderModelsResponse } from "./app/types";
-import { SILENT_CHAT_TOOLS, buildMessageUsage, formatToolActivity, previewToolInput, toolActivityStepType } from "./app/toolDisplay";
-import { colors, defaultAvatarConfig, fallbackProviders, fetchWithTimeout, geminiModelOptions, isEmptySessionDraft, isLmStudioOnlyLocked, listableProviders, normalizeTimestampMs, openaiModelOptions, sanitizeForTTS, stopTts, useAppStore } from "./app/runtime";
+import { isStreamThreadCurrent } from "./agentActivity";
+import { type ActivityItem, type AgentStreamEvent, type ApprovalDecisionEnvelope, type Message, type PendingActionEnvelope, type ProviderInfo, type Role, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse, type ProviderModelsResponse } from "./app/types";
+import { SILENT_CHAT_TOOLS, buildMessageUsage, previewToolInput } from "./app/toolDisplay";
+import { colors, fallbackProviders, fetchWithTimeout, geminiModelOptions, isEmptySessionDraft, isLmStudioOnlyLocked, listableProviders, normalizeTimestampMs, openaiModelOptions, sanitizeForTTS, stopTts, useAppStore } from "./app/runtime";
 import { globalCss } from "./app/globalCss";
-import { ActivityCard, ChatBubble, ContextMeter, LiveChatActivityBar } from "./app/chatComponents";
+import { ActivityCard, ChatBubble, ContextMeter } from "./app/chatComponents";
 
 const PROVIDER_LABELS: Record<string, string> = { lmstudio: "LM Studio", ollama: "Ollama", localai: "LocalAI", vllm: "vLLM" };
 type DashboardTab = "chat" | "research" | "overview" | "skills" | "memory" | "docs" | "settings" | "search_settings" | "mcp_settings" | "advanced_settings" | "system_services" | "capabilities" | "approvals" | "executions" | "projects" | "automations" | "connections" | "soul" | "services" | "avatar_editor";
@@ -82,24 +78,15 @@ export const Dashboard: React.FC<{
     listening,
     setListening,
     speaking,
-    speechBeat,
     speechEnabled,
     setSpeechEnabled,
   } = useAppStore();
 
   const [input, setInput] = useState("");
   const [activities, setActivities] = useState<ActivityItem[]>([]);
-  const [taskPlans, setTaskPlans] = useState<TaskPlanEntry[]>([]);
-  const [echoReaction, setEchoReaction] = useState<EchoReaction | null>(null);
-  const [userIsTyping, setUserIsTyping] = useState(false);
-  const userTypingTimerRef = useRef<number>(0);
   const updateComposerInput = useCallback((value: string) => {
     setInput(value);
-    setUserIsTyping(true);
-    if (userTypingTimerRef.current) clearTimeout(userTypingTimerRef.current);
-    userTypingTimerRef.current = window.setTimeout(() => setUserIsTyping(false), 1500);
   }, []);
-  const prependResearchRun = useResearchStore((state) => state.prependRun);
   const replaceResearchRuns = useResearchStore((state) => state.replaceRuns);
   const clearResearchRuns = useResearchStore((state) => state.clearRuns);
   const [leftTab, setLeftTab] = useState<DashboardTab>(
@@ -122,25 +109,14 @@ export const Dashboard: React.FC<{
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarCollapsed);
   const [narrowLayout, setNarrowLayout] = useState<boolean>(() => typeof window !== "undefined" && window.innerWidth < 900);
-  const [agentMode, setAgentMode] = useState<"idle" | "research" | "coding" | "working" | "thinking">("idle");
-  const [agentActivity, dispatchActivity] = useReducer(agentActivityReducer, undefined, initialAgentActivity);
   useEffect(() => {
     if (mediaRouteActive) {
       setLeftTab("chat");
       return;
     }
   }, [desktopMode, mediaRouteActive]);
-  const [liveReplyDraft, setLiveReplyDraft] = useState("");
-  const liveReplyDraftRef = useRef("");
-  const [avatarConfig, setAvatarConfig] = useState<AvatarConfig>(defaultAvatarConfig);
-  const [memoryCount, setMemoryCount] = useState<number>(0);
-  const [docSources, setDocSources] = useState<DocSource[]>([]);
-  const [docFile, setDocFile] = useState<File | null>(null);
   const [monitoring, setMonitoring] = useState<boolean>(false);
   const [monitorText, setMonitorText] = useState<string>("");
-  const [monitorAt, setMonitorAt] = useState<number>(0);
-  const [monitorError, setMonitorError] = useState<string | null>(null);
-  const toolInfoRef = useRef<Record<string, { name: string; input: string; requestId?: string }>>({});
   const desktopBootstrap = typeof window !== "undefined" ? window.__ECHOSPEAK_DESKTOP_BOOTSTRAP__ : undefined;
   const [projects, setProjects] = useState<{
     id: string; name: string; description?: string; context_prompt?: string; tags?: string[];
@@ -149,7 +125,6 @@ export const Dashboard: React.FC<{
   const [activeProjectId, setActiveProjectId] = useState<string>(() => desktopBootstrap?.active_project_id || "");
   const activeProjectIdRef = useRef<string>(desktopBootstrap?.active_project_id || "");
   const [folderDropActive, setFolderDropActive] = useState(false);
-  const [projectsLoading, setProjectsLoading] = useState<boolean>(false);
   // Bootstrap data is only a startup hint.  Do not paint it as authoritative
   // chat history: the first scoped /threads read reconciles the durable list.
   // Keeping this false until that read completes prevents transient sessions,
@@ -157,14 +132,7 @@ export const Dashboard: React.FC<{
   const [initialHydrationComplete, setInitialHydrationComplete] = useState(false);
   const [threadState, setThreadState] = useState<ThreadSessionState | null>(() => (desktopBootstrap?.thread_state || null) as ThreadSessionState | null);
   const [pendingApproval, setPendingApproval] = useState<PendingActionEnvelope | null>(null);
-  const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [approvalDecisionBusy, setApprovalDecisionBusy] = useState<boolean>(false);
-  const [executions, setExecutions] = useState<ExecutionRecord[]>([]);
-  const [executionsLoading, setExecutionsLoading] = useState<boolean>(false);
-  const [selectedTrace, setSelectedTrace] = useState<Record<string, any> | null>(null);
-  const [selectedTraceId, setSelectedTraceId] = useState<string>("");
-  const [latestExecutionId, setLatestExecutionId] = useState<string>("");
-  const [latestTraceId, setLatestTraceId] = useState<string>("");
 
   const [threads, setThreads] = useState<{ id: string; name: string; at: number; projectId?: string; messageCount?: number }[]>(() =>
     (desktopBootstrap?.threads || []).map((item: any) => ({
@@ -691,10 +659,6 @@ export const Dashboard: React.FC<{
         } else {
           clearResearchRuns();
         }
-        // Never resume live stream chrome from history.
-        setAgentMode("idle");
-        setEchoReaction(null);
-        dispatchActivity({ type: "reset" });
         return;
       }
 
@@ -717,7 +681,6 @@ export const Dashboard: React.FC<{
         setActivities([]);
         sessionProjectionRef.current.set(threadId, { messages: loadedMsgs, activities: [] });
         clearResearchRuns();
-        setAgentMode("idle");
       }
     } catch (e) {
       console.error("Failed to load history:", e);
@@ -777,8 +740,6 @@ export const Dashboard: React.FC<{
       if (activeThreadIdRef.current !== threadId) return data;
       setThreadState(data);
       setActiveProjectId(String(data.active_project_id || ""));
-      setLatestExecutionId(String(data.last_execution_id || ""));
-      setLatestTraceId(String(data.last_trace_id || ""));
       // The scoped Thread state is the first authoritative model projection
       // available during startup.  Seed the controls from it so the picker
       // does not briefly show a global/default provider before /provider has
@@ -844,7 +805,6 @@ export const Dashboard: React.FC<{
       if (activeThreadIdRef.current !== expectedSessionId) return;
       if (data.thread_state) {
         setThreadState(data.thread_state);
-        setLatestExecutionId(String(data.execution_id || data.thread_state.last_execution_id || ""));
       }
       // Terminal projection: clear pending only after successful HTTP response.
       setPendingApproval(null);
@@ -862,11 +822,9 @@ export const Dashboard: React.FC<{
           } : undefined,
         });
       }
-      setEchoReaction(data.success ? "success" : "error");
     } catch (error) {
       if (activeThreadIdRef.current !== expectedSessionId) return;
       const message = error instanceof Error ? error.message : String(error);
-      setEchoReaction("error");
       addMessage({ id: crypto.randomUUID(), role: "assistant", text: message, at: Date.now(), skipTypewriter: true });
     } finally {
       setApprovalDecisionBusy(false);
@@ -878,24 +836,7 @@ export const Dashboard: React.FC<{
     }
   };
 
-  const refreshExecutions = async (threadId: string = activeThreadId) => {
-    if (!threadId) return;
-    setExecutionsLoading(true);
-    try {
-      const resp = await fetchWithTimeout(`${apiBase}/executions?thread_id=${encodeURIComponent(threadId)}&limit=25`, undefined, 6000);
-      if (!resp.ok) throw new Error(`Executions failed (${resp.status})`);
-      const data = (await resp.json()) as ExecutionListResponse;
-      if (activeThreadIdRef.current !== threadId) return;
-      setExecutions(Array.isArray(data.items) ? data.items : []);
-    } catch (e) {
-      console.error("Failed to refresh executions:", e);
-    } finally {
-      setExecutionsLoading(false);
-    }
-  };
-
   const refreshProjects = async () => {
-    setProjectsLoading(true);
     try {
       const res = await fetch(`${apiBase}/projects`);
       if (!res.ok) throw new Error(`Projects failed (${res.status})`);
@@ -906,7 +847,6 @@ export const Dashboard: React.FC<{
       console.error("Failed to load projects:", e);
       return false;
     } finally {
-      setProjectsLoading(false);
     }
   };
 
@@ -954,18 +894,9 @@ export const Dashboard: React.FC<{
         setActiveThreadId(nextThread.id);
         useAppStore.setState({ messages: [] });
         setActivities([]);
-        setTaskPlans([]);
         clearResearchRuns();
         setPendingApproval(null);
-        setApprovals([]);
-        setExecutions([]);
-        setSelectedTrace(null);
-        dispatchActivity({ type: "reset" });
         setStreaming(false);
-        liveReplyDraftRef.current = "";
-        setLiveReplyDraft("");
-        setDocSources([]);
-        toolInfoRef.current = {};
         return nextThread.id;
       } catch (e) {
         console.error("Failed to create thread:", e);
@@ -994,27 +925,17 @@ export const Dashboard: React.FC<{
     activeThreadIdRef.current = id;
     setThreads((prev) => prev.filter((item) => item.id === id || !isEmptySessionDraft(item)));
     setActiveThreadId(id);
-    dispatchActivity({ type: "reset" });
     // The live timeline belongs to the Session that was visible; history reload restores it.
     lean.finish();
     setMention(null);
     setStreaming(streamControllersRef.current.has(id));
-    liveReplyDraftRef.current = "";
-    setLiveReplyDraft("");
-    setDocSources([]);
-    toolInfoRef.current = {};
     // In a real app, we might fetch history from backend here.
     // For now, we'll clear local state to start fresh in the new context.
     const cachedProjection = sessionProjectionRef.current.get(id);
     useAppStore.setState({ messages: cachedProjection?.messages || [] });
     setActivities(cachedProjection?.activities || []);
-    setTaskPlans([]);
     clearResearchRuns();
     setPendingApproval(null);
-    setApprovals([]);
-    setExecutions([]);
-    setSelectedTrace(null);
-    setSelectedTraceId("");
   };
 
   const deleteThread = async (id: string) => {
@@ -1085,22 +1006,7 @@ export const Dashboard: React.FC<{
     setThreads(items => items.map(item => item.id === id ? { ...item, name: String(data.title || title) } : item));
   };
 
-  const docInputRef = useRef<HTMLInputElement | null>(null);
   const backendRetryRef = useRef<{ attempt: number; timer: number | null }>({ attempt: 0, timer: null });
-  const refreshAvatarConfig = useCallback(async () => {
-    try {
-      const res = await fetch(`${apiBase}/avatar/config`);
-      if (!res.ok) return;
-      const data = await res.json();
-      setAvatarConfig({ ...defaultAvatarConfig, ...data });
-    } catch {
-      // ignore bootstrap avatar failures
-    }
-  }, [apiBase]);
-
-  useEffect(() => {
-    refreshAvatarConfig();
-  }, [refreshAvatarConfig]);
 
   const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
   const [providerModels, setProviderModels] = useState<string[]>([]);
@@ -1146,15 +1052,7 @@ export const Dashboard: React.FC<{
   const lmStudioOnly = useMemo(() => isLmStudioOnlyLocked(providerInfo), [providerInfo]);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [switchingProvider, setSwitchingProvider] = useState(false);
-  const [modelsLoading, setModelsLoading] = useState(false);
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
-  const gatewaySocketRef = useRef<WebSocket | null>(null);
-  const gatewayRetryTimerRef = useRef<number | null>(null);
-  const gatewayRetryAttemptRef = useRef<number>(0);
-  const [discordGatewayConnected, setDiscordGatewayConnected] = useState<boolean>(false);
-  const [discordGatewaySessionId, setDiscordGatewaySessionId] = useState<string>("");
-  const [discordLiveEvents, setDiscordLiveEvents] = useState<DiscordLiveEvent[]>([]);
-  const [spotifyPlaying, setSpotifyPlaying] = useState<{ is_playing: boolean; track_id: string; track_name: string; track_artist: string } | null>(null);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
@@ -1231,7 +1129,6 @@ export const Dashboard: React.FC<{
   const refreshProviderModels = async (provider: string) => {
     modelsRequestRef.current = provider;
     try {
-      setModelsLoading(true);
       const resp = await fetchWithTimeout(`${apiBase}/provider/models?provider=${encodeURIComponent(provider)}`);
       if (!resp.ok) return;
       const data = (await resp.json()) as ProviderModelsResponse;
@@ -1247,7 +1144,6 @@ export const Dashboard: React.FC<{
     } catch {
       if (modelsRequestRef.current === provider) setProviderModels([]);
     } finally {
-      if (modelsRequestRef.current === provider) setModelsLoading(false);
     }
   };
 
@@ -1326,7 +1222,6 @@ export const Dashboard: React.FC<{
 
   const lastMsgLen = messages.length ? (messages[messages.length - 1]?.text || "").length : 0;
   const activityLen = activities.length;
-  const taskPlanLen = taskPlans.reduce((sum, entry) => sum + entry.plan.tasks.length, 0);
 
   /**
    * Pin chat fully to the latest content. Instant scroll only — smooth scrolling
@@ -1405,10 +1300,8 @@ export const Dashboard: React.FC<{
     timeline.length,
     lastMsgLen,
     activityLen,
-    taskPlanLen,
     streaming,
     speaking,
-    liveReplyDraft,
     pendingApproval?.has_pending,
     scrollChatToBottom,
   ]);
@@ -1543,37 +1436,14 @@ export const Dashboard: React.FC<{
     );
     addMessage(userMsg);
     setInput("");
-    setUserIsTyping(false);
-    if (userTypingTimerRef.current) clearTimeout(userTypingTimerRef.current);
-    setDocSources([]);
-    // Turn-local research only — do not carry prior Session source cards into this answer.
-    // Research history remains available through Chat embeds; keep each turn isolated.
-    // Fresh turn = fresh checklist only (no stacked plans from prior messages)
-    setTaskPlans([]);
-    liveReplyDraftRef.current = "";
-    setLiveReplyDraft("");
-    dispatchActivity({ type: "stream_start" });
     setStreaming(true);
     lean.start(runRequestId);
     setMention(null);
-    // Drop prior-turn tool metadata so done-labels never inherit stale queries
-    // (e.g. Python search label leaking into a later GTA+FIFA turn).
-    toolInfoRef.current = {};
-    const bootstrapStepId = `${runRequestId}:working`;
-    /** Backend Turn id once create_execution emits turn_bound / final. */
+    /** Backend Execution id once the run starts. */
     let durableTurnId = "";
-      let finalHandled = false;
-      let streamWasHidden = false;
-    /** Mid-turn spoken beats already committed (so final doesn't re-add them). */
-    const partialReplies: string[] = [];
-    /** True once the first spoken mid-turn beat is sealed — tools must sort after it. */
-    let sawPartialBeat = false;
-    /** Floor timestamp for tool/search activity after the first partial. */
-    let toolsAfterPartialAt = 0;
-    /** Research runs + queries this turn — feed chat embeds under the final bubble. */
-    const turnResearchRuns: ResearchRun[] = [];
-    const turnSearchQueries: string[] = [];
-    // Close any prior-Turn running chrome so B's tools never paint as A's open work.
+    let finalHandled = false;
+    let streamWasHidden = false;
+    // Close any prior-Turn running chrome so this turn never inherits it.
     setActivities((prev) => {
       const closed = prev.map((a) => {
         if (a.kind === "tool" && a.status === "running") {
@@ -1633,304 +1503,6 @@ export const Dashboard: React.FC<{
       let buffer = "";
       // Monotonic stream seq (backend) — ignore reordered/stale reconnect frames.
       let maxStreamSeq = 0;
-      // Client turn key groups one thinking card. Backend request_id on events is preserved
-      // for durable ToolRun correlation in stream payloads but must not spawn extra cards.
-      const eventRequestId = (_evt?: { request_id?: string }) => runRequestId;
-      const markThinkingStep = (
-        evt: { request_id?: string },
-        stepId: string,
-        patch: Partial<ThinkingStep>,
-        opts?: { toolName?: string; stepType?: ThinkingStep["type"] },
-      ) => {
-        const reqId = eventRequestId(evt);
-        setActivities((prev) =>
-          prev.map((p) => {
-            if (p.kind !== "thinking" || p.request_id !== reqId || !p.steps?.length) return p;
-            let matched = false;
-            const steps = p.steps.map((s) => {
-              if (s.id === stepId) {
-                matched = true;
-                return { ...s, ...patch };
-              }
-              return s;
-            });
-            // No name/type FIFO fallback — only exact ToolRun id may complete a row.
-            if (!matched) return p;
-            // Keep card under first partial beat if any.
-            const nextAt = sawPartialBeat ? Math.max(p.at, toolsAfterPartialAt) : p.at;
-            return { ...p, at: nextAt, steps };
-          })
-        );
-      };
-
-      const appendThinkingStep = (evt: { request_id?: string }, step: ThinkingStep) => {
-        const reqId = eventRequestId(evt);
-        // Ignore raw thought dumps — they duplicate the bootstrap spinner and clutter chat.
-        if (step.type === "thought") {
-          const short = "Working";
-          setActivities((prev) =>
-            prev.map((p) => {
-              if (p.kind !== "thinking" || p.request_id !== reqId) return p;
-              const steps = (p.steps || []).map((s) =>
-                s.id === bootstrapStepId && s.status === "running"
-                  ? { ...s, content: short.endsWith("…") ? short : `${short}…` }
-                  : s
-              );
-              return { ...p, content: short, steps };
-            })
-          );
-          return;
-        }
-        setActivities((prev) => {
-          const existingIdx = prev.findIndex((p) => p.kind === "thinking" && p.request_id === reqId);
-          if (existingIdx !== -1) {
-            const updated = [...prev];
-            const existing = updated[existingIdx] as Extract<ActivityItem, { kind: "thinking" }>;
-            // Real work arrives → drop bootstrap so we don't stack "thinking…" + tool rows.
-            let prevSteps = (existing.steps || []).filter((s) =>
-              step.id === bootstrapStepId ? true : s.id !== bootstrapStepId
-            );
-            // Also drop post-partial placeholder once real tool/search steps land.
-            prevSteps = prevSteps.filter((s) => s.id !== `${reqId}:post-partial-working`);
-            // Upsert by exact ToolRun id only — never complete a different row by tool name/type.
-            const byId = prevSteps.findIndex((s) => s.id === step.id);
-            let nextSteps: ThinkingStep[];
-            if (byId >= 0) {
-              const existing = prevSteps[byId];
-              // Terminal steps ignore trailing events (idempotent).
-              if (
-                (existing.status === "done" || existing.status === "failed") &&
-                (step.status === "done" || step.status === "failed" || step.status === "running")
-              ) {
-                nextSteps = prevSteps;
-              } else {
-                nextSteps = prevSteps.map((s, i) => (i === byId ? { ...s, ...step } : s));
-              }
-            } else if (step.status === "done" || step.status === "failed") {
-              // No open row with this id — append terminal (do not steal another running row).
-              nextSteps = [...prevSteps, step];
-            } else {
-              // tool_start: drop only provisional request-scoped placeholders of same type
-              // (ids like `${reqId}:search:...`), never another real ToolRun UUID.
-              prevSteps = prevSteps.filter(
-                (s) =>
-                  !(
-                    s.status === "running" &&
-                    s.type === step.type &&
-                    s.id !== step.id &&
-                    String(s.id).startsWith(`${reqId}:`)
-                  )
-              );
-              nextSteps = [...prevSteps, step];
-            }
-            // NEVER pull the card earlier (Math.min was pinning Search done above the first beat).
-            // After a partial beat, stay strictly after that spoken message.
-            const stepAt = step.at || Date.now();
-            const floor = sawPartialBeat ? Math.max(toolsAfterPartialAt, existing.at) : existing.at;
-            const nextAt = Math.max(floor, stepAt, sawPartialBeat ? toolsAfterPartialAt : 0);
-            updated[existingIdx] = {
-              ...existing,
-              at: nextAt || stepAt,
-              steps: nextSteps,
-            };
-            return updated;
-          }
-          return [
-            ...prev,
-            {
-              kind: "thinking",
-              id: crypto.randomUUID(),
-              content: "",
-              at: step.at || Date.now(),
-              steps: [step],
-              request_id: reqId,
-            },
-          ];
-        });
-      };
-
-      const completeAllRunningSteps = (status: "done" | "failed" = "done") => {
-        // Only this Turn's thinking card — never force-complete prior turns.
-        // Provisional chrome ids (`${requestId}:…`) that never got a real tool_end must
-        // be dropped, not force-completed as a second "Calculate done" / "Search done".
-        setActivities((prev) =>
-          prev.map((p) => {
-            if (p.kind !== "thinking" || p.request_id !== runRequestId || !p.steps?.length) return p;
-            const nextSteps = p.steps
-              .map((s) => {
-                if (s.status !== "running") return s;
-                const id = String(s.id || "");
-                const provisional = id.startsWith(`${runRequestId}:`);
-                if (provisional && s.type !== "thought") {
-                  // Drop orphan tool/search/read chrome — ToolRun UUID rows own those.
-                  return null;
-                }
-                return {
-                  ...s,
-                  status,
-                  content:
-                    status === "failed" && !/fail/i.test(s.content)
-                      ? `${s.content} — failed`
-                      : s.content,
-                };
-              })
-              .filter((s): s is NonNullable<typeof s> => s != null && Boolean(String(s.content || "").trim() || s.type === "thought"));
-            return { ...p, steps: nextSteps };
-          })
-        );
-      };
-      const upsertTaskPlan = (evt: AgentStreamEvent) => {
-        const reqId = eventRequestId(evt);
-        // Always prefer "now" for plan placement so the checklist tracks the current turn
-        // (backend `at` can lag or collide with older messages and pin the plan high up).
-        const eventAt = Date.now();
-        setTaskPlans((prev) => {
-          if (evt.type !== "task_plan") return prev;
-          const id = crypto.randomUUID();
-          return [
-            ...prev,
-            {
-              id,
-              at: eventAt,
-              request_id: reqId || runRequestId,
-              plan: taskPlanReducer(createEmptyTaskPlan(), evt),
-            },
-          ];
-        });
-      };
-      const upsertTool = (evt: AgentStreamEvent) => {
-        if (evt.type === "tool_start") {
-          // Scope tool metadata to this stream turn (avoid stale labels from prior turns)
-          toolInfoRef.current[evt.id] = { name: evt.name, input: evt.input, requestId: runRequestId };
-          const toolNameStart = String(evt.name || "").toLowerCase();
-          if (toolNameStart === "terminal_run") {
-            setAgentMode("coding");
-          }
-          // Only hide pure injects that fire almost every turn
-          if (!SILENT_CHAT_TOOLS.has(toolNameStart)) {
-            const stepAt = sawPartialBeat
-              ? Math.max(Date.now(), toolsAfterPartialAt)
-              : normalizeTimestampMs(evt.at || Date.now());
-            appendThinkingStep(evt, {
-              id: evt.id,
-              type: toolActivityStepType(evt.name || ""),
-              content: formatToolActivity(evt.name || "tool", "start", { input: evt.input }),
-              status: "running",
-              at: stepAt,
-            });
-          }
-          return;
-        }
-
-        if (evt.type === "tool_end") {
-          const info = toolInfoRef.current[evt.id];
-          const toolFailed = evt.outcome?.success === false;
-          // Ignore tool_end that belongs to another turn's metadata
-          if (info && (info as { requestId?: string }).requestId && (info as { requestId?: string }).requestId !== runRequestId) {
-            return;
-          }
-          const toolName = info?.name || evt.name || "tool";
-          const toolNameLow = String(toolName || "").toLowerCase();
-          if (SILENT_CHAT_TOOLS.has(toolNameLow)) {
-            return;
-          }
-          // Outer fan-out / superseded shells — no second "Search done" timeline line.
-          const outRaw = String(evt.output || "");
-          if (
-            toolNameLow === "web_search" &&
-            (/\(expanded to /i.test(outRaw) || /\(superseded by canonical/i.test(outRaw))
-          ) {
-            markThinkingStep(
-              evt,
-              evt.id,
-              { status: "done", content: "" },
-              { toolName, stepType: toolActivityStepType(toolName) },
-            );
-            // Drop empty wrapper steps from the thinking card
-            setActivities((prev) =>
-              prev.map((p) => {
-                if (p.kind !== "thinking" || p.request_id !== runRequestId || !p.steps) return p;
-                return {
-                  ...p,
-                  steps: p.steps.filter((s) => s.id !== evt.id || Boolean(String(s.content || "").trim())),
-                };
-              })
-            );
-            return;
-          }
-          // Research panel still fed by web_search
-          if (!toolFailed && toolNameLow === "web_search") {
-            const normalized =
-              normalizeResearchRun(evt.research) ||
-              buildResearchRunFromToolEvent(
-                evt.id,
-                toolName,
-                info?.input || "",
-                evt.output || "",
-                evt.at || Date.now()
-              );
-            if (normalized) {
-              prependResearchRun(normalized);
-              turnResearchRuns.push(normalized);
-              if (normalized.query) turnSearchQueries.push(normalized.query);
-            } else if (info?.input) {
-              turnSearchQueries.push(String(info.input).replace(/\s+/g, " ").trim().slice(0, 120));
-            }
-          }
-          // The durable ToolRun and specialist projections own code activity.
-          // The stream only updates compact Chat status for coding activity.
-          const codingTools = new Set([
-            "file_write",
-            "file_read",
-            "file_delete",
-            "file_move",
-            "file_copy",
-            "file_mkdir",
-            "artifact_write",
-            "terminal_run",
-            "notepad_write",
-            "checkpoint_undo",
-          ]);
-          if (codingTools.has(toolName)) {
-            setAgentMode("coding");
-          }
-          // Unified done label: built-in, sports, MCP (mcp__server__tool), skills, …
-          markThinkingStep(
-            evt,
-            evt.id,
-            {
-              status: toolFailed ? "failed" : "done",
-              content: formatToolActivity(toolName, toolFailed ? "failed" : "done", {
-                input: info?.input || "",
-                output: evt.output || "",
-                error: evt.outcome?.error_message || "",
-              }),
-            },
-            { toolName, stepType: toolActivityStepType(toolName) },
-          );
-          return;
-        }
-
-        if (evt.type === "tool_error") {
-          const info = toolInfoRef.current[evt.id];
-          const toolName = info?.name || "tool";
-          if (!SILENT_CHAT_TOOLS.has(String(toolName || "").toLowerCase())) {
-            markThinkingStep(
-              evt,
-              evt.id,
-              {
-                status: "failed",
-                content: formatToolActivity(toolName, "failed", {
-                  input: info?.input || "",
-                  error: evt.error,
-                }),
-              },
-              { toolName, stepType: toolActivityStepType(toolName) },
-            );
-          }
-          setEchoReaction("error");
-        }
-      };
 
       while (true) {
         if (streamController.signal.aborted) break;
@@ -1972,16 +1544,13 @@ export const Dashboard: React.FC<{
               if (execId) {
                 durableTurnId = execId;
                 activeExecutionIdsRef.current.set(streamThreadId, execId);
-                setLatestExecutionId(execId);
               }
               // The legacy bootstrap "thinking…" card is not part of a lean turn.
               setActivities((prev) => prev.filter((a) => !(a.kind === "thinking" && a.request_id === runRequestId)));
             }
             if (leanEvt.type === "memory_saved" && typeof leanEvt.memory_count === "number") {
-              setMemoryCount(leanEvt.memory_count);
               continue;
             }
-            if (leanEvt.type === "tool_start") setAgentMode(String(leanEvt.name || "").includes("search") ? "research" : "working");
             if (leanEvt.type !== "final") {
               lean.push(leanEvt);
               continue;
@@ -2027,10 +1596,7 @@ export const Dashboard: React.FC<{
               setThreadState(leanEvt.thread_state);
               setActiveProjectId(String(leanEvt.thread_state.active_project_id || ""));
             }
-            if (typeof leanEvt.memory_count === "number") setMemoryCount(leanEvt.memory_count);
             setStreaming(false);
-            setAgentMode("idle");
-            setEchoReaction(leanEvt.success ? "success" : "error");
             const spokenLean = String(committed[committed.length - 1]?.text || leanEvt.response || "").trim();
             if (spokenLean && (voiceReadAloud || voiceConversationMode)) {
               void speakLocalText(spokenLean, {
@@ -2047,464 +1613,12 @@ export const Dashboard: React.FC<{
             void refreshRoster();
             continue;
           }
-          for (const action of activityActionsFromStreamEvent(evt as unknown as Record<string, unknown>)) {
-            dispatchActivity(action);
-          }
-
-          if (evt.type === "turn_bound") {
-            const execId = String(evt.execution_id || evt.turn_id || "").trim();
-            if (execId) {
-              durableTurnId = execId;
-              activeExecutionIdsRef.current.set(streamThreadId, execId);
-              setLatestExecutionId(execId);
-            }
-            dispatchActivity({ type: "turn_bound", objective: raw });
-            const reasoningControl = evt.reasoning_control || {};
-            if (
-              thinkingEnabled &&
-              reasoningControl.native_support === false &&
-              reasoningEffort !== "medium"
-            ) {
-              dispatchActivity({
-                type: "step_update",
-                nextAction: reasoningControl.applied
-                  ? "Using the selected effort as a bounded generation budget on this provider."
-                  : "This provider does not expose native effort control on the active endpoint.",
-              });
-            }
-          } else if (evt.type === "reasoning_summary") {
-            const summary = String(evt.content || "").trim();
-            if (thinkingEnabled && summary) {
-              appendThinkingStep(evt, {
-                id: `${runRequestId}:reasoning-summary:${evt.iteration || 0}`,
-                type: "thought",
-                content: summary,
-                status: "done",
-                at: normalizeTimestampMs(evt.at || Date.now()),
-              });
-            }
-          } else if (evt.type === "provider_retry") {
-            // A failed provider attempt is not a second assistant message.
-            // Clear only the transient generation draft so the bounded retry
-            // remains one continuous visible Echo run.
-            if (evt.retrying) {
-              liveReplyDraftRef.current = "";
-              setLiveReplyDraft("");
-            }
-          } else if (evt.type === "recovery" || evt.type === "lifecycle" || evt.type === "iteration_boundary" || evt.type === "token_usage") {
-            // The shared activity decoder above owns these semantic projections.
-          } else if (evt.type === "task_plan") {
-            upsertTaskPlan(evt);
-          } else if (evt.type === "tool_start" || evt.type === "tool_end" || evt.type === "tool_error") {
-            upsertTool(evt);
-          } else if (evt.type === "thinking_step") {
-            const stepType = (evt.step_type || "tool") as ThinkingStep["type"];
-            const st = String(evt.status || "running").toLowerCase();
-            const status: ThinkingStep["status"] =
-              st === "failed" || st === "error" ? "failed" : st === "done" || st === "complete" ? "done" : "running";
-            const content = String(evt.content || "").trim();
-            // thinking_step is provisional chrome only. Never complete real ToolRun UUIDs
-            // by type/name FIFO — tool_start/tool_end own ToolRun identity.
-            if (stepType === "thought") {
-              appendThinkingStep(evt, {
-                id: `${eventRequestId(evt)}:thought`,
-                type: "thought",
-                content,
-                status: "running",
-                at: normalizeTimestampMs(evt.at || Date.now()),
-              });
-            } else {
-              setActivities((prev) => {
-                const idx = prev.findIndex((p) => p.kind === "thinking" && p.request_id === runRequestId);
-                if (idx >= 0) {
-                  const card = prev[idx] as Extract<ActivityItem, { kind: "thinking" }>;
-                  const steps = [...(card.steps || [])];
-                  // Only update provisional request-scoped placeholders (never ToolRun UUIDs).
-                  const provisionalIdx = steps.findIndex(
-                    (s) =>
-                      s.status === "running" &&
-                      s.type === stepType &&
-                      String(s.id).startsWith(`${runRequestId}:`)
-                  );
-                  if (provisionalIdx >= 0 && status === "running") {
-                    steps[provisionalIdx] = {
-                      ...steps[provisionalIdx],
-                      content: content || steps[provisionalIdx].content,
-                      status: "running",
-                    };
-                    const next = [...prev];
-                    next[idx] = { ...card, steps };
-                    return next;
-                  }
-                  // Terminal thinking_step without ToolRun id: ignore (wait for tool_end).
-                  if (status === "done" || status === "failed") {
-                    return prev;
-                  }
-                  // No open tool row yet — provisional running row only
-                  if (status === "running") {
-                    const stableId = `${runRequestId}:${stepType}:${content.slice(0, 48)}`;
-                    if (!steps.some((s) => s.id === stableId)) {
-                      const floor = sawPartialBeat ? Math.max(toolsAfterPartialAt, card.at) : card.at;
-                      const next = [...prev];
-                      next[idx] = {
-                        ...card,
-                        at: Math.max(floor, normalizeTimestampMs(evt.at || Date.now())),
-                        steps: [
-                          ...steps.filter((s) => s.id !== bootstrapStepId && s.id !== `${runRequestId}:post-partial-working`),
-                          {
-                            id: stableId,
-                            type: stepType,
-                            content,
-                            status: "running",
-                            at: normalizeTimestampMs(evt.at || Date.now()),
-                          },
-                        ],
-                      };
-                      return next;
-                    }
-                  }
-                } else if (status === "running") {
-                  return [
-                    ...prev,
-                    {
-                      kind: "thinking" as const,
-                      id: crypto.randomUUID(),
-                      content: "",
-                      at: normalizeTimestampMs(evt.at || Date.now()),
-                      request_id: runRequestId,
-                      steps: [
-                        {
-                          id: `${runRequestId}:${stepType}:${content.slice(0, 48)}`,
-                          type: stepType,
-                          content,
-                          status: "running" as const,
-                          at: normalizeTimestampMs(evt.at || Date.now()),
-                        },
-                      ],
-                    },
-                  ];
-                }
-                return prev;
-              });
-            }
-          } else if (evt.type === "agent_token") {
-            const tok = String(evt.data || "");
-            if (tok) {
-              const prev = liveReplyDraftRef.current;
-              const next = prev + tok;
-              liveReplyDraftRef.current = next;
-              // First token — remove bootstrap spinner (reply is the progress now).
-              if (!prev) {
-                setActivities((acts) =>
-                  acts.map((p) => {
-                    if (p.kind !== "thinking" || p.request_id !== eventRequestId(evt)) return p;
-                    return {
-                      ...p,
-                      steps: (p.steps || []).filter((s) => s.id !== bootstrapStepId),
-                    };
-                  })
-                );
-              }
-              setLiveReplyDraft(next);
-            }
-          } else if (evt.type === "partial_reply") {
-            // Keep partial prose transient. The completed Turn is committed as
-            // one assistant message when the final event arrives.
-            const text = String(evt.response || liveReplyDraftRef.current || "").trim();
-            if (!text) continue;
-            if (partialReplies.some((p) => p.trim() === text)) continue;
-            partialReplies.push(text);
-            const beatAt = Date.now();
-            sawPartialBeat = true;
-            toolsAfterPartialAt = beatAt + 10;
-            liveReplyDraftRef.current = text;
-            setLiveReplyDraft(text);
-            // Speak this beat now — tools may follow, then a second reply.
-            if (evt.speak !== false && (voiceReadAloud || voiceConversationMode)) {
-              void speakLocalText(text, {
-                clientTurnId: voiceTranscript?.clientTurnId || runRequestId,
-                requestId: runRequestId,
-                executionId: durableTurnId,
-                completeTurn: false,
-              });
-            }
-            const reqId = eventRequestId(evt);
-            setActivities((prev) =>
-              prev.map((p) => {
-                if (p.kind !== "thinking" || p.request_id !== reqId) return p;
-                const kept = (p.steps || []).filter(
-                  (s) =>
-                    s.id !== bootstrapStepId &&
-                    s.id !== `${reqId}:post-partial-working` &&
-                    (s.status === "done" || s.status === "failed" || s.status === "running") &&
-                    !/^(thinking|thinking…)$/i.test(String(s.content || "").trim())
-                );
-                const hasToolWork = kept.some(
-                  (s) => s.type === "search" || s.type === "tool" || s.type === "read"
-                );
-                return {
-                  ...p,
-                  at: toolsAfterPartialAt,
-                  content: "working",
-                  steps: hasToolWork
-                    ? kept
-                    : [
-                        ...kept,
-                        {
-                          id: `${reqId}:post-partial-working`,
-                          type: "tool" as const,
-                          content: "checking…",
-                          status: "running" as const,
-                          at: toolsAfterPartialAt,
-                        },
-                      ],
-                };
-              })
-            );
-          } else if (evt.type === "thinking") {
-            const content = (evt.content || "").trim();
-            const reqId = eventRequestId(evt);
-            if (content) {
-              // Only nudge the single bootstrap label — never stack extra rows.
-              setActivities((prev) =>
-                prev.map((p) => {
-                  if (p.kind !== "thinking" || p.request_id !== reqId) return p;
-                  return {
-                    ...p,
-                    steps: (p.steps || []).map((s) =>
-                      s.id === bootstrapStepId && s.status === "running"
-                        ? { ...s, content: "thinking…" }
-                        : s
-                    ),
-                  };
-                })
-              );
-            }
-          } else if (evt.type === "memory_saved") {
-            setActivities((prev) => [
-              ...prev,
-              { kind: "memory", id: crypto.randomUUID(), memoryCount: evt.memory_count, at: Date.now() },
-            ]);
-            setMemoryCount(evt.memory_count);
-            setEchoReaction("memory_saved");
-            if (leftTab === "memory") {
-            }
-          } else if ((evt as any).type === "status" && (evt as any).agent_mode) {
-            const mode = String((evt as any).agent_mode || "idle");
-            setAgentMode(mode as any);
-          } else if (evt.type === "error") {
+          if (evt.type === "error") {
             setStreaming(false);
-            setLiveReplyDraft("");
-            completeAllRunningSteps("failed");
             setActivities((prev) => [
               ...prev,
               { kind: "error", id: crypto.randomUUID(), message: evt.message, at: Date.now() },
             ]);
-            setEchoReaction("error");
-          } else if (evt.type === "final") {
-            // Guard: stream can surface final more than once; never double-commit chat/TTS.
-            if (finalHandled) continue;
-            finalHandled = true;
-
-            const liveDraft = liveReplyDraftRef.current.trim();
-            const reply = mergeFinalReply(
-              evt.response,
-              liveDraft,
-              partialReplies,
-              Array.isArray(evt.partial_replies) ? evt.partial_replies : []
-            );
-
-            // Stale ownership: if the user switched Session/Project mid-stream,
-            // keep durable backend history but do not paint the final into the wrong chat.
-            // Own the Project captured at send time; compare against live refs (not stale closures).
-            if (
-              !canApplyFinalToChat({
-                activeThreadId: String(activeThreadIdRef.current || ""),
-                activeProjectId: String(activeProjectIdRef.current || ""),
-                ownedThreadId: streamThreadId,
-                ownedProjectId: streamProjectId,
-                streamOpen: streamControllersRef.current.get(streamThreadId) === streamController,
-              })
-            ) {
-              liveReplyDraftRef.current = "";
-              setLiveReplyDraft("");
-              setStreaming(false);
-              continue;
-            }
-
-            if (evt.execution_id) {
-              durableTurnId = String(evt.execution_id);
-            }
-            const executionStatus = String(evt.thread_state?.execution_status || "");
-            // Only mark tool rows done when backend authority says complete — not on soft success.
-            if (executionStatus === "complete" && evt.success) {
-              completeAllRunningSteps("done");
-            } else if (
-              ["failed", "blocked", "retryable", "cancelled", "partially_complete", "in_progress", "needs_permission"].includes(
-                executionStatus
-              ) ||
-              !evt.success
-            ) {
-              completeAllRunningSteps(executionStatus === "needs_permission" ? "done" : "failed");
-            }
-            if (typeof evt.memory_count === "number") {
-              setMemoryCount(evt.memory_count);
-            }
-            setDocSources(Array.isArray(evt.doc_sources) ? evt.doc_sources : []);
-            if (evt.thread_state) {
-              setThreadState(evt.thread_state);
-              setActiveProjectId(String(evt.thread_state.active_project_id || ""));
-              setLatestExecutionId(String(evt.thread_state.last_execution_id || evt.execution_id || ""));
-              setLatestTraceId(String(evt.thread_state.last_trace_id || evt.trace_id || ""));
-            } else {
-              if (evt.execution_id) setLatestExecutionId(String(evt.execution_id));
-              if (evt.trace_id) setLatestTraceId(String(evt.trace_id));
-            }
-            if (Array.isArray(evt.research) && evt.research.length) {
-              const finals = evt.research
-                .map((item) => normalizeResearchRun(item))
-                .filter((item): item is ResearchRun => Boolean(item));
-              replaceResearchRuns(finals);
-              for (const r of finals) {
-                if (!turnResearchRuns.some((t) => t.id === r.id)) turnResearchRuns.push(r);
-                if (r.query) turnSearchQueries.push(r.query);
-              }
-            }
-
-            liveReplyDraftRef.current = "";
-            setLiveReplyDraft("");
-            setStreaming(false);
-
-            if (reply) {
-              const alreadyStreamed = liveDraft.length > 0;
-              const ctxWindow = Number(providerInfo?.context_window || 0) || 32768;
-              const renderPlan = buildResponseRenderPlan({
-                answerText: reply,
-                intent: evt.response_render,
-                researchRuns: turnResearchRuns,
-                searchQueries: turnSearchQueries,
-              });
-              const embeds = buildChatEmbeds({
-                answerText: reply,
-                researchRuns: turnResearchRuns,
-                searchQueries: turnSearchQueries,
-              });
-              const finalExecId = String(evt.execution_id || durableTurnId || "").trim();
-              // Scope Session thread_state actions to this execution only.
-              const liveProjection = evt.execution_projection || {};
-              const projectedChangedFiles = (Array.isArray(liveProjection.files_actually_changed)
-                ? liveProjection.files_actually_changed
-                : [])
-                .flatMap((item: any) => [String(item?.path || "").trim(), String(item?.destination || "").trim()])
-                .filter(Boolean);
-              const liveOpState = evt.thread_state
-                ? ({
-                    ...evt.thread_state,
-                    execution_status: String(liveProjection.status || evt.thread_state.execution_status || ""),
-                    current_execution_id: finalExecId || evt.thread_state.current_execution_id,
-                    last_execution_id: finalExecId || evt.thread_state.last_execution_id,
-                    completed_actions: (evt.thread_state.completed_actions || []).filter(
-                      (a: any) => !finalExecId || String(a?.execution_id || "") === finalExecId
-                    ),
-                    failed_actions: (evt.thread_state.failed_actions || []).filter(
-                      (a: any) => !finalExecId || String(a?.execution_id || "") === finalExecId
-                    ),
-                    pending_actions: (evt.thread_state.pending_actions || []).filter(
-                      (a: any) => !finalExecId || String(a?.execution_id || "") === finalExecId
-                    ),
-                    retry_target:
-                      liveProjection.retry_target && typeof liveProjection.retry_target === "object"
-                        ? liveProjection.retry_target
-                        : {},
-                    operation_details: {
-                      ...(evt.thread_state.operation_details || {}),
-                      files_changed: projectedChangedFiles,
-                      memory_records: Array.isArray(liveProjection.memory_records)
-                        ? liveProjection.memory_records.map((item: any) => String(item?.memory_id || item?.item_id || "")).filter(Boolean)
-                        : [],
-                    },
-                  } as OperationalThreadState)
-                : undefined;
-              addMessage({
-                id: crypto.randomUUID(),
-                role: "assistant",
-                text: reply,
-                // Always after tools: toolsAfterPartialAt is 0 when no partial.
-                at: Math.max(Date.now(), toolsAfterPartialAt + 1),
-                skipTypewriter: alreadyStreamed || partialReplies.length > 0,
-                streamBeat: "final",
-                renderPlan,
-                embeds: embeds.length ? embeds : undefined,
-                executionId: finalExecId || undefined,
-                clientRequestId: runRequestId,
-                operation: liveOpState
-                  ? {
-                      state: liveOpState,
-                      success: Boolean(evt.success),
-                      executionId: finalExecId || undefined,
-                    }
-                  : undefined,
-                docSources: Array.isArray(evt.doc_sources) ? evt.doc_sources : undefined,
-                usage: buildMessageUsage(reply, useAppStore.getState().messages, ctxWindow, {
-                  provider: providerInfo?.provider,
-                  model: providerInfo?.model,
-                }),
-              });
-              // The backend's spoken_text is the final remainder after any
-              // already-spoken partial reply. Never fall back to the merged
-              // display reply when a preamble has already been played.
-              const spoken = (evt.spoken_text || "").trim();
-              const speakVal = spoken || (partialReplies.length ? "" : reply);
-              if (voiceReadAloud || voiceConversationMode) {
-                const playbackScope = {
-                  apiBase,
-                  sessionId: String(activeThreadIdRef.current || ""),
-                  projectId: String(activeProjectIdRef.current || ""),
-                  clientTurnId: voiceTranscript?.clientTurnId || runRequestId,
-                  requestId: runRequestId,
-                  executionId: finalExecId,
-                };
-                const playback = speakVal
-                  ? speakLocalText(speakVal, playbackScope)
-                  : localVoicePlayback.complete(playbackScope)
-                      .then(() => true)
-                      .catch((error) => {
-                        setVoicePhase("error");
-                        setVoiceNotice(error instanceof Error ? error.message : "Voice playback completion could not be saved.");
-                        return false;
-                      });
-                void playback.then((played) => {
-                  if (
-                    played &&
-                    voiceConversationMode &&
-                    activeThreadIdRef.current === streamThreadId &&
-                    !streamControllersRef.current.has(streamThreadId)
-                  ) {
-                    void start();
-                  }
-                });
-              }
-            } else if (!partialReplies.length && !reply) {
-              // True empty — still surface something so the turn doesn't ghost.
-              addMessage({
-                id: crypto.randomUUID(),
-                role: "assistant",
-                text: "(no response)",
-                at: Date.now(),
-                skipTypewriter: true,
-                operation: evt.thread_state ? {
-                  state: evt.thread_state,
-                  success: Boolean(evt.success),
-                  executionId: evt.execution_id,
-                } : undefined,
-              });
-            }
-
-            setEchoReaction(evt.success && executionStatus !== "needs_permission" ? "success" : evt.success ? null : "error");
-            setAgentMode("idle");
-            refreshPendingApproval(streamThreadId);
-            refreshExecutions(streamThreadId);
-            void refreshThreads();
           }
         }
       }
@@ -2517,13 +1631,11 @@ export const Dashboard: React.FC<{
       const msg = String(err);
       const pretty = msg.includes("Failed to fetch") ? `Backend offline (${apiBase})` : msg;
       setBackendOnline(false);
-      dispatchActivity({ type: "error", message: pretty });
       addMessage({ id: crypto.randomUUID(), role: "assistant", text: `Error: ${pretty}`, at: Date.now() });
       setActivities((prev) => [
         ...prev,
         { kind: "error", id: crypto.randomUUID(), message: pretty, at: Date.now() },
       ]);
-      setEchoReaction("error");
     } finally {
       const owned = ownsStreamCleanup(streamControllersRef.current.get(streamThreadId), streamController);
       const sameThread = isStreamThreadCurrent(streamThreadId, activeThreadIdRef.current);
@@ -2543,9 +1655,7 @@ export const Dashboard: React.FC<{
 
       // Only the visible Session owns the current projection's phase machine.
       if (sameThread && aborted) {
-        dispatchActivity({ type: "reset" });
       } else if (sameThread) {
-        dispatchActivity({ type: "stream_end" });
       }
 
       // Do not mutate chat of a different Session (switch already cleared UI).
@@ -2590,47 +1700,9 @@ export const Dashboard: React.FC<{
           }
         }
       }
-      // If stream died without final but we already streamed tokens, promote draft once
-      // only when the user did not cancel/abort mid-flight.
-      if (!finalHandled && !aborted && liveReplyDraftRef.current.trim()) {
-        const orphan = liveReplyDraftRef.current;
-        const ctxWindow = Number(providerInfo?.context_window || 0) || 32768;
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: orphan,
-          at: Date.now(),
-          skipTypewriter: true,
-          usage: buildMessageUsage(orphan, useAppStore.getState().messages, ctxWindow, {
-            provider: providerInfo?.provider,
-            model: providerInfo?.model,
-          }),
-        });
-        // A stream without its canonical final event is incomplete. Keep the
-        // visible recovered text, but do not speak it as if Echo finalized it.
-      }
-      liveReplyDraftRef.current = "";
-      setLiveReplyDraft("");
-      // An EOF without a final event is an interruption, never implicit success.
-      // Only close running steps for THIS turn's thinking card.
-      setActivities((prev) =>
-        prev.map((p) => {
-          if (p.kind !== "thinking" || p.request_id !== runRequestId || !p.steps?.length) return p;
-          if (!p.steps.some((s) => s.status === "running")) return p;
-          return {
-            ...p,
-            steps: p.steps.map((s) =>
-              s.status === "running"
-                ? { ...s, status: finalHandled && !aborted ? ("done" as const) : ("failed" as const) }
-                : s
-            ),
-          };
-        })
-      );
       if (!finalHandled && streamThreadId && !aborted) {
         void refreshThreadState(streamThreadId);
         void refreshPendingApproval(streamThreadId);
-        void refreshExecutions(streamThreadId);
       }
       if (finalHandled && !aborted && sameThread) {
         window.setTimeout(async () => {
@@ -2763,28 +1835,6 @@ export const Dashboard: React.FC<{
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
-
-  const queueFollowUp = async () => {
-    const sessionId = String(activeThreadIdRef.current || "").trim();
-    const message = String(input || "").trim();
-    if (!sessionId || !message) {
-      textareaRef.current?.focus();
-      return;
-    }
-    const response = await fetch(`${apiBase}/query/queue`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        thread_id: sessionId,
-        message,
-        client_request_id: crypto.randomUUID(),
-      }),
-    });
-    if (!response.ok) return;
-    setInput("");
-    setUserIsTyping(false);
-    dispatchActivity({ type: "recovery", reason: "Follow-up queued." });
-  };
 
   useEffect(() => {
     const sessionId = String(activeThreadId || "").trim();
@@ -2928,7 +1978,6 @@ export const Dashboard: React.FC<{
 
   const refreshMonitor = async () => {
     try {
-      setMonitorError(null);
       const resp = await fetchWithTimeout(`${apiBase}/vision/analyze`, { method: "POST" }, 6000);
       if (!resp.ok) {
         const t = await resp.text();
@@ -2936,9 +1985,7 @@ export const Dashboard: React.FC<{
       }
       const data = (await resp.json()) as VisionAnalyzeResponse;
       setMonitorText(String(data?.text || ""));
-      setMonitorAt(Date.now());
     } catch (e) {
-      setMonitorError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -2950,145 +1997,6 @@ export const Dashboard: React.FC<{
 
   useEffect(() => {
   }, [activeProjectId, activeThreadId, leftTab]);
-
-  useEffect(() => {
-    const gatewayUrl = `${apiBase.replace(/^http/i, "ws")}/gateway/ws`;
-    let disposed = false;
-
-    const clearRetryTimer = () => {
-      if (gatewayRetryTimerRef.current != null) {
-        window.clearTimeout(gatewayRetryTimerRef.current);
-        gatewayRetryTimerRef.current = null;
-      }
-    };
-
-    const scheduleReconnect = () => {
-      if (disposed || gatewayRetryTimerRef.current != null) return;
-      const attempt = gatewayRetryAttemptRef.current + 1;
-      gatewayRetryAttemptRef.current = attempt;
-      const delay = Math.min(1000 * Math.pow(2, Math.max(0, attempt - 1)), 10000);
-      gatewayRetryTimerRef.current = window.setTimeout(() => {
-        gatewayRetryTimerRef.current = null;
-        connectGateway();
-      }, delay);
-    };
-
-    const connectGateway = () => {
-      if (disposed) return;
-      try {
-        if (gatewaySocketRef.current) {
-          try {
-            gatewaySocketRef.current.close();
-          } catch {
-            // ignore
-          }
-          gatewaySocketRef.current = null;
-        }
-
-        const ws = createEchoSpeakWebSocket(gatewayUrl);
-        gatewaySocketRef.current = ws;
-
-        ws.onopen = () => {
-          if (disposed) return;
-          clearRetryTimer();
-          gatewayRetryAttemptRef.current = 0;
-          setDiscordGatewayConnected(true);
-        };
-
-        ws.onmessage = (evt: MessageEvent) => {
-          if (disposed) return;
-          let payload: GatewayEvent | null = null;
-          try {
-            payload = JSON.parse(String(evt.data || "")) as GatewayEvent;
-          } catch {
-            return;
-          }
-          if (!payload || typeof payload !== "object") return;
-
-          if (payload.type === "gateway_ready") {
-            setDiscordGatewayConnected(true);
-            setDiscordGatewaySessionId(String(payload.session_id || ""));
-            return;
-          }
-
-          if (payload.type === "discord_activity") {
-            const at = normalizeTimestampMs(payload.at || Date.now());
-            const tool = String(payload.tool || "unknown");
-            const source = String(payload.source || "discord_bot");
-            setDiscordLiveEvents((prev) => {
-              const nextEvent: DiscordLiveEvent = {
-                id: crypto.randomUUID(),
-                kind: "activity",
-                tool,
-                source,
-                at,
-              };
-              return [nextEvent, ...prev].slice(0, 25);
-            });
-            return;
-          }
-
-          if (payload.type === "spotify_playback") {
-            setSpotifyPlaying({
-              is_playing: !!payload.is_playing,
-              track_id: String(payload.track_id || ""),
-              track_name: String(payload.track_name || ""),
-              track_artist: String(payload.track_artist || ""),
-            });
-            return;
-          }
-
-          if (payload.type === "error") {
-            setDiscordLiveEvents((prev) => {
-              const nextEvent: DiscordLiveEvent = {
-                id: crypto.randomUUID(),
-                kind: "error",
-                message: String(payload.message || "Gateway error"),
-                at: normalizeTimestampMs(payload.at || Date.now()),
-              };
-              return [nextEvent, ...prev].slice(0, 25);
-            });
-          }
-        };
-
-        ws.onerror = () => {
-          if (disposed) return;
-          setDiscordGatewayConnected(false);
-        };
-
-        ws.onclose = () => {
-          if (disposed) return;
-          setDiscordGatewayConnected(false);
-          setDiscordGatewaySessionId("");
-          setSpotifyPlaying(null);
-          if (gatewaySocketRef.current === ws) {
-            gatewaySocketRef.current = null;
-          }
-          scheduleReconnect();
-        };
-      } catch (e) {
-        setDiscordGatewayConnected(false);
-        scheduleReconnect();
-      }
-    };
-
-    connectGateway();
-
-    return () => {
-      disposed = true;
-      clearRetryTimer();
-      setDiscordGatewayConnected(false);
-      setDiscordGatewaySessionId("");
-      if (gatewaySocketRef.current) {
-        try {
-          gatewaySocketRef.current.close();
-        } catch {
-          // ignore
-        }
-        gatewaySocketRef.current = null;
-      }
-    };
-  }, [apiBase]);
 
   useEffect(() => {
     return () => {
@@ -3915,46 +2823,6 @@ export const Dashboard: React.FC<{
                         ) : null}
                       </div>
                     ) : null}
-                    {/* Single Echo activity strip for the active Session stream only (legacy runtime). */}
-                    {streaming && !lean.live ? (
-                      <LiveChatActivityBar
-                        activity={agentActivity}
-                        showSpinner
-                        onStop={() => {
-                          stopTts();
-                          setVoicePhase("idle");
-                          setVoiceNotice("Stopped by Ty.");
-                          cancelSessionTurn(activeThreadId, true);
-                        }}
-                        onQueue={() => void queueFollowUp()}
-                        status={buildLiveOperationalStatus({
-                          phase: agentActivity.phase,
-                          streaming: true,
-                          label: agentActivity.label,
-                          activeToolName: agentActivity.activeToolName,
-                          thinkingText: agentActivity.thinkingText,
-                          taskDescription: (() => {
-                            const plan =
-                              taskPlans.find((entry) => entry.plan.active) ||
-                              [...taskPlans].reverse().find((entry) => entry.plan.tasks.length);
-                            const step =
-                              plan?.plan.tasks.find((t) =>
-                                ["running", "retrying", "awaiting_confirmation"].includes(t.status)
-                              ) || plan?.plan.tasks.find((t) => t.status === "pending");
-                            return step?.description || "";
-                          })(),
-                          searchHint: (() => {
-                            const thinking = [...activities]
-                              .reverse()
-                              .find((a) => a.kind === "thinking") as Extract<ActivityItem, { kind: "thinking" }> | undefined;
-                            const searchStep = [...(thinking?.steps || [])]
-                              .reverse()
-                              .find((s) => s.type === "search" && s.status === "running");
-                            return searchStep?.content || "";
-                          })(),
-                        })}
-                      />
-                    ) : null}
                   </div>
                   </WidgetEnvProvider>
                   <div className="input-bar">
@@ -4360,7 +3228,6 @@ export const Dashboard: React.FC<{
                   onEditAgent={(agent) => setAgentEditor({ open: true, agent })}
                   sessionId={activeThreadId}
                   projectId={activeProjectId}
-                  onAvatarConfigChange={setAvatarConfig}
                 />,
                 desktopMode ? desktopStudioHost! : document.body
               )}
@@ -4368,12 +3235,6 @@ export const Dashboard: React.FC<{
           </div>
         </div>
       </div>
-      <input
-        type="file"
-        ref={docInputRef}
-        style={{ display: "none" }}
-        onChange={(e) => setDocFile(e.target.files?.[0] || null)}
-      />
     </div>
   );
 };
