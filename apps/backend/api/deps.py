@@ -187,6 +187,7 @@ def _discord_process_query(
     thread_id: str | None = None,
     source: str | None = None,
     discord_user_info: dict | None = None,
+    untrusted_sources: list | None = None,
 ):
     agent = get_agent(thread_id)
     return agent.process_query(
@@ -196,6 +197,7 @@ def _discord_process_query(
         thread_id=thread_id,
         source=source or "discord_bot",
         discord_user_info=discord_user_info,
+        untrusted_sources=untrusted_sources,
     )
 
 

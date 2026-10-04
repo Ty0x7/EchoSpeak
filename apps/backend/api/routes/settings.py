@@ -724,14 +724,21 @@ def _autoconfigure_local_provider(force: bool = False) -> Optional[dict]:
 
 
 @router.get("/provider/detect")
-async def detect_providers(apply: bool = Query(default=False)):
+async def detect_providers():
     """Which local model apps are running right now, and their loaded models."""
     from agent.model_runtime import detect_local_providers
 
     rows = await asyncio.to_thread(detect_local_providers)
-    applied = None
-    if apply:
-        applied = await asyncio.to_thread(_autoconfigure_local_provider, True)
+    return {"providers": rows, "applied": None}
+
+
+@router.post("/provider/detect")
+async def detect_and_apply_provider():
+    """Pick the running local model app. A POST, so a cross-site page can't trigger it."""
+    from agent.model_runtime import detect_local_providers
+
+    rows = await asyncio.to_thread(detect_local_providers)
+    applied = await asyncio.to_thread(_autoconfigure_local_provider, True)
     return {"providers": rows, "applied": applied}
 
 

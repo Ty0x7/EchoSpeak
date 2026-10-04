@@ -458,7 +458,9 @@ class PreviewManager:
                     "command": "",
                 }
 
-            env = os.environ.copy()
+            from agent.child_env import child_env
+
+            env = child_env()
             env["PORT"] = str(port)
             env["HOST"] = "127.0.0.1"
             env["BROWSER"] = "none"

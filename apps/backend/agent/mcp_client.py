@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 import re
 import threading
 import time
@@ -227,8 +226,9 @@ class MCPSession:
         self._stop_event = asyncio.Event()
         async with AsyncExitStack() as stack:
             if self.state.transport == "stdio":
-                environment = os.environ.copy()
-                environment.update({str(key): str(value) for key, value in self.state.env.items()})
+                from agent.child_env import child_env
+
+                environment = child_env(self.state.env)
                 parameters = StdioServerParameters(
                     command=self.state.command,
                     args=list(self.state.args),

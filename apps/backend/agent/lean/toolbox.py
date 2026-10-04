@@ -17,6 +17,8 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
+from agent.lean.policy import redact_secrets
+
 from agent.lean.widgets import collect as collect_widgets
 from config import config
 
@@ -394,7 +396,7 @@ class Toolbox:
             except Exception as exc:
                 logger.warning("Lean native tool {} failed: {}", name, exc)
                 output, ok = f"Error: {exc}", False
-            return ToolResult(ok, output, int((time.perf_counter() - started) * 1000), widgets if ok else [])
+            return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000), widgets if ok else [])
         entry = self.entries.get(name)
         if entry is None:
             close = ", ".join(sorted(self.names)[:40])
@@ -438,7 +440,7 @@ class Toolbox:
                 output = f"{first_line}\n{body}" if not first_line.startswith("<<<") else body
             except Exception:
                 pass
-        return ToolResult(ok, output, int((time.perf_counter() - started) * 1000), widgets if ok else [])
+        return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000), widgets if ok else [])
 
 
 def describe_call(name: str, args: dict[str, Any]) -> str:

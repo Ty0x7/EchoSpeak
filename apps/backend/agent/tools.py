@@ -10,6 +10,7 @@ import json
 import subprocess
 import shutil
 import platform
+import math
 import re
 import time
 import hashlib
@@ -2642,20 +2643,87 @@ def calculate(expression: str) -> str:
         Result of the calculation.
     """
     try:
-        import math
-
-        safe_dict = {
-            'abs': abs, 'max': max, 'min': min, 'pow': pow,
-            'round': round, 'sum': sum, 'len': len,
-            'sqrt': math.sqrt, 'sin': math.sin, 'cos': math.cos,
-            'tan': math.tan, 'log': math.log, 'log10': math.log10,
-            'pi': math.pi, 'e': math.e
-        }
-
-        result = eval(expression, {"__builtins__": {}}, safe_dict)
-        return str(result)
+        return _format_number(_safe_math(str(expression or "")))
     except Exception as e:
         return f"Calculation error: {str(e)}"
+
+
+_MATH_FUNCS = {
+    "abs": abs, "max": max, "min": min, "round": round, "sum": lambda *a: sum(a[0] if len(a) == 1 else a),
+    "sqrt": math.sqrt, "sin": math.sin, "cos": math.cos, "tan": math.tan, "asin": math.asin,
+    "acos": math.acos, "atan": math.atan, "log": math.log, "log10": math.log10, "log2": math.log2,
+    "exp": math.exp, "floor": math.floor, "ceil": math.ceil, "factorial": math.factorial,
+    "pow": None,  # handled as the ** operator so the same limits apply
+}
+_MATH_CONSTS = {"pi": math.pi, "e": math.e, "tau": math.tau}
+_MAX_NUMBER = 10 ** 100
+_MAX_EXPONENT = 1000
+
+
+def _safe_math(expression: str) -> float | int:
+    """Evaluate arithmetic without eval(): numbers, + - * / // % **, and a few math functions.
+
+    eval() with empty builtins is escapable (``().__class__.__mro__...``), and this tool is
+    reachable from guest channels and from prompt-injected text.
+    """
+    import ast
+    import operator
+
+    if len(expression) > 500:
+        raise ValueError("expression is too long")
+    binops = {
+        ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul, ast.Div: operator.truediv,
+        ast.FloorDiv: operator.floordiv, ast.Mod: operator.mod, ast.Pow: operator.pow,
+    }
+
+    def check(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("only numbers are allowed")
+        if isinstance(value, int) and abs(value) > _MAX_NUMBER:
+            raise ValueError("number is too large")
+        return value
+
+    def power(base, exponent):
+        if abs(exponent) > _MAX_EXPONENT:
+            raise ValueError("exponent is too large")
+        return check(operator.pow(base, exponent))
+
+    def ev(node):
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+        if isinstance(node, ast.Constant):
+            return check(node.value)
+        if isinstance(node, ast.Name) and node.id in _MATH_CONSTS:
+            return _MATH_CONSTS[node.id]
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            value = ev(node.operand)
+            return value if isinstance(node.op, ast.UAdd) else -value
+        if isinstance(node, ast.BinOp) and type(node.op) in binops:
+            left, right = ev(node.left), ev(node.right)
+            if isinstance(node.op, ast.Pow):
+                return power(left, right)
+            return check(binops[type(node.op)](left, right))
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return [ev(item) for item in node.elts]
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _MATH_FUNCS
+                and not node.keywords):
+            args = [ev(arg) for arg in node.args]
+            if node.func.id == "pow":
+                if len(args) != 2:
+                    raise ValueError("pow takes two numbers")
+                return power(*args)
+            if node.func.id == "factorial" and (not args or args[0] > 1000):
+                raise ValueError("factorial argument is too large")
+            return check(_MATH_FUNCS[node.func.id](*args))
+        raise ValueError(f"unsupported expression: {type(node).__name__}")
+
+    return ev(ast.parse(expression.strip(), mode="eval"))
+
+
+def _format_number(value) -> str:
+    if isinstance(value, float) and value.is_integer() and abs(value) < 1e15:
+        return str(int(value))
+    return str(value)
 
 
 class YouTubeTranscriptArgs(BaseModel):

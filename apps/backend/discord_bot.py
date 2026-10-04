@@ -584,6 +584,11 @@ class EchoSpeakDiscordBot:
                                     _is_approve = bool(_re.search(r"\b(approve|accept|confirm)\b", _cmd))
 
                             if _is_tweet_action:
+                                # Only the owner can publish or drop a tweet waiting for approval.
+                                _tweet_owner = str(getattr(config, "discord_bot_owner_id", "") or "").strip()
+                                if not _tweet_owner or str(getattr(message.author, "id", "")) != _tweet_owner:
+                                    _is_tweet_action = False
+                            if _is_tweet_action:
                                 try:
                                     from twitter_bot import get_twitter_bot
                                     tw_bot = get_twitter_bot()
@@ -610,6 +615,16 @@ class EchoSpeakDiscordBot:
                                 channel_ctx = await self._maybe_get_channel_context(message, content)
                                 followup_ctx = await self._maybe_get_followup_context(message, content)
 
+                                # Other people's messages are outside content: mark them so the
+                                # agent treats them as data, and so the Rule of Two refuses
+                                # sends/posts this turn (Discord has no way to approve them).
+                                from agent.lean.policy import wrap_untrusted
+
+                                untrusted_sources = ["discord_channel"] if (channel_ctx or followup_ctx) else []
+                                if channel_ctx:
+                                    channel_ctx = wrap_untrusted("discord_channel", channel_ctx)
+                                if followup_ctx:
+                                    followup_ctx = wrap_untrusted("discord_channel", followup_ctx)
                                 if channel_ctx and followup_ctx:
                                     content_for_agent = (
                                         f"{channel_ctx}\n\n{followup_ctx}\n\nUser request: {content}".strip()
@@ -725,6 +740,7 @@ class EchoSpeakDiscordBot:
                                         thread_id=f"discord_{message.channel.id}_{message.author.id}",
                                         source=("discord_bot_dm" if is_dm else "discord_bot"),
                                         discord_user_info=discord_user_info,
+                                        untrusted_sources=untrusted_sources or None,
                                     )
                                     try:
                                         if cb is not None and getattr(cb, "_tools_used", None):

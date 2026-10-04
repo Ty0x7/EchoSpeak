@@ -1,7 +1,9 @@
 import React from "react";
 import ReactMarkdown from "react-markdown";
+import { safeMarkdownComponents } from "../../widgets/SafeImage";
 import remarkGfm from "remark-gfm";
 import type { ResponseRenderBlock, ResponseRenderPlan } from "./types";
+import { safeUrl } from "../../widgets/validate";
 
 type Palette = {
   panel2: string;
@@ -101,7 +103,7 @@ const EvidenceBlock: React.FC<{ block: Extract<ResponseRenderBlock, { kind: "evi
       {block.items.map((item, idx) => (
         <div key={`${item.url || item.title}-${idx}`} style={{ minWidth: 0 }}>
           <a
-            href={item.url || undefined}
+            href={safeUrl(item.url) || undefined}
             target="_blank"
             rel="noopener noreferrer"
             style={{
@@ -127,7 +129,7 @@ const BlockView: React.FC<{ block: ResponseRenderBlock; colors: Palette }> = ({ 
     return (
       <Panel title={block.title} colors={colors}>
         <div className="chat-markdown chat-line-assistant" style={{ fontSize: 13.5 }}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.body}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>{block.body}</ReactMarkdown>
         </div>
       </Panel>
     );
@@ -197,7 +199,7 @@ export const ResponseRenderer: React.FC<{ plan?: ResponseRenderPlan; fallbackTex
     <>
       {text ? (
         <div className="chat-markdown chat-line-assistant">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>{text}</ReactMarkdown>
         </div>
       ) : null}
       {blocks.length ? (

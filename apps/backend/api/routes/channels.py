@@ -242,12 +242,13 @@ async def twitter_autonomous_reject():
 # ── A2A Protocol Endpoints (v6.0.0) ─────────────────────────────────
 
 def _a2a_auth_check(request):
-    """Verify A2A auth key if configured."""
-    auth_key = getattr(config, "a2a_auth_key", "") or ""
+    """A2A always needs its key: inbound tasks run an agent turn on this PC."""
+    auth_key = str(getattr(config, "a2a_auth_key", "") or "").strip()
     if not auth_key:
-        return  # No auth required
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.replace("Bearer ", "").strip() != auth_key:
+        raise HTTPException(status_code=503, detail="A2A is enabled but A2A_AUTH_KEY is not set")
+    auth_header = str(request.headers.get("authorization", "") or "").strip()
+    supplied = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else auth_header
+    if not hmac.compare_digest(supplied.encode("utf-8"), auth_key.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid A2A auth key")
 
 

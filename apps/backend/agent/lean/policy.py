@@ -132,6 +132,16 @@ def contains_secret(args: dict[str, Any], secrets: Optional[list[str]] = None) -
     return any(secret in blob for secret in (secrets if secrets is not None else _secret_values()))
 
 
+def redact_secrets(text: str, secrets: Optional[list[str]] = None) -> str:
+    """Replace stored credentials in tool output (e.g. `cat settings.secrets.json`, `printenv`)
+    so they never reach the model, the chat, or the saved timeline."""
+    out = str(text or "")
+    for secret in (secrets if secrets is not None else _secret_values()):
+        if secret and secret in out:
+            out = out.replace(secret, "[redacted secret]")
+    return out
+
+
 # ── the decision ────────────────────────────────────────────────────────
 
 def evaluate(

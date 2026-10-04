@@ -13,7 +13,7 @@ from loguru import logger
 import anyio
 
 from config import config
-from api.auth import _api_auth_ok, _get_client_ip
+from api.auth import _api_auth_ok, _get_client_ip, _local_request_guard
 from api.deps import (
     _metric_inc,
     _register_query_cancellation,
@@ -198,6 +198,15 @@ async def _spotify_playback_monitor():
 @router.websocket("/gateway/ws")
 async def gateway_ws(websocket: WebSocket):
     client_host = _get_client_ip(websocket)
+    # HTTP middleware (host/origin guard) never runs for websockets, and browsers
+    # let any page open a socket to localhost. Treat the handshake as a write.
+    problem = _local_request_guard(
+        "POST", websocket.headers.get("host", ""), websocket.headers.get("origin", ""), client_host
+    )
+    if problem:
+        logger.warning("Refused gateway websocket: {} (client {})", problem, client_host)
+        await websocket.close(code=1008, reason="Origin not allowed")
+        return
     if not _api_auth_ok(websocket.headers, client_host):
         await websocket.close(code=1008, reason="EchoSpeak API auth required")
         return

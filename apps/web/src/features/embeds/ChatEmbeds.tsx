@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import type { ChatEmbed, ChatEmbedSourceItem } from "./types";
+import { safeUrl } from "../../widgets/validate";
 
 type Palette = {
   panel2: string;
@@ -95,7 +96,7 @@ const SourcesExpanded: React.FC<{
               <span style={{ opacity: 0.4, minWidth: 12 }}>{i + 1}</span>
               {hasUrl ? (
                 <a
-                  href={item.url}
+                  href={safeUrl(item.url) || undefined}
                   target="_blank"
                   rel="noopener noreferrer"
                   title={item.title || item.url}
@@ -179,7 +180,7 @@ const SourcesExpanded: React.FC<{
                 ) : null}
                 {hasUrl ? (
                   <a
-                    href={item.url}
+                    href={safeUrl(item.url) || undefined}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{

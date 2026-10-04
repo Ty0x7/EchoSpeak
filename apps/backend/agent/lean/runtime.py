@@ -110,6 +110,7 @@ class LeanSession:
         thinking_enabled: bool = True,
         reasoning_effort: str = "medium",
         caller_role: str = "owner",
+        untrusted_sources: Optional[list[str]] = None,
     ) -> None:
         self.caller_role = caller_role if caller_role in CALLER_ROLES else "public"
         self.thinking_enabled = thinking_enabled
@@ -137,7 +138,8 @@ class LeanSession:
         # Outside content read anywhere in this request (agent/lean/policy.py). Shared
         # by every agent on it: a handoff brief written after reading a web page can
         # carry that page's instructions.
-        self._taint: list[str] = []
+        # A channel can hand over outside text with the message (e.g. Discord channel history).
+        self._taint: list[str] = list(untrusted_sources or [])
         # Parallel agents share these.
         self._emit_lock = threading.Lock()
         self._state_lock = threading.Lock()
@@ -1446,6 +1448,7 @@ def run_lean_query(
     thinking_enabled: bool = True,
     reasoning_effort: str = "medium",
     caller_role: str = "owner",
+    untrusted_sources: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     room = get_room_store().by_thread(session_id)
     session = LeanSession(
@@ -1459,6 +1462,7 @@ def run_lean_query(
         thinking_enabled=thinking_enabled,
         reasoning_effort=reasoning_effort,
         caller_role=caller_role,
+        untrusted_sources=untrusted_sources,
     )
     return session.run(message, persona_id=persona_id)
 

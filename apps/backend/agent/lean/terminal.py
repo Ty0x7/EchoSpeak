@@ -41,6 +41,7 @@ from typing import Any, Optional
 
 from loguru import logger
 
+from agent.child_env import child_env
 from config import DATA_DIR, config
 from agent.lean.toolbox import NativeTool
 
@@ -536,7 +537,7 @@ def _host_launch(command: str, cwd: Path, log: Path, err: Path) -> subprocess.Po
             open(err, "w", encoding="utf-8", errors="replace") as err_handle:
         return subprocess.Popen(
             [*_host_shell(), _host_command(command)], cwd=str(cwd), stdin=subprocess.DEVNULL,
-            stdout=out_handle, stderr=err_handle, env={**os.environ, **_QUIET_ENV},
+            stdout=out_handle, stderr=err_handle, env=child_env(_QUIET_ENV),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             start_new_session=os.name != "nt",
         )

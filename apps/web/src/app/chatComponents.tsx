@@ -9,6 +9,7 @@ import { type AgentActivityState } from "../agentActivity";
 import { type ActivityItem, type Message, type ThinkingStep } from "./types";
 import { estimateTokens, formatTokenCount } from "./toolDisplay";
 import { colors } from "./runtime";
+import { safeUrl } from "../widgets/validate";
 
 export const SquareLoader: React.FC<{ size?: number; color?: string; active?: boolean }> = ({
   size = 12,
@@ -162,7 +163,7 @@ export const LiveChatActivityBar: React.FC<{
           <span>Sources</span>
           <div>
             {activity.sources.slice(-4).map((source, index) => source.url ? (
-              <a key={`${source.url}:${index}`} href={source.url} target="_blank" rel="noreferrer">
+              <a key={`${source.url}:${index}`} href={safeUrl(source.url) || undefined} target="_blank" rel="noreferrer">
                 {source.label}
               </a>
             ) : (

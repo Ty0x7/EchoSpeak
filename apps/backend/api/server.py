@@ -6,6 +6,7 @@ Provides FastAPI server for REST API access.
 import os
 import sys
 import asyncio
+import hmac
 import re
 import threading
 import time
@@ -493,7 +494,7 @@ def _verify_admin_key(api_key: str = Header(None, alias="X-Admin-Key")) -> str:
     if _ADMIN_API_KEY is None:
         _ADMIN_API_KEY = _get_admin_api_key()
     
-    if not api_key or api_key != _ADMIN_API_KEY:
+    if not api_key or not hmac.compare_digest(str(api_key).encode("utf-8"), str(_ADMIN_API_KEY).encode("utf-8")):
         raise HTTPException(
             status_code=403,
             detail="Admin access required. Provide X-Admin-Key header."

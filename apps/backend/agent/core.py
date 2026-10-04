@@ -987,6 +987,7 @@ class EchoSpeakAgent:
         thinking_enabled: bool = True,
         reasoning_effort: str = "medium",
         caller_role: str = "",
+        untrusted_sources: Optional[list] = None,
     ) -> tuple:
         """Run one turn on the lean runtime (every channel uses this path).
 
@@ -1017,6 +1018,7 @@ class EchoSpeakAgent:
             thinking_enabled=thinking_enabled,
             reasoning_effort=reasoning_effort,
             caller_role=caller_role,
+            untrusted_sources=untrusted_sources,
         )
         self._request_result_local.execution_id = str(result.get("execution_id") or "")
         return str(result.get("response") or ""), bool(result.get("success"))

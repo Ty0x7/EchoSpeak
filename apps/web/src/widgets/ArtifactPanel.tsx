@@ -21,7 +21,8 @@ const SOURCE_LANG: Record<string, string> = { html: "html", svg: "xml", mermaid:
 
 export function fileNameFor(detail: Pick<ArtifactDetail, "title" | "kind" | "language">): string {
   const slug = (detail.title || "artifact").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "artifact";
-  const ext = detail.kind === "code" ? CODE_EXT[detail.language] || detail.language || "txt" : EXT[detail.kind] || "txt";
+  // Only known extensions: a model-chosen ".bat" or ".hta" would run when double-clicked.
+  const ext = detail.kind === "code" ? CODE_EXT[detail.language] || "txt" : EXT[detail.kind] || "txt";
   return `${slug}.${ext}`;
 }
 

@@ -1067,11 +1067,21 @@ class Config:
     def _load_runtime_overrides(self) -> None:
         try:
             data = read_runtime_override_payload(include_secrets=True, migrate_legacy=True)
-            if not isinstance(data, dict) or not data:
-                return
-            self.apply_overrides(data)
+            if isinstance(data, dict) and data:
+                self.apply_overrides(data)
         except Exception:
+            pass
+        self._enforce_host_auth()
+
+    def _enforce_host_auth(self) -> None:
+        """The desktop host sets API auth per launch; saved settings can never loosen it."""
+        if os.getenv("ECHOSPEAK_RUNTIME_KIND", "").strip().lower() != "desktop":
             return
+        self.api_auth_enabled = True
+        self.api_auth_localhost_bypass = False
+        host_key = os.getenv("API_AUTH_KEY", "").strip()
+        if host_key:
+            self.api_auth_key = host_key
 
     def reload(self) -> None:
         self._load_env_vars()

@@ -592,7 +592,8 @@ class LeanTurn:
             request_id=self.request_id,
             tool=name,
             summary=describe_call(name, args),
-            args=safe_args_preview(args),
+            # The card shows these in full: a summary can hide "; iwr … | iex" after padding.
+            args=safe_args_preview(args, limit=4000),
             reason=reason,
         )
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
