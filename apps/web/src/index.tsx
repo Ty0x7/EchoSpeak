@@ -9,23 +9,11 @@ import {
   canApplyFinalToChat,
   shouldIncludeChatActivity,
 } from "./chatPresentation";
-import { normalizeResearchRun } from "./features/research/buildResearchRun";
 import { useResearchStore } from "./features/research/store";
-import type { ResearchRun } from "./features/research/types";
-import { buildResponseRenderPlan } from "./features/responseRenderer/buildResponseRenderPlan";
-import { buildChatEmbeds } from "./features/embeds/buildChatEmbeds";
 import { OperationalStateCard } from "./features/operations/OperationalStateCard";
-import type { OperationalThreadState } from "./features/operations/OperationalStateCard";
 import { controlDesktopWindow, getEchoSpeakApiBase, isDesktopRuntime, openDesktopSettingsWindow, pickDesktopProjectFolder } from "./desktop/bridge";
-import {
-  LocalVoiceInput,
-  WakeListener,
-  localVoicePlayback,
-} from "./voiceTransport";
 import type {
-  SpeechScope,
   VoiceTranscript,
-  VoiceTransportPhase,
 } from "./voiceTransport";
 import { canApplySessionHistory, ownsStreamCleanup } from "./desktop/sessionProjection";
 import leanCss from "./lean/lean.css?inline";
@@ -33,7 +21,7 @@ import settingsCss from "./settings/settings.css?inline";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { LeanMessage } from "./lean/LeanMessage";
 import { ChatFollower } from "./app/chatFollow";
-import { isLeanEvent, messageFromTimeline } from "./lean/liveReducer";
+import { isLeanEvent } from "./lean/liveReducer";
 import { useLeanLive } from "./lean/useLeanLive";
 import { LiveStatusPill } from "./lean/LiveStatus";
 import { leanApi } from "./lean/api";
@@ -48,13 +36,15 @@ import {
   type DesktopWorkspaceSurface,
 } from "./desktop/workspaceState";
 import { isStreamThreadCurrent } from "./agentActivity";
-import { type ActivityItem, type AgentStreamEvent, type ApprovalDecisionEnvelope, type Message, type PendingActionEnvelope, type ProviderInfo, type Role, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse, type ProviderModelsResponse } from "./app/types";
-import { SILENT_CHAT_TOOLS, buildMessageUsage, previewToolInput } from "./app/toolDisplay";
-import { colors, fallbackProviders, fetchWithTimeout, geminiModelOptions, isEmptySessionDraft, isLmStudioOnlyLocked, listableProviders, normalizeTimestampMs, openaiModelOptions, sanitizeForTTS, stopTts, useAppStore } from "./app/runtime";
+import { type ActivityItem, type AgentStreamEvent, type ApprovalDecisionEnvelope, type Message, type PendingActionEnvelope, type Role, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse } from "./app/types";
+import { buildMessageUsage } from "./app/toolDisplay";
+import { colors, fallbackProviders, fetchWithTimeout, geminiModelOptions, isEmptySessionDraft, normalizeTimestampMs, openaiModelOptions, stopTts, useAppStore } from "./app/runtime";
 import { globalCss } from "./app/globalCss";
+import { useProviderSettings } from "./dashboard/useProviderSettings";
+import { useVoice } from "./dashboard/useVoice";
+import { projectSessionHistory } from "./dashboard/historyProjection";
 import { ActivityCard, ChatBubble, ContextMeter } from "./app/chatComponents";
 
-const PROVIDER_LABELS: Record<string, string> = { lmstudio: "LM Studio", ollama: "Ollama", localai: "LocalAI", vllm: "vLLM" };
 type DashboardTab = "chat" | "research" | "overview" | "skills" | "memory" | "docs" | "settings" | "search_settings" | "mcp_settings" | "advanced_settings" | "system_services" | "capabilities" | "approvals" | "executions" | "projects" | "automations" | "connections" | "soul" | "services" | "avatar_editor";
 
 export const Dashboard: React.FC<{
@@ -213,7 +203,7 @@ export const Dashboard: React.FC<{
     const executionId = activeExecutionIdsRef.current.get(sessionId) || "";
     // Navigation/supersession detaches local ownership immediately. The user
     // Stop control keeps the exact stream open so the durable cancellation and
-    // final "Stopped by Ty." state can arrive from the backend.
+    // final "Stopped" state can arrive from the backend.
     if (!preserveStream) {
       streamControllersRef.current.get(sessionId)?.abort();
       streamControllersRef.current.delete(sessionId);
@@ -347,307 +337,8 @@ export const Dashboard: React.FC<{
 
       const turns: any[] = Array.isArray(data?.turns) ? data.turns : [];
       if (turns.length > 0) {
-        const loadedMsgs: Message[] = [];
-        const loadedActs: ActivityItem[] = [];
-        const hydratedResearch: ResearchRun[] = [];
-        const ctxWindow = Number(providerInfo?.context_window || 0) || 32768;
-        const runsByTurn = new Map<string, any[]>();
-        for (const run of sessionToolRuns) {
-          const turnKey = String(run.turn_id || "").trim();
-          if (!turnKey) continue;
-          const bucket = runsByTurn.get(turnKey) || [];
-          bucket.push(run);
-          runsByTurn.set(turnKey, bucket);
-        }
-
-        for (const turn of turns) {
-          const executionId = String(turn.execution_id || turn.execution?.id || "").trim();
-          const turnStatus = String(turn.progress_status || turn.terminal_status || turn.status || "complete");
-          const baseAt = Number(turn.created_at || 0) * 1000 || Date.now();
-          const doneAt = Number(turn.completed_at || turn.created_at || 0) * 1000 || baseAt + 1;
-          // Prefer turn.tool_runs; fall back to canonical /tool-runs by execution id.
-          if ((!Array.isArray(turn.tool_runs) || turn.tool_runs.length === 0) && executionId) {
-            const fromApi = runsByTurn.get(executionId) || [];
-            if (fromApi.length) turn.tool_runs = fromApi;
-          }
-
-          // User + assistant messages (durable items / execution fallback)
-          for (const msg of Array.isArray(turn.messages) ? turn.messages : []) {
-            const role = String(msg.role || "").toLowerCase() === "user" ? "user" : "assistant";
-            const text = String(msg.text || "").trim();
-            // Lean messages closed at a handoff may hold only tool cards.
-            const leanPart = role === "assistant" && Boolean(msg.agent_id && msg.message_id) && Array.isArray(msg.timeline) && msg.timeline.length > 0;
-            if (!text && !leanPart) continue;
-            const atMs = Number(msg.at || 0) * 1000 || (role === "user" ? baseAt : doneAt);
-            const msgId = `hist-${executionId || "x"}-${role}-${msg.item_id || loadedMsgs.length}`;
-            if (loadedMsgs.some((m) => m.id === msgId || (msg.message_id && m.id === String(msg.message_id)) || (!leanPart && m.executionId === executionId && m.role === role && m.text === text))) {
-              continue;
-            }
-            const researchRuns: ResearchRun[] = [];
-            if (role === "assistant" && Array.isArray(turn.research_runs)) {
-              for (const raw of turn.research_runs) {
-                const normalized = normalizeResearchRun(raw);
-                if (normalized) researchRuns.push(normalized);
-              }
-            }
-            const embeds =
-              role === "assistant" && researchRuns.length
-                ? buildChatEmbeds({
-                    answerText: text,
-                    researchRuns,
-                    searchQueries: researchRuns.map((r) => r.query).filter(Boolean),
-                  })
-                : undefined;
-            const renderPlan =
-              role === "assistant"
-                ? buildResponseRenderPlan({
-                    answerText: text,
-                    researchRuns,
-                    searchQueries: researchRuns.map((r) => r.query).filter(Boolean),
-                  })
-                : undefined;
-            for (const r of researchRuns) {
-              if (!hydratedResearch.some((h) => h.id === r.id)) hydratedResearch.push(r);
-            }
-            // Turn-scoped progress only — never attach full Session action lists
-            // (that painted Pokémon research under a prior "whats up" chat Turn).
-            const executionProjection =
-              turn.execution_projection && typeof turn.execution_projection === "object"
-                ? turn.execution_projection
-                : {};
-            const projectedRuns = Array.isArray(turn.tool_runs) ? turn.tool_runs : [];
-            const runById = new Map(projectedRuns.map((run: any) => [String(run.id || ""), run]));
-            const projectedAction = (runId: unknown, success: boolean) => {
-              const run: any = runById.get(String(runId || ""));
-              if (!run) return null;
-              const outcome = run.outcome || {};
-              return {
-                execution_id: executionId,
-                tool_run_id: String(run.id || ""),
-                tool: String(run.tool_name || "tool"),
-                summary: String(outcome.output || outcome.error_message || run.status || "").slice(0, 240),
-                status: String(run.status || (success ? "complete" : "failed")),
-                success,
-                execution_status: String(outcome.execution_status || ""),
-                result_state: String(outcome.result_state || ""),
-                provider: String(outcome.provider || ""),
-                observed_at: Number(outcome.observed_at || 0),
-                confidence: outcome.confidence == null ? null : Number(outcome.confidence),
-              };
-            };
-            const completedActions = (Array.isArray(executionProjection.successful_mutations)
-              ? executionProjection.successful_mutations
-              : [])
-              .map((id: unknown) => projectedAction(id, true))
-              .filter(Boolean) as Record<string, any>[];
-            const failedActions = (Array.isArray(executionProjection.blocked_mutations)
-              ? executionProjection.blocked_mutations
-              : [])
-              .map((id: unknown) => projectedAction(id, false))
-              .filter(Boolean) as Record<string, any>[];
-            const pendingActions = (Array.isArray(turn.approvals) ? turn.approvals : [])
-              .filter((approval: any) => String(approval.status || "") === "pending")
-              .map((approval: any) => ({
-                execution_id: executionId,
-                approval_id: String(approval.id || ""),
-                tool: String(approval.tool || "action"),
-                summary: String(approval.summary || approval.preview || "Awaiting approval"),
-                status: "needs_permission",
-                success: false,
-              }));
-            const changedFiles = (Array.isArray(executionProjection.files_actually_changed)
-              ? executionProjection.files_actually_changed
-              : [])
-              .flatMap((item: any) => [String(item?.path || "").trim(), String(item?.destination || "").trim()])
-              .filter(Boolean);
-            const turnScopedState: OperationalThreadState = {
-              thread_id: threadId,
-              mode: String(turn.execution?.mode || "chat"),
-              phase: String(turn.execution?.phase || ""),
-              execution_status:
-                turnStatus === "interrupted"
-                  ? "in_progress"
-                  : String(executionProjection.status || turnStatus || "complete"),
-              current_execution_id: executionId,
-              last_execution_id: executionId,
-              terminal_status: String(turn.terminal_status || turnStatus),
-              safest_next_action:
-                turnStatus && !["complete", "completed", "ready", ""].includes(String(turnStatus))
-                  ? String(executionProjection.next_action || turn.verification?.next_action || turn.progress?.status || "")
-                  : "",
-              completed_actions: completedActions,
-              failed_actions: failedActions,
-              pending_actions: pendingActions,
-              plan_steps: [],
-              retry_target:
-                executionProjection.retry_target && typeof executionProjection.retry_target === "object"
-                  ? executionProjection.retry_target
-                  : {},
-              operation_details: {
-                tools_used: projectedRuns
-                  .filter((r: any) => {
-                    const st = String(r.status || "").toLowerCase();
-                    return !["cancelled", "canceled", "interrupted"].includes(st);
-                  })
-                  .map((r: any) => String(r.tool_name || ""))
-                  .filter(Boolean),
-                files_changed: changedFiles,
-                memory_records: Array.isArray(executionProjection.memory_records)
-                  ? executionProjection.memory_records.map((item: any) => String(item?.memory_id || item?.item_id || "")).filter(Boolean)
-                  : [],
-              },
-            } as OperationalThreadState;
-            const leanAgentId = role === "assistant" ? String(msg.agent_id || "") : "";
-            const leanPersona = leanAgentId ? agents.find((a) => a.id === leanAgentId) : undefined;
-            loadedMsgs.push({
-              id: leanAgentId && msg.message_id ? String(msg.message_id) : msgId,
-              lean: leanAgentId
-                ? messageFromTimeline({
-                    messageId: String(msg.message_id || msgId),
-                    agentId: leanAgentId,
-                    agentName: String(leanPersona?.name || msg.agent_name || "Echo"),
-                    initials: leanPersona?.initials,
-                    title: leanPersona?.title,
-                    text,
-                    timeline: Array.isArray(msg.timeline) ? msg.timeline : [],
-                    at: atMs,
-                    success: msg.backend_success !== false,
-                    delegatedBy: msg.delegated_by?.name ? String(msg.delegated_by.name) : undefined,
-                    role: msg.agent_role ? String(msg.agent_role) : undefined,
-                    stopReason: msg.stop_reason ? String(msg.stop_reason) : undefined,
-                  })
-                : undefined,
-              role,
-              text,
-              at: atMs,
-              skipTypewriter: true,
-              streamBeat: role === "assistant" ? "final" : undefined,
-              executionId: executionId || undefined,
-              clientRequestId: String(turn.request_id || turn.execution?.request_id || "") || undefined,
-              embeds: embeds?.length ? embeds : undefined,
-              renderPlan,
-              operation:
-                role === "assistant"
-                  ? {
-                      state: turnScopedState,
-                      success:
-                        turn.success !== false &&
-                        !["failed", "blocked", "cancelled"].includes(String(turnStatus)),
-                      executionId: executionId || undefined,
-                    }
-                  : undefined,
-              usage: buildMessageUsage(text, loadedMsgs, ctxWindow, {
-                provider: providerInfo?.provider,
-                model: providerInfo?.model,
-              }),
-            });
-          }
-
-          // A group chat or handed-off job shows how it ended under its last message.
-          const turnOutcome = turn.execution?.metadata?.outcome;
-          if (turnOutcome && typeof turnOutcome === "object") {
-            for (let i = loadedMsgs.length - 1; i >= 0; i -= 1) {
-              const m = loadedMsgs[i];
-              if (m.lean && m.executionId === (executionId || undefined)) {
-                m.lean = {
-                  ...m.lean,
-                  outcome: {
-                    status: turnOutcome.status === "stopped" ? "stopped" : "done",
-                    summary: turnOutcome.summary ? String(turnOutcome.summary) : undefined,
-                    reason: turnOutcome.reason ? String(turnOutcome.reason) : undefined,
-                  },
-                };
-                break;
-              }
-            }
-          }
-
-          // ToolRuns — exact IDs, completed/failed only (never live spinners after refresh).
-          // Lean turns carry their tools inside each agent's timeline instead.
-          const leanTurn = (Array.isArray(turn.messages) ? turn.messages : []).some((m: any) => m?.agent_id);
-          const runs = leanTurn ? [] : Array.isArray(turn.tool_runs) ? turn.tool_runs : [];
-          for (const run of runs) {
-            const runId = String(run.id || "").trim();
-            const toolName = String(run.tool_name || "tool").trim();
-            if (!runId || SILENT_CHAT_TOOLS.has(toolName)) continue;
-            if (loadedActs.some((a) => a.kind === "tool" && a.id === runId)) continue;
-            const args = run.canonical_arguments || {};
-            const inputPreview = previewToolInput(
-              toolName,
-              typeof args === "object" ? JSON.stringify(args) : String(args || "")
-            );
-            const st = String(run.status || "").toLowerCase();
-            const outcome = run.outcome || {};
-            const outcomeOk = outcome.success === true || st === "complete" || st === "success";
-            const outcomeFail =
-              outcome.success === false ||
-              st === "failed" ||
-              st === "error" ||
-              Boolean(outcome.error_message) ||
-              Boolean(outcome.policy_block);
-            let uiStatus: "running" | "done" | "error" = "done";
-            if (outcomeFail) uiStatus = "error";
-            else if (outcomeOk) uiStatus = "done";
-            else if (st === "started" || st === "pending" || st === "running") {
-              // A persisted nonterminal ToolRun has no success evidence. Never
-              // turn it into "done" merely because its Turn was superseded or
-              // finalized; hydrate it as interrupted without a live spinner.
-              uiStatus = "error";
-            }
-            const outText =
-              String(outcome.output || outcome.error_message || outcome.error_code || "").trim() ||
-              (uiStatus === "error" && ["started", "pending", "running"].includes(st)
-                ? "Interrupted before a terminal tool outcome was recorded"
-                : "");
-            // Place tools strictly inside this Turn's time window so they never
-            // sort under a previous casual-chat assistant message.
-            const atMs = Math.min(
-              Math.max(Number(run.created_at || 0) * 1000 || baseAt + 10, baseAt + 1),
-              Math.max(doneAt - 1, baseAt + 2)
-            );
-            // Skip pure wrapper fan-out shells — children are the canonical rows.
-            if (
-              toolName === "web_search" &&
-              (String(outText || "").startsWith("(expanded to") ||
-                String(outText || "").startsWith("(superseded by canonical"))
-            ) {
-              continue;
-            }
-            // Hydration: one user-facing web_search row per ToolRun id (already unique).
-            // Skip cancelled/wrapper statuses that slipped past earlier filters.
-            if (toolName === "web_search" && ["cancelled", "canceled"].includes(st)) {
-              continue;
-            }
-            if (
-              toolName === "file_list" && st === "interrupted" &&
-              runs.some((other: any) => other.id !== run.id && other.tool_name === "file_list" && ["complete", "success"].includes(String(other.status || "").toLowerCase()))
-            ) {
-              continue;
-            }
-            loadedActs.push({
-              kind: "tool",
-              id: runId,
-              name: toolName,
-              input: inputPreview,
-              status: uiStatus,
-              output: outText ? outText.slice(0, 1500) : undefined,
-              at: atMs,
-            });
-          }
-
-          // Durable verification / denial errors as activity rows under the Turn timestamps
-          if (turn.error && String(turn.error).trim()) {
-            const errId = `hist-err-${executionId}`;
-            if (!loadedActs.some((a) => a.id === errId)) {
-              loadedActs.push({
-                kind: "error",
-                id: errId,
-                message: String(turn.error).trim().slice(0, 800),
-                at: doneAt,
-              });
-            }
-          }
-        }
+        const { messages: loadedMsgs, activities: loadedActs, research: hydratedResearch } =
+          projectSessionHistory(threadId, turns, sessionToolRuns, providerInfo, agents);
 
         // Replace — never append (idempotent refresh / session switch)
         useAppStore.setState({ messages: loadedMsgs });
@@ -1006,15 +697,10 @@ export const Dashboard: React.FC<{
     setThreads(items => items.map(item => item.id === id ? { ...item, name: String(data.title || title) } : item));
   };
 
-  const backendRetryRef = useRef<{ attempt: number; timer: number | null }>({ attempt: 0, timer: null });
-
-  const [providerInfo, setProviderInfo] = useState<ProviderInfo | null>(null);
-  const [providerModels, setProviderModels] = useState<string[]>([]);
-  const [providerDraft, setProviderDraft] = useState<{ provider: string; model: string; base_url: string }>({
-    provider: "",
-    model: "",
-    base_url: "",
-  });
+  const {
+    providerInfo, setProviderModels, providerDraft, setProviderDraft, providerError, switchingProvider, backendOnline, setBackendOnline, lmStudioOnly,
+    refreshProviderInfo, showModelPicker, modelPickerOptions, modelPickerValue,
+  } = useProviderSettings({ apiBase, activeThreadIdRef, cancelSessionTurn });
   const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(
     () => window.localStorage.getItem("echospeak.chat.thinking_enabled") !== "false",
   );
@@ -1027,32 +713,12 @@ export const Dashboard: React.FC<{
       ? stored
       : "medium";
   });
-  const [voiceReadAloud, setVoiceReadAloud] = useState<boolean>(
-    () => window.localStorage.getItem("echospeak.voice.read_aloud") === "true",
-  );
-  const [voiceConversationMode, setVoiceConversationMode] = useState<boolean>(false);
-  const [wakeWordEnabled, setWakeWordEnabled] = useState<boolean>(
-    () => window.localStorage.getItem("echospeak.voice.wake") === "true",
-  );
-  const wakeListenerRef = useRef<WakeListener | null>(null);
-  const [voicePhase, setVoicePhase] = useState<VoiceTransportPhase>("idle");
-  const [voiceNotice, setVoiceNotice] = useState("");
-  const [voiceInputLevel, setVoiceInputLevel] = useState(0);
-  const voiceInputRef = useRef<LocalVoiceInput | null>(null);
-  if (voiceInputRef.current == null) voiceInputRef.current = new LocalVoiceInput();
-  useEffect(() => {
-    window.localStorage.setItem("echospeak.voice.read_aloud", String(voiceReadAloud));
-  }, [voiceReadAloud]);
   useEffect(() => {
     window.localStorage.setItem("echospeak.chat.thinking_enabled", String(thinkingEnabled));
   }, [thinkingEnabled]);
   useEffect(() => {
     window.localStorage.setItem("echospeak.chat.reasoning_effort", reasoningEffort);
   }, [reasoningEffort]);
-  const lmStudioOnly = useMemo(() => isLmStudioOnlyLocked(providerInfo), [providerInfo]);
-  const [providerError, setProviderError] = useState<string | null>(null);
-  const [switchingProvider, setSwitchingProvider] = useState(false);
-  const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
@@ -1072,118 +738,6 @@ export const Dashboard: React.FC<{
     }
   }, [input]);
 
-  const lastAppliedProviderRef = useRef<{ provider: string; model: string } | null>(null);
-  const suppressAutoApplyRef = useRef(true);
-
-  const scheduleBackendRetry = () => {
-    if (backendRetryRef.current.timer != null) return;
-    const attempt = backendRetryRef.current.attempt;
-    // Backoff is deliberately slow after the initial recovery window. The old
-    // six-second ceiling could hammer a failing provider endpoint indefinitely
-    // and turn one backend exception into a noisy desktop-wide failure loop.
-    const delay = Math.min(30000, Math.round(900 * Math.pow(1.8, attempt)));
-    backendRetryRef.current.attempt = Math.min(attempt + 1, 8);
-    backendRetryRef.current.timer = window.setTimeout(() => {
-      backendRetryRef.current.timer = null;
-      refreshProviderInfo({ allowRetry: true });
-    }, delay);
-  };
-
-  const refreshProviderInfo = async (opts: { allowRetry?: boolean } = {}) => {
-    try {
-      setProviderError(null);
-      const scope = new URLSearchParams({ session_id: String(activeThreadIdRef.current || "default") });
-      const resp = await fetchWithTimeout(`${apiBase}/provider?${scope.toString()}`, undefined, 10000);
-      if (!resp.ok) throw new Error(`${resp.status} ${resp.statusText}`);
-      const info = (await resp.json()) as ProviderInfo;
-      setProviderInfo(info);
-      setBackendOnline(true);
-      backendRetryRef.current.attempt = 0;
-      if (backendRetryRef.current.timer != null) {
-        window.clearTimeout(backendRetryRef.current.timer);
-        backendRetryRef.current.timer = null;
-      }
-      lastAppliedProviderRef.current = { provider: info.provider, model: info.model };
-      suppressAutoApplyRef.current = false;
-      setProviderDraft((d) => ({
-        ...d,
-        provider: info.provider,
-        model: info.model,
-        base_url: info.base_url ? String(info.base_url) : d.base_url,
-      }));
-    } catch (e) {
-      setBackendOnline(false);
-      const err = e instanceof Error ? e : new Error(String(e));
-      const msg = err.message || String(e);
-      const aborted = err.name === "AbortError" || msg.toLowerCase().includes("aborted");
-      const offline = aborted || msg.includes("Failed to fetch");
-      const serverFailure = /\b5\d\d\b/.test(msg);
-      const pretty = offline ? "Backend offline" : msg;
-      const shouldRetry = Boolean(opts.allowRetry && (offline || serverFailure));
-      setProviderError(offline && shouldRetry ? "Backend offline — retrying" : pretty);
-      if (shouldRetry) scheduleBackendRetry();
-    }
-  };
-
-  const modelsRequestRef = useRef("");
-  const refreshProviderModels = async (provider: string) => {
-    modelsRequestRef.current = provider;
-    try {
-      const resp = await fetchWithTimeout(`${apiBase}/provider/models?provider=${encodeURIComponent(provider)}`);
-      if (!resp.ok) return;
-      const data = (await resp.json()) as ProviderModelsResponse;
-      if (modelsRequestRef.current !== provider) return;
-      const models = Array.isArray(data.models) ? data.models : [];
-      setProviderModels(models);
-      if (!models.length && listableProviders.includes(provider)) {
-        const name = PROVIDER_LABELS[provider] || provider;
-        setProviderError(`${name} isn't answering. Open ${name}, load a model and start its local server, then pick it again.`);
-      } else {
-        setProviderError((prev) => (prev && prev.includes("isn't answering") ? null : prev));
-      }
-    } catch {
-      if (modelsRequestRef.current === provider) setProviderModels([]);
-    } finally {
-    }
-  };
-
-  const applyProviderSwitch = async (draft?: { provider: string; model: string; base_url: string }) => {
-    if (lmStudioOnly) return;
-    const next = draft || providerDraft;
-    if (!next.provider) return;
-    setSwitchingProvider(true);
-    setProviderError(null);
-    cancelSessionTurn(String(activeThreadIdRef.current || ""));
-    try {
-      const body: any = {
-        provider: next.provider,
-        session_id: String(activeThreadIdRef.current || "default"),
-        expected_revision: Number(providerInfo?.binding_revision || 1),
-      };
-      if (next.provider === "openai") body.openai_model = next.model || undefined;
-      else if (next.provider === "gemini") body.gemini_model = next.model || undefined;
-      else body.model = next.model || undefined;
-
-      const resp = await fetchWithTimeout(`${apiBase}/provider/switch`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!resp.ok) {
-        const t = await resp.text();
-        throw new Error(t || `${resp.status} ${resp.statusText}`);
-      }
-      lastAppliedProviderRef.current = { provider: next.provider, model: next.model || "" };
-      await refreshProviderInfo();
-      if (listableProviders.includes(next.provider)) {
-        await refreshProviderModels(next.provider);
-      }
-    } catch (e) {
-      setProviderError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSwitchingProvider(false);
-    }
-  };
 
   const timeline = useMemo<TimelineItem[]>(() => {
     // Chat is a conversation projection. Durable operational evidence stays in
@@ -1344,43 +898,6 @@ export const Dashboard: React.FC<{
     };
   }, [scrollChatToBottom, leftTab]);
 
-  const speakLocalText = async (
-    text: string,
-    metadata: Pick<SpeechScope, "clientTurnId" | "requestId" | "executionId" | "completeTurn">,
-  ) => {
-    const sessionId = String(activeThreadIdRef.current || "").trim();
-    const cleaned = sanitizeForTTS(text);
-    if (!speechEnabled || !sessionId || !cleaned) return false;
-    setVoiceNotice("");
-    try {
-      await localVoicePlayback.speak(
-        cleaned,
-        {
-          apiBase,
-          sessionId,
-          projectId: String(activeProjectIdRef.current || ""),
-          ...metadata,
-        },
-        {
-          onPhase: (phase, detail) => {
-            setVoicePhase(phase);
-            setVoiceNotice(detail || "");
-            useAppStore.getState().setSpeaking(phase === "speaking");
-          },
-          onLevel: (level) => {
-            if (level > 0) useAppStore.getState().bumpSpeechBeat();
-          },
-        },
-      );
-      return true;
-    } catch (error) {
-      if ((error as any)?.name === "AbortError") return false;
-      setVoicePhase("error");
-      setVoiceNotice(error instanceof Error ? error.message : "Local speech playback is unavailable.");
-      useAppStore.getState().setSpeaking(false);
-      return false;
-    }
-  };
 
   const sendText = async (overrideText?: string, voiceTranscript?: VoiceTranscript) => {
     const raw = overrideText ?? input;
@@ -1763,61 +1280,6 @@ export const Dashboard: React.FC<{
       if (next) refreshMonitor();
       return next;
     });
-  const toggleReadAloud = () => {
-    const enabled = !voiceReadAloud;
-    setVoiceReadAloud(enabled);
-    if (!enabled) stopTts();
-  };
-  const toggleVoiceMode = () => {
-    const enabled = !voiceConversationMode;
-    setVoiceConversationMode(enabled);
-    if (enabled && !streaming && !listening && voicePhase !== "transcribing") void start();
-    if (!enabled) {
-      void voiceInputRef.current?.stop(false);
-      setListening(false);
-      stopTts();
-      setVoicePhase("idle");
-      setVoiceNotice("");
-    }
-  };
-
-  const toggleWakeWord = () => {
-    setWakeWordEnabled((on) => {
-      window.localStorage.setItem("echospeak.voice.wake", String(!on));
-      if (on) setVoiceNotice("");
-      return !on;
-    });
-  };
-  // "Hey Echo": listen only while idle; release the mic during a voice turn,
-  // while a reply streams or is read aloud, and when Wake is off.
-  const wakeIdle = wakeWordEnabled && !listening && !streaming && (voicePhase === "idle" || voicePhase === "error");
-  useEffect(() => {
-    if (!wakeIdle) {
-      wakeListenerRef.current?.stop();
-      return;
-    }
-    if (!wakeListenerRef.current) wakeListenerRef.current = new WakeListener();
-    const listener = wakeListenerRef.current;
-    void listener
-      .start({
-        apiBase,
-        onWake: () => {
-          listener.stop();
-          void start();
-        },
-        onUnavailable: (message) => {
-          listener.stop();
-          setWakeWordEnabled(false);
-          window.localStorage.setItem("echospeak.voice.wake", "false");
-          setVoiceNotice(message);
-        },
-      })
-      .catch((error) => {
-        setWakeWordEnabled(false);
-        setVoiceNotice(error instanceof Error ? error.message : "The microphone is unavailable.");
-      });
-    return () => listener.stop();
-  }, [wakeIdle, apiBase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stopActiveTurn = () => {
     stopTts();
@@ -1887,94 +1349,23 @@ export const Dashboard: React.FC<{
         ).catch(() => undefined);
       }
       setVoicePhase("idle");
-      setVoiceNotice("Stopped by Ty.");
+      setVoiceNotice("Stopped.");
       setInput("");
       return;
     }
     await sendText(transcript.text, transcript);
   };
 
-  const start = async () => {
-    const sessionId = String(activeThreadIdRef.current || "").trim();
-    if (!sessionId || !voiceInputRef.current) {
-      setVoicePhase("error");
-      setVoiceNotice("Create or select a Session before using Voice.");
-      return;
-    }
-    stopTts();
-    setVoiceNotice("");
-    try {
-      await voiceInputRef.current.start(
-        {
-          apiBase,
-          sessionId,
-          projectId: String(activeProjectIdRef.current || ""),
-        },
-        {
-          onPhase: (phase, detail) => {
-            setVoicePhase(phase);
-            setVoiceNotice(detail || "");
-            setListening(phase === "listening" || phase === "requesting_permission");
-          },
-          onLevel: setVoiceInputLevel,
-          onFinalTranscript: (transcript) => {
-            setListening(false);
-            setVoiceInputLevel(0);
-            void submitVoiceTranscript(transcript).catch((error) => {
-              setVoicePhase("error");
-              setVoiceNotice(error instanceof Error ? error.message : "The spoken instruction could not be applied.");
-            });
-          },
-          onFailure: (error) => {
-            setListening(false);
-            setVoiceInputLevel(0);
-            setVoicePhase("error");
-            setVoiceNotice(error.message || "Local transcription is unavailable.");
-          },
-        },
-      );
-    } catch (error) {
-      setListening(false);
-      setVoicePhase("error");
-      setVoiceNotice(error instanceof Error ? error.message : "Local microphone capture is unavailable.");
-    }
-  };
-
-  const stop = async () => {
-    if (!voiceInputRef.current) return;
-    setListening(false);
-    try {
-      const transcript = await voiceInputRef.current.stop(true);
-      if (!transcript) return;
-      await submitVoiceTranscript(transcript);
-    } catch (error) {
-      setVoicePhase("error");
-      setVoiceNotice(error instanceof Error ? error.message : "Local transcription is unavailable.");
-    } finally {
-      setListening(false);
-      setVoiceInputLevel(0);
-    }
-  };
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (!event.ctrlKey || event.key.toLowerCase() !== "m") return;
-      event.preventDefault();
-      if (voiceInputRef.current?.active) void stop();
-      else void start();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+  const {
+    voicePhase, setVoicePhase, voiceNotice, setVoiceNotice, voiceInputLevel,
+    voiceReadAloud, voiceConversationMode, wakeWordEnabled,
+    toggleReadAloud, toggleVoiceMode, toggleWakeWord, start, stop, speakLocalText,
+  } = useVoice({
+    apiBase, activeThreadId, activeProjectId, activeThreadIdRef, activeProjectIdRef,
+    streaming, listening, setListening, speechEnabled, onTranscript: submitVoiceTranscript,
   });
 
-  useEffect(() => {
-    if (voiceInputRef.current?.active) void voiceInputRef.current.stop(false);
-    setListening(false);
-    setVoiceInputLevel(0);
-    setVoicePhase("idle");
-    setVoiceNotice("");
-    stopTts();
-  }, [activeThreadId, activeProjectId]);
+
 
   const refreshMonitor = async () => {
     try {
@@ -1995,77 +1386,7 @@ export const Dashboard: React.FC<{
     refreshProviderInfo({ allowRetry: true });
   }, [apiBase, activeThreadId, initialHydrationComplete]);
 
-  useEffect(() => {
-  }, [activeProjectId, activeThreadId, leftTab]);
 
-  useEffect(() => {
-    return () => {
-      if (backendRetryRef.current.timer != null) {
-        window.clearTimeout(backendRetryRef.current.timer);
-        backendRetryRef.current.timer = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (backendOnline === false) return;
-    if (providerDraft.provider === "openai") {
-      setProviderModels(openaiModelOptions);
-      return;
-    }
-    if (providerDraft.provider === "gemini") {
-      setProviderModels(geminiModelOptions);
-      return;
-    }
-    if (listableProviders.includes(providerDraft.provider)) {
-      setProviderModels([]);
-      refreshProviderModels(providerDraft.provider);
-      return;
-    }
-    setProviderModels([]);
-  }, [providerDraft.provider, backendOnline]);
-
-  useEffect(() => {
-    if (providerModels.length && (providerDraft.provider === "openai" || providerDraft.provider === "gemini" || listableProviders.includes(providerDraft.provider))) {
-      if (!providerModels.includes(providerDraft.model)) {
-        setProviderDraft((d) => ({ ...d, model: providerModels[0] }));
-      }
-    }
-  }, [providerModels, providerDraft.provider, lmStudioOnly, switchingProvider]);
-
-  useEffect(() => {
-    if (lmStudioOnly) return;
-    if (suppressAutoApplyRef.current) return;
-    if (switchingProvider) return;
-
-    const next = { provider: providerDraft.provider, model: providerDraft.model, base_url: providerDraft.base_url };
-    if (listableProviders.includes(next.provider) && !next.model) return;
-    const last = lastAppliedProviderRef.current;
-    if (last && last.provider === next.provider && last.model === (next.model || "")) return;
-
-    const t = window.setTimeout(() => {
-      applyProviderSwitch(next);
-    }, next.provider === "llama_cpp" ? 800 : 250);
-
-    return () => window.clearTimeout(t);
-  }, [providerDraft.provider, providerDraft.model, providerDraft.base_url, switchingProvider]);
-
-  useEffect(() => {
-    const onSettingsSaved = () => {
-      void refreshProviderInfo();
-    };
-    window.addEventListener("echospeak:settings-saved", onSettingsSaved);
-    return () => window.removeEventListener("echospeak:settings-saved", onSettingsSaved);
-  }, [apiBase]);
-
-  useEffect(() => {
-    const listener = () => {
-      void voiceInputRef.current?.stop(false);
-      stopTts();
-    };
-    window.addEventListener("beforeunload", listener);
-    return () => window.removeEventListener("beforeunload", listener);
-  }, []);
 
   useEffect(() => {
     if (!activeGroup) {
@@ -2157,14 +1478,6 @@ export const Dashboard: React.FC<{
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  const showModelPicker =
-    providerDraft.provider === "openai" ||
-    providerDraft.provider === "gemini" ||
-    providerModels.length > 0;
-  const modelPickerOptions = showModelPicker
-    ? (providerDraft.provider === "openai" ? openaiModelOptions : providerDraft.provider === "gemini" ? geminiModelOptions : providerModels)
-    : [providerDraft.model || "Default model"];
-  const modelPickerValue = showModelPicker ? providerDraft.model : modelPickerOptions[0];
   const studioOpen = desktopMode
     ? desktopSettingsOpen
     : leftTab !== "chat" && leftTab !== "research";
