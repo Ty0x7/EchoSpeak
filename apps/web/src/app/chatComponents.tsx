@@ -37,9 +37,8 @@ export const LiveChatActivityBar: React.FC<{
   activity: AgentActivityState;
   showSpinner: boolean;
   onStop?: () => void;
-  onSteer?: () => void;
   onQueue?: () => void;
-}> = ({ status, activity, showSpinner, onStop, onSteer, onQueue }) => {
+}> = ({ status, activity, showSpinner, onStop, onQueue }) => {
   const [expanded, setExpanded] = useState(true);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -68,7 +67,7 @@ export const LiveChatActivityBar: React.FC<{
             {elapsedSeconds}s{activity.iteration ? ` · pass ${activity.iteration}` : ""}
           </span>
         </div>
-        {(onStop || onSteer || onQueue) && (
+        {(onStop || onQueue) && (
           <div className="live-run-actions">
             {onStop && (
               <button
@@ -79,17 +78,6 @@ export const LiveChatActivityBar: React.FC<{
                 aria-label="Stop current turn"
               >
                 Stop
-              </button>
-            )}
-            {onSteer && (
-              <button
-                className="live-run-action"
-                type="button"
-                onClick={onSteer}
-                title="Steer active TaskRun with new instruction"
-                aria-label="Steer active TaskRun"
-              >
-                Steer
               </button>
             )}
             {onQueue && (

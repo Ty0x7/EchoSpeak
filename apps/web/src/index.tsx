@@ -6,7 +6,6 @@ import { createEmptyTaskPlan, taskPlanReducer } from "./taskPlanProjection";
 import type { EchoReaction } from "./components/echoAnimationUtils";
 import { ProjectSidebar, type SidebarPage } from "./components/ProjectSidebar";
 import { MediaLibraryView } from "./features/media/MediaLibraryView.tsx";
-import { useWorkStore } from "./features/work/store";
 import { loadRuntimeLayout, runtimeGridColumns, saveRuntimeLayout } from "./runtimeLayout";
 import {
   buildLiveOperationalStatus,
@@ -216,69 +215,15 @@ export const Dashboard: React.FC<{
     },
     [leanClient]
   );
-  const currentWorkRuns = useWorkStore((state) => state.runs);
-  const loadCurrentWorkRuns = useWorkStore((state) => state.loadRuns);
-  const workProjectionRevisionRef = useRef<string>("");
   const activeThreadIdRef = useRef<string>(desktopBootstrap?.active_session_id || "");
   const threadCreationFlightRef = useRef<Promise<string> | null>(null);
   const streamControllersRef = useRef<Map<string, AbortController>>(new Map());
   const activeRequestIdsRef = useRef<Map<string, string>>(new Map());
   const activeExecutionIdsRef = useRef<Map<string, string>>(new Map());
-  const activeTaskRunIdsRef = useRef<Map<string, string>>(new Map());
   const historyRequestSeqRef = useRef<Map<string, number>>(new Map());
   const projectionRevisionRef = useRef<Map<string, number>>(new Map());
   const sessionProjectionRef = useRef<Map<string, { messages: Message[]; activities: ActivityItem[] }>>(new Map());
   const [inFlightSessionIds, setInFlightSessionIds] = useState<Set<string>>(() => new Set());
-
-  useEffect(() => {
-    if (!initialHydrationComplete || !activeThreadId) return;
-    void loadCurrentWorkRuns(apiBase, activeThreadId, activeProjectId || "");
-  }, [activeProjectId, activeThreadId, apiBase, initialHydrationComplete, loadCurrentWorkRuns]);
-
-  useEffect(() => {
-    if (!initialHydrationComplete || !activeThreadId) return;
-    const activeStatuses = new Set([
-      "running",
-      "suspended_waiting_for_user",
-      "suspended_waiting_for_approval",
-    ]);
-    if (!currentWorkRuns.some((run) => activeStatuses.has(String(run.status || "").toLowerCase()))) {
-      workProjectionRevisionRef.current = currentWorkRuns
-        .map((run) => `${run.id}:${run.revision}:${run.status}`)
-        .join("|");
-      return;
-    }
-    let cancelled = false;
-    const poll = async () => {
-      const before = useWorkStore.getState().runs
-        .map((run) => `${run.id}:${run.revision}:${run.status}`)
-        .join("|");
-      await loadCurrentWorkRuns(apiBase, activeThreadId, activeProjectId || "");
-      if (cancelled || activeThreadIdRef.current !== activeThreadId) return;
-      const after = useWorkStore.getState().runs
-        .map((run) => `${run.id}:${run.revision}:${run.status}`)
-        .join("|");
-      if (after && after !== before && after !== workProjectionRevisionRef.current) {
-        workProjectionRevisionRef.current = after;
-        await loadHistory(activeThreadId);
-      }
-    };
-    workProjectionRevisionRef.current = currentWorkRuns
-      .map((run) => `${run.id}:${run.revision}:${run.status}`)
-      .join("|");
-    const interval = window.setInterval(() => void poll(), 2500);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [
-    activeProjectId,
-    activeThreadId,
-    apiBase,
-    currentWorkRuns,
-    initialHydrationComplete,
-    loadCurrentWorkRuns,
-  ]);
 
   const setSessionInFlight = useCallback((threadId: string, active: boolean) => {
     setInFlightSessionIds((current) => {
@@ -306,7 +251,6 @@ export const Dashboard: React.FC<{
       streamControllersRef.current.delete(sessionId);
       activeRequestIdsRef.current.delete(sessionId);
       activeExecutionIdsRef.current.delete(sessionId);
-      activeTaskRunIdsRef.current.delete(sessionId);
       setSessionInFlight(sessionId, false);
     }
     if (requestId) {
@@ -1190,9 +1134,6 @@ export const Dashboard: React.FC<{
   const [voiceInputLevel, setVoiceInputLevel] = useState(0);
   const voiceInputRef = useRef<LocalVoiceInput | null>(null);
   if (voiceInputRef.current == null) voiceInputRef.current = new LocalVoiceInput();
-  const [showSteerModal, setShowSteerModal] = useState<boolean>(false);
-  const [steerInput, setSteerInput] = useState<string>("");
-  const [steerSubmitting, setSteerSubmitting] = useState<boolean>(false);
   useEffect(() => {
     window.localStorage.setItem("echospeak.voice.read_aloud", String(voiceReadAloud));
   }, [voiceReadAloud]);
@@ -1512,7 +1453,7 @@ export const Dashboard: React.FC<{
 
   const speakLocalText = async (
     text: string,
-    metadata: Pick<SpeechScope, "clientTurnId" | "requestId" | "executionId" | "taskRunId" | "completeTurn">,
+    metadata: Pick<SpeechScope, "clientTurnId" | "requestId" | "executionId" | "completeTurn">,
   ) => {
     const sessionId = String(activeThreadIdRef.current || "").trim();
     const cleaned = sanitizeForTTS(text);
@@ -2096,7 +2037,6 @@ export const Dashboard: React.FC<{
                 clientTurnId: voiceTranscript?.clientTurnId || runRequestId,
                 requestId: runRequestId,
                 executionId: finalExecId,
-                taskRunId: "",
               }).then((played) => {
                 if (played && voiceConversationMode && activeThreadIdRef.current === streamThreadId && !streamControllersRef.current.has(streamThreadId)) {
                   void start();
@@ -2132,8 +2072,6 @@ export const Dashboard: React.FC<{
                   : "This provider does not expose native effort control on the active endpoint.",
               });
             }
-          } else if (evt.type === "task_bound") {
-            activeTaskRunIdsRef.current.set(streamThreadId, String(evt.task_run_id || ""));
           } else if (evt.type === "reasoning_summary") {
             const summary = String(evt.content || "").trim();
             if (thinkingEnabled && summary) {
@@ -2287,7 +2225,6 @@ export const Dashboard: React.FC<{
                 clientTurnId: voiceTranscript?.clientTurnId || runRequestId,
                 requestId: runRequestId,
                 executionId: durableTurnId,
-                taskRunId: activeTaskRunIdsRef.current.get(streamThreadId) || "",
                 completeTurn: false,
               });
             }
@@ -2526,7 +2463,6 @@ export const Dashboard: React.FC<{
                   clientTurnId: voiceTranscript?.clientTurnId || runRequestId,
                   requestId: runRequestId,
                   executionId: finalExecId,
-                  taskRunId: activeTaskRunIdsRef.current.get(streamThreadId) || "",
                 };
                 const playback = speakVal
                   ? speakLocalText(speakVal, playbackScope)
@@ -2568,7 +2504,6 @@ export const Dashboard: React.FC<{
             setAgentMode("idle");
             refreshPendingApproval(streamThreadId);
             refreshExecutions(streamThreadId);
-            void loadCurrentWorkRuns(apiBase, streamThreadId, activeProjectIdRef.current || "");
             void refreshThreads();
           }
         }
@@ -2599,7 +2534,6 @@ export const Dashboard: React.FC<{
         if (activeRequestIdsRef.current.get(streamThreadId) === runRequestId) {
           activeRequestIdsRef.current.delete(streamThreadId);
           activeExecutionIdsRef.current.delete(streamThreadId);
-          activeTaskRunIdsRef.current.delete(streamThreadId);
         }
         setSessionInFlight(streamThreadId, false);
       }
@@ -2906,38 +2840,6 @@ export const Dashboard: React.FC<{
       setVoiceNotice("Stopped by Ty.");
       setInput("");
       return;
-    }
-    if (["canonical_steer", "canonical_continue", "canonical_inspect"].includes(transcript.controlHint)) {
-      const taskRunId = activeTaskRunIdsRef.current.get(transcript.sessionId) || "";
-      const requestId = activeRequestIdsRef.current.get(transcript.sessionId) || "";
-      if (taskRunId && requestId) {
-        const response = await fetch(`${apiBase}/query/steer`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            thread_id: transcript.sessionId,
-            instruction: transcript.text,
-            task_run_id: taskRunId,
-            client_request_id: requestId,
-            voice_turn_id: transcript.voiceTurnId,
-          }),
-        });
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({}));
-          throw new Error(String(payload?.detail || "The active run could not accept that direction."));
-        }
-        dispatchActivity({ type: "steer", instruction: transcript.text });
-        setInput("");
-        setVoicePhase("idle");
-        setVoiceNotice(
-          transcript.controlHint === "canonical_inspect"
-            ? "Status question attached to the active run."
-            : transcript.controlHint === "canonical_continue"
-            ? "The active run will continue."
-            : "Direction added to the active run.",
-        );
-        return;
-      }
     }
     await sendText(transcript.text, transcript);
   };
@@ -3361,13 +3263,6 @@ export const Dashboard: React.FC<{
   const mediaWorkspaceOpen = !desktopMode && mediaRouteActive;
   const desktopContextualWorkspace = false;
   const activeWorkspaceLabel = desktopMode ? "Conversation" : "EchoSpeak";
-  const activeChatTask = currentWorkRuns.find((run) =>
-    !["completed", "cancelled", "superseded", "quarantined"].includes(String(run.status || "").toLowerCase())
-  ) || null;
-  const activeChatRequirementStates = activeChatTask
-    ? Object.values(activeChatTask.requirement_statuses || {})
-    : [];
-  const activeChatSatisfied = activeChatRequirementStates.filter((status) => status === "satisfied").length;
   const closeStudio = () => {
     if (desktopSettingsWindow) {
       void controlDesktopWindow("close");
@@ -3941,15 +3836,6 @@ export const Dashboard: React.FC<{
                     {activeRoom ? (
                       <RoomHeader room={activeRoom} agents={agents} onEdit={() => setRoomDialog({ open: true, room: activeRoom })} />
                     ) : null}
-                    {activeChatTask ? (
-                      <section style={{ margin: "4px 4px 12px", padding: "11px 13px", border: "1px solid rgba(255,255,255,.1)", background: "linear-gradient(115deg,rgba(255,255,255,.045),rgba(255,255,255,.012))", borderRadius: 5, display: "flex", alignItems: "center", gap: 12 }} aria-label="Current work">
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div style={{ color: "rgba(255,255,255,.38)", font: "600 8px ui-monospace,monospace", letterSpacing: ".12em", textTransform: "uppercase" }}>Current work · {String(activeChatTask.status || "running").replace(/_/g, " ")}</div>
-                          <div style={{ marginTop: 5, color: "rgba(255,255,255,.86)", fontSize: 11.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{activeChatTask.objective}</div>
-                          <div style={{ marginTop: 4, color: "rgba(255,255,255,.36)", fontSize: 9.5 }}>{activeChatSatisfied}/{activeChatRequirementStates.length || 1} requirements satisfied</div>
-                        </div>
-                      </section>
-                    ) : null}
                     {!timeline.length && !streaming && !lean.live ? (
                       <div className="es-chat-empty">
                         <strong>{activeRoom ? activeRoom.name : "What can I help with?"}</strong>
@@ -4040,7 +3926,6 @@ export const Dashboard: React.FC<{
                           setVoiceNotice("Stopped by Ty.");
                           cancelSessionTurn(activeThreadId, true);
                         }}
-                        onSteer={activeTaskRunIdsRef.current.get(activeThreadId) ? () => setShowSteerModal(true) : undefined}
                         onQueue={() => void queueFollowUp()}
                         status={buildLiveOperationalStatus({
                           phase: agentActivity.phase,
@@ -4464,66 +4349,6 @@ export const Dashboard: React.FC<{
                     </div>
                   </div>
                 </>
-              )}
-
-              {showSteerModal && (
-                <div className="steer-backdrop" role="presentation">
-                  <div className="steer-dialog" role="dialog" aria-modal="true" aria-labelledby="steer-dialog-title">
-                    <div className="steer-dialog-copy">
-                      <span>Active run</span>
-                      <h3 id="steer-dialog-title">Guide Echo</h3>
-                    </div>
-                    <p>
-                      Add a direction for Echo to use at the next safe boundary. Completed work stays intact.
-                    </p>
-                    <textarea
-                      className="steer-input"
-                      value={steerInput}
-                      onChange={(e) => setSteerInput(e.target.value)}
-                      placeholder="For example: focus on the Python files first"
-                      rows={3}
-                    />
-                    <div className="steer-dialog-actions">
-                      <button
-                        className="steer-button"
-                        type="button"
-                        onClick={() => { setShowSteerModal(false); setSteerInput(""); }}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        className="steer-button is-primary"
-                        type="button"
-                        disabled={!steerInput.trim() || steerSubmitting}
-                        onClick={async () => {
-                          if (!steerInput.trim() || !activeThreadId) return;
-                          setSteerSubmitting(true);
-                          try {
-                            const res = await fetch(`${apiBase}/query/steer`, {
-                              method: "POST",
-                              headers: { "Content-Type": "application/json" },
-                              body: JSON.stringify({
-                                thread_id: activeThreadId,
-                                instruction: steerInput.trim(),
-                                task_run_id: activeTaskRunIdsRef.current.get(activeThreadId) || "",
-                                client_request_id: activeRequestIdsRef.current.get(activeThreadId) || "",
-                              }),
-                            });
-                            if (res.ok) {
-                              dispatchActivity({ type: "steer", instruction: steerInput.trim() });
-                              setShowSteerModal(false);
-                              setSteerInput("");
-                            }
-                          } finally {
-                            setSteerSubmitting(false);
-                          }
-                        }}
-                      >
-                        {steerSubmitting ? "Applying…" : "Apply direction"}
-                      </button>
-                    </div>
-                  </div>
-                </div>
               )}
 
               {studioOpen && (!desktopMode || desktopStudioHost) && createPortal(
