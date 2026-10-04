@@ -1,7 +1,7 @@
 from pathlib import Path
 import importlib.util
 
-from agent import git_changelog, heartbeat, security, task_store
+from agent import git_changelog, heartbeat, security
 from api import server
 from config import DATA_DIR
 import twitter_bot
@@ -32,7 +32,6 @@ def test_desktop_loopback_auth_is_required_when_bypass_is_disabled(monkeypatch):
 def test_desktop_mutable_state_uses_the_configured_data_root():
     root = Path(DATA_DIR).resolve()
     owned_paths = (
-        task_store.get_task_store().path,
         server._AVATAR_CONFIG_FILE,
         heartbeat._DATA_DIR,
         git_changelog._CHANGELOG_STATE_PATH,

@@ -282,13 +282,6 @@ def _media() -> dict[str, Any]:
     return {"count": len(store.list(limit=10000)), "root": str(store.root), "detail": "Media catalog loaded"}
 
 
-def _tasks() -> dict[str, Any]:
-    from agent.task_store import get_task_store
-
-    store = get_task_store()
-    return {"count": len(store.list()), "root": str(store.path), "detail": "Tasks restored"}
-
-
 def _routines() -> dict[str, Any]:
     from agent.routines import get_routine_manager
 
@@ -346,7 +339,6 @@ def build_startup_readiness() -> dict[str, Any]:
         _component("runtime_state", "Restoring work", _runtime_state),
         _component("jobs", "Restoring jobs", _jobs),
         _component("media", "Loading Media", _media),
-        _component("tasks", "Restoring Tasks", _tasks),
         _component("routines", "Restoring Routines", _routines),
         _component("heartbeat", "Restoring Heartbeat", _heartbeat),
         _component("schema", "Checking data compatibility", _schema),

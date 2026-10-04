@@ -5,7 +5,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from config import DiscordUserRole
-from agent.tool_registry import PipelinePlugin, PluginRegistry
 
 
 @dataclass
@@ -199,40 +198,3 @@ _UPDATE_CONTEXT_SERVICE = UpdateContextService()
 
 def get_update_context_service() -> UpdateContextService:
     return _UPDATE_CONTEXT_SERVICE
-
-
-class UpdateContextPlugin(PipelinePlugin):
-    def __init__(self, service: Optional[UpdateContextService] = None):
-        self._service = service or get_update_context_service()
-
-    def on_context(self, user_input: str, context: Any, **kwargs) -> Any:
-        query = str(getattr(context, "extracted_input", "") or user_input or "").strip()
-        if not self._service.is_update_intent(query):
-            return None
-        agent = kwargs.get("agent")
-        source = str(kwargs.get("source") or getattr(agent, "_current_source", "") or "").strip().lower()
-        public = self._is_public_request(agent, source)
-        block = self._service.build_context_block(
-            public=public,
-            include_diff=not public,
-            max_diff_chars=1600,
-            limit=6,
-        )
-        if not block:
-            return None
-        existing = str(getattr(context, "context", "") or "")
-        if block not in existing:
-            setattr(context, "context", f"{block}\n\n{existing}" if existing else block)
-        setattr(context, "update_context", block)
-        setattr(context, "update_intent", True)
-        return context
-
-    def _is_public_request(self, agent: Any, source: str) -> bool:
-        if source in {"twitter", "twitch"}:
-            return True
-        role = getattr(agent, "_current_user_role", DiscordUserRole.OWNER)
-        return role != DiscordUserRole.OWNER
-
-
-def ensure_update_context_plugin_registered() -> None:
-    PluginRegistry.register(UpdateContextPlugin())

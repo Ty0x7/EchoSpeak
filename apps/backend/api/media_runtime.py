@@ -66,28 +66,6 @@ def _session_scope(session_id: str, project_id: str = ""):
     return state
 
 
-@router.get("/capabilities")
-async def media_runtime_capabilities():
-    return {
-        "voice": [item.model_dump(mode="json") for item in voice_provider_statuses()],
-        "voice_defaults": {
-            "speech_to_text": default_voice_provider("speech_to_text"),
-            "text_to_speech": default_voice_provider("text_to_speech"),
-        },
-        "generation": [item.model_dump(mode="json") for item in generation_provider_statuses()],
-        "authority": {
-            "owner": "python",
-            "voice_submit_tool": "voice_synthesize_speech",
-            "generation_submit_tool": "generation_submit",
-            "direct_submit_api": False,
-            "voice_transport": (
-                "User-gesture microphone and playback transport only; final transcripts "
-                "enter the canonical query runtime before any semantic work begins."
-            ),
-        },
-    }
-
-
 @router.post("/voice/transcribe")
 def transcribe_voice_input(request: VoiceTranscriptionRequest):
     if request.mime_type.lower().split(";", 1)[0].strip() not in {
@@ -211,30 +189,6 @@ def synthesize_voice_output(request: VoiceSynthesisRequest):
             "at": turn.updated_at,
         },
     }
-
-
-@router.get("/voice/clips/{clip_id}/content")
-async def voice_clip_content(clip_id: str, session_id: str = Query(...)):
-    _session_scope(session_id)
-    store = get_voice_transport_store()
-    try:
-        clip = store.get_clip(clip_id)
-    except VoiceTransportError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if clip is None or clip.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Voice clip not found")
-    try:
-        path = store.clip_path(clip)
-    except (FileNotFoundError, OSError, ValueError):
-        raise HTTPException(status_code=404, detail="Voice clip content is unavailable")
-    if path.stat().st_size != clip.size_bytes or hashlib.sha256(path.read_bytes()).hexdigest() != clip.sha256:
-        raise HTTPException(status_code=409, detail="Voice clip failed integrity validation")
-    return FileResponse(
-        path,
-        media_type="audio/wav",
-        filename=f"{clip.id}.wav",
-        headers={"Cache-Control": "private, no-store"},
-    )
 
 
 @router.get("/voice/turns")

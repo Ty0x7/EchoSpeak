@@ -4,33 +4,6 @@ from types import SimpleNamespace
 import pytest
 
 
-def test_product_task_identity_is_stable_and_state_is_atomic(tmp_path: Path) -> None:
-    from agent.task_store import TaskStore
-
-    path = tmp_path / "todos.json"
-    store = TaskStore(path)
-    first = store.create(title="Daily brief", idempotency_key="routine:r1:bucket")
-    second = store.create(title="Duplicate retry", idempotency_key="routine:r1:bucket")
-    assert second.id == first.id
-
-    updated = store.update(first.id, status="complete", verification={"verified": True})
-    assert updated is not None and updated.status == "complete"
-    reloaded = TaskStore(path).get(first.id)
-    assert reloaded is not None and reloaded.verification == {"verified": True}
-    assert not list(tmp_path.glob("*.tmp.*"))
-
-
-def test_corrupt_product_tasks_fail_closed_with_recovery_copy(tmp_path: Path) -> None:
-    from agent.task_store import TaskStore
-
-    path = tmp_path / "todos.json"
-    path.write_text("{broken", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="authoritative file was not overwritten"):
-        TaskStore(path)
-    assert path.read_text(encoding="utf-8") == "{broken"
-    assert list((tmp_path / "corrupt-state").rglob("RECOVERY.txt"))
-
-
 def test_routine_requires_coordinator_and_records_callback_result(tmp_path: Path) -> None:
     from agent.routines import RoutineManager
 

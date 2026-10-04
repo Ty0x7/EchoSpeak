@@ -44,11 +44,6 @@ try:
 except Exception:
     croniter = None
 
-try:
-    from langchain_core.callbacks.base import BaseCallbackHandler
-except ImportError:
-    from langchain.callbacks.base import BaseCallbackHandler
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (
@@ -63,7 +58,6 @@ from config import (
 )
 from agent.research import build_research_run
 from agent.state import get_state_store
-from agent.stream_events import semantic_activity_from_stream_payload
 
 # Base directory for relative path resolution
 BASE_DIR = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -334,37 +328,6 @@ def _check_provider_readiness(
         }
 
     return {"ok": True, "provider": p.value, "message": "", "detail": ""}
-
-
-def _should_preflight_provider(message: str) -> bool:
-    """Skip preflight for lightweight confirmation/control replies."""
-    low = str(message or "").strip().lower()
-    if low in {"confirm", "cancel", "yes", "no", "approve", "reject"}:
-        return False
-    return True
-
-
-def _provider_unavailable_payload(request_id: str, readiness: dict[str, Any]) -> dict[str, Any]:
-    message = str(readiness.get("message") or "The selected model provider is not ready.")
-    detail = str(readiness.get("detail") or "").strip()
-    if detail and detail not in message:
-        message = f"{message}\n\nDetails: {detail}"
-    return {
-        "type": "final",
-        "response": message,
-        "success": False,
-        "memory_count": 0,
-        "doc_sources": [],
-        "research": [],
-        "spoken_text": message,
-        "execution_id": None,
-        "trace_id": None,
-        "thread_state": None,
-        "request_id": request_id,
-        "at": time.time(),
-        "error_code": "provider_unavailable",
-        "provider": readiness.get("provider"),
-    }
 
 
 _agent = None
@@ -949,91 +912,7 @@ def _metric_inc(key: str, amount: int = 1) -> None:
         _metrics[key] += amount
 
 
-def _record_tool_latency(ms: float) -> None:
-    with _metrics_lock:
-        _tool_latency_ms.append(ms)
-
-
 # Tool name → agent_mode classification for visualizer
-_RESEARCH_TOOLS = frozenset({"web_search", "browse_task"})
-_CODING_TOOLS = frozenset({"file_write", "file_read", "file_list", "file_move", "file_copy", "file_delete", "file_mkdir", "artifact_write", "terminal_run", "notepad_write"})
-
-
-def _classify_agent_mode(tool_name: str) -> str:
-    if tool_name in _RESEARCH_TOOLS:
-        return "research"
-    if tool_name in _CODING_TOOLS:
-        return "coding"
-    return "working"
-
-
-_STREAM_SECRET_KEY = re.compile(
-    r"(?i)(api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|password|secret|cookie)"
-)
-
-
-def _redact_stream_text(value: str, limit: int = 280) -> str:
-    text = re.sub(r"\s+", " ", str(value or "")).strip()
-    text = re.sub(
-        r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+",
-        r"\1[redacted]",
-        text,
-    )
-    text = re.sub(
-        r"(?i)(api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*[^,\s}\]]+",
-        r"\1=[redacted]",
-        text,
-    )
-    return text if len(text) <= limit else text[:limit].rstrip() + "â€¦"
-
-
-def _safe_tool_input_preview(tool_name: str, raw_input: str) -> str:
-    """Return bounded user-useful arguments without file bodies or secrets."""
-    raw = str(raw_input or "")
-    try:
-        parsed = json.loads(raw)
-    except Exception as exc:
-        parsed = None
-    if isinstance(parsed, dict):
-        projected: dict[str, Any] = {}
-        visible_keys = {
-            "query", "url", "path", "source", "destination", "target",
-            "operation", "location", "city", "league", "team", "ticker",
-            "date", "date_from", "date_to", "provider", "model",
-        }
-        for key, value in parsed.items():
-            key_text = str(key)
-            if _STREAM_SECRET_KEY.search(key_text):
-                projected[key_text] = "[redacted]"
-            elif key_text.casefold() in {"content", "text", "body", "data", "patch"}:
-                projected[key_text] = f"<{len(str(value or ''))} chars>"
-            elif key_text.casefold() in visible_keys and isinstance(value, (str, int, float, bool)):
-                projected[key_text] = _redact_stream_text(str(value), 140)
-        if projected:
-            return _redact_stream_text(json.dumps(projected, ensure_ascii=False), 320)
-    name = str(tool_name or "").casefold()
-    if name in {"file_write", "artifact_write", "notepad_write"}:
-        return "Writing governed content"
-    if name == "terminal_run":
-        return _redact_stream_text(raw, 180)
-    return _redact_stream_text(raw, 260)
-
-
-def _safe_tool_result_summary(tool_name: str, output: Any, *, success: bool = True) -> str:
-    name = str(tool_name or "tool").casefold()
-    if not success:
-        return "Tool failed â€” trying another approach."
-    if name == "web_search":
-        return "Search results received."
-    if name == "terminal_run":
-        return "Terminal action completed."
-    if name in {
-        "file_write", "file_read", "file_list", "file_move", "file_copy",
-        "file_delete", "file_mkdir", "artifact_write", "notepad_write",
-    }:
-        return f"{name.replace('_', ' ').capitalize()} completed."
-    text = _redact_stream_text(str(output or ""), 280)
-    return text or f"{name.replace('_', ' ').capitalize()} completed."
 
 
 def _safe_stream_failure(exc: BaseException) -> str:
@@ -1048,679 +927,14 @@ def _safe_stream_failure(exc: BaseException) -> str:
     return "The turn ended with a scoped recovery result; verified work is preserved."
 
 
-class _StreamingHandler(BaseCallbackHandler):
-    def __init__(self, q: queue.Queue, request_id: str):
-        self._q = q
-        self._request_id = request_id
-        self._event_seq = 0
-        self._tool_run_map: dict = {}
-        self._tool_started_at: dict = {}
-        self._tool_input_map: dict = {}
-        self._research_runs: list[dict[str, Any]] = []
-        self._in_think_block = False
-        self._loop_blocks: list[str] = []
-        self._current_reasoning = ""
-        # Visible answer text for the *current* LLM generation (pre-tool beat).
-        self._visible_gen = ""
-        self._partial_count = 0
-        self.partial_replies: list[str] = []
-        # One guaranteed preamble beat per LLM generation that invokes tools.
-        self._preamble_done_this_gen = False
-        # One spoken pre-tool beat per request; bounded model-loop iterations
-        # must never produce duplicate greetings.
-        self._preamble_done_this_request = False
-        # Optional: agent generates free-form wording when the model produced none.
-        self._preamble_fn = None  # type: ignore[assignment]
-        self._on_partial = None  # type: ignore[assignment]
-        # No-progress detection: track repeated tool call signatures
-        self._tool_call_signatures: dict[str, int] = {}  # hash -> count
-        self._visible_tool_keys: dict[str, str] = {}
-        self._hidden_duplicate_tool_ids: set[str] = set()
-        self._loop_warning_sent = False
-        # Private model reasoning is not part of the frontend stream contract.
-        self._expose_model_reasoning = False
-        # Durable lifecycle and tool events replace synthetic spoken preambles
-        # in the canonical runtime, avoiding an extra free-form model call.
-        self._emit_synthetic_preamble = False
-        self._iteration_count = 0
-        self._seen_llm_run_ids: set[str] = set()
-        self._token_usage = {"prompt": 0, "completion": 0, "total": 0, "reasoning": 0}
-        self._stream_reasoning_chars = 0
-        self._stream_visible_chars = 0
-        self._last_token_progress_chars = 0
+class _EventSink:
+    """Collects a lean turn's events for the non-streaming /query response."""
 
-    def _put(self, event: dict) -> None:
-        """Emit a stream event with monotonic seq for reconnect/reorder guards."""
-        self._event_seq += 1
-        payload = dict(event or {})
-        payload.setdefault("request_id", self._request_id)
-        if str(payload.get("type") or "") == "turn_bound":
-            _bind_query_execution(
-                self._request_id,
-                str(payload.get("execution_id") or payload.get("turn_id") or ""),
-            )
-        payload["seq"] = self._event_seq
-        payload.setdefault("at", time.time())
-        activity = semantic_activity_from_stream_payload(payload)
-        if activity is not None:
-            payload["activity"] = activity
-        self._q.put(payload)
+    def __init__(self) -> None:
+        self.events: list[dict[str, Any]] = []
 
-    @property
-    def research_runs(self) -> list[dict[str, Any]]:
-        return list(self._research_runs)
-
-    def set_preamble_fn(self, fn) -> None:
-        """Wire agent-side free-form beat generator (decision stays in code)."""
-        self._preamble_fn = fn
-
-    def set_on_partial(self, fn) -> None:
-        """Notify agent when a mid-turn spoken beat is sealed."""
-        self._on_partial = fn
-
-    # Internal / silent tools must NOT trigger a spoken beat (time inject, calc, memory…).
-    # User-facing tools (web_search, files, browser, etc.) always do.
-    _PREAMBLE_SKIP_TOOLS = frozenset({
-        "get_system_time",
-        "calculate",
-        "system_info",
-        "project_update_context",
-        "store_memory",
-        "save_memory",
-        "recall_memory",
-        "search_memory",
-        "query_memory",
-        "memory_store",
-        "memory_recall",
-    })
-
-    def _tool_requires_preamble(self, tool_name: str) -> bool:
-        n = re.sub(r"[^a-z0-9_]+", "", str(tool_name or "").strip().lower())
-        if not n:
-            return False
-        if n in self._PREAMBLE_SKIP_TOOLS:
-            return False
-        if "memory" in n and n not in {"memory_store", "memory_recall"}:
-            # catch-all for other memory helpers
-            if n.startswith("memory") or n.endswith("memory"):
-                return False
-        return True
-
-    def _looks_like_tool_payload(self, text: str) -> bool:
-        t = (text or "").strip()
-        if not t:
-            return True
-        # Pure tool/function JSON — not something we should speak mid-turn.
-        if t.startswith("{") and ("\"name\"" in t or "\"tool\"" in t or "arguments" in t):
-            return True
-        if t.startswith("```") and "function" in t.lower():
-            return True
-        return False
-
-    def _is_usable_preamble(self, text: str) -> bool:
-        t = (text or "").strip()
-        if len(t) < 3:
-            return False
-        if self._looks_like_tool_payload(t):
-            return False
-        # Reject pure reasoning dumps / markdown thought headers
-        low = t.lower()
-        if low.startswith("### ") or "model thoughts" in low or low.startswith("<think"):
-            return False
-        return True
-
-    def _emit_partial(self, text: str, reason: str) -> None:
-        text = (text or "").strip()
-        if not self._is_usable_preamble(text):
-            return
-        if self.partial_replies and self.partial_replies[-1].strip() == text:
-            return
-        # Hard stop: never emit two spoken first-beats in one request.
-        if self._preamble_done_this_request:
-            return
-        self._partial_count += 1
-        self.partial_replies.append(text)
-        self._preamble_done_this_gen = True
-        self._preamble_done_this_request = True
-        # Keep agent state in sync so finalize can forbid re-greetings.
-        try:
-            if callable(self._on_partial):
-                self._on_partial(text)
-        except Exception:
-            pass
-        self._put(
-            {
-                "type": "partial_reply",
-                "response": text,
-                "speak": True,
-                "segment": self._partial_count,
-                "reason": reason,
-                "at": time.time(),
-                "request_id": self._request_id,
-            }
-        )
-
-    def _flush_partial_reply(
-        self,
-        reason: str = "tool",
-        *,
-        tool_name: str = "",
-        tool_input: str = "",
-        force: bool = True,
-    ) -> None:
-        """
-        Code-level guarantee: before tools run, emit exactly one spoken beat.
-
-        Wording preference order:
-          1) Model-streamed visible text for this generation (if any)
-          2) Fresh free-form line from agent preamble generator
-          3) Soft varied fallback (only if generation fails)
-
-        Decision to emit is never left to the model remembering a prompt.
-        """
-        # Already sealed this generation or this full request — never double first-beat.
-        if self._preamble_done_this_gen or self._preamble_done_this_request:
-            self._visible_gen = ""
-            return
-
-        text = (self._visible_gen or "").strip()
-        self._visible_gen = ""
-        if not self._is_usable_preamble(text):
-            text = ""
-
-        # Always consult generator when available: it enforces social-first order
-        # when the user greeted / asked how Echo is (model often skips that).
-        if callable(self._preamble_fn):
-            try:
-                generated = str(
-                    self._preamble_fn(tool_name or "tool", tool_input or "", text) or ""
-                ).strip()
-                if self._is_usable_preamble(generated):
-                    text = generated
-            except TypeError:
-                # Older 2-arg callback
-                try:
-                    if not text:
-                        text = str(self._preamble_fn(tool_name or "tool", tool_input or "") or "").strip()
-                except Exception as exc:
-                    logger.warning("Preamble generator failed: {}", exc)
-            except Exception as exc:
-                logger.warning("Preamble generator failed: {}", exc)
-
-        if not self._is_usable_preamble(text):
-            # Last-resort variety — never say the raw tool id ("web search").
-            # Prefer agent social-aware fallback when the user opened socially.
-            import random
-            tool = re.sub(r"[_\-]+", " ", str(tool_name or "")).strip().lower()
-            if tool in {"web search", "websearch", "search"}:
-                task = "that"
-            elif tool:
-                task = tool
-            else:
-                task = "that"
-            social_fallback = ""
-            try:
-                agent = getattr(self, "_agent_ref", None)
-                if agent is not None and hasattr(agent, "_user_has_social_open"):
-                    uq = str(getattr(agent, "_active_user_query", "") or "")
-                    if agent._user_has_social_open(uq) and hasattr(agent, "_social_task_preamble_fallback"):
-                        social_fallback = str(agent._social_task_preamble_fallback(task) or "").strip()
-            except Exception:
-                social_fallback = ""
-            if social_fallback:
-                options = [social_fallback]
-            else:
-                options = [
-                    f"On it — pulling {task} up.",
-                    f"One sec, checking {task}.",
-                    f"Alright, looking into {task}.",
-                    "Checking that now.",
-                    "Let me pull that up.",
-                    "Hang on, grabbing it.",
-                ]
-            text = random.choice(options)
-
-        self._emit_partial(text, reason)
-
-    def _start_new_generation(self, run_id: Any = None):
-        run_key = str(run_id or "").strip()
-        if run_key and run_key in self._seen_llm_run_ids:
-            return
-        if run_key:
-            self._seen_llm_run_ids.add(run_key)
-        self._iteration_count += 1
-        # Save previous loop's reasoning before starting a new one
-        if self._current_reasoning.strip():
-            loop_idx = len(self._loop_blocks) + 1
-            header = f"### Model Thoughts (Loop {loop_idx})"
-            self._loop_blocks.append(f"{header}\n{self._current_reasoning.strip()}")
-        self._current_reasoning = ""
-        # New LLM generation after tools — start a fresh visible buffer
-        # (prior preamble should already have been flushed on tool_start).
-        self._visible_gen = ""
-        self._in_think_block = False
-        self._preamble_done_this_gen = False
-        # Do not reset _preamble_done_this_request: later canonical model-loop
-        # iterations must not emit another spoken pre-tool beat.
-        # Reliable phase signal for avatar/chat (was only set on tool_start before).
-        self._put({
-            "type": "iteration_boundary",
-            "iteration": self._iteration_count,
-            "phase": "model_call",
-            "model": str(
-                getattr(getattr(self, "_agent_ref", None), "_selected_model_id", lambda: "")()
-                or ""
-            ),
-            "at": time.time(),
-            "request_id": self._request_id,
-        })
-        self._put({
-            "type": "status",
-            "agent_mode": "thinking",
-            "at": time.time(),
-            "request_id": self._request_id,
-        })
-
-    def on_llm_start(self, serialized: dict, prompts: Any, run_id: str, parent_run_id: Optional[str] = None, **kwargs):
-        self._start_new_generation(run_id)
-
-    def on_chat_model_start(self, serialized: dict, messages: Any, run_id: str, parent_run_id: Optional[str] = None, **kwargs):
-        self._start_new_generation(run_id)
-
-    @staticmethod
-    def _usage_from_response(response: Any) -> dict[str, int]:
-        def as_non_negative_int(value: Any) -> int:
-            try:
-                return max(0, int(value or 0))
-            except (TypeError, ValueError, OverflowError):
-                return 0
-
-        candidates: list[Any] = []
-        llm_output = getattr(response, "llm_output", None)
-        if isinstance(llm_output, dict):
-            candidates.extend([
-                llm_output.get("token_usage"),
-                llm_output.get("usage"),
-                llm_output.get("usage_metadata"),
-            ])
-        for generation_group in list(getattr(response, "generations", None) or []):
-            for generation in list(generation_group or []):
-                message = getattr(generation, "message", None)
-                candidates.extend([
-                    getattr(message, "usage_metadata", None),
-                    getattr(message, "response_metadata", None),
-                    getattr(generation, "generation_info", None),
-                ])
-        for candidate in candidates:
-            if not isinstance(candidate, dict):
-                continue
-            nested = candidate.get("token_usage") or candidate.get("usage")
-            if isinstance(nested, dict):
-                candidate = nested
-            prompt = as_non_negative_int(
-                candidate.get("prompt_tokens")
-                or candidate.get("input_tokens")
-                or candidate.get("prompt_token_count")
-                or 0
-            )
-            completion = as_non_negative_int(
-                candidate.get("completion_tokens")
-                or candidate.get("output_tokens")
-                or candidate.get("candidates_token_count")
-                or 0
-            )
-            total = as_non_negative_int(
-                candidate.get("total_tokens") or candidate.get("total_token_count") or 0
-            )
-            if prompt or completion or total:
-                return {
-                    "prompt": prompt,
-                    "completion": completion,
-                    "total": total or prompt + completion,
-                }
-        return {}
-
-    @staticmethod
-    def _reasoning_summary_from_response(response: Any) -> str:
-        """Read only explicit provider summary fields, never reasoning_content."""
-        candidates: list[Any] = []
-        llm_output = getattr(response, "llm_output", None)
-        if isinstance(llm_output, dict):
-            candidates.extend([
-                llm_output.get("reasoning_summary"),
-                llm_output.get("summary"),
-            ])
-        for generation_group in list(getattr(response, "generations", None) or []):
-            for generation in list(generation_group or []):
-                message = getattr(generation, "message", None)
-                additional = getattr(message, "additional_kwargs", None)
-                if isinstance(additional, dict):
-                    candidates.append(additional.get("reasoning_summary"))
-        for candidate in candidates:
-            if isinstance(candidate, str) and candidate.strip():
-                return _redact_stream_text(candidate, 600)
-            if isinstance(candidate, list):
-                text = " ".join(
-                    str(item.get("text") or item.get("summary") or "")
-                    if isinstance(item, dict) else str(item)
-                    for item in candidate
-                ).strip()
-                if text:
-                    return _redact_stream_text(text, 600)
-        return ""
-
-    def on_llm_end(self, response: Any, run_id: str, parent_run_id: Optional[str] = None, **kwargs):
-        usage = self._usage_from_response(response)
-        if usage:
-            for key in ("prompt", "completion", "total"):
-                self._token_usage[key] += int(usage.get(key) or 0)
-            self._token_usage["reasoning"] = max(
-                self._token_usage.get("reasoning", 0),
-                int(self._stream_reasoning_chars / 4),
-            )
-            self._put({"type": "token_usage", **self._token_usage})
-        expose_summary = bool(
-            getattr(getattr(self, "_agent_ref", None), "_turn_thinking_enabled", True)
-        )
-        summary = self._reasoning_summary_from_response(response) if expose_summary else ""
-        if summary:
-            self._put({
-                "type": "reasoning_summary",
-                "content": summary,
-                "iteration": self._iteration_count,
-            })
-
-    def _process_token_or_reasoning(self, token: str, reasoning: str):
-        # 1. Extract inline <think> tags from main content stream if no native reasoning is provided
-        visible_token = token
-        if not reasoning and token:
-            t_low = token.lower()
-            if "<think>" in t_low:
-                self._in_think_block = True
-                parts = token.split("<think>", 1)
-                visible_token = parts[0]
-                if len(parts) > 1:
-                    reasoning = parts[1]
-            elif "</think>" in t_low:
-                self._in_think_block = False
-                parts = token.split("</think>", 1)
-                reasoning = parts[0]
-                visible_token = parts[1] if len(parts) > 1 else ""
-            elif self._in_think_block:
-                reasoning = token
-                visible_token = ""
-
-        # Count generation progress without exposing raw private reasoning.
-        # Providers may report exact usage at completion; while streaming we
-        # expose only bounded approximate counters so the Chat UI can show
-        # liveness and keep reasoning visually separate from the answer.
-        self._stream_reasoning_chars += len(str(reasoning or ""))
-        self._stream_visible_chars += len(str(visible_token or ""))
-        progress_chars = self._stream_reasoning_chars + self._stream_visible_chars
-        if progress_chars and (
-            progress_chars - self._last_token_progress_chars >= 48
-            or self._last_token_progress_chars == 0
-        ):
-            self._last_token_progress_chars = progress_chars
-            reasoning_tokens = int((self._stream_reasoning_chars + 3) / 4)
-            completion_tokens = int((self._stream_visible_chars + 3) / 4)
-            self._put({
-                "type": "token_usage",
-                "prompt": self._token_usage.get("prompt", 0),
-                "completion": completion_tokens,
-                "reasoning": reasoning_tokens,
-                "total": max(
-                    int(self._token_usage.get("total", 0)),
-                    int(self._token_usage.get("prompt", 0)) + completion_tokens + reasoning_tokens,
-                ),
-                "approximate": True,
-            })
-
-        # 2. Push accumulated loops + current reasoning to UI
-        if reasoning and self._expose_model_reasoning:
-            self._current_reasoning += reasoning
-            blocks = list(self._loop_blocks)
-            loop_idx = len(self._loop_blocks) + 1
-            if loop_idx > 1 or len(self._loop_blocks) > 0:
-                current_header = f"### Model Thoughts (Loop {loop_idx})"
-            else:
-                current_header = "### Model Thoughts"
-            blocks.append(f"{current_header}\n{self._current_reasoning}")
-            
-            self._put({
-                "type": "thinking",
-                "content": "\n\n".join(blocks),
-                "at": time.time(),
-                "request_id": self._request_id
-            })
-
-        # 3. Stream non-reasoning answer tokens so the chat can show live text.
-        # Buffer per generation so we can seal a partial spoken beat before tools.
-        # A provider chunk may carry a reasoning delta and visible answer text
-        # together.  The previous `and not reasoning` guard discarded the
-        # visible portion of those chunks, leaving Chat with a token counter but
-        # no live answer text.  Reasoning remains private; only the visible
-        # answer stream crosses this boundary.
-        if visible_token and not self._in_think_block:
-            self._visible_gen += visible_token
-            self._put({
-                "type": "agent_token",
-                "data": visible_token,
-                "at": time.time(),
-                "request_id": self._request_id,
-            })
-
-    def on_llm_new_token(self, token: str, **kwargs):
-        chunk = kwargs.get("chunk")
-        reasoning = ""
-        if chunk:
-            if hasattr(chunk, "message") and chunk.message:
-                msg = chunk.message
-                if hasattr(msg, "additional_kwargs") and msg.additional_kwargs:
-                    reasoning = msg.additional_kwargs.get("reasoning_content") or ""
-            if not reasoning and hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
-                reasoning = chunk.additional_kwargs.get("reasoning_content") or ""
-        self._process_token_or_reasoning(token, reasoning)
-
-    def on_llm_chunk(self, chunk: Any, **kwargs: Any) -> Any:
-        token = ""
-        reasoning = ""
-        if hasattr(chunk, "message") and chunk.message:
-            msg = chunk.message
-            if hasattr(msg, "content"):
-                token = str(msg.content or "")
-            if hasattr(msg, "additional_kwargs") and msg.additional_kwargs:
-                reasoning = msg.additional_kwargs.get("reasoning_content") or ""
-        elif hasattr(chunk, "text"):
-            token = str(chunk.text or "")
-        
-        if not reasoning and hasattr(chunk, "additional_kwargs") and chunk.additional_kwargs:
-            reasoning = chunk.additional_kwargs.get("reasoning_content") or ""
-        
-        self._process_token_or_reasoning(token, reasoning)
-
-    def on_tool_start(self, serialized: dict, input_str: str, run_id: str, parent_run_id: Optional[str] = None, **kwargs):
-        tool_name = (serialized or {}).get("name") or (serialized or {}).get("id") or "tool"
-        call_id = str(run_id)
-        raw_input = input_str if isinstance(input_str, str) else str(input_str)
-        normalized_input = re.sub(r"\s+", " ", raw_input).strip().casefold()
-        if str(tool_name) == "file_list":
-            normalized_input = re.sub(r"['\"]?limit['\"]?\s*[:=]\s*\d+\s*,?", "", normalized_input)
-            normalized_input = re.sub(r"\s+", " ", normalized_input).strip(" {},")
-        visible_key = str(tool_name) if str(tool_name) == "web_search" else f"{tool_name}:{normalized_input}"
-        if str(tool_name) in {"web_search", "file_list"} and visible_key in self._visible_tool_keys:
-            self._hidden_duplicate_tool_ids.add(call_id)
-        else:
-            self._visible_tool_keys[visible_key] = call_id
-        try:
-            agent = getattr(self, "_agent_ref", None)
-            if agent is not None:
-                if str(tool_name or "") == "web_search":
-                    if hasattr(agent, "_set_outer_web_search_id"):
-                        agent._set_outer_web_search_id(call_id)
-                    else:
-                        agent._lc_outer_web_search_id = call_id
-                        agent._grounded_fanout_count = 0
-                if hasattr(agent, "_register_tool_run"):
-                    agent._register_tool_run(str(tool_name or ""), call_id)
-                if hasattr(agent, "_ensure_durable_tool_run_started"):
-                    agent._ensure_durable_tool_run_started(str(tool_name or ""), call_id, str(input_str or ""))
-        except Exception:
-            pass
-        # Deterministic beat only for user-facing tools — never for silent injects
-        # like get_system_time (that was firing "Checking that now." then skipping weather).
-        if (
-            self._emit_synthetic_preamble
-            and call_id not in self._hidden_duplicate_tool_ids
-            and self._tool_requires_preamble(str(tool_name or ""))
-        ):
-            self._flush_partial_reply(
-                "tool_start",
-                tool_name=str(tool_name or ""),
-                tool_input=raw_input,
-                force=True,
-            )
-        self._tool_run_map[call_id] = tool_name
-        self._tool_started_at[call_id] = time.perf_counter()
-        self._tool_input_map[call_id] = raw_input
-        _metric_inc("tool_calls", 1)
-
-        # No-progress detection: hash tool name + input to detect repeated identical calls
-        import hashlib as _hl
-        sig = _hl.md5(f"{tool_name}:{raw_input}".encode("utf-8", errors="ignore")).hexdigest()
-        self._tool_call_signatures[sig] = self._tool_call_signatures.get(sig, 0) + 1
-        repeat_count = self._tool_call_signatures[sig]
-        if repeat_count >= 3 and not self._loop_warning_sent:
-            self._loop_warning_sent = True
-            self._put({
-                "type": "thinking",
-                "content": f"### ⚠️ Loop Detected\nThe model has called `{tool_name}` with the same arguments {repeat_count} times. The agent will be stopped after the current iteration to prevent infinite looping.",
-                "at": time.time(),
-                "request_id": self._request_id,
-            })
-            logger.warning("No-progress detected: tool '{}' called {} times with identical input", tool_name, repeat_count)
-
-        # Chat receives only a bounded preview. Full arguments stay on the
-        # governed ToolRun projection for authorized inspectors.
-        inp = _safe_tool_input_preview(str(tool_name or ""), raw_input)
-        if call_id not in self._hidden_duplicate_tool_ids:
-            self._put(
-            {
-                "type": "tool_start",
-                "id": call_id,
-                "name": tool_name,
-                "input": inp,
-                "at": time.time(),
-                "request_id": self._request_id,
-            }
-        )
-        # Emit agent_mode status for visualizer
-        mode = _classify_agent_mode(tool_name)
-        self._put({"type": "status", "agent_mode": mode, "tool": tool_name, "at": time.time(), "request_id": self._request_id})
-
-    def on_tool_end(self, output: str, run_id: str, parent_run_id: Optional[str] = None, **kwargs):
-        call_id = str(run_id)
-        out = output if isinstance(output, str) else str(output)
-        tool_name = self._tool_run_map.get(call_id, "")
-        raw_input = self._tool_input_map.pop(call_id, "")
-        if call_id in self._hidden_duplicate_tool_ids:
-            self._hidden_duplicate_tool_ids.discard(call_id)
-            self._tool_started_at.pop(call_id, None)
-            return
-        started = self._tool_started_at.pop(call_id, None)
-        if started is not None:
-            _record_tool_latency((time.perf_counter() - started) * 1000.0)
-        # Multi-intent fan-out already closed the outer LC web_search row (UI + durable)
-        # and emitted per-intent children — drop the outer tool_end to avoid a third row.
-        try:
-            agent = getattr(self, "_agent_ref", None)
-            fanout = int(getattr(agent, "_grounded_fanout_count", 0) or 0) if agent is not None else 0
-            if agent is not None and hasattr(agent, "_get_outer_web_search_id"):
-                outer = str(agent._get_outer_web_search_id() or "")
-            else:
-                outer = str(getattr(agent, "_lc_outer_web_search_id", "") or "") if agent is not None else ""
-            # Also skip if outer was already cleared after _close_outer_web_search_tool_run
-            # but this LC end still fires with the original outer call_id.
-            if tool_name == "web_search" and fanout > 1 and (call_id == outer or (
-                agent is not None
-                and call_id
-                and not outer
-                and hasattr(agent, "get_tool_outcome")
-                and agent.get_tool_outcome(call_id) is not None
-                and str((agent.get_tool_outcome(call_id).output or "")).startswith("(expanded")
-            )):
-                if agent is not None and hasattr(agent, "_dequeue_tool_run"):
-                    agent._dequeue_tool_run(call_id, "web_search")
-                if agent is not None:
-                    agent._grounded_fanout_count = 0
-                    if hasattr(agent, "_clear_outer_web_search_id"):
-                        agent._clear_outer_web_search_id(call_id)
-                    else:
-                        agent._lc_outer_web_search_id = ""
-                self._put({
-                    "type": "status",
-                    "agent_mode": "thinking",
-                    "at": time.time(),
-                    "request_id": self._request_id,
-                })
-                return
-        except Exception:
-            pass
-        event = {
-            "type": "tool_end",
-            "id": call_id,
-            "name": tool_name,
-            "output": _safe_tool_result_summary(tool_name, out),
-            "at": time.time(),
-            "request_id": self._request_id,
-        }
-        try:
-            agent = getattr(self, "_agent_ref", None)
-            outcome = agent.get_tool_outcome(call_id) if agent is not None and hasattr(agent, "get_tool_outcome") else None
-            if outcome is not None:
-                event["outcome"] = {
-                    "success": bool(outcome.success),
-                    "status": str(outcome.status or ""),
-                    "error_message": (
-                        "" if outcome.success else "Tool failed — trying another approach."
-                    ),
-                }
-        except Exception:
-            pass
-        research_run = build_research_run(run_id=call_id, tool_name=tool_name, tool_input=raw_input, output=output if isinstance(output, str) else str(output), at=event["at"])
-        if research_run is not None:
-            event["research"] = research_run
-            self._research_runs.append(research_run)
-        self._put(event)
-        # After a tool completes, return to thinking so UI does not stick on last tool mode.
-        self._put({
-            "type": "status",
-            "agent_mode": "thinking",
-            "at": time.time(),
-            "request_id": self._request_id,
-        })
-
-    def on_tool_error(self, error: BaseException, run_id: str, parent_run_id: Optional[str] = None, **kwargs):
-        call_id = str(run_id)
-        _metric_inc("tool_errors", 1)
-        started = self._tool_started_at.pop(call_id, None)
-        if started is not None:
-            _record_tool_latency((time.perf_counter() - started) * 1000.0)
-        tool_name = self._tool_run_map.get(call_id, "")
-        self._put({
-            "type": "tool_error",
-            "id": call_id,
-            "name": tool_name,
-            "error": "Tool failed — trying another approach.",
-            "at": time.time(),
-            "request_id": self._request_id,
-        })
-        self._put({
-            "type": "status",
-            "agent_mode": "thinking",
-            "at": time.time(),
-            "request_id": self._request_id,
-        })
+    def _put(self, event: dict[str, Any]) -> None:
+        self.events.append(event)
 
 
 def _run_lean_stream(
@@ -2353,12 +1567,6 @@ RATE_LIMIT_REQUESTS = int(os.getenv("ECHOSPEAK_RATE_LIMIT_REQUESTS", "240") or 2
 RATE_LIMIT_WINDOW = float(os.getenv("ECHOSPEAK_RATE_LIMIT_WINDOW", "60") or 60.0)
 # Safe reads / hydration / diagnostics do not consume the mutation budget.
 # Mutations and expensive model routes still count.
-_RATE_LIMIT_EXEMPT_PREFIXES = (
-    "/health",
-    "/metrics",
-    "/favicon.ico",
-    "/gateway/ws",
-)
 _RATE_LIMIT_SAFE_GET_PREFIXES = (
     "/threads",
     "/pending-action",
@@ -2539,21 +1747,8 @@ async def request_restart(
     )
 
 
-@app.get("/admin/restart/status", response_model=RestartResponse)
-async def get_restart_status(_: str = Depends(_verify_admin_key)):
-    """Check if a restart is pending. Requires admin auth."""
-    global _restart_requested
-    with _restart_lock:
-        return RestartResponse(
-            message="Restart pending" if _restart_requested else "No restart scheduled",
-            restart_scheduled=_restart_requested
-        )
-
-
 def _cancel_incompatible_session_work(session_id: str, *, reason: str) -> dict[str, int]:
     """Terminalize only work bound to the Session's previous model revision."""
-    from agent.task_runs import TERMINAL_TASK_STATUSES, TaskRunStatus, get_task_run_store
-
     key = _normalize_thread_id(session_id)
     approval_count = 0
     for approval in get_state_store().list_approvals(thread_id=key, limit=1000):
@@ -2563,24 +1758,6 @@ def _cancel_incompatible_session_work(session_id: str, *, reason: str) -> dict[s
             approval.id, status="canceled", outcome_summary=reason
         )
         approval_count += 1
-    task_count = 0
-    store = get_task_run_store()
-    for task in store.list_for_session(key, include_terminal=False):
-        if task.status in TERMINAL_TASK_STATUSES:
-            continue
-        try:
-            store.update(
-                task.id,
-                session_id=task.session_id,
-                project_id=task.project_id,
-                expected_revision=task.revision,
-                status=TaskRunStatus.CANCELLED,
-                workflow_stage="cancelled:model_binding_changed",
-                last_execution_id=task.last_execution_id,
-            )
-            task_count += 1
-        except Exception as exc:
-            logger.warning("Model-binding cancellation raced for TaskRun {}: {}", task.id, exc)
     state = get_state_store().get_thread_state(key)
     get_state_store().update_thread_state(
         key,
@@ -2596,7 +1773,7 @@ def _cancel_incompatible_session_work(session_id: str, *, reason: str) -> dict[s
             "model_binding_cancelled_at": time.time(),
         },
     )
-    return {"approvals": approval_count, "task_runs": task_count}
+    return {"approvals": approval_count}
 
 
 class QueryRequest(BaseModel):
@@ -2686,19 +1863,6 @@ class QueryCancelRequest(BaseModel):
     voice_transcript: Optional[str] = Field(default=None, max_length=10000)
 
 
-class QuerySteerRequest(BaseModel):
-    thread_id: str = Field(min_length=1, max_length=200)
-    instruction: str = Field(min_length=1, max_length=10000)
-    task_run_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
-    client_request_id: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
-    voice_turn_id: Optional[str] = Field(
-        default=None,
-        max_length=200,
-        pattern=r"^[A-Za-z0-9._:-]+$",
-        description="Optional exact Voice transport turn containing this steering instruction",
-    )
-
-
 class QueryQueueRequest(BaseModel):
     thread_id: str = Field(min_length=1, max_length=200)
     message: str = Field(min_length=1, max_length=50000)
@@ -2714,31 +1878,11 @@ def _register_query_cancellation(request_id: str, thread_id: str, event: threadi
         _ACTIVE_QUERY_CANCELLATIONS[str(request_id)] = (_normalize_thread_id(thread_id), event, "")
 
 
-def _bind_query_execution(request_id: str, execution_id: str) -> None:
-    rid = str(request_id or "").strip()
-    eid = str(execution_id or "").strip()
-    if not rid or not eid:
-        return
-    with _ACTIVE_QUERY_CANCEL_LOCK:
-        current = _ACTIVE_QUERY_CANCELLATIONS.get(rid)
-        if current is not None:
-            _ACTIVE_QUERY_CANCELLATIONS[rid] = (current[0], current[1], eid)
-
-
 def _release_query_cancellation(request_id: str, event: threading.Event) -> None:
     with _ACTIVE_QUERY_CANCEL_LOCK:
         current = _ACTIVE_QUERY_CANCELLATIONS.get(str(request_id))
         if current is not None and current[1] is event:
             _ACTIVE_QUERY_CANCELLATIONS.pop(str(request_id), None)
-
-
-def _cancel_all_active_queries() -> int:
-    """Signal every registered query without changing its ownership record."""
-    with _ACTIVE_QUERY_CANCEL_LOCK:
-        active = list(_ACTIVE_QUERY_CANCELLATIONS.values())
-    for _session_id, event, _execution_id in active:
-        event.set()
-    return len(active)
 
 
 def _cancel_active_queries_for_session(session_id: str) -> int:
@@ -2753,79 +1897,6 @@ def _cancel_active_queries_for_session(session_id: str) -> int:
     for _owner, event, _execution_id in active:
         event.set()
     return len(active)
-
-
-@app.post("/query/steer")
-async def steer_query(request: QuerySteerRequest):
-    """Steer an ongoing TaskRun with a new instruction without losing progress."""
-    from agent.task_runs import get_task_run_store, TaskRunStatus
-
-    thread_id = _normalize_thread_id(request.thread_id)
-    with _ACTIVE_QUERY_CANCEL_LOCK:
-        active = _ACTIVE_QUERY_CANCELLATIONS.get(request.client_request_id)
-    if active is None or active[0] != thread_id:
-        raise HTTPException(status_code=409, detail="The requested Turn is no longer active in this Session.")
-    execution_id = str(active[2] or "")
-    if not execution_id:
-        raise HTTPException(status_code=409, detail="The active Turn has not bound a durable Execution yet.")
-    execution = get_state_store().get_execution(execution_id)
-    if execution is None or str(execution.task_run_id or "") != request.task_run_id:
-        raise HTTPException(status_code=409, detail="Steering identity does not match the active TaskRun.")
-
-    store = get_task_run_store()
-    task = store.get(request.task_run_id, session_id=thread_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="The active TaskRun no longer exists.")
-    if task.status != TaskRunStatus.RUNNING or str(task.last_execution_id or task.created_by_execution_id) != execution_id:
-        raise HTTPException(status_code=409, detail="The TaskRun is not owned by this active Execution.")
-
-    if request.voice_turn_id:
-        try:
-            from agent.voice_transport import prepare_voice_turn_submission
-
-            prepare_voice_turn_submission(
-                request.voice_turn_id,
-                session_id=thread_id,
-                request_id=request.client_request_id,
-                transcript=request.instruction,
-            )
-        except Exception as exc:
-            from agent.voice_transport import VoiceTransportError
-
-            if isinstance(exc, VoiceTransportError):
-                raise HTTPException(status_code=409, detail=str(exc)) from exc
-            raise
-
-    task.steer(request.instruction)
-    updated = store.update(
-        task.id,
-        session_id=thread_id,
-        project_id=task.project_id,
-        expected_revision=task.revision - 1,
-        steering_instructions=task.steering_instructions,
-        status=task.status,
-        workflow_stage="steered_at_next_model_boundary",
-    )
-
-    if request.voice_turn_id:
-        from agent.voice_transport import bind_voice_turn_submission
-
-        bind_voice_turn_submission(
-            request.voice_turn_id,
-            session_id=thread_id,
-            request_id=request.client_request_id,
-            execution_id=execution_id,
-            task_run_id=updated.id,
-            query_completed=True,
-        )
-
-    logger.info("Steered TaskRun id={} session={} revision={}", updated.id, thread_id, updated.revision)
-    return {
-        "steered": True,
-        "task_run_id": updated.id,
-        "revision": updated.revision,
-        "applies_at": "next_model_boundary",
-    }
 
 
 @app.post("/query/queue")
@@ -2978,315 +2049,6 @@ class ThreadSessionStateResponse(BaseModel):
     updated_at: float = 0.0
 
 
-class TaskRunSummaryResponse(BaseModel):
-    id: str
-    project_id: str = ""
-    session_id: str
-    objective: str
-    status: str
-    workflow_stage: str
-    execution_profile: str
-    parent_task_run_id: str = ""
-    handoff_context_id: str = ""
-    requirement_statuses: Dict[str, str] = Field(default_factory=dict)
-    active_graph_node_ids: List[str] = Field(default_factory=list)
-    completion_finalizable: bool = False
-    completion_disposition: str = "pending"
-    next_runtime_action: str = ""
-    active_requirement_id: str = ""
-    preferred_tool_name: str = ""
-    recovery_epoch: int = 0
-    revision: int
-    updated_at: float
-
-
-class TaskRunHandoffRequest(BaseModel):
-    session_id: str
-    project_id: str = ""
-    execution_id: str = Field(min_length=1)
-    expected_revision: int = Field(ge=1)
-    target_profile: Literal["chat", "work", "code"]
-    objective: str = ""
-    expected_model_binding_revision: int = Field(ge=1)
-
-
-class TaskRunDetailResponse(BaseModel):
-    task: Dict[str, Any]
-    requirements: List[Dict[str, Any]] = Field(default_factory=list)
-    requirement_states: Dict[str, Dict[str, Any]] = Field(default_factory=dict)
-    completion: Optional[Dict[str, Any]] = None
-    stage: Dict[str, Any] = Field(default_factory=dict)
-    approvals: List[Dict[str, Any]] = Field(default_factory=list)
-    executions: List[Dict[str, Any]] = Field(default_factory=list)
-    tool_runs: List[Dict[str, Any]] = Field(default_factory=list)
-    research_artifacts: List[Dict[str, Any]] = Field(default_factory=list)
-    media_jobs: List[Dict[str, Any]] = Field(default_factory=list)
-    specialist_runs: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-def _task_run_summary(task: Any) -> TaskRunSummaryResponse:
-    verdict = getattr(task, "completion_evaluation", None)
-    liveness = getattr(task, "liveness_decision", None)
-    graph_state = getattr(task, "execution_graph_state", None)
-    return TaskRunSummaryResponse(
-        id=task.id,
-        project_id=str(task.project_id or ""),
-        session_id=task.session_id,
-        objective=task.objective,
-        status=str(getattr(task.status, "value", task.status)),
-        workflow_stage=task.workflow_stage,
-        execution_profile=str(getattr(task.execution_profile, "value", task.execution_profile)),
-        parent_task_run_id=str(task.parent_task_run_id or ""),
-        handoff_context_id=str(task.handoff_context_id or ""),
-        requirement_statuses={
-            key: str(getattr(value.status, "value", value.status))
-            for key, value in task.requirement_states.items()
-        },
-        active_graph_node_ids=list(getattr(graph_state, "active_node_ids", None) or []),
-        completion_finalizable=bool(verdict and verdict.finalizable),
-        completion_disposition=str(
-            getattr(getattr(verdict, "disposition", None), "value", "") or "pending"
-        ),
-        next_runtime_action=str(
-            getattr(getattr(liveness, "next_action", None), "value", "") or ""
-        ),
-        active_requirement_id=str(
-            getattr(liveness, "active_requirement_id", "") or ""
-        ),
-        preferred_tool_name=str(
-            getattr(liveness, "preferred_tool_name", "") or ""
-        ),
-        recovery_epoch=int(getattr(task, "recovery_epoch", 0) or 0),
-        revision=task.revision,
-        updated_at=task.updated_at,
-    )
-
-
-@app.get("/task-runs", response_model=List[TaskRunSummaryResponse])
-async def list_task_runs(
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-    include_terminal: bool = Query(default=False),
-):
-    """List canonical TaskRuns in one exact Session/Project scope."""
-
-    from agent.task_runs import get_task_run_store
-    from agent.threads import get_thread_manager
-
-    if get_thread_manager().get_thread(session_id) is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    state = get_state_store().get_thread_state(session_id)
-    if str(state.active_project_id or "") != str(project_id or ""):
-        raise HTTPException(status_code=409, detail="Session is not bound to the requested Project")
-    rows = get_task_run_store().list_for_session(
-        session_id,
-        project_id=project_id,
-        include_terminal=include_terminal,
-    )
-    return [_task_run_summary(item) for item in rows]
-
-
-@app.get("/task-runs/{task_run_id}", response_model=TaskRunDetailResponse)
-async def get_task_run_detail(
-    task_run_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Bounded, read-only projection of one canonical TaskRun owner."""
-
-    from agent.task_runs import TaskRunScopeError, get_task_run_store
-
-    state = get_state_store().get_thread_state(session_id)
-    if str(state.active_project_id or "") != str(project_id or ""):
-        raise HTTPException(status_code=409, detail="Session is not bound to the requested Project")
-    try:
-        task = get_task_run_store().get(
-            task_run_id, session_id=session_id, project_id=project_id
-        )
-    except TaskRunScopeError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if task is None:
-        raise HTTPException(status_code=404, detail="TaskRun not found")
-
-    executions = [
-        row for row in get_state_store().list_executions(session_id, limit=200)
-        if row.task_run_id == task.id
-    ]
-    execution_ids = {row.id for row in executions}
-    tool_runs = [
-        row for row in get_state_store().list_tool_runs_for_session(session_id, limit=240)
-        if row.id in set(task.tool_run_ids) or row.turn_id in execution_ids
-    ]
-    approvals = [
-        row for row in get_state_store().list_approvals(thread_id=session_id, limit=200)
-        if row.task_run_id == task.id
-    ]
-    artifacts: list[dict[str, Any]] = []
-    try:
-        from agent.research_artifacts import get_research_artifact_for_scope
-        for artifact_id in task.research_artifact_ids[:80]:
-            artifact = get_research_artifact_for_scope(
-                artifact_id, project_id=project_id, session_id=session_id
-            )
-            if artifact is not None:
-                artifacts.append(artifact.model_dump(mode="json"))
-    except Exception as exc:
-        logger.warning("TaskRun research projection unavailable: {}", exc)
-    media_jobs: list[dict[str, Any]] = []
-    try:
-        from agent.generation_runtime import get_generation_job_store
-        from agent.media_jobs import project_generation_job, project_voice_job
-        from agent.voice_runtime import get_voice_job_store
-        projected = [
-            *(project_generation_job(row) for row in get_generation_job_store().list(session_id=session_id, limit=100)),
-            *(project_voice_job(row) for row in get_voice_job_store().list(session_id=session_id, limit=100)),
-        ]
-        media_jobs = [
-            row.model_dump(mode="json") for row in projected
-            if row.task_run_id == task.id
-        ][:80]
-    except Exception:
-        media_jobs = []
-    specialist_runs: list[dict[str, Any]] = []
-    try:
-        from agent.specialist_store import get_specialist_run_store
-        specialist_runs = [
-            row.model_dump(mode="json")
-            for row in get_specialist_run_store().list(
-                session_id=session_id,
-                project_id=project_id,
-                task_run_id=task.id,
-                limit=100,
-            )
-        ]
-    except Exception as exc:
-        logger.warning("TaskRun specialist projection unavailable: {}", exc)
-    graph_state = task.execution_graph_state
-    graph = task.execution_graph
-    node_states = dict(getattr(graph_state, "node_states", None) or {})
-    return TaskRunDetailResponse(
-        task={
-            **_task_run_summary(task).model_dump(mode="json"),
-            "requested_operation": task.requested_operation,
-            "missing_inputs": list(task.missing_inputs),
-            "created_at": task.created_at,
-            "created_by_execution_id": task.created_by_execution_id,
-            "last_execution_id": task.last_execution_id,
-            "trigger_occurrence_id": task.trigger_occurrence_id,
-            "research_depth": str(getattr(task.research_depth, "value", task.research_depth or "")),
-            "recovery_epoch_started_at": float(
-                task.recovery_epoch_started_at or 0.0
-            ),
-            "recovery_history": list(task.recovery_history or []),
-            "liveness": (
-                task.liveness_decision.model_dump(mode="json")
-                if task.liveness_decision else None
-            ),
-        },
-        requirements=[item.model_dump(mode="json") for item in task.requirements],
-        requirement_states={
-            key: value.model_dump(mode="json")
-            for key, value in task.requirement_states.items()
-        },
-        completion=(task.completion_evaluation.model_dump(mode="json") if task.completion_evaluation else None),
-        stage={
-            "workflow_stage": task.workflow_stage,
-            "graph_id": str(getattr(graph, "graph_id", "") or ""),
-            "source": str(getattr(getattr(graph, "source", None), "value", getattr(graph, "source", "")) or ""),
-            "active_node_ids": list(getattr(graph_state, "active_node_ids", None) or []),
-            "checkpoint_count": len(list(getattr(graph_state, "checkpoints", None) or [])),
-            "nodes": [
-                {
-                    "node_id": node.node_id,
-                    "kind": str(getattr(node.kind, "value", node.kind)),
-                    "label": node.label,
-                    "requirement_id": node.requirement_id,
-                    "depends_on": list(node.depends_on),
-                    "status": str(
-                        getattr(
-                            getattr(node_states.get(node.node_id), "status", "pending"),
-                            "value",
-                            getattr(node_states.get(node.node_id), "status", "pending"),
-                        )
-                    ),
-                    "attempt_count": int(
-                        getattr(node_states.get(node.node_id), "attempt_count", 0) or 0
-                    ),
-                    "outcome_code": str(
-                        getattr(node_states.get(node.node_id), "outcome_code", "") or ""
-                    ),
-                }
-                for node in list(getattr(graph, "nodes", None) or [])[:128]
-            ],
-            "edges": [
-                {
-                    "source_node_id": edge.source_node_id,
-                    "target_node_id": edge.target_node_id,
-                    "kind": str(getattr(edge.kind, "value", edge.kind)),
-                }
-                for edge in list(getattr(graph, "edges", None) or [])[:512]
-            ],
-        },
-        approvals=[row.model_dump(mode="json") for row in approvals],
-        executions=[row.model_dump(mode="json") for row in executions],
-        tool_runs=[row.model_dump(mode="json") for row in tool_runs],
-        research_artifacts=artifacts,
-        media_jobs=media_jobs,
-        specialist_runs=specialist_runs,
-    )
-
-
-@app.post("/task-runs/{task_run_id}/handoff", response_model=TaskRunSummaryResponse)
-async def handoff_task_run(task_run_id: str, request: TaskRunHandoffRequest):
-    """Explicitly hand current work to another surface without creating a Session."""
-
-    from agent.execution_graph import ExecutionProfile
-    from agent.task_runs import TaskRunConflictError, get_task_run_store
-    from agent.threads import get_thread_manager
-
-    if get_thread_manager().get_thread(request.session_id) is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    state = get_state_store().get_thread_state(request.session_id)
-    if str(state.active_project_id or "") != str(request.project_id or ""):
-        raise HTTPException(status_code=409, detail="Session Project changed before handoff")
-    binding = _ensure_session_model_binding(request.session_id)
-    if binding.binding_revision != request.expected_model_binding_revision:
-        raise HTTPException(status_code=409, detail="Session model binding changed before handoff")
-    execution = get_state_store().get_execution(request.execution_id)
-    if execution is None:
-        raise HTTPException(status_code=404, detail="Handoff Execution not found")
-    if execution.session_id != request.session_id or execution.thread_id != request.session_id:
-        raise HTTPException(status_code=409, detail="Handoff Execution belongs to another Session")
-    if str(execution.project_id or execution.active_project_id or "") != str(request.project_id or ""):
-        raise HTTPException(status_code=409, detail="Handoff Execution belongs to another Project")
-    execution_id = execution.id
-    try:
-        _previous, replacement = get_task_run_store().handoff_to_profile(
-            task_run_id,
-            session_id=request.session_id,
-            project_id=request.project_id,
-            expected_revision=request.expected_revision,
-            execution_id=execution_id,
-            target_profile=ExecutionProfile(request.target_profile),
-            objective=request.objective,
-        )
-    except TaskRunConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    get_state_store().update_thread_state(
-        request.session_id,
-        foreground_task_id=replacement.id,
-        source_metadata={
-            **dict(state.source_metadata or {}),
-            "last_surface_handoff": request.target_profile,
-            "handoff_task_run_id": replacement.id,
-            "updated_at": time.time(),
-        },
-    )
-    return _task_run_summary(replacement)
-
-
 class ApprovalResponse(BaseModel):
     id: str
     thread_id: str
@@ -3339,7 +2101,6 @@ class ApprovalDecisionResponse(BaseModel):
     response: str = ""
     execution_id: Optional[str] = None
     thread_state: Dict[str, Any] = Field(default_factory=dict)
-    task_run: Optional[TaskRunSummaryResponse] = None
     tool_run_id: str = ""
 
 
@@ -3420,19 +2181,6 @@ async def get_settings():
 
 def _http_get_json(url: str, headers: Optional[dict] = None, timeout_s: float = 6.0) -> tuple[int, Any]:
     req = UrlRequest(url, headers=headers or {}, method="GET")
-    with urlopen(req, timeout=timeout_s) as resp:
-        code = int(getattr(resp, "status", 200) or 200)
-        raw = resp.read().decode("utf-8", errors="ignore")
-        try:
-            return code, json.loads(raw) if raw.strip() else {}
-        except Exception:
-            return code, {"raw": raw[:2000]}
-
-
-def _http_post_json(url: str, payload: dict, headers: Optional[dict] = None, timeout_s: float = 6.0) -> tuple[int, Any]:
-    body = json.dumps(payload or {}).encode("utf-8")
-    req_headers = {"Content-Type": "application/json", **(headers or {})}
-    req = UrlRequest(url, headers=req_headers, data=body, method="POST")
     with urlopen(req, timeout=timeout_s) as resp:
         code = int(getattr(resp, "status", 200) or 200)
         raw = resp.read().decode("utf-8", errors="ignore")
@@ -3775,28 +2523,12 @@ class DoctorResponse(BaseModel):
     text: str
 
 
-class SessionsResponse(BaseModel):
-    multi_agent_enabled: bool
-    pool_max: int
-    pool_size: int
-    thread_ids: List[str]
-    lm_studio_only: bool
-    runtime_provider: Optional[str] = None
-
-
 class ScreenAnalysisResponse(BaseModel):
     """Response model for screen analysis."""
     text: str
     text_length: int
     has_text: bool
     image_size: dict
-
-
-class ScreenCaptureResponse(BaseModel):
-    """Response model for screen capture."""
-    success: bool
-    image_base64: Optional[str] = None
-    error: Optional[str] = None
 
 
 class HistoryResponse(BaseModel):
@@ -4005,8 +2737,7 @@ async def query(request: QueryRequest):
         # process_query restores Session scope under its request lock. Query
         # payloads do not override backend-selected workspace/mode.
         thread_state = get_state_store().get_thread_state(request.thread_id).model_dump()
-        q: queue.Queue = queue.Queue()
-        handler = _StreamingHandler(q, request_id)
+        handler = _EventSink()
         response, success = agent.process_query(
             request.message,
             include_memory=request.include_memory,
@@ -4021,9 +2752,7 @@ async def query(request: QueryRequest):
         doc_sources = agent.get_last_doc_sources() if request.include_memory else []
         store = get_state_store()
         latest_state = store.get_thread_state(request.thread_id).model_dump()
-        worker_execution_id = str(
-            getattr(agent, "completed_execution_id_for_current_worker", lambda: "")() or ""
-        )
+        worker_execution_id = agent.completed_execution_id_for_current_worker()
         if not worker_execution_id and not request.voice_turn_id:
             worker_execution_id = str(latest_state.get("last_execution_id") or "")
         if request.voice_turn_id and not worker_execution_id:
@@ -4049,7 +2778,7 @@ async def query(request: QueryRequest):
             memory_count=agent.memory.memory_count,
             request_id=request_id,
             doc_sources=doc_sources,
-            research=handler.research_runs,
+            research=[],
             execution_id=execution.id if execution else None,
             trace_id=execution.trace_id if execution else None,
             thread_state=latest_state or thread_state,
@@ -4556,468 +3285,10 @@ async def get_pending_action(thread_id: Optional[str] = Query(default=None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-class SpecialistRunCreateRequest(BaseModel):
-    session_id: str = Field(min_length=1)
-    project_id: str = Field(min_length=1)
-    runtime_id: Literal["codex", "opencode"]
-    objective: str = Field(min_length=1, max_length=8000)
-    task_run_id: str = ""
-    requirement_id: str = ""
-    expected_task_revision: Optional[int] = Field(default=None, ge=1)
-    expected_model_binding_revision: int = Field(ge=1)
-    model_provider: str = ""
-    model_id: str = ""
-    local_base_url: str = ""
-
-
-class SpecialistTurnRequest(BaseModel):
-    session_id: str = Field(min_length=1)
-    project_id: str = Field(min_length=1)
-    prompt: str = Field(min_length=1, max_length=32000)
-
-
-class SpecialistDecisionRequest(BaseModel):
-    session_id: str = Field(min_length=1)
-    project_id: str = Field(min_length=1)
-    decision: Literal["approve", "deny"]
-
-
-class SpecialistScopeRequest(BaseModel):
-    session_id: str = Field(min_length=1)
-    project_id: str = Field(min_length=1)
-
-
-def _specialist_project_scope(session_id: str, project_id: str):
-    from agent.specialist_authority import (
-        SpecialistAuthorityError,
-        resolve_specialist_scope,
-    )
-
-    try:
-        return resolve_specialist_scope(session_id, project_id)
-    except SpecialistAuthorityError as exc:
-        status = 404 if str(exc) in {"Session not found", "Project not found"} else 409
-        raise HTTPException(status_code=status, detail=str(exc)) from exc
-
-
-def _specialist_local_base_url(value: str) -> str:
-    text = str(value or "").strip()
-    if not text:
-        return ""
-    parsed = urlparse(text)
-    if (
-        parsed.scheme != "http"
-        or parsed.username
-        or parsed.password
-        or str(parsed.hostname or "").casefold() not in {
-            "127.0.0.1", "localhost", "::1",
-        }
-    ):
-        raise HTTPException(
-            status_code=422,
-            detail="Local model base URL must be unauthenticated HTTP loopback",
-        )
-    return text.rstrip("/")
-
-
-def _validate_specialist_run_authority(run: Any, operation: str) -> None:
-    """Fresh Echo-level validation before each specialist lifecycle action."""
-
-    from agent.specialist_authority import (
-        SpecialistAuthorityError,
-        validate_specialist_run_authority,
-    )
-
-    try:
-        validate_specialist_run_authority(run, operation)
-    except SpecialistAuthorityError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-
-@app.get("/specialist-runtimes")
-async def list_specialist_runtimes_api():
-    """Discover configured specialist agents; raw model providers are not listed."""
-
-    from agent.specialist_runtime import get_specialist_runtime_manager
-
-    items = get_specialist_runtime_manager().catalog()
-    return {
-        "items": [item.model_dump(mode="json") for item in items],
-        "count": len(items),
-        "owner": "SpecialistRuntimeManager",
-    }
-
-
-@app.get("/specialist-runs")
-async def list_specialist_runs_api(
-    session_id: str = Query(...),
-    project_id: str = Query(...),
-    task_run_id: str = Query(default=""),
-):
-    _specialist_project_scope(session_id, project_id)
-    from agent.specialist_store import get_specialist_run_store
-
-    rows = get_specialist_run_store().list(
-        session_id=session_id,
-        project_id=project_id,
-        task_run_id=task_run_id,
-        limit=200,
-    )
-    return {
-        "items": [row.model_dump(mode="json") for row in rows],
-        "count": len(rows),
-    }
-
-
-@app.get("/specialist-runs/{run_id}")
-async def get_specialist_run_api(
-    run_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(...),
-    after: int = Query(default=0, ge=0),
-):
-    _specialist_project_scope(session_id, project_id)
-    from agent.specialist_runtime import get_specialist_runtime_manager
-
-    projection = get_specialist_runtime_manager().projection(
-        run_id,
-        session_id=session_id,
-        project_id=project_id,
-        after=after,
-        limit=1000,
-    )
-    if projection is None:
-        raise HTTPException(status_code=404, detail="SpecialistRun not found")
-    return projection.model_dump(mode="json")
-
-
-@app.get("/specialist-runs/{run_id}/stream")
-async def stream_specialist_run_api(
-    run_id: str,
-    request: Request,
-    session_id: str = Query(...),
-    project_id: str = Query(...),
-    after: int = Query(default=0, ge=0),
-):
-    """Stream exact-scope SpecialistRun projections on durable revision changes."""
-
-    _specialist_project_scope(session_id, project_id)
-    from agent.specialist_contracts import TERMINAL_SPECIALIST_STATUSES
-    from agent.specialist_store import get_specialist_run_store
-
-    store = get_specialist_run_store()
-    initial = store.get(
-        run_id, session_id=session_id, project_id=project_id
-    )
-    if initial is None:
-        raise HTTPException(status_code=404, detail="SpecialistRun not found")
-
-    async def generate():
-        last_sequence = int(after)
-        current = initial
-        while True:
-            events = store.list_events(
-                current.id, after=last_sequence, limit=2000
-            )
-            if events:
-                last_sequence = max(item.sequence for item in events)
-            yield json.dumps(
-                {
-                    "type": "specialist_projection",
-                    "run": current.model_dump(mode="json"),
-                    "events": [
-                        item.model_dump(mode="json") for item in events
-                    ],
-                },
-                ensure_ascii=False,
-            ) + "\n"
-            if current.status in TERMINAL_SPECIALIST_STATUSES:
-                return
-            revision = current.revision
-            current = await asyncio.to_thread(
-                store.wait_for_revision,
-                current.id,
-                after_revision=revision,
-                timeout=15.0,
-            )
-            if current is None or await request.is_disconnected():
-                return
-            if current.revision == revision:
-                yield json.dumps({
-                    "type": "keepalive",
-                    "run_id": current.id,
-                    "revision": current.revision,
-                }) + "\n"
-
-    return StreamingResponse(
-        generate(),
-        media_type="application/x-ndjson",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@app.post("/specialist-runs")
-async def create_specialist_run_api(request: SpecialistRunCreateRequest):
-    """Explicit Code action; opening/navigating the Code view never calls this."""
-
-    from agent.execution_graph import ExecutionProfile
-    from agent.research_runtime import RequirementKind, TurnRequirement
-    from agent.specialist_authority import (
-        SpecialistAuthorityError,
-        validate_specialist_delegation_policy,
-    )
-    from agent.specialist_contracts import SpecialistAuthoritySnapshot
-    from agent.specialist_runtime import get_specialist_runtime_manager
-    from agent.task_runs import TERMINAL_TASK_STATUSES, get_task_run_store
-
-    _state, _project, root = _specialist_project_scope(
-        request.session_id, request.project_id
-    )
-    binding = _ensure_session_model_binding(request.session_id)
-    if binding.binding_revision != request.expected_model_binding_revision:
-        raise HTTPException(
-            status_code=409,
-            detail="Session model binding changed before specialist delegation",
-        )
-    manager = get_specialist_runtime_manager()
-    descriptor = manager.descriptor(request.runtime_id)
-    if descriptor.state.value != "available":
-        raise HTTPException(
-            status_code=409,
-            detail=descriptor.reason or "Specialist runtime is unavailable",
-        )
-    try:
-        validate_specialist_delegation_policy(request.runtime_id)
-    except SpecialistAuthorityError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
-    store = get_task_run_store()
-    task = None
-    requirement_id = str(request.requirement_id or "").strip()
-    if request.task_run_id:
-        task = store.get(
-            request.task_run_id,
-            session_id=request.session_id,
-            project_id=request.project_id,
-        )
-        if task is None:
-            raise HTTPException(status_code=404, detail="TaskRun not found")
-        if request.expected_task_revision is None:
-            raise HTTPException(
-                status_code=422,
-                detail="expected_task_revision is required for an existing TaskRun",
-            )
-        if task.revision != request.expected_task_revision:
-            raise HTTPException(
-                status_code=409,
-                detail="TaskRun changed before specialist delegation",
-            )
-        if task.status in TERMINAL_TASK_STATUSES:
-            raise HTTPException(status_code=409, detail="TaskRun is terminal")
-        requirement = next(
-            (
-                item for item in task.requirements
-                if item.requirement_id == requirement_id
-            ),
-            None,
-        )
-        if requirement is None or requirement.kind != RequirementKind.SPECIALIST:
-            raise HTTPException(
-                status_code=409,
-                detail="Selected TaskRun requirement is not specialist-owned",
-            )
-    else:
-        task = store.create(
-            session_id=request.session_id,
-            project_id=request.project_id,
-            objective=request.objective,
-            requested_operation="coding_write",
-            permitted_capabilities=["specialist_code"],
-            requirements=[TurnRequirement(
-                kind=RequirementKind.SPECIALIST,
-                objective=request.objective,
-                acceptance_criteria=[
-                    "A configured specialist runtime must return one verified terminal outcome."
-                ],
-            )],
-            execution_profile=ExecutionProfile.CODE,
-            source="code",
-            workflow_stage="specialist_requested",
-        )
-        requirement_id = task.requirements[0].requirement_id
-    graph_node = next(
-        (
-            item
-            for item in list(getattr(task.execution_graph, "nodes", []) or [])
-            if item.requirement_id == requirement_id
-        ),
-        None,
-    )
-    if graph_node is None:
-        raise HTTPException(
-            status_code=409,
-            detail="Specialist requirement has no owning TaskRun graph node",
-        )
-    authority = SpecialistAuthoritySnapshot(
-        session_id=request.session_id,
-        project_id=request.project_id,
-        project_root=str(root),
-        task_run_id=task.id,
-        requirement_id=requirement_id,
-        graph_node_id=graph_node.node_id,
-        model_binding_revision=binding.binding_revision,
-        approval_policy="on_request",
-        sandbox_mode="read_only",
-    )
-    local_base_url = _specialist_local_base_url(request.local_base_url)
-    try:
-        run = manager.create_and_start(
-            runtime_id=request.runtime_id,
-            task=task,
-            requirement_id=requirement_id,
-            project_root=str(root),
-            objective=request.objective,
-            authority=authority,
-            model_provider=request.model_provider,
-            model_id=request.model_id,
-            local_base_url=local_base_url,
-            authority_validator=_validate_specialist_run_authority,
-        )
-    except HTTPException:
-        raise
-    except (KeyError, ValueError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    return {
-        "run": run.model_dump(mode="json"),
-        "task_run_id": task.id,
-        "requirement_id": requirement_id,
-    }
-
-
-@app.post("/specialist-runs/{run_id}/turn")
-async def continue_specialist_run_api(
-    run_id: str, request: SpecialistTurnRequest
-):
-    _specialist_project_scope(request.session_id, request.project_id)
-    from agent.specialist_runtime import get_specialist_runtime_manager
-    from agent.specialist_store import get_specialist_run_store
-
-    run = get_specialist_run_store().get(
-        run_id,
-        session_id=request.session_id,
-        project_id=request.project_id,
-    )
-    if run is None:
-        raise HTTPException(status_code=404, detail="SpecialistRun not found")
-    try:
-        updated = get_specialist_runtime_manager().continue_run(
-            run.id,
-            prompt=request.prompt,
-            authority_validator=_validate_specialist_run_authority,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"run": updated.model_dump(mode="json")}
-
-
-@app.post("/specialist-runs/{run_id}/interrupt")
-async def interrupt_specialist_run_api(
-    run_id: str, request: SpecialistScopeRequest
-):
-    _specialist_project_scope(request.session_id, request.project_id)
-    from agent.specialist_runtime import get_specialist_runtime_manager
-
-    try:
-        run = get_specialist_runtime_manager().interrupt(
-            run_id, authority_validator=_validate_specialist_run_authority
-        )
-    except HTTPException:
-        raise
-    except (KeyError, RuntimeError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"run": run.model_dump(mode="json")}
-
-
-@app.post("/specialist-runs/{run_id}/approvals/{request_id}")
-async def resolve_specialist_approval_api(
-    run_id: str,
-    request_id: str,
-    request: SpecialistDecisionRequest,
-):
-    from agent.specialist_runtime import get_specialist_runtime_manager
-    from agent.specialist_store import get_specialist_run_store
-
-    _specialist_project_scope(request.session_id, request.project_id)
-    run = get_specialist_run_store().get(
-        run_id,
-        session_id=request.session_id,
-        project_id=request.project_id,
-    )
-    if run is None:
-        raise HTTPException(status_code=404, detail="SpecialistRun not found")
-    # Denial executes no action and remains safe even when current authority was
-    # reduced. Approval must revalidate both Echo ownership and the relevant
-    # high-level permission before the specialist receives a one-shot decision.
-    validator = None
-    if request.decision == "approve":
-        from agent.specialist_authority import (
-            SpecialistAuthorityError,
-            validate_specialist_approval_authority,
-        )
-        try:
-            validate_specialist_approval_authority(run, request_id)
-        except SpecialistAuthorityError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        validator = _validate_specialist_run_authority
-    try:
-        updated = get_specialist_runtime_manager().resolve_approval(
-            run.id,
-            request_id,
-            request.decision,
-            authority_validator=validator,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"run": updated.model_dump(mode="json")}
-
-
 @app.get("/threads/{thread_id}/state", response_model=ThreadSessionStateResponse)
 async def get_thread_state(thread_id: str):
     store = get_state_store()
     return ThreadSessionStateResponse(**store.get_thread_state(thread_id).model_dump())
-
-
-class SessionModelBindingResponse(BaseModel):
-    session_id: str
-    provider_id: str
-    model_id: str
-    provider_configuration_id: str
-    binding_revision: int
-    created_at: float
-    updated_at: float
-
-
-@app.get("/sessions/{session_id}/model-binding", response_model=SessionModelBindingResponse)
-async def get_session_model_binding(session_id: str):
-    from agent.threads import get_thread_manager
-
-    if get_thread_manager().get_thread(session_id) is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return SessionModelBindingResponse(**_ensure_session_model_binding(session_id).model_dump())
-
-
-@app.get("/sessions/{session_id}/runtime")
-async def get_session_runtime(session_id: str):
-    """Current activity is isolated from historical Turns by construction."""
-    return get_state_store().runtime_projection(session_id)
 
 
 @app.get("/approvals", response_model=ApprovalListResponse)
@@ -5056,18 +3327,6 @@ async def confirm_approval(
     if updated is None:
         raise HTTPException(status_code=500, detail="Approval missing after confirm")
     thread_state = store.get_thread_state(approval.thread_id)
-    task_summary = None
-    if updated.task_run_id:
-        try:
-            from agent.task_runs import get_task_run_store
-            resumed = get_task_run_store().get(
-                updated.task_run_id,
-                session_id=updated.session_id,
-                project_id=updated.project_id,
-            )
-            task_summary = _task_run_summary(resumed) if resumed is not None else None
-        except Exception as exc:
-            logger.warning("Approval TaskRun response projection failed: {}", exc)
     try:
         from agent.skill_execution import (
             finalize_skill_executions_for_turn,
@@ -5099,7 +3358,6 @@ async def confirm_approval(
         response=str(response or ""),
         execution_id=thread_state.last_execution_id or None,
         thread_state=thread_state.model_dump(),
-        task_run=task_summary,
         tool_run_id=str(updated.tool_run_id or ""),
     )
 
@@ -5131,39 +3389,12 @@ async def cancel_approval(
     if updated is None:
         raise HTTPException(status_code=500, detail="Approval missing after cancel")
     thread_state = store.get_thread_state(approval.thread_id)
-    task_summary = None
-    if approval.task_run_id:
-        try:
-            from agent.task_runs import TaskRunStatus, get_task_run_store
-            task_store = get_task_run_store()
-            task = task_store.get(
-                approval.task_run_id,
-                session_id=approval.session_id,
-                project_id=approval.project_id,
-            )
-            if (
-                task is not None
-                and task.status == TaskRunStatus.SUSPENDED_WAITING_FOR_APPROVAL
-                and task.revision == approval.task_run_revision
-            ):
-                task = task_store.update(
-                    task.id,
-                    session_id=task.session_id,
-                    project_id=task.project_id,
-                    expected_revision=task.revision,
-                    status=TaskRunStatus.CANCELLED,
-                    workflow_stage="approval_cancelled",
-                )
-                task_summary = _task_run_summary(task)
-        except Exception as exc:
-            logger.warning("Approval cancellation TaskRun reconciliation failed: {}", exc)
     return ApprovalDecisionResponse(
         approval=ApprovalResponse(**updated.model_dump()),
         success=True,
         response=f"Canceled: {updated.summary or updated.tool}.",
         execution_id=thread_state.last_execution_id or None,
         thread_state=thread_state.model_dump(),
-        task_run=task_summary,
     )
 
 
@@ -5578,170 +3809,24 @@ async def heartbeat_update(request: Request):
     return {"ok": True}
 
 
-@app.post("/heartbeat/start")
-async def heartbeat_start():
-    """Start or restart the heartbeat scheduler."""
-    from agent.heartbeat import get_heartbeat_manager
-    hb = get_heartbeat_manager()
-    if hb and hb.is_running:
-        return {"ok": True, "message": "Already running"}
-    # Also persist enabled state
-    existing = _read_runtime_settings()
-    existing["heartbeat_enabled"] = True
-    config.apply_overrides(existing)
-    config.write_runtime_overrides(existing)
-    await _reconcile_heartbeat_runtime()
-    return {"ok": True, "message": "Heartbeat started"}
-
-
-@app.post("/heartbeat/stop")
-async def heartbeat_stop():
-    """Stop the heartbeat scheduler."""
-    existing = _read_runtime_settings()
-    existing["heartbeat_enabled"] = False
-    config.apply_overrides(existing)
-    config.write_runtime_overrides(existing)
-    await _reconcile_heartbeat_runtime()
-    return {"ok": True, "message": "Heartbeat stopped"}
-
-
-@app.get("/heartbeat/history")
-async def heartbeat_history(limit: int = 20):
-    """Get recent heartbeat results."""
-    from agent.heartbeat import get_heartbeat_manager
-    hb = get_heartbeat_manager()
-    history = hb.get_history(limit=limit) if hb else []
-    return {"history": history}
-
-
 # ---------------------------------------------------------------------------
 # Retired ProactiveEngine compatibility API
 # ---------------------------------------------------------------------------
 
-@app.get("/proactive")
-async def proactive_status():
-    """Project the retired scheduler contract without reviving its authority."""
-    return {
-        "running": False,
-        "retired": True,
-        "tasks": [],
-        "channels": [],
-        "replacement": "/routines",
-        "message": (
-            "ProactiveEngine was retired. Routines, AutomationRuns, and TaskRuns "
-            "own scheduled and background work."
-        ),
-    }
-
-
-@app.post("/proactive/task")
-async def proactive_add_task(request: Request):
-    """Fail closed instead of creating work in a second scheduler."""
-    raise HTTPException(
-        status_code=410,
-        detail=(
-            "ProactiveEngine is retired. Create Project/Session-scoped work with "
-            "POST /routines so AutomationRun, Execution, and TaskRun lineage remain canonical."
-        ),
-    )
-
-
-@app.get("/proactive/history")
-async def proactive_history(limit: int = 20):
-    """Return an inert compatibility projection; canonical history is TaskRun-owned."""
-    return {
-        "retired": True,
-        "history": [],
-        "replacement": "/routines",
-        "message": "Use routine and TaskRun projections for background-work history.",
-    }
 
 # ---------------------------------------------------------------------------
 # Discord API
 # ---------------------------------------------------------------------------
 
-@app.get("/discord")
-async def discord_status():
-    """Get Discord bot status."""
-    from discord_bot import get_bot
-    bot = get_bot()
-    is_running = False
-    username = None
-    guilds = 0
-    if bot and bot.is_running() and bot.client:
-        is_running = True
-        username = getattr(bot.client.user, "name", None)
-        try:
-            guilds = len(bot.client.guilds)
-        except Exception:
-            pass
-
-    return {
-        "enabled": bool(getattr(config, "allow_discord_bot", False)),
-        "running": is_running,
-        "token_set": bool(getattr(config, "discord_bot_token", "")),
-        "username": username,
-        "guilds": guilds,
-        "allowed_users": list(getattr(config, "discord_bot_allowed_users", [])),
-        "allowed_roles": list(getattr(config, "discord_bot_allowed_roles", [])),
-    }
 
 # ---------------------------------------------------------------------------
 # Telegram API (v5.4.0)
 # ---------------------------------------------------------------------------
 
-@app.get("/telegram")
-async def telegram_status():
-    """Get Telegram bot status."""
-    from telegram_bot import get_telegram_bot
-    tg = get_telegram_bot()
-    return {
-        "enabled": bool(getattr(config, "allow_telegram_bot", False)),
-        "running": bool(tg and tg.is_running),
-        "token_set": bool(getattr(config, "telegram_bot_token", "")),
-        "allowed_users": list(getattr(config, "telegram_allowed_users", [])),
-        "auto_confirm": getattr(config, "telegram_auto_confirm", True),
-    }
-
-
-@app.post("/telegram/send")
-async def telegram_send(request: Request):
-    """Send a message to a Telegram user."""
-    data = await request.json()
-    from telegram_bot import get_telegram_bot
-    tg = get_telegram_bot()
-    if not tg or not tg.is_running:
-        return {"ok": False, "error": "Telegram bot is not running"}
-    text = data.get("text", "")
-    chat_id = data.get("chat_id", "")
-    if not text or not chat_id:
-        return {"ok": False, "error": "text and chat_id are required"}
-    try:
-        import asyncio
-        app_instance = tg._application
-        loop = tg._loop
-        if app_instance and loop:
-            async def _send():
-                await app_instance.bot.send_message(chat_id=chat_id, text=text)
-            asyncio.run_coroutine_threadsafe(_send(), loop)
-        return {"ok": True, "sent_to": chat_id}
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
-
 
 # ---------------------------------------------------------------------------
 # Twitch API (v6.7.0)
 # ---------------------------------------------------------------------------
-
-@app.get("/twitch")
-async def twitch_status():
-    """Get Twitch bot status."""
-    try:
-        from twitch_bot import get_twitch_bot
-        bot = get_twitch_bot()
-        return bot.get_status()
-    except Exception:
-        return {"enabled": False, "running": False}
 
 
 @app.post("/twitch/eventsub")
@@ -5793,38 +3878,6 @@ async def twitter_status():
         return {"enabled": False, "running": False}
 
 
-@app.post("/twitter/tweet")
-async def twitter_post_tweet(request: Request):
-    """Post a tweet via the Twitter/X bot."""
-    data = await request.json()
-    text = data.get("text", "").strip()
-    if not text:
-        return {"ok": False, "error": "text is required"}
-    try:
-        from twitter_bot import get_twitter_bot
-        bot = get_twitter_bot()
-        if not bot or not bot.is_running:
-            return {"ok": False, "error": "Twitter bot is not running"}
-        result = bot.post_tweet(text)
-        return {"ok": "error" not in result, **result}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-@app.get("/twitter/mentions")
-async def twitter_get_mentions():
-    """Get recent mentions of the Twitter/X bot."""
-    try:
-        from twitter_bot import get_twitter_bot
-        bot = get_twitter_bot()
-        if not bot or not bot.is_running:
-            return {"ok": False, "error": "Twitter bot is not running", "mentions": []}
-        mentions = bot.get_mentions(max_results=10)
-        return {"ok": True, "mentions": mentions}
-    except Exception as e:
-        return {"ok": False, "error": str(e), "mentions": []}
-
-
 @app.get("/twitter/autonomous")
 async def twitter_autonomous_status():
     """Get autonomous tweeting status, pending tweet, and recent history."""
@@ -5862,40 +3915,6 @@ async def twitter_autonomous_reject():
         return bot.reject_pending_tweet()
     except Exception as e:
         return {"ok": False, "error": str(e)}
-
-
-@app.get("/twitter/autonomous/history")
-async def twitter_autonomous_history():
-    """Get autonomous tweet history (last 20 attempts)."""
-    try:
-        from twitter_bot import get_twitter_bot
-        bot = get_twitter_bot()
-        history = bot.get_auto_tweet_history(limit=20) if bot.is_running else []
-        return {"ok": True, "history": history}
-    except Exception as e:
-        return {"ok": False, "error": str(e), "history": []}
-
-
-@app.get("/sessions", response_model=SessionsResponse)
-async def list_sessions():
-    runtime_provider = _runtime_provider.value if _runtime_provider is not None else None
-
-    with _agent_pool_lock:
-        thread_ids = list(_agent_pool.keys())
-
-    return SessionsResponse(
-        multi_agent_enabled=True,
-        pool_max=_agent_pool_max,
-        pool_size=len(thread_ids),
-        thread_ids=thread_ids,
-        lm_studio_only=_is_lmstudio_only_enabled(),
-        runtime_provider=runtime_provider,
-    )
-
-
-@app.get("/agents", response_model=SessionsResponse)
-async def list_agents():
-    return await list_sessions()
 
 
 # ── Thread Management (v6.0.0) ──────────────────────────────────────
@@ -6210,23 +4229,6 @@ async def delete_documents(request: DocumentDeleteRequest):
             project_id=request.project_id,
             session_id=request.session_id,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"success": True, "deleted": deleted}
-
-
-@app.post("/documents/clear")
-async def clear_documents(session_id: str = Query(...), project_id: str = Query(default="")):
-    store = get_document_store()
-    if store is None:
-        raise HTTPException(status_code=503, detail="Document RAG is disabled")
-    state = get_state_store().get_thread_state(session_id)
-    if project_id and str(state.active_project_id or "") != project_id:
-        raise HTTPException(status_code=409, detail="Document Project does not match the active Session Project")
-    if not project_id and state.active_project_id:
-        raise HTTPException(status_code=409, detail="Project-bound Session requires a Project-scoped document clear")
-    try:
-        deleted = store.clear_scope(project_id=project_id, session_id=session_id)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"success": True, "deleted": deleted}
@@ -6781,35 +4783,6 @@ async def set_workspace(request: WorkspaceChangeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/workspace/browse")
-async def browse_workspace(path: str = Query(default="", description="Relative path within FILE_TOOL_ROOT to browse")):
-    """Browse a specific subdirectory within the workspace."""
-    try:
-        from agent.tools import _file_tool_root, _safe_file_path
-        root = _file_tool_root()
-        target = _safe_file_path(path or ".")
-        if target is None:
-            raise HTTPException(status_code=403, detail="Path not allowed")
-        if not target.exists():
-            raise HTTPException(status_code=404, detail="Path not found")
-        if not target.is_dir():
-            raise HTTPException(status_code=400, detail="Path is not a directory")
-        files = _build_file_tree(target, max_depth=1, max_items=100)
-        rel = str(target.relative_to(root)) if target != root else ""
-        return {
-            "root": str(root),
-            "current": str(target),
-            "relative": rel,
-            "display_name": target.name or str(target),
-            "files": files,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Workspace browse error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/history", response_model=HistoryResponse)
 def get_history(thread_id: Optional[str] = Query(default=None)):
     """
@@ -6911,21 +4884,6 @@ def get_history(thread_id: Optional[str] = Query(default=None)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/history/clear")
-def clear_history(thread_id: Optional[str] = Query(default=None)):
-    """Clear conversation history."""
-    try:
-        agent = get_existing_agent(thread_id)
-        if agent is None:
-            return {"success": True, "message": "Conversation history cleared"}
-        _apply_thread_scope(agent, thread_id)
-        agent.clear_conversation()
-        return {"success": True, "message": "Conversation history cleared"}
-    except Exception as e:
-        logger.error(f"Clear history error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/skills/status")
 async def skills_status_api():
     """Truthful skill executable classification (prompt-only never marked executable)."""
@@ -6945,77 +4903,6 @@ async def skills_status_api():
             for r in rows
             if str(r.get("status") or "").startswith("blocked") or r.get("status") in {"disabled", "invalid", "deprecated"}
         ],
-    }
-
-
-@app.get("/automations/runs")
-async def list_automation_runs_api(
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Exact-scope read model for durable Task/Routine occurrences."""
-    from agent.automation_runtime import get_automation_run_store
-
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    rows = get_automation_run_store().list_runs(
-        project_id=scoped_project_id,
-        session_id=session_id,
-    )
-    return {"items": [row.model_dump(mode="json") for row in rows], "count": len(rows)}
-
-
-@app.get("/work/occurrences")
-async def list_work_occurrences_api(
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Canonical background occurrence view without a second status owner."""
-
-    from agent.automation_runtime import get_automation_run_store
-    from agent.task_runs import get_task_run_store
-
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    rows = get_automation_run_store().list_runs(
-        project_id=scoped_project_id, session_id=session_id
-    )
-    items: list[dict[str, Any]] = []
-    for run in rows:
-        task = None
-        if run.task_run_id:
-            task = get_task_run_store().get(
-                run.task_run_id,
-                session_id=session_id,
-                project_id=scoped_project_id,
-            )
-        items.append({
-            "occurrence": run.model_dump(mode="json"),
-            "task_run": _task_run_summary(task).model_dump(mode="json") if task else None,
-        })
-    return {"items": items, "count": len(items)}
-
-
-@app.get("/media/jobs")
-async def list_media_jobs_api(
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-    limit: int = Query(default=100, ge=1, le=200),
-):
-    """Unified projection; GenerationJob and VoiceJob remain the owners."""
-
-    from agent.generation_runtime import get_generation_job_store
-    from agent.media_jobs import project_generation_job, project_voice_job
-    from agent.voice_runtime import get_voice_job_store
-
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    rows = [
-        *(project_generation_job(row) for row in get_generation_job_store().list(session_id=session_id, limit=limit)),
-        *(project_voice_job(row) for row in get_voice_job_store().list(session_id=session_id, limit=limit)),
-    ]
-    rows = [row for row in rows if row.project_id == scoped_project_id]
-    rows.sort(key=lambda row: (row.updated_at, row.job_id), reverse=True)
-    return {
-        "items": [row.model_dump(mode="json") for row in rows[:limit]],
-        "count": min(len(rows), limit),
     }
 
 
@@ -7712,25 +5599,12 @@ def _build_memory_doctor_report(
     if not warnings:
         recommendations.append("Memory looks healthy in the scanned sample.")
 
-    session_memory: Dict[str, Any] = {}
-    try:
-        distiller = getattr(agent, "_session_memory", None)
-        if distiller is not None and bool(getattr(config, "session_memory_enabled", True)):
-            session_memory = distiller.doctor(thread_id or getattr(agent, "_current_thread_id", None) or "default")
-            if session_memory.get("enabled") and not session_memory.get("exists"):
-                recommendations.append("Session memory is enabled and will be created after the next completed turn.")
-        else:
-            session_memory = {"enabled": False}
-    except Exception as exc:
-        session_memory = {"enabled": bool(getattr(config, "session_memory_enabled", True)), "error": str(exc)[:200]}
-
     return MemoryDoctorResponse(
         ok=not bool(warnings),
         memory_count=memory_count,
         scanned=len(items),
         use_faiss=bool(getattr(memory, "use_faiss", False)),
         auto_store_conversations=auto_store,
-        session_memory=session_memory,
         type_counts=type_counts,
         pinned_count=pinned_count,
         profile_fact_count=profile_fact_count,
@@ -8021,7 +5895,7 @@ async def switch_provider(request: SwitchProviderRequest):
                 "session_id": session_id,
                 "binding_revision": current_binding.binding_revision,
                 "cancelled_turns": 0,
-                "cancelled_incompatible_work": {"approvals": 0, "task_runs": 0},
+                "cancelled_incompatible_work": {"approvals": 0},
             }
         cancelled = _cancel_active_queries_for_session(session_id)
         if cancelled:
@@ -8151,61 +6025,6 @@ async def analyze_screen():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/vision/capture", response_model=ScreenCaptureResponse)
-async def capture_screen():
-    """
-    Capture screen and return as base64 encoded image.
-
-    Returns:
-        Base64 encoded image.
-    """
-    try:
-        import cv2
-        from PIL import Image
-
-        vision = get_vision_manager()
-        image = vision.capture_and_analyze()
-
-        if "error" in image:
-            return ScreenCaptureResponse(success=False, error=image["error"])
-
-        import numpy as np
-        from io import BytesIO
-        import base64
-
-        img_array = np.array(vision.last_capture)
-        img_rgb = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
-        pil_img = Image.fromarray(img_rgb)
-
-        buffer = BytesIO()
-        pil_img.save(buffer, format="PNG")
-        img_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
-
-        return ScreenCaptureResponse(
-            success=True,
-            image_base64=f"data:image/png;base64,{img_base64}"
-        )
-    except Exception as e:
-        logger.error(f"Capture error: {e}")
-        return ScreenCaptureResponse(success=False, error=str(e))
-
-
-@app.get("/vision/info")
-async def get_screen_info():
-    """
-    Get screen/monitor information.
-
-    Returns:
-        Screen information.
-    """
-    try:
-        vision = get_vision_manager()
-        return vision.get_screen_info()
-    except Exception as e:
-        logger.error(f"Screen info error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -8254,146 +6073,6 @@ async def metrics():
 
 
 # ── Todo List Endpoints ──────────────────────────────────────────────────────
-
-class TodoItem(BaseModel):
-    id: str = ""
-    title: str = ""
-    description: str = ""
-    status: str = "pending"  # pending | in_progress | done
-    priority: str = "medium"  # low | medium | high
-    project_id: str = ""
-    session_id: str = ""
-    created_at: str = ""
-    updated_at: str = ""
-
-
-class TodoUpdateRequest(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    status: Optional[str] = None
-    priority: Optional[str] = None
-
-
-@app.get("/todos")
-async def list_todos(
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """List Product Tasks in the exact active Project/Session scope."""
-    from agent.task_store import get_task_store
-
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    return {
-        "todos": [
-            task.model_dump(mode="json")
-            for task in get_task_store().list(
-                project_id=scoped_project_id,
-                session_id=session_id,
-            )
-        ]
-    }
-
-
-@app.post("/todos")
-async def create_todo(item: TodoItem):
-    """Create a new todo item."""
-    if not (item.title or "").strip():
-        raise HTTPException(status_code=400, detail="Todo title is required")
-    from agent.task_store import get_task_store
-    scoped_project_id = _require_automation_project_scope(item.session_id, item.project_id)
-
-    entry = get_task_store().create(
-        id=item.id or str(uuid.uuid4()),
-        title=item.title,
-        description=item.description,
-        status=item.status,
-        priority=item.priority,
-        project_id=scoped_project_id,
-        session_id=item.session_id,
-        source="user",
-    )
-    return {"todo": entry.model_dump(mode="json")}
-
-
-@app.put("/todos/{todo_id}")
-async def update_todo(
-    todo_id: str,
-    item: TodoUpdateRequest,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Update a todo item by ID."""
-    from agent.task_store import get_task_store
-
-    store = get_task_store()
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    current = store.get(todo_id)
-    if current is None or current.project_id != scoped_project_id or current.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Todo not found")
-    if current.source != "user" or current.automation_run_ids or current.task_run_ids:
-        raise HTTPException(
-            status_code=409,
-            detail="Automation-backed Task records are read-only projections; edit the owning schedule or TaskRun",
-        )
-    task = store.update(todo_id, **item.model_dump())
-    if task is None:
-        raise HTTPException(status_code=404, detail="Todo not found")
-    return {"todo": task.model_dump(mode="json")}
-
-
-@app.delete("/todos/{todo_id}")
-async def delete_todo(
-    todo_id: str,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Delete a todo item by ID."""
-    from agent.task_store import get_task_store
-
-    store = get_task_store()
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    current = store.get(todo_id)
-    if current is None or current.project_id != scoped_project_id or current.session_id != session_id:
-        raise HTTPException(status_code=404, detail="Todo not found")
-    if current.source != "user" or current.automation_run_ids or current.task_run_ids:
-        raise HTTPException(
-            status_code=409,
-            detail="Automation-backed Task records cannot be deleted from the Checklist",
-        )
-    if not store.delete(todo_id):
-        raise HTTPException(status_code=404, detail="Todo not found")
-    return {"deleted": todo_id}
-
-
-@app.post("/todos/reorder")
-async def reorder_todos(
-    request: Request,
-    session_id: str = Query(...),
-    project_id: str = Query(default=""),
-):
-    """Reorder todos by providing a list of IDs in order."""
-    data = await request.json()
-    order = data.get("order", [])
-    from agent.task_store import get_task_store
-
-    store = get_task_store()
-    scoped_project_id = _require_automation_project_scope(session_id, project_id)
-    scoped = store.list(project_id=scoped_project_id, session_id=session_id)
-    scoped_ids = {task.id for task in scoped}
-    requested = [str(item) for item in order]
-    if any(item not in scoped_ids for item in requested):
-        raise HTTPException(status_code=409, detail="Task reorder crosses Project/Session scope")
-    store.reorder_scope(
-        requested,
-        project_id=scoped_project_id,
-        session_id=session_id,
-    )
-    return {
-        "todos": [
-            task.model_dump(mode="json")
-            for task in store.list(project_id=scoped_project_id, session_id=session_id)
-        ]
-    }
 
 
 # ── Avatar Config Endpoints ─────────────────────────────────────────────────

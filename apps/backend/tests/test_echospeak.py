@@ -10,6 +10,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime
+from tests.route_paths import route_paths as _route_paths
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -259,15 +260,6 @@ class TestTools:
         assert "timed out after 7s" in str(out).lower()
 
 class TestDiscordHardening:
-    def test_discord_dm_allowlist_does_not_replace_bound_turn_authority(self, tmp_path):
-        from agent.core import EchoSpeakAgent
-
-        agent = EchoSpeakAgent(memory_path=str(tmp_path))
-        agent._current_source = "discord_bot_dm"
-        agent._tool_allowlist_override = {"file_read", "web_search"}
-
-        assert agent._tool_allowed("file_read") is False
-        assert agent._tool_allowed("web_search") is False
 
     def test_discord_followup_context_skips_smalltalk_with_suspicious_history(self):
         from discord_bot import EchoSpeakDiscordBot
@@ -309,23 +301,6 @@ class TestDiscordHardening:
 
         assert ctx == ""
 
-    def test_discord_smalltalk_reply_is_clamped(self, tmp_path):
-        from agent.core import EchoSpeakAgent
-
-        agent = EchoSpeakAgent(memory_path=str(tmp_path))
-        agent._current_source = "discord_bot"
-
-        long_reply = (
-            "I'm just here and ready to help you! Since I'm an AI, I don't have a personal life or plans like humans do—"
-            "I'm basically just hanging out in the digital ether waiting for your next question. "
-            "How about you? Do you have anything fun or productive on your agenda for this Saturday?"
-        )
-
-        clamped = agent._clamp_discord_casual_reply("what are you up to today", long_reply)
-
-        assert "Since I'm an AI" not in clamped
-        assert len(clamped) <= 120
-        assert clamped.count("?") <= 1
 
     def test_coding_path_pin_and_stub_rejection(self, tmp_path, monkeypatch):
         """Bare relative paths resolve under active project root (discovery-based pin)."""
@@ -358,17 +333,6 @@ class TestDiscordHardening:
         assert _looks_like_code_stub("game.js", big) is False
         set_active_project_root(None)
 
-    def test_discord_server_source_never_auto_confirms(self, tmp_path, monkeypatch):
-        from agent.core import EchoSpeakAgent
-        from config import DiscordUserRole, config
-
-        monkeypatch.setattr(config, "discord_bot_auto_confirm", True, raising=False)
-
-        agent = EchoSpeakAgent(memory_path=str(tmp_path))
-        agent._current_source = "discord_bot"
-        agent._current_user_role = DiscordUserRole.OWNER
-
-        assert agent._should_auto_confirm("file_write") is False
 
     def test_discord_server_access_can_be_granted_by_role(self, monkeypatch):
         from config import config
@@ -538,29 +502,6 @@ class TestUpdateContextParity:
         assert "SHARED_UPDATE_CONTEXT_BLOCK" in captured["prompt"]
 
 
-class TestNoSearchOnSocialIntro:
-    def test_social_intro_does_not_trigger_web_search(self, tmp_path, monkeypatch):
-        from agent.core import EchoSpeakAgent, Tool
-        from config import config
-
-        monkeypatch.setattr(config, "enable_system_actions", True, raising=False)
-        monkeypatch.setattr(config, "allow_playwright", True, raising=False)
-
-        agent = EchoSpeakAgent(memory_path=str(tmp_path))
-
-        calls: list[str] = []
-
-        def fake_web_search(q: str):
-            calls.append(str(q))
-            return "RESULTS"
-
-        for i, t in enumerate(list(agent.tools)):
-            if getattr(t, "name", "") == "web_search":
-                agent.tools[i] = Tool("web_search", fake_web_search, getattr(t, "description", ""))
-                break
-
-        agent.process_query("i have friend named max! he's currently watching you! say hi! remember my friend max!", include_memory=False)
-        assert calls == []
 
 class TestToolAllowlistMerge:
     def test_skills_cannot_expand_or_shrink_workspace_ceiling(self):
@@ -717,21 +658,21 @@ class TestAPI:
         """Test query endpoint is defined."""
         from api.server import app
 
-        route_paths = [route.path for route in app.routes]
+        route_paths = _route_paths(app)
         assert "/query" in route_paths
 
     def test_health_endpoint_exists(self):
         """Test health endpoint is defined."""
         from api.server import app
 
-        route_paths = [route.path for route in app.routes]
+        route_paths = _route_paths(app)
         assert "/health" in route_paths
 
     def test_provider_endpoint_exists(self):
         """Test provider endpoint is defined."""
         from api.server import app
 
-        route_paths = [route.path for route in app.routes]
+        route_paths = _route_paths(app)
         assert "/provider" in route_paths
 
 

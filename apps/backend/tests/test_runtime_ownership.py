@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.model_runtime import get_model_adapter, repair_tool_call_once, resolve_model_profile
+from agent.model_runtime import resolve_model_profile
 from agent.projects import ProjectManager
 from agent.state import StateStore, ToolOutcome
 
@@ -177,19 +177,6 @@ def test_allow_llm_tool_calling_is_equal_across_providers(monkeypatch):
     agent.llm_provider = ModelProvider.OLLAMA
     assert agent._allow_llm_tool_calling() is False
     monkeypatch.setattr(config, "disable_native_tool_calling", False, raising=False)
-
-
-def test_tool_repair_is_bounded_and_rejects_unknown_tools():
-    assert repair_tool_call_once("prefix {'tool':'file_read','arguments':{'path':'x'},}", {"file_read"})["arguments"] == {"path": "x"}
-    with pytest.raises(ValueError, match="Unknown tool"):
-        repair_tool_call_once('{"tool":"delete_everything","arguments":{}}', {"file_read"})
-    with pytest.raises(ValueError, match="No JSON"):
-        repair_tool_call_once("please run a tool", {"file_read"})
-
-
-def test_provider_logic_isolated_in_model_adapters():
-    assert get_model_adapter("gemini").tool_call_format == "gemini-function-calling"
-    assert get_model_adapter("lmstudio").tool_call_format == "openai-tools"
 
 
 def test_projects_bind_exact_folders_and_read_only_git_scope(tmp_path: Path):
