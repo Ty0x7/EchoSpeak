@@ -592,6 +592,7 @@ class EchoSpeakAgent:
                 "path": str(getattr(self.memory, "memory_path", "")),
                 "use_faiss": bool(getattr(self.memory, "use_faiss", False)),
                 "file_memory_enabled": bool(getattr(self.memory, "file_memory_enabled", False)),
+                "embedding": dict(getattr(self.memory, "embedding_health", {}) or {}),
                 "ok": memory_ok,
             },
             "documents": {

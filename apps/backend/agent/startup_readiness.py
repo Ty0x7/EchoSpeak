@@ -148,7 +148,7 @@ def _memory() -> dict[str, Any]:
 
     from config import config
 
-    # Importing agent.memory pulls in torch/transformers (~17s). Readiness only
+    # Importing agent.memory pulls in langchain and FAISS (seconds). Readiness only
     # reports whether memory is loaded yet; the background warmup loads it.
     memory_module = sys.modules.get("agent.memory")
     if memory_module is None:
@@ -191,12 +191,6 @@ def _model() -> dict[str, Any]:
 
 
 def _adapter() -> dict[str, Any]:
-    import sys
-
-    # The adapter modules chain into langchain/torch (~17s). This item is
-    # informational, so report it once the chat stack has loaded.
-    if "agent.model_adapters" not in sys.modules:
-        return {"detail": "Model adapter resolves on first use"}
     from agent.model_adapters import get_provider_adapter as get_model_adapter
     from api.routes.settings import _resolve_runtime_provider
     from config import config

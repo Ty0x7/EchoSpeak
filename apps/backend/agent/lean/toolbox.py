@@ -49,7 +49,7 @@ TOOLSETS: dict[str, list[str]] = {
         "discord_web_send", "discord_contacts_add", "discord_contacts_discover",
     ],
     "self": ["self_list", "self_read", "self_grep", "self_git_status", "self_edit", "self_rollback", "project_update_context"],
-    "memory": ["memory_save", "memory_search", "chat_search", "soul_update"],
+    "memory": ["memory_save", "memory_search", "chat_search", "document_search", "soul_update"],
     # Skill, MCP, and Connection tools that registered at runtime.
     "skills": ["@external"],
 }
@@ -487,6 +487,8 @@ def describe_call(name: str, args: dict[str, Any]) -> str:
         return "Saving to memory"
     if name == "memory_search":
         return f"Recalling “{pick('query')}”"
+    if name == "document_search":
+        return f"Searching your documents for “{pick('query')}”"
     if name == "soul_update":
         from agent.lean.soul import describe
 

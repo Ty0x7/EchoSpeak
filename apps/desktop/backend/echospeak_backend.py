@@ -140,6 +140,9 @@ def _self_check() -> int:
     import api.server  # noqa: F401
     import agent.lean.runtime  # noqa: F401
     import faster_whisper  # noqa: F401  (local speech; fails the build if not bundled)
+    import onnxruntime  # noqa: F401  (local embeddings for memory and documents)
+    import tokenizers  # noqa: F401
+    from agent.embeddings import OnnxEmbeddings  # noqa: F401
     print("echospeak-backend self-check ok")
     return 0
 

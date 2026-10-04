@@ -69,7 +69,7 @@ from api.routes.system import (
 def _start_background_warmup() -> None:
     """Load the heavy chat stack after the server is up, off the startup path.
 
-    The first agent needs langchain/torch/transformers (~15-20s to import) and
+    The first agent needs langchain, FAISS and the embedding model loaded, and
     the memory store. Doing it here, a moment after readiness, means the UI is
     interactive immediately and the first message rarely waits on imports.
     """

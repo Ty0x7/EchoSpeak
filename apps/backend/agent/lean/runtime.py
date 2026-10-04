@@ -1056,6 +1056,29 @@ class LeanSession:
                 lines.append(f"- {when}{here} {who}: {hit['snippet']}")
             return "\n".join(lines)
 
+        store = getattr(self.agent, "document_store", None)
+        if store is not None and getattr(store, "enabled", False):
+            def document_search(args: dict[str, Any]) -> str:
+                from agent.state import get_state_store
+
+                query = str(args.get("query") or "").strip()
+                if not query:
+                    return "Give a query."
+                project_id = str(get_state_store().get_thread_state(self.session_id).active_project_id or "")
+                context, sources = store.query(query, k=5, project_id=project_id, session_id=self.session_id)
+                if not sources:
+                    return "No uploaded document matches."
+                return context
+
+            tools.append(NativeTool(
+                name="document_search",
+                description="Search the documents the user uploaded (PDFs, notes, text files) for passages about a topic. "
+                "Results name the document they came from.",
+                parameters={"type": "object", "properties": {"query": {"type": "string", "description": "What to look for."}}, "required": ["query"]},
+                func=document_search,
+                parallel_safe=True,
+            ))
+
         tools.append(NativeTool(
             name="chat_search",
             description="Search the words of every past conversation with the user (all chats, including group chats). "

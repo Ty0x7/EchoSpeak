@@ -7,13 +7,11 @@ langchain-google-genai>=2.0,<3.0
 # Vector store for memory
 faiss-cpu>=1.7.4
 
-sentence-transformers>=2.2.2
-langchain-huggingface>=0.1,<0.2
-
-# Shared local-embedding / PersonaPlex runtime.
-torch>=2.9.0
+# Local embeddings without PyTorch: all-MiniLM-L6-v2 as ONNX (agent/embeddings.py),
+# downloaded into the data folder on first use. The same runtime runs local voice.
+onnxruntime>=1.17.0
+tokenizers>=0.15.0
 huggingface-hub>=0.24.0
-transformers>=4.40.0
 
 # Local speech-to-text and the "Hey Echo" wake word (Settings > Voice downloads
 # the model). Without it the mic needs manual setup.
@@ -39,8 +37,6 @@ playwright>=1.41.0
 pywinauto>=0.6.8; platform_system == "Windows"
 pyautogui>=0.9.54
 
-tool-calling-llm>=0.1.2
-
 # API server
 fastapi>=0.104.0
 uvicorn>=0.24.0
@@ -53,18 +49,15 @@ pydantic>=2.5.0
 # Logging
 loguru>=0.7.0
 
-# Optional: Local LLM support
+# Optional: Local LLM support (llama.cpp is reached over its HTTP server)
 langchain-ollama>=0.3,<0.4
-llama-cpp-python>=0.2.0; python_version < "3.14"
 
 # Utilities
 python-dateutil>=2.8.2
 mss>=9.0.0
 
-# PersonaPlex streaming audio
+# WebSocket support for uvicorn (/gateway/ws)
 websockets>=12.0
-sounddevice>=0.4.6
-sphn>=0.1.0
 numpy>=1.24.0
 
 # Discord bot

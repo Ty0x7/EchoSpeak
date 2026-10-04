@@ -36,6 +36,8 @@ UNTRUSTED_SOURCES = {
     "analyze_screen", "vision_qa",
     # Titles, prices and pages from the web.
     "stock_history", "product_search", "video_search", "image_search",
+    # Uploaded documents can come from anywhere (a downloaded PDF, a forwarded email).
+    "document_search",
 }
 
 # (C) Actions that leave the machine, speak for the user, or persist something

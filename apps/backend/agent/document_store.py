@@ -219,7 +219,10 @@ class DocumentStore:
 
             self._reranker = CrossEncoder(self.rerank_model)
         except Exception as exc:
-            logger.warning(f"Failed to load reranker model: {exc}")
+            logger.warning(
+                f"Document reranking is on but unavailable ({exc}). It is optional: "
+                "pip install -r requirements-optional.txt, or set DOC_RERANK_ENABLED=false."
+            )
             self._reranker = None
         return self._reranker
 
