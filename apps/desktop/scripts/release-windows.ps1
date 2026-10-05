@@ -48,7 +48,7 @@ if ($RequirePublisherSignature -and -not $publisherConfigured -and -not $SkipBui
 }
 if (-not $SkipBuild) {
     $env:TAURI_SIGNING_PRIVATE_KEY = $KeyPath
-    if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+    if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -and $env:CI -ne "true") {
         $secure = Read-Host "Signing key password (press Enter if it has none)" -AsSecureString
         $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = [System.Net.NetworkCredential]::new("", $secure).Password
     }

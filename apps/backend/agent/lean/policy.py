@@ -172,6 +172,8 @@ def evaluate(
         return Decision("deny", "its arguments contain one of your stored API keys or tokens", "secret_in_args")
     if name == "create_media" and args.get("provider") != "comfyui-local":
         reason = "this sends your prompt to a cloud generation provider and may charge your API account"
+        if args.get("input_asset_ids"):
+            reason += "; the selected reference images will also be uploaded for editing"
         return Decision("ask" if interactive else "deny", reason, "generation_cost")
     if tainted_by and is_external_action(name, entry, args):
         sources = ", ".join(sorted(set(tainted_by)))

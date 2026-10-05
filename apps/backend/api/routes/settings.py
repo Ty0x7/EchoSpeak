@@ -537,6 +537,11 @@ def settings_test(request: SettingsTestRequest):
 
     started = time.perf_counter()
     try:
+        if target in {"local", "ollama", "openai_compat"} and request.check == "generation":
+            from agent.local_model_setup import test_response
+            provider = "ollama" if target == "ollama" else "lmstudio"
+            result = test_response(provider, request.model, base_url or "")
+            return SettingsTestResponse(target=target, latency_ms=(time.perf_counter() - started) * 1000, **result)
         if target in CLOUD_PROVIDERS:
             if request.check == "generation":
                 from agent.cloud_providers import test_cloud_model
@@ -550,7 +555,7 @@ def settings_test(request: SettingsTestRequest):
             url0 = _normalize_base_url(url0)
             if not url0:
                 return SettingsTestResponse(ok=False, target=target, message="Missing local base URL.")
-            url = f"{url0}/v1/models"
+            url = f"{url0.removesuffix('/v1')}/v1/models"
             code, data = _http_get_json(url, timeout_s=5.0)
             ok = 200 <= code < 300
             ms = (time.perf_counter() - started) * 1000.0

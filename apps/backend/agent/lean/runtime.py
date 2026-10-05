@@ -837,6 +837,8 @@ class LeanSession:
         # agent was given), never from a "[System]: ..." brief full of boilerplate words.
         goal = self._goal(message, task)
         memories = [] if guest else self._recall(goal)
+        from agent.project_context import context_for_session
+        project_brief, project_evidence = ("", "") if guest else context_for_session(self.session_id)
         prompt = build_system_prompt(
             persona=persona,
             soul_text=self._soul() if persona.id == "echo" else "",
@@ -851,6 +853,8 @@ class LeanSession:
             chat_summary=summaries.summary_text(self.session_id),
             caller_note=caller_note(self.source, self.caller_role),
             past_chats=[] if guest else self._past_chats(),
+            project_brief=project_brief,
+            project_evidence=project_evidence,
         )
         turn = LeanTurn(
             client=self._client_for(persona),

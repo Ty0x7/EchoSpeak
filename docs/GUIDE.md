@@ -11,6 +11,11 @@ inside, see [ARCHITECTURE.md](ARCHITECTURE.md). For what's next, see
 1. Download `EchoSpeak_<version>_x64-setup.exe` from the
    [latest release](https://github.com/Ty0x7/EchoSpeak/releases/latest) and run it.
 2. Open EchoSpeak. The first screen walks you through picking a model.
+   Echo greets you before setup. Optional tools can wait. Choose an installed local
+   runtime or cloud provider; setup can download and load a supported starter model
+   through Ollama or LM Studio after you choose **Download and load**. On the last
+   step, **Check my model** sends a small response request. **Start chatting** opens
+   your first chat only after setup finishes; it does not send a greeting for you.
 3. Later versions install from inside the app: **Settings › About › Update**.
    The app only installs releases signed with the project's key.
 
@@ -177,6 +182,44 @@ Open **Research & activity** in a chat, then **Research**, to see that chat's so
 page passages and working notes. Search-result snippets are marked separately from
 pages Echo actually read. The notebook keeps working evidence for seven days, apart
 from permanent personal memory. Expired rows are removed on reads, startup and hourly.
+
+Click a retained citation in an answer to open its source passage in that same panel.
+**Edit working notes** lets you record findings, open questions and conflicts; **Export
+report** downloads a Markdown copy. With a project attached, enter a **Project brief**
+and use **Save findings to project** to keep notes and up to 20 read sources from the
+current filter for later project chats. Web evidence stays separate from instructions
+and personal memory; it is only retained beyond the notebook's expiry when you choose
+to save it to a project or export it.
+
+Browser refreshes and brief connection drops reattach to an existing chat run without
+submitting the prompt twice. A two-day local transport log retains output for replay.
+**Stop** still stops that exact chat. Restarting the backend preserves partial output
+and marks the run interrupted; it does not automatically repeat tools or resume a
+chat request after a backend process restart.
+
+In **Creations**, **Edit with Echo** opens the image's chat with an editable draft.
+Describe your changes and send it. Gemini supports image-reference edits; the local
+ComfyUI preset supports one image-to-image reference. Cloud references are uploaded
+only through the existing approval flow. Originals remain saved, and **Related versions**
+shows their variants. Video editing is not included. Interrupted Google Veo, MiniMax
+and ComfyUI jobs with saved provider IDs reconnect without a new submission. If
+automatic recovery fails, use **Reconnect to existing job**. A timed-out synchronous
+image request without a remote ID cannot be safely retried automatically.
+
+Windows builds repair recognized EchoSpeak shortcuts after installation and at
+production launch. They do not remove older independent installations. If a packaged
+dependency is missing, the startup screen stops retrying and offers the complete
+installer; reinstalling preserves the application's separate runtime data folder.
+
+The **Windows release** GitHub workflow builds from a manual run or a `v10.*` tag.
+Configure the `windows-release` environment with `TAURI_SIGNING_PRIVATE_KEY` and
+`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, using the existing updater key so installed
+copies can verify future updates. Optional `WINDOWS_SIGNING_PFX_BASE64` and
+`WINDOWS_SIGNING_PFX_PASSWORD` configure Windows publisher signing. Tagged builds
+upload a draft release for review; manual runs upload build artifacts. Configure
+these secrets before using the workflow. Local releases still use
+`apps/desktop/scripts/release-windows.ps1`; add `-SkipBuild -Publish` only after
+testing the built installer.
 
 To try native Gemini audio, save a Gemini key and select an accessible Live model.
 Turn **Live mic** on, then use the existing **Mic** or **Voice** control. Audio goes

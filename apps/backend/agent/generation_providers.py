@@ -96,6 +96,10 @@ def comfy_workflow(job) -> dict:
     if job.kind == "image":
         graph["4"] = {"class_type": "CheckpointLoaderSimple", "inputs": {"ckpt_name": job.model}}
         graph["5"] = {"class_type": "EmptyLatentImage", "inputs": {"width": width, "height": height, "batch_size": 1}}
+        if getattr(job, "input_asset_ids", []):
+            graph["14"] = {"class_type": "LoadImage", "inputs": {"image": "echospeak-" + job.id + ".png"}}
+            graph["5"] = {"class_type": "VAEEncode", "inputs": {"pixels": ["14", 0], "vae": ["4", 2]}}
+            graph["3"]["inputs"]["denoise"] = 0.65
         graph["9"] = {"class_type": "SaveImage", "inputs": {"images": ["8", 0], "filename_prefix": "EchoSpeak/" + job.id}}
     else:
         graph["4"] = {"class_type": "UNETLoader", "inputs": {"unet_name": job.model, "weight_dtype": "default"}}
@@ -161,17 +165,21 @@ def generate(job, checkpoint, cancelled) -> tuple[bytes, str]:
             raise ValueError("Add your Gemini API key in Creations settings.")
         model = quote(job.model, safe="-._")
         if job.kind == "image":
+            from agent.creation_references import read_references
+            parts = [{"text": job.prompt}] + [{"inlineData": {"mimeType": "image/png", "data": base64.b64encode(data).decode()}} for data in read_references(job.session_id, job.project_id, job.input_asset_ids)]
             data = request("POST", f"{GOOGLE}/models/{model}:generateContent", headers=headers,
-                payload={"contents": [{"parts": [{"text": job.prompt}]}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}})
+                payload={"contents": [{"parts": parts}], "generationConfig": {"responseModalities": ["TEXT", "IMAGE"]}})
             for candidate in data.get("candidates", []):
                 for part in candidate.get("content", {}).get("parts", []):
                     inline = part.get("inlineData") or part.get("inline_data") or {}
                     if inline.get("data"):
                         return base64.b64decode(inline["data"], validate=True), "image"
             raise RuntimeError("Provider returned no image. Check content restrictions or use another prompt.")
-        data = request("POST", f"{GOOGLE}/models/{model}:predictLongRunning", headers=headers,
-            payload={"instances": [{"prompt": job.prompt}], "parameters": {"sampleCount": 1, "durationSeconds": 4, "aspectRatio": "16:9"}})
-        operation = str(data.get("name") or "")
+        operation = job.provider_job_id
+        if not operation:
+            data = request("POST", f"{GOOGLE}/models/{model}:predictLongRunning", headers=headers,
+                payload={"instances": [{"prompt": job.prompt}], "parameters": {"sampleCount": 1, "durationSeconds": 4, "aspectRatio": "16:9"}})
+            operation = str(data.get("name") or "")
         if not re.fullmatch(r"[A-Za-z0-9._/-]+", operation) or ".." in operation:
             raise RuntimeError("Provider returned no valid operation ID.")
         checkpoint(operation)
@@ -187,9 +195,11 @@ def generate(job, checkpoint, cancelled) -> tuple[bytes, str]:
                 return google_download(samples[0]["video"]["uri"], config.gemini.api_key), "video"
     if job.provider_id == "minimax-video":
         headers = {"Authorization": "Bearer " + config.minimax_api_key}
-        data = request("POST", "https://api.minimax.io/v1/video_generation", headers=headers,
-            payload={"model": job.model, "prompt": job.prompt, "duration": 6, "resolution": "768P"})
-        task = str(data.get("task_id") or "")
+        task = job.provider_job_id
+        if not task:
+            data = request("POST", "https://api.minimax.io/v1/video_generation", headers=headers,
+                payload={"model": job.model, "prompt": job.prompt, "duration": 6, "resolution": "768P"})
+            task = str(data.get("task_id") or "")
         if not task:
             raise RuntimeError("MiniMax did not accept the task. Check model access and account balance.")
         checkpoint(task)
@@ -204,11 +214,24 @@ def generate(job, checkpoint, cancelled) -> tuple[bytes, str]:
     if job.provider_id != "comfyui-local":
         raise ValueError("Unknown generation provider.")
     base = comfy_base()
-    graph = validate_comfy_workflow(job)
-    data = request("POST", base + "/prompt", payload={"prompt": graph, "client_id": job.id})
-    prompt_id = str(data.get("prompt_id") or "")
-    if not prompt_id or data.get("node_errors"):
-        raise RuntimeError("ComfyUI rejected the workflow. Check the installed model files.")
+    prompt_id = job.provider_job_id
+    if not prompt_id:
+        graph = validate_comfy_workflow(job)
+        if job.input_asset_ids:
+            from agent.creation_references import read_references
+            image = read_references(job.session_id, job.project_id, job.input_asset_ids)[0]
+            with httpx.Client(timeout=60, trust_env=False, follow_redirects=False) as client:
+                response = client.post(base + "/upload/image", files={"image": ("echospeak-" + job.id + ".png", image, "image/png")}, data={"type": "input", "overwrite": "false"})
+                response.raise_for_status()
+                uploaded = response.json()
+                name = str(uploaded.get("name") or "")
+                if not name or "/" in name or "\\" in name or uploaded.get("subfolder"):
+                    raise ValueError("ComfyUI returned an unexpected reference-image path.")
+                graph["14"]["inputs"]["image"] = name
+        data = request("POST", base + "/prompt", payload={"prompt": graph, "client_id": job.id})
+        prompt_id = str(data.get("prompt_id") or "")
+        if not prompt_id or data.get("node_errors"):
+            raise RuntimeError("ComfyUI rejected the workflow. Check the installed model files.")
     checkpoint(prompt_id)
     while True:
         wait()

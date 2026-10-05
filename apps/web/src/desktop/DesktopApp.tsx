@@ -9,6 +9,7 @@ import {
   readDesktopReadiness,
   readDesktopRuntime,
   restartDesktopBackend,
+  openDesktopExternalUrl,
 } from "./bridge";
 import { initialDesktopBootState, reduceDesktopBootState } from "./runtimeState";
 import { CompanionApp } from "./CompanionApp";
@@ -148,6 +149,7 @@ export function DesktopApp() {
     return <CompanionApp backendReady={showWorkspace && boot.phase === "ready"} />;
   }
   const settingsWindow = windowKind === "settings";
+  const needsInstaller = boot.phase === "failed" && boot.detail.startsWith("The installed backend could not load:");
   return (
     <div className={`desktop-window${settingsWindow ? " desktop-settings-window" : ""}`}>
       <header className="desktop-titlebar" data-tauri-drag-region>
@@ -181,7 +183,7 @@ export function DesktopApp() {
             ) : null}
             {boot.phase === "failed" ? (
               <div className="desktop-recovery-actions">
-                <button type="button" className="is-primary" onClick={() => void retry()}>Restart service</button>
+                {needsInstaller ? <button type="button" className="is-primary" onClick={() => void openDesktopExternalUrl("https://github.com/Ty0x7/EchoSpeak/releases/latest")}>Get complete installer</button> : <button type="button" className="is-primary" onClick={() => void retry()}>Restart service</button>}
                 <button type="button" onClick={() => void openDesktopLogs()}>Open logs</button>
               </div>
             ) : null}
@@ -193,7 +195,7 @@ export function DesktopApp() {
             {boot.phase === "failed" ? (
               <div>
                 <button type="button" onClick={() => void openDesktopLogs()}>Logs</button>
-                <button type="button" onClick={() => void retry()}>Restart</button>
+                {needsInstaller ? <button type="button" onClick={() => void openDesktopExternalUrl("https://github.com/Ty0x7/EchoSpeak/releases/latest")}>Installer</button> : <button type="button" onClick={() => void retry()}>Restart</button>}
               </div>
             ) : null}
           </aside>

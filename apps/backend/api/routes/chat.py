@@ -8,7 +8,7 @@ import uuid
 import hashlib
 from typing import Optional, Any, Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from loguru import logger
@@ -231,6 +231,8 @@ async def cancel_query(request: QueryCancelRequest):
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             raise
     event.set()
+    from agent.query_journal import get_query_journal
+    get_query_journal().finish(request.request_id, "cancelled")
     return {
         "cancelled": True,
         "request_id": request.request_id,
@@ -389,8 +391,18 @@ async def stream_events(request_id: str):
 
 @router.post("/query/stream")
 async def query_stream(request: QueryRequest):
+    from agent.query_journal import get_query_journal
+    journal = get_query_journal()
+    session = _normalize_thread_id(request.thread_id)
     q: queue.Queue = queue.Queue()
     request_id = str(request.client_request_id or "").strip() or str(uuid.uuid4())
+    fingerprint = hashlib.sha256(request.model_dump_json().encode()).hexdigest()
+    try:
+        claimed = journal.claim(request_id, session, fingerprint)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    if not claimed:
+        return _journal_response(request_id, session, 0, replay=True)
     cancel_event = threading.Event()
     _register_query_cancellation(request_id, request.thread_id or "default", cancel_event)
     _metric_inc("requests", 1)
@@ -426,6 +438,8 @@ async def query_stream(request: QueryRequest):
     except Exception as exc:
         cancel_event.set()
         _release_query_cancellation(request_id, cancel_event)
+        journal.append(request_id, {"type": "error", "message": _safe_stream_failure(exc), "request_id": request_id})
+        journal.finish(request_id, "failed")
         if request.voice_turn_id:
             try:
                 from agent.voice_transport import fail_voice_turn
@@ -444,7 +458,9 @@ async def query_stream(request: QueryRequest):
                 )
         raise
 
-    async def gen():
+    def collect():
+        # The collector belongs to the run, not the HTTP connection. A browser
+        # disconnect only detaches a reader and never cancels governed work.
         first = True
         startup_timeout = max(
             1.0,
@@ -453,31 +469,66 @@ async def query_stream(request: QueryRequest):
         try:
             while True:
                 try:
-                    item = await anyio.to_thread.run_sync(
-                        (lambda: q.get(timeout=startup_timeout)) if first else q.get,
-                        abandon_on_cancel=True,
-                    )
+                    item = q.get(timeout=startup_timeout if first else 60)
                 except queue.Empty:
+                    if not first:
+                        continue
                     cancel_event.set()
-                    yield (
-                        json.dumps(
-                            {
+                    journal.append(request_id, {
                                 "type": "error",
                                 "message": "The selected model did not start responding in time. This run was cancelled.",
                                 "request_id": request_id,
                                 "at": time.time(),
-                            },
-                            ensure_ascii=False,
-                        )
-                        + "\n"
-                    ).encode("utf-8")
+                            })
                     break
                 first = False
                 if item is None:
                     break
-                yield (json.dumps(item, ensure_ascii=False) + "\n").encode("utf-8")
-        finally:
+                journal.append(request_id, item)
+        except Exception as exc:
             cancel_event.set()
+            logger.exception("Stream journal failed request_id={}", request_id)
+            journal.append(request_id, {"type": "error", "message": _safe_stream_failure(exc), "request_id": request_id})
+        finally:
+            journal.finish(request_id, "cancelled" if cancel_event.is_set() else "completed")
             _release_query_cancellation(request_id, cancel_event)
 
-    return StreamingResponse(gen(), media_type="application/x-ndjson")
+    threading.Thread(target=collect, name="query-journal", daemon=True).start()
+    return _journal_response(request_id, session, 0)
+
+
+def _journal_response(request_id: str, session: str, after: int, replay: bool = False):
+    from agent.query_journal import get_query_journal
+    journal = get_query_journal()
+    if not journal.get(request_id, session):
+        raise HTTPException(404, "Run not found in this chat, or its replay expired.")
+
+    async def events():
+        cursor = after
+        while True:
+            items = await anyio.to_thread.run_sync(lambda: journal.read(request_id, cursor))
+            for item in items:
+                cursor = item["_replay_seq"]
+                # Stored sound is never played twice after reconnection.
+                if replay and item.get("type") == "voice_audio":
+                    continue
+                yield (json.dumps({**item, "_recovered": replay}, ensure_ascii=False) + "\n").encode()
+            if not items:
+                run = journal.get(request_id, session)
+                if not run or run["status"] != "running":
+                    yield (json.dumps({"type": "journal_done", "status": run["status"] if run else "expired", "_replay_seq": cursor}) + "\n").encode()
+                    return
+                await anyio.sleep(0.2)
+
+    return StreamingResponse(events(), media_type="application/x-ndjson", headers={"Cache-Control": "no-store", "X-Request-Id": request_id})
+
+
+@router.get("/query/runs")
+def query_runs(thread_id: str):
+    from agent.query_journal import get_query_journal
+    return {"items": get_query_journal().list(_normalize_thread_id(thread_id))}
+
+
+@router.get("/query/runs/{request_id}/events")
+def replay_query(request_id: str, thread_id: str, after: int = Query(default=0, ge=0)):
+    return _journal_response(request_id, _normalize_thread_id(thread_id), after, replay=True)

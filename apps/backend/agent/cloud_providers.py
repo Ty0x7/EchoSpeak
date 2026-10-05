@@ -46,6 +46,8 @@ def provider_error(provider: str, status: int, detail: str = "") -> str:
         "request": "Request rejected. Check the selected model and its supported parameters.",
     }
     message = remedies.get(category, "Provider request failed.")
+    if provider == "gemini" and "access_token_type_unsupported" in safe.lower():
+        message = "Google rejected the saved credential type. Save a Gemini Developer API key from Google AI Studio, then refresh the model catalog and select an API model ID."
     return f"{label}: {message} (HTTP {status})." + (f" Details: {safe[:500]}" if safe else "")
 
 

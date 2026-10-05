@@ -24,6 +24,7 @@ export function CreationPreview({ asset, apiBase }: { asset: CreationAsset; apiB
 }
 
 export function CreationCard({ id, apiBase }: { id: string; apiBase: string }) {
+  const [revision, setRevision] = useState(0);
   const [job, setJob] = useState<CreationJob | null>(null);
   const [assets, setAssets] = useState<CreationAsset[]>([]);
   const [error, setError] = useState("");
@@ -39,11 +40,12 @@ export function CreationCard({ id, apiBase }: { id: string; apiBase: string }) {
     };
     void refresh();
     return () => { disposed = true; clearTimeout(timer); };
-  }, [apiBase, id]);
+  }, [apiBase, id, revision]);
   return <article className="creation-card">
     <strong>Creation · {job?.status || "Loading"}</strong>
     {job && <p>{job.prompt}</p>}
     {(error || job?.error) && <p role="alert">{error || job?.error}</p>}
+    {job?.status === "failed" && job.provider_job_id && ["gemini-video", "minimax-video", "comfyui-local"].includes(job.provider_id) && <button className="es-btn es-btn-sm" onClick={() => void creationRequest(apiBase, `/creations/jobs/${encodeURIComponent(id)}/recover`, "POST").then(() => setRevision(v => v + 1)).catch(e => setError(e.message))}>Reconnect to existing job</button>}
     {assets.map(asset => <CreationPreview key={asset.id} asset={asset} apiBase={apiBase} />)}
     {job && ["queued", "running"].includes(job.status) && <button className="es-btn es-btn-sm" onClick={() => void creationRequest(apiBase, `/creations/jobs/${encodeURIComponent(id)}/cancel`, "POST").then(data => setError(data.detail)).catch(e => setError(e.message))}>Stop waiting</button>}
     <small>Saved in Creations when complete. Cloud jobs may continue and incur charges after stopping.</small>

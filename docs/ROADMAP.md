@@ -9,12 +9,18 @@ Creations, cloud/local generation adapters, optional local setup, research noteb
 and first-run setup are implemented. Live generation, GPU installation and the signed
 Windows installer are in user testing. See [10.3 release notes](releases/v10.3.0.md).
 
-## Reliability implementation (unreleased; based on 10.3.2)
+## Reliability implementation (10.4.0)
 
 Implemented: separate cloud response checks, a chat Research panel with physical expiry
 cleanup, native Gemini Live input/output and bounded resumption, GPU selection and
 resumable verified downloads, a real local render test, publisher-signing support,
 updater signature verification and separate installer/app/model measurements.
+
+Added in 10.4.0: replayable chat transport, polling recovery for submitted creation
+jobs, passage-linked citations, editable/exportable research notes, explicit project
+findings and briefs, reference-image editing with lineage, runtime-managed starter
+model downloads, a redesigned setup that opens the first chat after completion,
+Windows shortcut repair, packaged-import safeguards and a Windows release workflow.
 
 Focused automated checks use fake provider sockets and disposable state. Actual
 provider keys/billing, microphones, GPU rendering, a publisher certificate, clean
@@ -37,8 +43,10 @@ installation and upgrading still require real-machine validation before release.
 
 ## Next
 
-1. **Build releases on GitHub Actions.** A tag-triggered `windows-latest` workflow with the
-   signing key as a secret, so a release is one `git tag` away and never depends on one PC. **M**
+1. **Configure and validate Windows release automation.** The workflow is implemented;
+   supply the existing updater key in the `windows-release` environment, optionally
+   configure Authenticode, and validate clean installation/upgrading before publishing
+   its draft release. **S**
 2. **Run the evaluation before every release.** `apps/backend/scripts/eval_gemma.py` needs a
    live model; run it from the release script or a self-hosted runner and block on regressions. **S**
 3. **Approvals page on the lean approvals.** The Approvals tab still reads the old approval

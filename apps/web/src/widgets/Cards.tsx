@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ExternalLink, RemoteImage, openExternal } from "./env";
+import { ExternalLink, ResearchLink, RemoteImage, openExternal } from "./env";
 import type { CitationsData, MediaData, ProductData, ScoreData } from "./types";
 import { hostOf } from "./validate";
 
@@ -118,10 +118,10 @@ export function CitationChips({ data }: { data: CitationsData }) {
     <section className="wg-sources" aria-label="Sources">
       <span className="wg-sources-label">Sources</span>
       {shown.map((item, i) => (
-        <ExternalLink key={item.url} href={item.url} className="wg-source" title={[item.title, item.snippet].filter(Boolean).join("\n")}>
+        <ResearchLink key={item.url} href={item.url} className="wg-source" title={[item.title, item.snippet].filter(Boolean).join("\n")}>
           <b>{i + 1}</b>
           <span>{item.site || hostOf(item.url)}</span>
-        </ExternalLink>
+        </ResearchLink>
       ))}
       {data.items.length > 5 ? (
         <button type="button" className="wg-source is-more" onClick={() => setExpanded((v) => !v)}>

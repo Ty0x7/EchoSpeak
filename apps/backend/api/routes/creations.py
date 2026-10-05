@@ -46,6 +46,15 @@ def cancel(job_id: str):
         raise HTTPException(404, str(exc)) from exc
 
 
+@router.post("/jobs/{job_id}/recover")
+def recover(job_id: str):
+    from agent.generation_service import recover_job
+    try:
+        return recover_job(job_id).model_dump(mode="json")
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
 class AssetUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=160)
     archived: bool | None = None

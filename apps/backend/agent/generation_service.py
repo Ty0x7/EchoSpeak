@@ -86,7 +86,7 @@ def _worker(job: GenerationJob, cancel: threading.Event):
             session_id=job.session_id, name=filename, media_kind=kind, source_kind="generated",
             storage_scope="library", project_relative_path="files/" + filename,
             sha256=hashlib.sha256(data).hexdigest(), size_bytes=len(data), prompt=job.prompt,
-            provider=job.provider_id, model=job.model, settings=job.settings.model_dump(), job_id=job.id,
+            provider=job.provider_id, model=job.model, settings={**job.settings.model_dump(), "input_asset_ids": job.input_asset_ids}, job_id=job.id,
             execution_id=job.execution_id))
         job.output_asset_ids = [asset.id]
         job.status, job.progress = "completed", 1
@@ -104,7 +104,7 @@ def _worker(job: GenerationJob, cancel: threading.Event):
             _SLOTS.release()
 
 
-def submit(*, session_id: str, execution_id: str, prompt: str, kind: str, provider: str = "", model: str = "", settings: GenerationSettings | None = None) -> GenerationJob:
+def submit(*, session_id: str, execution_id: str, prompt: str, kind: str, provider: str = "", model: str = "", settings: GenerationSettings | None = None, input_asset_ids: list[str] | None = None) -> GenerationJob:
     if not config.allow_generation_actions:
         raise ValueError("Enable image/video creation in Creations settings first.")
     from agent.threads import get_thread_manager
@@ -112,7 +112,15 @@ def submit(*, session_id: str, execution_id: str, prompt: str, kind: str, provid
     if not get_thread_manager().get_thread(session_id):
         raise ValueError("Chat does not exist")
     provider, model = resolve_selection(kind, provider, model)
-    key = hashlib.sha256(json.dumps([execution_id, kind, provider, model, prompt]).encode()).hexdigest()
+    inputs = list(dict.fromkeys(input_asset_ids or []))
+    if inputs and (kind != "image" or provider not in {"gemini-images", "comfyui-local"}):
+        raise ValueError("Image editing is supported by Gemini images and local ComfyUI image workflows.")
+    if provider == "comfyui-local" and len(inputs) > 1:
+        raise ValueError("The local image-to-image preset supports one reference image.")
+    state = get_state_store().get_thread_state(session_id)
+    from agent.creation_references import read_references
+    read_references(session_id, state.active_project_id or "", inputs)
+    key = hashlib.sha256(json.dumps([execution_id, kind, provider, model, prompt, inputs]).encode()).hexdigest()
     store = get_generation_job_store()
     with _LOCK:
         old = store.find_idempotent(session_id, key)
@@ -123,12 +131,43 @@ def submit(*, session_id: str, execution_id: str, prompt: str, kind: str, provid
         state = get_state_store().get_thread_state(session_id)
         job = GenerationJob(idempotency_key=key, session_id=session_id, project_id=state.active_project_id or "",
             origin="lean_creation", execution_id=execution_id, prompt=prompt, kind=kind, provider_id=provider, model=model,
+            input_asset_ids=inputs,
             settings=settings or GenerationSettings(width=512, height=512, seed=secrets.randbelow(2**32)))
         store.save(job)
         cancel = threading.Event()
         _ACTIVE[job.id] = cancel
         threading.Thread(target=_worker, args=(job, cancel), daemon=True, name="creation-" + job.id[-8:]).start()
     return job
+
+
+def recover_job(job_id: str):
+    """Poll an existing remote job only. A recovery never makes a submission."""
+    store = get_generation_job_store()
+    with _LOCK:
+        job = store.get(job_id)
+        if not job:
+            raise ValueError("Creation job not found")
+        if job_id in _ACTIVE or job.status == "completed":
+            return job
+        if job.status != "failed" or not job.provider_job_id or job.provider_id not in {"gemini-video", "minimax-video", "comfyui-local"}:
+            raise ValueError("No recoverable provider job ID is saved. EchoSpeak will not automatically resubmit it.")
+        if len(_ACTIVE) >= 6:
+            raise ValueError("Wait for an existing creation to finish before reconnecting.")
+        job.status, job.error, job.error_code = "queued", "", ""
+        store.save(job)
+        event = threading.Event()
+        _ACTIVE[job.id] = event
+        threading.Thread(target=_worker, args=(job, event), daemon=True, name="creation-recovery").start()
+        return job
+
+
+def recover_pending_jobs():
+    for job in get_generation_job_store().list(limit=500):
+        if job.error_code == "process_interrupted" and job.provider_job_id:
+            try:
+                recover_job(job.id)
+            except ValueError:
+                pass
 
 
 def cancel_job(job_id: str):
@@ -157,7 +196,7 @@ def generation_tools(session_id: str, execution_id: str):
     def create(args):
         return show(submit(session_id=session_id, execution_id=execution_id,
             prompt=str(args.get("prompt") or ""), kind=str(args.get("kind") or "image"),
-            provider=str(args.get("provider") or ""), model=str(args.get("model") or "")))
+            provider=str(args.get("provider") or ""), model=str(args.get("model") or ""), input_asset_ids=list(args.get("input_asset_ids") or [])))
     def status(args):
         store = get_generation_job_store()
         job = store.get(str(args.get("job_id") or ""))
@@ -169,9 +208,10 @@ def generation_tools(session_id: str, execution_id: str):
             job = store.get(job.id)
         return show(job)
     return [NativeTool(name="create_media", description="Create an image or video from a prompt using the user's selected cloud/local provider. "
-        "Result appears in chat and Creations. Cloud requests ask approval and may cost money. Never resubmit a pending job; use creation_status.",
+        "For image editing, supply existing image asset IDs as input_asset_ids and describe the requested changes. Originals remain unchanged. Local edits are image-to-image variants. "
+        "Result appears in chat and Creations. Cloud requests upload references, ask approval and may cost money. Never resubmit a pending job; use creation_status.",
         parameters={"type": "object", "properties": {"kind": {"type": "string", "enum": ["image", "video"]},
             "prompt": {"type": "string"}, "provider": {"type": "string", "enum": ["gemini-images", "gemini-video", "minimax-video", "comfyui-local"]},
-            "model": {"type": "string", "description": "Optional model ID; omit to use settings."}}, "required": ["kind", "prompt"]}, func=create),
+            "model": {"type": "string", "description": "Optional model ID; omit to use settings."}, "input_asset_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 4, "description": "Reference images in this chat or its project. Gemini supports image edits; local supports one reference variant."}}, "required": ["kind", "prompt"]}, func=create),
         NativeTool(name="creation_status", description="Check or wait for a creation in this chat. Repeat while running, then report the result.",
             parameters={"type": "object", "properties": {"job_id": {"type": "string"}, "wait_seconds": {"type": "integer"}}, "required": ["job_id"]}, func=status, parallel_safe=True)]

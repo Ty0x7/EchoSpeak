@@ -34,6 +34,7 @@ struct Supervisor {
     instance_id: String,
     restart_count: u32,
     consecutive_failures: u32,
+    startup_failure: Option<String>,
 }
 
 #[derive(Clone)]
@@ -86,6 +87,7 @@ impl DesktopState {
                 instance_id: String::new(),
                 restart_count: 0,
                 consecutive_failures: 0,
+                startup_failure: None,
             })),
         })
     }
@@ -265,7 +267,11 @@ pub fn launch_backend(app: AppHandle, state: DesktopState) -> Result<(), String>
         .resource_dir()
         .map_err(|error| format!("Could not resolve the app resource folder: {error}"))?
         .join("backend")
-        .join(if cfg!(windows) { "echospeak-backend.exe" } else { "echospeak-backend" });
+        .join(if cfg!(windows) {
+            "echospeak-backend.exe"
+        } else {
+            "echospeak-backend"
+        });
     if !backend_exe.is_file() {
         return Err(format!(
             "The packaged EchoSpeak backend is missing at {}",
@@ -314,6 +320,7 @@ pub fn launch_backend(app: AppHandle, state: DesktopState) -> Result<(), String>
         supervisor.child_pid = Some(child_pid);
         supervisor.child = Some(child);
         supervisor.detail = "Waiting for the local EchoSpeak service".into();
+        supervisor.startup_failure = None;
     }
 
     let event_app = app.clone();
@@ -327,14 +334,29 @@ pub fn launch_backend(app: AppHandle, state: DesktopState) -> Result<(), String>
                 }
                 CommandEvent::Stderr(bytes) => {
                     forward_backend_stderr(&bytes);
+                    if let Some(cause) = permanent_startup_failure(&String::from_utf8_lossy(&bytes))
+                    {
+                        if let Ok(mut supervisor) = event_state.inner.lock() {
+                            if supervisor.generation == generation && supervisor.phase != "ready" {
+                                supervisor.startup_failure = Some(cause);
+                            }
+                        }
+                    }
                 }
                 CommandEvent::Error(error) => {
                     log::error!(target: "echospeak_backend", "{error}");
                 }
                 CommandEvent::Terminated(payload) => {
                     let reason = format!(
-                        "Local service exited (code {:?}, signal {:?})",
-                        payload.code, payload.signal
+                        "Local service exited{}{}",
+                        payload
+                            .code
+                            .map(|code| format!(" with code {code}"))
+                            .unwrap_or_default(),
+                        payload
+                            .signal
+                            .map(|signal| format!(" after signal {signal}"))
+                            .unwrap_or_default()
                     );
                     let current = {
                         let mut supervisor = event_state
@@ -453,6 +475,7 @@ pub fn launch_backend(app: AppHandle, state: DesktopState) -> Result<(), String>
                     supervisor.phase = "ready".into();
                     supervisor.detail = "Local service is ready".into();
                     supervisor.consecutive_failures = 0;
+                    supervisor.startup_failure = None;
                 }
                 return;
             }
@@ -537,6 +560,14 @@ fn take_failed_generation(
     Some(supervisor.child.take())
 }
 
+fn permanent_startup_failure(line: &str) -> Option<String> {
+    if line.contains("ImportError:") || line.contains("ModuleNotFoundError:") {
+        Some(line.trim().chars().take(500).collect())
+    } else {
+        None
+    }
+}
+
 fn schedule_restart(app: AppHandle, state: DesktopState, reason: String) {
     let delay_ms = {
         let mut supervisor = state
@@ -544,6 +575,11 @@ fn schedule_restart(app: AppHandle, state: DesktopState, reason: String) {
             .lock()
             .expect("desktop supervisor mutex poisoned");
         if !supervisor.desired_running {
+            return;
+        }
+        if let Some(cause) = &supervisor.startup_failure {
+            supervisor.detail = format!("The installed backend could not load: {cause}. Install the latest complete EchoSpeak installer. Your data is preserved; restarting this bundle cannot repair missing dependencies.");
+            supervisor.phase = "failed".into();
             return;
         }
         if supervisor.consecutive_failures >= MAX_AUTOMATIC_RESTARTS {
@@ -593,6 +629,7 @@ pub fn restart_backend(app: AppHandle, state: DesktopState) -> DesktopRuntime {
         supervisor.desired_running = true;
         supervisor.generation += 1;
         supervisor.consecutive_failures = 0;
+        supervisor.startup_failure = None;
         supervisor.phase = "recovering".into();
         supervisor.detail = "Restarting the local EchoSpeak service".into();
         supervisor.child_pid = None;
@@ -667,7 +704,17 @@ fn terminate_process_tree(child: CommandChild) {
 
 #[cfg(test)]
 mod tests {
-    use super::backend_stderr_level;
+    use super::{backend_stderr_level, permanent_startup_failure};
+
+    #[test]
+    fn missing_packaged_import_is_not_a_transient_restart() {
+        assert!(permanent_startup_failure("ImportError: cannot import name 'Runnable'").is_some());
+        assert!(
+            permanent_startup_failure("ModuleNotFoundError: no module named langchain_core")
+                .is_some()
+        );
+        assert!(permanent_startup_failure("WARNING: provider quota exceeded").is_none());
+    }
 
     #[test]
     fn backend_stderr_uses_embedded_python_severity() {

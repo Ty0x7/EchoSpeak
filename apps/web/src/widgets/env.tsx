@@ -6,6 +6,7 @@ export type WidgetEnv = {
   apiBase: string;
   /** Open an artifact in the side panel. */
   openArtifact?(id: string, version?: number): void;
+  openResearch?(url: string): Promise<boolean>;
 };
 
 const Ctx = createContext<WidgetEnv>({ apiBase: "" });
@@ -46,6 +47,18 @@ export function ExternalLink({ href, children, className, title }: { href: strin
       {children}
     </a>
   );
+}
+
+/** Evidence links use the shared panel when this chat retained the source. */
+export function ResearchLink({ href, children, className, title }: { href: string; children: React.ReactNode; className?: string; title?: string }) {
+  const { openResearch } = useWidgetEnv();
+  const clean = safeUrl(href);
+  if (!clean) return <span className={className}>{children}</span>;
+  return <a href={clean} className={className} title={title} target="_blank" rel="noreferrer noopener" onClick={event => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey) return;
+    event.preventDefault();
+    void (async () => { if (!await openResearch?.(clean)) openExternal(clean); })().catch(() => openExternal(clean));
+  }}>{children}</a>;
 }
 
 /** Proxied path for a remote image (fetched by the backend with size/time limits). */

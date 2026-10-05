@@ -19,3 +19,7 @@
 .notebook-passage pre { margin: 0 0 12px; }
 .notebook-pages { display: flex; flex-wrap: wrap; gap: 8px; }
 .notebook-error { color: #e6aaa8; font-size: 13px; }
+.notebook-editor { margin: 12px 0; display: grid; gap: 10px; }
+.notebook-editor label { font-size: 12px; color: var(--es-dim); }
+.notebook-editor textarea { display: block; width: 100%; box-sizing: border-box; min-height: 130px; margin-top: 8px; padding: 10px; border-radius: var(--es-r-sm); border: 1px solid var(--es-line-2); background: var(--es-surface-2); color: var(--es-text); font: inherit; resize: vertical; }
+.notebook-editor small { font-size: 11px; color: var(--es-dim); line-height: 1.5; }

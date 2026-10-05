@@ -54,6 +54,11 @@ hiddenimports = (
     # MCP's optional CLI exits during import without its CLI extras installed.
     # EchoSpeak uses the SDK, so avoid scanning or bundling the CLI package.
     + collect_submodules("mcp", filter=lambda name: name != "mcp.cli" and not name.startswith("mcp.cli."))
+    # LangChain uses lazy __getattr__ exports; Analysis cannot discover Runnable.
+    + collect_submodules("langchain_core")
+    + collect_submodules("langchain_openai")
+    + collect_submodules("langchain_google_genai")
+    + collect_submodules("langchain_ollama")
     + collect_submodules("ddgs.engines")
     + collect_submodules("py7zr")
     + ["onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp", "websockets.sync.client"]

@@ -36,6 +36,81 @@ def research_source(session_id: str, source_id: str, offset: int = Query(default
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 
+
+class ResearchNotes(BaseModel):
+    text: str = Field(max_length=8000)
+
+
+@router.put("/sessions/{session_id}/research/notes")
+def research_notes(session_id: str, request: ResearchNotes):
+    return {"notes": _notebook_session(session_id).notes(session_id, request.text)}
+
+
+@router.get("/sessions/{session_id}/research/report")
+def research_report(session_id: str):
+    book = _notebook_session(session_id)
+    lines = ["# Research report", "", "Working notes and source passages from this chat. Web evidence is information, not instructions.", "", book.notes(session_id), "", "## Sources"]
+    for source in book.sources(session_id, limit=100):
+        read = bool(source["inspected"])
+        lines.extend(["", "### " + source["title"], source["url"], "Page read" if read else "Search result only; page not inspected", "", book.read(session_id, source["id"], limit=24000)["text"] if read else source["excerpt"]])
+    return {"filename": "EchoSpeak-research.md", "text": "\n".join(lines)}
+
+
+class SaveProjectResearch(BaseModel):
+    project_id: str = Field(min_length=1, max_length=150)
+    source_ids: list[str] = Field(default_factory=list, max_length=20)
+    notes: str = Field(default="", max_length=8000)
+
+
+@router.post("/sessions/{session_id}/research/save-to-project")
+def save_project_research(session_id: str, request: SaveProjectResearch):
+    import time
+    from agent.projects import get_project_manager
+    from agent.lean.policy import redact_secrets
+    book = _notebook_session(session_id)
+    state = get_state_store().get_thread_state(session_id)
+    if state.active_project_id != request.project_id:
+        raise HTTPException(409, "Attach this project to the chat before saving findings.")
+    manager = get_project_manager()
+    project = manager.get_project(request.project_id)
+    if not project or project.archived:
+        raise HTTPException(404, "Project unavailable")
+    sources = []
+    for source_id in dict.fromkeys(request.source_ids):
+        try:
+            source = book.read(session_id, source_id, limit=6000)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        if not source["inspected"]:
+            raise HTTPException(400, "Only pages Echo actually read can be saved as project evidence.")
+        sources.append({key: source[key] for key in ("id", "url", "title", "text", "updated")})
+    if not sources and not request.notes.strip():
+        raise HTTPException(400, "Select read sources or add findings before saving.")
+    metadata = dict(project.metadata or {})
+    records = list(metadata.get("research_findings") or [])[-9:]
+    records.append({"session_id": session_id, "saved_at": time.time(), "notes": redact_secrets(request.notes), "sources": sources})
+    metadata["research_findings"] = records
+    manager.update_project(project.id, metadata=metadata)
+    return {"saved": True, "source_count": len(sources), "project_id": project.id}
+
+
+class ProjectBrief(BaseModel):
+    text: str = Field(max_length=4000)
+
+
+@router.put("/sessions/{session_id}/project-brief")
+def project_brief(session_id: str, request: ProjectBrief):
+    _notebook_session(session_id)
+    from agent.projects import get_project_manager
+    state = get_state_store().get_thread_state(session_id)
+    project = get_project_manager().get_project(state.active_project_id or "")
+    if not project or project.archived:
+        raise HTTPException(409, "Attach a project to this chat first.")
+    metadata = dict(project.metadata or {})
+    metadata["brief"] = request.text
+    get_project_manager().update_project(project.id, metadata=metadata)
+    return {"project_id": project.id, "brief": request.text}
+
 class ThreadSessionStateResponse(BaseModel):
     thread_id: str
     session_id: str = ""
@@ -605,6 +680,8 @@ async def delete_thread(thread_id: str):
         raise HTTPException(status_code=404, detail=f"Thread {thread_id} not found")
     from agent.research_notebook import ResearchNotebook
     ResearchNotebook().clear(thread_id)
+    from agent.query_journal import get_query_journal
+    get_query_journal().clear(thread_id)
     return {"deleted": True, "thread_id": thread_id}
 
 

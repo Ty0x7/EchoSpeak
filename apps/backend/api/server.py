@@ -107,6 +107,10 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("SOUL.md default refresh failed", exc_info=True)
     threading.Thread(target=_autoconfigure_local_provider, name="local-model-autoconfig", daemon=True).start()
+    from agent.query_journal import get_query_journal
+    get_query_journal()  # Mark interrupted transport logs before any new run can claim an ID.
+    from agent.generation_service import recover_pending_jobs
+    threading.Thread(target=recover_pending_jobs, name="creation-recovery", daemon=True).start()
     build_id = (
         os.environ.get("ECHOSPEAK_BUILD_ID")
         or os.environ.get("ECHOSPEAK_DESKTOP_INSTANCE_ID")
@@ -219,6 +223,7 @@ async def lifespan(app: FastAPI):
         while True:
             try:
                 await asyncio.to_thread(lambda: ResearchNotebook().prune())
+                await asyncio.to_thread(get_query_journal().cleanup)
             except Exception:
                 logger.warning("Research retention cleanup failed; will retry")
             await asyncio.sleep(3600)

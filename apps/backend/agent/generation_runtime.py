@@ -309,13 +309,15 @@ def register_generated_output(job: GenerationJob, output: Path, *, project_relat
 
 
 _STORE: Optional[GenerationJobStore] = None
+_STORE_LOCK = threading.Lock()
 
 
 def get_generation_job_store() -> GenerationJobStore:
     global _STORE
-    if _STORE is None:
-        _STORE = GenerationJobStore()
-        _STORE.recover_incomplete()
+    with _STORE_LOCK:
+        if _STORE is None:
+            _STORE = GenerationJobStore()
+            _STORE.recover_incomplete()
     return _STORE
 
 
