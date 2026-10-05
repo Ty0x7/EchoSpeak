@@ -61,7 +61,7 @@ export function useScrollTo() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   return (id: string) => {
-    const go = () => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const go = () => document.getElementById(id)?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
     if (pathname !== "/") {
       navigate("/");
       window.setTimeout(go, 80);
@@ -79,7 +79,8 @@ export function SiteHeader() {
       </Link>
       <nav aria-label="Main">
         <button type="button" onClick={() => scrollTo("ways")}>What Echo does</button>
-        <button type="button" onClick={() => scrollTo("team")}>The team</button>
+        <button type="button" onClick={() => scrollTo("creations")}>Creations</button>
+        <button type="button" onClick={() => scrollTo("research")}>Research</button>
         <button type="button" onClick={() => scrollTo("about")}>About</button>
         <Link to="/docs">Docs</Link>
       </nav>
