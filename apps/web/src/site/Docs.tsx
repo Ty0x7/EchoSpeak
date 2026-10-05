@@ -29,7 +29,7 @@ const SECTIONS: Section[] = [
         <Steps
           items={[
             <><strong>Download and install.</strong> Run the installer. Windows may show “Windows protected your PC” because the app is new: click <em>More info</em> → <em>Run anyway</em>.</>,
-            <><strong>Pick a brain (a model).</strong> Free and private: install <a href="https://lmstudio.ai" target="_blank" rel="noreferrer">LM Studio</a>, download <em>Gemma 4 E4B</em> (great on an 8 GB graphics card) and start its server. Or paste an OpenAI or Gemini key instead. Choose it in <em>Settings › Models</em>.</>,
+            <><strong>Pick a brain (a model).</strong> Free and private: install <a href="https://lmstudio.ai" target="_blank" rel="noreferrer">LM Studio</a>, download <em>Gemma 4 E4B</em> (great on an 8 GB graphics card) and start its server. Or paste an OpenAI or Gemini key instead. The first-launch setup guides you through choosing a model, search and optional tools. You can reopen it from <em>Settings › General › Setup</em>.</>,
             <><strong>Say hi.</strong> Type in the box at the bottom, or turn on <em>Wake</em> and say “Hey Echo”.</>,
           ]}
         />
@@ -37,6 +37,27 @@ const SECTIONS: Section[] = [
         <Tip>EchoSpeak updates itself: when a new version is out, <em>Settings › About</em> shows an “Update” button.</Tip>
       </>
     ),
+  },
+  {
+    id: "creations",
+    title: "Creations",
+    icon: "spark",
+    body: <>
+      <p>In 10.3, images and videos have a home below Routines: <em>Creations</em>.</p>
+      <Steps items={[<>Open <em>Creations › Creation settings</em> and enable creation. Choose Gemini for images, Veo or MiniMax for videos, or ComfyUI locally.</>, <>Add your provider key or connect a local server. Optional managed setup detects Windows NVIDIA hardware and downloads an isolated runtime and starter models after you choose to install.</>, <>Ask Echo to create an image or make a video in chat. Cloud requests ask approval before submission. The finished result appears in chat and your library.</>]} />
+      <p>Preview, download, rename, archive and restore your creations. Open the original chat to return to the idea behind them.</p>
+      <Tip>Cloud providers may charge for generation. Local models are large optional downloads and need compatible hardware. Stopping a job does not guarantee that provider processing or billing stops.</Tip>
+    </>,
+  },
+  {
+    id: "research",
+    title: "Web research",
+    icon: "research",
+    body: <>
+      <p>Ask a concrete question and let Echo search different angles, open useful sources, read webpages and PDFs, and compare what it finds.</p>
+      <p>DuckDuckGo works without a key. Configure Brave, Tavily or a SearXNG server in <em>Settings › Web search</em> for another search index.</p>
+      <p>A research notebook retains source passages and working notes for seven days within each chat. It is separate from personal memory. Source links help you check the evidence yourself.</p>
+    </>,
   },
   {
     id: "agents",

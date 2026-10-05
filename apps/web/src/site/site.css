@@ -400,6 +400,23 @@ body { margin: 0; background: #050505; }
 .doc-more { margin-top: 16px; }
 .site-docs .flow-diagram, .site-docs .system-diagram, .site-docs .timeline { margin-top: 20px; }
 
+/* A living constellation around Echo, with the same monochrome personality. */
+.site-home .hero-face { width: min(100%, 430px); height: 440px; }
+.hero-orbit-track { position: absolute; width: 390px; max-width: 95%; aspect-ratio: 1; border: 1px dashed #ffffff12; border-radius: 50%; animation: cap-spin 70s linear infinite; z-index: -1; }
+.hero-orbit-track i { position: absolute; top: 14%; left: 14%; width: 6px; height: 6px; border-radius: 50%; background: #e3e3d4; box-shadow: 0 0 18px #e3e3d477; }
+.hero-orbit-track i:last-child { top: auto; left: auto; bottom: 14%; right: 14%; width: 4px; height: 4px; }
+.hero-satellite { position: absolute; display: flex; align-items: center; gap: 8px; padding: 11px 14px; border: 1px solid #ffffff22; border-radius: 10px; background: linear-gradient(120deg, #222220, #111110); box-shadow: 0 16px 28px #0007; color: #c4c4b8; font-size: 10px; white-space: nowrap; z-index: 2; animation: cap-float 8s ease-in-out infinite; }
+.hero-satellite-create { top: 25px; right: 0; animation-delay: -2s; }
+.hero-satellite-research { bottom: 42px; left: -10px; animation-delay: -4s; }
+.hero-satellite-build { top: 85px; left: -30px; animation-delay: -6s; }
+.hero-satellite-voice { bottom: 80px; right: -20px; }
+.site-home .hero::before { content: ""; position: absolute; inset: 40% -20vw -5%; background: radial-gradient(ellipse at 70% 50%, #b7b79709, transparent 60%); pointer-events: none; z-index: 0; }
+.site-home .hero-values { font-size: 12px; }
+.site-home .snap { position: relative; }
+.site-home .snap:not(.snap-hero)::before { content: ""; position: absolute; top: 35px; left: max(32px, calc((100vw - 1240px)/2)); width: 42px; height: 1px; background: linear-gradient(90deg, #636354, transparent); }
+.site[data-motion=paused] *, .site[data-motion=paused] *::before, .site[data-motion=paused] *::after { animation: none !important; transition: none !important; }
+.site[data-motion=paused] .cm, .site[data-motion=paused] .team-line, .site[data-motion=paused] .done-line { opacity: 1; }
+
 /* Responsive */
 @media (max-width: 1100px) {
   .bento-weather, .bento-chart, .bento-steps, .bento-scores { grid-column: span 12; }
@@ -417,6 +434,13 @@ body { margin: 0; background: #050505; }
   .hero { grid-template-columns: 1fr; align-content: center; gap: 34px; padding: 120px 0 88px; }
   .snap-hero > .hero { padding-block: 110px 88px; }
   .hero-face { order: -1; }
+  .site-home .hero-face { width: min(100%, 340px); height: 300px; }
+  .hero-satellite { padding: 8px 10px; font-size: 9px; }
+  .hero-satellite-create { top: 0; right: 0; }
+  .hero-satellite-research { bottom: 0; left: 0; }
+  .hero-satellite-build { top: 60px; left: -5px; }
+  .hero-satellite-voice { bottom: 40px; right: -5px; }
+  .hero-orbit-track { width: 280px; }
   .hero-orbit { width: 250px; box-shadow: 0 0 0 24px #ffffff03, 0 0 0 48px #ffffff02; }
   .hero-explore { bottom: 20px; }
   .hero-eyebrow { margin-bottom: 18px; }

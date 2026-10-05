@@ -7,6 +7,7 @@ import "../widgets/widgets.css";
 import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, useScrollTo, type IconName } from "./Chrome";
 import { GITHUB_URL, useLatestRelease } from "./release";
 import "./site.css";
+import { CreationsStory, ResearchStory, SetupStory, MotionControls } from "./Capabilities";
 
 /** Adds data-visible once the element scrolls into view (immediately with reduced motion). */
 function useReveal<T extends HTMLElement>() {
@@ -49,21 +50,26 @@ function Hero() {
   return (
     <section className="hero shell">
       <div className="hero-copy">
-        <p className="hero-eyebrow"><span aria-hidden="true" /> A little personality. A lot of possibility.</p>
+        <p className="hero-eyebrow"><span aria-hidden="true" /> Your assistant. Your ideas. In motion.</p>
         <h1>Meet <span className="hl">Echo</span>, the AI that lives on your computer.</h1>
-        <p className="hero-lede">Ask anything, get answers you can see, and let Echo and his team actually do the work. Your data stays with you.</p>
+        <p className="hero-lede">Talk, research, build, and create with an AI that feels at home on your computer. One conversation. So many places to take it.</p>
         <div className="hero-actions">
           <DownloadButton />
           <a className="btn btn-ghost" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={18} /> View on GitHub</a>
         </div>
         <ul className="hero-values">
           <li><Icon name="github" size={15} /> Open source</li>
-          <li><Icon name="house" size={15} /> Your data stays on your PC</li>
+          <li><Icon name="house" size={15} /> Chats saved on your PC</li>
           <li><Icon name="model" size={15} /> Local or cloud models</li>
         </ul>
       </div>
       <div className="hero-face">
         <div className="hero-orbit" aria-hidden="true" />
+        <div className="hero-orbit-track" aria-hidden="true"><i /><i /></div>
+        <span className="hero-satellite hero-satellite-create" aria-hidden="true"><Icon name="spark" size={15} /> Make something</span>
+        <span className="hero-satellite hero-satellite-research" aria-hidden="true"><Icon name="research" size={15} /> Follow a question</span>
+        <span className="hero-satellite hero-satellite-build" aria-hidden="true"><Icon name="code" size={15} /> Build an idea</span>
+        <span className="hero-satellite hero-satellite-voice" aria-hidden="true"><Icon name="voice" size={15} /> Just say it</span>
         <div className="hero-character"><EchoFace size="clamp(180px, 24vw, 300px)" /></div>
       </div>
       <button className="hero-explore" type="button" onClick={() => scrollTo("about")}>
@@ -80,6 +86,7 @@ const MODES: Mode[] = [
   { id: "chat", icon: "chat", label: "Talk it through", says: "Ask me anything.", caption: "Plans, advice, explanations: talk to Echo like a person." },
   { id: "see", icon: "chart", label: "Answers you can see", says: "Here's the week.", caption: "Weather, stocks, scores and more show up as cards, not walls of text." },
   { id: "research", icon: "research", label: "Look things up", says: "I read the sources.", caption: "Echo searches the web, reads the pages and shows where answers came from." },
+  { id: "create", icon: "spark", label: "Create something", says: "From a prompt to a picture.", caption: "Generate images and videos with a local or cloud provider, then find them in Creations." },
   { id: "build", icon: "code", label: "Build things", says: "Shipped it.", caption: "Echo edits your files, runs the tests and tells you what changed." },
   { id: "team", icon: "team", label: "Bring the team", says: "Glados is on it.", caption: "Echo hands work to Jarvis and Glados and tells you when it's really done." },
   { id: "voice", icon: "voice", label: "Just say “Hey Echo”", says: "I'm listening.", caption: "Turn on Wake and just talk. Speech stays on your PC." },
@@ -155,6 +162,8 @@ function Screen({ mode }: { mode: string }) {
           </Agent>
         </div>
       );
+    case "create":
+      return <div className="thread"><You>Create an image for the world I’m imagining.</You><Agent i={1}><p>Choose a local or cloud provider, describe your idea, and keep the result in Creations.</p><div className="artifact-chip"><Icon name="spark" size={20} /><span><strong>Creations</strong><small>Images & videos · your media library</small></span><em>10.3</em></div></Agent></div>;
     case "build":
       return (
         <div className="thread">
@@ -189,14 +198,14 @@ function Screen({ mode }: { mode: string }) {
   }
 }
 
-function WaysShowcase() {
+function WaysShowcase({ motionPaused = false }: { motionPaused?: boolean }) {
   const [active, setActive] = useState(0);
   const [paused, setPaused] = useState(false);
   useEffect(() => {
-    if (paused || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (paused || motionPaused || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     const t = window.setTimeout(() => setActive((v) => (v + 1) % MODES.length), 6000);
     return () => window.clearTimeout(t);
-  }, [active, paused]);
+  }, [active, paused, motionPaused]);
   const mode = MODES[active];
   return (
     <section className="ways shell" id="ways" aria-label="What Echo does">
@@ -207,7 +216,7 @@ function WaysShowcase() {
             <button key={m.id} type="button" role="tab" aria-selected={i === active} className={i === active ? "is-on" : ""} onClick={() => setActive(i)}>
               <Icon name={m.icon} size={18} />
               <span>{m.label}</span>
-              {i === active && !paused ? <i className="tab-timer" key={active} /> : null}
+              {i === active && !paused && !motionPaused ? <i className="tab-timer" key={active} /> : null}
             </button>
           ))}
         </div>
@@ -473,7 +482,7 @@ function ModelsPanel() {
 
 const PILLARS: { icon: IconName; title: string; copy: string }[] = [
   { icon: "github", title: "Open source", copy: "Every line is public on GitHub. Read it, change it, make it yours." },
-  { icon: "house", title: "Your data goes to you", copy: "Chats, memory and files live on your PC, not on a company's servers." },
+  { icon: "house", title: "A home for your data", copy: "Chats, memory and files are stored on your PC. Cloud models receive the requests you choose to send." },
   { icon: "spark", title: "A decentralized agent", copy: "No account, no middleman. Echo runs where you are, on the model you choose." },
   { icon: "check", title: "Gets things done", copy: "Echo doesn't just answer. He searches, writes, builds and finishes the job." },
   { icon: "team", title: "Talks to other agents", copy: "He works with Jarvis, Glados and agents you make, and can connect to agents elsewhere (A2A)." },
@@ -546,7 +555,7 @@ function useSectionSnap() {
       list.push(max);
       return list.map((v) => Math.max(0, Math.min(max, Math.round(v)))).sort((x, y) => x - y);
     };
-    const enabled = () => window.innerWidth > 900 && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const enabled = () => document.querySelector(".site")?.getAttribute("data-motion") !== "paused" && window.innerWidth > 900 && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
     const glide = (to: number) => {
       const from = window.scrollY;
@@ -595,7 +604,7 @@ function useSectionSnap() {
     const onKey = (e: KeyboardEvent) => {
       if (!enabled()) return;
       const el = e.target as HTMLElement | null;
-      if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
+      if (el && (el.isContentEditable || el.closest("input,textarea,select,button,a,[role=tab]"))) return;
       const down = ["ArrowDown", "PageDown"].includes(e.key) || (e.key === " " && !e.shiftKey);
       const up = ["ArrowUp", "PageUp"].includes(e.key) || (e.key === " " && e.shiftKey);
       if (!down && !up) return;
@@ -618,14 +627,19 @@ function useSectionSnap() {
 
 export function Home() {
   useSectionSnap();
+  const [motionPaused, setMotionPaused] = useState(false);
   return (
-    <div className="site">
+    <div className="site site-home" data-motion={motionPaused ? "paused" : "running"}>
+      <MotionControls paused={motionPaused} onToggle={() => setMotionPaused(value => !value)} />
       <style>{echoFaceStyles}</style>
       <SiteHeader />
       <main>
         <div className="snap snap-hero"><Hero /></div>
         <div className="snap snap-up"><About /></div>
-        <div className="snap"><WaysShowcase /></div>
+        <div className="snap"><WaysShowcase motionPaused={motionPaused} /></div>
+        <div className="snap"><CreationsStory /></div>
+        <div className="snap"><ResearchStory /></div>
+        <div className="snap"><SetupStory /></div>
         <div className="snap"><BuildPanel /></div>
         <div className="snap snap-up"><AnswerCards /></div>
         <div className="snap snap-up"><Team /></div>
