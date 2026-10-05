@@ -837,6 +837,8 @@ class LeanSession:
         # agent was given), never from a "[System]: ..." brief full of boilerplate words.
         goal = self._goal(message, task)
         memories = [] if guest else self._recall(goal)
+        from agent.project_context import context_for_session
+        project_brief, project_evidence = ("", "") if guest else context_for_session(self.session_id)
         prompt = build_system_prompt(
             persona=persona,
             soul_text=self._soul() if persona.id == "echo" else "",
@@ -851,6 +853,8 @@ class LeanSession:
             chat_summary=summaries.summary_text(self.session_id),
             caller_note=caller_note(self.source, self.caller_role),
             past_chats=[] if guest else self._past_chats(),
+            project_brief=project_brief,
+            project_evidence=project_evidence,
         )
         turn = LeanTurn(
             client=self._client_for(persona),
@@ -871,6 +875,16 @@ class LeanSession:
             taint=self._taint,
             goal=goal,
         )
+        if self.source == "voice" and depth == 0:
+            from agent.live_voice import claim_client
+            live_client = claim_client(self.session_id, self.request_id, turn.client.endpoint, persona, history)
+            if live_client is not None:
+                previous = turn.client
+                for key, value in self._clients.items():
+                    if value is previous:
+                        self._clients[key] = live_client
+                previous.close()
+                turn.client = live_client
         return turn
 
     def _record(self, persona: AgentPersona, part: TurnResult, depth: int, meta: dict[str, Any]) -> None:

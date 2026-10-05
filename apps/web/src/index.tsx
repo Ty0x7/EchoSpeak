@@ -28,6 +28,7 @@ import { leanApi } from "./lean/api";
 import { AgentRows, CollapsedRoster } from "./lean/Roster";
 import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
 import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
+import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { AgentEditor, RoomDialog } from "./lean/Dialogs";
 import type { LeanEvent, LeanPersona, LeanRoom } from "./lean/types";
@@ -46,6 +47,7 @@ import { useVoice } from "./dashboard/useVoice";
 import { projectSessionHistory } from "./dashboard/historyProjection";
 import { ComposerInput } from "./dashboard/ComposerInput";
 import { ChatThread } from "./dashboard/ChatThread";
+import { recoverableQuery } from "./dashboard/recoverableStream";
 
 type DashboardTab = "chat" | "research" | "overview" | "skills" | "memory" | "docs" | "settings" | "search_settings" | "mcp_settings" | "advanced_settings" | "system_services" | "capabilities" | "approvals" | "executions" | "projects" | "automations" | "connections" | "soul" | "services" | "avatar_editor";
 
@@ -90,7 +92,7 @@ export const Dashboard: React.FC<{
   const [mainPage, setMainPage] = useState<SidebarPage>("chat");
   /** The artifact shown in the side panel. */
   const [openArtifact, setOpenArtifact] = useState<{ id: string; version?: number } | null>(null);
-  /** Right side panel: which tab, whether Activity was opened, and its width. */
+  /** Shared right side panel: selected tab, open state and remembered width. */
   const [rightTab, setRightTab] = useState<RightTab>("artifact");
   const [activityOpen, setActivityOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(() => loadPanelWidth());
@@ -894,13 +896,13 @@ export const Dashboard: React.FC<{
   }, [scrollChatToBottom, leftTab]);
 
 
-  const sendText = async (overrideText?: string, voiceTranscript?: VoiceTranscript) => {
+  const sendText = async (overrideText?: string, voiceTranscript?: VoiceTranscript, recovery?: { id: string; session: string }) => {
     const raw = overrideText ?? input;
-    if (!raw.trim()) return;
+    if (!raw.trim() && !recovery) return;
     // Session creation has one explicit owner: the + controls in the sidebar.
     // Composer submission, navigation, hydration, and assistant replies never
     // invent a Session.
-    const streamThreadId = String(activeThreadIdRef.current || activeThreadId || "").trim();
+    const streamThreadId = String(recovery?.session || activeThreadIdRef.current || activeThreadId || "").trim();
     if (!streamThreadId) return;
     const appendTurnMessage = (message: Message) => {
       const visible = activeThreadIdRef.current === streamThreadId;
@@ -911,16 +913,16 @@ export const Dashboard: React.FC<{
       sessionProjectionRef.current.set(streamThreadId, { messages: next, activities: cached?.activities || [] });
       if (visible) useAppStore.setState({ messages: next });
     };
-    const runRequestId = crypto.randomUUID();
+    const runRequestId = recovery?.id || crypto.randomUUID();
     const streamProjectId = String(activeProjectIdRef.current || activeProjectId || "");
-    cancelSessionTurn(streamThreadId);
+    if (!recovery) cancelSessionTurn(streamThreadId);
     const streamController = new AbortController();
     streamControllersRef.current.set(streamThreadId, streamController);
     activeRequestIdsRef.current.set(streamThreadId, runRequestId);
     setSessionInFlight(streamThreadId, true);
 
-    followerRef.current.reset(true); // sending a message always follows its reply
-    if (!overrideText) setInput("");
+    if (!recovery) followerRef.current.reset(true); // sending a message follows its reply
+    if (!recovery && !overrideText) setInput("");
 
     const clampContext = (t: string, n: number) => {
       const s = (t || "").replace(/\s+/g, " ").trim();
@@ -955,8 +957,7 @@ export const Dashboard: React.FC<{
       streamThreadId,
       (projectionRevisionRef.current.get(streamThreadId) || 0) + 1,
     );
-    appendTurnMessage(userMsg);
-    setInput("");
+    if (!recovery) { appendTurnMessage(userMsg); setInput(""); }
     setStreaming(true);
     lean.start(runRequestId, streamThreadId);
     setMention(null);
@@ -994,11 +995,7 @@ export const Dashboard: React.FC<{
       return pruned;
     });
     try {
-      const resp = await fetch(`${apiBase}/query/stream`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: streamController.signal,
-        body: JSON.stringify({
+      const resp = await recoverableQuery(apiBase, {
           message: requestText,
           include_memory: true,
           thread_id: streamThreadId,
@@ -1007,8 +1004,7 @@ export const Dashboard: React.FC<{
           reasoning_effort: reasoningEffort,
           transport: voiceTranscript ? "voice" : "chat",
           voice_turn_id: voiceTranscript?.voiceTurnId,
-        }),
-      });
+        }, streamController.signal, Boolean(recovery));
       if (!resp.ok) {
         const errText = await resp.text();
         throw new Error(errText || `HTTP ${resp.status}`);
@@ -1023,6 +1019,7 @@ export const Dashboard: React.FC<{
       let buffer = "";
       // Monotonic stream seq (backend) — ignore reordered/stale reconnect frames.
       let maxStreamSeq = 0;
+      let nativeAudioPlayed = false;
 
       while (true) {
         if (streamController.signal.aborted) break;
@@ -1054,6 +1051,18 @@ export const Dashboard: React.FC<{
             maxStreamSeq = evtSeq;
           }
           // Lean runtime events render through the agent timeline, not the legacy cards.
+          if ((evt as any).type === "voice_audio") {
+            if (visible && useAppStore.getState().speechEnabled && (voiceReadAloud || voiceConversationMode || voiceTranscript?.providerId === "gemini-live")) {
+              try {
+                const played = await liveAudioPlayback.enqueue(evt as unknown as LiveAudioPacket, speaking => {
+                  useAppStore.getState().setSpeaking(speaking);
+                  setVoicePhase(speaking ? "speaking" : "idle");
+                });
+                nativeAudioPlayed = nativeAudioPlayed || played;
+              } catch (error) { setVoiceNotice(error instanceof Error ? error.message : "Live audio playback failed."); }
+            }
+            continue;
+          }
           if (isLeanEvent(evt as unknown as LeanEvent)) {
             const leanEvt = evt as unknown as LeanEvent;
             if (leanEvt.type === "run_start") {
@@ -1105,7 +1114,16 @@ export const Dashboard: React.FC<{
             }
             if (visible) setStreaming(false);
             const spokenLean = String(committed[committed.length - 1]?.text || leanEvt.response || "").trim();
-            if (visible && spokenLean && (voiceReadAloud || voiceConversationMode)) {
+            if (visible && nativeAudioPlayed) {
+              if (nativeLiveVoice && voiceConversationMode && activeThreadIdRef.current === streamThreadId) {
+                // Listen for the next utterance while queued speech plays; actual speech stops playback.
+                void start(true);
+              } else {
+                void liveAudioPlayback.finished().then(played => {
+                  if (played && voiceConversationMode && activeThreadIdRef.current === streamThreadId && !streamControllersRef.current.has(streamThreadId)) void start();
+                });
+              }
+            } else if (visible && !(evt as any)._recovered && spokenLean && (voiceReadAloud || voiceConversationMode)) {
               void speakLocalText(spokenLean, {
                 clientTurnId: voiceTranscript?.clientTurnId || runRequestId,
                 requestId: runRequestId,
@@ -1216,6 +1234,25 @@ export const Dashboard: React.FC<{
     }
   };
 
+  const recoveredRunsRef = useRef(new Set<string>());
+  useEffect(() => {
+    const session = String(activeThreadId || "");
+    if (!initialHydrationComplete || !session || streamControllersRef.current.has(session)) return;
+    let disposed = false;
+    void fetch(`${apiBase}/query/runs?thread_id=${encodeURIComponent(session)}`).then(async response => {
+      if (!response.ok) return;
+      const data = await response.json();
+      const run = (data.items || []).find((item: any) => item.status === "running") || (data.items?.[0]?.status === "interrupted" ? data.items[0] : undefined);
+      if (!disposed && run && !recoveredRunsRef.current.has(run.id) && !streamControllersRef.current.has(session)) {
+        await loadHistory(session);
+        if (disposed || activeThreadIdRef.current !== session || streamControllersRef.current.has(session)) return;
+        recoveredRunsRef.current.add(run.id);
+        void sendText("", undefined, { id: run.id, session });
+      }
+    }).catch(() => {});
+    return () => { disposed = true; };
+  }, [apiBase, activeThreadId, initialHydrationComplete]);
+
   const toggleMonitor = () =>
     setMonitoring((v) => {
       const next = !v;
@@ -1301,10 +1338,12 @@ export const Dashboard: React.FC<{
   const {
     voicePhase, setVoicePhase, voiceNotice, setVoiceNotice, voiceInputLevel,
     voiceReadAloud, voiceConversationMode, wakeWordEnabled,
+    nativeLiveVoice, toggleNativeLiveVoice,
     toggleReadAloud, toggleVoiceMode, toggleWakeWord, start, stop, speakLocalText,
   } = useVoice({
     apiBase, activeThreadId, activeProjectId, activeThreadIdRef, activeProjectIdRef,
     streaming, listening, setListening, speechEnabled, onTranscript: submitVoiceTranscript,
+    onInterrupt: () => { if (streamControllersRef.current.has(activeThreadIdRef.current)) cancelSessionTurn(activeThreadIdRef.current, true); },
   });
 
 
@@ -1428,9 +1467,6 @@ export const Dashboard: React.FC<{
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, [measurePanelRoom, rightOpen]);
-  useEffect(() => {
-    if (openArtifact) setRightTab("artifact");
-  }, [openArtifact]);
   const activityItems = useMemo(() => {
     const live = lean.live ? lean.live.order.map((id) => lean.live!.messages[id]) : [];
     return collectActivity([...messages.map((m) => m.lean), ...live]);
@@ -1445,7 +1481,7 @@ export const Dashboard: React.FC<{
         if (seg.kind === "tool" && TERMINAL_TOOLS.has(seg.name) && seg.status === "running" && !seenTerminalRef.current.has(seg.id)) {
           seenTerminalRef.current.add(seg.id);
           setActivityOpen(true);
-          if (!openArtifact) setRightTab("activity");
+          if (!openArtifact && !activityOpen) setRightTab("activity");
         }
         if (seg.kind !== "tool" || !seg.widgets) continue;
         for (const widget of seg.widgets as { type?: string; data?: { id?: string; version?: number } }[]) {
@@ -1454,12 +1490,26 @@ export const Dashboard: React.FC<{
           if (seenArtifactsRef.current.has(key)) continue;
           seenArtifactsRef.current.add(key);
           setOpenArtifact({ id: widget.data.id });
+          if (!openArtifact && !activityOpen) setRightTab("artifact");
         }
       }
     }
   }, [lean.live]); // eslint-disable-line react-hooks/exhaustive-deps
   const widgetEnv = useMemo<WidgetEnv>(
-    () => ({ apiBase, openArtifact: (id, version) => setOpenArtifact({ id, version }) }),
+    () => ({ apiBase, openArtifact: (id, version) => { setOpenArtifact({ id, version }); setRightTab("artifact"); }, openResearch: async url => {
+      const session = activeThreadIdRef.current;
+      if (!session) return false;
+      const response = await fetch(`${apiBase}/sessions/${encodeURIComponent(session)}/research`);
+      if (!response.ok) return false;
+      const book = await response.json();
+      const normalize = (value: string) => { const u = new URL(value); u.hash = ""; return u.href.replace(/\/$/, ""); };
+      const source = book.sources?.find((item: any) => normalize(item.url) === normalize(url));
+      if (!source || activeThreadIdRef.current !== session) return false;
+      sessionStorage.setItem(`echospeak:research-source:${session}`, source.id);
+      setActivityOpen(true); setRightTab("research");
+      window.dispatchEvent(new CustomEvent("echospeak:research-source", { detail: { session, sourceId: source.id } }));
+      return true;
+    } }),
     [apiBase],
   );
   /** Open (or create) the one-to-one chat with an agent. Echo's chat is the most recent plain chat. */
@@ -1495,6 +1545,7 @@ export const Dashboard: React.FC<{
     setMainPage("chat");
     if (item.session_id && item.session_id !== activeThreadId) switchThread(item.session_id);
     setOpenArtifact({ id: item.id, version: item.version });
+    setRightTab("artifact");
   };
 
   return (
@@ -1511,7 +1562,11 @@ export const Dashboard: React.FC<{
         position: "relative",
       }}
     >
-      <FirstRunSetup apiBase={apiBase} autoShow={!desktopSettingsWindow} />
+      <FirstRunSetup apiBase={apiBase} autoShow={!desktopSettingsWindow} onReady={async () => {
+        setMainPage("chat");
+        setLeftTab("chat");
+        if (!activeThreadIdRef.current && !await createNewThread("", "First chat")) throw new Error("Could not open your first chat. Try again.");
+      }} />
       <style>{globalCss}</style>
       <style>{leanCss}</style>
       <style>{settingsCss}</style>
@@ -1657,6 +1712,7 @@ export const Dashboard: React.FC<{
         {rightOpen ? (
           <RightPanel
             apiBase={apiBase}
+            sessionId={activeThreadId}
             tab={rightTab}
             onTab={setRightTab}
             artifact={openArtifact}
@@ -1708,7 +1764,7 @@ export const Dashboard: React.FC<{
                 }}
               />
             ) : mainPage === "creations" ? (
-              <CreationsPage apiBase={apiBase} onChat={id => { setMainPage("chat"); switchThread(id); }} />
+              <CreationsPage apiBase={apiBase} sessionId={activeThreadId} onChat={id => { setMainPage("chat"); switchThread(id); }} onEdit={asset => { setMainPage("chat"); switchThread(asset.session_id); setInput(`Edit this image using input_asset_ids ["${asset.id}"]. Keep the composition and change the lighting to soft morning light.`); }} />
             ) : mainPage === "artifacts" ? (
               <ArtifactsPage apiBase={apiBase} onOpen={openArtifactFromPage} />
             ) : (
@@ -1791,18 +1847,19 @@ export const Dashboard: React.FC<{
               {/* Chat Tab */}
                 <>
                   <WidgetEnvProvider value={widgetEnv}>
-                  {!rightOpen && activityItems.length ? (
+                  {!rightOpen && activeThreadId ? (
                     <button
                       type="button"
                       className="rp-toggle"
+                      aria-label="Research & activity"
                       onClick={() => {
                         setActivityOpen(true);
-                        setRightTab("activity");
+                        setRightTab("research");
                       }}
-                      title="Show what the agents did: commands, files, searches"
+                      title="Open this chat’s research notebook and activity"
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12h3l2-6 4 12 2-6h5" /></svg>
-                      Activity
+                      Research &amp; activity
                       <small>{activityItems.length}</small>
                     </button>
                   ) : null}
@@ -1851,6 +1908,7 @@ export const Dashboard: React.FC<{
                       setThinkingEnabled={setThinkingEnabled} voiceReadAloud={voiceReadAloud}
                       toggleReadAloud={toggleReadAloud} voiceConversationMode={voiceConversationMode}
                       toggleVoiceMode={toggleVoiceMode} wakeWordEnabled={wakeWordEnabled} toggleWakeWord={toggleWakeWord}
+                      nativeLiveVoice={nativeLiveVoice} toggleNativeLiveVoice={toggleNativeLiveVoice}
                     />
                   </div>
                 </>

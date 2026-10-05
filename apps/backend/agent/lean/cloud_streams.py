@@ -152,17 +152,55 @@ def _google_turns(messages):
 def gemini_live_turn(client, messages, tools, on_reasoning, on_content, cancel, max_tokens):
     from websockets.sync.client import connect
     from websockets.exceptions import ConnectionClosed, InvalidStatus
-    deadline = time.monotonic() + settings.request_timeout_seconds()
+    deadline = time.monotonic() + getattr(client, "live_timeout", settings.request_timeout_seconds())
     turn = ModelTurn()
+    setup = None
+    reconnects = 0
+    audio_bytes = 0
+
+    def audio(packet):
+        nonlocal audio_bytes
+        audio_bytes += len(packet.get("data", ""))
+        if audio_bytes > 32_000_000:
+            raise ProviderError(413, "Live audio exceeded the per-turn buffer limit.", "gemini")
+        turn.audio.append(packet)
+        if client.on_audio:
+            client.on_audio(packet)
+
+    def reconnect():
+        nonlocal reconnects
+        handle = getattr(client, "_live_resume_handle", "")
+        if not handle or reconnects >= 2 or setup is None:
+            raise ProviderError(503, "Live session could not resume safely. Speak again; completed tools will not be replayed.", "gemini")
+        reconnects += 1
+        if getattr(client, "live_input", None) is not None:
+            client.live_input.pause()
+        client._live.close()
+        client._live = connect("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent", additional_headers={"x-goog-api-key": client.endpoint.api_key}, open_timeout=10, close_timeout=2, max_size=16 * 1024 * 1024)
+        resumed = {**setup, "sessionResumption": {"handle": handle}}
+        client._live.send(json.dumps({"setup": resumed}))
 
     def receive():
         while time.monotonic() < deadline:
             if cancel is not None and cancel.is_set():
                 return None
+            if getattr(client, "live_input", None) is not None:
+                client.live_input.pump(client._live)
             try:
                 packet = json.loads(client._live.recv(timeout=0.5))
             except TimeoutError:
                 continue
+            except ConnectionClosed:
+                reconnect()
+                continue
+            resumption = packet.get("sessionResumptionUpdate") or {}
+            if resumption.get("resumable") and resumption.get("newHandle"):
+                client._live_resume_handle = resumption["newHandle"]
+            if packet.get("goAway"):
+                reconnect()
+                continue
+            if "setupComplete" in packet and reconnects and getattr(client, "live_input", None) is not None:
+                client.live_input.ready()
             if packet.get("error"):
                 error = packet["error"]
                 raise ProviderError(int(error.get("code") or 400), str(error.get("message") or "Live API error"), "gemini")
@@ -171,8 +209,11 @@ def gemini_live_turn(client, messages, tools, on_reasoning, on_content, cancel, 
 
     try:
         if client._live is None:
+            client._live_resume_handle = ""
+            client._live_completed_calls = set()
             client._live = connect("wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent", additional_headers={"x-goog-api-key": client.endpoint.api_key}, open_timeout=15, close_timeout=2, max_size=16 * 1024 * 1024)
-            setup = {"model": f"models/{client.endpoint.model}", "generationConfig": {"responseModalities": ["AUDIO"], "maxOutputTokens": int(max_tokens or settings.max_output_tokens())}, "outputAudioTranscription": {}}
+            setup = {"model": f"models/{client.endpoint.model}", "generationConfig": {"responseModalities": ["AUDIO"], "maxOutputTokens": int(max_tokens or settings.max_output_tokens())}, "outputAudioTranscription": {}, "inputAudioTranscription": {}, "sessionResumption": {}, "contextWindowCompression": {"slidingWindow": {}}}
+            client._live_setup = setup
             system = "\n\n".join(p["text"] for m in messages if m.get("role") in ("system", "developer") for p in _content_parts(m.get("content"), google=True) if "text" in p)
             if system:
                 setup["systemInstruction"] = {"parts": [{"text": system}]}
@@ -186,13 +227,23 @@ def gemini_live_turn(client, messages, tools, on_reasoning, on_content, cancel, 
                     return turn
                 if "setupComplete" in packet:
                     break
-            client._live.send(json.dumps({"clientContent": {"turns": _google_turns(messages), "turnComplete": True}}))
+            history = _google_turns(messages)
+            if getattr(client, "live_input", None) is not None:
+                if history:
+                    client._live.send(json.dumps({"clientContent": {"turns": history, "turnComplete": False}}))
+                client.live_input.ready()
+            else:
+                client._live.send(json.dumps({"clientContent": {"turns": history, "turnComplete": True}}))
         else:
+            setup = getattr(client, "_live_setup", None)
             pending = getattr(client, "_live_pending", {})
             responses = [{"id": m["tool_call_id"], "name": pending[m["tool_call_id"]], "response": {"result": str(m.get("content") or "")}} for m in messages if m.get("role") == "tool" and m.get("tool_call_id") in pending]
             if {r["id"] for r in responses} != set(pending):
                 raise ValueError("Gemini Live tool results were missing. Retry this turn.")
             client._live_pending = {}
+            completed = getattr(client, "_live_completed_calls", set())
+            completed.update(pending)
+            client._live_completed_calls = completed
             client._live.send(json.dumps({"toolResponse": {"functionResponses": responses}}))
         while True:
             packet = receive()
@@ -202,16 +253,27 @@ def gemini_live_turn(client, messages, tools, on_reasoning, on_content, cancel, 
             usage = packet.get("usageMetadata") or {}
             if usage:
                 turn.usage = {"prompt": int(usage.get("promptTokenCount") or 0), "completion": int(usage.get("responseTokenCount") or 0), "total": int(usage.get("totalTokenCount") or 0)}
+            server = packet.get("serverContent") or {}
+            transcript = (server.get("inputTranscription") or {}).get("text") or ""
+            if transcript and getattr(client, "live_input", None) is not None:
+                client.live_input.transcript(transcript)
             calls = (packet.get("toolCall") or {}).get("functionCalls") or []
             if calls:
+                if any(c["id"] in getattr(client, "_live_completed_calls", set()) for c in calls):
+                    raise ProviderError(409, "Live session repeated an already completed tool call. Stopped to avoid duplicate actions.", "gemini")
                 turn.tool_calls = [ToolCall(c["id"], c["name"], json.dumps(c.get("args") or {})) for c in calls]
                 client._live_pending = {c.id: c.name for c in turn.tool_calls}
                 turn.finish_reason = "tool_calls"
                 return turn
-            server = packet.get("serverContent") or {}
+            if server.get("interrupted"):
+                audio({"kind": "interrupted"})
+                turn.content, turn.reasoning = "", ""
             text = (server.get("outputTranscription") or {}).get("text") or ""
             transcribed = bool(text)
             for part in (server.get("modelTurn") or {}).get("parts") or []:
+                inline = part.get("inlineData") or {}
+                if inline.get("data") and str(inline.get("mimeType", "")).startswith("audio/pcm"):
+                    audio({"kind": "pcm", "data": inline["data"], "mime_type": inline.get("mimeType", "audio/pcm;rate=24000")})
                 if part.get("thought"):
                     thought = part.get("text", "")
                     turn.reasoning += thought
@@ -233,6 +295,6 @@ def gemini_live_turn(client, messages, tools, on_reasoning, on_content, cancel, 
         raise ProviderError(400, f"Gemini Live connection closed: {detail}", "gemini") from None
     finally:
         # Keep the socket only while the existing tool loop executes its calls.
-        if not turn.tool_calls and client._live is not None:
+        if not turn.tool_calls and not getattr(client, "live_keep_open", False) and client._live is not None:
             client._live.close()
             client._live = None

@@ -186,6 +186,7 @@ class ModelTurn:
     finish_reason: str = ""
     usage: dict[str, int] = field(default_factory=dict)
     provider_blocks: list[dict[str, Any]] = field(default_factory=list)
+    audio: list[dict[str, Any]] = field(default_factory=list)
 
 
 _TEXT_TOOL_PATTERNS = (
@@ -371,16 +372,18 @@ class ChatClient:
     """Streams one model turn and reports reasoning/text deltas as they arrive."""
 
     def __init__(self, endpoint: Endpoint, *, reasoning_effort: str = "") -> None:
+        from agent.cloud_providers import cloud_headers
         self.endpoint = endpoint
         # "none" turns thinking off (LM Studio honors it for Gemma/Qwen);
         # low/medium/high set its depth. Dropped automatically if rejected.
         self.reasoning_effort = reasoning_effort
         self._live = None
+        self.on_audio = None
         timeout = settings.request_timeout_seconds()
         self._http = httpx.Client(
             base_url=endpoint.base_url,
             timeout=httpx.Timeout(timeout, connect=15.0),
-            headers=({"x-api-key": endpoint.api_key, "anthropic-version": "2023-06-01"} if endpoint.provider == "anthropic" else {"Authorization": f"Bearer {endpoint.api_key or 'not-needed'}"}) | {"Content-Type": "application/json"},
+            headers=(cloud_headers("anthropic", endpoint.api_key) if endpoint.provider == "anthropic" else {"Authorization": f"Bearer {endpoint.api_key or 'not-needed'}"}) | {"Content-Type": "application/json"},
         )
 
     def close(self) -> None:
@@ -403,6 +406,25 @@ class ChatClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> ModelTurn:
+        prefetched = getattr(self, "_prefetched_turn", None)
+        if prefetched is not None:
+            self._prefetched_turn = None
+            from agent.live_voice import schema_fingerprint
+            if schema_fingerprint(tools or []) != self._prefetched_schema:
+                raise ProviderError(409, "Voice tools changed during capture. Please speak again.", "gemini")
+            if on_content and prefetched.content:
+                on_content(prefetched.content)
+            if on_reasoning and prefetched.reasoning:
+                on_reasoning(prefetched.reasoning)
+            if self.on_audio:
+                for packet in prefetched.audio:
+                    self.on_audio(packet)
+            self.live_input = None
+            self.live_keep_open = False
+            if not prefetched.tool_calls and self._live is not None:
+                self._live.close()
+                self._live = None
+            return prefetched
         if not self.endpoint.local and not self.endpoint.api_key.strip():
             raise ProviderError(401, "No API key saved. Add it in Settings → Models.", self.endpoint.provider)
         if not self.endpoint.local and self.endpoint.model in ("", "default"):

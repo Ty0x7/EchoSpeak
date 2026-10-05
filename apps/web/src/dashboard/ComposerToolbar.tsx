@@ -35,6 +35,8 @@ type ComposerToolbarProps = {
   toggleVoiceMode(): void;
   wakeWordEnabled: boolean;
   toggleWakeWord(): void;
+  nativeLiveVoice: boolean;
+  toggleNativeLiveVoice(): void;
 };
 
 export function ComposerToolbar({ listening, voicePhase, voiceNotice, voiceInputLevel, startMic, stopMic,
@@ -42,7 +44,7 @@ export function ComposerToolbar({ listening, voicePhase, voiceNotice, voiceInput
   setProviderModels, switchingProvider, lmStudioOnly, providerInfo, modelPickerValue,
   modelPickerOptions, showModelPicker, reasoningEffort, setReasoningEffort, thinkingEnabled,
   setThinkingEnabled, voiceReadAloud, toggleReadAloud, voiceConversationMode, toggleVoiceMode,
-  wakeWordEnabled, toggleWakeWord }: ComposerToolbarProps) {
+  wakeWordEnabled, toggleWakeWord, nativeLiveVoice, toggleNativeLiveVoice }: ComposerToolbarProps) {
   const [toolbarSize, setToolbarSize] = useState<"full" | "icons" | "compact" | "mini">("full");
   const [toolbarMenuOpen, setToolbarMenuOpen] = useState(false);
   const toolbarObserverRef = useRef<ResizeObserver | null>(null);
@@ -103,7 +105,7 @@ export function ComposerToolbar({ listening, voicePhase, voiceNotice, voiceInput
                               : voicePhase === "listening"
                               ? "Listening"
                               : voicePhase === "transcribing"
-                              ? "Local transcript"
+                              ? (nativeLiveVoice ? "Finishing Live input" : "Local transcript")
                               : voicePhase === "speaking"
                               ? "Speaking"
                               : voicePhase === "error"
@@ -211,6 +213,9 @@ export function ComposerToolbar({ listening, voicePhase, voiceNotice, voiceInput
                       </div>
                       </div>
                       <div className="composer-mode-controls" role="group" aria-label="Thinking and voice controls">
+                      <button className={`composer-mode-button ${nativeLiveVoice ? "active" : ""}`} type="button" aria-label="Native Gemini Live microphone" aria-pressed={nativeLiveVoice}
+                        title="Live mic sends speech to Google using this chat’s Gemini Live model. API charges may apply. Turn off for local transcription."
+                        onClick={toggleNativeLiveVoice}>Live mic</button>
                       <button
                         className={`composer-mode-button ${thinkingEnabled ? "active" : ""}`}
                         type="button"

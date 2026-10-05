@@ -25,11 +25,21 @@ class ResearchNotebook:
                 inspected INTEGER, updated REAL, PRIMARY KEY(session,id))""")
             db.execute("""CREATE TABLE IF NOT EXISTS notes (
                 session TEXT PRIMARY KEY, text TEXT, updated REAL)""")
+        self.prune()
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=10)
         db.row_factory = sqlite3.Row
+        db.execute("PRAGMA secure_delete=ON")
         return db
+
+    def prune(self) -> int:
+        """Delete expired evidence even if no further research is submitted."""
+        cutoff = time.time() - TTL
+        with self.connect() as db:
+            removed = db.execute("DELETE FROM sources WHERE updated <= ?", (cutoff,)).rowcount
+            removed += db.execute("DELETE FROM notes WHERE updated <= ?", (cutoff,)).rowcount
+        return removed
 
     def retain(self, session: str, *, url: str, title: str, text: str,
                inspected: bool = False, metadata: dict | None = None) -> str:
@@ -53,7 +63,8 @@ class ResearchNotebook:
                 (session, session, MAX_SOURCES))
         return source_id
 
-    def sources(self, session: str, query: str = "") -> list[dict]:
+    def sources(self, session: str, query: str = "", limit: int = 30) -> list[dict]:
+        self.prune()
         with self.connect() as db:
             rows = db.execute("SELECT * FROM sources WHERE session=? AND updated>? ORDER BY updated DESC",
                               (session, time.time() - TTL)).fetchall()
@@ -68,10 +79,12 @@ class ResearchNotebook:
             item["excerpt"] = item.pop("text")[:600]
             item.pop("session")
             item.pop("metadata")
+            item["expires_at"] = item["updated"] + TTL
             scored.append((score, item))
-        return [item for _, item in sorted(scored, key=lambda row: row[0], reverse=True)[:30]]
+        return [item for _, item in sorted(scored, key=lambda row: row[0], reverse=True)[:max(1, min(limit, MAX_SOURCES))]]
 
     def read(self, session: str, source_id: str, offset: int = 0, limit: int = 12000) -> dict:
+        self.prune()
         with self.connect() as db:
             row = db.execute("SELECT * FROM sources WHERE session=? AND id=? AND updated>?",
                              (session, source_id, time.time() - TTL)).fetchone()
@@ -84,9 +97,11 @@ class ResearchNotebook:
                     next_offset=offset + limit if offset + limit < len(full) else None)
         item["metadata"] = json.loads(item["metadata"])
         item.pop("session")
+        item["expires_at"] = item["updated"] + TTL
         return item
 
     def notes(self, session: str, text: str | None = None) -> str:
+        self.prune()
         with self.connect() as db:
             if text is not None:
                 from agent.lean.policy import redact_secrets

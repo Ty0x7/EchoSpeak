@@ -414,6 +414,7 @@ class LeanTurn:
 
     # ── model ───────────────────────────────────────────────────────────
     def _call_model(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], step: int) -> ModelTurn:
+        self.client.on_audio = lambda packet: self.emit({"type": "voice_audio", **packet})
         def on_reasoning(text: str) -> None:
             self._append_text("thinking", step, text)
             self.emit({"type": "reasoning_delta", "step": step, "text": text})

@@ -38,6 +38,7 @@ type VoiceCallbacks = {
   onLevel?: (level: number) => void;
   onFinalTranscript?: (transcript: VoiceTranscript) => void;
   onFailure?: (error: Error) => void;
+  onSpeechStart?: () => void;
 };
 
 const apiError = async (response: Response, fallback: string): Promise<Error> => {

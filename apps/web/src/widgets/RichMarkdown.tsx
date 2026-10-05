@@ -6,7 +6,7 @@ import remarkMath from "remark-math";
 import "katex/dist/katex.min.css";
 import { CodeBlock } from "./CodeBlock";
 import { DataTable, textOf } from "./DataTable";
-import { ExternalLink } from "./env";
+import { ResearchLink } from "./env";
 import { SafeImage } from "./SafeImage";
 import { MermaidDiagram } from "./Mermaid";
 import { FENCED_WIDGETS, widgetFromFence } from "./validate";
@@ -28,7 +28,7 @@ export const RichMarkdown = React.memo(function RichMarkdown({ text, streaming =
         remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: "ignore", output: "html" }]]}
         components={{
-          a: ({ node: _node, href, children }) => <ExternalLink href={String(href || "")}>{children}</ExternalLink>,
+          a: ({ node: _node, href, children }) => <ResearchLink href={String(href || "")}>{children}</ResearchLink>,
           img: ({ node: _node, src, alt }) => <SafeImage src={typeof src === "string" ? src : undefined} alt={alt} />,
           table: ({ node: _node, children }) => <DataTable>{children}</DataTable>,
           pre: ({ node: _node, children }) => <>{children}</>,

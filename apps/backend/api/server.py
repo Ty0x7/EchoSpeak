@@ -107,6 +107,10 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("SOUL.md default refresh failed", exc_info=True)
     threading.Thread(target=_autoconfigure_local_provider, name="local-model-autoconfig", daemon=True).start()
+    from agent.query_journal import get_query_journal
+    get_query_journal()  # Mark interrupted transport logs before any new run can claim an ID.
+    from agent.generation_service import recover_pending_jobs
+    threading.Thread(target=recover_pending_jobs, name="creation-recovery", daemon=True).start()
     build_id = (
         os.environ.get("ECHOSPEAK_BUILD_ID")
         or os.environ.get("ECHOSPEAK_DESKTOP_INSTANCE_ID")
@@ -214,7 +218,25 @@ async def lifespan(app: FastAPI):
         gateway.start_spotify_monitor()
         logger.info("Spotify playback monitor started")
 
-    yield
+    async def prune_research():
+        from agent.research_notebook import ResearchNotebook
+        while True:
+            try:
+                await asyncio.to_thread(lambda: ResearchNotebook().prune())
+                await asyncio.to_thread(get_query_journal().cleanup)
+            except Exception:
+                logger.warning("Research retention cleanup failed; will retry")
+            await asyncio.sleep(3600)
+
+    research_cleanup = asyncio.create_task(prune_research())
+    try:
+        yield
+    finally:
+        research_cleanup.cancel()
+        try:
+            await research_cleanup
+        except asyncio.CancelledError:
+            pass
     try:
         from agent.lean.terminal import stop_all_processes
 
@@ -289,9 +311,9 @@ app = FastAPI(
 )
 
 
-from api.routes import creations, onboarding
+from api.routes import creations, onboarding, live_voice
 
-for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, media, media_runtime, creations, onboarding):
+for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, media, media_runtime, creations, onboarding, live_voice):
     app.include_router(_routes.router)
 # Ensure domain ToolRegistry entries load independently of agent import order.
 for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):

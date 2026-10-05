@@ -1,6 +1,7 @@
 // Moved out of index.tsx (10.0 split). Kept verbatim.
 import { create } from "zustand";
 import { localVoicePlayback } from "../voiceTransport";
+import { liveAudioPlayback } from "../liveVoiceTransport";
 import { type AppState, type AvatarConfig, type ProviderInfo, type ProviderListItem } from "./types";
 
 export const cloudProviders = ["openai", "gemini", "anthropic", "xai"];
@@ -66,7 +67,7 @@ export const useAppStore = create<AppState>((set) => ({
   listening: false,
   speaking: false,
   speechEnabled: true,
-  setSpeechEnabled: (v) => set({ speechEnabled: v }),
+  setSpeechEnabled: (v) => { if (!v) stopTts(); set({ speechEnabled: v }); },
   speechBeat: 0,
   addMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
   setStreaming: (v) => set({ streaming: v }),
@@ -112,6 +113,7 @@ export const sanitizeForTTS = (input: string) => {
 
 export const stopTts = () => {
   localVoicePlayback.stop();
+  liveAudioPlayback.stop();
   useAppStore.getState().setSpeaking(false);
 };
 

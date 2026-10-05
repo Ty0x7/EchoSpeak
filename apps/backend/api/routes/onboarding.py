@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from config import DATA_DIR
 
@@ -40,3 +40,35 @@ def progress(request: Progress):
         temp.write_text(json.dumps({**request.model_dump(), "updated_at": time.time(), "version": 1}), encoding="utf-8")
         os.replace(temp, STATE_PATH)
     return request.model_dump()
+
+
+@router.get("/local-models")
+def local_models():
+    from agent.local_model_setup import catalog
+    try:
+        return catalog()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class ModelDownload(BaseModel):
+    provider: Literal["lmstudio", "ollama"]
+    model: str = Field(min_length=1, max_length=150)
+
+
+@router.post("/local-models/jobs")
+def download_model(request: ModelDownload):
+    from agent.local_model_setup import start
+    try:
+        return start(request.provider, request.model)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.get("/local-models/jobs/{job_id}")
+def download_status(job_id: str):
+    from agent.local_model_setup import get_job
+    try:
+        return get_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc

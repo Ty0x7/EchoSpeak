@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { stopTts, sanitizeForTTS, useAppStore } from "../app/runtime";
 import { LocalVoiceInput, WakeListener, localVoicePlayback } from "../voiceTransport";
 import type { SpeechScope, VoiceTranscript, VoiceTransportPhase } from "../voiceTransport";
+import { NativeLiveInput, liveAudioPlayback } from "../liveVoiceTransport";
 
 /** Mic capture (Ctrl+M), the "Hey Echo" wake listener, read-aloud and voice mode. */
 export function useVoice({
@@ -15,6 +16,7 @@ export function useVoice({
   setListening,
   speechEnabled,
   onTranscript,
+  onInterrupt,
 }: {
   apiBase: string;
   activeThreadId: string;
@@ -26,6 +28,7 @@ export function useVoice({
   setListening: (value: boolean) => void;
   speechEnabled: boolean;
   onTranscript: (transcript: VoiceTranscript) => Promise<void>;
+  onInterrupt?: () => void;
 }) {
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
@@ -40,8 +43,19 @@ export function useVoice({
   const [voicePhase, setVoicePhase] = useState<VoiceTransportPhase>("idle");
   const [voiceNotice, setVoiceNotice] = useState("");
   const [voiceInputLevel, setVoiceInputLevel] = useState(0);
-  const voiceInputRef = useRef<LocalVoiceInput | null>(null);
+  const [nativeLiveVoice, setNativeLiveVoice] = useState(() => window.localStorage.getItem("echospeak.voice.native_live") === "true");
+  const voiceInputRef = useRef<LocalVoiceInput | NativeLiveInput | null>(null);
   if (voiceInputRef.current == null) voiceInputRef.current = new LocalVoiceInput();
+  const toggleNativeLiveVoice = () => {
+    void voiceInputRef.current?.stop(false);
+    stopTts();
+    setListening(false);
+    setVoicePhase("idle");
+    setNativeLiveVoice(value => {
+      window.localStorage.setItem("echospeak.voice.native_live", String(!value));
+      return !value;
+    });
+  };
 
   useEffect(() => {
     window.localStorage.setItem("echospeak.voice.read_aloud", String(voiceReadAloud));
@@ -88,6 +102,7 @@ export function useVoice({
   const toggleReadAloud = () => {
     const enabled = !voiceReadAloud;
     setVoiceReadAloud(enabled);
+    if (enabled) void liveAudioPlayback.unlock().catch(() => undefined);
     if (!enabled) stopTts();
   };
   const toggleVoiceMode = () => {
@@ -141,14 +156,19 @@ export function useVoice({
     return () => listener.stop();
   }, [wakeIdle, apiBase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const start = async () => {
+  const start = async (background = false) => {
     const sessionId = String(activeThreadIdRef.current || "").trim();
     if (!sessionId || !voiceInputRef.current) {
       setVoicePhase("error");
       setVoiceNotice("Create or select a Session before using Voice.");
       return;
     }
-    stopTts();
+    if (voiceInputRef.current.active) return;
+    if (!background) {
+      stopTts();
+      if (nativeLiveVoice) onInterrupt?.();
+    }
+    voiceInputRef.current = nativeLiveVoice ? new NativeLiveInput() : new LocalVoiceInput();
     setVoiceNotice("");
     try {
       await voiceInputRef.current.start(
@@ -164,6 +184,9 @@ export function useVoice({
             setListening(phase === "listening" || phase === "requesting_permission");
           },
           onLevel: setVoiceInputLevel,
+          onSpeechStart: () => {
+            if (nativeLiveVoice) { stopTts(); onInterrupt?.(); }
+          },
           onFinalTranscript: (transcript) => {
             setListening(false);
             setVoiceInputLevel(0);
@@ -235,6 +258,7 @@ export function useVoice({
   return {
     voicePhase, setVoicePhase, voiceNotice, setVoiceNotice, voiceInputLevel,
     voiceReadAloud, voiceConversationMode, wakeWordEnabled,
+    nativeLiveVoice, toggleNativeLiveVoice,
     toggleReadAloud, toggleVoiceMode, toggleWakeWord, start, stop, speakLocalText,
   };
 }

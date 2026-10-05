@@ -484,6 +484,8 @@ class SettingsTestRequest(BaseModel):
     target: str = Field(..., description="openai | gemini | anthropic | xai | local | ollama | openai_compat")
     base_url: Optional[str] = None
     api_key: Optional[str] = None
+    model: str = Field(default="", max_length=200)
+    check: str = Field(default="catalog", pattern="^(catalog|generation)$")
 
 
 class SettingsTestResponse(BaseModel):
@@ -491,6 +493,9 @@ class SettingsTestResponse(BaseModel):
     target: str
     message: str
     latency_ms: Optional[float] = None
+    check: str = "catalog"
+    model: str = ""
+    error_code: str = ""
 
 
 def _settings_response() -> "SettingsResponse":
@@ -532,7 +537,16 @@ def settings_test(request: SettingsTestRequest):
 
     started = time.perf_counter()
     try:
+        if target in {"local", "ollama", "openai_compat"} and request.check == "generation":
+            from agent.local_model_setup import test_response
+            provider = "ollama" if target == "ollama" else "lmstudio"
+            result = test_response(provider, request.model, base_url or "")
+            return SettingsTestResponse(target=target, latency_ms=(time.perf_counter() - started) * 1000, **result)
         if target in CLOUD_PROVIDERS:
+            if request.check == "generation":
+                from agent.cloud_providers import test_cloud_model
+                result = test_cloud_model(target, request.model, api_key)
+                return SettingsTestResponse(target=target, latency_ms=(time.perf_counter() - started) * 1000, **result)
             result = list_cloud_models(target, api_key)
             return SettingsTestResponse(ok=result["reachable"], target=target, message=result["message"], latency_ms=(time.perf_counter() - started) * 1000)
 
@@ -541,7 +555,7 @@ def settings_test(request: SettingsTestRequest):
             url0 = _normalize_base_url(url0)
             if not url0:
                 return SettingsTestResponse(ok=False, target=target, message="Missing local base URL.")
-            url = f"{url0}/v1/models"
+            url = f"{url0.removesuffix('/v1')}/v1/models"
             code, data = _http_get_json(url, timeout_s=5.0)
             ok = 200 <= code < 300
             ms = (time.perf_counter() - started) * 1000.0

@@ -1,6 +1,7 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LeanMessageData, LeanSegment } from "../lean/types";
 import { ArtifactPanel } from "./ArtifactPanel";
+import { ResearchPanel } from "./ResearchPanel";
 
 /** One tool run shown in the Activity tab. */
 export type ActivityItem = {
@@ -57,15 +58,15 @@ function ActivityRow({ item, defaultOpen }: { item: ActivityItem; defaultOpen: b
   );
 }
 
-export function ActivityView({ items }: { items: ActivityItem[] }) {
+export function ActivityView({ items, active = true }: { items: ActivityItem[]; active?: boolean }) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const listRef = useRef<HTMLDivElement>(null);
   const shown = useMemo(() => (filter === "all" ? items : items.filter((i) => activityKind(i.name) === filter)), [items, filter]);
   const running = items.some((i) => i.status === "running");
   useLayoutEffect(() => {
     const el = listRef.current;
-    if (el && running) el.scrollTop = el.scrollHeight;
-  }, [items, running]);
+    if (el && running && active) el.scrollTop = el.scrollHeight;
+  }, [items, running, active]);
   const count = (f: ActivityFilter) => (f === "all" ? items.length : items.filter((i) => activityKind(i.name) === f).length);
   return (
     <div className="rp-activity">
@@ -119,14 +120,15 @@ export function clampPanelWidth(width: number, room: number): number {
   return Math.round(Math.min(max, Math.max(RIGHT_PANEL_MIN, width)));
 }
 
-export type RightTab = "artifact" | "activity";
+export type RightTab = "artifact" | "activity" | "research";
 
 /**
- * The right sidebar: the open artifact and the chat's activity (commands, file
- * edits, searches). Resizable from its left edge; the width is remembered.
+ * One right sidebar for artifacts, research and activity. Its views share
+ * tabs, expansion, close controls and remembered width.
  */
 export function RightPanel({
   apiBase,
+  sessionId,
   tab,
   onTab,
   artifact,
@@ -138,6 +140,7 @@ export function RightPanel({
   onClose,
 }: {
   apiBase: string;
+  sessionId: string;
   tab: RightTab;
   onTab(tab: RightTab): void;
   artifact: { id: string; version?: number } | null;
@@ -150,17 +153,33 @@ export function RightPanel({
   onClose(): void;
 }) {
   const [dragging, setDragging] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [visitedArtifactId, setVisitedArtifactId] = useState("");
+  const panelId = useId();
   const startRef = useRef({ x: 0, width });
   const active: RightTab = tab === "artifact" && !artifact ? "activity" : tab;
   const running = activity.filter((a) => a.status === "running").length;
+  useEffect(() => {
+    if (active === "artifact" && artifact) setVisitedArtifactId(artifact.id);
+  }, [active, artifact?.id]);
   useEffect(() => {
     if (!dragging) return;
     document.body.classList.add("rp-resizing");
     return () => document.body.classList.remove("rp-resizing");
   }, [dragging]);
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (expanded) { event.preventDefault(); setExpanded(false); }
+      else if (overlay) { event.preventDefault(); onClose(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [expanded, overlay, onClose]);
+  const tabs: RightTab[] = artifact ? ["artifact", "activity", "research"] : ["activity", "research"];
   return (
-    <aside className={`rp${overlay ? " is-overlay" : ""}`} aria-label="Side panel" data-dragging={dragging ? "true" : undefined}>
-      {!overlay ? (
+    <aside className={`rp${overlay ? " is-overlay" : ""}${expanded ? " is-expanded" : ""}`} aria-label="Side panel" data-dragging={dragging ? "true" : undefined}>
+      {!overlay && !expanded ? (
         <div
           className="rp-resize"
           role="separator"
@@ -198,27 +217,46 @@ export function RightPanel({
           <span aria-hidden />
         </div>
       ) : null}
-      <div className="rp-tabs" role="tablist" aria-label="Side panel">
+      <div className="rp-tabs" role="tablist" aria-label="Side panel" onKeyDown={event => {
+        const current = (event.target as HTMLElement).closest<HTMLButtonElement>("[role=tab]");
+        if (!current) return;
+        const index = tabs.indexOf(current.dataset.tab as RightTab);
+        const next = event.key === "ArrowRight" ? (index + 1) % tabs.length
+          : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length
+          : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+        if (next < 0) return;
+        event.preventDefault();
+        onTab(tabs[next]);
+        event.currentTarget.querySelector<HTMLButtonElement>(`[data-tab="${tabs[next]}"]`)?.focus();
+      }}>
         {artifact ? (
-          <button type="button" role="tab" aria-selected={active === "artifact"} className={active === "artifact" ? "is-on" : ""} onClick={() => onTab("artifact")}>
+          <button type="button" role="tab" data-tab="artifact" id={`${panelId}-artifact-tab`} aria-controls={`${panelId}-artifact`} tabIndex={active === "artifact" ? 0 : -1} aria-selected={active === "artifact"} className={active === "artifact" ? "is-on" : ""} onClick={() => onTab("artifact")}>
             Artifact
           </button>
         ) : null}
-        <button type="button" role="tab" aria-selected={active === "activity"} className={active === "activity" ? "is-on" : ""} onClick={() => onTab("activity")}>
+        <button type="button" role="tab" data-tab="activity" id={`${panelId}-activity-tab`} aria-controls={`${panelId}-activity`} tabIndex={active === "activity" ? 0 : -1} aria-selected={active === "activity"} className={active === "activity" ? "is-on" : ""} onClick={() => onTab("activity")}>
           Activity
           {running ? <span className="rp-live" aria-label={`${running} running`} /> : activity.length ? <small>{activity.length}</small> : null}
         </button>
+        <button type="button" role="tab" data-tab="research" id={`${panelId}-research-tab`} aria-controls={`${panelId}-research`} tabIndex={active === "research" ? 0 : -1} aria-selected={active === "research"} className={active === "research" ? "is-on" : ""} onClick={() => onTab("research")}>Research</button>
         <span className="rp-spacer" />
+        {!overlay && <button type="button" className="rp-close" onClick={() => setExpanded(value => !value)} aria-label={expanded ? "Restore side panel" : "Expand side panel"} aria-pressed={expanded} title={expanded ? "Restore panel width" : "Expand panel"}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{expanded ? <path d="M8 3v5H3M16 3v5h5M8 21v-5H3M16 21v-5h5" /> : <path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5" />}</svg>
+        </button>}
         <button type="button" className="rp-close" onClick={onClose} aria-label="Close side panel" title="Close">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6 6 18" /></svg>
         </button>
       </div>
       <div className="rp-body">
-        {active === "artifact" && artifact ? (
-          <ArtifactPanel embedded apiBase={apiBase} artifactId={artifact.id} version={artifact.version} onClose={onClose} />
-        ) : (
-          <ActivityView items={activity} />
-        )}
+        {artifact && <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-artifact`} aria-labelledby={`${panelId}-artifact-tab`} hidden={active !== "artifact"}>
+          {(active === "artifact" || visitedArtifactId === artifact.id) && <ArtifactPanel key={artifact.id} embedded apiBase={apiBase} artifactId={artifact.id} version={artifact.version} onClose={onClose} />}
+        </div>}
+        <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-research`} aria-labelledby={`${panelId}-research-tab`} hidden={active !== "research"}>
+          <ResearchPanel key={sessionId} apiBase={apiBase} sessionId={sessionId} active={active === "research"} />
+        </div>
+        <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-activity`} aria-labelledby={`${panelId}-activity-tab`} hidden={active !== "activity"}>
+          <ActivityView key={sessionId} items={activity} active={active === "activity"} />
+        </div>
       </div>
     </aside>
   );

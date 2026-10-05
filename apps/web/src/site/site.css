@@ -478,8 +478,58 @@ body { margin: 0; background: #050505; }
 .site-home .ways-screen-inner{min-height:440px}.site-home .ways-grid{grid-template-columns:minmax(0,.75fr) minmax(0,1.25fr)}
 .site-home .last-pair .bring{border-radius:0;background:#ededed}.site-home .marquee-set span{border:0;background:none;padding:12px 22px}
 @media(min-width:761px) and (max-width:1100px){.site-home .shell{width:calc(100% - 96px)}.site-home .hero{gap:32px}.site-home .hero-face{order:0;height:300px}.site-home .hero h1{font-size:clamp(40px,5.5vw,58px)}.site-home .hero-actions{gap:10px}.site-home .hero-actions .btn{padding-inline:15px}.site-home .ways-grid{grid-template-columns:1fr}.site-home .ways-tabs{grid-template-columns:repeat(3,minmax(0,1fr))}.site-home .snap-hero>.hero{grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);padding:128px 0 100px}}
-@media(max-width:760px){.site-home .shell{width:calc(100% - 48px)}.site-home .hero{grid-template-columns:1fr;gap:24px;text-align:left}.site-home .hero-face{order:-1;height:230px;width:100%}.site-home .snap-hero>.hero{padding:104px 0 94px}.site-home .hero h1{font-size:clamp(40px,8vw,58px)}.site-home .snap:not(.snap-hero){min-height:0;padding:76px 0}.site-home .snap-last{padding-bottom:0}.site-home .ways-grid{grid-template-columns:1fr}.site-home .ways-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.site-home .last-pair{gap:44px}.site-home .hero-explore{bottom:26px}.site-home .hero-values{font-size:11px}.site-home .ways-screen-inner{min-height:0}.site-home .screen-body{min-height:340px}}
-@media(max-width:380px){.site-home .shell{width:calc(100% - 36px)}.site-home .hero-eyebrow{font-size:10px}.site-home .ways-tabs button{font-size:12px;padding:11px 8px;gap:6px}}
+/* Phone layouts keep the focus on the copy and product previews. */
+@media (max-width: 760px) {
+  .site-home .shell, .site-home .site-footer { width: calc(100% - 40px); }
+  .site-home .snap-hero { min-height: 0; }
+  .site-home .snap-hero > .hero {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+    min-height: 0;
+    gap: 28px;
+    padding: 112px 0 40px;
+    text-align: left;
+  }
+  .site-home .hero-face, .site-home .bring-mark { display: none; }
+  .site-home .hero-copy { min-width: 0; max-width: 560px; }
+  .site-home .hero h1 { font-size: clamp(40px, 8vw, 56px); line-height: 1.06; }
+  .site-home .hero-eyebrow { font-size: 11px; line-height: 1.5; gap: 8px; }
+  .site-home .hero-eyebrow > span { flex-shrink: 0; }
+  .site-home .hero-lede { margin-top: 22px; font-size: 16px; line-height: 1.65; }
+  .site-home .hero-actions { gap: 10px; margin-top: 26px; }
+  .site-home .hero-values { gap: 10px 16px; margin-top: 22px; font-size: 11px; line-height: 1.5; }
+  .site-home .hero-explore { position: static; justify-self: start; min-height: 44px; padding: 10px 0; }
+  .site-home .snap:not(.snap-hero) { min-height: 0; padding: 56px 0; }
+  .site-home .snap-last { padding-bottom: 0; }
+  .site-home .section-head h2 { font-size: clamp(34px, 7.5vw, 48px); line-height: 1.08; }
+  .site-home .pillar { padding: 20px 0; }
+  .site-home .ways-grid { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .site-home .ways-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .site-home .ways-tabs button { min-height: 48px; gap: 8px; padding: 12px 10px; font-size: 12px; }
+  .site-home .ways-tabs button > svg { flex-shrink: 0; }
+  .site-home .ways-screen { min-width: 0; }
+  .site-home .ways-screen-inner { min-height: 0; border-radius: 18px; }
+  .site-home .screen-body { min-height: 300px; padding: 20px 16px 14px; }
+  .site-home .cm-body { padding-left: 0; font-size: 14px; overflow-wrap: anywhere; }
+  .site-home .cm-you { max-width: 92%; font-size: 13px; }
+  .site-home .ways-caption { align-items: flex-start; font-size: 12px; }
+  .site-home .bento-tile, .site-home .bento-card { min-width: 0; }
+  .site-home .bento-ask { font-size: 12px; border-radius: 14px; line-height: 1.5; }
+  .site-home .bento-you { flex-shrink: 0; }
+  .site-home .last-pair { gap: 36px; }
+  .site-home .last-pair .bring { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 28px 22px; }
+  .site-home .last-pair .bring h2 { font-size: clamp(36px, 8vw, 52px); }
+  .site-home .bring-copy > p { font-size: 16px; }
+  .site-home .bring-actions { gap: 16px 22px; }
+  .site-home .bring-note { line-height: 1.65; }
+  .site-home .text-link, .site-home .site-footer > div a { min-height: 44px; display: inline-flex; align-items: center; }
+}
+@media (max-width: 380px) {
+  .site-home .shell, .site-home .site-footer { width: calc(100% - 32px); }
+  .site-home .hero-eyebrow { font-size: 10px; }
+  .site-home .ways-tabs button { font-size: 11px; padding-inline: 8px; gap: 6px; }
+  .site-home .last-pair .bring { padding-inline: 18px; }
+}
 @media(max-height:760px) and (min-width:761px){.site-home .snap:not(.snap-hero){min-height:0;padding:90px 0 70px}.site-home .hero{min-height:760px}}
 
 .site-home .bento-card{filter:grayscale(1)}
