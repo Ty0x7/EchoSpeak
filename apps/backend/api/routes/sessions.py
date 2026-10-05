@@ -579,6 +579,8 @@ async def delete_thread(thread_id: str):
     deleted = tm.delete_thread(thread_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Thread {thread_id} not found")
+    from agent.research_notebook import ResearchNotebook
+    ResearchNotebook().clear(thread_id)
     return {"deleted": True, "thread_id": thread_id}
 
 

@@ -1,4 +1,5 @@
 import React from "react";
+import { CreationCard } from "../creations/CreationCard";
 import { Comparison, MapCard, StatTiles, Timeline } from "./Blocks";
 import { CitationChips, MediaGallery, ProductCarousel, ScoreCard } from "./Cards";
 import { ChartView } from "./Chart";
@@ -58,6 +59,7 @@ function fallbackText(widget: Widget): string {
 }
 
 export function WidgetView({ widget }: { widget: unknown }) {
+  const { apiBase } = useWidgetEnv();
   const checked = validateWidget(widget);
   if (!checked) return null;
   const fallback = fallbackText(checked);
@@ -83,6 +85,8 @@ export function WidgetView({ widget }: { widget: unknown }) {
         return <StatTiles data={checked.data} />;
       case "map":
         return <MapCard data={checked.data} />;
+      case "creation":
+        return <CreationCard id={checked.data.id} apiBase={apiBase} />;
       case "artifact":
         return <ArtifactCard data={checked.data} />;
       default:

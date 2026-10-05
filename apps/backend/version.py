@@ -1,3 +1,3 @@
 """The EchoSpeak release version. Keep in step with apps/desktop/src-tauri/tauri.conf.json."""
 
-APP_VERSION = "10.2.0"
+APP_VERSION = "10.3.0"

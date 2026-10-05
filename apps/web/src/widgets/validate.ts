@@ -197,6 +197,10 @@ export function validateWidget(raw: unknown): Widget | null {
       const m = validateMap(data);
       return m ? { type, data: m } : null;
     }
+    case "creation": {
+      const id = str(data.id, 80);
+      return /^generation-[a-zA-Z0-9_-]+$/.test(id) ? { type, data: { id } } : null;
+    }
     case "artifact": {
       const id = str(data.id, 64);
       return id ? { type, data: { id, title: str(data.title, 120) || "Artifact", kind: str(data.kind, 16), version: num(data.version) ?? 1, language: str(data.language, 24) } } : null;

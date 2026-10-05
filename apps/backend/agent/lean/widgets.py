@@ -228,6 +228,7 @@ def _artifact(data: dict[str, Any]) -> Optional[dict[str, Any]]:
 
 
 _NORMALIZERS: dict[str, Callable[[dict[str, Any]], Optional[dict[str, Any]]]] = {
+    "creation": lambda data: {"id": _s(data.get("id"), 80)} if str(data.get("id", "")).startswith("generation-") else None,
     "weather": _weather,
     "chart": _chart,
     "product_carousel": _products,

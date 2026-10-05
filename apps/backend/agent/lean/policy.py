@@ -37,7 +37,7 @@ UNTRUSTED_SOURCES = {
     # Titles, prices and pages from the web.
     "stock_history", "product_search", "video_search", "image_search",
     # Uploaded documents can come from anywhere (a downloaded PDF, a forwarded email).
-    "document_search",
+    "document_search", "research_notebook",
 }
 
 # (C) Actions that leave the machine, speak for the user, or persist something
@@ -170,6 +170,9 @@ def evaluate(
     """allow / ask / deny for one tool call. Deterministic: no model involved."""
     if contains_secret(args, secrets):
         return Decision("deny", "its arguments contain one of your stored API keys or tokens", "secret_in_args")
+    if name == "create_media" and args.get("provider") != "comfyui-local":
+        reason = "this sends your prompt to a cloud generation provider and may charge your API account"
+        return Decision("ask" if interactive else "deny", reason, "generation_cost")
     if tainted_by and is_external_action(name, entry, args):
         sources = ", ".join(sorted(set(tainted_by)))
         reason = (f"this turn read outside content ({sources}), and {name} sends data out or changes things "

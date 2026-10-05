@@ -61,6 +61,8 @@ SECRET_TOP_LEVEL_SETTINGS = {
     "webhook_secret",
     "webhook_secret_path",
     "brave_search_api_key",
+    "tavily_api_key",
+    "minimax_api_key",
     "odds_api_key",
     "email_password",
     "telegram_bot_token",
@@ -928,6 +930,12 @@ class Config:
         self.voice_stt_language = os.getenv("VOICE_STT_LANGUAGE", "").strip()
         self.voice_max_audio_bytes = max(262_144, int(os.getenv("VOICE_MAX_AUDIO_BYTES", "16777216") or 16_777_216))
         self.generation_cloud_provider = os.getenv("GENERATION_CLOUD_PROVIDER", "").strip()
+        self.generation_image_provider = os.getenv("GENERATION_IMAGE_PROVIDER", "gemini-images")
+        self.generation_video_provider = os.getenv("GENERATION_VIDEO_PROVIDER", "gemini-video")
+        self.generation_image_model = os.getenv("GENERATION_IMAGE_MODEL", "")
+        self.generation_video_model = os.getenv("GENERATION_VIDEO_MODEL", "")
+        self.tavily_api_key = os.getenv("TAVILY_API_KEY", "")
+        self.minimax_api_key = os.getenv("MINIMAX_API_KEY", "")
         self.comfyui_base_url = os.getenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188").strip().rstrip("/")
         self.comfyui_workflow_path = os.getenv("COMFYUI_WORKFLOW_PATH", "").strip()
         self.runway_api_key = os.getenv("RUNWAY_API_KEY", "").strip()
@@ -1407,6 +1415,12 @@ class Config:
             "voice_wake_word",
             "voice_max_audio_bytes",
             "generation_cloud_provider",
+            "generation_image_provider",
+            "generation_video_provider",
+            "generation_image_model",
+            "generation_video_model",
+            "tavily_api_key",
+            "minimax_api_key",
             "comfyui_base_url",
             "comfyui_workflow_path",
             "runway_api_key",

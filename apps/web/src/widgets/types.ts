@@ -91,6 +91,7 @@ export type Widget =
   | { type: "comparison"; data: ComparisonData }
   | { type: "stat"; data: StatData }
   | { type: "map"; data: MapData }
+  | { type: "creation"; data: { id: string } }
   | { type: "artifact"; data: ArtifactRef };
 
 export type WidgetType = Widget["type"];

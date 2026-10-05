@@ -2338,6 +2338,17 @@ def web_search(
             errors=errors[:5],
             queries_used=queries,
         )
+        source_ids = []
+        from agent.research_notebook import ResearchNotebook, current_session
+        from agent.safe_web_retrieval import SafeWebRetrievalError
+        if current_session():
+            book = ResearchNotebook()
+            for hit in result.hits:
+                try:
+                    source_ids.append(book.retain(current_session(), url=hit.url, title=hit.title,
+                        text=hit.snippet + "\n" + hit.extract, metadata={"query": hit.query, "date": hit.date}))
+                except (ValueError, SafeWebRetrievalError):
+                    source_ids.append("")
         try:
             from agent.lean.widgets import attach
 
@@ -2346,7 +2357,8 @@ def web_search(
             ]}})
         except Exception:
             logger.debug("citation widget skipped", exc_info=True)
-        return format_hits_for_tool(result, multi_query=len(queries) > 1)
+        return format_hits_for_tool(result, multi_query=len(queries) > 1) + (
+            "\nNotebook source IDs (search leads, not inspected pages): " + ", ".join(source_ids) if source_ids else "")
     except Exception as e:
         logger.error(f"Web search failed: {e}")
         return f"Search failed: {str(e)}"
@@ -2823,18 +2835,26 @@ class SafeWebFetchArgs(BaseModel):
     ),
 )
 def safe_web_fetch(url: str, objective: str = "", max_text_chars: int = 24000) -> str:
-    del objective  # Runtime requirement state owns the objective and evidence binding.
     try:
         from agent.safe_web_retrieval import SafeWebRetrievalError, fetch_public_page
 
-        result = fetch_public_page(url, max_text_chars=max_text_chars)
+        result = fetch_public_page(url, max_text_chars=100000)
+        from agent.research_notebook import ResearchNotebook, current_session
+        source_id = ""
+        if current_session():
+            source_id = ResearchNotebook().retain(current_session(), url=result.final_url, title=result.title,
+                text=result.text, inspected=True, metadata={"links": result.links, "objective": objective,
+                    "retrieved_at": result.retrieved_at, "content_type": result.content_type})
+        total_chars = len(result.text)
+        result = result.model_copy(update={"text": result.text[:max_text_chars]})
         try:
             from agent.lean.widgets import attach
 
             attach({"type": "citations", "data": {"items": [{"title": result.title, "url": result.final_url or result.url}]}})
         except Exception:
             logger.debug("citation widget skipped", exc_info=True)
-        return result.tool_text()
+        return result.tool_text() + (f"\nsource_id={source_id}; total_chars={total_chars}. "
+            "Use research_notebook read with offset to read later passages." if source_id else "")
     except SafeWebRetrievalError as exc:
         return (
             "execution_status=error\nresult_state=insufficient_evidence\n"

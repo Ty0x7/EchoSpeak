@@ -21,7 +21,7 @@ type Project = { id: string; name: string; workspace_root?: string; archived?: b
 /** Closes the open page and brings the chat back. Provided by the app shell. */
 export const PageCloseContext = createContext<(() => void) | null>(null);
 
-function PageShell({ title, lead, action, children }: { title: string; lead: string; action?: React.ReactNode; children: React.ReactNode }) {
+export function PageShell({ title, lead, action, children }: { title: string; lead: string; action?: React.ReactNode; children: React.ReactNode }) {
   const close = useContext(PageCloseContext);
   useEffect(() => {
     if (!close) return;

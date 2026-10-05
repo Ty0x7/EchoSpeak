@@ -17,6 +17,8 @@ import type {
 import { canApplySessionHistory, ownsStreamCleanup } from "./desktop/sessionProjection";
 import leanCss from "./lean/lean.css?inline";
 import settingsCss from "./settings/settings.css?inline";
+import { CreationsPage } from "./creations/CreationsPage";
+import { FirstRunSetup } from "./setup/FirstRunSetup";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { LeanMessage } from "./lean/LeanMessage";
 import { ChatFollower } from "./app/chatFollow";
@@ -1531,6 +1533,7 @@ export const Dashboard: React.FC<{
         position: "relative",
       }}
     >
+      <FirstRunSetup apiBase={apiBase} autoShow={!desktopSettingsWindow} />
       <style>{globalCss}</style>
       <style>{leanCss}</style>
       <style>{settingsCss}</style>
@@ -1726,6 +1729,8 @@ export const Dashboard: React.FC<{
                   else void createNewThread(project.id);
                 }}
               />
+            ) : mainPage === "creations" ? (
+              <CreationsPage apiBase={apiBase} onChat={id => { setMainPage("chat"); switchThread(id); }} />
             ) : mainPage === "artifacts" ? (
               <ArtifactsPage apiBase={apiBase} onOpen={openArtifactFromPage} />
             ) : (

@@ -458,10 +458,13 @@ class LeanTurn:
         prepared: list[tuple[Any, str, dict[str, Any], str]] = []
         for call in calls:
             args, arg_error = call.parsed_arguments()
-            name, args = self.toolbox.normalize_call(call.name, args)
+            try:
+                name, args = self.toolbox.normalize_call(call.name, args)
+            except (ValueError, TypeError) as exc:
+                name, arg_error = call.name, f"Invalid tool arguments: {exc}"
             signature = self._sig(name, args)
             call_counts[signature] = call_counts.get(signature, 0) + 1
-            problem = arg_error or ("" if call_counts[signature] < 3 else "repeat")
+            problem = arg_error or ("" if call_counts[signature] < 3 or name == "creation_status" else "repeat")
             if not problem:
                 # Checked for every call, parallel read-only ones included.
                 decision = policy.evaluate(name, args, entry=self.toolbox.entry(name), tainted_by=self.taint,
