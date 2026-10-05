@@ -42,21 +42,15 @@ from api.deps import (
     _require_automation_project_scope,
 )
 
+from agent.cloud_providers import CLOUD_PROVIDERS, CLOUD_LABELS, cloud_config, list_cloud_models
+
 router = APIRouter()
 LM_STUDIO_DEFAULT_URL = "http://localhost:1234"
 
 
 def _assert_provider_available(provider: "ModelProvider") -> None:
-    if provider == ModelProvider.GEMINI:
-        if importlib.util.find_spec("langchain_google_genai") is None:
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "Gemini provider requires 'langchain-google-genai' on the backend. "
-                    "Install it in apps/backend venv: pip install langchain-google-genai"
-                ),
-            )
-
+    # Cloud chat uses the bundled HTTP/WebSocket adapters, not optional SDKs.
+    return None
 
 def _resolve_runtime_provider(session_id: Optional[str] = None) -> "ModelProvider":
     """Resolve the provider the next query would use without creating an agent."""
@@ -134,23 +128,13 @@ def _check_provider_readiness(
             "detail": str(exc.detail),
         }
 
-    if p == ModelProvider.OPENAI:
-        key = str(getattr(getattr(config, "openai", None), "api_key", "") or "").strip()
-        return {
-            "ok": bool(key),
-            "provider": p.value,
-            "message": "" if key else _provider_recovery_message(p),
-            "detail": "" if key else "Missing OPENAI_API_KEY",
-        }
-
-    if p == ModelProvider.GEMINI:
-        key = str(getattr(getattr(config, "gemini", None), "api_key", "") or "").strip()
-        return {
-            "ok": bool(key),
-            "provider": p.value,
-            "message": "" if key else _provider_recovery_message(p),
-            "detail": "" if key else "Missing GEMINI_API_KEY",
-        }
+    if p.value in CLOUD_PROVIDERS:
+        key = str(cloud_config(p).api_key or "").strip()
+        model = str(model_id or cloud_config(p).model or "").strip()
+        if model == "default":
+            model = ""
+        message = "" if key and model else f"Add a {CLOUD_LABELS[p.value]} API key and select a model in Settings → Models."
+        return {"ok": bool(key and model), "provider": p.value, "message": message, "detail": message}
 
     if p == ModelProvider.LLAMA_CPP:
         model_path = str(model_id or getattr(getattr(config, "local", None), "model_name", "") or "").strip()
@@ -286,9 +270,9 @@ def _validate_settings_effective(effective: dict) -> list[dict]:
         if not local_model:
             issues.append({"key": "local.model_name", "message": "Local model name is required when Use Local Models is enabled.", "severity": "error"})
     else:
-        # Cloud provider: need either OpenAI or Gemini API key
-        if not openai_api_key and not gemini_api_key:
-            issues.append({"key": "cloud.api_key", "message": "An API key is required for cloud providers. Add either an OpenAI or Gemini API key.", "severity": "error"})
+        # Cloud chat needs a developer API key.
+        if not any(str((s.get(p) or {}).get("api_key") or "").strip() for p in CLOUD_PROVIDERS):
+            issues.append({"key": "cloud.api_key", "message": "Add an OpenAI, Gemini, Claude or Grok API key in Models settings.", "severity": "error"})
 
     embedding_provider = ((s.get("embedding") or {}).get("provider") or "").strip()
     if embedding_provider == "openai" and not openai_api_key:
@@ -417,7 +401,9 @@ def _sanitize_incoming_settings(patch: dict) -> dict:
 
     nested_sections = {
         "openai": set(getattr(config.openai, "model_dump")().keys()),
-        "gemini": set(getattr(config.gemini, "model_dump")().keys()),
+        "gemini": set(config.gemini.model_dump().keys()),
+        "anthropic": set(config.anthropic.model_dump().keys()),
+        "xai": set(config.xai.model_dump().keys()),
         "local": set(getattr(config.local, "model_dump")().keys()),
         "patches": set(getattr(config.patches, "model_dump")().keys()),
         "embedding": set(getattr(config.embedding, "model_dump")().keys()),
@@ -441,21 +427,16 @@ def _sanitize_incoming_settings(patch: dict) -> dict:
             out[key] = value
 
     # If the UI sends redacted placeholders, ignore them.
-    openai_patch = out.get("openai")
-    if isinstance(openai_patch, dict):
-        val = openai_patch.get("api_key")
-        if isinstance(val, str) and val.strip() == "***":
-            openai_patch = dict(openai_patch)
-            openai_patch.pop("api_key", None)
-            out["openai"] = openai_patch
-
-    gemini_patch = out.get("gemini")
-    if isinstance(gemini_patch, dict):
-        val = gemini_patch.get("api_key")
-        if isinstance(val, str) and val.strip() == "***":
-            gemini_patch = dict(gemini_patch)
-            gemini_patch.pop("api_key", None)
-            out["gemini"] = gemini_patch
+    for provider in CLOUD_PROVIDERS:
+        section = out.get(provider)
+        if isinstance(section, dict):
+            if isinstance(section.get("api_key"), str):
+                if section["api_key"].strip() == "***":
+                    section.pop("api_key", None)
+                else:
+                    section["api_key"] = section["api_key"].strip()
+            if isinstance(section.get("model"), str):
+                section["model"] = section["model"].strip().removeprefix("models/")
 
     for secret_key in SECRET_TOP_LEVEL_SETTINGS:
         val = out.get(secret_key)
@@ -500,7 +481,7 @@ class SettingsResponse(BaseModel):
 
 
 class SettingsTestRequest(BaseModel):
-    target: str = Field(..., description="openai | gemini | local | ollama | openai_compat")
+    target: str = Field(..., description="openai | gemini | anthropic | xai | local | ollama | openai_compat")
     base_url: Optional[str] = None
     api_key: Optional[str] = None
 
@@ -551,32 +532,9 @@ def settings_test(request: SettingsTestRequest):
 
     started = time.perf_counter()
     try:
-        if target == "openai":
-            key = api_key or (getattr(getattr(config, "openai", None), "api_key", "") or "").strip()
-            if not key or key == "***":
-                return SettingsTestResponse(ok=False, target=target, message="Missing OpenAI API key.")
-            url = "https://api.openai.com/v1/models"
-            code, _ = _http_get_json(url, headers={"Authorization": f"Bearer {key}"}, timeout_s=6.0)
-            ok = 200 <= code < 300
-            ms = (time.perf_counter() - started) * 1000.0
-            return SettingsTestResponse(ok=ok, target=target, message=f"HTTP {code}", latency_ms=ms)
-
-        if target == "gemini":
-            key = api_key or (getattr(getattr(config, "gemini", None), "api_key", "") or "").strip()
-            if not key or key == "***":
-                return SettingsTestResponse(ok=False, target=target, message="Missing Gemini API key.")
-            url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
-            code, data = _http_get_json(url, timeout_s=6.0)
-            ok = 200 <= code < 300
-            ms = (time.perf_counter() - started) * 1000.0
-            if ok:
-                count = 0
-                try:
-                    count = len((data or {}).get("models") or [])
-                except Exception:
-                    count = 0
-                return SettingsTestResponse(ok=True, target=target, message=f"OK (models={count})", latency_ms=ms)
-            return SettingsTestResponse(ok=False, target=target, message=f"HTTP {code}", latency_ms=ms)
+        if target in CLOUD_PROVIDERS:
+            result = list_cloud_models(target, api_key)
+            return SettingsTestResponse(ok=result["reachable"], target=target, message=result["message"], latency_ms=(time.perf_counter() - started) * 1000)
 
         if target in {"local", "openai_compat"}:
             url0 = base_url or (getattr(getattr(config, "local", None), "base_url", "") or "").strip()
@@ -614,7 +572,7 @@ def settings_test(request: SettingsTestRequest):
                 return SettingsTestResponse(ok=True, target=target, message=f"OK (models={models})", latency_ms=ms)
             return SettingsTestResponse(ok=False, target=target, message=f"HTTP {code}", latency_ms=ms)
 
-        return SettingsTestResponse(ok=False, target=target, message="Unknown target. Use: openai | gemini | local | ollama | openai_compat")
+        return SettingsTestResponse(ok=False, target=target, message="Unknown target. Use: openai | gemini | anthropic | xai | local | ollama | openai_compat")
     except HTTPError as e:
         ms = (time.perf_counter() - started) * 1000.0
         return SettingsTestResponse(ok=False, target=target, message=f"HTTP {getattr(e, 'code', 'error')}: {str(e)}", latency_ms=ms)
@@ -653,6 +611,8 @@ def _apply_settings_patch(patch: dict) -> None:
         # Config reload failure shouldn't brick the API; keep serving.
         pass
     new_default = _current_default_binding()
+    from agent.lean.policy import _SECRET_CACHE
+    _SECRET_CACHE.update(at=0, values=[])
     if new_default != old_default:
         try:
             changed = get_state_store().retarget_default_bindings(
@@ -687,8 +647,7 @@ def _local_setup_chosen() -> bool:
     if os.getenv("USE_LOCAL_MODELS") or os.getenv("LOCAL_MODEL_NAME"):
         return True
     return bool(
-        str(getattr(config.openai, "api_key", "") or "").strip()
-        or str(getattr(config.gemini, "api_key", "") or "").strip()
+        any(str(cloud_config(p).api_key or "").strip() for p in CLOUD_PROVIDERS)
     )
 
 
@@ -976,7 +935,7 @@ async def get_provider_info(session_id: Optional[str] = Query(default=None)):
     # and we still want /provider to respond.
     binding = _ensure_session_model_binding(session_id or "default")
     provider = ModelProvider(binding.provider_id)
-    is_local = provider not in (ModelProvider.OPENAI, ModelProvider.GEMINI)
+    is_local = provider.value not in CLOUD_PROVIDERS
     if provider == ModelProvider.OPENAI:
         model = binding.model_id
     elif provider == ModelProvider.GEMINI:
@@ -985,14 +944,13 @@ async def get_provider_info(session_id: Optional[str] = Query(default=None)):
         model = binding.model_id
     base_url = (
         None
-        if provider in (ModelProvider.OPENAI, ModelProvider.GEMINI, ModelProvider.LLAMA_CPP)
+        if provider.value in (*CLOUD_PROVIDERS, "llama_cpp")
         else _provider_configured_base_url(provider)
     )
     model_profile = _profile_for(provider, model)
     ctx_w = int(model_profile["context_limit"])
     max_out = int(
-        getattr(config.openai, "max_tokens", 0) if provider == ModelProvider.OPENAI
-        else getattr(config.gemini, "max_tokens", 0) if provider == ModelProvider.GEMINI
+        getattr(cloud_config(provider), "max_tokens", 0) if provider.value in CLOUD_PROVIDERS
         else getattr(config.local, "max_tokens", 0)
         or 4096
     )
@@ -1047,7 +1005,7 @@ async def switch_provider(request: SwitchProviderRequest):
                     f"{request.expected_revision} to {current_binding.binding_revision}"
                 ),
             )
-        requested_model = (
+        requested_model = request.model or (
             request.openai_model if provider == ModelProvider.OPENAI
             else request.gemini_model if provider == ModelProvider.GEMINI
             else request.model
@@ -1062,7 +1020,7 @@ async def switch_provider(request: SwitchProviderRequest):
         if request.base_url and not is_known_local_default_url(request.base_url):
             configured = str(
                 _provider_configured_base_url(provider)
-                if provider not in {ModelProvider.OPENAI, ModelProvider.GEMINI}
+                if provider.value not in CLOUD_PROVIDERS
                 else ""
             ).rstrip("/")
             if configured and request.base_url.rstrip("/") != configured:
@@ -1158,31 +1116,8 @@ async def list_provider_models(provider: Optional[str] = Query(default=None)):
             logger.warning(f"No {p.value} models found at {base}")
         return {"provider": p.value, "models": models, "base_url": base, "reachable": bool(models)}
 
-    return {"provider": p.value, "models": []}
-
-    if p in (ModelProvider.LM_STUDIO, ModelProvider.LOCALAI, ModelProvider.VLLM):
-        try:
-            import requests
-
-            base = _provider_configured_base_url(p)
-            if base.endswith("/v1"):
-                url = f"{base}/models"
-            else:
-                url = f"{base}/v1/models"
-
-            resp = requests.get(url, timeout=4)
-            resp.raise_for_status()
-            data = resp.json() or {}
-            models = []
-            for m in data.get("data") or []:
-                model_id = m.get("id")
-                if model_id:
-                    models.append(model_id)
-            return {"provider": p.value, "models": sorted(set(models))}
-        except Exception as e:
-            logger.warning(f"Failed to list {p.value} models: {e}")
-            return {"provider": p.value, "models": []}
-
+    if p.value in CLOUD_PROVIDERS:
+        return await asyncio.to_thread(list_cloud_models, p.value)
     return {"provider": p.value, "models": []}
 
 

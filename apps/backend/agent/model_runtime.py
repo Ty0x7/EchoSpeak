@@ -173,7 +173,7 @@ class SelectedModelReadinessError(RuntimeError):
         self.code = str(code or "selected_model_unavailable")
 
 
-_HOSTED_PROVIDERS = {"openai", "gemini"}
+_HOSTED_PROVIDERS = {"openai", "gemini", "anthropic", "xai"}
 _STRUCTURED_PROBE_LOCK = threading.RLock()
 _STRUCTURED_PROBE_CACHE: dict[str, tuple[float, StructuredOutputCapability]] = {}
 
@@ -181,6 +181,8 @@ _STRUCTURED_PROBE_CACHE: dict[str, tuple[float, StructuredOutputCapability]] = {
 _PROVIDER_CATALOG: tuple[dict[str, Any], ...] = (
     {"id": "openai", "name": "OpenAI", "local": False, "description": "OpenAI models"},
     {"id": "gemini", "name": "Google Gemini", "local": False, "description": "Google Gemini models"},
+    {"id": "anthropic", "name": "Claude", "local": False, "description": "Anthropic Claude models"},
+    {"id": "xai", "name": "Grok", "local": False, "description": "xAI Grok models"},
     {"id": "ollama", "name": "Ollama", "local": True, "description": "Local models served by Ollama"},
     {"id": "lmstudio", "name": "LM Studio", "local": True, "description": "Models served by LM Studio"},
     {"id": "localai", "name": "LocalAI", "local": True, "description": "Models served by LocalAI"},
@@ -199,6 +201,8 @@ _PROVIDER_REQUIREMENTS: dict[ModelProvider, dict[str, Any]] = {
         "pip_packages": ["langchain-google-genai"],
         "description": "Requires a Google AI Studio API key",
     },
+    ModelProvider.ANTHROPIC: {"env_vars": ["ANTHROPIC_API_KEY"], "pip_packages": [], "description": "Requires an Anthropic API key"},
+    ModelProvider.XAI: {"env_vars": ["XAI_API_KEY"], "pip_packages": [], "description": "Requires an xAI API key"},
     ModelProvider.OLLAMA: {
         "env_vars": ["LOCAL_MODEL_URL", "LOCAL_MODEL_NAME"],
         "pip_packages": ["langchain-ollama"],
@@ -397,13 +401,18 @@ class ModelRuntimeClient:
         self.llm = self._create_llm()
 
     def _configured_model_id(self) -> str:
-        if self.provider == ModelProvider.OPENAI:
-            return str(config.openai.model or "")
-        if self.provider == ModelProvider.GEMINI:
-            return str(config.gemini.model or "")
+        from agent.cloud_providers import CLOUD_PROVIDERS, cloud_config
+        if self.provider.value in CLOUD_PROVIDERS:
+            return str(cloud_config(self.provider).model or "")
         return str(config.local.model_name or "")
 
     def _create_llm(self) -> Any:
+        if self.provider in (ModelProvider.ANTHROPIC, ModelProvider.XAI) or (self.provider == ModelProvider.GEMINI and any(x in self.model_id.lower() for x in ("live", "native-audio"))):
+            from agent.cloud_providers import BASE_URLS, cloud_config
+            c = cloud_config(self.provider)
+            # Legacy helper calls use the provider's SDK-compatible API. Canonical
+            # chat uses the native Claude / Gemini Live adapters in lean.provider.
+            return ReasoningChatOpenAI(model=self.model_id, api_key=c.api_key or "not-needed", base_url=BASE_URLS[self.provider.value], max_tokens=c.max_tokens, max_retries=0, streaming=True)
         if self.provider == ModelProvider.OPENAI:
             if ReasoningChatOpenAI is None:
                 raise ImportError("langchain-openai is required for provider=openai")

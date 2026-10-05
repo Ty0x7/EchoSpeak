@@ -412,6 +412,8 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
   const provider = useLocal ? String(local.provider || "lmstudio") : String(s.default_cloud_provider || "openai");
   const providerLabel = LOCAL_PROVIDERS.find((p) => p.value === provider)?.label || provider;
   const [models, setModels] = useState<string[] | null>(null);
+  const [catalog, setCatalog] = useState<{ id: string; name: string; chat: boolean; live: boolean; reason: string }[]>([]);
+  const [catalogMessage, setCatalogMessage] = useState("");
   const [detected, setDetected] = useState<DetectRow[] | null>(null);
   const [detecting, setDetecting] = useState(false);
   const [test, setTest] = useState<{ busy: boolean; ok?: boolean; message?: string }>({ busy: false });
@@ -422,14 +424,28 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
   useEffect(() => {
     let cancelled = false;
     setModels(null);
+    setCatalog([]);
+    setCatalogMessage("");
     fetch(`${apiBase}/provider/models?provider=${encodeURIComponent(provider)}`)
-      .then((r) => (r.ok ? r.json() : { models: [] }))
-      .then((d) => !cancelled && setModels(Array.isArray(d.models) ? d.models.map(String).filter((m: string) => !m.includes("embed")) : []))
-      .catch(() => !cancelled && setModels([]));
+      .then((r) => { if (!r.ok) throw new Error(`Unable to load models (HTTP ${r.status})`); return r.json(); })
+      .then((d) => { if (!cancelled) { setModels(Array.isArray(d.models) ? d.models.map(String) : []); setCatalog(Array.isArray(d.catalog) ? d.catalog : []); setCatalogMessage(String(d.message || "")); } })
+      .catch((err) => { if (!cancelled) { setModels([]); setCatalogMessage(String(err)); } });
     return () => {
       cancelled = true;
     };
   }, [apiBase, provider, local.base_url, reloadKey]);
+
+  useEffect(() => {
+    const onSaved = (event: Event) => {
+      const patch = (event as CustomEvent).detail || {};
+      if (patch[provider] || patch.default_cloud_provider !== undefined || patch.use_local_models !== undefined) {
+        setReloadKey((k) => k + 1);
+        setTest({ busy: false });
+      }
+    };
+    window.addEventListener("echospeak:settings-saved", onSaved);
+    return () => window.removeEventListener("echospeak:settings-saved", onSaved);
+  }, [provider]);
 
   // A model that this app doesn't have can't work: pick the first one it does have.
   useEffect(() => {
@@ -576,19 +592,26 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
       ) : (
         <Group title="Cloud model">
           <Row label="Provider">
-            <Select value={provider} onChange={(v) => save({ default_cloud_provider: v })} options={[{ value: "openai", label: "OpenAI" }, { value: "gemini", label: "Google Gemini" }]} />
+            <Select value={provider} onChange={(v) => save({ default_cloud_provider: v })} options={[{ value: "openai", label: "OpenAI / ChatGPT" }, { value: "gemini", label: "Google Gemini" }, { value: "anthropic", label: "Anthropic / Claude" }, { value: "xai", label: "xAI / Grok" }]} />
           </Row>
-          {provider === "openai" ? (
-            <>
-              <Row label="Model"><TextField mono value={s.openai?.model || ""} onCommit={(v) => save({ openai: { model: v } })} /></Row>
-              <Row label="API key" stack><SecretField isSet={Boolean(s.openai?.api_key)} onCommit={(v) => save({ openai: { api_key: v } })} placeholder="sk-…" /></Row>
-            </>
-          ) : (
-            <>
-              <Row label="Model"><TextField mono value={s.gemini?.model || ""} onCommit={(v) => save({ gemini: { model: v } })} /></Row>
-              <Row label="API key" stack><SecretField isSet={Boolean(s.gemini?.api_key)} onCommit={(v) => save({ gemini: { api_key: v } })} /></Row>
-            </>
-          )}
+          <Row label="API key" stack help="Use this provider's developer API key. Save it to load the models your account can access.">
+            <SecretField isSet={Boolean(s[provider]?.api_key)} onCommit={(v) => save({ [provider]: { api_key: v } })} />
+          </Row>
+          <Row label="Available models" help={models === null ? "Loading the provider's model catalog…" : catalogMessage}>
+            <div style={{ display: "flex", gap: 6, width: "100%" }}>
+              <div className="st-select is-wide"><select aria-label="Available cloud models" value={String(s[provider]?.model || "")} onChange={(e) => void save({ [provider]: { model: e.target.value } })}>
+                <option value="" disabled>Choose a model</option>
+                {s[provider]?.model && !catalog.some(m => m.id === s[provider].model) ? <option value={s[provider].model}>{s[provider].model} (custom ID)</option> : null}
+                {(catalog.length ? catalog : (models || []).map(id => ({ id, name: id, chat: true, live: false, reason: "" }))).map(m => <option key={m.id} value={m.id} disabled={!m.chat}>{m.id}{m.live ? " · Live (chat transcription)" : ""}{!m.chat ? " · specialized API" : ""}</option>)}
+              </select></div>
+              <button type="button" className="es-btn es-btn-sm" onClick={() => setReloadKey((k) => k + 1)}>Refresh</button>
+            </div>
+          </Row>
+          {provider === "anthropic" && <Row label="Workspace ID" help="Optional. Required for Claude personal/service keys that can access multiple workspaces."><TextField mono value={s.anthropic?.workspace_id || ""} onCommit={(v) => save({ anthropic: { workspace_id: v } })} /></Row>}
+          <Row label="Model ID" help="The exact API ID. Custom IDs stay selected even when absent from the catalog.">
+            <TextField mono wide value={s[provider]?.model || ""} onCommit={(v) => save({ [provider]: { model: v } })} />
+          </Row>
+          {provider === "gemini" && /live|native-audio/i.test(String(s.gemini?.model || "")) && <p className="st-muted">Gemini Live displays its response transcription in chat. Google bills its generated audio even when you read the text. Model access depends on your Google account; microphone/audio playback uses the separate Voice settings.</p>}
           <Row label="Check connection" help={test.message ? <span className={test.ok ? "st-ok" : "st-err"}>{test.message}</span> : undefined}>
             <button type="button" className="es-btn es-btn-sm" disabled={test.busy} onClick={() => void runTest()}>{test.busy ? "Testing…" : "Test"}</button>
           </Row>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { fallbackProviders, geminiModelOptions, openaiModelOptions } from "../app/runtime";
+import { fallbackProviders } from "../app/runtime";
 import type { ProviderInfo } from "../app/types";
 
 export type ReasoningEffort = "minimal" | "low" | "medium" | "high" | "extra_high" | "max" | "ultra";
@@ -156,7 +156,7 @@ export function ComposerToolbar({ listening, voicePhase, voiceNotice, voiceInput
                                 ...d,
                                 provider: p,
                                 base_url: "",
-                                model: p === "openai" ? openaiModelOptions[0] : p === "gemini" ? geminiModelOptions[0] : "",
+                                model: "",
                               }));
                             }}
                             disabled={switchingProvider || lmStudioOnly}

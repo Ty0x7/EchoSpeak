@@ -87,6 +87,8 @@ SECRET_TOP_LEVEL_SETTINGS = {
 SECRET_NESTED_SETTINGS = {
     "openai": {"api_key"},
     "gemini": {"api_key"},
+    "anthropic": {"api_key"},
+    "xai": {"api_key"},
 }
 
 _MCP_SECRET_KEYS = {
@@ -459,6 +461,8 @@ class ModelProvider(str, Enum):
     """Supported model providers."""
     OPENAI = "openai"
     GEMINI = "gemini"
+    ANTHROPIC = "anthropic"
+    XAI = "xai"
     OLLAMA = "ollama"
     LM_STUDIO = "lmstudio"
     LOCALAI = "localai"
@@ -494,6 +498,17 @@ class GeminiConfig(BaseModel):
     api_key: str = ""
     model: str = "gemini-3.5-flash"
     temperature: float = 0.7
+    max_tokens: int = 8192
+
+
+class AnthropicConfig(OpenAIConfig):
+    model: str = ""
+    max_tokens: int = 8192
+    workspace_id: str = ""
+
+
+class XAIConfig(OpenAIConfig):
+    model: str = ""
     max_tokens: int = 8192
 
 
@@ -602,16 +617,14 @@ class Config:
             max_tokens=int(os.getenv("GEMINI_MAX_TOKENS", "8192"))
         )
 
+        self.anthropic = AnthropicConfig(api_key=os.getenv("ANTHROPIC_API_KEY", ""), model=os.getenv("ANTHROPIC_MODEL", ""), workspace_id=os.getenv("ANTHROPIC_WORKSPACE_ID", ""))
+        self.xai = XAIConfig(api_key=os.getenv("XAI_API_KEY", ""), model=os.getenv("XAI_MODEL", ""))
+
         default_cloud_provider_env = os.getenv("DEFAULT_CLOUD_PROVIDER", "").strip().lower()
-        if default_cloud_provider_env in {ModelProvider.OPENAI.value, ModelProvider.GEMINI.value}:
+        if default_cloud_provider_env in {ModelProvider.OPENAI.value, ModelProvider.GEMINI.value, ModelProvider.ANTHROPIC.value, ModelProvider.XAI.value}:
             default_cloud_provider_raw = default_cloud_provider_env
         else:
-            openai_key_present = bool((os.getenv("OPENAI_API_KEY", "") or "").strip())
-            gemini_key_present = bool((os.getenv("GEMINI_API_KEY", "") or "").strip())
-            if gemini_key_present and not openai_key_present:
-                default_cloud_provider_raw = ModelProvider.GEMINI.value
-            else:
-                default_cloud_provider_raw = ModelProvider.OPENAI.value
+            default_cloud_provider_raw = next((p for p in ("openai", "gemini", "anthropic", "xai") if getattr(self, p).api_key.strip()), "openai")
         self.default_cloud_provider = default_cloud_provider_raw
 
         self.local = LocalModelConfig(
@@ -1151,12 +1164,12 @@ class Config:
         top_level = self._public_top_level_keys()
 
         for k, v in overrides.items():
-            if k in {"openai", "gemini", "local", "research_model", "patches", "embedding", "voice", "personaplex", "api"}:
+            if k in {"openai", "gemini", "anthropic", "xai", "local", "research_model", "patches", "embedding", "voice", "personaplex", "api"}:
                 continue
             if k in top_level:
                 if k == "default_cloud_provider":
                     raw = str(v or "").strip().lower()
-                    if raw not in {ModelProvider.OPENAI.value, ModelProvider.GEMINI.value}:
+                    if raw not in {ModelProvider.OPENAI.value, ModelProvider.GEMINI.value, ModelProvider.ANTHROPIC.value, ModelProvider.XAI.value}:
                         continue
                     v = raw
                 if k in (
@@ -1176,6 +1189,8 @@ class Config:
         nested = {
             "openai": self.openai,
             "gemini": self.gemini,
+            "anthropic": self.anthropic,
+            "xai": self.xai,
             "local": self.local,
             "patches": self.patches,
             "embedding": self.embedding,
@@ -1196,6 +1211,8 @@ class Config:
         _nested_sections = {
             "openai": self.openai,
             "gemini": self.gemini,
+            "anthropic": self.anthropic,
+            "xai": self.xai,
             "local": self.local,
             "patches": self.patches,
             "embedding": self.embedding,
@@ -1457,9 +1474,7 @@ def get_llm_config():
     """Get LLM configuration based on provider selection."""
     if config.use_local_models:
         return config.local
-    if str(getattr(config, "default_cloud_provider", "openai") or "").strip().lower() == ModelProvider.GEMINI.value:
-        return config.gemini
-    return config.openai
+    return getattr(config, config.default_cloud_provider, config.openai)
 
 
 def get_embedding_config():

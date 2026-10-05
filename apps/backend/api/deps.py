@@ -38,28 +38,14 @@ def _is_lmstudio_only_enabled() -> bool:
 
 def _default_cloud_provider() -> "ModelProvider":
     """Choose a sensible default cloud provider when none is explicitly selected."""
-    configured = str(getattr(config, "default_cloud_provider", "") or "").strip().lower()
-    try:
-        openai_key = str(getattr(getattr(config, "openai", None), "api_key", "") or "").strip()
-        gemini_key = str(getattr(getattr(config, "gemini", None), "api_key", "") or "").strip()
-        if configured == ModelProvider.OPENAI.value:
-            if openai_key or not gemini_key:
-                return ModelProvider.OPENAI
-        elif configured == ModelProvider.GEMINI.value:
-            if gemini_key or not openai_key:
-                return ModelProvider.GEMINI
-        if gemini_key and not openai_key:
-            return ModelProvider.GEMINI
-    except Exception:
-        pass
-    return ModelProvider.OPENAI
+    from agent.cloud_providers import default_cloud_provider
+    return ModelProvider(default_cloud_provider())
 
 
 def _default_model_for_provider(provider: "ModelProvider") -> str:
-    if provider == ModelProvider.OPENAI:
-        return str(config.openai.model or "").strip()
-    if provider == ModelProvider.GEMINI:
-        return str(config.gemini.model or "").strip()
+    from agent.cloud_providers import CLOUD_PROVIDERS, cloud_config
+    if provider.value in CLOUD_PROVIDERS:
+        return str(cloud_config(provider).model or "").strip()
     return str(config.local.model_name or "").strip()
 
 

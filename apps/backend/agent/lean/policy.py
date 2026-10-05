@@ -118,7 +118,7 @@ def _secret_values() -> list[str]:
         from config import SECRET_TOP_LEVEL_SETTINGS, config
 
         raw = [getattr(config, key, "") for key in SECRET_TOP_LEVEL_SETTINGS if not key.endswith("_path")]
-        for group in ("openai", "gemini"):
+        for group in ("openai", "gemini", "anthropic", "xai"):
             raw.append(getattr(getattr(config, group, None), "api_key", ""))
         values = sorted({str(v).strip() for v in raw if isinstance(v, str) and len(v.strip()) >= 12})
     except Exception:

@@ -56,7 +56,7 @@ hiddenimports = (
     + collect_submodules("mcp", filter=lambda name: name != "mcp.cli" and not name.startswith("mcp.cli."))
     + collect_submodules("ddgs.engines")
     + collect_submodules("py7zr")
-    + ["onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp"]
+    + ["onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp", "websockets.sync.client"]
 )
 
 a = Analysis(

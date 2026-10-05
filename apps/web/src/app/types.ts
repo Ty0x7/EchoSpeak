@@ -158,6 +158,8 @@ export type ProviderInfo = {
 export type ProviderModelsResponse = {
   provider: string;
   models: string[];
+  reachable?: boolean;
+  message?: string;
 };
 
 export type MemoryItem = {

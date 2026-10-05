@@ -10,6 +10,7 @@ export function useSettings(apiBase: string) {
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [saveError, setSaveError] = useState("");
   const savedTimer = useRef(0);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
 
   const load = useCallback(async () => {
     try {
@@ -28,9 +29,12 @@ export function useSettings(apiBase: string) {
   }, [load]);
 
   const save = useCallback(
-    async (patch: SettingsMap) => {
-      // Optimistic: reflect the change right away, roll back on failure.
-      const previous = settings;
+    (patch: SettingsMap) => {
+      window.clearTimeout(savedTimer.current);
+      setSaveState("saving");
+      // Serialize commits so saving a key and model in quick succession cannot
+      // overwrite either setting with an older response.
+      const operation = saveQueue.current.then(async () => {
       setSettings((current) => mergeDeep(current || {}, patch));
       setSaveState("saving");
       setSaveError("");
@@ -47,17 +51,21 @@ export function useSettings(apiBase: string) {
         const data = await resp.json();
         setSettings(data.settings || {});
         // The chat's model picker listens so a new default shows up there too.
-        window.dispatchEvent(new CustomEvent("echospeak:settings-saved", { detail: patch }));
+        const detail = JSON.parse(JSON.stringify(patch, (key, value) => /api_key|secret|token|password/i.test(key) && typeof value === "string" ? (value ? "***" : "") : value));
+        window.dispatchEvent(new CustomEvent("echospeak:settings-saved", { detail }));
         setSaveState("saved");
         window.clearTimeout(savedTimer.current);
         savedTimer.current = window.setTimeout(() => setSaveState("idle"), 1800);
       } catch (err) {
-        setSettings(previous);
+        await load();
         setSaveState("error");
         setSaveError(err instanceof Error ? err.message : String(err));
       }
+      });
+      saveQueue.current = operation.catch(() => {});
+      return operation;
     },
-    [apiBase, settings]
+    [apiBase, load]
   );
 
   return { settings, error, reload: load, save, saveState, saveError };

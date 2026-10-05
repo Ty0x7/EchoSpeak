@@ -40,17 +40,8 @@ class EchoSpeakAgent:
 
     def __init__(self, memory_path: Optional[str] = None, llm_provider: ModelProvider = None, manage_background_services: bool = True, model_id: Optional[str] = None):
         logger.info("Initializing Echo Speak Agent...")
-        default_cloud_provider = str(getattr(config, "default_cloud_provider", ModelProvider.OPENAI.value) or "").strip().lower()
-        openai_key = str(getattr(getattr(config, "openai", None), "api_key", "") or "").strip()
-        gemini_key = str(getattr(getattr(config, "gemini", None), "api_key", "") or "").strip()
-        if default_cloud_provider == ModelProvider.GEMINI.value:
-            fallback_provider = ModelProvider.GEMINI if gemini_key or not openai_key else ModelProvider.OPENAI
-        elif default_cloud_provider == ModelProvider.OPENAI.value:
-            fallback_provider = ModelProvider.OPENAI if openai_key or not gemini_key else ModelProvider.GEMINI
-        elif gemini_key and not openai_key:
-            fallback_provider = ModelProvider.GEMINI
-        else:
-            fallback_provider = ModelProvider.OPENAI
+        from agent.cloud_providers import default_cloud_provider
+        fallback_provider = ModelProvider(default_cloud_provider())
         self.llm_provider = llm_provider or (config.local.provider if config.use_local_models else fallback_provider)
         self._bound_model_id = str(model_id or "").strip()
         self.model_runtime = ModelRuntimeClient(self.llm_provider, self._bound_model_id)
@@ -420,32 +411,18 @@ class EchoSpeakAgent:
         return ""
 
     def get_doctor_report(self) -> Dict[str, Any]:
-        if self.llm_provider == ModelProvider.OPENAI:
-            provider_model = config.openai.model
-        elif self.llm_provider == ModelProvider.GEMINI:
-            provider_model = config.gemini.model
-        else:
-            provider_model = config.local.model_name
-        provider_base_url = None
-        if self.llm_provider not in (ModelProvider.OPENAI, ModelProvider.GEMINI, ModelProvider.LLAMA_CPP):
-            provider_base_url = config.local.base_url
-
+        from agent.cloud_providers import CLOUD_PROVIDERS, cloud_config
+        cloud = self.llm_provider.value in CLOUD_PROVIDERS
+        provider_model = self.model_runtime.model_id
+        provider_base_url = None if cloud or self.llm_provider == ModelProvider.LLAMA_CPP else config.local.base_url
         provider_ok = True
         provider_notes: list[str] = []
-        if self.llm_provider == ModelProvider.OPENAI:
-            api_key = config.openai.api_key or os.getenv("OPENAI_API_KEY", "")
-            if not api_key:
-                provider_ok = False
-                provider_notes.append("Missing OPENAI_API_KEY")
-        elif self.llm_provider == ModelProvider.GEMINI:
-            api_key = config.gemini.api_key or os.getenv("GEMINI_API_KEY", "")
-            if not api_key:
-                provider_ok = False
-                provider_notes.append("Missing GEMINI_API_KEY")
-        elif self.llm_provider not in (ModelProvider.LLAMA_CPP,):
-            if not (provider_base_url or "").strip():
-                provider_ok = False
-                provider_notes.append("Missing base_url for local provider")
+        if cloud and not cloud_config(self.llm_provider).api_key:
+            provider_ok = False
+            provider_notes.append(f"Missing {self.llm_provider.value} API key")
+        elif not cloud and self.llm_provider != ModelProvider.LLAMA_CPP and not provider_base_url:
+            provider_ok = False
+            provider_notes.append("Missing base_url for local provider")
 
         memory_ok = bool(getattr(self.memory, "embeddings", None)) or not bool(getattr(self.memory, "use_faiss", True))
         docs_enabled = bool(getattr(config, "document_rag_enabled", False))

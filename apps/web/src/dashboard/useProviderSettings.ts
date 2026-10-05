@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { fetchWithTimeout, geminiModelOptions, isLmStudioOnlyLocked, listableProviders, openaiModelOptions } from "../app/runtime";
+import { fetchWithTimeout, cloudProviders, isLmStudioOnlyLocked, listableProviders } from "../app/runtime";
 import type { ProviderInfo, ProviderModelsResponse } from "../app/types";
 
 const PROVIDER_LABELS: Record<string, string> = { lmstudio: "LM Studio", ollama: "Ollama", localai: "LocalAI", vllm: "vLLM" };
@@ -82,24 +82,27 @@ export function useProviderSettings({
     }
   };
 
-  const modelsRequestRef = useRef("");
+  const modelsRequestRef = useRef(0);
+  const modelsProviderRef = useRef("");
   const refreshProviderModels = async (provider: string) => {
-    modelsRequestRef.current = provider;
+    const request = ++modelsRequestRef.current;
     try {
-      const resp = await fetchWithTimeout(`${apiBase}/provider/models?provider=${encodeURIComponent(provider)}`);
-      if (!resp.ok) return;
+      const resp = await fetchWithTimeout(`${apiBase}/provider/models?provider=${encodeURIComponent(provider)}`, undefined, 30000);
+      if (!resp.ok) throw new Error(`Could not load models (HTTP ${resp.status})`);
       const data = (await resp.json()) as ProviderModelsResponse;
-      if (modelsRequestRef.current !== provider) return;
+      if (modelsRequestRef.current !== request) return;
       const models = Array.isArray(data.models) ? data.models : [];
+      modelsProviderRef.current = provider;
       setProviderModels(models);
+      if (cloudProviders.includes(provider)) setProviderError(data.reachable ? null : data.message || "Save an API key in Settings → Models, then refresh.");
       if (!models.length && listableProviders.includes(provider)) {
         const name = PROVIDER_LABELS[provider] || provider;
         setProviderError(`${name} isn't answering. Open ${name}, load a model and start its local server, then pick it again.`);
       } else {
         setProviderError((prev) => (prev && prev.includes("isn't answering") ? null : prev));
       }
-    } catch {
-      if (modelsRequestRef.current === provider) setProviderModels([]);
+    } catch (err) {
+      if (modelsRequestRef.current === request) { setProviderModels([]); setProviderError(err instanceof Error ? err.message : String(err)); }
     } finally {
     }
   };
@@ -117,9 +120,7 @@ export function useProviderSettings({
         session_id: String(activeThreadIdRef.current || "default"),
         expected_revision: Number(providerInfo?.binding_revision || 1),
       };
-      if (next.provider === "openai") body.openai_model = next.model || undefined;
-      else if (next.provider === "gemini") body.gemini_model = next.model || undefined;
-      else body.model = next.model || undefined;
+      body.model = next.model || undefined;
 
       const resp = await fetchWithTimeout(`${apiBase}/provider/switch`, {
         method: "POST",
@@ -132,9 +133,6 @@ export function useProviderSettings({
       }
       lastAppliedProviderRef.current = { provider: next.provider, model: next.model || "" };
       await refreshProviderInfo();
-      if (listableProviders.includes(next.provider)) {
-        await refreshProviderModels(next.provider);
-      }
     } catch (e) {
       setProviderError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -153,29 +151,20 @@ export function useProviderSettings({
 
   useEffect(() => {
     if (backendOnline === false) return;
-    if (providerDraft.provider === "openai") {
-      setProviderModels(openaiModelOptions);
-      return;
-    }
-    if (providerDraft.provider === "gemini") {
-      setProviderModels(geminiModelOptions);
-      return;
-    }
-    if (listableProviders.includes(providerDraft.provider)) {
+    if ([...cloudProviders, ...listableProviders].includes(providerDraft.provider)) {
       setProviderModels([]);
-      refreshProviderModels(providerDraft.provider);
+      void refreshProviderModels(providerDraft.provider);
       return;
     }
     setProviderModels([]);
   }, [providerDraft.provider, backendOnline]);
 
   useEffect(() => {
-    if (providerModels.length && (providerDraft.provider === "openai" || providerDraft.provider === "gemini" || listableProviders.includes(providerDraft.provider))) {
-      if (!providerModels.includes(providerDraft.model)) {
-        setProviderDraft((d) => ({ ...d, model: providerModels[0] }));
-      }
+    // Keep custom IDs and saved choices, even if the catalog omits them.
+    if (modelsProviderRef.current === providerDraft.provider && providerModels.length && !providerDraft.model) {
+      setProviderDraft((d) => ({ ...d, model: providerModels[0] }));
     }
-  }, [providerModels, providerDraft.provider, lmStudioOnly, switchingProvider]);
+  }, [providerModels, providerDraft.provider, providerDraft.model]);
 
   useEffect(() => {
     if (lmStudioOnly) return;
@@ -183,7 +172,7 @@ export function useProviderSettings({
     if (switchingProvider) return;
 
     const next = { provider: providerDraft.provider, model: providerDraft.model, base_url: providerDraft.base_url };
-    if (listableProviders.includes(next.provider) && !next.model) return;
+    if ([...cloudProviders, ...listableProviders].includes(next.provider) && !next.model) return;
     const last = lastAppliedProviderRef.current;
     if (last && last.provider === next.provider && last.model === (next.model || "")) return;
 
@@ -197,18 +186,14 @@ export function useProviderSettings({
   useEffect(() => {
     const onSettingsSaved = () => {
       void refreshProviderInfo();
+      if (providerDraft.provider) void refreshProviderModels(providerDraft.provider);
     };
     window.addEventListener("echospeak:settings-saved", onSettingsSaved);
     return () => window.removeEventListener("echospeak:settings-saved", onSettingsSaved);
-  }, [apiBase]);
+  }, [apiBase, providerDraft.provider]);
 
-  const showModelPicker =
-    providerDraft.provider === "openai" ||
-    providerDraft.provider === "gemini" ||
-    providerModels.length > 0;
-  const modelPickerOptions = showModelPicker
-    ? (providerDraft.provider === "openai" ? openaiModelOptions : providerDraft.provider === "gemini" ? geminiModelOptions : providerModels)
-    : [providerDraft.model || "Default model"];
+  const showModelPicker = cloudProviders.includes(providerDraft.provider) || providerModels.length > 0;
+  const modelPickerOptions = [...new Set([providerDraft.model, ...providerModels].filter(Boolean))];
   const modelPickerValue = showModelPicker ? providerDraft.model : modelPickerOptions[0];
 
   return {
