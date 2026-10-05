@@ -5,7 +5,6 @@ import { ProjectSidebar, type SidebarPage } from "./components/ProjectSidebar";
 import { MediaLibraryView } from "./features/media/MediaLibraryView.tsx";
 import { loadRuntimeLayout, runtimeGridColumns, saveRuntimeLayout } from "./runtimeLayout";
 import {
-  canApplyFinalToChat,
   shouldIncludeChatActivity,
 } from "./chatPresentation";
 import { useResearchStore } from "./features/research/store";
@@ -133,7 +132,7 @@ export const Dashboard: React.FC<{
   );
   const [activeThreadId, setActiveThreadId] = useState<string>(() => desktopBootstrap?.active_session_id || "");
   // ── Lean runtime: live turn, agent roster, rooms ──
-  const lean = useLeanLive();
+  const lean = useLeanLive(activeThreadId);
   const leanClient = useMemo(() => leanApi(apiBase), [apiBase]);
   const searchChats = useCallback((query: string) => leanClient.searchChats(query), [leanClient]);
   const [agents, setAgents] = useState<LeanPersona[]>([]);
@@ -199,12 +198,13 @@ export const Dashboard: React.FC<{
     if (!sessionId) return;
     const requestId = activeRequestIdsRef.current.get(sessionId);
     const executionId = activeExecutionIdsRef.current.get(sessionId) || "";
-    // Navigation/supersession detaches local ownership immediately. The user
+    // Explicit supersession/deletion detaches local ownership. The user
     // Stop control keeps the exact stream open so the durable cancellation and
     // final "Stopped" state can arrive from the backend.
     if (!preserveStream) {
       streamControllersRef.current.get(sessionId)?.abort();
       streamControllersRef.current.delete(sessionId);
+      lean.finish(sessionId);
       activeRequestIdsRef.current.delete(sessionId);
       activeExecutionIdsRef.current.delete(sessionId);
       setSessionInFlight(sessionId, false);
@@ -223,7 +223,7 @@ export const Dashboard: React.FC<{
         keepalive: true,
       }).catch(() => undefined);
     }
-  }, [apiBase, setSessionInFlight]);
+  }, [apiBase, setSessionInFlight, lean.finish]);
 
   useEffect(() => {
     const cancelAll = () => {
@@ -614,12 +614,11 @@ export const Dashboard: React.FC<{
     activeThreadIdRef.current = id;
     setThreads((prev) => prev.filter((item) => item.id === id || !isEmptySessionDraft(item)));
     setActiveThreadId(id);
-    // The live timeline belongs to the Session that was visible; history reload restores it.
-    lean.finish();
+    // Select this Session’s live turn without stopping or clearing other turns.
+    lean.select(id);
     setMention(null);
     setStreaming(streamControllersRef.current.has(id));
-    // In a real app, we might fetch history from backend here.
-    // For now, we'll clear local state to start fresh in the new context.
+    // Restore the cached projection immediately; idle Sessions also refresh history.
     const cachedProjection = sessionProjectionRef.current.get(id);
     useAppStore.setState({ messages: cachedProjection?.messages || [] });
     setActivities(cachedProjection?.activities || []);
@@ -903,8 +902,17 @@ export const Dashboard: React.FC<{
     // invent a Session.
     const streamThreadId = String(activeThreadIdRef.current || activeThreadId || "").trim();
     if (!streamThreadId) return;
+    const appendTurnMessage = (message: Message) => {
+      const visible = activeThreadIdRef.current === streamThreadId;
+      const cached = sessionProjectionRef.current.get(streamThreadId);
+      const current = visible ? useAppStore.getState().messages : cached?.messages || [];
+      const next = current.some(item => item.id === message.id)
+        ? current.map(item => item.id === message.id ? message : item) : [...current, message];
+      sessionProjectionRef.current.set(streamThreadId, { messages: next, activities: cached?.activities || [] });
+      if (visible) useAppStore.setState({ messages: next });
+    };
     const runRequestId = crypto.randomUUID();
-    const streamProjectId = String(activeProjectIdRef.current || activeProjectId || "").trim();
+    const streamProjectId = String(activeProjectIdRef.current || activeProjectId || "");
     cancelSessionTurn(streamThreadId);
     const streamController = new AbortController();
     streamControllersRef.current.set(streamThreadId, streamController);
@@ -947,15 +955,14 @@ export const Dashboard: React.FC<{
       streamThreadId,
       (projectionRevisionRef.current.get(streamThreadId) || 0) + 1,
     );
-    addMessage(userMsg);
+    appendTurnMessage(userMsg);
     setInput("");
     setStreaming(true);
-    lean.start(runRequestId);
+    lean.start(runRequestId, streamThreadId);
     setMention(null);
     /** Backend Execution id once the run starts. */
     let durableTurnId = "";
     let finalHandled = false;
-    let streamWasHidden = false;
     // Close any prior-Turn running chrome so this turn never inherits it.
     setActivities((prev) => {
       const closed = prev.map((a) => {
@@ -1036,11 +1043,8 @@ export const Dashboard: React.FC<{
             continue;
           }
           if (streamController.signal.aborted) continue;
-          if (!isStreamThreadCurrent(streamThreadId, activeThreadIdRef.current)) {
-            streamWasHidden = true;
-            if (evt.type === "final") finalHandled = true;
-            continue;
-          }
+          if (!ownsStreamCleanup(streamControllersRef.current.get(streamThreadId), streamController)) continue;
+          const visible = isStreamThreadCurrent(streamThreadId, activeThreadIdRef.current);
           const evtSeq = Number((evt as { seq?: number }).seq || 0);
           if (evtSeq > 0) {
             if (evtSeq <= maxStreamSeq) {
@@ -1059,35 +1063,25 @@ export const Dashboard: React.FC<{
                 activeExecutionIdsRef.current.set(streamThreadId, execId);
               }
               // The legacy bootstrap "thinking…" card is not part of a lean turn.
-              setActivities((prev) => prev.filter((a) => !(a.kind === "thinking" && a.request_id === runRequestId)));
+              if (visible) setActivities((prev) => prev.filter((a) => !(a.kind === "thinking" && a.request_id === runRequestId)));
             }
             if (leanEvt.type === "memory_saved" && typeof leanEvt.memory_count === "number") {
               continue;
             }
             if (leanEvt.type !== "final") {
-              lean.push(leanEvt);
+              lean.push(leanEvt, streamThreadId);
               continue;
             }
             // Final: commit exactly what streamed, one message per agent.
             if (finalHandled) continue;
             finalHandled = true;
-            const done = lean.finish();
+            const done = lean.finish(streamThreadId);
             const finalExecId = String(leanEvt.execution_id || durableTurnId || "");
             const committed = done ? done.order.map((id) => done.messages[id]).filter(Boolean) : [];
             const ctxWindowLean = Number(providerInfo?.context_window || 0) || 32768;
-            if (!canApplyFinalToChat({
-              activeThreadId: String(activeThreadIdRef.current || ""),
-              activeProjectId: String(activeProjectIdRef.current || ""),
-              ownedThreadId: streamThreadId,
-              ownedProjectId: streamProjectId,
-              streamOpen: streamControllersRef.current.get(streamThreadId) === streamController,
-            })) {
-              setStreaming(false);
-              continue;
-            }
             for (const item of committed) {
               const text = item.text || item.segments.filter((s) => s.kind === "text").map((s) => (s as { text: string }).text).join("\n\n").trim();
-              addMessage({
+              appendTurnMessage({
                 id: item.messageId,
                 role: "assistant",
                 text,
@@ -1103,15 +1097,15 @@ export const Dashboard: React.FC<{
               });
             }
             if (!committed.length && String(leanEvt.response || "").trim()) {
-              addMessage({ id: crypto.randomUUID(), role: "assistant", text: String(leanEvt.response), at: Date.now(), skipTypewriter: true });
+              appendTurnMessage({ id: crypto.randomUUID(), role: "assistant", text: String(leanEvt.response), at: Date.now(), skipTypewriter: true });
             }
-            if (leanEvt.thread_state) {
+            if (visible && leanEvt.thread_state && String(activeProjectIdRef.current || "") === streamProjectId) {
               setThreadState(leanEvt.thread_state);
               setActiveProjectId(String(leanEvt.thread_state.active_project_id || ""));
             }
-            setStreaming(false);
+            if (visible) setStreaming(false);
             const spokenLean = String(committed[committed.length - 1]?.text || leanEvt.response || "").trim();
-            if (spokenLean && (voiceReadAloud || voiceConversationMode)) {
+            if (visible && spokenLean && (voiceReadAloud || voiceConversationMode)) {
               void speakLocalText(spokenLean, {
                 clientTurnId: voiceTranscript?.clientTurnId || runRequestId,
                 requestId: runRequestId,
@@ -1126,7 +1120,7 @@ export const Dashboard: React.FC<{
             void refreshRoster();
             continue;
           }
-          if (evt.type === "error") {
+          if (evt.type === "error" && visible) {
             setStreaming(false);
             setActivities((prev) => [
               ...prev,
@@ -1140,12 +1134,12 @@ export const Dashboard: React.FC<{
         // Explicit same-Session supersession/delete: never paint a cancellation error.
         return;
       }
-      if (!isStreamThreadCurrent(streamThreadId, activeThreadIdRef.current)) return;
+      if (!ownsStreamCleanup(streamControllersRef.current.get(streamThreadId), streamController)) return;
       const msg = String(err);
       const pretty = msg.includes("Failed to fetch") ? `Backend offline (${apiBase})` : msg;
-      setBackendOnline(false);
-      addMessage({ id: crypto.randomUUID(), role: "assistant", text: `Error: ${pretty}`, at: Date.now() });
-      setActivities((prev) => [
+      if (activeThreadIdRef.current === streamThreadId) setBackendOnline(false);
+      appendTurnMessage({ id: crypto.randomUUID(), role: "assistant", text: `Error: ${pretty}`, at: Date.now() });
+      if (activeThreadIdRef.current === streamThreadId) setActivities((prev) => [
         ...prev,
         { kind: "error", id: crypto.randomUUID(), message: pretty, at: Date.now() },
       ]);
@@ -1166,32 +1160,16 @@ export const Dashboard: React.FC<{
       // A superseded controller owns no visible or durable projection cleanup.
       if (!owned) return;
 
-      // Only the visible Session owns the current projection's phase machine.
-      if (sameThread && aborted) {
-      } else if (sameThread) {
-      }
-
-      // Do not mutate chat of a different Session (switch already cleared UI).
-      if (!sameThread) {
-        return;
-      }
-
-      if (streamWasHidden) {
-        // Frames skipped while this Session was hidden are reconstructed from
-        // canonical Turns/ToolRuns, preventing duplicate or partially measured rows.
-        await loadHistory(streamThreadId);
-      }
-
-      setStreaming(false);
+      if (sameThread) setStreaming(false);
       // A lean turn interrupted before its final event keeps what already streamed.
-      if (lean.stateRef.current?.requestId === runRequestId) {
-        const leftover = lean.finish();
+      if (lean.get(streamThreadId)?.requestId === runRequestId) {
+        const leftover = lean.finish(streamThreadId);
         if (leftover && !finalHandled) {
           for (const id of leftover.order) {
             const item = leftover.messages[id];
             if (!item || !item.segments.length) continue;
             const text = item.segments.filter((s) => s.kind === "text").map((s) => (s as { text: string }).text).join("\n\n").trim();
-            addMessage({
+            appendTurnMessage({
               id: item.messageId,
               role: "assistant",
               text: text || (aborted ? "Stopped." : "Interrupted."),
@@ -1213,7 +1191,7 @@ export const Dashboard: React.FC<{
           }
         }
       }
-      if (!finalHandled && streamThreadId && !aborted) {
+      if (!finalHandled && streamThreadId && !aborted && sameThread) {
         void refreshThreadState(streamThreadId);
         void refreshPendingApproval(streamThreadId);
       }

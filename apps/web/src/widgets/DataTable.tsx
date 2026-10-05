@@ -47,7 +47,7 @@ export function DataTable({ children }: { children: React.ReactNode }) {
         <CopyButton text={tsv} label="Copy for Sheets" />
         <CopyButton text={md} label="Copy Markdown" />
       </div>
-      <div className="wg-table-wrap">
+      <div className="wg-table-wrap" role="region" aria-label="Scrollable data table" tabIndex={0} style={{ "--table-columns": Math.max(1, headCells.length) } as React.CSSProperties}>
         <table className="wg-table">
           <thead>
             <tr>

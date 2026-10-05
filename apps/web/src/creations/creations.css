@@ -10,3 +10,19 @@
 .setup-panel{width:min(880px,100%);max-height:92vh;display:flex;flex-direction:column;background:#111;border:1px solid #333;border-radius:18px;box-shadow:0 20px 90px #000;color:#eee}
 .setup-panel header,.setup-panel footer{padding:20px 28px;display:flex;align-items:center;justify-content:space-between;gap:16px}.setup-panel header h2{margin:0}.setup-panel main{padding:0 28px 20px;overflow:auto}.setup-panel nav{display:flex;gap:8px;flex-wrap:wrap;padding:0 28px 16px}.setup-panel nav button{border:1px solid #333;background:transparent;color:inherit;border-radius:6px;padding:6px 10px}.setup-panel nav button[aria-current=step]{background:#eee;color:#111}
 @media(max-width:600px){.setup-backdrop{padding:8px}.setup-panel header,.setup-panel footer,.setup-panel main{padding:16px}.creation-grid{grid-template-columns:1fr}}
+
+/* Library pages share the same typography and surfaces as Projects and Artifacts. */
+.es-page .creation-filters{margin:0 0 20px;gap:10px;color:var(--es-dim);font:12px var(--es-font)}
+.es-page .creation-filters input:not([type=checkbox]),.es-page .creation-filters select,.creation-library-card>input{background:var(--es-glass);color:var(--es-text);border:1px solid var(--es-line-2);border-radius:10px;padding:9px 12px;font:13px var(--es-font);min-width:0}
+.es-page .creation-filters input:not([type=checkbox]){flex:1;min-width:160px}
+.es-page .creation-filters label{display:flex;gap:7px;align-items:center}
+.creation-library-grid{margin-top:16px}
+.es-page-card.creation-library-card{min-width:0;cursor:default;gap:10px}
+.creation-library-card>input{width:100%;font-weight:600}
+.creation-library-card p{margin:0;color:var(--es-dim);font:12.5px/1.6 var(--es-font);overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.creation-library-card .creation-preview img,.creation-library-card .creation-preview video{height:190px;max-height:190px;object-fit:contain;margin:0 0 10px;border-radius:9px}
+.creation-library-card small{margin:0;color:var(--es-faint);font-size:11px;white-space:normal}
+.creation-library-card .creation-actions{margin:0;gap:8px}
+@media(max-width:480px){.creation-library-grid{grid-template-columns:minmax(0,1fr)}}
+
+.es-page .creation-card{padding:14px;border-color:var(--es-line);background:var(--es-glass);color:var(--es-text);font-family:var(--es-font)}
