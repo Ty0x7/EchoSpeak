@@ -29,3 +29,18 @@
 .cap-creation-portrait{width:100%;aspect-ratio:8/9;overflow:hidden;border-radius:12px;background:#111}
 .creation-photo{background-position:50% 50%;background-size:300% 100%;filter:none}
 .cap-creation-portrait .creation-photo{animation:none;transform:none}
+
+/* Leave more room for the actual previews on a phone. */
+@media (max-width: 760px) {
+  .cap-creations, .cap-setup { gap: 28px; }
+  .cap-copy h2 { font-size: clamp(34px, 8vw, 48px); margin-block: 18px; }
+  .cap-copy p { line-height: 1.65; }
+  .cap-feature-list { margin: 22px 0; gap: 12px; line-height: 1.5; }
+  .cap-feature-list svg { flex-shrink: 0; }
+  .cap-setup-demo { padding: 14px 8px; }
+  .cap-setup-window { padding: 24px 18px; }
+  .cap-setup-options button { gap: 8px; }
+  .cap-setup-options button > svg { flex-shrink: 0; }
+  .cap-setup-detail { min-height: 0; }
+  .cap-echo-peek { display: none; }
+}
