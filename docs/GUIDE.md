@@ -169,6 +169,10 @@ always need the key. Don't expose the port to the internet even then; use a VPN 
 
 ## Research, native Live audio and local creations
 
+Artifacts, research and tool activity share one right sidebar. Switch its tabs to
+keep your preview, source passage and filter in place. The shared expand/close
+controls work across all views; incoming tools do not switch the tab you are reading.
+
 Open **Research & activity** in a chat, then **Research**, to see that chat's sources,
 page passages and working notes. Search-result snippets are marked separately from
 pages Echo actually read. The notebook keeps working evidence for seven days, apart

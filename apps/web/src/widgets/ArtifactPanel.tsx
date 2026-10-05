@@ -166,7 +166,7 @@ export function ArtifactPanel({
         {current && detail ? <button type="button" className="wg-ghost" onClick={() => download(fileNameFor(detail), current.content)}>Download</button> : null}
         {runnable ? <button type="button" className="wg-ghost" onClick={() => void openInBrowser()} title="Open in your browser (still sandboxed)">Open ↗</button> : null}
         {runnable && view === "preview" ? <button type="button" className="wg-ghost" onClick={() => setReloadKey((k) => k + 1)} title="Restart the app">Reload</button> : null}
-        <button type="button" className="wg-ghost" onClick={() => setFullscreen((v) => !v)} aria-pressed={fullscreen}>{fullscreen ? "Exit full screen" : "Full screen"}</button>
+        {!embedded && <button type="button" className="wg-ghost" onClick={() => setFullscreen((v) => !v)} aria-pressed={fullscreen}>{fullscreen ? "Exit full screen" : "Full screen"}</button>}
       </div>
       <div className="ap-body">
         {error ? (

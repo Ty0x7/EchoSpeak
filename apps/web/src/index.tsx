@@ -91,7 +91,7 @@ export const Dashboard: React.FC<{
   const [mainPage, setMainPage] = useState<SidebarPage>("chat");
   /** The artifact shown in the side panel. */
   const [openArtifact, setOpenArtifact] = useState<{ id: string; version?: number } | null>(null);
-  /** Right side panel: which tab, whether Activity was opened, and its width. */
+  /** Shared right side panel: selected tab, open state and remembered width. */
   const [rightTab, setRightTab] = useState<RightTab>("artifact");
   const [activityOpen, setActivityOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(() => loadPanelWidth());
@@ -1453,9 +1453,6 @@ export const Dashboard: React.FC<{
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, [measurePanelRoom, rightOpen]);
-  useEffect(() => {
-    if (openArtifact) setRightTab("artifact");
-  }, [openArtifact]);
   const activityItems = useMemo(() => {
     const live = lean.live ? lean.live.order.map((id) => lean.live!.messages[id]) : [];
     return collectActivity([...messages.map((m) => m.lean), ...live]);
@@ -1470,7 +1467,7 @@ export const Dashboard: React.FC<{
         if (seg.kind === "tool" && TERMINAL_TOOLS.has(seg.name) && seg.status === "running" && !seenTerminalRef.current.has(seg.id)) {
           seenTerminalRef.current.add(seg.id);
           setActivityOpen(true);
-          if (!openArtifact) setRightTab("activity");
+          if (!openArtifact && !activityOpen) setRightTab("activity");
         }
         if (seg.kind !== "tool" || !seg.widgets) continue;
         for (const widget of seg.widgets as { type?: string; data?: { id?: string; version?: number } }[]) {
@@ -1479,12 +1476,13 @@ export const Dashboard: React.FC<{
           if (seenArtifactsRef.current.has(key)) continue;
           seenArtifactsRef.current.add(key);
           setOpenArtifact({ id: widget.data.id });
+          if (!openArtifact && !activityOpen) setRightTab("artifact");
         }
       }
     }
   }, [lean.live]); // eslint-disable-line react-hooks/exhaustive-deps
   const widgetEnv = useMemo<WidgetEnv>(
-    () => ({ apiBase, openArtifact: (id, version) => setOpenArtifact({ id, version }) }),
+    () => ({ apiBase, openArtifact: (id, version) => { setOpenArtifact({ id, version }); setRightTab("artifact"); } }),
     [apiBase],
   );
   /** Open (or create) the one-to-one chat with an agent. Echo's chat is the most recent plain chat. */
@@ -1520,6 +1518,7 @@ export const Dashboard: React.FC<{
     setMainPage("chat");
     if (item.session_id && item.session_id !== activeThreadId) switchThread(item.session_id);
     setOpenArtifact({ id: item.id, version: item.version });
+    setRightTab("artifact");
   };
 
   return (

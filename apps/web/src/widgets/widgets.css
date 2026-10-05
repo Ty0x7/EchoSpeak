@@ -339,7 +339,7 @@
 }
 @keyframes rp-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
 .desktop-window .desktop-single-workspace > .rp { grid-row: 1 / 3; }
-.rp.is-overlay { position: fixed; inset: 0; z-index: 150500; border-left: 0; }
+.rp.is-overlay, .rp.is-expanded { position: fixed; inset: 0; z-index: 150500; border-left: 0; }
 .rp-resize { position: absolute; left: -4px; top: 0; bottom: 0; z-index: 5; width: 8px; cursor: col-resize; touch-action: none; display: grid; place-items: center; }
 .rp-resize > span { width: 2px; height: 100%; background: transparent; transition: background 120ms ease; }
 .rp-resize:hover > span, .rp-resize:focus-visible > span, .rp[data-dragging="true"] .rp-resize > span { background: rgba(255, 255, 255, 0.28); }
@@ -357,6 +357,26 @@ body.rp-resizing iframe { pointer-events: none; }
 .rp-close { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--wg-dim); cursor: pointer; }
 .rp-close:hover { color: var(--wg-text); background: rgba(255, 255, 255, 0.075); border-color: var(--wg-line); }
 .rp-body { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.rp-tab-panel { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.rp-tab-panel[hidden] { display: none; }
+.echo-root .rp {
+  --wg-line: var(--es-line);
+  --wg-line-2: var(--es-line-2);
+  --wg-text: var(--es-text);
+  --wg-dim: var(--es-dim);
+  --wg-faint: var(--es-faint);
+  --wg-font: var(--es-font);
+  --wg-mono: var(--es-mono);
+  background: var(--es-surface-1);
+  font: 400 13px/1.55 var(--es-font);
+}
+.rp .ap { --wg-font: var(--es-font); --wg-text: var(--es-text); --wg-line: var(--es-line); --wg-line-2: var(--es-line-2); --wg-dim: var(--es-dim); --wg-faint: var(--es-faint); }
+.rp-tabs { gap: 4px; padding: 8px; }
+.rp-tabs [role="tab"] { padding: 0 8px; font-size: 10px; letter-spacing: 0.06em; }
+.rp-tabs .rp-close { flex: 0 0 28px; }
+.rp-tabs [role="tab"]:focus-visible, .rp-close:focus-visible { outline: 2px solid var(--es-focus); outline-offset: -2px; }
+.rp .ap-seg { border-radius: var(--es-r-sm); }
+.rp .ap-seg button { border-radius: 6px; }
 .rp .ap-head { padding: 10px 12px 8px; border-bottom: 0; }
 .rp-activity { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
 .rp-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 10px; border-bottom: 1px solid var(--wg-line); }

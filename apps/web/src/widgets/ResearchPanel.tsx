@@ -6,7 +6,7 @@ type Source = { id: string; url: string; title: string; excerpt: string; inspect
 type Notebook = { session_id: string; sources: Source[]; notes: string; retention_days: number };
 type Passage = { text: string; next_offset: number | null; total_chars: number };
 
-export function ResearchPanel({ apiBase, sessionId }: { apiBase: string; sessionId: string }) {
+export function ResearchPanel({ apiBase, sessionId, active = true }: { apiBase: string; sessionId: string; active?: boolean }) {
   const [book, setBook] = useState<Notebook | null>(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState("");
@@ -15,7 +15,7 @@ export function ResearchPanel({ apiBase, sessionId }: { apiBase: string; session
   const [loading, setLoading] = useState(false);
   const [offset, setOffset] = useState(0);
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !active) return;
     const controller = new AbortController();
     let busy = false;
     const load = async () => {
@@ -33,7 +33,7 @@ export function ResearchPanel({ apiBase, sessionId }: { apiBase: string; session
     const delay = window.setTimeout(() => void load(), 200);
     const interval = window.setInterval(() => void load(), 4000);
     return () => { controller.abort(); window.clearTimeout(delay); window.clearInterval(interval); };
-  }, [apiBase, sessionId, query]);
+  }, [apiBase, sessionId, query, active]);
   useEffect(() => {
     setPassage(null);
     if (!selected) return;
