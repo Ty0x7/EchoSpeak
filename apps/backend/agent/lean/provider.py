@@ -1,9 +1,7 @@
-"""OpenAI-compatible streaming client for every provider EchoSpeak supports.
+"""Streaming client for EchoSpeak's cloud and local chat providers.
 
-LM Studio, Ollama, vLLM, LocalAI, OpenAI and Gemini all speak the
-``/chat/completions`` dialect, so one client covers them. Talking to the
-endpoint directly (instead of through LangChain) keeps the reasoning channel,
-native tool-call deltas, and finish reasons intact.
+OpenAI-compatible hosts share a streaming parser. Claude Messages and Gemini
+Live use native adapters while retaining the same chat and tool-loop contract.
 """
 
 from __future__ import annotations
@@ -40,10 +38,10 @@ def reasoning_effort_for(endpoint: Endpoint, thinking_enabled: bool, effort: str
         return level if thinking_enabled else "none"
     model = endpoint.model.lower()
     # Cloud: only reasoning models accept the parameter.
-    if endpoint.provider == "openai" and (model.startswith(("o1", "o3", "o4", "gpt-5"))):
+    if endpoint.provider == "openai" and (model.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))):
         return level if thinking_enabled else "low"
     if endpoint.provider == "gemini" and ("2.5" in model or "-3" in model):
-        return level if thinking_enabled else "none"
+        return level if thinking_enabled else ("low" if "-3" in model else "none")
     return ""
 
 
@@ -51,23 +49,14 @@ def resolve_endpoint(provider: str, model_id: str = "") -> Endpoint:
     """Map EchoSpeak's provider config onto an OpenAI-compatible endpoint."""
     from agent.model_runtime import resolve_local_provider_base_url
 
-    try:
-        resolved = ModelProvider(str(provider))
-    except ValueError:
-        resolved = ModelProvider.LM_STUDIO
-    if resolved == ModelProvider.OPENAI:
+    from agent.cloud_providers import CLOUD_PROVIDERS, BASE_URLS, cloud_config
+    resolved = ModelProvider(str(provider))
+    if resolved.value in CLOUD_PROVIDERS:
+        c = cloud_config(resolved)
         return Endpoint(
-            base_url="https://api.openai.com/v1",
-            api_key=str(config.openai.api_key or ""),
-            model=model_id or str(config.openai.model or ""),
-            provider=resolved.value,
-            local=False,
-        )
-    if resolved == ModelProvider.GEMINI:
-        return Endpoint(
-            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-            api_key=str(config.gemini.api_key or ""),
-            model=model_id or str(config.gemini.model or ""),
+            base_url=BASE_URLS[resolved.value],
+            api_key=str(c.api_key or "").strip(),
+            model=str(model_id or c.model or "").strip().removeprefix("models/"),
             provider=resolved.value,
             local=False,
         )
@@ -150,6 +139,7 @@ class ToolCall:
     id: str
     name: str
     arguments: str
+    extra_content: dict[str, Any] = field(default_factory=dict)
 
     def parsed_arguments(self) -> tuple[dict[str, Any], str]:
         """Return (arguments, error). Small models sometimes emit loose JSON."""
@@ -195,6 +185,7 @@ class ModelTurn:
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str = ""
     usage: dict[str, int] = field(default_factory=dict)
+    provider_blocks: list[dict[str, Any]] = field(default_factory=list)
 
 
 _TEXT_TOOL_PATTERNS = (
@@ -384,17 +375,18 @@ class ChatClient:
         # "none" turns thinking off (LM Studio honors it for Gemma/Qwen);
         # low/medium/high set its depth. Dropped automatically if rejected.
         self.reasoning_effort = reasoning_effort
+        self._live = None
         timeout = settings.request_timeout_seconds()
         self._http = httpx.Client(
             base_url=endpoint.base_url,
             timeout=httpx.Timeout(timeout, connect=15.0),
-            headers={
-                "Authorization": f"Bearer {endpoint.api_key or 'not-needed'}",
-                "Content-Type": "application/json",
-            },
+            headers=({"x-api-key": endpoint.api_key, "anthropic-version": "2023-06-01"} if endpoint.provider == "anthropic" else {"Authorization": f"Bearer {endpoint.api_key or 'not-needed'}"}) | {"Content-Type": "application/json"},
         )
 
     def close(self) -> None:
+        if self._live is not None:
+            self._live.close()
+            self._live = None
         try:
             self._http.close()
         except Exception:
@@ -411,6 +403,18 @@ class ChatClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> ModelTurn:
+        if not self.endpoint.local and not self.endpoint.api_key.strip():
+            raise ProviderError(401, "No API key saved. Add it in Settings → Models.", self.endpoint.provider)
+        if not self.endpoint.local and self.endpoint.model in ("", "default"):
+            raise ProviderError(422, "Select an API model in Settings → Models.", self.endpoint.provider)
+        if self.endpoint.provider == "anthropic":
+            from agent.lean.cloud_streams import anthropic_turn
+            return anthropic_turn(self, messages, tools, on_reasoning, on_content, cancel, max_tokens)
+        if self.endpoint.provider == "gemini" and any(s in self.endpoint.model.lower() for s in ("live", "native-audio")):
+            from agent.lean.cloud_streams import gemini_live_turn
+            return gemini_live_turn(self, messages, tools, on_reasoning, on_content, cancel, max_tokens)
+        # Provider-specific metadata is only meaningful to its own adapter.
+        messages = [{k: v for k, v in m.items() if k != "provider_blocks"} for m in messages]
         body: dict[str, Any] = {
             "model": self.endpoint.model,
             "messages": messages,
@@ -418,7 +422,10 @@ class ChatClient:
             "stream_options": {"include_usage": True},
             "max_tokens": int(max_tokens or settings.max_output_tokens()),
         }
-        if temperature is not None:
+        reasoning_model = self.endpoint.provider == "openai" and self.endpoint.model.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))
+        if self.endpoint.provider == "openai":
+            body["max_completion_tokens"] = body.pop("max_tokens")
+        if temperature is not None and not reasoning_model:
             body["temperature"] = temperature
         if tools:
             body["tools"] = tools
@@ -463,7 +470,7 @@ class ChatClient:
         with self._http.stream("POST", "/chat/completions", json=body) as response:
             if response.status_code >= 400:
                 detail = response.read().decode("utf-8", errors="ignore")[:800]
-                raise ProviderError(response.status_code, detail)
+                raise ProviderError(response.status_code, detail.replace(self.endpoint.api_key, "[redacted]") if self.endpoint.api_key else detail, self.endpoint.provider)
             for line in response.iter_lines():
                 if cancel is not None and cancel.is_set():
                     turn.finish_reason = "cancelled"
@@ -495,6 +502,8 @@ class ChatClient:
                     for fragment in delta.get("tool_calls") or []:
                         index = int(fragment.get("index") or 0)
                         slot = partial_calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                        if fragment.get("extra_content"):
+                            slot["extra_content"] = fragment["extra_content"]
                         if fragment.get("id"):
                             slot["id"] = str(fragment["id"])
                         function = fragment.get("function") or {}
@@ -518,6 +527,7 @@ class ChatClient:
                 id=slot["id"] or f"call_{uuid.uuid4().hex[:12]}",
                 name=slot["name"].strip(),
                 arguments=slot["arguments"],
+                extra_content=slot.get("extra_content") or {},
             ))
         logger.debug(
             "Lean model turn finish={} content={} reasoning={} tools={}",
@@ -528,8 +538,9 @@ class ChatClient:
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, status: int, detail: str) -> None:
-        super().__init__(f"Model provider returned HTTP {status}: {detail}")
+    def __init__(self, status: int, detail: str, provider: str = "") -> None:
+        from agent.cloud_providers import provider_error
+        super().__init__(provider_error(provider, status, detail) if provider else f"Model provider returned HTTP {status}: {detail}")
         self.status = status
         self.detail = detail
 

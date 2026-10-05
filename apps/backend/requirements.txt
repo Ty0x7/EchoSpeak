@@ -26,6 +26,7 @@ pypdf>=4.0.0
 # Web search
 requests>=2.31.0
 httpx>=0.27.0
+websockets>=15,<18
 trafilatura>=2.0,<3
 py7zr>=1.0,<2
 ddgs>=9,<10

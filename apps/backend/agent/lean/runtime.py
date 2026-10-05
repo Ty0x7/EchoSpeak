@@ -1252,7 +1252,9 @@ class LeanSession:
         try:
             from config import config
 
-            return float(config.local.temperature)
+            from agent.cloud_providers import CLOUD_PROVIDERS, cloud_config
+            provider = str(getattr(getattr(self.agent, "llm_provider", None), "value", ""))
+            return float(cloud_config(provider).temperature if provider in CLOUD_PROVIDERS else config.local.temperature)
         except Exception:
             return None
 

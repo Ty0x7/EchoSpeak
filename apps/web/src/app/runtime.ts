@@ -3,8 +3,7 @@ import { create } from "zustand";
 import { localVoicePlayback } from "../voiceTransport";
 import { type AppState, type AvatarConfig, type ProviderInfo, type ProviderListItem } from "./types";
 
-export const openaiModelOptions = ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1", "gpt-3.5-turbo"];
-export const geminiModelOptions = ["gemini-3.5-flash", "gemini-3.5-pro", "gemini-3.1-flash-lite-preview", "gemini-3.1-pro-preview", "gemini-2.5-pro"];
+export const cloudProviders = ["openai", "gemini", "anthropic", "xai"];
 export const listableProviders = ["ollama", "lmstudio", "localai", "vllm"];
 export const isLmStudioOnlyLocked = (info: ProviderInfo | null): boolean => {
   const providers = info?.available_providers || [];
@@ -52,6 +51,8 @@ export const isEmptySessionDraft = (session: { name?: string; messageCount?: num
 export const fallbackProviders: ProviderListItem[] = [
   { id: "openai", name: "OpenAI", local: false, description: "OpenAI GPT models" },
   { id: "gemini", name: "Google Gemini", local: false, description: "Google Gemini models" },
+  { id: "anthropic", name: "Claude", local: false, description: "Anthropic Claude models" },
+  { id: "xai", name: "Grok", local: false, description: "xAI Grok models" },
   { id: "ollama", name: "Ollama", local: true, description: "Local Ollama models" },
   { id: "lmstudio", name: "LM Studio (GGUF direct)", local: true, description: "LM Studio (GGUF direct via OpenAI-compatible API)" },
   { id: "localai", name: "LocalAI", local: true, description: "LocalAI (OpenAI compatible)" },

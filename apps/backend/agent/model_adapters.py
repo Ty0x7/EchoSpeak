@@ -60,7 +60,7 @@ def resolve_reasoning_effort(
     m_low = str(model_id or "").lower()
     openai_reasoning = provider == "openai" and any(
         marker in m_low
-        for marker in ("o1", "o3", "o4", "gpt-5", "reasoner")
+        for marker in ("o1", "o3", "o4", "gpt-5", "gpt-6", "reasoner")
     )
     gemini_thinking = provider == "gemini" and any(
         marker in m_low for marker in ("gemini-2.5", "gemini-3")

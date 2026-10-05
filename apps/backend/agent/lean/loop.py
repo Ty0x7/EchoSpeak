@@ -276,9 +276,11 @@ class LeanTurn:
                     calls, content = recovered, cleaned
 
             assistant: dict[str, Any] = {"role": "assistant", "content": content or ""}
+            if turn.provider_blocks:
+                assistant["provider_blocks"] = turn.provider_blocks
             if calls:
                 assistant["tool_calls"] = [
-                    {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments or "{}"}}
+                    {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments or "{}"}, **({"extra_content": call.extra_content} if call.extra_content else {})}
                     for call in calls
                 ]
             messages.append(assistant)
