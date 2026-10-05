@@ -63,6 +63,7 @@ class GenerationJob(BaseModel):
     prompt: str
     settings: GenerationSettings = Field(default_factory=GenerationSettings)
     input_asset_ids: list[str] = Field(default_factory=list)
+    origin: str = ""
     execution_id: str = ""
     task_run_id: str = ""
     requirement_id: str = ""
@@ -177,7 +178,7 @@ class GenerationJobStore:
             if job.status in {"queued", "running"}:
                 job.status = "failed"
                 job.error_code = "process_interrupted"
-                job.error = "Generation worker stopped before a terminal result; submit a new approved job to retry."
+                job.error = "EchoSpeak stopped while this job was pending. A submitted provider job may still finish and incur charges. Check the provider before approving another generation."
                 self.save(job)
                 recovered += 1
         return recovered
@@ -200,77 +201,11 @@ def _comfyui_detected() -> tuple[bool, str]:
 
 
 def generation_provider_statuses() -> list[GenerationProviderStatus]:
-    comfy, comfy_detail = _comfyui_detected()
-    workflow = str(getattr(config, "comfyui_workflow_path", "") or "").strip()
-    workflow_ready = bool(workflow and Path(workflow).expanduser().is_file())
-    openai_key = bool(str(getattr(config.openai, "api_key", "") or "").strip())
-    vertex = bool(str(getattr(config, "vertex_project_id", "") or "").strip())
-    runway = bool(str(getattr(config, "runway_api_key", "") or "").strip())
-    return [
-        GenerationProviderStatus(
-            id="comfyui-local",
-            locality="local",
-            kinds=["image", "video"],
-            detected=comfy,
-            configured=comfy and workflow_ready,
-            execution_ready=False,
-            supports_progress=True,
-            supports_cancel=True,
-            detail=(
-                "Server and workflow are configured; the governed workflow compiler/output verifier is not implemented."
-                if comfy and workflow_ready
-                else f"{comfy_detail} Configure an explicit API-format workflow template to continue."
-            ),
-        ),
-        GenerationProviderStatus(
-            id="openai-images",
-            locality="cloud",
-            kinds=["image"],
-            detected=openai_key,
-            configured=openai_key and getattr(config, "generation_cloud_provider", "") == "openai-images",
-            execution_ready=False,
-            supports_progress=True,
-            supports_cancel=True,
-            requires_cost_approval=True,
-            detail="Credentials detected; adapter is held behind explicit cost/upload approval." if openai_key else "OPENAI_API_KEY is not configured.",
-        ),
-        GenerationProviderStatus(
-            id="openai-video",
-            locality="cloud",
-            kinds=["video"],
-            detected=openai_key,
-            configured=openai_key and getattr(config, "generation_cloud_provider", "") == "openai-video",
-            execution_ready=False,
-            supports_progress=True,
-            supports_cancel=True,
-            requires_cost_approval=True,
-            detail="Credentials detected; adapter is held behind explicit cost/upload approval." if openai_key else "OPENAI_API_KEY is not configured.",
-        ),
-        GenerationProviderStatus(
-            id="vertex-media",
-            locality="cloud",
-            kinds=["image", "video"],
-            detected=vertex,
-            configured=vertex and getattr(config, "generation_cloud_provider", "") == "vertex-media",
-            execution_ready=False,
-            supports_progress=True,
-            supports_cancel=True,
-            requires_cost_approval=True,
-            detail="Vertex Project detected; credentials, region, quota, and approval adapter remain gated." if vertex else "VERTEX_PROJECT_ID is not configured.",
-        ),
-        GenerationProviderStatus(
-            id="runway",
-            locality="cloud",
-            kinds=["image", "video"],
-            detected=runway,
-            configured=runway and getattr(config, "generation_cloud_provider", "") == "runway",
-            execution_ready=False,
-            supports_progress=True,
-            supports_cancel=True,
-            requires_cost_approval=True,
-            detail="Runway credentials detected; cost/upload approval adapter remains gated." if runway else "RUNWAY_API_KEY is not configured.",
-        ),
-    ]
+    from agent.generation_providers import provider_statuses
+    return [GenerationProviderStatus(id=row["id"], locality=row["locality"], kinds=row["kinds"],
+        detected=row["execution_ready"], configured=row["execution_ready"], execution_ready=row["execution_ready"],
+        supports_progress=False, supports_cancel=False, requires_cost_approval=row["locality"] == "cloud", detail=row["detail"])
+        for row in provider_statuses()]
 
 
 def _authority(session_id: str, project_id: str, tool_name: str) -> tuple[Any, Any, Path]:

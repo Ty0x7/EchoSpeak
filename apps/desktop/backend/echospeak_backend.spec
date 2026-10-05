@@ -30,6 +30,8 @@ datas += data_tree(backend_root / "workspaces", "workspaces")
 
 # Local speech (faster-whisper): its VAD model files and CTranslate2's native DLLs.
 datas += collect_data_files("faster_whisper")
+for package in ("trafilatura", "justext", "ddgs", "primp"):
+    datas += collect_data_files(package)
 binaries_extra = collect_dynamic_libs("ctranslate2")
 # Local embeddings (agent/embeddings.py) and the voice VAD run on onnxruntime.
 binaries_extra += collect_dynamic_libs("onnxruntime")
@@ -52,7 +54,9 @@ hiddenimports = (
     # MCP's optional CLI exits during import without its CLI extras installed.
     # EchoSpeak uses the SDK, so avoid scanning or bundling the CLI package.
     + collect_submodules("mcp", filter=lambda name: name != "mcp.cli" and not name.startswith("mcp.cli."))
-    + ["onnxruntime", "tokenizers"]
+    + collect_submodules("ddgs.engines")
+    + collect_submodules("py7zr")
+    + ["onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp"]
 )
 
 a = Analysis(

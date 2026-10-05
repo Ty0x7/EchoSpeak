@@ -324,30 +324,12 @@ class DuckDuckGoProvider:
         )
 
     def extract_url(self, url: str) -> str:
-        """Optional full-page extract (Firecrawl-like, free via ddgs)."""
-        url = str(url or "").strip()
-        if not url.startswith("http"):
-            return ""
+        """Extract through the same DNS-pinned, public-only reader as open-page."""
         try:
-            try:
-                from ddgs import DDGS
-            except ImportError:
-                from duckduckgo_search import DDGS  # type: ignore
-            with DDGS() as ddgs:
-                data = ddgs.extract(url, fmt="text_markdown")
-            if isinstance(data, dict):
-                for k in ("text", "markdown", "content", "body"):
-                    if data.get(k):
-                        return str(data.get(k))[:8000]
-                # any string value
-                for v in data.values():
-                    if isinstance(v, str) and len(v) > 40:
-                        return v[:8000]
-            if isinstance(data, str):
-                return data[:8000]
-        except Exception as exc:
-            logger.debug("ddg extract failed for {}: {}", url[:80], exc)
-        return ""
+            from agent.safe_web_retrieval import fetch_public_page
+            return fetch_public_page(url, max_text_chars=8000).text
+        except Exception:
+            return ""
 
 
 class SearXNGProvider:
@@ -409,6 +391,36 @@ class SearXNGProvider:
                 errors=[_format_provider_error("SearXNG", exc, self.timeout_s)],
                 queries_used=[q],
             )
+
+class TavilyProvider:
+    """Optional independent index; page content still goes through our safe reader."""
+    name = "tavily"
+
+    def __init__(self, api_key: str, max_results: int = 8, timeout_s: float = 12):
+        self.api_key, self.max_results, self.timeout_s = api_key.strip(), min(20, max(1, max_results)), timeout_s
+
+    @property
+    def available(self):
+        return bool(self.api_key)
+
+    def search(self, query: str, **_kwargs):
+        if not self.available:
+            return SearchProviderResult(provider=self.name, errors=["Tavily API key not set"])
+        try:
+            import httpx
+            with httpx.Client(timeout=self.timeout_s, trust_env=False, follow_redirects=False) as client:
+                response = client.post("https://api.tavily.com/search", headers={"Authorization": "Bearer " + self.api_key},
+                    json={"query": query, "max_results": self.max_results, "search_depth": "basic",
+                          "include_answer": False, "include_raw_content": False})
+                response.raise_for_status()
+                data = response.json()
+            hits = [SearchHit(title=str(row.get("title", "")), url=str(row.get("url", "")),
+                snippet=str(row.get("content", ""))[:8000], provider=self.name, query=query)
+                for row in data.get("results", [])[:self.max_results] if isinstance(row, dict)]
+            return SearchProviderResult(hits=_dedupe_hits(hits), provider=self.name, queries_used=[query])
+        except Exception as exc:
+            return SearchProviderResult(provider=self.name, queries_used=[query], errors=[_format_provider_error("Tavily", exc, self.timeout_s)])
+
 
 class BraveProvider:
     """Brave Search API — optional; independent index."""
@@ -508,7 +520,9 @@ def resolve_provider_order(config: Any) -> List[str]:
     brave = bool(str(getattr(config, "brave_search_api_key", "") or "").strip())
     searxng = bool(str(getattr(config, "searxng_base_url", "") or "").strip())
 
-    if pref == "searxng":
+    if pref == "tavily":
+        order = ["tavily", "duckduckgo"]
+    elif pref == "searxng":
         order = ["searxng", "duckduckgo"]
     elif pref == "brave":
         order = ["brave", "duckduckgo"]
@@ -516,6 +530,8 @@ def resolve_provider_order(config: Any) -> List[str]:
         order = ["duckduckgo"]
     else:
         order = []
+        if str(getattr(config, "tavily_api_key", "") or "").strip():
+            order.append("tavily")
         if searxng:
             order.append("searxng")
         if brave:
@@ -532,6 +548,7 @@ def _provider_registry(config: Any) -> Dict[str, Any]:
     timeout = float(getattr(config, "web_search_timeout", 10) or 10)
     max_results = int(getattr(config, "web_search_max_results", 8) or 8)
     return {
+        "tavily": TavilyProvider(str(getattr(config, "tavily_api_key", "") or ""), max_results=max_results, timeout_s=timeout),
         "duckduckgo": DuckDuckGoProvider(max_results=max_results, timeout_s=timeout),
         "searxng": SearXNGProvider(
             base_url=str(getattr(config, "searxng_base_url", "") or ""),
@@ -584,7 +601,7 @@ def run_web_search(
         prov = providers.get(pname)
         if prov is None:
             continue
-        if pname in {"brave", "searxng"} and not getattr(prov, "available", False):
+        if pname in {"brave", "searxng", "tavily"} and not getattr(prov, "available", False):
             continue
         for vq in variants:
             res = prov.search(vq, news=_is_newsish(vq))

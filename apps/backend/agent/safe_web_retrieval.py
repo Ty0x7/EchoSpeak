@@ -27,6 +27,7 @@ class SafePageResult(BaseModel):
     final_url: str
     title: str = ""
     text: str = ""
+    links: list[dict[str, str]] = Field(default_factory=list)
     metadata: dict[str, str] = Field(default_factory=dict)
     json_ld: list[Any] = Field(default_factory=list)
     semantic_attributes: list[dict[str, str]] = Field(default_factory=list)
@@ -54,6 +55,7 @@ class SafePageResult(BaseModel):
             "semantic_attributes": self.semantic_attributes[:80],
             "tables": self.tables[:12],
             "text": self.text,
+            "links": self.links,
         }
         return (
             "execution_status=success\nresult_state=data_found\n"
@@ -70,6 +72,9 @@ class _PageExtractor(HTMLParser):
         self.json_ld: list[Any] = []
         self.semantic: list[dict[str, str]] = []
         self.tables: list[list[list[str]]] = []
+        self.links: list[dict[str, str]] = []
+        self._link: Optional[dict[str, str]] = None
+        self._text_size = 0
         self._ignored = 0
         self._in_title = False
         self._json_ld_depth = 0
@@ -81,6 +86,9 @@ class _PageExtractor(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, Optional[str]]]) -> None:
         values = {str(key).casefold(): str(value or "") for key, value in attrs}
         lower = tag.casefold()
+        if lower == "a" and values.get("href") and len(self.links) < 150:
+            self._link = {"url": values["href"][:2048], "title": ""}
+            self.links.append(self._link)
         if lower in {"script", "style", "noscript", "svg", "canvas"}:
             if lower == "script" and values.get("type", "").casefold() == "application/ld+json":
                 self._json_ld_depth += 1
@@ -112,6 +120,8 @@ class _PageExtractor(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         lower = tag.casefold()
+        if lower == "a":
+            self._link = None
         if lower == "title":
             self._in_title = False
         if lower == "script" and self._json_ld_depth:
@@ -151,8 +161,11 @@ class _PageExtractor(HTMLParser):
             self.title_parts.append(clean)
         if self._cell_parts is not None:
             self._cell_parts.append(clean)
-        if sum(len(item) for item in self.text_parts) < 100000:
+        if self._link is not None:
+            self._link["title"] = (self._link["title"] + " " + clean).strip()[:200]
+        if self._text_size < 200000:
             self.text_parts.append(clean)
+            self._text_size += len(clean)
 
 
 class _CacheEntry(BaseModel):
@@ -318,9 +331,25 @@ def _request_pinned_public_url(
 
 
 def _extract_page(body: bytes, *, content_type: str, max_text_chars: int) -> tuple[str, str, dict[str, str], list[Any], list[dict[str, str]], list[list[list[str]]]]:
+    if "application/pdf" in content_type:
+        from io import BytesIO
+        from pypdf import PdfReader
+        reader = PdfReader(BytesIO(body))
+        if reader.is_encrypted:
+            raise SafeWebRetrievalError("Encrypted PDF cannot be read", code="encrypted_pdf")
+        pages, size = [], 0
+        for number, page in enumerate(reader.pages[:100], 1):
+            text = f"\n[Page {number}]\n" + (page.extract_text() or "")
+            pages.append(text[:max_text_chars - size])
+            size += len(pages[-1])
+            if size >= max_text_chars:
+                break
+        return str((reader.metadata or {}).get("/Title", "")), "\n".join(pages), {}, [], [], []
     encoding_match = re.search(r"(?i)charset=([a-z0-9._-]+)", content_type)
     encoding = encoding_match.group(1) if encoding_match else "utf-8"
     text = body.decode(encoding, errors="replace")
+    if content_type.startswith("text/plain") or content_type.startswith("text/markdown"):
+        return "", text[:max_text_chars], {}, [], [], []
     if "json" in content_type.casefold():
         try:
             structured = json.loads(text)
@@ -331,6 +360,13 @@ def _extract_page(body: bytes, *, content_type: str, max_text_chars: int) -> tup
     parser = _PageExtractor()
     parser.feed(text)
     visible = re.sub(r"\s+", " ", " ".join(parser.text_parts)).strip()[:max_text_chars]
+    try:
+        from trafilatura import extract
+        main = extract(text, include_comments=False, include_tables=True, output_format="txt")
+        if main and len(main) > 100:
+            visible = main[:max_text_chars]
+    except Exception:
+        pass  # Keep the bounded HTML-parser fallback on malformed pages.
     title = re.sub(r"\s+", " ", " ".join(parser.title_parts)).strip()[:500]
     return title, visible, parser.metadata, parser.json_ld, parser.semantic, parser.tables
 
@@ -347,7 +383,7 @@ def fetch_public_page(
     """Retrieve one public page without browser credentials or interaction."""
 
     target = _normalize_url(url)
-    key = _cache_key(target, locale)
+    key = _cache_key(target, locale) + f":{max_bytes}:{max_text_chars}"
     now = time.time()
     with _CACHE_LOCK:
         cached = _CACHE.get(key)
@@ -395,7 +431,8 @@ def fetch_public_page(
         raise SafeWebRetrievalError(f"Public page returned HTTP {status_code}", code="http_error")
     content_type = str(response_headers.get("content-type") or "").split(";", 1)[0].strip().casefold()
     allowed_types = {
-        "text/html", "application/xhtml+xml", "application/json", "application/ld+json", "text/plain"
+        "text/html", "application/xhtml+xml", "application/json", "application/ld+json", "text/plain",
+        "text/markdown", "application/pdf",
     }
     if content_type not in allowed_types:
         raise SafeWebRetrievalError("Unsupported public page content type", code="content_type_not_allowed")
@@ -405,11 +442,21 @@ def fetch_public_page(
     if not text and not json_ld and not tables:
         raise SafeWebRetrievalError("Public page contained no extractable information", code="no_data")
     cache_control = str(response_headers.get("cache-control") or "")
+    links = []
+    if "html" in content_type:
+        parser = _PageExtractor()
+        parser.feed(body.decode("utf-8", errors="replace"))
+        for link in parser.links:
+            try:
+                links.append({"url": _normalize_url(urljoin(current, link["url"])), "title": link["title"]})
+            except SafeWebRetrievalError:
+                continue
     result = SafePageResult(
         url=target,
         final_url=current,
         title=title,
         text=text,
+        links=links,
         metadata=metadata,
         json_ld=json_ld,
         semantic_attributes=semantic,
@@ -426,6 +473,8 @@ def fetch_public_page(
     ttl = _max_age(cache_control)
     if "no-store" not in cache_control.casefold():
         with _CACHE_LOCK:
+            if len(_CACHE) >= 128:
+                _CACHE.pop(next(iter(_CACHE)))
             _CACHE[key] = _CacheEntry(result=result, expires_at=time.time() + ttl)
     return result
 

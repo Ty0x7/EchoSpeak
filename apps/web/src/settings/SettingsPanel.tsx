@@ -276,7 +276,7 @@ type VoiceSetupInfo = {
   download: { running: boolean; size: string; progress: number; error: string };
 };
 
-function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMap; save: Save; apiBase: string; openAdvanced(page: AdvancedPage): void }) {
+export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMap; save: Save; apiBase: string; openAdvanced(page: AdvancedPage): void }) {
   const [info, setInfo] = useState<VoiceSetupInfo | null>(null);
   const refresh = useCallback(async () => {
     try {
@@ -360,6 +360,7 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
   return (
     <>
       <Group>
+        <Row label="Setup" help="Revisit the first-time model and capability checklist."><button className="es-btn es-btn-sm" onClick={() => window.dispatchEvent(new Event("echospeak:open-setup"))}>Open setup</button></Row>
         <Row label="Your name" help="How your agents refer to you.">
           <TextField value={s.user_display_name || ""} placeholder="Ty" onCommit={(v) => save({ user_display_name: v })} />
         </Row>
@@ -405,7 +406,7 @@ const LOCAL_DEFAULT_URLS: Record<string, string> = {
 
 type DetectRow = { provider: string; base_url: string; running: boolean; models: string[] };
 
-function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBase: string }) {
+export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBase: string }) {
   const local = s.local || {};
   const useLocal = asBool(s.use_local_models);
   const provider = useLocal ? String(local.provider || "lmstudio") : String(s.default_cloud_provider || "openai");
@@ -720,7 +721,7 @@ type TerminalInfo = {
   setup: { running: boolean; message: string; ok: boolean | null };
 };
 
-function TerminalSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBase: string }) {
+export function TerminalSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBase: string }) {
   const [info, setInfo] = useState<TerminalInfo | null>(null);
   const refresh = useCallback(async () => {
     try {
@@ -855,7 +856,7 @@ function TerminalSection({ s, save, apiBase }: { s: SettingsMap; save: Save; api
 }
 
 // ── Search ──────────────────────────────────────────────────────────────
-function SearchSection({ s, save }: { s: SettingsMap; save: Save }) {
+export function SearchSection({ s, save }: { s: SettingsMap; save: Save }) {
   const provider = String(s.web_search_provider || "auto");
   return (
     <>
@@ -869,12 +870,15 @@ function SearchSection({ s, save }: { s: SettingsMap; save: Save }) {
               { value: "duckduckgo", label: "DuckDuckGo" },
               { value: "searxng", label: "SearXNG (self-hosted)" },
               { value: "brave", label: "Brave Search" },
+              { value: "tavily", label: "Tavily" },
             ]}
           />
         </Row>
         {provider === "searxng" || s.searxng_base_url ? (
           <Row label="SearXNG address"><TextField mono value={s.searxng_base_url || ""} placeholder="http://localhost:8080" onCommit={(v) => save({ searxng_base_url: v })} /></Row>
         ) : null}
+        <Row label="Brave API key"><SecretField isSet={Boolean(s.brave_search_api_key)} onCommit={v => save({ brave_search_api_key: v })} /></Row>
+        <Row label="Tavily API key"><SecretField isSet={Boolean(s.tavily_api_key)} onCommit={v => save({ tavily_api_key: v })} /></Row>
         <Row label="Results per search">
           <Select value={String(s.web_search_max_results || 8)} onChange={(v) => save({ web_search_max_results: Number(v) })} options={[5, 8, 10, 15, 20].map((n) => ({ value: String(n), label: String(n) }))} />
         </Row>

@@ -289,7 +289,9 @@ app = FastAPI(
 )
 
 
-for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, media, media_runtime):
+from api.routes import creations, onboarding
+
+for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, media, media_runtime, creations, onboarding):
     app.include_router(_routes.router)
 # Ensure domain ToolRegistry entries load independently of agent import order.
 for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):

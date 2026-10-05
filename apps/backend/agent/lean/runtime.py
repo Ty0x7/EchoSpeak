@@ -918,6 +918,10 @@ class LeanSession:
     ) -> list[NativeTool]:
         memory = getattr(self.agent, "memory", None)
         tools: list[NativeTool] = []
+        from agent.research_notebook import research_tools
+        tools.extend(research_tools(self.session_id))
+        from agent.generation_service import generation_tools
+        tools.extend(generation_tools(self.session_id, self.execution_id))
 
         # Work-together groups: the lead turns a decision into owned tasks on the shared board.
         if allow_assign and self.job is not None:

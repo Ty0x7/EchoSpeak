@@ -3,7 +3,13 @@
 What's next, in priority order. Each item says why it matters and roughly how big it is
 (S, M, L). Older plans are in [archive/ROADMAP-v9.md](archive/ROADMAP-v9.md).
 
-## Now: the 10.2 cleanup
+## 10.3 implementation and testing handoff
+
+Creations, cloud/local generation adapters, optional local setup, research notebooks,
+and first-run setup are implemented. Live generation, GPU installation and the signed
+Windows installer are in user testing. See [10.3 release notes](releases/v10.3.0.md).
+
+## Completed: the 10.2 cleanup
 
 - [x] Remove the retired pipeline: specialists, TaskRuns, execution graph, intent router,
       mode controller, pipeline plugins and ~44 API routes nothing called (about 30k lines).

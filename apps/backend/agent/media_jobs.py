@@ -32,7 +32,7 @@ class MediaJobStatus(str, Enum):
 class MediaJobBinding(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    binding_kind: Literal["canonical_tool", "session_transport", "legacy_unbound"] = "canonical_tool"
+    binding_kind: Literal["canonical_tool", "session_transport", "lean_execution", "legacy_unbound"] = "canonical_tool"
     execution_id: str = ""
     task_run_id: str = ""
     requirement_id: str = ""
@@ -46,6 +46,8 @@ class MediaJobBinding(BaseModel):
             not self.execution_id or not self.task_run_id or not self.tool_run_id
         ):
             raise ValueError("MediaJobBinding requires Execution, TaskRun, and ToolRun identity")
+        if self.binding_kind == "lean_execution" and not self.execution_id:
+            raise ValueError("Lean media jobs require an Execution identity")
         if self.binding_kind == "session_transport" and self.tool_run_id:
             raise ValueError("Session Voice transport must not impersonate a ToolRun")
         if self.binding_kind == "legacy_unbound":
@@ -163,10 +165,12 @@ def project_voice_job(job: Any) -> MediaJobProjection:
 
 def _binding_from_job(job: Any) -> MediaJobBinding:
     transport = str(getattr(job, "origin", "") or "") == "voice_transport"
-    unbound = not transport and not bool(job.execution_id and job.task_run_id and job.tool_run_id)
+    lean = getattr(job, "origin", "") == "lean_creation" and bool(job.execution_id)
+    unbound = not transport and not lean and not bool(job.execution_id and job.task_run_id and job.tool_run_id)
     return MediaJobBinding(
         binding_kind=(
-            "session_transport" if transport
+            "lean_execution" if lean
+            else "session_transport" if transport
             else "legacy_unbound" if unbound
             else "canonical_tool"
         ),

@@ -47,15 +47,14 @@ def test_provider_order_auto_ddg_only():
     assert "duckduckgo" in order
 
 
-def test_provider_order_ignores_legacy_tavily_key():
+def test_provider_order_uses_configured_tavily_key():
     cfg = SimpleNamespace(
         tavily_api_key="tvly-test",
         brave_search_api_key="",
         web_search_provider="auto",
     )
     order = resolve_provider_order(cfg)
-    assert "tavily" not in order
-    assert order[0] == "duckduckgo"
+    assert order[0] == "tavily"
     assert "duckduckgo" in order
 
 

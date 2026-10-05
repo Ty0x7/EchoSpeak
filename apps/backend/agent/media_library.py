@@ -30,6 +30,8 @@ class MediaLibraryAsset(BaseModel):
     media_kind: Literal["image", "video", "audio", "caption", "unknown"] = "unknown"
     source_kind: Literal["imported", "generated", "rendered", "proxy"] = "imported"
     project_relative_path: str
+    storage_scope: Literal["project", "library"] = "project"
+    archived: bool = False
     sha256: str
     size_bytes: int = Field(ge=0)
     immutable: bool = True
@@ -97,8 +99,8 @@ class MediaLibraryStore:
         with self._lock:
             if path.exists():
                 current = self._read(path)
-                stable = (current.project_id, current.project_relative_path, current.sha256)
-                incoming = (asset.project_id, asset.project_relative_path, asset.sha256)
+                stable = (current.storage_scope, current.project_id, current.project_relative_path, current.sha256)
+                incoming = (asset.storage_scope, asset.project_id, asset.project_relative_path, asset.sha256)
                 if stable != incoming:
                     raise MediaLibraryError("MediaAsset identity already belongs to another source")
                 return current
@@ -114,6 +116,22 @@ class MediaLibraryStore:
             return None
         with self._lock:
             return self._read(path)
+
+    def update(self, asset_id: str, *, name: str | None = None, archived: bool | None = None) -> MediaLibraryAsset:
+        with self._lock:
+            asset = self.get(asset_id)
+            if asset is None:
+                raise MediaLibraryError("Media asset not found")
+            if name is not None:
+                asset.name = name.strip()[:160] or asset.name
+            if archived is not None:
+                asset.archived = archived
+            asset.updated_at = time.time()
+            path = self._path(asset_id)
+            tmp = path.with_suffix(f".tmp.{time.time_ns()}")
+            tmp.write_text(asset.model_dump_json(indent=2), encoding="utf-8")
+            os.replace(tmp, path)
+            return asset
 
     def list(self, *, project_id: str = "", session_id: str = "", limit: int = 200) -> list[MediaLibraryAsset]:
         rows: list[MediaLibraryAsset] = []

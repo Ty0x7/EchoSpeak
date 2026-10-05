@@ -30,9 +30,10 @@ TOOLSETS: dict[str, list[str]] = {
         "file_list", "file_read", "file_find", "file_search", "file_edit", "file_write",
         "file_copy", "file_move", "file_delete", "checkpoint_undo",
         "project_status", "create_artifact", "update_artifact",
+        "create_media", "creation_status",
     ],
     # Looking things up on the web.
-    "web": ["web_search", "safe_web_fetch", "youtube_transcript"],
+    "web": ["web_search", "safe_web_fetch", "youtube_transcript", "research_notebook"],
     # Live data and media shown as cards.
     "live": [
         "weather_live", "sports_live", "browse_task",
@@ -365,6 +366,10 @@ class Toolbox:
                 # The policy sees the destination the Terminal instance will use,
                 # including Auto's host fallback when Docker is unavailable.
                 args["where"] = terminal.effective_where(args)
+        if resolved == "create_media":
+            from agent.generation_service import resolve_selection
+            args["provider"], args["model"] = resolve_selection(str(args.get("kind") or "image"),
+                str(args.get("provider") or ""), str(args.get("model") or ""))
         return resolved, args
 
     def tool_context(self) -> dict[str, Any]:
