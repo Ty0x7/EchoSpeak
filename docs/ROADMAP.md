@@ -9,6 +9,17 @@ Creations, cloud/local generation adapters, optional local setup, research noteb
 and first-run setup are implemented. Live generation, GPU installation and the signed
 Windows installer are in user testing. See [10.3 release notes](releases/v10.3.0.md).
 
+## Reliability implementation (unreleased; based on 10.3.2)
+
+Implemented: separate cloud response checks, a chat Research panel with physical expiry
+cleanup, native Gemini Live input/output and bounded resumption, GPU selection and
+resumable verified downloads, a real local render test, publisher-signing support,
+updater signature verification and separate installer/app/model measurements.
+
+Focused automated checks use fake provider sockets and disposable state. Actual
+provider keys/billing, microphones, GPU rendering, a publisher certificate, clean
+installation and upgrading still require real-machine validation before release.
+
 ## Completed: the 10.2 cleanup
 
 - [x] Remove the retired pipeline: specialists, TaskRuns, execution graph, intent router,

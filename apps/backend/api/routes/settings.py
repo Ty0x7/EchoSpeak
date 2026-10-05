@@ -484,6 +484,8 @@ class SettingsTestRequest(BaseModel):
     target: str = Field(..., description="openai | gemini | anthropic | xai | local | ollama | openai_compat")
     base_url: Optional[str] = None
     api_key: Optional[str] = None
+    model: str = Field(default="", max_length=200)
+    check: str = Field(default="catalog", pattern="^(catalog|generation)$")
 
 
 class SettingsTestResponse(BaseModel):
@@ -491,6 +493,9 @@ class SettingsTestResponse(BaseModel):
     target: str
     message: str
     latency_ms: Optional[float] = None
+    check: str = "catalog"
+    model: str = ""
+    error_code: str = ""
 
 
 def _settings_response() -> "SettingsResponse":
@@ -533,6 +538,10 @@ def settings_test(request: SettingsTestRequest):
     started = time.perf_counter()
     try:
         if target in CLOUD_PROVIDERS:
+            if request.check == "generation":
+                from agent.cloud_providers import test_cloud_model
+                result = test_cloud_model(target, request.model, api_key)
+                return SettingsTestResponse(target=target, latency_ms=(time.perf_counter() - started) * 1000, **result)
             result = list_cloud_models(target, api_key)
             return SettingsTestResponse(ok=result["reachable"], target=target, message=result["message"], latency_ms=(time.perf_counter() - started) * 1000)
 

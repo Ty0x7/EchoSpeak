@@ -91,13 +91,14 @@ def local_status():
 
 class LocalSetupRequest(BaseModel):
     profile: str = "image"
+    gpu_id: str = Field(default="", max_length=100)
 
 
 @router.post("/local/setup")
 def local_setup(request: LocalSetupRequest):
     from agent.generation_setup import start_setup
     try:
-        return start_setup(request.profile)
+        return start_setup(request.profile, request.gpu_id)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(409, str(exc)) from exc
 
@@ -115,3 +116,26 @@ def local_start():
 def local_cancel():
     from agent.generation_setup import stop_setup
     return stop_setup()
+
+
+class LocalRenderRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=200)
+    profile: str = Field(default="image", pattern="^(image|video)$")
+
+
+@router.post("/local/test")
+def local_render_test(request: LocalRenderRequest):
+    """Owner-requested local render, through the existing job and media pipeline."""
+    import uuid
+    from agent.generation_providers import validate_local_profile, IMAGE_MODEL, VIDEO_MODEL
+    from agent.generation_service import submit
+    from agent.generation_runtime import GenerationSettings
+    try:
+        validate_local_profile(request.profile)
+        job = submit(session_id=request.session_id, execution_id="local-test-" + uuid.uuid4().hex,
+                     prompt="A small white circle on a black background", kind=request.profile,
+                     provider="comfyui-local", model=IMAGE_MODEL if request.profile == "image" else VIDEO_MODEL,
+                     settings=GenerationSettings(width=512, height=512, duration_seconds=1, seed=1))
+        return {"job_id": job.id, "status": job.status}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(409, str(exc)) from exc

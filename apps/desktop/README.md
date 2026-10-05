@@ -109,7 +109,7 @@ From the repository root:
 rustup default stable-msvc
 rustup target add x86_64-pc-windows-msvc
 python -m pip install -r apps/backend/requirements.txt
-python -m pip install PyInstaller==6.21.0
+python -m pip install PyInstaller==6.21.0 cryptography
 npm --prefix apps/web ci
 npm --prefix apps/desktop ci
 npm --prefix apps/desktop run build
@@ -192,3 +192,36 @@ After both bundles exist:
 Record the exact installer, OS build, WebView2 version, toolchain versions,
 hashes, observed processes, listener addresses, and failures. Only after this
 procedure passes may packaged-app acceptance be claimed.
+
+## Publisher signing and size measurements
+
+Updater `.sig` files authorize EchoSpeak updates; Windows Authenticode identifies the
+publisher. They are separate. Configure an installed signing certificate's SHA-1
+thumbprint in `ECHOSPEAK_SIGN_CERT_SHA1`, or a user-owned PowerShell signing hook in
+`ECHOSPEAK_SIGN_SCRIPT` accepting `-FilePath` (for hardware tokens/cloud signing).
+Certificate signing needs Windows SDK SignTool. The hook must timestamp the signature.
+No certificate or publisher identity is supplied by this repository.
+
+```powershell
+$env:ECHOSPEAK_SIGN_CERT_SHA1 = "YOUR_INSTALLED_CERTIFICATE_THUMBPRINT"
+.\apps\desktop\scripts\release-windows.ps1 -PythonExecutable .\.venv\Scripts\python.exe -RequirePublisherSignature
+```
+
+The release script signs the sidecar, app and installer before updater artifacts are
+created. It verifies publisher validity, timestamp and configured identity, plus the
+updater signature against the shipped public key. The build Python needs `cryptography`.
+Without publisher configuration, existing updater-only builds remain available and
+the script reports that publisher signing was not required. Signing does not itself
+prove clean installation, successful upgrading or SmartScreen reputation.
+
+Every release generates `size-report.json`. Pass `-InstalledAppPath` and `-ModelsPath`
+to measure those separately, or measure an existing installer directly:
+
+```powershell
+.\apps\desktop\scripts\measure-release.ps1 -InstallerPath "C:\path\EchoSpeak-setup.exe" -InstalledPath "C:\path\installed-app" -ModelsPath "C:\path\runtime\models" -OutputPath .\size-report.json
+```
+
+Installer history: 10.1.0 was 356,940,405 bytes, 10.2.0 was 184,377,051 bytes
+(48.35% smaller), and 10.3.1 was 200,724,852 bytes. These are download sizes, not
+installed application or model sizes. Source: the corresponding
+[GitHub release assets](https://github.com/Ty0x7/EchoSpeak/releases).

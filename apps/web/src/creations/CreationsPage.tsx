@@ -5,7 +5,7 @@ import { CreationCard, CreationPreview } from "./CreationCard";
 import { creationRequest, type CreationAsset, type CreationJob } from "./api";
 import { GenerationSettings } from "./GenerationSettings";
 
-export function CreationsPage({ apiBase, onChat }: { apiBase: string; onChat(id: string): void }) {
+export function CreationsPage({ apiBase, onChat, sessionId = "" }: { apiBase: string; onChat(id: string): void; sessionId?: string }) {
   const [assets, setAssets] = useState<CreationAsset[]>([]);
   const [jobs, setJobs] = useState<CreationJob[]>([]);
   const [archived, setArchived] = useState(false);
@@ -29,7 +29,7 @@ export function CreationsPage({ apiBase, onChat }: { apiBase: string; onChat(id:
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
   return <PageShell title="Creations" lead="Images and videos you create with Echo, together in one place." action={<button type="button" className="es-btn es-btn-primary" onClick={() => setSettingsOpen(!settingsOpen)}>{settingsOpen ? "Back to library" : "Creation settings"}</button>}>
-    {settingsOpen ? settings.settings ? <><GenerationSettings s={settings.settings} save={settings.save} apiBase={apiBase} /><p role="status">{settings.saveError || settings.saveState}</p></> : <p>{settings.error || "Loading settings…"}</p> : <>
+    {settingsOpen ? settings.settings ? <><GenerationSettings s={settings.settings} save={settings.save} apiBase={apiBase} sessionId={sessionId} /><p role="status">{settings.saveError || settings.saveState}</p></> : <p>{settings.error || "Loading settings…"}</p> : <>
       <div className="creation-filters"><input aria-label="Search creations" placeholder="Search names and prompts" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="Media type" value={kind} onChange={e => setKind(e.target.value)}><option value="">All media</option><option value="image">Images</option><option value="video">Videos</option></select><label><input type="checkbox" checked={archived} onChange={e => setArchived(e.target.checked)} /> Archived</label></div>
       {error && <p role="alert">{error}</p>}
       {!archived && jobs.slice(0, 12).map(job => <CreationCard key={job.id} id={job.id} apiBase={apiBase} />)}

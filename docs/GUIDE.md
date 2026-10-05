@@ -39,6 +39,14 @@ To build the Windows installer yourself: `powershell -File apps/desktop/scripts/
 
 ## 2. Pick a model
 
+Cloud providers have two separate checks in **Settings › Models**. **Check catalog**
+loads model IDs available to the key; it does not prove the selected model responds.
+**Test response** sends a small, explicit request through the same adapter as chat
+and may incur an API charge. Authentication, billing, quota, permissions and model
+compatibility errors need different fixes; follow the displayed provider message.
+Use an exact API model ID rather than a display name. Specialized image/video models
+belong in Creations.
+
 EchoSpeak talks to any OpenAI-compatible chat endpoint. Set it in **Settings › Models**.
 
 | Option | What you need |
@@ -158,3 +166,29 @@ always need the key. Don't expose the port to the internet even then; use a VPN 
 | Commands fail in the sandbox | Start Docker Desktop, or switch **Terminal** to **This PC**. |
 | Voice says unavailable | Download a Whisper model in **Settings › Voice**. |
 | Something looks wrong | The doctor report (`GET /doctor` on the backend) lists what's misconfigured. Desktop logs are in the app log folder (`backend.log`). |
+
+## Research, native Live audio and local creations
+
+Open **Research & activity** in a chat, then **Research**, to see that chat's sources,
+page passages and working notes. Search-result snippets are marked separately from
+pages Echo actually read. The notebook keeps working evidence for seven days, apart
+from permanent personal memory. Expired rows are removed on reads, startup and hourly.
+
+To try native Gemini audio, save a Gemini key and select an accessible Live model.
+Turn **Live mic** on, then use the existing **Mic** or **Voice** control. Audio goes
+to Google and API charges may apply. Gemini's PCM reply plays in the chat; **Read**
+can also enable native playback for typed Live requests. In Voice mode the microphone
+can listen while the reply plays; speaking interrupts playback. Live sessions attempt
+bounded resumption without replaying completed tool actions. Generated tools still
+go through EchoSpeak's normal permissions and approvals. Native mic currently supports
+direct chats. Turn Live mic off to use the existing transcription path, including
+local Whisper when configured.
+
+In **Creations › generation settings**, select the NVIDIA GPU for managed Windows
+setup. Setup checks the driver/runtime combination, available disk space and CUDA
+execution before downloading model weights. Failed or cancelled downloads retain
+verified-manifest partial files and resume on retry; completed files must pass SHA-256.
+Server and workflow checks are distinct from a real render: after enabling generation,
+use **Test local generation** from an existing chat to submit a small real creation.
+The test uses the managed starter model and appears in Creations. Hardware beyond the
+managed Windows/NVIDIA path can connect its own ComfyUI installation.

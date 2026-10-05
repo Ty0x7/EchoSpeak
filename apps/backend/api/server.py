@@ -214,7 +214,24 @@ async def lifespan(app: FastAPI):
         gateway.start_spotify_monitor()
         logger.info("Spotify playback monitor started")
 
-    yield
+    async def prune_research():
+        from agent.research_notebook import ResearchNotebook
+        while True:
+            try:
+                await asyncio.to_thread(lambda: ResearchNotebook().prune())
+            except Exception:
+                logger.warning("Research retention cleanup failed; will retry")
+            await asyncio.sleep(3600)
+
+    research_cleanup = asyncio.create_task(prune_research())
+    try:
+        yield
+    finally:
+        research_cleanup.cancel()
+        try:
+            await research_cleanup
+        except asyncio.CancelledError:
+            pass
     try:
         from agent.lean.terminal import stop_all_processes
 
@@ -289,9 +306,9 @@ app = FastAPI(
 )
 
 
-from api.routes import creations, onboarding
+from api.routes import creations, onboarding, live_voice
 
-for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, media, media_runtime, creations, onboarding):
+for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, media, media_runtime, creations, onboarding, live_voice):
     app.include_router(_routes.router)
 # Ensure domain ToolRegistry entries load independently of agent import order.
 for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):

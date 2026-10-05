@@ -32,6 +32,9 @@ $SourceBinary = Join-Path $SourceFolder "echospeak-backend.exe"
 if (-not (Test-Path -LiteralPath $SourceBinary)) {
     throw "Expected backend was not produced at $SourceBinary."
 }
+if ($env:ECHOSPEAK_SIGN_CERT_SHA1 -or $env:ECHOSPEAK_SIGN_SCRIPT) {
+    & (Join-Path $PSScriptRoot "sign-windows.ps1") -FilePath $SourceBinary
+}
 # Fail the build if the bundle is incomplete (e.g. a module failed to compile
 # during analysis and PyInstaller silently left it out).
 $env:ECHOSPEAK_DATA_DIR = Join-Path $BuildRoot "selfcheck-data"
@@ -45,6 +48,8 @@ if ($SelfCheckExit -ne 0) {
 }
 $StagedFolder = Join-Path $TauriRoot "backend-dist"
 if (Test-Path -LiteralPath $StagedFolder) {
+    $resolvedStage = (Resolve-Path -LiteralPath $StagedFolder).Path
+    if ($resolvedStage -ne (Join-Path $TauriRoot "backend-dist")) { throw "Unexpected sidecar staging path." }
     Remove-Item -LiteralPath $StagedFolder -Recurse -Force
 }
 Copy-Item -LiteralPath $SourceFolder -Destination $StagedFolder -Recurse

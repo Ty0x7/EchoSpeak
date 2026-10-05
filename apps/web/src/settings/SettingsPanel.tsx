@@ -491,14 +491,14 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
     void save({ local: { provider: value, ...(isStock ? { base_url: LOCAL_DEFAULT_URLS[value] || current } : {}), model_name: row?.models[0] || "" } });
   };
 
-  const runTest = async () => {
+  const runTest = async (check: "catalog" | "generation" = "catalog") => {
     setTest({ busy: true });
     try {
       const target = useLocal ? (provider === "ollama" ? "ollama" : "local") : provider;
       const resp = await fetch(`${apiBase}/settings/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target, base_url: useLocal ? local.base_url : undefined }),
+        body: JSON.stringify({ target, check, model: useLocal ? undefined : s[provider]?.model, base_url: useLocal ? local.base_url : undefined }),
       });
       const data = await resp.json();
       setTest({ busy: false, ok: Boolean(data.ok), message: String(data.message || "") });
@@ -602,7 +602,7 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
               <div className="st-select is-wide"><select aria-label="Available cloud models" value={String(s[provider]?.model || "")} onChange={(e) => void save({ [provider]: { model: e.target.value } })}>
                 <option value="" disabled>Choose a model</option>
                 {s[provider]?.model && !catalog.some(m => m.id === s[provider].model) ? <option value={s[provider].model}>{s[provider].model} (custom ID)</option> : null}
-                {(catalog.length ? catalog : (models || []).map(id => ({ id, name: id, chat: true, live: false, reason: "" }))).map(m => <option key={m.id} value={m.id} disabled={!m.chat}>{m.id}{m.live ? " · Live (chat transcription)" : ""}{!m.chat ? " · specialized API" : ""}</option>)}
+                {(catalog.length ? catalog : (models || []).map(id => ({ id, name: id, chat: true, live: false, reason: "" }))).map(m => <option key={m.id} value={m.id} disabled={!m.chat}>{m.id}{m.live ? " · Live audio" : ""}{!m.chat ? " · specialized API" : ""}</option>)}
               </select></div>
               <button type="button" className="es-btn es-btn-sm" onClick={() => setReloadKey((k) => k + 1)}>Refresh</button>
             </div>
@@ -611,10 +611,14 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
           <Row label="Model ID" help="The exact API ID. Custom IDs stay selected even when absent from the catalog.">
             <TextField mono wide value={s[provider]?.model || ""} onCommit={(v) => save({ [provider]: { model: v } })} />
           </Row>
-          {provider === "gemini" && /live|native-audio/i.test(String(s.gemini?.model || "")) && <p className="st-muted">Gemini Live displays its response transcription in chat. Google bills its generated audio even when you read the text. Model access depends on your Google account; microphone/audio playback uses the separate Voice settings.</p>}
-          <Row label="Check connection" help={test.message ? <span className={test.ok ? "st-ok" : "st-err"}>{test.message}</span> : undefined}>
-            <button type="button" className="es-btn es-btn-sm" disabled={test.busy} onClick={() => void runTest()}>{test.busy ? "Testing…" : "Test"}</button>
+          {provider === "gemini" && /live|native-audio/i.test(String(s.gemini?.model || "")) && <p className="st-muted">Gemini Live returns speech and its transcription. Use Read or Voice to hear replies, and enable Live mic in the chat toolbar to stream your microphone to Google. Leave Live mic off for local transcription. API audio charges and account model access apply.</p>}
+          <Row label="Check provider" help="Catalog access and a working model response are separate checks. Test response sends a small request and may incur API charges.">
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button type="button" className="es-btn es-btn-sm" disabled={test.busy} onClick={() => void runTest("catalog")}>Check catalog</button>
+              <button type="button" className="es-btn es-btn-sm" disabled={test.busy || !s[provider]?.model} onClick={() => void runTest("generation")}>{test.busy ? "Checking…" : "Test response"}</button>
+            </div>
           </Row>
+          {test.message && <p className={test.ok ? "st-ok" : "st-err"} role="status">{test.message}</p>}
         </Group>
       )}
     </>

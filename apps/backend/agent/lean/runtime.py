@@ -871,6 +871,16 @@ class LeanSession:
             taint=self._taint,
             goal=goal,
         )
+        if self.source == "voice" and depth == 0:
+            from agent.live_voice import claim_client
+            live_client = claim_client(self.session_id, self.request_id, turn.client.endpoint, persona, history)
+            if live_client is not None:
+                previous = turn.client
+                for key, value in self._clients.items():
+                    if value is previous:
+                        self._clients[key] = live_client
+                previous.close()
+                turn.client = live_client
         return turn
 
     def _record(self, persona: AgentPersona, part: TurnResult, depth: int, meta: dict[str, Any]) -> None:

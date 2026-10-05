@@ -281,3 +281,27 @@ Reloading a chat calls the Session timeline (`StateStore.session_timeline`). Eac
 ## 8. What to work on next
 
 See [ROADMAP.md](ROADMAP.md).
+
+## Reliability additions (unreleased)
+
+- Cloud catalog access and selected-model inference are separate operations. Explicit
+  response checks use `ChatClient` without tools or saved-settings mutation.
+- Research uses the existing `ResearchNotebook` SQLite store. Session-scoped APIs
+  feed the right-side Research tab; physical TTL cleanup runs on startup, hourly and
+  on reads. No web material is automatically promoted to personal memory.
+- Native Live mic uses an authenticated, origin-checked WebSocket for bounded 16 kHz
+  PCM input. Capture buffers the first response and creates a durable voice transcript.
+  A single-use, short-lived handoff binds that response to the normal voice request,
+  exact model, history, persona, project, permissions and tool schemas. Capture executes
+  no tools; the ordinary governed Lean loop processes calls. Output PCM is streamed
+  through the existing chat event channel and scheduled by Web Audio at 24 kHz.
+  Session resumption sends the provider handle without replaying user input or tool
+  results; unavailable resumption fails explicitly.
+- Managed local generation selects a GPU by UUID and chooses a compatible pinned
+  ComfyUI runtime. Downloads resume with HTTP Range/ETag and final SHA-256 validation.
+  A CUDA operation, node/model validation and explicit small render test cover distinct
+  readiness stages. Torch remains isolated in the optional ComfyUI runtime.
+- Release scripts optionally sign the backend, app and installer with Windows
+  Authenticode before updater signing. They verify publisher identity/timestamp when
+  configured and always cryptographically verify updater artifacts against the shipped
+  key. Size reports distinguish installer bytes, installed app files and optional models.

@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LeanMessageData, LeanSegment } from "../lean/types";
 import { ArtifactPanel } from "./ArtifactPanel";
+import { ResearchPanel } from "./ResearchPanel";
 
 /** One tool run shown in the Activity tab. */
 export type ActivityItem = {
@@ -119,7 +120,7 @@ export function clampPanelWidth(width: number, room: number): number {
   return Math.round(Math.min(max, Math.max(RIGHT_PANEL_MIN, width)));
 }
 
-export type RightTab = "artifact" | "activity";
+export type RightTab = "artifact" | "activity" | "research";
 
 /**
  * The right sidebar: the open artifact and the chat's activity (commands, file
@@ -127,6 +128,7 @@ export type RightTab = "artifact" | "activity";
  */
 export function RightPanel({
   apiBase,
+  sessionId,
   tab,
   onTab,
   artifact,
@@ -138,6 +140,7 @@ export function RightPanel({
   onClose,
 }: {
   apiBase: string;
+  sessionId: string;
   tab: RightTab;
   onTab(tab: RightTab): void;
   artifact: { id: string; version?: number } | null;
@@ -209,6 +212,7 @@ export function RightPanel({
           {running ? <span className="rp-live" aria-label={`${running} running`} /> : activity.length ? <small>{activity.length}</small> : null}
         </button>
         <span className="rp-spacer" />
+        <button type="button" role="tab" aria-selected={active === "research"} className={active === "research" ? "is-on" : ""} onClick={() => onTab("research")}>Research</button>
         <button type="button" className="rp-close" onClick={onClose} aria-label="Close side panel" title="Close">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden><path d="M6 6l12 12M18 6 6 18" /></svg>
         </button>
@@ -216,6 +220,8 @@ export function RightPanel({
       <div className="rp-body">
         {active === "artifact" && artifact ? (
           <ArtifactPanel embedded apiBase={apiBase} artifactId={artifact.id} version={artifact.version} onClose={onClose} />
+        ) : active === "research" ? (
+          <ResearchPanel key={sessionId} apiBase={apiBase} sessionId={sessionId} />
         ) : (
           <ActivityView items={activity} />
         )}

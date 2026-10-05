@@ -15,7 +15,10 @@ param(
     [string]$NotesPath = "",
     [string]$Repo = "Ty0x7/EchoSpeak",
     [switch]$Publish,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$RequirePublisherSignature,
+    [string]$InstalledAppPath = "",
+    [string]$ModelsPath = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -39,16 +42,27 @@ if (-not $NotesPath) { $NotesPath = Join-Path $RepoRoot "docs\releases\$Tag.md" 
 if (-not (Test-Path -LiteralPath $NotesPath)) { throw "Release notes not found: $NotesPath" }
 
 $BundleRoot = Join-Path $DesktopRoot "src-tauri\target\release\bundle"
+$publisherConfigured = [bool]($env:ECHOSPEAK_SIGN_CERT_SHA1 -or $env:ECHOSPEAK_SIGN_SCRIPT)
+if ($RequirePublisherSignature -and -not $publisherConfigured -and -not $SkipBuild) {
+    throw "Configure ECHOSPEAK_SIGN_CERT_SHA1 or ECHOSPEAK_SIGN_SCRIPT before building a publisher-signed release."
+}
 if (-not $SkipBuild) {
     $env:TAURI_SIGNING_PRIVATE_KEY = $KeyPath
     if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
         $secure = Read-Host "Signing key password (press Enter if it has none)" -AsSecureString
         $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = [System.Net.NetworkCredential]::new("", $secure).Password
     }
-    $overlay = Join-Path $env:TEMP "echospeak-release-config.json"
-    Set-Content -LiteralPath $overlay -Value '{"bundle":{"createUpdaterArtifacts":true}}' -Encoding ascii
-    & (Join-Path $PSScriptRoot "build-windows.ps1") -PythonExecutable $PythonExecutable -TauriConfigPath $overlay
-    if ($LASTEXITCODE -ne 0) { throw "Build failed." }
+    $overlay = Join-Path $env:TEMP ("echospeak-release-" + [guid]::NewGuid().ToString("N") + ".json")
+    $bundleConfig = @{ createUpdaterArtifacts = $true }
+    if ($publisherConfigured) {
+        $signer = Join-Path $PSScriptRoot "sign-windows.ps1"
+        $bundleConfig.windows = @{ signCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$signer`" -FilePath `"%1`"" }
+    }
+    [IO.File]::WriteAllText($overlay, (@{ bundle = $bundleConfig } | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+    try {
+        & (Join-Path $PSScriptRoot "build-windows.ps1") -PythonExecutable $PythonExecutable -TauriConfigPath $overlay
+        if ($LASTEXITCODE -ne 0) { throw "Build failed." }
+    } finally { Remove-Item -LiteralPath $overlay -ErrorAction SilentlyContinue }
 }
 
 $Setup = Get-ChildItem -LiteralPath (Join-Path $BundleRoot "nsis") -Filter "*_${Version}_*-setup.exe" | Select-Object -First 1
@@ -58,6 +72,16 @@ foreach ($file in @($Setup, $Msi)) {
     if ($file -and -not (Test-Path -LiteralPath "$($file.FullName).sig")) {
         throw "$($file.Name) is not signed (no .sig next to it). Was the build run by this script?"
     }
+    if ($file -and ($publisherConfigured -or $RequirePublisherSignature)) {
+        & (Join-Path $PSScriptRoot "sign-windows.ps1") -FilePath $file.FullName -VerifyOnly
+    }
+    if ($file) {
+        & $PythonExecutable (Join-Path $PSScriptRoot "verify-updater-signature.py") $file.FullName --config $ConfPath
+        if ($LASTEXITCODE -ne 0) { throw "Updater signature does not match the final installer or shipped public key." }
+    }
+}
+if (-not $publisherConfigured -and -not $RequirePublisherSignature) {
+    Write-Host "Updater signatures are present. Windows publisher signatures are not required by this run; use -RequirePublisherSignature to enforce them."
 }
 
 $OutDir = Join-Path $RepoRoot "release\$Tag"
@@ -94,6 +118,7 @@ $latest = [ordered]@{
 $LatestPath = Join-Path $OutDir "latest.json"
 [System.IO.File]::WriteAllText($LatestPath, ($latest | ConvertTo-Json -Depth 8), (New-Object System.Text.UTF8Encoding($false)))
 $assets += $LatestPath
+& (Join-Path $PSScriptRoot "measure-release.ps1") -InstallerPath $Setup.FullName -InstalledPath $InstalledAppPath -ModelsPath $ModelsPath -OutputPath (Join-Path $OutDir "size-report.json") | Out-Null
 
 Write-Host ""
 Write-Host "Release files for $Tag are in $OutDir"

@@ -1,0 +1,12 @@
+.notebook-panel { padding: 16px; overflow: auto; height: 100%; min-width: 0; }
+.notebook-hint, .notebook-source span, .notebook-source small { color: var(--text-muted, #999); font-size: 12px; }
+.notebook-search { width: 100%; min-width: 0; box-sizing: border-box; padding: 10px 12px; border: 1px solid #333; border-radius: 9px; background: #111; color: inherit; }
+.notebook-sources { list-style: none; padding: 0; display: grid; gap: 16px; }
+.notebook-sources li { border-bottom: 1px solid #292929; padding-bottom: 16px; min-width: 0; }
+.echo-root .notebook-panel .notebook-source { display: flex; flex-direction: column; gap: 7px; width: 100%; text-align: left; background: transparent; color: inherit; font: inherit; padding: 0 0 12px; border: 0; cursor: pointer; }
+.notebook-source strong, .notebook-source p { overflow-wrap: anywhere; margin: 0; }
+.notebook-source p { font-size: 13px; line-height: 1.6; }
+.notebook-passage pre, .notebook-notes p { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; line-height: 1.6; }
+.notebook-notes { margin-top: 18px; }
+.notebook-pages { display: flex; flex-wrap: wrap; gap: 8px; }
+.notebook-error { color: #e6aaa8; font-size: 13px; }

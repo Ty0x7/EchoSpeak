@@ -112,6 +112,8 @@ def _prepare_query_transport(request: QueryRequest, request_id: str) -> str:
             request_id=request_id,
             transcript=request.message,
         )
+        from agent.live_voice import bind_request
+        bind_request(voice_turn_id, _normalize_thread_id(request.thread_id), request_id)
     except Exception as exc:
         from agent.voice_transport import VoiceTransportError
 

@@ -104,7 +104,7 @@ def _worker(job: GenerationJob, cancel: threading.Event):
             _SLOTS.release()
 
 
-def submit(*, session_id: str, execution_id: str, prompt: str, kind: str, provider: str = "", model: str = "") -> GenerationJob:
+def submit(*, session_id: str, execution_id: str, prompt: str, kind: str, provider: str = "", model: str = "", settings: GenerationSettings | None = None) -> GenerationJob:
     if not config.allow_generation_actions:
         raise ValueError("Enable image/video creation in Creations settings first.")
     from agent.threads import get_thread_manager
@@ -123,7 +123,7 @@ def submit(*, session_id: str, execution_id: str, prompt: str, kind: str, provid
         state = get_state_store().get_thread_state(session_id)
         job = GenerationJob(idempotency_key=key, session_id=session_id, project_id=state.active_project_id or "",
             origin="lean_creation", execution_id=execution_id, prompt=prompt, kind=kind, provider_id=provider, model=model,
-            settings=GenerationSettings(width=512, height=512, seed=secrets.randbelow(2**32)))
+            settings=settings or GenerationSettings(width=512, height=512, seed=secrets.randbelow(2**32)))
         store.save(job)
         cancel = threading.Event()
         _ACTIVE[job.id] = cancel

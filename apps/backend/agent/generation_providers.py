@@ -111,6 +111,38 @@ def comfy_workflow(job) -> dict:
     return graph
 
 
+def validate_comfy_workflow(job, base: str = "") -> dict:
+    graph = comfy_workflow(job)
+    info = request("GET", (base or comfy_base()) + "/object_info")
+    missing = [node["class_type"] for node in graph.values() if node["class_type"] not in info]
+    if missing:
+        raise ValueError("Update ComfyUI; missing built-in nodes: " + ", ".join(sorted(set(missing))))
+    if job.kind == "video":
+        format_input = info["SaveVideo"].get("input", {}).get("required", {}).get("format", [])
+        if format_input and format_input[0] == "COMFY_DYNAMICCOMBO_V3":
+            graph["9"]["inputs"].pop("codec", None)
+            graph["9"]["inputs"]["format.codec"] = "h264"
+    for node in graph.values():
+        required = info[node["class_type"]].get("input", {}).get("required", {})
+        for field in ("ckpt_name", "unet_name", "clip_name", "vae_name"):
+            if field in node["inputs"]:
+                choices = required.get(field, [None])[0]
+                if not isinstance(choices, list) or node["inputs"][field] not in choices:
+                    raise ValueError("Install the local model file: " + node["inputs"][field])
+    return graph
+
+
+def validate_local_profile(profile: str, base: str = ""):
+    from types import SimpleNamespace
+    from agent.generation_runtime import GenerationSettings
+    if profile not in {"image", "video"}:
+        raise ValueError("Unknown local profile")
+    job = SimpleNamespace(id="setup-check", kind=profile, model=IMAGE_MODEL if profile == "image" else VIDEO_MODEL,
+                          prompt="A small white circle", settings=GenerationSettings(width=512, height=512, duration_seconds=1))
+    validate_comfy_workflow(job, base)
+    return {"workflow_ready": True, "render_tested": False, "detail": "Required models and nodes are present. A render test is still needed."}
+
+
 def generate(job, checkpoint, cancelled) -> tuple[bytes, str]:
     """Submit once, persist remote identity immediately, then poll with bounded waits."""
     def wait():
@@ -172,23 +204,7 @@ def generate(job, checkpoint, cancelled) -> tuple[bytes, str]:
     if job.provider_id != "comfyui-local":
         raise ValueError("Unknown generation provider.")
     base = comfy_base()
-    graph = comfy_workflow(job)
-    info = request("GET", base + "/object_info")
-    missing = [node["class_type"] for node in graph.values() if node["class_type"] not in info]
-    if missing:
-        raise ValueError("Update ComfyUI; missing built-in nodes: " + ", ".join(missing))
-    # Current ComfyUI nests codec under its dynamic format selector; older
-    # installations expose the original flat combo. Support both API schemas.
-    if job.kind == "video":
-        format_input = info["SaveVideo"].get("input", {}).get("required", {}).get("format", [])
-        if format_input and format_input[0] == "COMFY_DYNAMICCOMBO_V3":
-            graph["9"]["inputs"].pop("codec", None)
-            graph["9"]["inputs"]["format.codec"] = "h264"
-    for node in graph.values():
-        required = info[node["class_type"]].get("input", {}).get("required", {})
-        for field in ("ckpt_name", "unet_name", "clip_name", "vae_name"):
-            if field in node["inputs"] and field in required and node["inputs"][field] not in required[field][0]:
-                raise ValueError("Install the local model file: " + node["inputs"][field])
+    graph = validate_comfy_workflow(job)
     data = request("POST", base + "/prompt", payload={"prompt": graph, "client_id": job.id})
     prompt_id = str(data.get("prompt_id") or "")
     if not prompt_id or data.get("node_errors"):

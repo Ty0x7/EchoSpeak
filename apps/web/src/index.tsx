@@ -28,6 +28,7 @@ import { leanApi } from "./lean/api";
 import { AgentRows, CollapsedRoster } from "./lean/Roster";
 import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
 import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
+import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { AgentEditor, RoomDialog } from "./lean/Dialogs";
 import type { LeanEvent, LeanPersona, LeanRoom } from "./lean/types";
@@ -1023,6 +1024,7 @@ export const Dashboard: React.FC<{
       let buffer = "";
       // Monotonic stream seq (backend) — ignore reordered/stale reconnect frames.
       let maxStreamSeq = 0;
+      let nativeAudioPlayed = false;
 
       while (true) {
         if (streamController.signal.aborted) break;
@@ -1054,6 +1056,18 @@ export const Dashboard: React.FC<{
             maxStreamSeq = evtSeq;
           }
           // Lean runtime events render through the agent timeline, not the legacy cards.
+          if ((evt as any).type === "voice_audio") {
+            if (visible && useAppStore.getState().speechEnabled && (voiceReadAloud || voiceConversationMode || voiceTranscript?.providerId === "gemini-live")) {
+              try {
+                const played = await liveAudioPlayback.enqueue(evt as unknown as LiveAudioPacket, speaking => {
+                  useAppStore.getState().setSpeaking(speaking);
+                  setVoicePhase(speaking ? "speaking" : "idle");
+                });
+                nativeAudioPlayed = nativeAudioPlayed || played;
+              } catch (error) { setVoiceNotice(error instanceof Error ? error.message : "Live audio playback failed."); }
+            }
+            continue;
+          }
           if (isLeanEvent(evt as unknown as LeanEvent)) {
             const leanEvt = evt as unknown as LeanEvent;
             if (leanEvt.type === "run_start") {
@@ -1105,7 +1119,16 @@ export const Dashboard: React.FC<{
             }
             if (visible) setStreaming(false);
             const spokenLean = String(committed[committed.length - 1]?.text || leanEvt.response || "").trim();
-            if (visible && spokenLean && (voiceReadAloud || voiceConversationMode)) {
+            if (visible && nativeAudioPlayed) {
+              if (nativeLiveVoice && voiceConversationMode && activeThreadIdRef.current === streamThreadId) {
+                // Listen for the next utterance while queued speech plays; actual speech stops playback.
+                void start(true);
+              } else {
+                void liveAudioPlayback.finished().then(played => {
+                  if (played && voiceConversationMode && activeThreadIdRef.current === streamThreadId && !streamControllersRef.current.has(streamThreadId)) void start();
+                });
+              }
+            } else if (visible && spokenLean && (voiceReadAloud || voiceConversationMode)) {
               void speakLocalText(spokenLean, {
                 clientTurnId: voiceTranscript?.clientTurnId || runRequestId,
                 requestId: runRequestId,
@@ -1301,10 +1324,12 @@ export const Dashboard: React.FC<{
   const {
     voicePhase, setVoicePhase, voiceNotice, setVoiceNotice, voiceInputLevel,
     voiceReadAloud, voiceConversationMode, wakeWordEnabled,
+    nativeLiveVoice, toggleNativeLiveVoice,
     toggleReadAloud, toggleVoiceMode, toggleWakeWord, start, stop, speakLocalText,
   } = useVoice({
     apiBase, activeThreadId, activeProjectId, activeThreadIdRef, activeProjectIdRef,
     streaming, listening, setListening, speechEnabled, onTranscript: submitVoiceTranscript,
+    onInterrupt: () => { if (streamControllersRef.current.has(activeThreadIdRef.current)) cancelSessionTurn(activeThreadIdRef.current, true); },
   });
 
 
@@ -1657,6 +1682,7 @@ export const Dashboard: React.FC<{
         {rightOpen ? (
           <RightPanel
             apiBase={apiBase}
+            sessionId={activeThreadId}
             tab={rightTab}
             onTab={setRightTab}
             artifact={openArtifact}
@@ -1708,7 +1734,7 @@ export const Dashboard: React.FC<{
                 }}
               />
             ) : mainPage === "creations" ? (
-              <CreationsPage apiBase={apiBase} onChat={id => { setMainPage("chat"); switchThread(id); }} />
+              <CreationsPage apiBase={apiBase} sessionId={activeThreadId} onChat={id => { setMainPage("chat"); switchThread(id); }} />
             ) : mainPage === "artifacts" ? (
               <ArtifactsPage apiBase={apiBase} onOpen={openArtifactFromPage} />
             ) : (
@@ -1791,18 +1817,19 @@ export const Dashboard: React.FC<{
               {/* Chat Tab */}
                 <>
                   <WidgetEnvProvider value={widgetEnv}>
-                  {!rightOpen && activityItems.length ? (
+                  {!rightOpen && activeThreadId ? (
                     <button
                       type="button"
                       className="rp-toggle"
+                      aria-label="Research & activity"
                       onClick={() => {
                         setActivityOpen(true);
-                        setRightTab("activity");
+                        setRightTab("research");
                       }}
-                      title="Show what the agents did: commands, files, searches"
+                      title="Open this chat’s research notebook and activity"
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12h3l2-6 4 12 2-6h5" /></svg>
-                      Activity
+                      Research &amp; activity
                       <small>{activityItems.length}</small>
                     </button>
                   ) : null}
@@ -1851,6 +1878,7 @@ export const Dashboard: React.FC<{
                       setThinkingEnabled={setThinkingEnabled} voiceReadAloud={voiceReadAloud}
                       toggleReadAloud={toggleReadAloud} voiceConversationMode={voiceConversationMode}
                       toggleVoiceMode={toggleVoiceMode} wakeWordEnabled={wakeWordEnabled} toggleWakeWord={toggleWakeWord}
+                      nativeLiveVoice={nativeLiveVoice} toggleNativeLiveVoice={toggleNativeLiveVoice}
                     />
                   </div>
                 </>

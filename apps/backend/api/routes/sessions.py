@@ -12,6 +12,30 @@ from api.deps import _apply_thread_scope, _normalize_thread_id, get_agent, get_e
 
 router = APIRouter()
 
+
+def _notebook_session(session_id: str):
+    from agent.threads import get_thread_manager
+    if not get_thread_manager().get_thread(session_id):
+        raise HTTPException(404, "Chat not found")
+    from agent.research_notebook import ResearchNotebook
+    return ResearchNotebook()
+
+
+@router.get("/sessions/{session_id}/research")
+def research_notebook(session_id: str, query: str = Query(default="", max_length=300)):
+    book = _notebook_session(session_id)
+    return {"session_id": session_id, "sources": book.sources(session_id, query, limit=100),
+            "notes": book.notes(session_id), "retention_days": 7}
+
+
+@router.get("/sessions/{session_id}/research/sources/{source_id}")
+def research_source(session_id: str, source_id: str, offset: int = Query(default=0, ge=0)):
+    book = _notebook_session(session_id)
+    try:
+        return book.read(session_id, source_id, offset)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
 class ThreadSessionStateResponse(BaseModel):
     thread_id: str
     session_id: str = ""

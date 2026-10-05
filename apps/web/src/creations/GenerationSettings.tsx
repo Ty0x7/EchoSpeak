@@ -2,12 +2,15 @@ import React, { useEffect, useState } from "react";
 import { Group, Row, SecretField, Select, TextField, Toggle } from "../settings/controls";
 import type { SettingsMap } from "../settings/useSettings";
 import { creationRequest } from "./api";
+import { CreationCard } from "./CreationCard";
 
-export function GenerationSettings({ s, save, apiBase }: { s: SettingsMap; save(patch: SettingsMap): Promise<void>; apiBase: string }) {
+export function GenerationSettings({ s, save, apiBase, sessionId = "" }: { s: SettingsMap; save(patch: SettingsMap): Promise<void>; apiBase: string; sessionId?: string }) {
   const [providers, setProviders] = useState<any[]>([]);
   const [local, setLocal] = useState<any>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [gpuId, setGpuId] = useState("");
+  const [testJob, setTestJob] = useState("");
   const refresh = async () => {
     try { const [p, l] = await Promise.all([creationRequest(apiBase, "/creations/providers"), creationRequest(apiBase, "/creations/local/setup")]); setProviders(p.items); setLocal(l); setError(""); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); }
@@ -18,6 +21,12 @@ export function GenerationSettings({ s, save, apiBase }: { s: SettingsMap; save(
     setBusy(true); setError("");
     try { await creationRequest(apiBase, path, "POST", body); await refresh(); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  const renderTest = async (profile: string) => {
+    setBusy(true); setError("");
+    try { const data = await creationRequest(apiBase, "/creations/local/test", "POST", { profile, session_id: sessionId }); setTestJob(data.job_id); }
+    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
   };
   return <div className="creation-settings">
     <Group title="Image and video creation" description="Ask Echo to create something in chat. Results appear there and in your Creations library. Cloud requests send your prompt to the provider and ask approval before spending credits.">
@@ -41,14 +50,18 @@ export function GenerationSettings({ s, save, apiBase }: { s: SettingsMap; save(
     <Group title="Install local generation" description={local?.detail || "Checking your hardware…"}>
       {local && <>
         <p>{local.hardware?.name || "No supported NVIDIA GPU detected"} · {local.free_gb} GB disk space free</p>
+        {!!local.gpus?.length && <Row label="GPU for local setup" help="Choose a GPU before installing. A running runtime needs an EchoSpeak restart to change devices."><Select value={gpuId || local.hardware?.id || ""} onChange={setGpuId} options={local.gpus.map((gpu: any) => ({ value: gpu.id, label: `${gpu.name} · ${(gpu.vram_mb / 1024).toFixed(1)} GB VRAM · ${(gpu.free_vram_mb / 1024).toFixed(1)} GB currently free` }))} /></Row>}
+        {local.compatibility_issue && <p role="status">{local.compatibility_issue}</p>}
         {local.profiles?.map((p: any) => <Row key={p.id} label={p.label} help={`${p.download_gb} GB download · ${p.recommended_vram_gb} GB VRAM recommended`}>
           <a href={p.license} target="_blank" rel="noreferrer">Model license</a>
-          <button className="es-btn es-btn-sm" disabled={busy || local.running || !local.supported} onClick={() => void action("/creations/local/setup", { profile: p.id })}>{p.installed ? "Verify / repair" : "Accept license & install"}</button>
+          <button className="es-btn es-btn-sm" disabled={busy || local.running || !(local.gpus?.length)} onClick={() => void action("/creations/local/setup", { profile: p.id, gpu_id: gpuId || local.hardware?.id })}>{p.installed ? "Verify / repair" : "Accept license & install"}</button>
+          {p.installed && <button className="es-btn es-btn-sm" disabled={busy || local.running || !sessionId || !s.allow_generation_actions} onClick={() => void renderTest(p.id)}>Test local generation</button>}
         </Row>)}
         {local.runtime_installed && <button className="es-btn es-btn-sm" disabled={busy || local.running || local.runtime_running} onClick={() => void action("/creations/local/start")}>{local.runtime_running ? "Runtime running" : "Start local runtime"}</button>}
         {local.running && <><progress max={local.total || 1} value={local.downloaded || 0} aria-label="Model download progress" /><button className="es-btn es-btn-sm" onClick={() => void action("/creations/local/cancel")}>Cancel setup</button></>}
         {local.message && <p role="status">{local.message}</p>}
         {local.error && <p role="alert">{local.error}</p>}
+        {testJob && <CreationCard id={testJob} apiBase={apiBase} />}
       </>}
     </Group>
     {error && <p role="alert">{error}</p>}
