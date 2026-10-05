@@ -7,7 +7,7 @@ import "../widgets/widgets.css";
 import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, useScrollTo, type IconName } from "./Chrome";
 import { GITHUB_URL, useLatestRelease } from "./release";
 import "./site.css";
-import { CreationsStory, ResearchStory, SetupStory, MotionControls } from "./Capabilities";
+import { CreationsStory, ResearchStory, SetupStory, MotionControls, CreationImage } from "./Capabilities";
 
 /** Adds data-visible once the element scrolls into view (immediately with reduced motion). */
 function useReveal<T extends HTMLElement>() {
@@ -64,12 +64,6 @@ function Hero() {
         </ul>
       </div>
       <div className="hero-face">
-        <div className="hero-orbit" aria-hidden="true" />
-        <div className="hero-orbit-track" aria-hidden="true"><i /><i /></div>
-        <span className="hero-satellite hero-satellite-create" aria-hidden="true"><Icon name="spark" size={15} /> Make something</span>
-        <span className="hero-satellite hero-satellite-research" aria-hidden="true"><Icon name="research" size={15} /> Follow a question</span>
-        <span className="hero-satellite hero-satellite-build" aria-hidden="true"><Icon name="code" size={15} /> Build an idea</span>
-        <span className="hero-satellite hero-satellite-voice" aria-hidden="true"><Icon name="voice" size={15} /> Just say it</span>
         <div className="hero-character"><EchoFace size="clamp(180px, 24vw, 300px)" /></div>
       </div>
       <button className="hero-explore" type="button" onClick={() => scrollTo("about")}>
@@ -163,7 +157,7 @@ function Screen({ mode }: { mode: string }) {
         </div>
       );
     case "create":
-      return <div className="thread"><You>Create an image for the world I’m imagining.</You><Agent i={1}><p>Choose a local or cloud provider, describe your idea, and keep the result in Creations.</p><div className="artifact-chip"><Icon name="spark" size={20} /><span><strong>Creations</strong><small>Images & videos · your media library</small></span><em>10.3</em></div></Agent></div>;
+      return <div className="thread"><You>Create a cinematic image of an astronaut exploring another world.</You><Agent i={1}><p>A new world, ready to keep in Creations.</p><div className="ways-creation"><CreationImage /><span>Sample image · Creations preview</span></div></Agent></div>;
     case "build":
       return (
         <div className="thread">
@@ -311,150 +305,6 @@ function Team() {
 
 // ── Big ad panels ────────────────────────────────────────────────────
 
-/** Smoothly counts a number toward its new value. */
-function useTween(value: number, ms = 450) {
-  const [shown, setShown] = useState(value);
-  const from = useRef(value);
-  useEffect(() => {
-    const start = performance.now();
-    const begin = from.current;
-    let raf = 0;
-    const step = (now: number) => {
-      const t = Math.min(1, (now - start) / ms);
-      const v = begin + (value - begin) * (1 - Math.pow(1 - t, 3));
-      from.current = v;
-      setShown(v);
-      if (t < 1) raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, [value, ms]);
-  return shown;
-}
-
-const SPLIT_PEOPLE = [
-  { name: "You", hue: 252 },
-  { name: "Sam", hue: 330 },
-  { name: "Alex", hue: 22 },
-  { name: "Jo", hue: 160 },
-  { name: "Kim", hue: 200 },
-  { name: "Lee", hue: 290 },
-];
-const TIPS = [10, 15, 18, 20, 25];
-const BILL_MIN = 10;
-const BILL_MAX = 300;
-
-function SplitApp({ version }: { version: 1 | 2 }) {
-  const [bill, setBill] = useState(84);
-  const [tip, setTip] = useState(18);
-  const [people, setPeople] = useState(3);
-  const total = bill * (1 + tip / 100);
-  const split = version === 2;
-  const each = split ? total / people : total;
-  const shownMain = useTween(each);
-  const shownTotal = useTween(total);
-  const fill = `${((bill - BILL_MIN) / (BILL_MAX - BILL_MIN)) * 100}%`;
-  return (
-    <div className="splitapp">
-      <div className="split-top">
-        <span className="split-logo"><Icon name="spark" size={13} /></span>
-        <b>Split</b>
-        <small>{split ? `${people} people` : "Tip calculator"}</small>
-      </div>
-      <div className="split-hero">
-        <span>{split ? "Each person pays" : "Total with tip"}</span>
-        <strong>${shownMain.toFixed(2)}</strong>
-        <div className="split-break">
-          <span>Bill <b>${bill.toFixed(2)}</b></span>
-          <span>Tip <b>${(total - bill).toFixed(2)}</b></span>
-          {split ? <span>Total <b>${shownTotal.toFixed(2)}</b></span> : null}
-        </div>
-      </div>
-      <label className="split-field">
-        <span>Bill</span>
-        <b>${bill}</b>
-        <input className="split-range" type="range" min={BILL_MIN} max={BILL_MAX} value={bill} onChange={(e) => setBill(Number(e.target.value))} aria-label="Bill amount" style={{ "--fill": fill } as React.CSSProperties} />
-      </label>
-      <div className="split-field">
-        <span>Tip</span>
-        <b>{tip}%</b>
-        <div className="split-seg" role="radiogroup" aria-label="Tip" style={{ "--i": TIPS.indexOf(tip), "--n": TIPS.length } as React.CSSProperties}>
-          <i className="split-seg-pill" aria-hidden="true" />
-          {TIPS.map((t) => (
-            <button key={t} type="button" role="radio" aria-checked={tip === t} className={tip === t ? "is-on" : ""} onClick={() => setTip(t)}>{t}%</button>
-          ))}
-        </div>
-      </div>
-      {split ? (
-        <div className="split-field">
-          <span>Split between</span>
-          <div className="split-stepper">
-            <button type="button" onClick={() => setPeople((n) => Math.max(1, n - 1))} aria-label="Fewer people">−</button>
-            <b>{people}</b>
-            <button type="button" onClick={() => setPeople((n) => Math.min(SPLIT_PEOPLE.length, n + 1))} aria-label="More people">+</button>
-          </div>
-          <div className="split-faces">
-            {SPLIT_PEOPLE.slice(0, people).map((person) => (
-              <span key={person.name} className="split-face" style={{ "--h": person.hue } as React.CSSProperties}>
-                <i>{person.name[0]}</i>
-                <small>{person.name}</small>
-                <em>${each.toFixed(2)}</em>
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function BuildDemo() {
-  const [version, setVersion] = useState<1 | 2>(2);
-  return (
-    <div className="build-demo">
-      <div className="build-chat">
-        <div className="thread">
-          <You>Build me a tip calculator.</You>
-          <Agent i={1}>
-            <p>Here you go. It's open on the right.</p>
-            <button type="button" className={`build-chip${version === 1 ? " is-on" : ""}`} onClick={() => setVersion(1)}><Icon name="code" size={14} /><span><strong>Tip calculator</strong><small>App · v1</small></span></button>
-          </Agent>
-          <You i={2}>Make it split the bill between friends.</You>
-          <Agent i={3}>
-            <p>Done. Version 2 shows what each person pays.</p>
-            <button type="button" className={`build-chip${version === 2 ? " is-on" : ""}`} onClick={() => setVersion(2)}><Icon name="code" size={14} /><span><strong>Tip & split</strong><small>App · v2</small></span></button>
-          </Agent>
-        </div>
-        <div className="chat-composer" aria-hidden="true"><span>Ask for a change...</span><b><Icon name="arrow" size={15} /></b></div>
-      </div>
-      <div className="build-artifact">
-        <div className="build-bar">
-          <strong>{version === 2 ? "Tip & split" : "Tip calculator"}</strong>
-          <small>App · v{version}</small>
-        </div>
-        <div className="build-stage" key={version}>
-          <SplitApp version={version} />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function BuildPanel() {
-  return (
-    <div className="panels shell">
-      <Reveal as="section" className="panel panel-dark panel-build" anim="zoom">
-        <div className="panel-copy">
-          <span className="kicker">Artifacts</span>
-          <h2>Ask for an app. <span className="dim">Get an app.</span></h2>
-        </div>
-        <BuildDemo />
-        <p className="build-hint">It's live. Drag the bill, add people, or tap a version in the chat.</p>
-      </Reveal>
-    </div>
-  );
-}
-
 function ModelsPanel() {
   return (
     <div className="panels shell">
@@ -462,13 +312,13 @@ function ModelsPanel() {
         <div className="panel-copy">
           <span className="kicker">Bring your own brain</span>
           <h2>Free local models. <span className="dim">Or your favourite cloud one.</span></h2>
-          <p>Run a model on your own GPU for free, or plug in an OpenAI or Gemini key. Switch any time.</p>
+          <p>Run a model on your own GPU for free, or connect OpenAI, Gemini, Claude, or Grok with your own API key. Switch any time.</p>
         </div>
-        <div className="marquee" aria-label="Works with LM Studio, Ollama, llama.cpp, vLLM, LocalAI, OpenAI and Gemini">
+        <div className="marquee" aria-label="Works with LM Studio, Ollama, llama.cpp, vLLM, LocalAI, OpenAI, Gemini, Claude and Grok">
           <div className="marquee-track">
             {[0, 1].map((k) => (
               <div className="marquee-set" key={k} aria-hidden={k === 1}>
-                {["LM Studio", "Ollama", "llama.cpp", "vLLM", "LocalAI", "OpenAI", "Gemini", "Gemma", "Qwen", "Llama"].map((n) => <span key={n}>{n}</span>)}
+                {["LM Studio", "Ollama", "llama.cpp", "vLLM", "LocalAI", "OpenAI", "Gemini", "Claude", "Grok", "Gemma", "Qwen", "Llama"].map((n) => <span key={n}>{n}</span>)}
               </div>
             ))}
           </div>
@@ -533,100 +383,7 @@ function BringHome() {
   );
 }
 
-/**
- * One wheel tick, swipe or key press glides to the next section (or the next screenful of a
- * tall one). Only on wide screens; phones scroll normally.
- */
-function useSectionSnap() {
-  useEffect(() => {
-    let animating = false;
-    let touchY: number | null = null;
-
-    const stops = () => {
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      const list: number[] = [];
-      document.querySelectorAll<HTMLElement>(".snap").forEach((el) => {
-        const top = el.getBoundingClientRect().top + window.scrollY;
-        list.push(top);
-        // Tall section: also stop where its bottom meets the bottom of the screen.
-        const end = top + el.offsetHeight - window.innerHeight;
-        if (end > top + 40) list.push(end);
-      });
-      list.push(max);
-      return list.map((v) => Math.max(0, Math.min(max, Math.round(v)))).sort((x, y) => x - y);
-    };
-    const enabled = () => document.querySelector(".site")?.getAttribute("data-motion") !== "paused" && window.innerWidth > 900 && !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-
-    const glide = (to: number) => {
-      const from = window.scrollY;
-      if (Math.abs(to - from) < 2) return;
-      animating = true;
-      const html = document.documentElement;
-      const prev = html.style.scrollBehavior;
-      html.style.scrollBehavior = "auto";
-      const duration = Math.min(1000, 550 + Math.abs(to - from) * 0.35);
-      const start = performance.now();
-      const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
-      const step = (now: number) => {
-        const t = Math.min(1, (now - start) / duration);
-        window.scrollTo(0, from + (to - from) * ease(t));
-        if (t < 1) requestAnimationFrame(step);
-        else {
-          html.style.scrollBehavior = prev;
-          // Swallow the rest of a trackpad fling.
-          window.setTimeout(() => { animating = false; }, 380);
-        }
-      };
-      requestAnimationFrame(step);
-    };
-    const go = (dir: 1 | -1) => {
-      const y = window.scrollY;
-      const list = stops();
-      const next = dir > 0 ? list.find((v) => v > y + 4) : [...list].reverse().find((v) => v < y - 4);
-      if (next !== undefined) glide(next);
-    };
-
-    const onWheel = (e: WheelEvent) => {
-      if (!enabled() || e.ctrlKey || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
-      e.preventDefault();
-      if (animating || Math.abs(e.deltaY) < 2) return;
-      go(e.deltaY > 0 ? 1 : -1);
-    };
-    const onTouchStart = (e: TouchEvent) => { touchY = e.touches[0]?.clientY ?? null; };
-    const onTouchMove = (e: TouchEvent) => {
-      if (!enabled()) return;
-      e.preventDefault();
-      const y = e.touches[0]?.clientY;
-      if (animating || touchY === null || y === undefined || Math.abs(touchY - y) < 14) return;
-      go(touchY - y > 0 ? 1 : -1);
-      touchY = null;
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (!enabled()) return;
-      const el = e.target as HTMLElement | null;
-      if (el && (el.isContentEditable || el.closest("input,textarea,select,button,a,[role=tab]"))) return;
-      const down = ["ArrowDown", "PageDown"].includes(e.key) || (e.key === " " && !e.shiftKey);
-      const up = ["ArrowUp", "PageUp"].includes(e.key) || (e.key === " " && e.shiftKey);
-      if (!down && !up) return;
-      e.preventDefault();
-      if (!animating) go(down ? 1 : -1);
-    };
-
-    window.addEventListener("wheel", onWheel, { passive: false });
-    window.addEventListener("touchstart", onTouchStart, { passive: true });
-    window.addEventListener("touchmove", onTouchMove, { passive: false });
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("wheel", onWheel);
-      window.removeEventListener("touchstart", onTouchStart);
-      window.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, []);
-}
-
 export function Home() {
-  useSectionSnap();
   const [motionPaused, setMotionPaused] = useState(false);
   return (
     <div className="site site-home" data-motion={motionPaused ? "paused" : "running"}>
@@ -640,7 +397,6 @@ export function Home() {
         <div className="snap"><CreationsStory /></div>
         <div className="snap"><ResearchStory /></div>
         <div className="snap"><SetupStory /></div>
-        <div className="snap"><BuildPanel /></div>
         <div className="snap snap-up"><AnswerCards /></div>
         <div className="snap snap-up"><Team /></div>
         <div className="snap snap-last"><div className="last-pair"><ModelsPanel /><BringHome /></div><SiteFooter /></div>
