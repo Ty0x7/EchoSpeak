@@ -7,7 +7,7 @@ import "../widgets/widgets.css";
 import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, useScrollTo, type IconName } from "./Chrome";
 import { GITHUB_URL, useLatestRelease } from "./release";
 import "./site.css";
-import { CreationsStory, ResearchStory, SetupStory, MotionControls, CreationImage } from "./Capabilities";
+import { CreationsStory, SetupStory, ScrollProgress, CreationImage } from "./Capabilities";
 
 /** Adds data-visible once the element scrolls into view (immediately with reduced motion). */
 function useReveal<T extends HTMLElement>() {
@@ -157,7 +157,7 @@ function Screen({ mode }: { mode: string }) {
         </div>
       );
     case "create":
-      return <div className="thread"><You>Create a cinematic image of an astronaut exploring another world.</You><Agent i={1}><p>A new world, ready to keep in Creations.</p><div className="ways-creation"><CreationImage /><span>Sample image · Creations preview</span></div></Agent></div>;
+      return <div className="thread"><You>Create a sculptural glass and metal object in black and white.</You><Agent i={1}><p>Your sculpture, ready to keep in Creations.</p><div className="ways-creation"><CreationImage /><span>Sample image · Creations preview</span></div></Agent></div>;
     case "build":
       return (
         <div className="thread">
@@ -384,18 +384,16 @@ function BringHome() {
 }
 
 export function Home() {
-  const [motionPaused, setMotionPaused] = useState(false);
   return (
-    <div className="site site-home" data-motion={motionPaused ? "paused" : "running"}>
-      <MotionControls paused={motionPaused} onToggle={() => setMotionPaused(value => !value)} />
+    <div className="site site-home" data-motion="running">
+      <ScrollProgress />
       <style>{echoFaceStyles}</style>
       <SiteHeader />
       <main>
         <div className="snap snap-hero"><Hero /></div>
         <div className="snap snap-up"><About /></div>
-        <div className="snap"><WaysShowcase motionPaused={motionPaused} /></div>
+        <div className="snap"><WaysShowcase /></div>
         <div className="snap"><CreationsStory /></div>
-        <div className="snap"><ResearchStory /></div>
         <div className="snap"><SetupStory /></div>
         <div className="snap snap-up"><AnswerCards /></div>
         <div className="snap snap-up"><Team /></div>

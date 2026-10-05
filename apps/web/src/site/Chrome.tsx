@@ -80,7 +80,6 @@ export function SiteHeader() {
       <nav aria-label="Main">
         <button type="button" onClick={() => scrollTo("ways")}>What Echo does</button>
         <button type="button" onClick={() => scrollTo("creations")}>Creations</button>
-        <button type="button" onClick={() => scrollTo("research")}>Research</button>
         <button type="button" onClick={() => scrollTo("about")}>About</button>
         <Link to="/docs">Docs</Link>
       </nav>
