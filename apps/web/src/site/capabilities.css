@@ -24,3 +24,8 @@
 @media(max-width:760px){.cap-creations,.cap-research,.cap-setup{grid-template-columns:1fr;gap:38px}.cap-copy h2{font-size:clamp(40px,9vw,60px)}.cap-copy p{max-width:560px}.cap-setup-demo{order:2;max-width:560px;width:100%;margin:auto}.cap-setup .cap-copy{order:1}.cap-research-demo{max-width:600px}.cap-question{font-size:24px}.cap-small-label{font-size:9px}.cap-motion-control{bottom:12px;right:12px}}
 @media(max-width:420px){.cap-studio-top{gap:10px}.cap-small-label{max-width:120px}.cap-art-caption>span{font-size:8px}.cap-routing{align-items:flex-start}.cap-routing>span{max-width:90px}.cap-notebook>span{display:none}.cap-research-nav button{gap:8px;font-size:12px}.cap-question{font-size:22px}.cap-setup-window{padding:25px 19px}}
 @media(prefers-reduced-motion:reduce){.cap-stage *,.cap-stage *:before,.cap-stage *:after{animation:none!important;transition:none!important}.cap-motion-control,.cap-scroll-progress{display:none}.cap-main-art .creation-photo{transform:none}}
+
+/* Show the middle sample at its original portrait proportions, without zoom or blur. */
+.cap-creation-portrait{width:100%;aspect-ratio:8/9;overflow:hidden;border-radius:12px;background:#111}
+.creation-photo{background-position:50% 50%;background-size:300% 100%;filter:none}
+.cap-creation-portrait .creation-photo{animation:none;transform:none}
