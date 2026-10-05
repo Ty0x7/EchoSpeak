@@ -1,73 +1,45 @@
-import { useCallback, useRef, useState } from "react";
-import { emptyLive, leanReducer } from "./liveReducer";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { SessionLiveBuffer } from "./sessionLiveBuffer";
 import type { LeanEvent, LeanLiveState } from "./types";
 
-/**
- * Live state for the turn being streamed.
- *
- * Token and reasoning events can arrive hundreds of times a second. They are
- * queued and applied once per animation frame, so React renders at most one
- * update per frame no matter how fast the model streams. The ref is the
- * source of truth; `finish()` applies anything still queued synchronously so
- * the committed message is exactly what was on screen.
- */
-export function useLeanLive() {
+/** Batch frames without tying a running turn to the currently visible chat. */
+export function useLeanLive(sessionId: string) {
   const [live, setLive] = useState<LeanLiveState | null>(null);
-  const stateRef = useRef<LeanLiveState | null>(null);
-  const queueRef = useRef<LeanEvent[]>([]);
-  const frameRef = useRef(0);
-  const timerRef = useRef(0);
-
+  const buffer = useRef(new SessionLiveBuffer());
+  const selected = useRef(sessionId);
+  const frame = useRef(0), timer = useRef(0);
+  const select = useCallback((session: string) => {
+    selected.current = session;
+    setLive(buffer.current.flush(session));
+  }, []);
+  useEffect(() => { select(sessionId); }, [sessionId, select]);
   const flush = useCallback(() => {
-    frameRef.current = 0;
-    if (timerRef.current) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = 0;
+    window.cancelAnimationFrame(frame.current);
+    window.clearTimeout(timer.current);
+    frame.current = timer.current = 0;
+    buffer.current.flushAll();
+    setLive(buffer.current.get(selected.current));
+  }, []);
+  const push = useCallback((event: LeanEvent, session: string) => {
+    buffer.current.push(session, event);
+    if (!frame.current) {
+      frame.current = window.requestAnimationFrame(flush);
+      timer.current = window.setTimeout(flush, 120);
     }
-    const events = queueRef.current;
-    if (!events.length) return;
-    queueRef.current = [];
-    let state = stateRef.current ?? emptyLive();
-    for (const evt of events) state = leanReducer(state, evt);
-    stateRef.current = state;
-    setLive(state);
+  }, [flush]);
+  const start = useCallback((request: string, session: string) => {
+    buffer.current.start(session, request);
+    if (session === selected.current) setLive(buffer.current.get(session));
   }, []);
-
-  const push = useCallback(
-    (evt: LeanEvent) => {
-      queueRef.current.push(evt);
-      if (!frameRef.current) {
-        frameRef.current = window.requestAnimationFrame(flush);
-        // Background windows pause rAF; keep the transcript current anyway.
-        timerRef.current = window.setTimeout(flush, 120);
-      }
-    },
-    [flush]
-  );
-
-  const start = useCallback((requestId: string) => {
-    if (frameRef.current) window.cancelAnimationFrame(frameRef.current);
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    frameRef.current = 0;
-    timerRef.current = 0;
-    queueRef.current = [];
-    const state = emptyLive(requestId);
-    stateRef.current = state;
-    setLive(state);
+  const finish = useCallback((session: string) => {
+    const result = buffer.current.finish(session);
+    if (session === selected.current) setLive(null);
+    return result;
   }, []);
-
-  const finish = useCallback((): LeanLiveState | null => {
-    if (frameRef.current) window.cancelAnimationFrame(frameRef.current);
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    frameRef.current = 0;
-    timerRef.current = 0;
-    let state = stateRef.current;
-    if (state) for (const evt of queueRef.current) state = leanReducer(state, evt);
-    queueRef.current = [];
-    stateRef.current = null;
-    setLive(null);
-    return state;
+  const get = useCallback((session: string) => buffer.current.get(session), []);
+  useEffect(() => () => {
+    window.cancelAnimationFrame(frame.current);
+    window.clearTimeout(timer.current);
   }, []);
-
-  return { live, push, start, finish, stateRef };
+  return { live, select, push, start, finish, get };
 }

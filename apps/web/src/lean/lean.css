@@ -137,6 +137,7 @@
 .lm-title { color: var(--es-faint); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lm-time { margin-left: auto; color: var(--es-faint); font: 500 10px var(--es-mono); }
 .lm-body { display: grid; gap: 7px; padding-left: 35px; min-width: 0; }
+.lm-text-wrap { min-width: 0; max-width: 100%; }
 .lm-text { color: rgba(255, 255, 255, 0.92); font-size: 14.5px; line-height: 1.7; }
 .lm-text p { margin: 0.5em 0; }
 .lm-text pre {
@@ -151,8 +152,8 @@
 .lm-text a { color: #fff; text-decoration: underline; text-decoration-color: rgba(255, 255, 255, 0.3); text-underline-offset: 3px; }
 .lm-text a:hover { text-decoration-color: #fff; }
 .lm-text ul, .lm-text ol { padding-left: 1.3em; }
-.lm-text table { border-collapse: collapse; font-size: 13px; }
-.lm-text th, .lm-text td { border-bottom: 1px solid var(--es-line); padding: 6px 12px 6px 0; text-align: left; }
+.lm-text table:not(.wg-table) { border-collapse: collapse; font-size: 13px; }
+.lm-text table:not(.wg-table) th, .lm-text table:not(.wg-table) td { border-bottom: 1px solid var(--es-line); padding: 6px 12px 6px 0; text-align: left; }
 .lm-text-wrap[data-tail="true"] .lm-text > :last-child::after {
   content: "";
   display: inline-block;

@@ -50,10 +50,10 @@ export const globalCss = `
            word-break: break-word;
          }
          .chat-markdown img,
-         .chat-markdown table {
+         .chat-markdown table:not(.wg-table) {
            max-width: 100%;
          }
-         .chat-markdown table {
+         .chat-markdown table:not(.wg-table) {
            display: block;
            overflow-x: auto;
          }
