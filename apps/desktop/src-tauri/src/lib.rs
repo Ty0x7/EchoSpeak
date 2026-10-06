@@ -84,10 +84,13 @@ fn control_desktop_window(action: String, window: Window) -> Result<(), String> 
                 window.maximize()
             }
         }
-        "close" if matches!(window.label(), "settings" | "companion") => window.hide(),
+        "close" if matches!(window.label(), "settings" | "setup" | "companion") => window.hide(),
         "close" => {
             if let Some(settings) = window.app_handle().get_webview_window("settings") {
                 let _ = settings.close();
+            }
+            if let Some(setup) = window.app_handle().get_webview_window("setup") {
+                let _ = setup.close();
             }
             if let Some(companion) = window.app_handle().get_webview_window("companion") {
                 let _ = companion.close();
@@ -104,6 +107,18 @@ fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("settings")
         .ok_or_else(|| "The packaged Settings window is unavailable.".to_string())?;
+    window.unminimize().map_err(|error| error.to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
+}
+
+/// First-run setup has its own window, so it never draws over the main or
+/// Settings window. The renderer hides it again when setup is done.
+#[tauri::command]
+fn open_setup_window(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("setup")
+        .ok_or_else(|| "The packaged setup window is unavailable.".to_string())?;
     window.unminimize().map_err(|error| error.to_string())?;
     window.show().map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())
@@ -202,6 +217,7 @@ pub fn run() {
             open_desktop_logs,
             control_desktop_window,
             open_settings_window,
+            open_setup_window,
             open_companion_window,
             set_companion_always_on_top,
             desktop_window_label,

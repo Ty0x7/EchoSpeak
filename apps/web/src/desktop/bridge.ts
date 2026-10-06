@@ -58,6 +58,7 @@ declare global {
       core?: { invoke?: Invoke };
       event?: {
         listen?: <T>(event: string, handler: (event: { payload: T }) => void) => Promise<() => void>;
+        emit?: (event: string, payload?: unknown) => Promise<void>;
       };
     };
     __ECHOSPEAK_DESKTOP_RUNTIME__?: DesktopRuntime;
@@ -143,6 +144,21 @@ export const openDesktopLogs = (): Promise<void> => invoke<void>("open_desktop_l
 export const openDesktopSettingsWindow = (): Promise<void> => invoke<void>("open_settings_window");
 
 export const openDesktopCompanionWindow = (): Promise<void> => invoke<void>("open_companion_window");
+
+/** First-run setup gets its own window, so it never opens inside the main or Settings window. */
+export const openDesktopSetupWindow = (): Promise<void> => invoke<void>("open_setup_window");
+
+/** Tell every EchoSpeak window something happened (for example, setup finished). */
+export const emitDesktopEvent = async (event: string, payload?: unknown): Promise<void> => {
+  const emit = window.__TAURI__?.event?.emit;
+  if (emit) await emit(event, payload);
+};
+
+export const onDesktopEvent = async <T>(event: string, handler: (payload: T) => void): Promise<() => void> => {
+  const listen = window.__TAURI__?.event?.listen;
+  if (!listen) return () => undefined;
+  return listen<T>(event, (e) => handler(e.payload));
+};
 
 export const setDesktopCompanionAlwaysOnTop = (enabled: boolean): Promise<void> =>
   invoke<void>("set_companion_always_on_top", { enabled });

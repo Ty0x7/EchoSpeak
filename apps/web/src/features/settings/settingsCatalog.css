@@ -4,7 +4,7 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
-  color: #f5f5f5;
+  color: var(--es-text);
 }
 
 .settings-catalog-intro {
@@ -13,7 +13,7 @@
   justify-content: space-between;
   gap: 18px;
   padding-bottom: 13px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(var(--es-edge-rgb), calc(0.08 * var(--es-edge-k)));
 }
 
 .settings-catalog-intro h3,
@@ -28,7 +28,7 @@
 .settings-catalog-intro p {
   max-width: 660px;
   margin: 6px 0 0;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--es-ink-rgb), 0.5);
   font-size: 12px;
   line-height: 1.55;
 }
@@ -61,22 +61,22 @@
   gap: 10px;
   padding: 15px;
   text-align: left;
-  color: #f4f4f4;
-  background: rgba(255, 255, 255, 0.022);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: var(--es-text);
+  background: rgba(var(--es-wash-rgb), calc(0.022 * var(--es-wash-k)));
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.09 * var(--es-edge-k)));
   border-radius: 7px;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease;
 }
 
 .settings-capability-card:hover {
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.17);
+  background: rgba(var(--es-wash-rgb), calc(0.04 * var(--es-wash-k)));
+  border-color: rgba(var(--es-edge-rgb), calc(0.17 * var(--es-edge-k)));
 }
 
 .settings-capability-card.is-selected {
-  background: rgba(255, 255, 255, 0.065);
-  border-color: rgba(255, 255, 255, 0.42);
+  background: rgba(var(--es-wash-rgb), calc(0.065 * var(--es-wash-k)));
+  border-color: rgba(var(--es-edge-rgb), calc(0.42 * var(--es-edge-k)));
 }
 
 .settings-card-heading {
@@ -88,14 +88,14 @@
 
 .settings-card-heading > span { min-width: 0; display: grid; gap: 3px; }
 .settings-card-heading strong { font-size: 13px; font-weight: 600; line-height: 1.35; }
-.settings-card-heading small { color: rgba(255, 255, 255, 0.44); font-size: 10px; }
+.settings-card-heading small { color: rgba(var(--es-ink-rgb), 0.44); font-size: 10px; }
 .settings-card-heading em,
 .settings-detail-heading em {
   flex: 0 0 auto;
   padding: 3px 6px;
-  color: rgba(255, 255, 255, 0.6);
-  background: rgba(255, 255, 255, 0.035);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(var(--es-ink-rgb), 0.6);
+  background: rgba(var(--es-wash-rgb), calc(0.035 * var(--es-wash-k)));
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.1 * var(--es-edge-k)));
   border-radius: 999px;
   font-size: 9px;
   font-style: normal;
@@ -107,21 +107,21 @@
 
 .settings-card-heading em[data-status="ready"],
 .settings-detail-heading em[data-status="ready"] {
-  color: #f5f5f5;
-  border-color: rgba(255, 255, 255, 0.32);
-  background: rgba(255, 255, 255, 0.09);
+  color: var(--es-text);
+  border-color: rgba(var(--es-edge-rgb), calc(0.32 * var(--es-edge-k)));
+  background: rgba(var(--es-wash-rgb), calc(0.09 * var(--es-wash-k)));
 }
 
 .settings-card-heading em[data-status="degraded"],
 .settings-card-heading em[data-status="reconnect_required"],
 .settings-detail-heading em[data-status="degraded"],
 .settings-detail-heading em[data-status="reconnect_required"] {
-  color: #d5d5d5;
+  color: var(--es-text-soft);
   border-style: dashed;
 }
 
 .settings-card-description {
-  color: rgba(255, 255, 255, 0.52);
+  color: rgba(var(--es-ink-rgb), 0.52);
   font-size: 11px;
   line-height: 1.5;
 }
@@ -135,8 +135,8 @@
 
 .settings-card-meta span {
   padding: 3px 5px;
-  color: rgba(255, 255, 255, 0.38);
-  background: rgba(0, 0, 0, 0.22);
+  color: rgba(var(--es-ink-rgb), 0.38);
+  background: rgba(var(--es-shade-rgb), calc(0.22 * var(--es-shade-k)));
   border-radius: 3px;
   font-size: 9px;
   text-transform: capitalize;
@@ -146,8 +146,8 @@
   min-height: 0;
   overflow-y: auto;
   padding: 18px;
-  background: #0d0d0e;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--es-surface-1);
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.1 * var(--es-edge-k)));
   border-radius: 8px;
   scrollbar-gutter: stable;
 }
@@ -163,7 +163,7 @@
 .settings-detail-capabilities > span {
   display: block;
   margin-bottom: 5px;
-  color: rgba(255, 255, 255, 0.34);
+  color: rgba(var(--es-ink-rgb), 0.34);
   font-size: 9px;
   font-weight: 650;
   letter-spacing: 0.09em;
@@ -174,7 +174,7 @@
 .settings-detail-description,
 .settings-detail-note {
   margin: 12px 0 0;
-  color: rgba(255, 255, 255, 0.52);
+  color: rgba(var(--es-ink-rgb), 0.52);
   font-size: 11px;
   line-height: 1.6;
 }
@@ -183,9 +183,9 @@
 .settings-catalog-error {
   margin-top: 11px;
   padding: 9px 10px;
-  color: rgba(255, 255, 255, 0.76);
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px dashed rgba(255, 255, 255, 0.17);
+  color: rgba(var(--es-ink-rgb), 0.76);
+  background: rgba(var(--es-wash-rgb), calc(0.04 * var(--es-wash-k)));
+  border: 1px dashed rgba(var(--es-edge-rgb), calc(0.17 * var(--es-edge-k)));
   border-radius: 5px;
   font-size: 10px;
   line-height: 1.5;
@@ -197,19 +197,19 @@
   gap: 1px;
   margin: 15px 0 0;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.075);
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.075 * var(--es-edge-k)));
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.075);
+  background: rgba(var(--es-wash-rgb), calc(0.075 * var(--es-wash-k)));
 }
 
 .settings-detail-facts > div {
   min-width: 0;
   padding: 9px 10px;
-  background: #0d0d0e;
+  background: var(--es-surface-1);
 }
 
-.settings-detail-facts dt { color: rgba(255, 255, 255, 0.32); font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; }
-.settings-detail-facts dd { margin: 4px 0 0; color: rgba(255, 255, 255, 0.73); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; text-transform: capitalize; }
+.settings-detail-facts dt { color: rgba(var(--es-ink-rgb), 0.32); font-size: 9px; text-transform: uppercase; letter-spacing: 0.06em; }
+.settings-detail-facts dd { margin: 4px 0 0; color: rgba(var(--es-ink-rgb), 0.73); font-size: 10px; line-height: 1.45; overflow-wrap: anywhere; text-transform: capitalize; }
 
 .settings-detail-capabilities { margin-top: 16px; }
 .settings-detail-capabilities > div,
@@ -220,7 +220,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 7px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.065);
+  border-top: 1px solid rgba(var(--es-edge-rgb), calc(0.065 * var(--es-edge-k)));
   font-size: 10px;
   color: inherit;
   background: transparent;
@@ -231,21 +231,21 @@
   text-align: left;
 }
 .settings-detail-capabilities > button { cursor: pointer; }
-.settings-detail-capabilities > button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.025); }
+.settings-detail-capabilities > button:hover:not(:disabled) { background: rgba(var(--es-wash-rgb), calc(0.025 * var(--es-wash-k))); }
 .settings-detail-capabilities > button:disabled { cursor: default; }
 .settings-detail-capabilities > [data-available="false"] { opacity: 0.42; }
-.settings-detail-capabilities > [data-enabled="false"] > span { color: rgba(255, 255, 255, 0.4); }
-.settings-detail-capabilities small { color: rgba(255, 255, 255, 0.35); text-transform: capitalize; }
+.settings-detail-capabilities > [data-enabled="false"] > span { color: rgba(var(--es-ink-rgb), 0.4); }
+.settings-detail-capabilities small { color: rgba(var(--es-ink-rgb), 0.35); text-transform: capitalize; }
 
 .settings-model-control {
   display: grid;
   gap: 7px;
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.075);
+  border-top: 1px solid rgba(var(--es-edge-rgb), calc(0.075 * var(--es-edge-k)));
 }
 .settings-model-control > label {
-  color: rgba(255, 255, 255, 0.44);
+  color: rgba(var(--es-ink-rgb), 0.44);
   font-size: 10px;
   font-weight: 600;
 }
@@ -259,7 +259,7 @@
   min-width: 0;
 }
 .settings-model-control > small {
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(var(--es-ink-rgb), 0.5);
   font-size: 10px;
   line-height: 1.45;
 }
@@ -274,11 +274,11 @@
   gap: 13px;
   margin-top: 16px;
   padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.075);
+  border-top: 1px solid rgba(var(--es-edge-rgb), calc(0.075 * var(--es-edge-k)));
 }
 
 .settings-connection-control > small {
-  color: rgba(255, 255, 255, 0.48);
+  color: rgba(var(--es-ink-rgb), 0.48);
   font-size: 10px;
   line-height: 1.55;
 }
@@ -289,14 +289,14 @@
 .settings-catalog-button {
   min-height: 33px;
   padding: 0 13px;
-  color: #090909;
-  background: #f1f1f1;
-  border: 1px solid #f1f1f1;
+  color: var(--es-on-emph);
+  background: var(--es-emph);
+  border: 1px solid var(--es-emph);
   border-radius: 5px;
   font: 600 11px/1 Inter, "Segoe UI Variable", sans-serif;
   cursor: pointer;
 }
-.settings-catalog-button.is-quiet { color: rgba(255, 255, 255, 0.78); background: rgba(255, 255, 255, 0.035); border-color: rgba(255, 255, 255, 0.12); }
+.settings-catalog-button.is-quiet { color: rgba(var(--es-ink-rgb), 0.78); background: rgba(var(--es-wash-rgb), calc(0.035 * var(--es-wash-k))); border-color: rgba(var(--es-edge-rgb), calc(0.12 * var(--es-edge-k))); }
 .settings-catalog-button:disabled { opacity: 0.35; cursor: default; }
 
 .settings-catalog-empty {
@@ -304,8 +304,8 @@
   display: grid;
   place-items: center;
   padding: 20px;
-  color: rgba(255, 255, 255, 0.4);
-  border: 1px dashed rgba(255, 255, 255, 0.1);
+  color: rgba(var(--es-ink-rgb), 0.4);
+  border: 1px dashed rgba(var(--es-edge-rgb), calc(0.1 * var(--es-edge-k)));
   border-radius: 7px;
   font-size: 11px;
   text-align: center;
@@ -316,10 +316,10 @@
   flex-wrap: wrap;
   gap: 8px 18px;
   padding-top: 1px;
-  color: rgba(255, 255, 255, 0.34);
+  color: rgba(var(--es-ink-rgb), 0.34);
   font-size: 10px;
 }
-.settings-catalog-legend b { color: rgba(255, 255, 255, 0.64); font-weight: 600; }
+.settings-catalog-legend b { color: rgba(var(--es-ink-rgb), 0.64); font-weight: 600; }
 
 @media (max-width: 900px) {
   .settings-catalog-layout { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }

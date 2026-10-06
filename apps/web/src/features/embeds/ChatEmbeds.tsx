@@ -12,7 +12,7 @@ type Palette = {
 /** Same visual language as the bubble time / token meta line. */
 const metaFont: React.CSSProperties = {
   fontSize: 10,
-  color: "rgba(255,255,255,0.28)",
+  color: "rgba(var(--es-ink-rgb), 0.28)",
   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
   letterSpacing: "0.06em",
 };
@@ -89,7 +89,7 @@ const SourcesExpanded: React.FC<{
                 alignItems: "center",
                 gap: 6,
                 ...metaFont,
-                color: "rgba(255,255,255,0.38)",
+                color: "rgba(var(--es-ink-rgb), 0.38)",
                 lineHeight: 1.45,
               }}
             >
@@ -101,9 +101,9 @@ const SourcesExpanded: React.FC<{
                   rel="noopener noreferrer"
                   title={item.title || item.url}
                   style={{
-                    color: "rgba(255,255,255,0.42)",
+                    color: "rgba(var(--es-ink-rgb), 0.42)",
                     textDecoration: "none",
-                    borderBottom: "1px dotted rgba(255,255,255,0.16)",
+                    borderBottom: "1px dotted rgba(var(--es-edge-rgb), calc(0.16 * var(--es-edge-k)))",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
@@ -148,7 +148,7 @@ const SourcesExpanded: React.FC<{
                 style={{
                   margin: "2px 0 4px 18px",
                   ...metaFont,
-                  color: "rgba(255,255,255,0.32)",
+                  color: "rgba(var(--es-ink-rgb), 0.32)",
                   letterSpacing: "0.02em",
                   lineHeight: 1.45,
                   width: "100%",
@@ -163,7 +163,7 @@ const SourcesExpanded: React.FC<{
                 {item.title ? (
                   <div
                     style={{
-                      color: "rgba(255,255,255,0.45)",
+                      color: "rgba(var(--es-ink-rgb), 0.45)",
                       marginBottom: 2,
                       overflowWrap: "anywhere",
                       wordBreak: "break-word",
@@ -186,7 +186,7 @@ const SourcesExpanded: React.FC<{
                     style={{
                       display: "inline-block",
                       marginTop: 3,
-                      color: "rgba(255,255,255,0.4)",
+                      color: "rgba(var(--es-ink-rgb), 0.4)",
                       textDecoration: "underline",
                       textUnderlineOffset: 2,
                       wordBreak: "break-all",
@@ -248,7 +248,7 @@ const SearchedExpanded: React.FC<{
         title={q}
         style={{
           ...metaFont,
-          color: "rgba(255,255,255,0.34)",
+          color: "rgba(var(--es-ink-rgb), 0.34)",
           whiteSpace: "pre-wrap",
           overflowWrap: "anywhere",
           wordBreak: "break-word",
@@ -274,8 +274,8 @@ const WeatherStat: React.FC<{
           width: 36,
           height: 36,
           borderRadius: 8,
-          background: "rgba(255,255,255,0.055)",
-          border: "1px solid rgba(255,255,255,0.07)",
+          background: "rgba(var(--es-wash-rgb), calc(0.055 * var(--es-wash-k)))",
+          border: "1px solid rgba(var(--es-edge-rgb), calc(0.07 * var(--es-edge-k)))",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -414,11 +414,11 @@ export const ChatEmbeds: React.FC<{ embeds?: ChatEmbed[]; colors: Palette }> = (
                 justifyContent: "space-between",
                 gap: 12,
                 ...metaFont,
-                color: "rgba(255,255,255,0.38)",
+                color: "rgba(var(--es-ink-rgb), 0.38)",
               }}
             >
               <span>{embed.label}</span>
-              <span style={{ color: "rgba(255,255,255,0.5)" }}>{embed.value}</span>
+              <span style={{ color: "rgba(var(--es-ink-rgb), 0.5)" }}>{embed.value}</span>
             </div>
           );
         }
@@ -462,7 +462,7 @@ export const ChatEmbedFooter: React.FC<{ embeds?: ChatEmbed[]; colors: Palette; 
           <span
             data-testid="chat-meta-sources"
             title={sources?.items.map((s) => s.title || s.domain || s.url).filter(Boolean).join(" · ") || "Sources"}
-            style={{ ...metaFont, color: "rgba(255,255,255,0.34)" }}
+            style={{ ...metaFont, color: "rgba(var(--es-ink-rgb), 0.34)" }}
           >
             Sources · {sourceCount}
           </span>
@@ -474,7 +474,7 @@ export const ChatEmbedFooter: React.FC<{ embeds?: ChatEmbed[]; colors: Palette; 
           <span
             data-testid="chat-meta-search"
             title={(searched?.queries || []).join(" · ") || "Search"}
-            style={{ ...metaFont, color: "rgba(255,255,255,0.34)" }}
+            style={{ ...metaFont, color: "rgba(var(--es-ink-rgb), 0.34)" }}
           >
             Search · {searchCount}
           </span>

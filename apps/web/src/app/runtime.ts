@@ -77,17 +77,18 @@ export const useAppStore = create<AppState>((set) => ({
   bumpSpeechBeat: () => set((s) => ({ speechBeat: s.speechBeat + 1 })),
 }));
 
+/** Theme tokens (theme/tokens.css) for inline styles: they follow light and dark. */
 export const colors = {
-  bg: "#000000",
-  panel: "#0a0a0a",
-  panel2: "#111111",
-  accent: "#ffffff",
-  accentSoft: "#222222",
-  text: "#ffffff",
-  textDim: "#888888",
-  line: "#333333",
-  danger: "#ff4444",
-  glow: "#ffffff",
+  bg: "var(--es-bg-0)",
+  panel: "var(--es-surface-1)",
+  panel2: "var(--es-surface-2)",
+  accent: "var(--es-text-strong)",
+  accentSoft: "var(--es-surface-3)",
+  text: "var(--es-text-strong)",
+  textDim: "var(--es-text-3)",
+  line: "var(--es-border)",
+  danger: "var(--es-err)",
+  glow: "var(--es-text-strong)",
 };
 
 export const defaultAvatarConfig: AvatarConfig = DEFAULT_AVATAR_CONFIG;

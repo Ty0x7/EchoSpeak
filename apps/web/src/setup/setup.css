@@ -1,13 +1,14 @@
-.setup-panel { background:var(--es-bg); color:var(--es-text); font-family:var(--es-font); border:1px solid var(--es-line-2); border-radius:20px; box-shadow:0 30px 100px #0008; }
+.setup-panel { background:var(--es-bg); color:var(--es-text); font-family:var(--es-font); border:1px solid var(--es-line-2); border-radius:20px; box-shadow:0 30px 100px rgba(var(--es-shade-rgb), calc(0.533 * var(--es-shade-k))); }
 .setup-panel:focus { outline:none; }
 .setup-panel>main { min-height:0; flex:1 1 auto; }
-.setup-panel>header,.setup-panel>nav,.setup-panel>footer { flex-shrink:0; }
-.setup-panel>header { align-items:center; padding:22px 28px; }
-.setup-brand { font-size:11px; color:var(--es-dim); letter-spacing:.06em; }
-.setup-panel>header h2 { margin:5px 0 0; font-size:18px; font-weight:600; letter-spacing:-.03em; }
-.setup-panel>nav { padding:14px 28px; gap:6px; border-block:1px solid var(--es-line); }
-.setup-panel>nav button { border:0; background:transparent; color:var(--es-dim); border-radius:8px; min-height:36px; font:12px var(--es-font); padding:8px 10px; }
-.setup-panel>nav button[aria-current=step] { background:var(--es-glass); color:var(--es-text); box-shadow:inset 0 0 0 1px var(--es-line-2); }
+.setup-panel>header,.setup-panel>footer { flex-shrink:0; }
+/* One compact top row: the step name, the steps, and Set up later. */
+.setup-panel>header { display:flex; align-items:center; gap:14px; padding:10px 16px 10px 22px; border-bottom:1px solid var(--es-line); }
+.setup-panel>header h2 { margin:0; flex:0 0 auto; font-size:14px; font-weight:600; letter-spacing:-.01em; white-space:nowrap; }
+.setup-panel>header nav { display:flex; flex-wrap:nowrap; flex:1 1 auto; min-width:0; gap:2px; padding:0; overflow-x:auto; scrollbar-width:none; }
+.setup-panel>header nav::-webkit-scrollbar { display:none; }
+.setup-panel>header nav button { flex:0 0 auto; border:0; background:transparent; color:var(--es-dim); border-radius:8px; min-height:30px; font:12px var(--es-font); padding:5px 9px; white-space:nowrap; }
+.setup-panel>header nav button[aria-current=step] { background:var(--es-glass); color:var(--es-text); box-shadow:inset 0 0 0 1px var(--es-line-2); }
 .setup-panel>main { padding:28px; }
 .setup-panel>footer { padding:18px 28px; border-top:1px solid var(--es-line); }
 .setup-panel>footer .es-btn:last-child { background:var(--es-text); color:var(--es-bg); }
@@ -31,3 +32,12 @@
 @media(max-width:600px) { .setup-panel>header,.setup-panel>nav,.setup-panel>main,.setup-panel>footer { padding-inline:18px; }.setup-panel>header .es-btn { font-size:11px; }.setup-welcome-points { flex-direction:column; } }
 @media(max-width:600px) { .setup-welcome { margin:0 auto 8px; }.setup-avatar { margin-bottom:12px; }.setup-welcome h3 { margin-top:12px; }.setup-welcome p { font-size:13px; line-height:1.55; }.setup-welcome-points { gap:8px; margin:14px 0; } }
 @media(prefers-reduced-motion:reduce) { .setup-step,.setup-avatar { animation:none; } }
+/* Desktop: setup fills its own window (setup/SetupWindow.tsx). */
+.setup-window { height:100%; overflow:hidden; color:var(--es-text); font-family:var(--es-font); }
+.setup-panel.is-window { width:100%; height:100%; max-width:none; max-height:none; margin:0; border:0; border-radius:0; box-shadow:none; background:transparent; display:flex; flex-direction:column; }
+.setup-panel.is-window>main { overflow:auto; }
+.setup-panel.is-window>header,.setup-panel.is-window>footer { background:var(--es-surface-1); }
+/* Last step: choose the look. */
+.setup-theme { width:100%; display:grid; gap:10px; margin:22px 0 6px; text-align:left; }
+.setup-theme h4 { margin:0; font-size:14px; font-weight:600; color:var(--es-text); }
+.setup-theme small { font-size:12px; color:var(--es-faint); }

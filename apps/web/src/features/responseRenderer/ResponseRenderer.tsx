@@ -23,7 +23,7 @@ const Panel: React.FC<{ title?: string; colors: Palette; children: React.ReactNo
   <div
     style={{
       border: `1px solid ${colors.line}`,
-      background: "rgba(255,255,255,0.035)",
+      background: "rgba(var(--es-wash-rgb), calc(0.035 * var(--es-wash-k)))",
       borderRadius: 6,
       padding: "10px 12px",
       minWidth: 0,
@@ -79,7 +79,7 @@ const ChartBlock: React.FC<{ block: Extract<ResponseRenderBlock, { kind: "chart"
           return (
             <div key={point.label} style={{ display: "grid", gridTemplateColumns: "minmax(70px, 130px) 1fr auto", gap: 8, alignItems: "center" }}>
               <div style={{ color: colors.textDim, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{point.label}</div>
-              <div style={{ height: 6, background: "rgba(255,255,255,0.08)", borderRadius: 2, overflow: "hidden" }}>
+              <div style={{ height: 6, background: "rgba(var(--es-wash-rgb), calc(0.08 * var(--es-wash-k)))", borderRadius: 2, overflow: "hidden" }}>
                 <div style={{ width: `${pct}%`, height: "100%", background: "rgba(190,205,255,0.78)", borderRadius: 2 }} />
               </div>
               <div style={{ color: colors.text, fontSize: 11, fontVariantNumeric: "tabular-nums" }}>
@@ -95,7 +95,7 @@ const ChartBlock: React.FC<{ block: Extract<ResponseRenderBlock, { kind: "chart"
 };
 
 const EvidenceBlock: React.FC<{ block: Extract<ResponseRenderBlock, { kind: "evidence" }>; colors: Palette }> = ({ block, colors }) => (
-  <details style={{ border: `1px solid ${colors.line}`, background: "rgba(255,255,255,0.025)", borderRadius: 6, padding: "5px 8px" }}>
+  <details style={{ border: `1px solid ${colors.line}`, background: "rgba(var(--es-wash-rgb), calc(0.025 * var(--es-wash-k)))", borderRadius: 6, padding: "5px 8px" }}>
     <summary style={{ cursor: "pointer", color: colors.textDim, fontSize: 11, fontWeight: 600 }}>
       {block.title || "Sources"} ({block.items.length})
     </summary>
@@ -117,7 +117,7 @@ const EvidenceBlock: React.FC<{ block: Extract<ResponseRenderBlock, { kind: "evi
             {item.title}
           </a>
           <div style={{ color: colors.textDim, fontSize: 10.5, marginTop: 1 }}>{item.domain}</div>
-          {item.snippet ? <div style={{ color: "rgba(255,255,255,0.52)", fontSize: 11.5, lineHeight: 1.45, marginTop: 2 }}>{item.snippet}</div> : null}
+          {item.snippet ? <div style={{ color: "rgba(var(--es-ink-rgb), 0.52)", fontSize: 11.5, lineHeight: 1.45, marginTop: 2 }}>{item.snippet}</div> : null}
         </div>
       ))}
     </div>

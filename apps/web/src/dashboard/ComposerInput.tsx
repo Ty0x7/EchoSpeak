@@ -44,7 +44,7 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                           onDrop={(event) => { event.preventDefault(); setFolderDropActive(false); const path = folderPathFromDrop(event); if (path) void attachFolder(path); else void attachFolder(); }}
                         >
                           <span style={{ whiteSpace: "nowrap" }}>
-                            Session: <b style={{ color: "rgba(255,255,255,.8)" }}>{threads.find(t => t.id === activeThreadId)?.name || activeThreadId}</b>
+                            Session: <b style={{ color: "rgba(var(--es-ink-rgb), 0.8)" }}>{threads.find(t => t.id === activeThreadId)?.name || activeThreadId}</b>
                           </span>
                           {(() => {
                             const folderFull =
@@ -76,7 +76,7 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                                 }}
                               >
                                 Folder:{" "}
-                                <b style={{ color: "rgba(255,255,255,.8)" }}>
+                                <b style={{ color: "rgba(var(--es-ink-rgb), 0.8)" }}>
                                   {folderName || "drop folder to start Project"}
                                   {gitBranch ? ` · git:${gitBranch}` : ""}
                                 </b>
@@ -89,13 +89,13 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                               aria-label="Remove folder from this Session"
                               title="Remove folder from this Session"
                               onClick={() => void onRemoveFolder()}
-                              style={{ width: 18, height: 18, border: 0, background: "transparent", color: "rgba(255,255,255,.65)", borderRadius: 2, cursor: "pointer", lineHeight: 1, flexShrink: 0 }}
+                              style={{ width: 18, height: 18, border: 0, background: "transparent", color: "rgba(var(--es-ink-rgb), 0.65)", borderRadius: 2, cursor: "pointer", lineHeight: 1, flexShrink: 0 }}
                             >
                               ×
                             </button>
                           )}
                           {providerError ? (
-                            <span role="status" title={providerError} style={{ marginLeft: 8, color: "#e8b86a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                            <span role="status" title={providerError} style={{ marginLeft: 8, color: "var(--es-warn)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                               {providerError}
                             </span>
                           ) : null}

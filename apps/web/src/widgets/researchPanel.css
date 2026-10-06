@@ -7,7 +7,7 @@
 .notebook-sources { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 16px; }
 .notebook-sources li { border-bottom: 1px solid var(--es-line); padding-bottom: 16px; min-width: 0; }
 .echo-root .notebook-panel .notebook-source { display: flex; flex-direction: column; gap: 7px; width: 100%; text-align: left; background: transparent; color: inherit; font: inherit; padding: 4px 0 12px; border: 0; border-radius: 6px; cursor: pointer; }
-.notebook-source:hover strong, .notebook-source[aria-expanded="true"] strong { color: #fff; }
+.notebook-source:hover strong, .notebook-source[aria-expanded="true"] strong { color: var(--es-text-strong); }
 .notebook-source strong { font-size: 13px; font-weight: 600; }
 .notebook-source strong, .notebook-source p { overflow-wrap: anywhere; margin: 0; }
 .notebook-source p { font-size: 13px; line-height: 1.6; }
@@ -18,7 +18,7 @@
 .notebook-passage { margin-top: 12px; padding: 12px; border: 1px solid var(--es-line); border-radius: var(--es-r-sm); background: var(--es-surface-2); }
 .notebook-passage pre { margin: 0 0 12px; }
 .notebook-pages { display: flex; flex-wrap: wrap; gap: 8px; }
-.notebook-error { color: #e6aaa8; font-size: 13px; }
+.notebook-error { color: var(--es-err-text); font-size: 13px; }
 .notebook-editor { margin: 12px 0; display: grid; gap: 10px; }
 .notebook-editor label { font-size: 12px; color: var(--es-dim); }
 .notebook-editor textarea { display: block; width: 100%; box-sizing: border-box; min-height: 130px; margin-top: 8px; padding: 10px; border-radius: var(--es-r-sm); border: 1px solid var(--es-line-2); background: var(--es-surface-2); color: var(--es-text); font: inherit; resize: vertical; }

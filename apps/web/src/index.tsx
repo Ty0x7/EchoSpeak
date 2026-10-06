@@ -1849,7 +1849,7 @@ export const Dashboard: React.FC<{
               <img src="/logo.png" alt="" style={{ width: 15, height: 15 }} />
               <span>{activeWorkspaceLabel}</span>
               {activeProjectId && leftTab === "chat" && threadState?.mode === "coding" && (
-                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: "linear-gradient(135deg, rgba(34,197,94,0.15), rgba(34,197,94,0.05))", border: "1px solid rgba(34,197,94,0.25)", color: "#22c55e", fontWeight: 600, marginLeft: 8 }}>
+                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 6, background: "linear-gradient(135deg, rgba(34,197,94,0.15), rgba(34,197,94,0.05))", border: "1px solid rgba(34,197,94,0.25)", color: "var(--es-ok)", fontWeight: 600, marginLeft: 8 }}>
                   📁 {projects.find(p => p.id === activeProjectId)?.name || "Project Active"}
                 </span>
               )}
@@ -1877,7 +1877,7 @@ export const Dashboard: React.FC<{
                   padding: "0 12px",
                   fontSize: 12,
                   fontWeight: 700,
-                  color: "#fff",
+                  color: "var(--es-text-strong)",
                   background: studioOpen ? "rgba(140,180,255,0.16)" : "transparent",
                   border: `1px solid ${studioOpen ? "rgba(140,180,255,0.38)" : colors.line}`,
                 }}
@@ -1895,7 +1895,7 @@ export const Dashboard: React.FC<{
                 title={speechEnabled ? "Mute Speech" : "Unmute Speech"}
                 style={{
                   display: "none",
-                  color: "#fff",
+                  color: "var(--es-text-strong)",
                   background: speechEnabled ? "#222" : "transparent",
                   border: `1px solid ${colors.line}`,
                 }}

@@ -183,24 +183,24 @@ export const OperationalStateCard: React.FC<Props & { executionId?: string | nul
         marginTop: compact ? 0 : 12,
         marginBottom: 0,
         padding: compact ? "6px 8px" : "10px 12px",
-        border: "1px solid rgba(255,255,255,0.1)",
+        border: "1px solid rgba(var(--es-edge-rgb), calc(0.1 * var(--es-edge-k)))",
         borderRadius: compact ? 6 : 10,
-        background: "rgba(255,255,255,0.025)",
+        background: "rgba(var(--es-wash-rgb), calc(0.025 * var(--es-wash-k)))",
         position: "relative",
         zIndex: approval ? 15 : 1,
       }}
     >
       <div role="status" aria-live="polite" style={{ display: "flex", gap: 10, alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap" }}>
         <span style={{ fontSize: compact ? 11 : 12, fontWeight: 700 }}>{activity}</span>
-        {status ? <span style={{ fontSize: 11, color: "rgba(255,255,255,0.58)" }}>{STATUS_LABELS[status] || status.replace(/_/g, " ")}</span> : null}
+        {status ? <span style={{ fontSize: 11, color: "rgba(var(--es-ink-rgb), 0.58)" }}>{STATUS_LABELS[status] || status.replace(/_/g, " ")}</span> : null}
       </div>
-      {contextLabel ? <div style={{ marginTop: innerGap, fontSize: 11, color: "rgba(255,255,255,0.45)" }}>{contextLabel}</div> : null}
-      {state?.continuity_notice ? <div style={{ marginTop: innerGap, fontSize: 11, color: "rgba(147,197,253,0.9)" }}>{state.continuity_notice}</div> : null}
+      {contextLabel ? <div style={{ marginTop: innerGap, fontSize: 11, color: "rgba(var(--es-ink-rgb), 0.45)" }}>{contextLabel}</div> : null}
+      {state?.continuity_notice ? <div style={{ marginTop: innerGap, fontSize: 11, color: "var(--es-info)" }}>{state.continuity_notice}</div> : null}
 
       {approval ? (
-        <div style={{ marginTop: sectionGap, paddingTop: sectionGap, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+        <div style={{ marginTop: sectionGap, paddingTop: sectionGap, borderTop: "1px solid rgba(var(--es-edge-rgb), calc(0.08 * var(--es-edge-k)))" }}>
           <div style={{ fontSize: 12, fontWeight: 650 }}>{approval.summary || approval.preview || `Run ${approval.tool}`}</div>
-          <div style={{ marginTop: innerGap, fontSize: 11, color: "rgba(255,255,255,0.55)", overflowWrap: "anywhere" }}>
+          <div style={{ marginTop: innerGap, fontSize: 11, color: "rgba(var(--es-ink-rgb), 0.55)", overflowWrap: "anywhere" }}>
             {approval.permission_level === "read" ? "Read-only" : "Modifying"} · {safeTarget(approval)} · {approval.risk_level || "safe"} risk
           </div>
           {missingFlags.length ? (
@@ -242,18 +242,18 @@ export const OperationalStateCard: React.FC<Props & { executionId?: string | nul
 
       {(steps.length || completed.length || failed.length || pending.length || state?.safest_next_action) ? (
         <details style={{ marginTop: sectionGap }}>
-          <summary style={{ cursor: "pointer", fontSize: 11, color: "rgba(255,255,255,0.62)" }}>Progress and details</summary>
+          <summary style={{ cursor: "pointer", fontSize: 11, color: "rgba(var(--es-ink-rgb), 0.62)" }}>Progress and details</summary>
           {steps.length ? (
             <ol style={{ margin: compact ? "4px 0 0" : "8px 0 0", paddingLeft: 20 }}>
               {steps.map((step, index) => (
                 <li key={`${step.index ?? index}-${step.description || step.tool}`} style={{ margin: compact ? "2px 0" : "4px 0", fontSize: 11 }}>
-                  {step.description || step.tool || "Task"} <span style={{ color: "rgba(255,255,255,0.45)" }}>— {stepLabel(step.status || "pending")}</span>
+                  {step.description || step.tool || "Task"} <span style={{ color: "rgba(var(--es-ink-rgb), 0.45)" }}>— {stepLabel(step.status || "pending")}</span>
                 </li>
               ))}
             </ol>
           ) : null}
           {[...completed, ...failed, ...pending].slice(-12).map((item, index) => (
-            <div key={`${item.execution_id || "action"}-${index}`} style={{ marginTop: innerGap, fontSize: 11, color: item.success === false ? "#fca5a5" : "rgba(255,255,255,0.56)" }}>
+            <div key={`${item.execution_id || "action"}-${index}`} style={{ marginTop: innerGap, fontSize: 11, color: item.success === false ? "var(--es-err-soft)" : "rgba(var(--es-ink-rgb), 0.56)" }}>
               {String(item.summary || item.tool || item.status || "Action")}
               {item.verified ? " · verified" : ""}
             </div>
@@ -267,14 +267,14 @@ export const OperationalStateCard: React.FC<Props & { executionId?: string | nul
                 : String(value);
             if (!text) return null;
             return (
-              <div key={label} style={{ marginTop: innerGap, fontSize: 11, color: "rgba(255,255,255,0.52)", overflowWrap: "anywhere" }}>
-                <span style={{ color: "rgba(255,255,255,0.72)" }}>{label.replace(/_/g, " ")}:</span> {text}
+              <div key={label} style={{ marginTop: innerGap, fontSize: 11, color: "rgba(var(--es-ink-rgb), 0.52)", overflowWrap: "anywhere" }}>
+                <span style={{ color: "rgba(var(--es-ink-rgb), 0.72)" }}>{label.replace(/_/g, " ")}:</span> {text}
               </div>
             );
           })}
           {/* Next-action only when it belongs to this Turn's non-complete status */}
           {state?.safest_next_action && status && !["", "ready", "complete"].includes(status) ? (
-            <div style={{ marginTop: innerGap, fontSize: 11, color: "rgba(255,255,255,0.5)" }}>
+            <div style={{ marginTop: innerGap, fontSize: 11, color: "rgba(var(--es-ink-rgb), 0.5)" }}>
               Next: {state.safest_next_action}
             </div>
           ) : null}
@@ -306,11 +306,11 @@ export const CapabilityRegistryGroups: React.FC<{ registry?: Record<string, any>
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8, marginBottom: 16 }}>
       {Object.entries(groups).filter(([, items]) => items.length).map(([label, items]) => (
-        <section key={label} style={{ padding: 10, border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10, background: "rgba(255,255,255,0.025)" }}>
+        <section key={label} style={{ padding: 10, border: "1px solid rgba(var(--es-edge-rgb), calc(0.1 * var(--es-edge-k)))", borderRadius: 10, background: "rgba(var(--es-wash-rgb), calc(0.025 * var(--es-wash-k)))" }}>
           <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 7 }}>{label}</div>
           {items.map(([name, spec]) => (
-            <div key={name} style={{ marginTop: 5, fontSize: 10.5, color: "rgba(255,255,255,0.58)" }}>
-              <span style={{ color: "rgba(255,255,255,0.86)" }}>{String(name).replace(/_/g, " ")}</span>
+            <div key={name} style={{ marginTop: 5, fontSize: 10.5, color: "rgba(var(--es-ink-rgb), 0.58)" }}>
+              <span style={{ color: "rgba(var(--es-ink-rgb), 0.86)" }}>{String(name).replace(/_/g, " ")}</span>
               {spec.supported_task ? ` — ${spec.supported_task}` : ""}
             </div>
           ))}

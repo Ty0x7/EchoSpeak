@@ -1,5 +1,21 @@
 # Changes
 
+## Unreleased: light theme and setup window
+
+- **Light theme, now the default** (`apps/web/src/theme/`). White surfaces, navy text, blue hairlines and a blue
+  accent; blue gradient primary and send buttons; mono uppercase section labels; outlined pill tabs in the right
+  panel; a blue outer ring and glow around Echo, and a large blue glow behind Echo in voice mode, with a thin
+  measuring ring. Jarvis and Glados are blue in light and stay black in dark; in dark, Echo's glow is white.
+- **Dark theme unchanged.** About 700 hard-coded colours (12 stylesheets, inline styles, the sidebar's embedded
+  CSS) were converted to theme tokens whose dark values are the old colours. Overlays use role channels
+  (`--es-ink-rgb`, `--es-edge-rgb`, `--es-wash-rgb`, `--es-shade-rgb`) with light-mode multipliers.
+- **Appearance:** Settings › General › Appearance and the last setup step offer Light, Dark or Match system,
+  stored per device and synced across every window (`theme/theme.ts`). Code blocks get a light syntax palette.
+- **Setup has its own desktop window** (`setup` in `tauri.conf.json`, `open_setup_window`). Before, "Open setup"
+  in Settings opened the setup dialog inside the Settings window. The main window opens the setup window on first
+  run and opens the first chat when it reports completion. Browsers keep the dialog. The setup header is one
+  compact row (title, steps, Set up later). Windows no longer force the dark native theme.
+
 ## v11.0.0 — 2026-10-06
 
 User-facing notes: [EchoSpeak 11.0.0](docs/releases/v11.0.0.md). Design and research basis: the 11.0 learning

@@ -114,9 +114,9 @@ function Snippet({ text }: { text: string }) {
   );
 }
 
-const surface = "#0a0a0a";
-const border = "rgba(255,255,255,.10)";
-const muted = "rgba(255,255,255,.48)";
+const surface = "var(--es-surface-1)";
+const border = "rgba(var(--es-edge-rgb), calc(0.1 * var(--es-edge-k)))";
+const muted = "rgba(var(--es-ink-rgb), 0.48)";
 
 /** Minimal monochrome icons — readable in the 50px collapsed rail. */
 function Icon({
@@ -139,7 +139,7 @@ function Icon({
   size?: number;
   active?: boolean;
 }) {
-  const stroke = active ? "#fff" : "rgba(255,255,255,0.72)";
+  const stroke = active ? "var(--es-text-strong)" : "rgba(var(--es-ink-rgb), 0.72)";
   const common = {
     width: size,
     height: size,
@@ -293,9 +293,9 @@ export function ProjectSidebar(props: SidebarProps) {
     border: 0,
     borderRadius: 2,
     background: active
-      ? "linear-gradient(90deg, rgba(255,255,255,.10), rgba(255,255,255,.025) 62%, transparent)"
+      ? "linear-gradient(90deg, rgba(var(--es-wash-rgb), calc(0.10 * var(--es-wash-k))), rgba(var(--es-wash-rgb), calc(0.025 * var(--es-wash-k))) 62%, transparent)"
       : "transparent",
-    color: active ? "#fff" : "rgba(255,255,255,.62)",
+    color: active ? "var(--es-text-strong)" : "rgba(var(--es-ink-rgb), 0.62)",
     display: "flex",
     alignItems: "center",
     justifyContent: iconOnly ? "center" : "flex-start",
@@ -595,7 +595,7 @@ export function ProjectSidebar(props: SidebarProps) {
         height: "100%",
         overflow: "hidden",
         borderRight: `1px solid ${border}`,
-        background: `linear-gradient(180deg, rgba(255,255,255,.018) 0%, transparent 18%), ${surface}`,
+        background: `linear-gradient(180deg, rgba(var(--es-wash-rgb), calc(0.018 * var(--es-wash-k))) 0%, transparent 18%), ${surface}`,
         /* No right padding — scroll track must sit on the sidebar edge */
         padding: iconOnly ? "6px 0 6px 6px" : "10px 0 10px 10px",
         display: "flex",
@@ -605,8 +605,8 @@ export function ProjectSidebar(props: SidebarProps) {
     >
       <style>{`
       .echo-side-button { transition: background .14s ease, color .14s ease, opacity .14s ease; }
-      .echo-side-button:hover { background: linear-gradient(90deg, rgba(255,255,255,.065), rgba(255,255,255,.018) 68%, transparent) !important; color: #fff !important; }
-      .echo-side-button:focus-visible, .echo-row-actions button:focus-visible { outline: 1px solid rgba(255,255,255,.72); outline-offset: 2px; }
+      .echo-side-button:hover { background: linear-gradient(90deg, rgba(var(--es-wash-rgb), calc(0.065 * var(--es-wash-k))), rgba(var(--es-wash-rgb), calc(0.018 * var(--es-wash-k))) 68%, transparent) !important; color: var(--es-text-strong) !important; }
+      .echo-side-button:focus-visible, .echo-row-actions button:focus-visible { outline: 1px solid rgba(var(--es-edge-rgb), calc(0.72 * var(--es-edge-k))); outline-offset: 2px; }
       .echo-side-button.is-active { font-weight: 600; position: relative; }
       .echo-side-button.is-active::before {
         content: "";
@@ -616,10 +616,10 @@ export function ProjectSidebar(props: SidebarProps) {
         bottom: 9px;
         width: 2px;
         border-radius: 2px;
-        background: rgba(255,255,255,.9);
+        background: rgba(var(--es-wash-rgb), calc(0.9 * var(--es-wash-k)));
         box-shadow: 0 0 12px rgba(255,255,255,.22);
       }
-      .echo-side-button:active { background: linear-gradient(90deg, rgba(255,255,255,.09), rgba(255,255,255,.025) 68%, transparent) !important; }
+      .echo-side-button:active { background: linear-gradient(90deg, rgba(var(--es-wash-rgb), calc(0.09 * var(--es-wash-k))), rgba(var(--es-wash-rgb), calc(0.025 * var(--es-wash-k))) 68%, transparent) !important; }
       /* Fixed trailing slot — never shrinks when titles are long */
       .echo-row-actions {
         display: flex;
@@ -636,7 +636,7 @@ export function ProjectSidebar(props: SidebarProps) {
         height: 30px;
         border: 0;
         background: transparent;
-        color: rgba(255,255,255,.7);
+        color: rgba(var(--es-ink-rgb), 0.7);
         cursor: pointer;
         padding: 0;
         font-size: 13px;
@@ -645,7 +645,7 @@ export function ProjectSidebar(props: SidebarProps) {
         place-items: center;
         border-radius: 2px;
       }
-      .echo-row-actions button:hover { color: #fff; background: #181818; }
+      .echo-row-actions button:hover { color: var(--es-text-strong); background: var(--es-surface-3); }
       .echo-side-row {
         min-width: 0;
         max-width: 100%;
@@ -668,7 +668,7 @@ export function ProjectSidebar(props: SidebarProps) {
         /* Content inset only — scrollbar stays on the sidebar's right edge */
         padding-right: ${iconOnly ? 2 : 6}px;
         scrollbar-width: thin;
-        scrollbar-color: rgba(255,255,255,.12) transparent;
+        scrollbar-color: rgba(var(--es-edge-rgb), calc(0.12 * var(--es-edge-k))) transparent;
         scrollbar-gutter: auto;
       }
       .echo-sidebar-scroll::-webkit-scrollbar {
@@ -679,11 +679,11 @@ export function ProjectSidebar(props: SidebarProps) {
         margin: 0;
       }
       .echo-sidebar-scroll::-webkit-scrollbar-thumb {
-        background: rgba(255,255,255,.12);
+        background: rgba(var(--es-wash-rgb), calc(0.12 * var(--es-wash-k)));
         border-radius: 0;
       }
       .echo-sidebar-scroll::-webkit-scrollbar-thumb:hover {
-        background: rgba(255,255,255,.2);
+        background: rgba(var(--es-wash-rgb), calc(0.2 * var(--es-wash-k)));
       }
       /* Brand / footer keep the previous right inset since they sit outside the scroller */
       .echo-sidebar-edge-pad {
@@ -697,20 +697,20 @@ export function ProjectSidebar(props: SidebarProps) {
         box-shadow: none;
       }
       .echo-footer-action {
-        border: 1px solid rgba(255,255,255,.09);
-        background: #0b0b0b;
-        color: rgba(255,255,255,.72);
+        border: 1px solid rgba(var(--es-edge-rgb), calc(0.09 * var(--es-edge-k)));
+        background: var(--es-surface-1);
+        color: rgba(var(--es-ink-rgb), 0.72);
         transition: background .14s ease, border-color .14s ease, color .14s ease;
       }
       .echo-footer-action:hover {
-        background: #121212;
-        border-color: rgba(255,255,255,.16);
-        color: #fff;
+        background: var(--es-surface-2);
+        border-color: rgba(var(--es-edge-rgb), calc(0.16 * var(--es-edge-k)));
+        color: var(--es-text-strong);
       }
-      .echo-footer-action:focus-visible { outline: 1px solid rgba(255,255,255,.72); outline-offset: 2px; }
+      .echo-footer-action:focus-visible { outline: 1px solid rgba(var(--es-edge-rgb), calc(0.72 * var(--es-edge-k))); outline-offset: 2px; }
       .echo-rail-divider {
         height: 1px;
-        background: rgba(255,255,255,.07);
+        background: rgba(var(--es-wash-rgb), calc(0.07 * var(--es-wash-k)));
         margin: ${iconOnly ? "4px 6px" : "5px 3px"};
       }
     `}</style>
@@ -917,9 +917,9 @@ export function ProjectSidebar(props: SidebarProps) {
                   style={{
                     width: 26,
                     height: 26,
-                    border: "1px solid rgba(255,255,255,.09)",
-                    background: "rgba(255,255,255,.025)",
-                    color: "rgba(255,255,255,.78)",
+                    border: "1px solid rgba(var(--es-edge-rgb), calc(0.09 * var(--es-edge-k)))",
+                    background: "rgba(var(--es-wash-rgb), calc(0.025 * var(--es-wash-k)))",
+                    color: "rgba(var(--es-ink-rgb), 0.78)",
                     borderRadius: 3,
                     cursor: "pointer",
                     display: "grid",
@@ -964,7 +964,7 @@ export function ProjectSidebar(props: SidebarProps) {
                   style={{ ...railButton(), flex: "1 1 auto", minWidth: 0, minHeight: 28, padding: "0 4px", color: muted }}
                 >
                   <span style={{ flex: 1, fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Projects</span>
-                  <span style={{ minWidth: 18, height: 18, padding: "0 5px", display: "inline-grid", placeItems: "center", borderRadius: 9, background: "rgba(255,255,255,.045)", color: "rgba(255,255,255,.45)", fontSize: 9 }}>{projects.length}</span>
+                  <span style={{ minWidth: 18, height: 18, padding: "0 5px", display: "inline-grid", placeItems: "center", borderRadius: 9, background: "rgba(var(--es-wash-rgb), calc(0.045 * var(--es-wash-k)))", color: "rgba(var(--es-ink-rgb), 0.45)", fontSize: 9 }}>{projects.length}</span>
                   <span style={{ display: "grid", placeItems: "center", transform: projectsOpen ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform .15s ease" }}><Icon name="chevron" size={13} /></span>
                 </button>
                 <button
@@ -988,8 +988,8 @@ export function ProjectSidebar(props: SidebarProps) {
                 onClick={props.onAddFolder}
                 style={{ margin: "2px 3px 4px", minHeight: 46, borderRadius: 3, padding: "8px 10px", cursor: "pointer", textAlign: "left", fontFamily: "'Inter', 'Segoe UI', sans-serif" }}
               >
-                <span style={{ display: "block", fontSize: 10.5, color: "rgba(255,255,255,.72)" }}>Add your first Project</span>
-                <span style={{ display: "block", marginTop: 4, fontSize: 9, color: "rgba(255,255,255,.36)" }}>Attach a local folder</span>
+                <span style={{ display: "block", fontSize: 10.5, color: "rgba(var(--es-ink-rgb), 0.72)" }}>Add your first Project</span>
+                <span style={{ display: "block", marginTop: 4, fontSize: 9, color: "rgba(var(--es-ink-rgb), 0.36)" }}>Attach a local folder</span>
               </button>
             )}
 
@@ -1021,7 +1021,7 @@ export function ProjectSidebar(props: SidebarProps) {
           </button>
         </footer>
       ) : (
-        <div className="echo-sidebar-edge-pad" style={{ display: "grid", gap: 4, flexShrink: 0, paddingTop: 5, borderTop: "1px solid rgba(255,255,255,.07)" }}>
+        <div className="echo-sidebar-edge-pad" style={{ display: "grid", gap: 4, flexShrink: 0, paddingTop: 5, borderTop: "1px solid rgba(var(--es-edge-rgb), calc(0.07 * var(--es-edge-k)))" }}>
           <button className="echo-side-button" type="button" title="Add Project folder" aria-label="Add Project folder" onClick={props.onAddFolder} style={railButton()}>
             <span style={iconSlot()}><Icon name="folder" size={16} /></span>
           </button>
