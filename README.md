@@ -4,13 +4,12 @@
 
 <p align="center">
   <strong>A personal agent. A place to make things happen.</strong><br />
-  Talk, research, build and create—with your choice of local or cloud models.
+  Talk, research, build and create with your choice of local or cloud models.
 </p>
 
 <p align="center">
-  <a href="https://github.com/Ty0x7/EchoSpeak/releases/latest"><img src="https://img.shields.io/github/v/release/Ty0x7/EchoSpeak?label=release&amp;color=222222" alt="Latest published release" /></a>
-  <img src="https://img.shields.io/badge/desktop-Windows_10%2F11_x64-222222" alt="Windows 10 and 11, 64-bit" />
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-222222" alt="MIT license" /></a>
+  <a href="https://github.com/Ty0x7/EchoSpeak/releases/latest"><img src="https://img.shields.io/github/v/release/Ty0x7/EchoSpeak?label=release&amp;color=222222" alt="Latest published release" /></a><br />
+  Windows 10 / 11 · x64 · <a href="LICENSE">MIT license</a>
 </p>
 
 <p align="center">
@@ -21,29 +20,39 @@
   <a href="docs/GUIDE.md">Getting started</a>
 </p>
 
----
-
 EchoSpeak brings your conversations, projects, research and creations into one workspace. Echo can use tools to work on a request, keep the results, and help you continue later. Add Jarvis, Glados or your own agents when you want different perspectives or a team working together.
 
 Run a compatible model on your computer, or connect **OpenAI, Google Gemini, Claude or Grok**. Choose the provider and model that fit your work; optional voice, generation and integrations can be set up when you need them.
 
 <p align="center">
-  <img src="assets/readme/workspace.png" alt="EchoSpeak desktop workspace with a research conversation, a saved artifact and copy, edit, retry and read-aloud controls" width="1200" />
+  <img src="assets/readme/workspace.png" alt="EchoSpeak desktop workspace with a research conversation, a saved artifact and message controls" width="1200" />
   <br />
-  <sub>Current interface, shown with an example conversation and simulated provider responses. No private conversations or credentials are pictured.</sub>
+  <sub>Interface preview with an example conversation and simulated provider responses. No private conversations or credentials are pictured.</sub>
 </p>
+
+## EchoSpeak is the harness around your model
+
+The model supplies reasoning and responses. **EchoSpeak is the agent harness that turns those responses into work:** it prepares the context, provides tools, checks permissions, carries out approved actions and records what actually happened. Changing models keeps you in the same workspace with the same underlying tools and controls.
+
+1. **Understand the request.** Echo combines your message with the active agent's instructions, relevant conversation context and the attached project's information.
+2. **Choose the next action.** The selected model can answer directly or request an available tool. EchoSpeak checks the request against tool permissions, project scope and approval rules before execution.
+3. **Work from results.** Tool results return to the model so it can read, revise, search again or continue building. The runtime bounds this loop and supports stopping the run.
+4. **Keep the evidence.** Tool activity, saved outputs and execution records show what ran. A confident reply alone does not prove a task succeeded.
+5. **Continue the work.** Saved chats, project context, artifacts and research let you return later. Active chat runs can continue while you move between pages, and brief connection drops can reconnect to the same backend run.
+
+The harness includes the **React workspace, local Python backend and Rust desktop host**. Its lean agent runtime connects models to files, terminal commands, web research, memory, media generation and configured integrations. Permissions are enforced in code; text from a model or webpage cannot grant additional authority.
+
+This gives Echo a consistent way to act across supported providers. Results still depend on the selected model, available tools, configuration and the checks performed on the work.
 
 ## One workspace, more ways to work
 
-| What you want to do | What EchoSpeak brings together |
-| --- | --- |
-| **Research a question** | Search, read webpages and PDFs, compare sources, and follow citations into the chat's Research panel. Keep passages, findings and open questions in a temporary notebook; export or explicitly save useful findings to a project. |
-| **Build something** | Attach a project, work with its files, run commands using your configured terminal environment, and keep a project brief for later chats. Open saved apps, documents, code and diagrams as Artifacts. |
-| **Create images and videos** | Ask in chat and keep the results in **Creations**. Use supported Gemini image, Google Veo video, MiniMax video or local ComfyUI generation. Edit supported images and keep their related versions. |
-| **Talk with Echo** | Dictate a prompt, read a reply aloud, or enter a full voice conversation with the new Echo avatar and a fading live transcript. Compatible Gemini Live models use native audio; other chat models use your configured speech services. |
-| **Bring a team** | Chat with Echo, Jarvis, Glados or custom agents. Use mentions and group chats for different perspectives, handoffs and shared work. Agents can have their own model and tools. |
-| **Pick up where you left off** | Search earlier chats, keep saved personal memories and chat summaries, and switch chats or pages while active runs continue. Brief connection drops can reconnect to the existing run. |
-| **Set things in motion** | Create scheduled routines and connect supported messaging services and tools. Configure optional integrations through Settings, including MCP connections. |
+1. **Research a question.** Search, read webpages and PDFs, compare sources, and follow citations into the chat's Research panel. Keep passages, findings and open questions in a temporary notebook; export or explicitly save useful findings to a project.
+2. **Build something.** Attach a project, work with its files, run commands using your configured terminal environment, and keep a project brief for later chats. Open saved apps, documents, code and diagrams as Artifacts.
+3. **Create images and videos.** Ask in chat and keep the results in **Creations**. Use supported Gemini image, Google Veo video, MiniMax video or local ComfyUI generation. Edit supported images and keep their related versions.
+4. **Talk with Echo.** Dictate a prompt, read a reply aloud, or enter a full voice conversation with the new Echo avatar and a fading live transcript. Compatible Gemini Live models use native audio; other chat models use your configured speech services.
+5. **Bring a team.** Chat with Echo, Jarvis, Glados or custom agents. Use mentions and group chats for different perspectives, handoffs and shared work. Agents can have their own model and tools.
+6. **Pick up where you left off.** Search earlier chats, keep saved personal memories and chat summaries, and switch chats or pages while active runs continue. Restarting the backend interrupts active chat work; saved output remains available, but interrupted tool actions are not automatically repeated.
+7. **Set things in motion.** Create scheduled routines and connect supported messaging services and tools. Configure optional integrations through Settings, including MCP connections. Routines need the backend running.
 
 ### See it in action
 
@@ -67,15 +76,27 @@ The sidebar stays available. Pause the microphone and speech, resume listening, 
 
 *These interface previews use sample data. They demonstrate the UI, not a benchmark or a claim that a particular provider completed the example.*
 
+## Learning from experience
+
+The current development branch adds a learning layer to the existing harness. It records each agent's part in a finished request, grades the available execution evidence, and can propose short lessons for similar future tasks. **This is ongoing development, not a claim that the learning features are included in the latest published installer or have completed browser validation.**
+
+1. **Evidence before confidence.** Task records distinguish an unsupported claim, successful tool execution, a check after the work, corroborating checks and your confirmation.
+2. **Feedback you control.** The new **Worked** and **Didn't work** reply controls feed the experience records. The Learning page provides agent track records, lessons, review actions and change history.
+3. **Relevant lessons.** A small selection of advisory lessons can accompany similar tasks. Checked outcomes and owner feedback determine whether lessons are promoted, demoted or retired. Track records also inform routing and delegation.
+4. **Separate authority.** Learning stores lessons and statistics separately from personal memory. It does not retrain model weights or change permissions, approval rules or tool access. Lessons derived from outside content or work that changed its own checks wait for owner review.
+5. **Bounded reflection.** Reflection runs in the background while chats are quiet, with a daily limit. It uses the agent's selected model, so cloud reflection can send task context to that provider and incur API charges. Learning can be paused per agent.
+
+These records help guide future work; they do not guarantee correctness or establish a measured improvement in model capability.
+
 ## Your first few minutes
 
 1. **Install.** Download the Windows setup EXE from the [latest published release](https://github.com/Ty0x7/EchoSpeak/releases/latest).
-2. **Meet Echo.** First-launch setup helps you choose a model and check that it responds. Choose an installed local runtime or configure a cloud provider in Settings. Optional features can wait.
+2. **Meet Echo.** Initial setup helps you choose a model and check that it responds. Choose an installed local runtime or configure a cloud provider in Settings. Optional features can wait.
 3. **Start your first chat.** Setup finishes before opening the conversation. Ask a question, attach a project or choose Voice.
 
 For local chat, EchoSpeak supports **LM Studio, Ollama and compatible model servers**. Supported starter models can be downloaded and loaded through a running LM Studio or Ollama installation during setup. Local image/video generation has a separate optional setup and hardware requirements.
 
-For cloud chat, Settings loads the provider's available model catalog and separately tests the selected model's response and tool round-trip. Use an API model ID available to your account; a consumer chat subscription does not automatically include API access.
+For cloud chat, Settings loads the provider's available model catalog and separately tests the selected model's response and tool exchange. Use an API model ID available to your account; a consumer chat subscription does not automatically include API access. A successful chat check does not validate image generation, video generation or every voice capability.
 
 ## Try asking Echo
 
@@ -87,22 +108,24 @@ For cloud chat, Settings loads the provider's available model catalog and separa
 >
 > **Work together:** “@Jarvis research the options, then @Glados help build a prototype.”
 
-These are starting prompts, not pre-recorded results. Available tools, model support and your settings determine what Echo can do.
+These are starting prompts, not recorded results. Available tools, model support and your settings determine what Echo can do.
 
-## What's new in 10.5.0
+## Recent updates
 
-The current source includes 10.5.0, alongside the 10.4.x installer, chat and voice improvements. The download button always points to the latest **published** release.
+The source version is **10.5.0**, with newer learning work on the current development branch. The download button always points to the latest **published** release, which can differ from the source checkout.
 
-- **Tidier lists:** Group chats, Projects, Artifacts, Routines and Creations show three items with **Show more** / **Show less**.
-- **Clearer model choice:** local and cloud providers grouped, each provider's saved model restored when you switch, and plain messages when a key or model is missing.
-- **Settings where you'd look:** voice, channel, search and heartbeat options sit with their features, Advanced keeps only rarely changed options, and Settings search finds options by name.
-- **From 10.4:** recoverable chats, research citations, image editing, message actions, full voice conversations with the new Echo avatar, and an Echo-branded installer.
+1. **Tidier lists.** Group chats, Projects, Artifacts, Routines and Creations show three items with **Show more** / **Show less**.
+2. **Clearer model choice.** Local and cloud providers are grouped, each provider's saved model is restored when you switch, and missing keys or models have clearer messages.
+3. **Settings where you'd look.** Voice, channel, search and heartbeat options sit with their features. Advanced keeps rarely changed options, and Settings search finds options by name.
+4. **Earlier reliability improvements.** Recoverable chats, research citations, image editing, message actions, full voice conversations with the new Echo avatar, and an installer with Echo branding.
 
-[10.5.0 release notes](docs/releases/v10.5.0.md) · [10.4.3 release notes](docs/releases/v10.4.3.md) · [10.4.2 release notes](docs/releases/v10.4.2.md) · [10.4.0 reliability update](docs/releases/v10.4.0.md) · [10.x history](docs/releases/10.x-history.md)
+[10.5.0 release notes](docs/releases/v10.5.0.md) · [10.4.3 release notes](docs/releases/v10.4.3.md) · [10.4.2 release notes](docs/releases/v10.4.2.md) · [10.4.0 reliability update](docs/releases/v10.4.0.md) · [Full release history](docs/releases/)
 
 ## Your data and your choices
 
-EchoSpeak stores chats, memories, project information and saved creations on your machine. **Local-first does not mean every feature is offline:** cloud models receive the conversation context they need, online search makes network requests, and cloud generation sends the approved prompt and any selected references to its provider.
+EchoSpeak stores chats, memories, project information and saved creations on your machine. **Local storage does not mean every feature is offline:** cloud models receive the conversation context they need, online search makes network requests, and cloud generation sends the approved prompt and any selected references to its provider.
+
+Personal memory, temporary research notes, project findings and learning lessons serve different purposes. Web research is not automatically saved as permanent personal memory. You explicitly choose when useful findings should become project context.
 
 Review tool permissions and approval requests before allowing changes or uploads. Docker can provide an isolated terminal environment when available; check the selected terminal mode before running commands. Download releases from this repository and keep the app updated. If Windows reports a threat, stop and report the warning through GitHub issues. Keep Windows protection enabled.
 
@@ -110,40 +133,20 @@ Never paste API keys into an issue, chat screenshot or public document. Configur
 
 ## Learn more
 
-| Resource | Where to go |
-| --- | --- |
-| Install, models, voice and everyday use | [User guide](docs/GUIDE.md) |
-| How the existing systems fit together | [Architecture](docs/ARCHITECTURE.md) |
-| Planned work and remaining validation | [Roadmap](docs/ROADMAP.md) |
-| Version-by-version changes | [Release notes](docs/releases/) and [Changelog](CHANGES.md) |
-| Report a problem or suggest a feature | [GitHub issues](https://github.com/Ty0x7/EchoSpeak/issues) |
+1. [User guide](docs/GUIDE.md): installation, models, voice and everyday use.
+2. [Architecture](docs/ARCHITECTURE.md): how the existing systems fit together. Check current code for newer development beyond the document's stated baseline.
+3. [Roadmap](docs/ROADMAP.md): planned work and remaining validation.
+4. [Release notes](docs/releases/) and [Changelog](CHANGES.md): changes across versions.
+5. [GitHub issues](https://github.com/Ty0x7/EchoSpeak/issues): report a problem or suggest a feature.
 
 <details>
-<summary><strong>For developers: run from source</strong></summary>
+<summary><strong>For developers: the existing system</strong></summary>
 
-Use Python 3.11 or 3.12 and Node.js 22 or newer. Start the backend and frontend in separate terminals. For platform-specific instructions and optional dependencies, see the [guide](docs/GUIDE.md).
+The Windows desktop host lives in `apps/desktop`; the React browser app lives in `apps/web`, and the Python backend in `apps/backend`. The lean agent runtime lives in `apps/backend/agent/lean`, with the new experience layer in `apps/backend/agent/learning`.
 
-```bash
-# Backend
-cd apps/backend
-python -m venv .venv
-# Activate .venv using your shell's activation command.
-python -m pip install -r requirements.txt
-python app.py --mode api
-```
-
-```bash
-# Frontend (a separate terminal, from the repository root)
-cd apps/web
-npm ci
-npm run dev
-```
-
-The Windows desktop host lives in `apps/desktop`; the browser app lives in `apps/web` and the Python backend in `apps/backend`. Changes should extend these existing systems. Keep credentials, personal data and build artifacts out of commits.
+Use Python 3.11 or 3.12 and Node.js 22 or newer. See the [guide](docs/GUIDE.md) for running from source and optional dependencies. Extend the existing harness and UI; keep credentials, personal data and build artifacts out of commits.
 
 </details>
-
----
 
 <p align="center">
   <img src="apps/web/public/logo.png" alt="" width="24" height="24" /><br />
