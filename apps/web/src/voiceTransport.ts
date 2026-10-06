@@ -304,6 +304,7 @@ export class LocalVoicePlayback {
   private queue: Promise<void> = Promise.resolve();
   private controller: AbortController | null = null;
   private audio: HTMLAudioElement | null = null;
+  private finishClip: (() => void) | null = null;
   private objectUrl = "";
   private activeTurnId = "";
   private activeSessionId = "";
@@ -314,6 +315,10 @@ export class LocalVoicePlayback {
     this.sequence += 1;
     this.controller?.abort();
     this.controller = null;
+    // Paused audio emits no `ended` event. Release the queue so the next
+    // message can be read immediately after the user presses Stop.
+    this.finishClip?.();
+    this.finishClip = null;
     if (this.audio) {
       this.audio.pause();
       this.audio.src = "";
@@ -430,6 +435,7 @@ export class LocalVoicePlayback {
       this.objectUrl = objectUrl;
       try {
         await new Promise<void>((resolve, reject) => {
+          this.finishClip = resolve;
           const audio = new Audio(objectUrl);
           this.audio = audio;
           audio.onplay = () => callbacks.onPhase?.("speaking", "Speaking locally");
@@ -439,6 +445,7 @@ export class LocalVoicePlayback {
           void audio.play().catch(reject);
         });
       } finally {
+        this.finishClip = null;
         if (this.audio) {
           this.audio.pause();
           this.audio.src = "";
@@ -449,6 +456,7 @@ export class LocalVoicePlayback {
         if (this.objectUrl === objectUrl) this.objectUrl = "";
       }
     }
+    if (controller.signal.aborted || ownSequence !== this.sequence) return;
     callbacks.onLevel?.(0);
     callbacks.onPhase?.("idle");
     if (scope.completeTurn !== false) await this.completeRemoteTurn(scope);

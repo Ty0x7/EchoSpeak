@@ -1,3 +1,4 @@
+import { DEFAULT_AVATAR_CONFIG } from "../components/avatarConfig";
 // Moved out of index.tsx (10.0 split). Kept verbatim.
 import { create } from "zustand";
 import { localVoicePlayback } from "../voiceTransport";
@@ -89,19 +90,7 @@ export const colors = {
   glow: "#ffffff",
 };
 
-export const defaultAvatarConfig: AvatarConfig = {
-  body_color: "#ffffff",
-  eye_color: "#000000",
-  bg_color: "#0a0a0a",
-  glow_color: "#4f8eff",
-  idle_activity: "auto",
-  breathing_speed: 1,
-  eye_size: 1,
-  body_roundness: 14,
-  enable_glow: true,
-  enable_idle_activities: true,
-  custom_status_text: "",
-};
+export const defaultAvatarConfig: AvatarConfig = DEFAULT_AVATAR_CONFIG;
 
 export const sanitizeForTTS = (input: string) => {
   let text = input || "";

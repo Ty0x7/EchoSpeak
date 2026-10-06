@@ -153,6 +153,7 @@ export type ProviderInfo = {
   readiness_detail?: string;
   session_id?: string;
   binding_revision?: number;
+  model_profile?: { thinking_controls?: { supported: boolean; toggle: boolean; effort: boolean; reason: string } };
 };
 
 export type ProviderModelsResponse = {
@@ -346,17 +347,5 @@ export type AppState = {
   bumpSpeechBeat: () => void;
 };
 
-export type AvatarConfig = {
-  body_color: string;
-  eye_color: string;
-  bg_color: string;
-  glow_color: string;
-  idle_activity: string;
-  breathing_speed: number;
-  eye_size: number;
-  body_roundness: number;
-  enable_glow: boolean;
-  enable_idle_activities: boolean;
-  custom_status_text: string;
-};
+export type AvatarConfig = import("../components/avatarConfig").AvatarConfig;
 

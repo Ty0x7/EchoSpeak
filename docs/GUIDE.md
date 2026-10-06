@@ -16,7 +16,8 @@ inside, see [ARCHITECTURE.md](ARCHITECTURE.md). For what's next, see
    through Ollama or LM Studio after you choose **Download and load**. On the last
    step, **Check my model** sends a small response request. **Start chatting** opens
    your first chat only after setup finishes; it does not send a greeting for you.
-3. Later versions install from inside the app: **Settings › About › Update**.
+3. A new-release notice appears above **Settings** in the desktop sidebar. Click it
+   to open **Settings › About › Update** and install the update.
    The app only installs releases signed with the project's key.
 
 ### From source (Windows, macOS, Linux)
@@ -73,6 +74,16 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
   limit it says what it finished and shows **Continue**.
 - **Stop** ends a run at once. Messages you send while Echo is busy wait in a queue and run next.
 - Search every past chat from the sidebar. Echo can search them too (`chat_search`).
+- Use **Copy** beneath a prompt or reply. Replies also have **Read aloud / Stop reading**.
+  Prompts have **Edit** and **Retry**: continue in a new chat from before that prompt,
+  keeping the original chat and its later messages. Completed history, the selected
+  model, project and group members carry forward; past tools are not run again and
+  approval grants are not copied. Stop an active chat before retrying it.
+- New chats get a topic title after the first reply. This uses a small additional
+  request to the selected chat provider; manually renamed chats keep your name.
+  Live-only models keep the cleaned-up fallback title.
+- **Think** and effort controls follow the selected model and adapter. Unsupported
+  thinking controls are disabled. Models that always think cannot turn thinking off.
 
 ### Agents and group chats
 
@@ -120,8 +131,19 @@ Dangerous commands ask first in every mode.
 
 - **Settings › Voice**: **Download** a local Whisper model (tiny, base or small) for
   speech-to-text. Nothing leaves your PC.
-- **Read** reads replies aloud. **Voice** mode listens, sends, speaks the reply and listens again.
-- **Wake** listens for "Echo" while idle. Wake checks run locally too.
+- **Voice** opens a full conversation view beside the sidebar, with Echo centered
+  and the chat transcript and tool/approval activity fading in at the bottom. The
+  composer returns when you choose **Back to chat**. **Pause / Listen** controls the
+  microphone; pressing Pause also stops speech playback.
+- Dictation remains a separate microphone shortcut for writing a message. Voice
+  conversations use your selected local or cloud chat model with configured speech
+  recognition and playback. Compatible Gemini Live models use native audio.
+- **More chat controls** holds automatic read-aloud, sound, wake word, screen monitor
+  and available reasoning effort. **Wake** listens for "Echo" while idle outside
+  voice conversation mode. Wake checks run locally too.
+- **Settings › Advanced › Companion** previews the new Echo avatar's listening,
+  thinking, speaking and working states. Appearance changes apply to voice and the
+  floating desktop companion, including the voice avatar size.
 - Speech output uses Windows voices, Piper, or OpenAI audio if you add a key.
 
 ## 6. Memory
@@ -178,6 +200,11 @@ always need the key. Don't expose the port to the internet even then; use a VPN 
 Artifacts, research and tool activity share one right sidebar. Switch its tabs to
 keep your preview, source passage and filter in place. The shared expand/close
 controls work across all views; incoming tools do not switch the tab you are reading.
+Artifact previews have a saved-version picker and **Edit with Echo**. Select a passage
+in a text/source view for **Edit selection with Echo**. This prepares a chat draft;
+you review and send it, and Echo is asked to preserve the original as an earlier version.
+During voice mode the right panel is tucked away so Echo fills the conversation area;
+returning to chat restores the panel you had open.
 
 Open **Research & activity** in a chat, then **Research**, to see that chat's sources,
 page passages and working notes. Search-result snippets are marked separately from

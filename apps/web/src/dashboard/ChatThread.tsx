@@ -7,6 +7,7 @@ import type { LeanLiveState, LeanPersona, LeanRoom } from "../lean/types";
 import { ActivityCard, ChatBubble } from "../app/chatComponents";
 import type { PendingActionEnvelope, ProviderInfo, ThreadSessionState, TimelineItem } from "../app/types";
 import { stopTts } from "../app/runtime";
+import type { MessageActionProps } from "./MessageActions";
 
 type ChatThreadProps = {
   activeThreadId: string;
@@ -29,6 +30,8 @@ type ChatThreadProps = {
   approvalDecisionBusy: boolean;
   onApprovalDecision(id: string, decision: "confirm" | "cancel"): void;
   onLeanApproval(id: string, decision: "allow" | "deny" | "always"): void;
+  actions?: MessageActionProps;
+  voiceStage?: React.ReactNode;
 };
 
 /** The message timeline owns only presentation; Dashboard owns session changes. */
@@ -36,23 +39,26 @@ export function ChatThread({
   activeThreadId, streaming, scrollRef, onScroll, onWheel, onKeyDown, onTouchStart, onTouchEnd,
   activeRoom, agents, onEditRoom, timeline, live, providerInfo, onQuickReply,
   pendingApproval, threadState, approvalDecisionBusy, onApprovalDecision, onLeanApproval,
+  actions, voiceStage,
 }: ChatThreadProps) {
   return (
+    <div className={`conversation-view${voiceStage ? " is-voice" : ""}`}>
+    {voiceStage}
     <div key={activeThreadId || "quick-chat"} className="chat-scroll" data-live={streaming ? "true" : undefined}
-      style={{ flex: 1 }} ref={scrollRef} onScroll={onScroll} onWheel={onWheel} onKeyDown={onKeyDown}
+      role={voiceStage ? "log" : undefined} aria-label={voiceStage ? "Voice transcript and tool activity" : undefined} style={{ flex: 1 }} ref={scrollRef} onScroll={onScroll} onWheel={onWheel} onKeyDown={onKeyDown}
       onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}>
       {activeRoom ? <RoomHeader room={activeRoom} agents={agents} onEdit={() => onEditRoom(activeRoom)} /> : null}
       {!timeline.length && !streaming && !live ? (
         <div className="es-chat-empty">
-          <strong>{activeRoom ? activeRoom.name : "What can I help with?"}</strong>
-          <span>{activeRoom?.kind === "group"
+          <strong>{voiceStage ? "Say something to Echo" : activeRoom ? activeRoom.name : "What can I help with?"}</strong>
+          <span>{voiceStage ? "Your conversation will appear here." : activeRoom?.kind === "group"
             ? "Write to the whole group, or @mention an agent to pick who answers."
             : "Ask anything, or drop a folder on the composer to work inside a project."}</span>
         </div>
       ) : null}
       <AnimatePresence initial={false}>
         {timeline.map((item) => item.kind === "message" ? (
-          <ChatBubble key={`msg-${item.id}`} msg={item.msg} streaming={streaming}
+          <ChatBubble key={`msg-${item.id}`} msg={item.msg} streaming={streaming} actions={actions}
             typewriter={item.msg.role === "assistant" && !item.msg.skipTypewriter}
             contextWindow={Number(providerInfo?.context_window || 0) || 32768}
             providerLabel={providerInfo?.provider} modelLabel={providerInfo?.model}
@@ -84,6 +90,7 @@ export function ChatThread({
           {!live.order.length && !live.routing ? <div className="lm-routing" aria-hidden><span className="lm-dots"><i /><i /><i /></span></div> : null}
         </div>
       ) : null}
+    </div>
     </div>
   );
 }

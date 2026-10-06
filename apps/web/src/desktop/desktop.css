@@ -695,6 +695,8 @@ html.echospeak-companion-root #root {
   pointer-events: auto;
 }
 
+.echo-companion-avatar > div { display: grid; place-items: center; }
+
 .echo-companion-avatar > div > * {
   pointer-events: none;
   opacity: 1 !important;

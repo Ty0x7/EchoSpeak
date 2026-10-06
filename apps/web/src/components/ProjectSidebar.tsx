@@ -12,6 +12,7 @@ import {
   type StackLayout,
 } from "./sidebarSections";
 import { SplitHandle, type SplitGeometry } from "./SplitHandle";
+import { useDesktopUpdate } from "../dashboard/useDesktopUpdate";
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any> };
 type Session = { id: string; name: string; at: number; projectId?: string };
@@ -229,6 +230,13 @@ function Icon({
 
 
 export function ProjectSidebar(props: SidebarProps) {
+  const updateInfo = useDesktopUpdate(Boolean(props.desktop));
+  const openUpdate = () => {
+    localStorage.setItem("echospeak.settings.section", "about");
+    window.dispatchEvent(new CustomEvent("echospeak.settings.navigate", { detail: "about" }));
+    props.onSettings();
+  };
+  const updateNotice = updateInfo?.configured && updateInfo.available ? <button type="button" className="sidebar-update-notice" onClick={openUpdate} title={`EchoSpeak ${updateInfo.version} is available`} aria-label={`Update to EchoSpeak ${updateInfo.version}`}><span aria-hidden>↑</span>{!props.collapsed ? <span><strong>Update available</strong><small>EchoSpeak {updateInfo.version}</small></span> : null}</button> : null;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [layout, setLayout] = useState<StackLayout>(() => loadStackLayout());
@@ -450,11 +458,7 @@ export function ProjectSidebar(props: SidebarProps) {
               <button className="es-sec-action" type="button" onClick={() => { props.onPage?.("chat"); props.onNewSession(); }} title="Start new chat" aria-label="Start new chat">
                 <Icon name="plus" size={14} />
               </button>
-              {props.desktop ? (
-                <button className="es-sec-action" type="button" onClick={props.onToggleCollapsed} title="Collapse sidebar" aria-label="Collapse sidebar">
-                  <Icon name="collapse" size={14} />
-                </button>
-              ) : null}
+
             </>
           ))}
           <div className="es-sec-list" id="es-sec-chats" hidden={!layout.open.chats}>
@@ -708,73 +712,11 @@ export function ProjectSidebar(props: SidebarProps) {
       }
     `}</style>
 
-      {/* Browser branding remains here. Desktop identity belongs to the native title bar. */}
-      {!props.desktop ? <div
-        className="echo-sidebar-edge-pad"
-        style={{
-          height: 38,
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: iconOnly ? "center" : "space-between",
-          paddingLeft: iconOnly ? 0 : 4,
-          gap: 6,
-        }}
-      >
-        {iconOnly ? (
-          <button
-            className="echo-side-button"
-            type="button"
-            title="Expand sidebar"
-            aria-label="Expand sidebar"
-            onClick={props.onToggleCollapsed}
-            style={{
-              width: 34,
-              height: 34,
-              borderRadius: 2,
-              border: 0,
-              background: "transparent",
-              cursor: "pointer",
-              display: "grid",
-              placeItems: "center",
-              padding: 0,
-            }}
-          >
-            <img src="/logo.png" alt="EchoSpeak" style={{ width: 20, height: 20, display: "block" }} />
-          </button>
-        ) : (
-          <>
-            <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-              <img src="/logo.png" alt="" style={{ width: 24, height: 24, display: "block", flex: "0 0 auto" }} />
-              <div style={{ minWidth: 0, lineHeight: 1.05 }}>
-                <strong style={{ display: "block", fontFamily: "'Space Grotesk', sans-serif", fontSize: 15.5, letterSpacing: "-.01em" }}>EchoSpeak</strong>
-                <span style={{ display: "block", marginTop: 4, color: "rgba(255,255,255,.35)", fontSize: 8.5, letterSpacing: ".13em", textTransform: "uppercase" }}>Local workspace</span>
-              </div>
-            </div>
-            <button
-              className="echo-side-button"
-              type="button"
-              title="Collapse sidebar"
-              aria-label="Collapse sidebar"
-              onClick={props.onToggleCollapsed}
-              style={{
-                width: 28,
-                height: 28,
-                borderRadius: 2,
-                border: 0,
-                color: "rgba(255,255,255,.72)",
-                background: "transparent",
-                cursor: "pointer",
-                display: "grid",
-                placeItems: "center",
-                padding: 0,
-              }}
-            >
-              <Icon name="collapse" size={15} />
-            </button>
-          </>
-        )}
-      </div> : null}
+      <div className="sidebar-navigation">
+        <button type="button" onClick={props.onToggleCollapsed} aria-label={iconOnly ? "Expand sidebar" : "Collapse sidebar"} title={iconOnly ? "Expand sidebar" : "Collapse sidebar"}>
+          {!iconOnly ? <span>Navigation</span> : null}<Icon name={iconOnly ? "expand" : "collapse"} size={16} />
+        </button>
+      </div>
 
       {!iconOnly ? (
         <div className="es-side-body">
@@ -935,18 +877,7 @@ export function ProjectSidebar(props: SidebarProps) {
 
         <section aria-label="Workspace" style={{ padding: iconOnly ? "0 1px" : 0, display: "grid", gap: 7, flex: "0 0 auto" }}>
           <div style={{ display: "grid", gap: 2 }}>
-            {props.desktop && iconOnly ? (
-              <button
-                className="echo-side-button"
-                type="button"
-                style={railButton()}
-                onClick={props.onToggleCollapsed}
-                title="Expand sidebar"
-                aria-label="Expand sidebar"
-              >
-                <span style={iconSlot()}><Icon name="expand" size={16} /></span>
-              </button>
-            ) : null}
+
             {!iconOnly && (
               <div
                 style={{
@@ -997,30 +928,7 @@ export function ProjectSidebar(props: SidebarProps) {
                 >
                   <Icon name="plus" size={14} />
                 </button>
-                {props.desktop ? (
-                  <button
-                    className="echo-side-button"
-                    type="button"
-                    onClick={props.onToggleCollapsed}
-                    title="Collapse sidebar"
-                    aria-label="Collapse sidebar"
-                    style={{
-                      width: 26,
-                      height: 24,
-                      border: 0,
-                      background: "transparent",
-                      color: "rgba(255,255,255,.7)",
-                      borderRadius: 2,
-                      cursor: "pointer",
-                      display: "grid",
-                      placeItems: "center",
-                      padding: 0,
-                      flex: "0 0 auto",
-                    }}
-                  >
-                    <Icon name="collapse" size={14} />
-                  </button>
-                ) : null}
+
               </div>
             )}
 
@@ -1098,6 +1006,7 @@ export function ProjectSidebar(props: SidebarProps) {
 
       {!iconOnly ? (
         <footer className="echo-sidebar-footer" style={{ padding: "6px 10px 0 0" }}>
+          {updateNotice}
           <button
             className={`echo-footer-action ${props.settingsOpen ? "is-active" : ""}`}
             type="button"
@@ -1113,6 +1022,7 @@ export function ProjectSidebar(props: SidebarProps) {
           <button className="echo-side-button" type="button" title="Add Project folder" aria-label="Add Project folder" onClick={props.onAddFolder} style={railButton()}>
             <span style={iconSlot()}><Icon name="folder" size={16} /></span>
           </button>
+          {updateNotice}
           <button className="echo-side-button" type="button" title="Settings" aria-label="Settings" aria-pressed={props.settingsOpen} onClick={props.onSettings} style={railButton(Boolean(props.settingsOpen))}>
             <span style={iconSlot(Boolean(props.settingsOpen))}><Icon name="studio" size={16} active={Boolean(props.settingsOpen)} /></span>
           </button>

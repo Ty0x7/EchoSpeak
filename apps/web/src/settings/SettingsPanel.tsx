@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { announceUpdate } from "../dashboard/useDesktopUpdate";
 import { AgentAvatar } from "../lean/LeanMessage";
 import type { LeanPersona } from "../lean/types";
 import {
@@ -114,6 +115,18 @@ export function SettingsPanel(props: SettingsPanelProps) {
     }
   });
   const [query, setQuery] = useState("");
+  useEffect(() => {
+    const navigate = (event: Event) => {
+      const target = (event as CustomEvent<string>).detail;
+      if (target === "about" || target === "voice") setSection(target);
+    };
+    const storage = (event: StorageEvent) => {
+      if (event.key === "echospeak.settings.section" && (event.newValue === "about" || event.newValue === "voice")) setSection(event.newValue);
+    };
+    window.addEventListener("echospeak.settings.navigate", navigate);
+    window.addEventListener("storage", storage);
+    return () => { window.removeEventListener("echospeak.settings.navigate", navigate); window.removeEventListener("storage", storage); };
+  }, []);
   const [advancedPage, setAdvancedPage] = useState<AdvancedPage>("settings");
   const openAdvanced = useCallback((page: AdvancedPage) => {
     setAdvancedPage(page);
@@ -1215,7 +1228,8 @@ function UpdateRow() {
     setBusy("checking");
     setError("");
     try {
-      setInfo(await checkForDesktopUpdate());
+      const result = await checkForDesktopUpdate();
+      setInfo(result); announceUpdate(result);
     } catch (err) {
       setError(String((err as Error)?.message || err));
     } finally {

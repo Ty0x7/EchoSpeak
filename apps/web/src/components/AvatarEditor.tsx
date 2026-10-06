@@ -1,36 +1,13 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 
-export type AvatarConfig = {
-  body_color: string;
-  eye_color: string;
-  bg_color: string;
-  glow_color: string;
-  idle_activity: string;
-  breathing_speed: number;
-  eye_size: number;
-  body_roundness: number;
-  enable_glow: boolean;
-  enable_idle_activities: boolean;
-  custom_status_text: string;
-};
-
-export const DEFAULT_AVATAR_CONFIG: AvatarConfig = {
-  body_color: "#ffffff",
-  eye_color: "#000000",
-  bg_color: "#0a0a0a",
-  glow_color: "#4f8eff",
-  idle_activity: "auto",
-  breathing_speed: 1,
-  eye_size: 1,
-  body_roundness: 14,
-  enable_glow: true,
-  enable_idle_activities: true,
-  custom_status_text: "",
-};
+import { EchoFace, echoFaceStyles, type EchoFaceMode } from "./EchoFace";
+import { DEFAULT_AVATAR_CONFIG, normalizeAvatarConfig, type AvatarConfig } from "./avatarConfig";
+import { notifyAvatarUpdated } from "../dashboard/useAvatarConfig";
+export { DEFAULT_AVATAR_CONFIG, type AvatarConfig } from "./avatarConfig";
 
 const PRESETS: Array<{ name: string; config: Partial<AvatarConfig> }> = [
-  { name: "Default", config: { body_color: "#ffffff", eye_color: "#000000", glow_color: "#4f8eff", bg_color: "#0a0a0a" } },
+  { name: "Default", config: { body_color: "#ffffff", eye_color: "#000000", glow_color: "#ffffff", bg_color: "#0a0a0a" } },
   { name: "Midnight", config: { body_color: "#8b5cf6", eye_color: "#ddd6fe", glow_color: "#7c3aed", bg_color: "#140b27" } },
   { name: "Ember", config: { body_color: "#fb923c", eye_color: "#fde68a", glow_color: "#ef4444", bg_color: "#190a02" } },
   { name: "Ocean", config: { body_color: "#22d3ee", eye_color: "#cffafe", glow_color: "#0ea5e9", bg_color: "#03151e" } },
@@ -63,6 +40,7 @@ async function requestJson(url: string, init?: RequestInit) {
 }
 
 export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onConfigChange }) => {
+  const [preview, setPreview] = useState<EchoFaceMode>("idle");
   const [config, setConfig] = useState<AvatarConfig>(DEFAULT_AVATAR_CONFIG);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -75,7 +53,7 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
     setError(null);
     try {
       const data = await requestJson(`${apiBase}/avatar/config`);
-      const next = { ...DEFAULT_AVATAR_CONFIG, ...data };
+      const next = normalizeAvatarConfig(data);
       setConfig(next);
       setDirty(false);
       onConfigChange?.(next);
@@ -109,10 +87,11 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(config),
       });
-      const next = { ...DEFAULT_AVATAR_CONFIG, ...data };
+      const next = normalizeAvatarConfig(data);
       setConfig(next);
       setDirty(false);
       setSaved(true);
+      notifyAvatarUpdated();
       onConfigChange?.(next);
       window.setTimeout(() => setSaved(false), 1800);
     } catch (e: any) {
@@ -126,10 +105,11 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
     setError(null);
     try {
       const data = await requestJson(`${apiBase}/avatar/config/reset`, { method: "POST" });
-      const next = { ...DEFAULT_AVATAR_CONFIG, ...data };
+      const next = normalizeAvatarConfig(data);
       setConfig(next);
       setDirty(false);
       setSaved(false);
+      notifyAvatarUpdated();
       onConfigChange?.(next);
     } catch (e: any) {
       setError(e.message || "Failed to reset avatar config");
@@ -149,7 +129,7 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
   const cardStyle: React.CSSProperties = {
     background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
     border: `1px solid ${colors.line}`,
-    borderRadius: 16,
+    borderRadius: 10,
     padding: 16,
     boxShadow: "0 18px 40px rgba(0,0,0,0.18)",
   };
@@ -204,7 +184,7 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
           </div>
         ) : null}
 
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(280px, 0.85fr)", gap: 16 }}>
+        <div className="avatar-settings-grid">
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={cardStyle}>
               <div style={labelStyle}>Presets</div>
@@ -245,6 +225,7 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
                   ["Eye Size", "eye_size", 0.5, 2, 0.1, "x"],
                   ["Roundness", "body_roundness", 4, 40, 1, "px"],
                   ["Breathing", "breathing_speed", 0.4, 2.6, 0.1, "x"],
+                  ["Voice avatar", "voice_avatar_scale", 0.7, 1.2, 0.1, "x"],
                 ] as const).map(([label, field, min, max, step, unit]) => (
                   <div key={field} style={{ display: "grid", gridTemplateColumns: "110px 1fr 52px", alignItems: "center", gap: 12 }}>
                     <span style={{ fontSize: 12, color: colors.textDim }}>{label}</span>
@@ -260,16 +241,10 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
               <div style={{ display: "grid", gap: 14 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 12, alignItems: "center" }}>
                   <span style={{ fontSize: 12, color: colors.textDim }}>Idle Mode</span>
-                  <select value={config.idle_activity} onChange={(e) => updateField("idle_activity", e.target.value)} style={{ ...inputStyle, paddingRight: 32 }}>
-                    <option value="auto">Auto</option>
-                    <option value="phone">On Phone</option>
-                    <option value="daydream">Daydream</option>
-                    <option value="weight_shift">Weight Shift</option>
-                    <option value="fidget">Fidget</option>
-                    <option value="stretching">Stretching</option>
-                    <option value="napping">Napping</option>
-                    <option value="vibing">Vibing</option>
-                    <option value="none">Static</option>
+                  <select value={["auto", "breathe", "none"].includes(config.idle_activity) ? config.idle_activity : "auto"} onChange={(e) => updateField("idle_activity", e.target.value)} style={{ ...inputStyle, paddingRight: 32 }}>
+                    <option value="auto">Follow pointer & look around</option>
+                    <option value="breathe">Gentle float</option>
+                    <option value="none">Still</option>
                   </select>
                 </div>
                 {([
@@ -289,22 +264,12 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <div style={{ ...cardStyle, padding: 18, background: `linear-gradient(180deg, ${config.bg_color}, rgba(255,255,255,0.02))` }}>
-              <div style={labelStyle}>Live Preview</div>
-              <div style={{ position: "relative", height: 260, borderRadius: 18, border: `1px solid ${colors.line}`, overflow: "hidden", background: `radial-gradient(circle at center, ${config.bg_color} 0%, rgba(0,0,0,0) 75%)` }}>
-                <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <motion.div animate={{ y: [0, -4 * config.breathing_speed, 0] }} transition={{ duration: Math.max(0.9, 3 / Math.max(0.25, config.breathing_speed)), repeat: Infinity, repeatType: "reverse", ease: "easeInOut" }} style={{ width: 136, height: 136, borderRadius: config.body_roundness, background: `linear-gradient(135deg, ${config.body_color}, ${config.body_color}dd)`, boxShadow: config.enable_glow ? `0 0 36px ${config.glow_color}55` : "none", border: config.enable_glow ? `4px solid ${config.glow_color}33` : "4px solid rgba(255,255,255,0.08)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative" }}>
-                    <div style={{ display: "flex", gap: Math.max(22, 28 + config.eye_size * 6), marginTop: -18 }}>
-                      <div style={{ width: 18 * config.eye_size, height: 22 * config.eye_size, borderRadius: 999, background: config.eye_color }} />
-                      <div style={{ width: 18 * config.eye_size, height: 22 * config.eye_size, borderRadius: 999, background: config.eye_color }} />
-                    </div>
-                    <div style={{ width: 20, height: 6, borderRadius: 999, background: config.eye_color, marginTop: 24, opacity: 0.9 }} />
-                  </motion.div>
-                </div>
-                {config.custom_status_text ? (
-                  <div style={{ position: "absolute", bottom: 14, left: "50%", transform: "translateX(-50%)", padding: "6px 12px", borderRadius: 999, background: "rgba(10,10,10,0.65)", border: `1px solid ${config.glow_color}33`, color: config.body_color, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                    {config.custom_status_text}
-                  </div>
-                ) : null}
+              <div style={labelStyle}>Echo in voice & companion</div>
+              <div className="avatar-preview-states" role="group" aria-label="Preview avatar state">
+                {["idle", "listening", "thinking", "speaking", "working"].map(state => <button type="button" key={state} aria-pressed={preview === state} onClick={() => setPreview(state as EchoFaceMode)}>{state}</button>)}
+              </div>
+              <div className="avatar-live-preview" style={{ transform: `scale(${config.voice_avatar_scale})` }}>
+                <style>{echoFaceStyles}</style><EchoFace size={150} avatarConfig={config} mode={preview} />
               </div>
             </div>
 
@@ -314,10 +279,10 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
             </div>
 
             <div style={cardStyle}>
-              <div style={labelStyle}>What is wired</div>
+              <div style={labelStyle}>One Echo, wherever you talk</div>
               <div style={{ display: "grid", gap: 8, fontSize: 12, color: colors.textDim, lineHeight: 1.55 }}>
-                <div>Colors, roundness, eye size, breathing, glow, idle mode, and status text all feed the visualizer live.</div>
-                <div>Save persists the profile to the backend API. Reset restores the default server-side profile.</div>
+                <div>Preview the same Echo you see during voice conversations and in your desktop companion.</div>
+                <div>Save to use this appearance in both places. Voice avatar size adjusts Echo in the conversation view.</div>
               </div>
             </div>
           </div>

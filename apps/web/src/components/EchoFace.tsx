@@ -1,4 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
+import { normalizeAvatarConfig, type AvatarConfig } from "./avatarConfig";
+
+export type EchoFaceMode = "idle" | "listening" | "thinking" | "speaking" | "working" | "error";
 
 /**
  * Echo's face, drawn like the wordmark: a white rounded square with two dark
@@ -7,7 +10,12 @@ import React, { useEffect, useRef, useState } from "react";
  * Everything is still when the user prefers reduced motion.
  */
 /** `size` is a px number or any CSS length (e.g. a clamp() so Echo scales on phones). */
-export function EchoFace({ size = 280, className = "" }: { size?: number | string; className?: string }) {
+export function EchoFace({ size = 280, className = "", avatarConfig, mode = "idle" }: {
+  size?: number | string; className?: string; avatarConfig?: Partial<AvatarConfig>; mode?: EchoFaceMode;
+}) {
+  const appearance = avatarConfig ? normalizeAvatarConfig(avatarConfig) : null;
+  const wander = !appearance || (appearance.enable_idle_activities && !["none", "breathe"].includes(appearance.idle_activity));
+  const float = !appearance || (appearance.enable_idle_activities && appearance.idle_activity !== "none");
   const faceRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -38,7 +46,7 @@ export function EchoFace({ size = 280, className = "" }: { size?: number | strin
     };
 
     const tick = (now: number) => {
-      if (now - lastMove > 3500) {
+      if (now - lastMove > 3500 && wander) {
         // Idle: look around slowly on a lazy figure-eight.
         const t = now / 1000;
         target.x = Math.sin(t * 0.55) * 0.55;
@@ -75,12 +83,23 @@ export function EchoFace({ size = 280, className = "" }: { size?: number | strin
       cancelAnimationFrame(frame);
       window.clearTimeout(blinkTimer);
     };
-  }, []);
+  }, [wander]);
 
   return (
-    <div className={`echo-face-wrap ${className}`} style={{ ["--face" as string]: typeof size === "number" ? `${size}px` : size }}>
+    <div className={`echo-face-wrap ${className}`} data-mode={mode} style={{
+      ["--face" as string]: typeof size === "number" ? `${size}px` : size,
+      ...(appearance ? {
+        ["--echo-body" as string]: appearance.body_color,
+        ["--echo-eye" as string]: appearance.eye_color,
+        ["--echo-round" as string]: `${Math.min(50, appearance.body_roundness * 1.93)}%`,
+        ["--echo-eye-size" as string]: appearance.eye_size,
+        ["--echo-glow" as string]: appearance.enable_glow ? appearance.glow_color : "transparent",
+        ["--echo-duration" as string]: `${6 / appearance.breathing_speed}s`,
+        ["--echo-float-play" as string]: float ? "running" : "paused",
+      } : {}),
+    }}>
       <div className="echo-face-float">
-        <div className="echo-face" ref={faceRef} role="img" aria-label="Echo">
+        <div className="echo-face" ref={faceRef} role="img" aria-label={mode === "idle" ? "Echo" : `Echo ${mode}`}>
           <div className="echo-face-eyes" aria-hidden="true">
             <i />
             <i />
@@ -117,14 +136,14 @@ export function EchoSays() {
 
 export const echoFaceStyles = `
   .echo-face-wrap { position: relative; width: var(--face); height: calc(var(--face) * 1.18); display: grid; justify-items: center; perspective: calc(var(--face) * 3.2); }
-  .echo-face-float { animation: echoFloat 6s ease-in-out infinite; }
+  .echo-face-float { animation: echoFloat var(--echo-duration, 6s) ease-in-out infinite; animation-play-state: var(--echo-float-play, running); }
   .echo-face {
     --look-x: 0;
     --look-y: 0;
     width: var(--face);
     height: var(--face);
-    border-radius: 27%;
-    background: #f4f4f2;
+    border-radius: var(--echo-round, 27%);
+    background: var(--echo-body, #f4f4f2);
     box-shadow: inset 0 calc(var(--face) * .012) 0 #ffffff, inset 0 calc(var(--face) * -.02) 0 rgba(0,0,0,.06), 0 calc(var(--face) * .09) calc(var(--face) * .22) rgba(0,0,0,.55);
     display: grid;
     place-items: center;
@@ -138,23 +157,30 @@ export const echoFaceStyles = `
     transform: translate(calc(var(--look-x) * var(--face) * .15), calc(var(--look-y) * var(--face) * .11));
   }
   .echo-face-eyes i {
-    width: calc(var(--face) * .115);
-    height: calc(var(--face) * .2);
+    width: calc(var(--face) * .115 * var(--echo-eye-size, 1));
+    height: calc(var(--face) * .2 * var(--echo-eye-size, 1));
     border-radius: 999px;
-    background: #070707;
+    background: var(--echo-eye, #070707);
     transform-origin: 50% 60%;
     transition: transform 110ms ease, height 180ms ease, border-radius 180ms ease;
   }
   .echo-face[data-blink="true"] .echo-face-eyes i { transform: scaleY(.08); }
   .echo-face[data-mood="happy"] .echo-face-eyes i { height: calc(var(--face) * .09); border-radius: 999px 999px 40% 40%; transform: translateY(calc(var(--face) * -.03)); }
-  .echo-face-shadow { position: absolute; bottom: 0; width: 62%; height: calc(var(--face) * .06); border-radius: 50%; background: rgba(0,0,0,.55); filter: blur(calc(var(--face) * .03)); animation: echoShadow 6s ease-in-out infinite; }
+  .echo-face-shadow { position: absolute; bottom: 0; width: 62%; height: calc(var(--face) * .06); border-radius: 50%; background: rgba(0,0,0,.55); filter: blur(calc(var(--face) * .03)); animation: echoShadow var(--echo-duration, 6s) ease-in-out infinite; animation-play-state: var(--echo-float-play, running); }
+  .echo-face-wrap[data-mode="listening"] .echo-face { outline: 1px solid var(--echo-glow, #fff4); outline-offset: 8px; }
+  .echo-face-wrap[data-mode="listening"] .echo-face-eyes { scale: 1.07; }
+  .echo-face-wrap[data-mode="speaking"] .echo-face-float { animation: echoSpeaking .7s ease-in-out infinite; }
+  .echo-face-wrap[data-mode="thinking"] .echo-face-eyes, .echo-face-wrap[data-mode="working"] .echo-face-eyes { animation: echoConsidering 2.4s ease-in-out infinite; }
+  .echo-face-wrap[data-mode="error"] .echo-face-eyes { rotate: -8deg; }
+  @keyframes echoSpeaking { 0%,100% { transform: translateY(0) rotate(-1deg); } 50% { transform: translateY(calc(var(--face) * -.025)) rotate(1deg); } }
+  @keyframes echoConsidering { 0%,100% { translate: 0 0; } 50% { translate: calc(var(--face) * .035) calc(var(--face) * -.025); } }
   @keyframes echoFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(calc(var(--face) * -.045)); } }
   @keyframes echoShadow { 0%, 100% { transform: scaleX(1); opacity: .9; } 50% { transform: scaleX(.84); opacity: .55; } }
   .echo-says { margin: 0; min-height: 40px; overflow: hidden; padding: 10px 15px; border: 1px solid #2c2c2c; border-radius: 14px 14px 14px 4px; background: #111; color: #e6e6e2; font-size: 14px; font-weight: 550; letter-spacing: -.01em; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
   .echo-says span { display: inline-block; animation: echoSay 3.6s ease both; }
   @keyframes echoSay { 0% { transform: translateY(120%); } 10%, 88% { transform: none; } 100% { transform: translateY(-120%); } }
   @media (prefers-reduced-motion: reduce) {
-    .echo-face-float, .echo-face-shadow, .echo-says span { animation: none !important; }
+    .echo-face-float, .echo-face-shadow, .echo-says span, .echo-face-eyes { animation: none !important; }
     .echo-face { transform: none; }
   }
 `;

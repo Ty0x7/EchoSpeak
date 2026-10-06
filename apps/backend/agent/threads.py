@@ -38,6 +38,9 @@ class ThreadInfo:
     # Opaque creation identity used only to collapse transport retries.
     idempotency_key: str = ""
     creation_fingerprint: str = ""
+    title_revision: int = 0
+    auto_title_pending: bool = False
+    auto_title_input_hash: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -224,10 +227,23 @@ class ThreadManager:
                 return None
             if thread.message_count == 0 and self._is_placeholder_title(thread.title):
                 thread.title = self._title_from_message(message)
+                thread.auto_title_pending = True
+                thread.auto_title_input_hash = hashlib.sha256(message.encode()).hexdigest()
             thread.message_count += 1
             thread.last_active_at = time.time()
             self._save()
             return ThreadInfo.from_dict(thread.to_dict())
+
+    def finish_auto_title(self, thread_id: str, title: Optional[str], revision: int) -> bool:
+        with self._lock:
+            thread = self._threads.get(thread_id)
+            if not thread or not thread.auto_title_pending or thread.title_revision != revision:
+                return False
+            if title:
+                thread.title = title[:100]
+            thread.auto_title_pending = False
+            self._save()
+            return True
 
     @staticmethod
     def _is_placeholder_title(title: str) -> bool:
@@ -238,6 +254,8 @@ class ThreadManager:
     def _title_from_message(message: str) -> str:
         text = re.sub(r"[`#>*_]+", " ", str(message or ""))
         text = re.sub(r"\s+", " ", text).strip(" .,:;-\t\r\n")
+        text = re.sub(r"^(?:(?:hi|hey|hello)[,!]?\s+)?(?:please\s+)?(?:can|could|would)\s+you\s+", "", text, flags=re.I)
+        text = re.sub(r"^(?:please\s+)?(?:help me|tell me|explain|research|write|create|build|make)(?:\s+(?:about|with|how to))?\s+", "", text, flags=re.I)
         if not text:
             return "New Session"
         words = text.split()
@@ -260,6 +278,8 @@ class ThreadManager:
                 return None
             if title is not None:
                 thread.title = title
+                thread.title_revision += 1
+                thread.auto_title_pending = False
             if pinned is not None:
                 thread.pinned = pinned
             if archived is not None:

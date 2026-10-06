@@ -133,6 +133,7 @@ export function RightPanel({
   onTab,
   artifact,
   activity,
+  onEditArtifact,
   width,
   onWidth,
   measureRoom,
@@ -145,6 +146,7 @@ export function RightPanel({
   onTab(tab: RightTab): void;
   artifact: { id: string; version?: number } | null;
   activity: ActivityItem[];
+  onEditArtifact?(id: string, version: number, passage?: string): void;
   width: number;
   onWidth(width: number): void;
   /** Layout px available to chat + panel together, and screen px per layout px (the desktop shell can be zoomed). */
@@ -249,7 +251,7 @@ export function RightPanel({
       </div>
       <div className="rp-body">
         {artifact && <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-artifact`} aria-labelledby={`${panelId}-artifact-tab`} hidden={active !== "artifact"}>
-          {(active === "artifact" || visitedArtifactId === artifact.id) && <ArtifactPanel key={artifact.id} embedded apiBase={apiBase} artifactId={artifact.id} version={artifact.version} onClose={onClose} />}
+          {(active === "artifact" || visitedArtifactId === artifact.id) && <ArtifactPanel key={artifact.id} embedded apiBase={apiBase} artifactId={artifact.id} version={artifact.version} onClose={onClose} onEdit={onEditArtifact} />}
         </div>}
         <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-research`} aria-labelledby={`${panelId}-research-tab`} hidden={active !== "research"}>
           <ResearchPanel key={sessionId} apiBase={apiBase} sessionId={sessionId} active={active === "research"} />
