@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { RoutinesGroup } from "../settings/SettingsPanel";
 import { AvatarStack } from "./Roster";
+import { ShowMore, useShowMore } from "./ShowMore";
 import type { LeanPersona, LeanRoom } from "./types";
 
 /** Pages opened from the sidebar nav (Group chats, Projects, Artifacts, Routines). */
@@ -78,6 +79,7 @@ export function GroupChatsPage({
 }) {
   const byId = new Map(agents.map((a) => [a.id, a]));
   const groups = rooms.filter((r) => r.kind === "group").sort((a, b) => (b.last_message_at || b.updated_at || 0) - (a.last_message_at || a.updated_at || 0));
+  const more = useShowMore(groups, groups.findIndex((room) => room.thread_id === activeThreadId));
   return (
     <PageShell
       title="Group chats"
@@ -90,8 +92,9 @@ export function GroupChatsPage({
           <span>Pick two or more agents, for example Jarvis to research and Glados to build.</span>
         </button>
       ) : (
+        <>
         <div className="es-page-list">
-          {groups.map((room) => {
+          {more.shown.map((room) => {
             const members = room.agent_ids.map((id) => byId.get(id)).filter(Boolean) as LeanPersona[];
             return (
               <div key={room.id} className={`es-page-row${room.thread_id === activeThreadId ? " is-active" : ""}`}>
@@ -118,6 +121,8 @@ export function GroupChatsPage({
             );
           })}
         </div>
+        {more.collapsible ? <ShowMore expanded={more.expanded} hidden={more.hidden} label="group chats" onToggle={() => more.setExpanded((v) => !v)} /> : null}
+        </>
       )}
     </PageShell>
   );
@@ -137,6 +142,7 @@ export function ProjectsPage({
   onAdd(): void;
 }) {
   const shown = projects.filter((p) => !p.archived);
+  const more = useShowMore(shown, shown.findIndex((project) => project.id === activeProjectId));
   return (
     <PageShell
       title="Projects"
@@ -149,8 +155,9 @@ export function ProjectsPage({
           <span>Attach a folder and chats inside it work on those files.</span>
         </button>
       ) : (
+        <>
         <div className="es-page-grid">
-          {shown.map((project) => (
+          {more.shown.map((project) => (
             <button key={project.id} type="button" className={`es-page-card${project.id === activeProjectId ? " is-active" : ""}`} onClick={() => onOpen(project)}>
               <strong>{project.name}</strong>
               <small className="is-mono">{project.workspace_root || "No folder"}</small>
@@ -158,6 +165,8 @@ export function ProjectsPage({
             </button>
           ))}
         </div>
+        {more.collapsible ? <ShowMore expanded={more.expanded} hidden={more.hidden} label="projects" onToggle={() => more.setExpanded((v) => !v)} /> : null}
+        </>
       )}
     </PageShell>
   );
@@ -177,6 +186,7 @@ export function ArtifactsPage({ apiBase, onOpen }: { apiBase: string; onOpen(ite
       live = false;
     };
   }, [apiBase]);
+  const more = useShowMore(items || []);
   return (
     <PageShell title="Artifacts" lead="Apps, documents, diagrams and code your agents made. Open one to keep working on it.">
       {items === null ? (
@@ -187,8 +197,9 @@ export function ArtifactsPage({ apiBase, onOpen }: { apiBase: string; onOpen(ite
           <span>Ask for something you can use or keep, like “build me a tip calculator”.</span>
         </div>
       ) : (
+        <>
         <div className="es-page-grid">
-          {items.map((item) => (
+          {more.shown.map((item) => (
             <button key={item.id} type="button" className="es-page-card" onClick={() => onOpen(item)}>
               <span className="es-art-kind">{KIND_LABEL[item.kind] || item.kind}</span>
               <strong>{item.title}</strong>
@@ -196,6 +207,8 @@ export function ArtifactsPage({ apiBase, onOpen }: { apiBase: string; onOpen(ite
             </button>
           ))}
         </div>
+        {more.collapsible ? <ShowMore expanded={more.expanded} hidden={more.hidden} label="artifacts" onToggle={() => more.setExpanded((v) => !v)} /> : null}
+        </>
       )}
     </PageShell>
   );
