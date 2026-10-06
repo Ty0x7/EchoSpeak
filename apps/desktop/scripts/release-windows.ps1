@@ -42,13 +42,12 @@ if (-not $NotesPath) { $NotesPath = Join-Path $RepoRoot "docs\releases\$Tag.md" 
 if (-not (Test-Path -LiteralPath $NotesPath)) { throw "Release notes not found: $NotesPath" }
 
 $BundleRoot = Join-Path $DesktopRoot "src-tauri\target\release\bundle"
-if ($Publish) { $RequirePublisherSignature = $true }
 $publisherConfigured = [bool]($env:ECHOSPEAK_SIGN_CERT_SHA1 -or $env:ECHOSPEAK_SIGN_SCRIPT)
 if ($RequirePublisherSignature -and -not $publisherConfigured -and -not $SkipBuild) {
     throw "Configure ECHOSPEAK_SIGN_CERT_SHA1 or ECHOSPEAK_SIGN_SCRIPT before building a publisher-signed release."
 }
 if (-not $publisherConfigured -and -not $RequirePublisherSignature) {
-    Write-Warning "This build has no Windows publisher signature. The updater key does not establish a Windows publisher. Publishing requires verified publisher signatures."
+    Write-Warning "Windows publisher signing is not configured. Updater-signed releases can still be published; Windows warnings may remain. Use -RequirePublisherSignature when publisher signing is set up."
 }
 if (-not $SkipBuild) {
     $env:TAURI_SIGNING_PRIVATE_KEY = $KeyPath
