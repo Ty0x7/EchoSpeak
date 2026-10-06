@@ -152,7 +152,7 @@ export type LearningEpisode = {
   agent_id: string;
   agent_name: string;
   goal: string;
-  outcome: "success" | "failure" | "stopped" | "answered";
+  outcome: "success" | "failure" | "stopped" | "answered" | "error";
   level: number;
   reasons: string[];
   trusted: boolean;

@@ -38,6 +38,8 @@ ClientFactory = Callable[[Episode], Any]
 
 def skip_reason(episode: Episode) -> str:
     """Why an episode isn't worth a reflection, or ''."""
+    if episode.outcome == "error":
+        return "the model request failed, so there is no work to learn from"
     if episode.feedback:
         return ""
     ran = [t for t in episode.tools if not t.get("not_run")]
@@ -115,7 +117,15 @@ def prompt_for(episode: Episode, contrast: Optional[Episode]) -> str:
 def _default_client(episode: Episode) -> Any:
     from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoint
 
-    endpoint = resolve_endpoint(episode.provider, episode.model)
+    provider = episode.provider
+    if not provider:
+        # No model on record: the app's current one, chosen the way agents choose it (agent/core.py).
+        from config import config
+
+        from agent.cloud_providers import default_cloud_provider
+        local = getattr(config.local.provider, "value", config.local.provider)
+        provider = str(local if config.use_local_models else default_cloud_provider())
+    endpoint = resolve_endpoint(provider, episode.model if episode.provider else "")
     return ChatClient(endpoint, reasoning_effort=reasoning_effort_for(endpoint, False, "low"))
 
 

@@ -25,7 +25,9 @@ _cache_lock = threading.Lock()
 
 
 def _verdict(episode: Episode) -> str:
-    """win | loss | '' (answered, or nothing to judge)."""
+    """win | loss | '' (answered, a failed model call, or nothing to judge)."""
+    if episode.outcome == "error":
+        return ""
     if episode.feedback < 0 or episode.outcome in {"failure", "stopped"}:
         return "loss"
     if episode.outcome == "success":

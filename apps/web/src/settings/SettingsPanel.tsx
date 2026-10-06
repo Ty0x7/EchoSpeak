@@ -68,7 +68,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
 
 /** What each section holds, so searching for a setting finds the section it lives in. */
 const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
-  general: "name setup approvals approval mode step budget iterations",
+  general: "name setup approvals approval mode step budget iterations learning lessons reviews reflections experience feedback",
   models: "provider model api key openai gemini claude anthropic grok xai lm studio ollama localai vllm local cloud context temperature creativity custom model id",
   agents: "persona jarvis glados toolsets",
   personality: "soul personality tone",
@@ -446,6 +446,25 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
             value={String(s.lean_max_iterations || 60)}
             onChange={(v) => save({ lean_max_iterations: Number(v) })}
             options={[20, 40, 60, 100, 150, 250].map((n) => ({ value: String(n), label: `${n} steps` }))}
+          />
+        </Row>
+      </Group>
+      <Group title="Learning from experience" description="Agents keep short lessons from their own checked work and read them before similar tasks. Lessons are advice only: they never change permissions, approvals or tools. Review them on the Learning page.">
+        <Row label="Learn from experience" help="Off: agents don't record new experience or read lessons. What they already learned is kept.">
+          <Toggle checked={s.learning_enabled === undefined ? true : asBool(s.learning_enabled)} onChange={(v) => save({ learning_enabled: v })} label="Learn from experience" />
+        </Row>
+        <Row label="Reviews per day" help="Each review is one short call to the agent's own model, made only when no chat is running.">
+          <Select
+            value={String(s.learning_reflection_daily_cap ?? 30)}
+            onChange={(v) => save({ learning_reflection_daily_cap: Number(v) })}
+            options={[0, 10, 30, 60, 120].map((n) => ({ value: String(n), label: n === 0 ? "None (grade only)" : `${n} a day` }))}
+          />
+        </Row>
+        <Row label="Lessons per task" help="How many lessons an agent reads before it starts a task.">
+          <Select
+            value={String(s.learning_playbook_size ?? 5)}
+            onChange={(v) => save({ learning_playbook_size: Number(v) })}
+            options={[3, 5, 8].map((n) => ({ value: String(n), label: `${n} lessons` }))}
           />
         </Row>
       </Group>

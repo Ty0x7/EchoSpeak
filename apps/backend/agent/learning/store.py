@@ -37,7 +37,7 @@ class Episode:
     """One agent's part in one finished request, graded from what actually ran."""
     agent_id: str
     goal: str
-    outcome: str  # success | failure | stopped | answered
+    outcome: str  # success | failure | stopped | answered | error (the model call failed)
     id: str = field(default_factory=lambda: f"ep_{uuid.uuid4().hex[:12]}")
     created_at: float = field(default_factory=time.time)
     session_id: str = ""
@@ -66,7 +66,7 @@ class Episode:
     @property
     def verified_success(self) -> bool:
         """Success backed by a check after the work (V2+), or the owner said it worked."""
-        if self.feedback < 0:
+        if self.feedback < 0 or self.outcome == "error":
             return False
         if self.feedback > 0:
             return self.outcome in {"success", "answered"}
@@ -74,6 +74,9 @@ class Episode:
 
     @property
     def failed(self) -> bool:
+        """The agent's work fell short. A failed model call is nobody's lesson."""
+        if self.outcome == "error":
+            return False
         return self.feedback < 0 or self.outcome in {"failure", "stopped"}
 
     def to_dict(self) -> dict[str, Any]:

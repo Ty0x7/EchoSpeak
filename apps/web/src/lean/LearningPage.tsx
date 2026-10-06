@@ -20,7 +20,7 @@ const STATUS_LABEL: Record<LessonStatus, string> = {
 
 // The verification ladder, in plain words.
 const LEVEL_LABEL = ["Claimed", "Ran", "Checked", "Double-checked", "You confirmed"];
-const OUTCOME_LABEL: Record<string, string> = { success: "Worked", failure: "Failed", stopped: "Stopped", answered: "Answered" };
+const OUTCOME_LABEL: Record<string, string> = { success: "Worked", failure: "Failed", stopped: "Stopped", answered: "Answered", error: "Model error" };
 const ACTION_LABEL: Record<string, string> = {
   created: "Learned", approve: "You approved it", reject: "You rejected it", promote: "You marked it proven",
   retire: "You retired it", restore: "You restored it", edit: "You edited it", rollback: "Rolled back",
@@ -28,6 +28,8 @@ const ACTION_LABEL: Record<string, string> = {
 };
 
 const kindLabel = (kind: string) => (kind || "general").replace(/_/g, " ");
+const sentenceCase = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 const ago = (seconds: number) => {
   if (!seconds) return "";
@@ -117,11 +119,11 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
           </div>
         ) : null}
         <p className="es-learn-summary" aria-live="polite">
-          <span><strong>{data.status.episodes}</strong> tasks graded</span>
-          <span><strong>{data.status.lessons.established || 0}</strong> proven lessons</span>
+          <span><strong>{data.status.episodes}</strong> {data.status.episodes === 1 ? "task" : "tasks"} graded</span>
+          <span><strong>{data.status.lessons.established || 0}</strong> proven {(data.status.lessons.established || 0) === 1 ? "lesson" : "lessons"}</span>
           <span><strong>{data.status.lessons.probation || 0}</strong> unproven</span>
           <span><strong>{data.status.reflections_today}</strong> of {data.status.reflection_daily_cap} reviews today</span>
-          {data.status.reflections_pending ? <span>{data.status.reflections_pending} tasks waiting to be reviewed</span> : null}
+          {data.status.reflections_pending ? <span>{plural(data.status.reflections_pending, "task")} waiting to be reviewed</span> : null}
         </p>
         {notice ? <p className="es-learn-notice" role="status">{notice}</p> : null}
 
@@ -226,7 +228,7 @@ function ProfileCard({ profile, onPause }: { profile: LearningProfile; onPause(p
         <ul className="es-learn-kinds">
           {kinds.map(([kind, row]) => (
             <li key={kind}>
-              <span>{kindLabel(kind)}</span>
+              <span>{sentenceCase(kindLabel(kind))}</span>
               <span className="es-learn-bar" aria-hidden><i style={{ width: `${Math.round(row.rate * 100)}%` }} /></span>
               <span>{row.wins}/{row.decided}</span>
             </li>
@@ -251,6 +253,17 @@ function LessonRow({ lesson, agentName, open, onToggle, api, act }: {
   const [detail, setDetail] = useState<{ events: LearningEvent[]; episodes: LearningEpisode[] } | null>(null);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(lesson.title);
+  const [editError, setEditError] = useState("");
+  const saveEdit = async () => {
+    setEditError("");
+    try {
+      await api.editLesson(lesson.id, { title, text });
+      setEditing(false);
+      await act(async () => undefined);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Not saved.");
+    }
+  };
   const [text, setText] = useState(lesson.text);
   useEffect(() => {
     if (!open) return;
@@ -276,10 +289,11 @@ function LessonRow({ lesson, agentName, open, onToggle, api, act }: {
             <label>Title<input value={title} maxLength={80} onChange={(e) => setTitle(e.target.value)} /></label>
             <label>Lesson<textarea value={text} maxLength={400} onChange={(e) => setText(e.target.value)} /></label>
             <small>Lessons can't be about permissions, approvals, safety rules, secrets, or skipping or changing checks.</small>
+            {editError ? <p className="es-learn-error" role="alert">{sentenceCase(editError)}</p> : null}
             <div>
               <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => { setEditing(false); setTitle(lesson.title); setText(lesson.text); }}>Cancel</button>
               <button type="button" className="es-btn es-btn-sm es-btn-primary" disabled={!title.trim() || !text.trim()}
-                onClick={() => void act(async () => { await api.editLesson(lesson.id, { title, text }); setEditing(false); })}>Save</button>
+                onClick={() => void saveEdit()}>Save</button>
             </div>
           </div>
         ) : (
@@ -388,7 +402,7 @@ function ReliabilityTable({ title, rows }: { title: string; rows: ReliabilityRow
               const failing = recent >= 3 && row.recent_failed / recent >= 0.6;
               return (
                 <tr key={row.name} className={failing ? "is-failing" : undefined}>
-                  <td>{row.name.replace(/_/g, " ")}</td>
+                  <td>{sentenceCase(row.name.replace(/_/g, " "))}</td>
                   <td>{row.recent_ok} of {recent} worked{failing ? " · failing" : ""}</td>
                   <td>{row.ok} ok · {row.failed} failed</td>
                 </tr>

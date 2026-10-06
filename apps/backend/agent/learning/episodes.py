@@ -69,8 +69,10 @@ _CODE_FILE = re.compile(r"(?i)\.(py|js|jsx|ts|tsx|mjs|cjs|rs|go|java|kt|cs|cpp|c
 
 _KIND_WORDS: list[tuple[str, re.Pattern[str]]] = [
     ("coding", re.compile(r"(?i)\b(code|script|function|bug|debug|compile|build|refactor|test|python|javascript|"
-                          r"typescript|react|api|repo|git|npm|pip|terminal|command|program)\b")),
-    ("files", re.compile(r"(?i)\b(file|folder|directory|rename|move|copy|delete|txt|csv|markdown|\.md)\b")),
+                          r"typescript|react|api|repo|git|npm|pip|terminal|command|program)\b"
+                          r"|\b[\w-]+\.(py|js|jsx|ts|tsx|mjs|rs|go|java|kt|cs|cpp|rb|php|swift|sh|ps1|sql|html|css)\b")),
+    ("files", re.compile(r"(?i)\b(file|folder|directory|rename|move|copy|delete|txt|csv|markdown)\b"
+                         r"|\b[\w-]+\.(md|txt|csv|json|yaml|yml|toml|ini|log|pdf|docx?|xlsx?)\b")),
     ("comms", re.compile(r"(?i)\b(email|e-mail|discord|telegram|message (him|her|them)|reply to|send (a|an) (message|note))\b")),
     ("media", re.compile(r"(?i)\b(image|picture|video|draw|generate (a|an) (image|video|picture))\b")),
     ("live_data", re.compile(r"(?i)\b(weather|forecast|score|game|stock|price|shares)\b")),
@@ -308,7 +310,9 @@ def build_episodes(
         completed = next((r.completed for r in reversed(mine) if r.completed), "")
         text = next((r.text for r in reversed(mine) if r.text), "")
         if errors:
-            outcome, summary = "failure", f"hit an error: {errors[0][:200]}"
+            # The model call itself failed (server down, bad key, overflow): not the agent's
+            # doing, so it counts neither for nor against it, and nothing is learned from it.
+            outcome, summary = "error", f"the model request failed: {errors[0][:200]}"
         elif claim_failed:
             outcome = "failure"
             summary = ("said it would act but didn't" if "promise_unfulfilled" in stops

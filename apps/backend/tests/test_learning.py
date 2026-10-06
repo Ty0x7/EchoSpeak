@@ -206,6 +206,34 @@ def test_timeline_items_name_their_target_with_secrets_redacted(monkeypatch):
         "curl -H 'Authorization: [redacted secret]' x"
 
 
+def test_a_failed_model_call_is_nobodys_lesson(monkeypatch, store, tools):
+    from agent.lean.provider import ProviderError
+
+    class Broken:
+        def stream_turn(self, *a, **kw):
+            raise ProviderError(401, "API key rejected", "openai")
+
+    session, _ = _session(monkeypatch, {"echo": Broken()})
+    out = session.run("write hello.py that prints hi", persona_id="echo")
+    [episode] = store.episodes()
+    assert episode.outcome == "error" and episode.task_kind == "coding"
+    assert not episode.failed and not episode.verified_success
+    assert store.reflection_status(episode.id) == ""
+    # Even "Didn't work" on it teaches nothing and doesn't count against the agent.
+    learning.record_feedback(out["execution_id"], -1, "no model")
+    assert reflector.skip_reason(store.episodes()[0])
+    profiles.forget_cache()
+    assert profiles.profile("echo")["kinds"]["coding"]["losses"] == 0
+
+
+def test_request_words_name_the_task_kind():
+    from agent.learning.episodes import guess_kind
+
+    assert guess_kind("write hello.py that prints hi") == "coding"
+    assert guess_kind("put these notes in notes.md") == "files"
+    assert guess_kind("how's it going?") == "chat"
+
+
 def test_an_unchecked_success_is_kept_but_not_reflected(monkeypatch, store, tools):
     _run(monkeypatch, [
         ModelTurn(tool_calls=[_call("file_write", path="notes.md", content="# Notes")]),
