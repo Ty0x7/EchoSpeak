@@ -702,7 +702,7 @@ export const Dashboard: React.FC<{
 
   const {
     providerInfo, setProviderModels, providerDraft, setProviderDraft, providerError, switchingProvider, backendOnline, setBackendOnline, lmStudioOnly,
-    refreshProviderInfo, showModelPicker, modelPickerOptions, modelPickerValue,
+    refreshProviderInfo, showModelPicker, modelPickerOptions, modelPickerValue, modelsLoading,
   } = useProviderSettings({ apiBase, activeThreadIdRef, cancelSessionTurn });
   const [thinkingEnabled, setThinkingEnabled] = useState<boolean>(
     () => window.localStorage.getItem("echospeak.chat.thinking_enabled") !== "false",
@@ -1967,7 +1967,7 @@ export const Dashboard: React.FC<{
                       setProviderModels={setProviderModels} switchingProvider={switchingProvider}
                       lmStudioOnly={lmStudioOnly} providerInfo={providerInfo}
                       modelPickerValue={modelPickerValue} modelPickerOptions={modelPickerOptions}
-                      showModelPicker={showModelPicker} reasoningEffort={reasoningEffort}
+                      showModelPicker={showModelPicker} modelsLoading={modelsLoading} reasoningEffort={reasoningEffort}
                       setReasoningEffort={setReasoningEffort} thinkingEnabled={thinkingEnabled}
                       setThinkingEnabled={setThinkingEnabled} voiceReadAloud={voiceReadAloud}
                       toggleReadAloud={toggleReadAloud} voiceConversationMode={voiceConversationMode}

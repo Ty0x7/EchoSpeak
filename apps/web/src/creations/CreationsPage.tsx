@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { PageShell } from "../lean/Pages";
+import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { useSettings } from "../settings/useSettings";
 import { CreationCard, CreationPreview } from "./CreationCard";
 import { creationRequest, type CreationAsset, type CreationJob } from "./api";
@@ -29,6 +30,9 @@ export function CreationsPage({ apiBase, onChat, onEdit, sessionId = "" }: { api
   };
   const shown = assets.filter(asset => !family || rootFor(asset) === family);
   const settings = useSettings(apiBase);
+  // In-progress jobs and the library each open on their first few; nothing is cut off for good.
+  const moreJobs = useShowMore(archived ? [] : jobs);
+  const moreAssets = useShowMore(shown);
   useEffect(() => {
     let disposed = false;
     const refresh = async () => {
@@ -47,16 +51,18 @@ export function CreationsPage({ apiBase, onChat, onEdit, sessionId = "" }: { api
       <div className="creation-filters"><input aria-label="Search creations" placeholder="Search names and prompts" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="Media type" value={kind} onChange={e => setKind(e.target.value)}><option value="">All media</option><option value="image">Images</option><option value="video">Videos</option></select><label><input type="checkbox" checked={archived} onChange={e => setArchived(e.target.checked)} /> Archived</label></div>
       {error && <p role="alert">{error}</p>}
       {family && <button className="es-btn es-btn-sm" onClick={() => setFamily("")}>Show all creations</button>}
-      {!archived && jobs.slice(0, 12).map(job => <CreationCard key={job.id} id={job.id} apiBase={apiBase} />)}
+      {moreJobs.shown.map(job => <CreationCard key={job.id} id={job.id} apiBase={apiBase} />)}
+      {moreJobs.collapsible ? <ShowMore expanded={moreJobs.expanded} hidden={moreJobs.hidden} label="creations in progress" onToggle={() => moreJobs.setExpanded(v => !v)} /> : null}
       {!loaded && <div className="es-sec-empty" role="status">Loading creations…</div>}
       {loaded && !assets.length && (archived || !jobs.length) && <button type="button" className="es-page-empty" onClick={() => setSettingsOpen(true)}><strong>{query || kind || archived ? "No matching creations" : "No creations yet"}</strong><span>{query || kind || archived ? "Try another search or media filter." : "Choose a creation provider, then ask Echo for an image or video in a chat."}</span></button>}
-      <div className="es-page-grid creation-library-grid">{shown.map(asset => <article className="es-page-card creation-library-card" key={asset.id}>
+      <div className="es-page-grid creation-library-grid">{moreAssets.shown.map(asset => <article className="es-page-card creation-library-card" key={asset.id}>
         <CreationPreview asset={asset} apiBase={apiBase} />
         <input aria-label="Creation name" defaultValue={asset.name} key={`${asset.id}-${asset.name}`} maxLength={160} onBlur={e => { if (e.target.value.trim() && e.target.value !== asset.name) void update(asset, { name: e.target.value.trim() }); }} />
         <p>{asset.prompt}</p><small>{asset.provider} · {asset.model}</small>
         {asset.settings?.input_asset_ids?.length ? <small>Edited version · original retained</small> : null}
         <div className="creation-actions"><button className="es-btn es-btn-sm" onClick={() => onChat(asset.session_id)}>Open chat</button>{asset.media_kind === "image" && onEdit && !asset.archived && <button className="es-btn es-btn-sm" onClick={() => onEdit(asset)}>Edit with Echo</button>}{assets.filter(a => rootFor(a) === rootFor(asset)).length > 1 && <button className="es-btn es-btn-sm" onClick={() => setFamily(rootFor(asset))}>Related versions</button>}<button className="es-btn es-btn-sm" onClick={() => void update(asset, { archived: !asset.archived })}>{asset.archived ? "Restore" : "Archive"}</button></div>
       </article>)}</div>
+      {moreAssets.collapsible ? <ShowMore expanded={moreAssets.expanded} hidden={moreAssets.hidden} label="creations" onToggle={() => moreAssets.setExpanded(v => !v)} /> : null}
     </>}
   </PageShell>;
 }

@@ -53,8 +53,10 @@ loads model IDs available to the key; it does not prove the selected model respo
 the same adapter as chat. It never runs file, terminal, media or external tools.
 The test requests may incur an API charge. Authentication, billing, quota, permissions and model
 compatibility errors need different fixes; follow the displayed provider message.
-Use an exact API model ID rather than a display name. Specialized image/video models
-belong in Creations.
+Pick a model from the provider's list. For an ID the list doesn't show, choose
+**Use a custom model ID…** and enter the exact API ID, not a display name. Specialized
+image/video models belong in Creations. In the chat, the provider menu groups apps on
+this PC and cloud providers; switching provider brings back the model you saved for it.
 
 EchoSpeak talks to any OpenAI-compatible chat endpoint. Set it in **Settings › Models**.
 
@@ -146,7 +148,8 @@ Dangerous commands ask first in every mode.
 - **Settings › Advanced › Companion** previews the new Echo avatar's listening,
   thinking, speaking and working states. Appearance changes apply to voice and the
   floating desktop companion, including the voice avatar size.
-- Speech output uses Windows voices, Piper, or OpenAI audio if you add a key.
+- Speech output uses Windows voices, Piper, or OpenAI audio if you add a key. Choose
+  engines in **Settings › Voice › Engines**.
 
 ## 6. Memory
 

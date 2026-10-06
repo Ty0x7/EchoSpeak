@@ -1124,6 +1124,13 @@ async def list_provider_models(provider: Optional[str] = Query(default=None)):
     else:
         p = config.local.provider if config.use_local_models else _default_cloud_provider()
 
+    # The model saved for this provider, so a picker switching to it restores that choice
+    # instead of jumping to the first catalog entry (or an empty box when the catalog is unreachable).
+    if p in (ModelProvider.OLLAMA, ModelProvider.LM_STUDIO, ModelProvider.LOCALAI, ModelProvider.VLLM):
+        saved = str(config.local.model_name or "").strip() if config.local.provider == p else ""
+    else:
+        saved = str(getattr(getattr(config, p.value, None), "model", "") or "").strip()
+
     if p in (ModelProvider.OLLAMA, ModelProvider.LM_STUDIO, ModelProvider.LOCALAI, ModelProvider.VLLM):
         from agent.model_runtime import list_local_models
 
@@ -1131,11 +1138,12 @@ async def list_provider_models(provider: Optional[str] = Query(default=None)):
         models = await asyncio.to_thread(list_local_models, p, base, 4.0)
         if not models:
             logger.warning(f"No {p.value} models found at {base}")
-        return {"provider": p.value, "models": models, "base_url": base, "reachable": bool(models)}
+        return {"provider": p.value, "models": models, "base_url": base, "reachable": bool(models), "saved_model": saved}
 
     if p.value in CLOUD_PROVIDERS:
-        return await asyncio.to_thread(list_cloud_models, p.value)
-    return {"provider": p.value, "models": []}
+        result = await asyncio.to_thread(list_cloud_models, p.value)
+        return {**result, "saved_model": saved}
+    return {"provider": p.value, "models": [], "saved_model": saved}
 
 
 # ── Todo List Endpoints ──────────────────────────────────────────────────────

@@ -1164,6 +1164,10 @@
 .es-page-row-text small { color: var(--es-faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .es-page-row time { flex: 0 0 auto; color: var(--es-faint); font-size: 11px; }
 .es-page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.es-show-more { display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 0 4px; padding: 6px 10px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--es-dim); font: 500 12.5px var(--es-font); cursor: pointer; transition: color var(--es-dur) var(--es-ease), background var(--es-dur) var(--es-ease), border-color var(--es-dur) var(--es-ease); }
+.es-show-more:hover { color: var(--es-text); background: var(--es-glass); border-color: var(--es-line); }
+.es-show-more:focus-visible { outline: 2px solid var(--es-line-3); outline-offset: 2px; }
+.es-show-more span { min-width: 18px; padding: 1px 6px; border-radius: 999px; background: var(--es-glass); color: var(--es-faint); font-size: 11px; text-align: center; }
 .es-page-card { display: grid; align-content: start; gap: 6px; min-height: 104px; padding: 14px; border: 1px solid var(--es-line); border-radius: 14px; background: rgba(255, 255, 255, 0.02); color: var(--es-text); text-align: left; cursor: pointer; font-family: var(--es-font); transition: background var(--es-dur) var(--es-ease), border-color var(--es-dur) var(--es-ease); }
 .es-page-card:hover { background: var(--es-glass); border-color: var(--es-line-2); }
 .es-page-card.is-active { border-color: var(--es-line-3); }
