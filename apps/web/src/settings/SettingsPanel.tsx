@@ -612,7 +612,7 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
             <TextField mono wide value={s[provider]?.model || ""} onCommit={(v) => save({ [provider]: { model: v } })} />
           </Row>
           {provider === "gemini" && /live|native-audio/i.test(String(s.gemini?.model || "")) && <p className="st-muted">Gemini Live returns speech and its transcription. Use Read or Voice to hear replies, and enable Live mic in the chat toolbar to stream your microphone to Google. Leave Live mic off for local transcription. API audio charges and account model access apply.</p>}
-          <Row label="Check provider" help="Catalog access and a working model response are separate checks. Test response sends a small request and may incur API charges.">
+          <Row label="Check provider" help="Catalog access and working chat are separate checks. Test response checks a reply and a harmless tool round-trip; it may incur API charges.">
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <button type="button" className="es-btn es-btn-sm" disabled={test.busy} onClick={() => void runTest("catalog")}>Check catalog</button>
               <button type="button" className="es-btn es-btn-sm" disabled={test.busy || !s[provider]?.model} onClick={() => void runTest("generation")}>{test.busy ? "Checking…" : "Test response"}</button>

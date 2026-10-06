@@ -145,8 +145,8 @@ def list_cloud_models(provider: str, api_key: str | None = None) -> dict:
 
 
 def test_cloud_model(provider: str, model: str = "", api_key: str | None = None) -> dict:
-    """Explicit small inference through the same adapter as chat. Never execute tools."""
-    from agent.lean.provider import ChatClient, Endpoint, ProviderError
+    """Check an isolated tool round-trip through chat, without real tool execution."""
+    from agent.lean.provider import ChatClient, Endpoint, ProviderError, reasoning_effort_for
     import threading
     key = str(api_key if api_key and api_key != "***" else cloud_config(provider).api_key).strip()
     model = str(model or cloud_config(provider).model or "").strip().removeprefix("models/")
@@ -154,7 +154,14 @@ def test_cloud_model(provider: str, model: str = "", api_key: str | None = None)
     issue = chat_model_issue(provider, model)
     if issue or not key or key == "***":
         return {**result, "error_code": "configuration", "message": issue or "Save an API key first."}
-    client = ChatClient(Endpoint(BASE_URLS[provider], key, model, provider, False))
+    endpoint = Endpoint(BASE_URLS[provider], key, model, provider, False)
+    client = ChatClient(endpoint, reasoning_effort=reasoning_effort_for(endpoint, False, "medium"))
+    names = {"echospeak_check_alpha", "echospeak_check_beta"}
+    tools = [{"type": "function", "function": {
+        "name": name, "description": "Harmless connection check returning OK. It does not access files, services or media.",
+        "parameters": {"type": "object", "properties": {"token": {"type": "string", "enum": ["OK"]}}, "required": ["token"]},
+    }} for name in sorted(names)]
+    messages = [{"role": "user", "content": "Call both echospeak_check_alpha and echospeak_check_beta with token OK, preferably together. After both results, reply with just OK."}]
     # Bound both the HTTP timeout and Live adapter deadline without changing saved settings.
     client._http.timeout = httpx.Timeout(25, connect=10)
     client.live_timeout = 25
@@ -162,10 +169,27 @@ def test_cloud_model(provider: str, model: str = "", api_key: str | None = None)
     timer = threading.Timer(25, cancel.set)
     timer.start()
     try:
-        turn = client.stream_turn([{"role": "user", "content": "Reply with just OK."}], max_tokens=512, cancel=cancel)
-        if cancel.is_set() or not turn.content.strip():
-            return {**result, "error_code": "empty_response", "message": "No text response received within the bounded test. The model is not validated."}
-        return {**result, "ok": True, "message": f"{CLOUD_LABELS[provider]} · {model} responded through EchoSpeak's chat adapter. Tool use and media were not tested."}
+        checked: set[str] = set()
+        for _ in range(3):
+            turn = client.stream_turn(messages, tools=tools, max_tokens=512, cancel=cancel)
+            if cancel.is_set():
+                break
+            if not turn.tool_calls:
+                if checked == names and turn.content.strip():
+                    return {**result, "ok": True, "message": f"{CLOUD_LABELS[provider]} · {model} responded and completed a harmless tool round-trip through EchoSpeak's chat adapter. Files, commands and media were not tested."}
+                break
+            calls = []
+            for call in turn.tool_calls:
+                args, error = call.parsed_arguments()
+                if call.name not in names or error or args != {"token": "OK"}:
+                    return {**result, "error_code": "tool_compatibility", "message": "The model returned an invalid connection-check tool call. Chat tool compatibility is not validated; no real tools ran."}
+                calls.append({"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}, **({"extra_content": call.extra_content} if call.extra_content else {})})
+            messages.append({"role": "assistant", "content": turn.content or "", "tool_calls": calls, **({"provider_blocks": turn.provider_blocks} if turn.provider_blocks else {})})
+            for call in turn.tool_calls:
+                # Synthetic results only: never enter Toolbox, MCP or an action handler.
+                messages.append({"role": "tool", "tool_call_id": call.id, "content": "OK"})
+                checked.add(call.name)
+        return {**result, "error_code": "tool_compatibility", "message": "The model did not finish the bounded text-and-tool check. Chat tool compatibility is not validated; no real tools ran."}
     except ProviderError as exc:
         return {**result, "error_code": cloud_error_category(exc.status, exc.detail), "message": str(exc).replace(key, "[redacted]")}
     except (httpx.HTTPError, TimeoutError, OSError):

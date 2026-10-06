@@ -41,7 +41,8 @@ def reasoning_effort_for(endpoint: Endpoint, thinking_enabled: bool, effort: str
     if endpoint.provider == "openai" and (model.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))):
         return level if thinking_enabled else "low"
     if endpoint.provider == "gemini" and ("2.5" in model or "-3" in model):
-        return level if thinking_enabled else ("low" if "-3" in model else "none")
+        # Pro 2.5 and Gemini 3 cannot disable thinking, including side/review calls.
+        return level if thinking_enabled else ("low" if "-3" in model or "pro" in model else "none")
     return ""
 
 
@@ -473,7 +474,9 @@ class ChatClient:
     ) -> ModelTurn:
         turn = ModelTurn()
         scrubber = ThinkTagScrubber()
-        partial_calls: dict[int, dict[str, str]] = {}
+        partial_calls: dict[int, dict[str, Any]] = {}
+        call_ids: dict[str, int] = {}
+        call_indexes: dict[int, int] = {}
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
 
@@ -522,15 +525,38 @@ class ChatClient:
                         emit_reasoning(hidden)
                         emit_content(visible)
                     for fragment in delta.get("tool_calls") or []:
-                        index = int(fragment.get("index") or 0)
-                        slot = partial_calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
-                        if fragment.get("extra_content"):
-                            slot["extra_content"] = fragment["extra_content"]
-                        if fragment.get("id"):
-                            slot["id"] = str(fragment["id"])
+                        # OpenAI streams an index; Gemini can omit it entirely.
+                        # Keep distinct IDs separate instead of treating every
+                        # unindexed call as index zero and concatenating names/JSON.
+                        call_id = str(fragment.get("id") or "")
+                        wire_index = fragment.get("index")
+                        wire_index = int(wire_index) if wire_index is not None else None
                         function = fragment.get("function") or {}
+                        index = call_ids.get(call_id) if call_id else None
+                        if index is None and wire_index in call_indexes:
+                            candidate = call_indexes[wire_index]
+                            prior_id = partial_calls[candidate]["id"]
+                            if not call_id or not prior_id or call_id == prior_id:
+                                index = candidate
+                        if index is None:
+                            if call_id or wire_index is not None or function.get("name"):
+                                index = len(partial_calls)
+                            elif len(partial_calls) == 1:
+                                index = next(iter(partial_calls))
+                            else:
+                                raise ProviderError(502, "Tool-call fragment has no ID or index; cannot safely associate its arguments with a tool.", self.endpoint.provider)
+                        slot = partial_calls.setdefault(index, {"id": "", "name": "", "arguments": ""})
+                        if wire_index is not None:
+                            call_indexes[wire_index] = index
+                        if call_id:
+                            call_ids[call_id] = index
+                            slot["id"] = call_id
+                        if fragment.get("extra_content"):
+                            slot["extra_content"] = {**slot.get("extra_content", {}), **fragment["extra_content"]}
                         if function.get("name"):
-                            slot["name"] += str(function["name"])
+                            name = str(function["name"])
+                            if name != slot["name"]:
+                                slot["name"] += name
                         if function.get("arguments"):
                             slot["arguments"] += str(function["arguments"])
                     if choice.get("finish_reason"):
