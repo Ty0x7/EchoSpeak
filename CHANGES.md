@@ -6,7 +6,7 @@ User-facing notes: [EchoSpeak 10.4.3](docs/releases/v10.4.3.md).
 
 - Echo-branded Windows installer and uninstaller.
 - Native installer shortcut maintenance replaces repeated startup PowerShell repair.
-- Windows publisher verification covers the installer and installed executables before public publishing.
+- Optional Windows publisher verification covers the installer and installed executables; updater signatures remain required for publishing.
 - Public guides remove maintainer distribution recipes and correct voice setup instructions.
 - Windows warning guidance keeps protection enabled.
 

@@ -325,5 +325,5 @@ See [ROADMAP.md](ROADMAP.md).
 - Windows GUI-subsystem builds hide the host console. Native NSIS post-install hooks
   repair standard shortcuts with known installation targets; the host does not launch
   shortcut-repair shells. Permanent startup import failures stop bounded crash recovery.
-  Public distribution verifies Windows publisher signatures separately from updater
-  signatures.
+  Distribution always verifies updater signatures. Configured or explicitly required
+  Windows publisher signatures are verified separately.
