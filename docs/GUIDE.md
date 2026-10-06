@@ -211,15 +211,11 @@ production launch. They do not remove older independent installations. If a pack
 dependency is missing, the startup screen stops retrying and offers the complete
 installer; reinstalling preserves the application's separate runtime data folder.
 
-The **Windows release** GitHub workflow builds from a manual run or a `v10.*` tag.
-Configure the `windows-release` environment with `TAURI_SIGNING_PRIVATE_KEY` and
-`TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, using the existing updater key so installed
-copies can verify future updates. Optional `WINDOWS_SIGNING_PFX_BASE64` and
-`WINDOWS_SIGNING_PFX_PASSWORD` configure Windows publisher signing. Tagged builds
-upload a draft release for review; manual runs upload build artifacts. Configure
-these secrets before using the workflow. Local releases still use
-`apps/desktop/scripts/release-windows.ps1`; add `-SkipBuild -Publish` only after
-testing the built installer.
+Build Windows releases locally with `apps/desktop/scripts/release-windows.ps1`.
+Keep using the existing updater signing key so installed copies can verify future
+updates. The script builds and verifies the installer; add `-SkipBuild -Publish`
+after checking the built installer to publish the tagged GitHub release. Windows
+publisher signing is optional and configured separately from updater signing.
 
 To try native Gemini audio, save a Gemini key and select an accessible Live model.
 Turn **Live mic** on, then use the existing **Mic** or **Voice** control. Audio goes
