@@ -591,6 +591,11 @@ def run_web_search(
     providers = _provider_registry(config)
 
     order = resolve_provider_order(config)
+    if str(getattr(config, "web_search_provider", "auto") or "auto").strip().lower() == "auto":
+        # A provider failing right now is tried after the ones that work (agent/learning/reliability.py).
+        from agent.learning.reliability import provider_order
+
+        order = provider_order(order)
     variants = build_query_variants(normalized_query, max_variants=3)
     all_hits: List[SearchHit] = []
     all_errors: List[str] = []
@@ -603,15 +608,21 @@ def run_web_search(
             continue
         if pname in {"brave", "searxng", "tavily"} and not getattr(prov, "available", False):
             continue
+        answered = False
         for vq in variants:
             res = prov.search(vq, news=_is_newsish(vq))
             queries_used.extend(res.queries_used or [vq])
             all_errors.extend(res.errors or [])
+            # Worked: any hits, or a clean "nothing found". Failed: only errors came back.
+            answered = answered or bool(res.hits) or not res.errors
             if res.hits:
                 used_provider = used_provider or pname
                 all_hits.extend(res.hits)
             if len(_dedupe_hits(all_hits)) >= max_hits:
                 break
+        from agent.learning.reliability import record_search
+
+        record_search(pname, answered)
         if len(_dedupe_hits(all_hits)) >= max(4, max_hits // 2):
             # Good enough — stop cascading
             break

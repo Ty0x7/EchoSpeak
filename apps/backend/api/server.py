@@ -51,6 +51,7 @@ from api.routes import (
     chat,
     gateway,
     lean,
+    learning,
     media,
     media_runtime,
     memory,
@@ -228,15 +229,26 @@ async def lifespan(app: FastAPI):
                 logger.warning("Research retention cleanup failed; will retry")
             await asyncio.sleep(3600)
 
+    async def learning_worker():
+        # Reflections on finished work (agent/learning/reflector.py). Each tick skips
+        # while a chat is running, so the model is never shared with a reply.
+        from agent.learning import worker_tick
+        await asyncio.sleep(90)
+        while True:
+            await asyncio.to_thread(worker_tick)
+            await asyncio.sleep(120)
+
     research_cleanup = asyncio.create_task(prune_research())
+    learning_task = asyncio.create_task(learning_worker())
     try:
         yield
     finally:
-        research_cleanup.cancel()
-        try:
-            await research_cleanup
-        except asyncio.CancelledError:
-            pass
+        for task in (research_cleanup, learning_task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
     try:
         from agent.lean.terminal import stop_all_processes
 
@@ -313,7 +325,7 @@ app = FastAPI(
 
 from api.routes import creations, onboarding, live_voice
 
-for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, media, media_runtime, creations, onboarding, live_voice):
+for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, learning, media, media_runtime, creations, onboarding, live_voice):
     app.include_router(_routes.router)
 # Ensure domain ToolRegistry entries load independently of agent import order.
 for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):
