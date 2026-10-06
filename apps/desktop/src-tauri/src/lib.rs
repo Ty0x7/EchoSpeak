@@ -222,47 +222,6 @@ pub fn run() {
                 .unwrap_or(app.path().app_log_dir()?);
             let state = DesktopState::new(data_dir, log_dir).map_err(std::io::Error::other)?;
             app.manage(state.clone());
-            #[cfg(windows)]
-            if !cfg!(debug_assertions) {
-                let repair_app = app.handle().clone();
-                tauri::async_runtime::spawn_blocking(move || {
-                    use std::os::windows::process::CommandExt;
-                    if let (Ok(exe), Ok(resources)) =
-                        (std::env::current_exe(), repair_app.path().resource_dir())
-                    {
-                        let script = resources.join("repair-shortcuts.ps1");
-                        if script.is_file() {
-                            let powershell = std::path::PathBuf::from(
-                                std::env::var_os("SystemRoot")
-                                    .unwrap_or_else(|| "C:\\Windows".into()),
-                            )
-                            .join("System32\\WindowsPowerShell\\v1.0\\powershell.exe");
-                            let result = std::process::Command::new(powershell)
-                                .args([
-                                    "-NoProfile",
-                                    "-NonInteractive",
-                                    "-WindowStyle",
-                                    "Hidden",
-                                    "-ExecutionPolicy",
-                                    "Bypass",
-                                    "-File",
-                                ])
-                                .arg(script)
-                                .arg("-ExecutablePath")
-                                .arg(exe)
-                                .creation_flags(0x0800_0000)
-                                .output();
-                            match result {
-                                Err(error) => log::warn!("Shortcut repair could not run: {error}"),
-                                Ok(output) if !output.status.success() => {
-                                    log::warn!("Shortcut repair exited with {}", output.status)
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                });
-            }
             if let Err(error) = backend::launch_backend(app.handle().clone(), state.clone()) {
                 log::error!("Initial desktop backend launch failed: {error}");
                 backend::recover_from_launch_failure(app.handle().clone(), state, error);

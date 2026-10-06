@@ -28,7 +28,7 @@ const SECTIONS: Section[] = [
         <p>Three steps and you're chatting.</p>
         <Steps
           items={[
-            <><strong>Download and install.</strong> Run the installer. Windows may show “Windows protected your PC” because the app is new: click <em>More info</em> → <em>Run anyway</em>.</>,
+            <><strong>Download and install.</strong> Download from the official releases. If Windows reports a threat or blocks the app, stop and check Windows Security’s Protection history. Report the app version and warning through GitHub issues; keep Windows protection enabled.</>,
             <><strong>Pick a brain (a model).</strong> Free and private: install <a href="https://lmstudio.ai" target="_blank" rel="noreferrer">LM Studio</a>, download <em>Gemma 4 E4B</em> (great on an 8 GB graphics card) and start its server. Or paste an OpenAI or Gemini key instead. The first-launch setup guides you through choosing a model, search and optional tools. You can reopen it from <em>Settings › General › Setup</em>.</>,
             <><strong>Say hi.</strong> Type in the box at the bottom, or turn on <em>Wake</em> and say “Hey Echo”.</>,
           ]}

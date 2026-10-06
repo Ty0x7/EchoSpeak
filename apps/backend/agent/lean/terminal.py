@@ -516,7 +516,7 @@ def _host_shell() -> list[str]:
     pwsh = shutil.which("pwsh")
     if os.name == "nt":
         exe = pwsh or "powershell.exe"
-        return [exe, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]
+        return [exe, "-NoProfile", "-NonInteractive", "-Command"]
     return [shutil.which("bash") or "/bin/sh", "-lc"]
 
 

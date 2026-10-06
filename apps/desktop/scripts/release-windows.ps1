@@ -42,9 +42,13 @@ if (-not $NotesPath) { $NotesPath = Join-Path $RepoRoot "docs\releases\$Tag.md" 
 if (-not (Test-Path -LiteralPath $NotesPath)) { throw "Release notes not found: $NotesPath" }
 
 $BundleRoot = Join-Path $DesktopRoot "src-tauri\target\release\bundle"
+if ($Publish) { $RequirePublisherSignature = $true }
 $publisherConfigured = [bool]($env:ECHOSPEAK_SIGN_CERT_SHA1 -or $env:ECHOSPEAK_SIGN_SCRIPT)
 if ($RequirePublisherSignature -and -not $publisherConfigured -and -not $SkipBuild) {
     throw "Configure ECHOSPEAK_SIGN_CERT_SHA1 or ECHOSPEAK_SIGN_SCRIPT before building a publisher-signed release."
+}
+if (-not $publisherConfigured -and -not $RequirePublisherSignature) {
+    Write-Warning "This build has no Windows publisher signature. The updater key does not establish a Windows publisher. Publishing requires verified publisher signatures."
 }
 if (-not $SkipBuild) {
     $env:TAURI_SIGNING_PRIVATE_KEY = $KeyPath
@@ -56,7 +60,7 @@ if (-not $SkipBuild) {
     $bundleConfig = @{ createUpdaterArtifacts = $true }
     if ($publisherConfigured) {
         $signer = Join-Path $PSScriptRoot "sign-windows.ps1"
-        $bundleConfig.windows = @{ signCommand = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$signer`" -FilePath `"%1`"" }
+        $bundleConfig.windows = @{ signCommand = "powershell.exe -NoProfile -NonInteractive -File `"$signer`" -FilePath `"%1`"" }
     }
     [IO.File]::WriteAllText($overlay, (@{ bundle = $bundleConfig } | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
     try {
@@ -82,6 +86,15 @@ foreach ($file in @($Setup, $Msi)) {
 }
 if (-not $publisherConfigured -and -not $RequirePublisherSignature) {
     Write-Host "Updater signatures are present. Windows publisher signatures are not required by this run; use -RequirePublisherSignature to enforce them."
+}
+
+if ($publisherConfigured -or $RequirePublisherSignature) {
+    foreach ($executable in @(
+        (Join-Path $DesktopRoot "src-tauri\target\release\echospeak-desktop.exe"),
+        (Join-Path $DesktopRoot "src-tauri\backend-dist\echospeak-backend.exe")
+    )) {
+        & (Join-Path $PSScriptRoot "sign-windows.ps1") -FilePath $executable -VerifyOnly
+    }
 }
 
 $OutDir = Join-Path $RepoRoot "release\$Tag"

@@ -18,7 +18,11 @@ inside, see [ARCHITECTURE.md](ARCHITECTURE.md). For what's next, see
    your first chat only after setup finishes; it does not send a greeting for you.
 3. A new-release notice appears above **Settings** in the desktop sidebar. Click it
    to open **Settings › About › Update** and install the update.
-   The app only installs releases signed with the project's key.
+   Updates are checked before installation.
+4. If Windows flags a download or installed file as a threat, stop and check
+   **Windows Security › Protection history**. Report the threat name and app version
+   through [GitHub issues](https://github.com/Ty0x7/EchoSpeak/issues), without keys or
+   personal logs. Keep Windows protection enabled.
 
 ### From source (Windows, macOS, Linux)
 
@@ -40,8 +44,6 @@ npm run dev                        # http://localhost:5174/app
 
 On Arch or CachyOS (PEP 668), install with `./.venv/bin/python -m pip install -r requirements.txt`.
 `scripts/install.sh` does the same steps and writes a `start` script.
-
-To build the Windows installer yourself: `powershell -File apps/desktop/scripts/build-windows.ps1 -PythonExecutable <python 3.12>`.
 
 ## 2. Pick a model
 
@@ -172,20 +174,12 @@ Everything lives in one data folder:
 - Windows app: `%LOCALAPPDATA%\ai.echospeak.desktop\runtime`
 - From source: `apps/backend/data` (override with `ECHOSPEAK_DATA_DIR`)
 
-It holds settings (`settings.json`, secrets in `settings.secrets.json`), chats (`phase3/state.db`),
-memory, agents, group chats, projects, routines, voice models and the soul. Back it up by copying
-the folder while EchoSpeak is closed. The soul (Echo's personality) is editable in
-**Settings › Personality**.
+It holds your settings, chats, memories, agents, projects, routines and downloaded
+models. Back it up by copying the folder while EchoSpeak is closed. Treat that backup
+as private: it can contain account credentials and personal conversations.
+Echo's personality is editable in **Settings › Personality**.
 
-## 9. Remote access
-
-The API only answers this PC by default, and refuses to listen on a network address
-unless a key is set. To reach it from another device, set `API_AUTH_ENABLED=true` and
-`API_AUTH_KEY=<long random key>` in `apps/backend/.env`, then send the key as
-`X-EchoSpeak-Key: <key>` or `Authorization: Bearer <key>`. Requests from other machines
-always need the key. Don't expose the port to the internet even then; use a VPN or tunnel.
-
-## 10. Troubleshooting
+## 9. Troubleshooting
 
 | Problem | Try |
 | --- | --- |
@@ -193,7 +187,7 @@ always need the key. Don't expose the port to the internet even then; use a VPN 
 | Replies are slow at first | The first message loads the model; later ones are faster. |
 | Commands fail in the sandbox | Start Docker Desktop, or switch **Terminal** to **This PC**. |
 | Voice says unavailable | Download a Whisper model in **Settings › Voice**. |
-| Something looks wrong | The doctor report (`GET /doctor` on the backend) lists what's misconfigured. Desktop logs are in the app log folder (`backend.log`). |
+| Something looks wrong | Check the status in Settings. If desktop startup fails, use **Open logs** on its recovery screen; review logs for personal data before sharing. |
 
 ## Research, native Live audio and local creations
 
@@ -209,7 +203,7 @@ returning to chat restores the panel you had open.
 Open **Research & activity** in a chat, then **Research**, to see that chat's sources,
 page passages and working notes. Search-result snippets are marked separately from
 pages Echo actually read. The notebook keeps working evidence for seven days, apart
-from permanent personal memory. Expired rows are removed on reads, startup and hourly.
+from permanent personal memory. Expired working evidence is cleaned up automatically.
 
 Click a retained citation in an answer to open its source passage in that same panel.
 **Edit working notes** lets you record findings, open questions and conflicts; **Export
@@ -220,7 +214,7 @@ and personal memory; it is only retained beyond the notebook's expiry when you c
 to save it to a project or export it.
 
 Browser refreshes and brief connection drops reattach to an existing chat run without
-submitting the prompt twice. A two-day local transport log retains output for replay.
+submitting the prompt twice.
 **Stop** still stops that exact chat. Restarting the backend preserves partial output
 and marks the run interrupted; it does not automatically repeat tools or resume a
 chat request after a backend process restart.
@@ -234,31 +228,25 @@ and ComfyUI jobs with saved provider IDs reconnect without a new submission. If
 automatic recovery fails, use **Reconnect to existing job**. A timed-out synchronous
 image request without a remote ID cannot be safely retried automatically.
 
-Windows builds repair recognized EchoSpeak shortcuts after installation and at
-production launch. They do not remove older independent installations. If a packaged
-dependency is missing, the startup screen stops retrying and offers the complete
-installer; reinstalling preserves the application's separate runtime data folder.
-
-Build Windows releases locally with `apps/desktop/scripts/release-windows.ps1`.
-Keep using the existing updater signing key so installed copies can verify future
-updates. The script builds and verifies the installer; add `-SkipBuild -Publish`
-after checking the built installer to publish the tagged GitHub release. Windows
-publisher signing is optional and configured separately from updater signing.
+Windows installation repairs standard EchoSpeak shortcuts that point to recognized
+installation paths. The app does not rewrite shortcuts each time it starts. For a pin
+that still points to an independent older copy, unpin it and pin the current app from
+Windows search. Reinstalling preserves the application's separate runtime data folder.
 
 To try native Gemini audio, save a Gemini key and select an accessible Live model.
-Turn **Live mic** on, then use the existing **Mic** or **Voice** control. Audio goes
+Choose **Voice** to open the voice conversation. Audio goes
 to Google and API charges may apply. Gemini's PCM reply plays in the chat; **Read**
 can also enable native playback for typed Live requests. In Voice mode the microphone
 can listen while the reply plays; speaking interrupts playback. Live sessions attempt
 bounded resumption without replaying completed tool actions. Generated tools still
 go through EchoSpeak's normal permissions and approvals. Native mic currently supports
-direct chats. Turn Live mic off to use the existing transcription path, including
+direct chats. Use dictation or a standard chat model for the transcription path, including
 local Whisper when configured.
 
 In **Creations › generation settings**, select the NVIDIA GPU for managed Windows
 setup. Setup checks the driver/runtime combination, available disk space and CUDA
 execution before downloading model weights. Failed or cancelled downloads retain
-verified-manifest partial files and resume on retry; completed files must pass SHA-256.
+partial files and resume on retry; completed downloads are verified before use.
 Server and workflow checks are distinct from a real render: after enabling generation,
 use **Test local generation** from an existing chat to submit a small real creation.
 The test uses the managed starter model and appears in Creations. Hardware beyond the

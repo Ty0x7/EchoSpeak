@@ -89,23 +89,25 @@ For cloud chat, Settings loads the provider's available model catalog and separa
 
 These are starting prompts, not pre-recorded results. Available tools, model support and your settings determine what Echo can do.
 
-## What's new in 10.4.2
+## What's new in 10.4.3
 
-The current source includes the 10.4.2 chat and voice polish. The download button always points to the latest **published** release.
+The current source includes 10.4.3 installation and documentation improvements, alongside the 10.4.2 chat and voice polish. The download button always points to the latest **published** release.
 
+- **Windows installation:** Echo-branded installer and uninstaller, with native shortcut maintenance during installation.
+- **Clearer guides:** everyday setup and use, with maintainer distribution instructions removed.
 - **Message actions:** copy prompts and replies, read replies aloud, and edit or retry a prompt while keeping the original conversation.
 - **Full voice view:** the new Echo avatar fills the conversation area, with a compact transcript below and shared companion appearance settings.
 - **Cleaner controls:** a compact model/voice toolbar, clearer approvals, and thinking controls that follow model and adapter support.
 - **Better saved work:** artifact version selection and editing through chat, plus topic-based titles for new conversations.
 - **Visible updates:** an available-update notice above Settings and a separate sidebar collapse control.
 
-[10.4.2 release notes](docs/releases/v10.4.2.md) · [10.4.1 cloud fixes](docs/releases/v10.4.1.md) · [10.4.0 reliability update](docs/releases/v10.4.0.md) · [10.x history](docs/releases/10.x-history.md)
+[10.4.3 release notes](docs/releases/v10.4.3.md) · [10.4.2 release notes](docs/releases/v10.4.2.md) · [10.4.1 cloud fixes](docs/releases/v10.4.1.md) · [10.4.0 reliability update](docs/releases/v10.4.0.md) · [10.x history](docs/releases/10.x-history.md)
 
 ## Your data and your choices
 
 EchoSpeak stores chats, memories, project information and saved creations on your machine. **Local-first does not mean every feature is offline:** cloud models receive the conversation context they need, online search makes network requests, and cloud generation sends the approved prompt and any selected references to its provider.
 
-Review tool permissions and approval requests before allowing changes or uploads. Docker can provide an isolated terminal environment when available; check the selected terminal mode before running commands. Download releases from this repository and keep the app updated. Official in-app updates use updater signatures; a Windows publisher signature is a separate part of release signing.
+Review tool permissions and approval requests before allowing changes or uploads. Docker can provide an isolated terminal environment when available; check the selected terminal mode before running commands. Download releases from this repository and keep the app updated. If Windows reports a threat, stop and report the warning through GitHub issues. Keep Windows protection enabled.
 
 Never paste API keys into an issue, chat screenshot or public document. Configure them in Settings. Provider access, API billing and local GPU compatibility depend on the services and hardware you choose.
 
