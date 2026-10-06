@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/readme/title.svg" alt="EchoSpeak" width="410" height="96" />
+  <img src="assets/readme/title.svg" alt="EchoSpeak" width="310" height="96" />
 </p>
 
 EchoSpeak connects a language model to the context, tools and execution controls needed to work on real tasks. Research a question, build in a project, create media or talk with Echo, while keeping the conversation and its results together.
