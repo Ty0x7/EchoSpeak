@@ -324,5 +324,6 @@ See [ROADMAP.md](ROADMAP.md).
   access. Completion precedes first-chat creation; no request is automatically sent.
 - Windows GUI-subsystem builds hide the host console. NSIS post-install hooks and a
   hidden production-launch helper repair recognized shortcuts while preserving newer
-  targets. Permanent startup import failures stop bounded crash recovery. CI builds
-  verified installer artifacts and draft releases using the existing updater key.
+  targets. Permanent startup import failures stop bounded crash recovery. The local
+  release script builds verified installer artifacts and publishes tagged GitHub
+  releases using the existing updater key.

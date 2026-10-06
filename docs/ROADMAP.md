@@ -20,7 +20,8 @@ Added in 10.4.0: replayable chat transport, polling recovery for submitted creat
 jobs, passage-linked citations, editable/exportable research notes, explicit project
 findings and briefs, reference-image editing with lineage, runtime-managed starter
 model downloads, a redesigned setup that opens the first chat after completion,
-Windows shortcut repair, packaged-import safeguards and a Windows release workflow.
+Windows shortcut repair and packaged-import safeguards. Windows releases use the
+local release script and tagged GitHub releases.
 
 Focused automated checks use fake provider sockets and disposable state. Actual
 provider keys/billing, microphones, GPU rendering, a publisher certificate, clean
@@ -43,10 +44,9 @@ installation and upgrading still require real-machine validation before release.
 
 ## Next
 
-1. **Configure and validate Windows release automation.** The workflow is implemented;
-   supply the existing updater key in the `windows-release` environment, optionally
-   configure Authenticode, and validate clean installation/upgrading before publishing
-   its draft release. **S**
+1. **Validate Windows release distribution.** Use the local release script with the
+   existing updater key, optionally configure Authenticode, and validate clean
+   installation/upgrading before publishing the tagged release. **S**
 2. **Run the evaluation before every release.** `apps/backend/scripts/eval_gemma.py` needs a
    live model; run it from the release script or a self-hosted runner and block on regressions. **S**
 3. **Approvals page on the lean approvals.** The Approvals tab still reads the old approval
