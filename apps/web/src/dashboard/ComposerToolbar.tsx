@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { fallbackProviders } from "../app/runtime";
+import { cloudProviders, fallbackProviders } from "../app/runtime";
 import type { ProviderInfo } from "../app/types";
 import { ActionIcon } from "./MessageActions";
 
@@ -12,7 +12,7 @@ type ComposerToolbarProps = {
   providerDraft: ProviderDraft; setProviderDraft: React.Dispatch<React.SetStateAction<ProviderDraft>>;
   setProviderModels(models: string[]): void; switchingProvider: boolean; lmStudioOnly: boolean;
   providerInfo: ProviderInfo | null; modelPickerValue: string; modelPickerOptions: string[];
-  showModelPicker: boolean; reasoningEffort: ReasoningEffort; setReasoningEffort(value: ReasoningEffort): void;
+  showModelPicker: boolean; modelsLoading?: boolean; reasoningEffort: ReasoningEffort; setReasoningEffort(value: ReasoningEffort): void;
   thinkingEnabled: boolean; setThinkingEnabled(value: boolean): void;
   voiceReadAloud: boolean; toggleReadAloud(): void; voiceConversationMode: boolean; toggleVoiceMode(): void;
   wakeWordEnabled: boolean; toggleWakeWord(): void;
@@ -30,15 +30,24 @@ export function ComposerToolbar(p: ComposerToolbarProps) {
     window.addEventListener("pointerdown", outside); window.addEventListener("keydown", escape);
     return () => { window.removeEventListener("pointerdown", outside); window.removeEventListener("keydown", escape); };
   }, [open]);
-  const providers = p.providerInfo?.available_providers?.length ? p.providerInfo.available_providers : fallbackProviders;
+  const catalog = p.providerInfo?.available_providers?.length ? p.providerInfo.available_providers : fallbackProviders;
+  // llama.cpp has no chat endpoint in the agent runtime; only show it if a chat is already set to it.
+  const providers = catalog.filter(provider => provider.id !== "llama_cpp" || provider.id === p.providerDraft.provider);
+  const localProviders = providers.filter(provider => provider.local);
+  const onlineProviders = providers.filter(provider => !provider.local);
+  const isCloud = cloudProviders.includes(p.providerDraft.provider);
+  const modelPlaceholder = p.modelsLoading ? "Loading models…" : isCloud ? "Add an API key in Settings" : "No models found";
   return <div className="composer-tools-shell">
     <div className="composer-tools" role="group" aria-label="Chat controls">
       <div className="composer-model-strip">
         <select className="composer-provider" aria-label="AI provider" value={p.providerDraft.provider} disabled={p.switchingProvider || p.lmStudioOnly} onChange={e => {
           p.setProviderDraft(old => ({ ...old, provider: e.target.value, model: "" })); p.setProviderModels([]);
-        }}>{providers.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</select>
-        {p.showModelPicker ? <select className="composer-model" aria-label="Model" value={p.modelPickerValue} disabled={p.switchingProvider} onChange={e => p.setProviderDraft(old => ({ ...old, model: e.target.value }))}>
-          {p.modelPickerOptions.map(model => <option key={model} value={model}>{model}</option>)}
+        }}>
+          {localProviders.length ? <optgroup label="On this PC">{localProviders.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</optgroup> : null}
+          {onlineProviders.length ? <optgroup label="Cloud">{onlineProviders.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</optgroup> : null}
+        </select>
+        {p.showModelPicker || p.modelsLoading ? <select className="composer-model" aria-label="Model" value={p.modelPickerOptions.length ? p.modelPickerValue : ""} disabled={p.switchingProvider || !p.modelPickerOptions.length} title={p.modelPickerValue || modelPlaceholder} onChange={e => p.setProviderDraft(old => ({ ...old, model: e.target.value }))}>
+          {p.modelPickerOptions.length ? p.modelPickerOptions.map(model => <option key={model} value={model}>{model}</option>) : <option value="">{modelPlaceholder}</option>}
         </select> : <span className="composer-model-name" title={p.providerInfo?.model}>{p.providerInfo?.model || "Choose a model in Settings"}</span>}
       </div>
       <div className="composer-tool-buttons">

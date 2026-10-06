@@ -232,3 +232,23 @@ def test_new_provider_secrets_are_redacted_and_not_inherited(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "private-claude-test-key")
     monkeypatch.setenv("XAI_API_KEY", "private-grok-test-key")
     assert "ANTHROPIC_API_KEY" not in child_env() and "XAI_API_KEY" not in child_env()
+
+
+def test_model_lists_report_the_saved_model_so_pickers_restore_it(monkeypatch):
+    """Switching providers in the composer restores that provider's saved model, even
+    when its catalog is empty (no key yet) or unreachable."""
+    from api.routes import settings as routes
+
+    monkeypatch.setattr(routes, "_is_lmstudio_only_enabled", lambda: False)
+    monkeypatch.setattr(routes, "list_cloud_models", lambda provider: {"provider": provider, "models": [], "reachable": False})
+    monkeypatch.setattr(config.openai, "model", "gpt-4o-mini", raising=False)
+    cloud_out = asyncio.run(routes.list_provider_models(provider="openai"))
+    assert cloud_out["saved_model"] == "gpt-4o-mini" and cloud_out["models"] == []
+
+    import agent.model_runtime as runtime
+    monkeypatch.setattr(runtime, "list_local_models", lambda provider, base, timeout=4.0: ["qwen/qwen3.5-9b"])
+    monkeypatch.setattr(config.local, "provider", ModelProvider.LM_STUDIO, raising=False)
+    monkeypatch.setattr(config.local, "model_name", "google/gemma-4-e4b", raising=False)
+    assert asyncio.run(routes.list_provider_models(provider="lmstudio"))["saved_model"] == "google/gemma-4-e4b"
+    # Another local app than the configured one has no saved model of its own.
+    assert asyncio.run(routes.list_provider_models(provider="ollama"))["saved_model"] == ""

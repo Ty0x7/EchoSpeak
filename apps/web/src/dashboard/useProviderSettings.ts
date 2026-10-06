@@ -27,6 +27,8 @@ export function useProviderSettings({
   const lmStudioOnly = useMemo(() => isLmStudioOnlyLocked(providerInfo), [providerInfo]);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [switchingProvider, setSwitchingProvider] = useState(false);
+  // The picker says "Loading models…" instead of showing an empty list while a catalog loads.
+  const [modelsLoading, setModelsLoading] = useState(false);
   const [backendOnline, setBackendOnline] = useState<boolean | null>(null);
 
   const lastAppliedProviderRef = useRef<{ provider: string; model: string } | null>(null);
@@ -84,8 +86,10 @@ export function useProviderSettings({
 
   const modelsRequestRef = useRef(0);
   const modelsProviderRef = useRef("");
+  const savedModelRef = useRef<{ provider: string; model: string }>({ provider: "", model: "" });
   const refreshProviderModels = async (provider: string) => {
     const request = ++modelsRequestRef.current;
+    setModelsLoading(true);
     try {
       const resp = await fetchWithTimeout(`${apiBase}/provider/models?provider=${encodeURIComponent(provider)}`, undefined, 30000);
       if (!resp.ok) throw new Error(`Could not load models (HTTP ${resp.status})`);
@@ -93,6 +97,7 @@ export function useProviderSettings({
       if (modelsRequestRef.current !== request) return;
       const models = Array.isArray(data.models) ? data.models : [];
       modelsProviderRef.current = provider;
+      savedModelRef.current = { provider, model: String(data.saved_model || "") };
       setProviderModels(models);
       if (cloudProviders.includes(provider)) setProviderError(data.reachable ? null : data.message || "Save an API key in Settings → Models, then refresh.");
       if (!models.length && listableProviders.includes(provider)) {
@@ -104,6 +109,7 @@ export function useProviderSettings({
     } catch (err) {
       if (modelsRequestRef.current === request) { setProviderModels([]); setProviderError(err instanceof Error ? err.message : String(err)); }
     } finally {
+      if (modelsRequestRef.current === request) setModelsLoading(false);
     }
   };
 
@@ -160,11 +166,13 @@ export function useProviderSettings({
   }, [providerDraft.provider, backendOnline]);
 
   useEffect(() => {
-    // Keep custom IDs and saved choices, even if the catalog omits them.
-    if (modelsProviderRef.current === providerDraft.provider && providerModels.length && !providerDraft.model) {
-      setProviderDraft((d) => ({ ...d, model: providerModels[0] }));
-    }
-  }, [providerModels, providerDraft.provider, providerDraft.model]);
+    // Switching providers restores that provider's saved model (kept even when the catalog
+    // omits it or can't be reached); only with nothing saved does the first catalog model apply.
+    if (modelsProviderRef.current !== providerDraft.provider || providerDraft.model || modelsLoading) return;
+    const saved = savedModelRef.current.provider === providerDraft.provider ? savedModelRef.current.model : "";
+    const pick = saved || providerModels[0] || "";
+    if (pick) setProviderDraft((d) => ({ ...d, model: pick }));
+  }, [providerModels, providerDraft.provider, providerDraft.model, modelsLoading]);
 
   useEffect(() => {
     if (lmStudioOnly) return;
@@ -200,6 +208,6 @@ export function useProviderSettings({
     providerInfo, providerModels, setProviderModels, providerDraft, setProviderDraft, providerError, setProviderError,
     switchingProvider, backendOnline, setBackendOnline, lmStudioOnly,
     refreshProviderInfo, applyProviderSwitch,
-    showModelPicker, modelPickerOptions, modelPickerValue,
+    showModelPicker, modelPickerOptions, modelPickerValue, modelsLoading,
   };
 }

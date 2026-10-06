@@ -161,6 +161,8 @@ export type ProviderModelsResponse = {
   models: string[];
   reachable?: boolean;
   message?: string;
+  /** The model saved for this provider in Settings. */
+  saved_model?: string;
 };
 
 export type MemoryItem = {
