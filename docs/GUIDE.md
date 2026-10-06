@@ -46,8 +46,9 @@ To build the Windows installer yourself: `powershell -File apps/desktop/scripts/
 
 Cloud providers have two separate checks in **Settings › Models**. **Check catalog**
 loads model IDs available to the key; it does not prove the selected model responds.
-**Test response** sends a small, explicit request through the same adapter as chat
-and may incur an API charge. Authentication, billing, quota, permissions and model
+**Test response** checks a small reply and a harmless two-tool round-trip through
+the same adapter as chat. It never runs file, terminal, media or external tools.
+The test requests may incur an API charge. Authentication, billing, quota, permissions and model
 compatibility errors need different fixes; follow the displayed provider message.
 Use an exact API model ID rather than a display name. Specialized image/video models
 belong in Creations.

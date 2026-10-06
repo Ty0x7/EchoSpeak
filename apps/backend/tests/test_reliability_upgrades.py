@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from agent import cloud_providers as cloud
-from agent.lean.provider import ChatClient, Endpoint, ModelTurn, ProviderError
+from agent.lean.provider import ChatClient, Endpoint, ModelTurn, ProviderError, ToolCall
 
 
 @pytest.mark.parametrize("status,detail,category", [
@@ -25,23 +25,44 @@ def test_cloud_error_remedies(status, detail, category):
     assert "HTTP" in cloud.provider_error("openai", status, detail)
 
 
-def test_selected_model_test_uses_chat_adapter_and_does_not_execute_tools(monkeypatch):
+@pytest.mark.parametrize("provider", cloud.CLOUD_PROVIDERS)
+def test_selected_model_test_uses_chat_adapter_and_only_synthetic_tools(monkeypatch, provider):
     seen = []
     class Client:
-        def __init__(self, endpoint):
+        def __init__(self, endpoint, **kwargs):
             seen.append(endpoint)
             self._http = SimpleNamespace(timeout=None)
+            self.calls = 0
         def stream_turn(self, messages, **kwargs):
-            assert "tools" not in kwargs
+            assert {t["function"]["name"] for t in kwargs["tools"]} == {"echospeak_check_alpha", "echospeak_check_beta"}
             assert kwargs["max_tokens"] == 512
+            self.calls += 1
+            if self.calls == 1:
+                return ModelTurn(tool_calls=[ToolCall("a", "echospeak_check_alpha", '{"token":"OK"}'), ToolCall("b", "echospeak_check_beta", '{"token":"OK"}')])
+            assert [m["tool_call_id"] for m in messages if m["role"] == "tool"] == ["a", "b"]
+            assert all(m["content"] == "OK" for m in messages if m["role"] == "tool")
             return ModelTurn(content="OK")
         def close(self):
             seen.append("closed")
     monkeypatch.setattr("agent.lean.provider.ChatClient", Client)
-    result = cloud.test_cloud_model("gemini", "gemini-custom", "test-key")
+    result = cloud.test_cloud_model(provider, "gemini-custom" if provider == "gemini" else "gpt-4o-mini" if provider == "openai" else "claude-test" if provider == "anthropic" else "grok-test", "test-key")
     assert result["ok"] and result["check"] == "generation"
-    assert seen[0].model == "gemini-custom" and seen[0].api_key == "test-key"
+    assert seen[0].provider == provider and seen[0].api_key == "test-key"
+    assert "harmless tool round-trip" in result["message"]
     assert seen[-1] == "closed"
+
+
+def test_plain_reply_does_not_claim_cloud_tools_are_ready(monkeypatch):
+    class Client:
+        def __init__(self, *args, **kwargs):
+            self._http = SimpleNamespace(timeout=None)
+        def stream_turn(self, *args, **kwargs):
+            return ModelTurn(content="OK")
+        def close(self):
+            pass
+    monkeypatch.setattr("agent.lean.provider.ChatClient", Client)
+    result = cloud.test_cloud_model("gemini", "gemini-custom", "test-key")
+    assert not result["ok"] and result["error_code"] == "tool_compatibility"
 
 
 def test_specialized_model_is_not_sent_to_chat(monkeypatch):

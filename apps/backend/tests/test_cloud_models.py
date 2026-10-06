@@ -97,7 +97,7 @@ def test_claude_native_stream_and_tool_history():
         client.close()
 
 
-def test_openai_reasoning_tokens_and_gemini_tool_signature():
+def test_openai_reasoning_tokens():
     def handle(request):
         body = json.loads(request.content)
         assert "max_tokens" not in body and body["max_completion_tokens"] > 0
@@ -108,11 +108,77 @@ def test_openai_reasoning_tokens_and_gemini_tool_signature():
         assert client.stream_turn([{"role": "user", "content": "hi"}], temperature=.1).content == "Hi"
     finally:
         client.close()
+
+
+def test_gemini_tool_signature():
     client = _http_client("gemini", [{"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "search", "arguments": "{}"}, "extra_content": {"google": {"thought_signature": "sig"}}}]}}]}])
     try:
         assert client.stream_turn([]).tool_calls[0].extra_content["google"]["thought_signature"] == "sig"
     finally:
         client.close()
+
+
+@pytest.mark.parametrize("provider", ["gemini", "openai", "xai"])
+def test_unindexed_parallel_calls_keep_ids_names_arguments_and_signatures(provider):
+    packets = [
+        {"choices": [{"delta": {"tool_calls": [
+            {"id": "call_alpha", "function": {"name": "memory_save", "arguments": '{"fact":"OK"}'}, "extra_content": {"google": {"thought_signature": "sig"}}},
+            {"id": "call_beta", "function": {"name": "sports_live", "arguments": '{"query":"OK"}'}},
+        ]}}]},
+        {"choices": [{"delta": {"tool_calls": [
+            {"id": "call_gamma", "function": {"name": "weather_live", "arguments": '{"location":"OK"}'}},
+        ]}, "finish_reason": "tool_calls"}]},
+    ]
+    client = _http_client(provider, packets)
+    try:
+        calls = client.stream_turn([{"role": "user", "content": "Check"}]).tool_calls
+        assert [(c.id, c.name, c.parsed_arguments()) for c in calls] == [
+            ("call_alpha", "memory_save", ({"fact": "OK"}, "")),
+            ("call_beta", "sports_live", ({"query": "OK"}, "")),
+            ("call_gamma", "weather_live", ({"location": "OK"}, "")),
+        ]
+        assert calls[0].extra_content["google"]["thought_signature"] == "sig"
+        assert calls[1].extra_content == {}
+    finally:
+        client.close()
+
+
+def test_indexed_interleaved_fragments_and_unindexed_id_continuation():
+    packets = [{"choices": [{"delta": {"tool_calls": calls}}]} for calls in [
+        [{"index": 0, "id": "a", "function": {"name": "web_", "arguments": '{"query":"'}},
+         {"index": 1, "id": "b", "function": {"name": "calculate", "arguments": '{"expression":"'}}],
+        [{"index": 1, "function": {"arguments": '1+1"}'}},
+         {"index": 0, "function": {"name": "search", "arguments": 'Echo'}}],
+        [{"id": "a", "function": {"name": "web_search", "arguments": '"}'}}],
+    ]]
+    client = _http_client("openai", packets)
+    try:
+        calls = client.stream_turn([]).tool_calls
+        assert [(c.id, c.name, c.parsed_arguments()[0]) for c in calls] == [
+            ("a", "web_search", {"query": "Echo"}),
+            ("b", "calculate", {"expression": "1+1"}),
+        ]
+    finally:
+        client.close()
+
+
+def test_ambiguous_tool_fragment_fails_before_tool_execution():
+    client = _http_client("gemini", [{"choices": [{"delta": {"tool_calls": [
+        {"id": "a", "function": {"name": "first", "arguments": "{"}},
+        {"id": "b", "function": {"name": "second", "arguments": "{"}},
+        {"function": {"arguments": "}"}},
+    ]}}]}])
+    try:
+        with pytest.raises(ProviderError, match="cannot safely associate"):
+            client.stream_turn([])
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize("model,expected", [("gemini-2.5-pro", "low"), ("gemini-2.5-flash", "none"), ("gemini-3.5-flash", "low")])
+def test_gemini_thinking_off_respects_models_that_require_thinking(model, expected):
+    from agent.lean.provider import reasoning_effort_for
+    assert reasoning_effort_for(Endpoint(cloud.BASE_URLS["gemini"], "test-key", model, "gemini", False), False, "medium") == expected
 
 
 def test_live_socket_is_kept_for_tool_result_then_closed(monkeypatch):
