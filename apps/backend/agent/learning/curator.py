@@ -22,6 +22,7 @@ from typing import Any
 from agent.lean.job import near_duplicate
 from agent.lean.policy import EXTERNAL_ACTIONS, contains_secret
 from agent.learning.store import ACTIVE_STATUSES, Episode, Lesson, get_experience_store
+from agent.stopwords import keywords
 
 MAX_PER_EPISODE = 2
 MAX_ACTIVE_PER_AGENT = 40
@@ -63,6 +64,19 @@ _EXTERNAL_WORDS = re.compile(
 )
 
 
+# Lessons must transfer: overly specific heuristics are why self-generated skills made agents
+# worse in SkillsBench (-1.3 pp, via the 2026 skills SoK). A named file is the clearest sign.
+_FILE_NAME = re.compile(r"(?i)\b[\w-]+\.(py|js|jsx|ts|tsx|mjs|json|csv|md|txt|html|css|rs|go|java|sh|ps1|ya?ml|toml|ini|log|xlsx?|docx?|pdf)\b")
+
+
+def same_lesson(a: str, b: str) -> bool:
+    """The same strategy, worded the same or paraphrased (ACE dedupes by meaning, not wording)."""
+    if near_duplicate(a, b, threshold=0.6):
+        return True
+    ka, kb = set(keywords(a, limit=40)), set(keywords(b, limit=40))
+    return len(ka) >= 4 and len(kb) >= 4 and len(ka & kb) / len(ka | kb) >= 0.6
+
+
 def vet(title: str, text: str) -> str:
     """Why a proposed lesson can't be kept, or ''."""
     if not TITLE_RANGE[0] <= len(title) <= TITLE_RANGE[1]:
@@ -76,6 +90,8 @@ def vet(title: str, text: str) -> str:
         return "contains a link"
     if _MARKUP.search(body):
         return "contains markup"
+    if _FILE_NAME.search(body):
+        return "too specific: names a file"
     if _INJECTION.search(body):
         return "reads like an injected instruction"
     match = _FORBIDDEN.search(body)
@@ -123,8 +139,7 @@ def admit(episode: Episode, proposals: list[dict[str, Any]]) -> dict[str, list[s
         if problem:
             out["refused"].append(problem)
             continue
-        twin = next((lesson for lesson in existing
-                     if near_duplicate(f"{lesson.title} {lesson.text}", f"{title} {text}", threshold=0.6)), None)
+        twin = next((lesson for lesson in existing if same_lesson(f"{lesson.title} {lesson.text}", f"{title} {text}")), None)
         if twin is not None:
             if episode.id not in twin.source_episodes:
                 before = Lesson.from_dict(twin.to_dict())

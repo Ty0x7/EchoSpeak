@@ -462,9 +462,9 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
         </Row>
         <Row label="Lessons per task" help="How many lessons an agent reads before it starts a task.">
           <Select
-            value={String(s.learning_playbook_size ?? 5)}
+            value={String(s.learning_playbook_size ?? 3)}
             onChange={(v) => save({ learning_playbook_size: Number(v) })}
-            options={[3, 5, 8].map((n) => ({ value: String(n), label: `${n} lessons` }))}
+            options={[1, 3, 5, 8].map((n) => ({ value: String(n), label: n === 1 ? "1 lesson" : `${n} lessons` }))}
           />
         </Row>
       </Group>

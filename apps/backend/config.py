@@ -931,8 +931,8 @@ class Config:
         self.learning_enabled = os.getenv("LEARNING_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
         # Background reflections per day, across all agents (each one is a model call).
         self.learning_reflection_daily_cap = int(os.getenv("LEARNING_REFLECTION_DAILY_CAP", "30") or 30)
-        # Lessons an agent reads before a task.
-        self.learning_playbook_size = int(os.getenv("LEARNING_PLAYBOOK_SIZE", "5") or 5)
+        # Lessons an agent reads before a task. Few and relevant beats many (ReasoningBank uses one).
+        self.learning_playbook_size = int(os.getenv("LEARNING_PLAYBOOK_SIZE", "3") or 3)
         # on (default) | off | control. "control" is for evaluation: learns nothing and shows
         # same-size unrelated notes instead of lessons, so gains can't come from prompt length.
         self.learning_mode = os.getenv("LEARNING_MODE", "on").strip().lower() or "on"

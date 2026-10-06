@@ -58,7 +58,9 @@ CONTROL_NOTES = [
 def _score(lesson: Lesson, words: set[str], kind: str) -> float:
     overlap = len(words & set(keywords(f"{lesson.title} {lesson.text}", limit=40)))
     kind_match = bool(lesson.task_kind and lesson.task_kind == kind)
-    if not overlap and not kind_match:
+    # A loosely related lesson costs more than it helps: negative transfer hits hard tasks
+    # hardest (arXiv 2604.27003). Same kind of task and a shared word, or two shared words.
+    if overlap < (1 if kind_match else 2):
         return 0.0
     decided = lesson.wins + lesson.losses
     utility = (lesson.wins - lesson.losses) / decided if decided else 0.0

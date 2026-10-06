@@ -31,9 +31,9 @@ harness study (ReasoningBank, ACE, CoMem, the Verification Horizon, MINJA/A-MemG
       checks unless negated ("don't skip the tests").
     - Sends lessons to `pending_review` when they come from tainted or tampered episodes or mention external
       actions.
-    - Merges near-duplicates. Caps 40 active and 20 pending per agent.
+    - Refuses lessons that name a specific file (they don't transfer). Merges near-duplicates and paraphrases (keyword overlap). Caps 40 active and 20 pending per agent.
   - `playbook.py`: selection and lifecycle.
-    - Up to `learning_playbook_size` (default 5) lessons by keyword and task-kind relevance; established first,
+    - Up to `learning_playbook_size` (default 3) lessons by keyword and task-kind relevance (a shared word and the same task kind, or two shared words); established first,
       at most 2 probation. Rendered as an advisory prompt section.
     - Attribution counts wins (V2+ or owner confirmed) and losses, and feedback corrects them without double
       counting.
@@ -58,7 +58,7 @@ harness study (ReasoningBank, ACE, CoMem, the Verification Horizon, MINJA/A-MemG
   - `POST /lean/learning/agents/{id}/pause`, `POST /lean/learning/reflect`.
 
   The server lifespan runs the learning worker every 120 s.
-- **Settings:** `learning_enabled` (default on), `learning_reflection_daily_cap` (30), `learning_playbook_size` (5)
+- **Settings:** `learning_enabled` (default on), `learning_reflection_daily_cap` (30), `learning_playbook_size` (3)
   and `learning_mode` (`on` / `off` / `control`).
 - **Web:** Worked / Didn't work with an optional note under replies (`MessageActions.tsx`, vote remembered per
   device). Learning sidebar page (`lean/LearningPage.tsx`, `lean/learning.css`). Settings › General › Learning

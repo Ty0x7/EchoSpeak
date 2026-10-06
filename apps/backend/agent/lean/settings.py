@@ -126,6 +126,6 @@ def reflection_daily_cap() -> int:
 def playbook_size() -> int:
     """Lessons an agent reads before a task."""
     try:
-        return max(0, min(int(_setting("learning_playbook_size", 5)), 8))
+        return max(0, min(int(_setting("learning_playbook_size", 3)), 8))
     except (TypeError, ValueError):
-        return 5
+        return 3

@@ -335,6 +335,23 @@ def test_the_curator_refuses_unsafe_lessons(store, title, text, why):
     assert store.lessons() == []
 
 
+def test_lessons_must_transfer_and_paraphrases_merge(store):
+    specific = curator.admit(_episode(), [{"title": "Fix calc", "text": "In calc.py, change the minus in add() to a plus and rerun it."}])
+    assert specific["refused"] == ["too specific: names a file"]
+    first = curator.admit(_episode(), [{"title": "Run what you write",
+                                        "text": "After writing a script, run it once and read the output before saying it works."}])
+    reworded = curator.admit(_episode(), [{"title": "Run scripts you write",
+                                           "text": "Before saying a script works, run it once after writing and read its output."}])
+    assert reworded["merged"] == first["created"] and len(store.lessons()) == 1
+
+
+def test_loosely_related_lessons_stay_out_of_the_prompt(store):
+    _lesson(store, "Check the folder", "List the project folder before running a command.", "established", task_kind="coding")
+    # One shared word with a different kind of task is not enough.
+    assert playbook.select("echo", "what's the weather in the project city?", 3) == []
+    assert [l.title for l in playbook.select("echo", "run a command in the project folder", 3)] == ["Check the folder"]
+
+
 def test_the_curator_keeps_lessons_that_protect_checks(store):
     good = "Don't skip the tests after a change: run them, and report a failure plainly instead of hiding it."
     result = curator.admit(_episode(), [{"title": "Never skip the tests", "text": good, "kind": "do"}])
