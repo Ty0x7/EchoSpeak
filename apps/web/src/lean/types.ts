@@ -108,3 +108,93 @@ export type LeanApproval = {
   summary: string;
   reason: string;
 };
+
+/** Learning from verified experience (backend agent/learning). */
+export type LessonStatus = "pending_review" | "probation" | "established" | "retired" | "quarantined";
+
+export type LearningLesson = {
+  id: string;
+  agent_id: string;
+  agent_name?: string;
+  title: string;
+  text: string;
+  status: LessonStatus;
+  kind: "do" | "avoid";
+  task_kind: string;
+  trusted: boolean;
+  origin: string;
+  source_episodes: string[];
+  level: number;
+  uses: number;
+  wins: number;
+  losses: number;
+  last_used_at: number;
+  created_at: number;
+  updated_at: number;
+  edited: boolean;
+  note: string;
+};
+
+export type LearningEvent = {
+  id: number;
+  lesson_id: string;
+  at: number;
+  actor: string;
+  action: string;
+  reason: string;
+  before: Partial<LearningLesson> | null;
+  after: Partial<LearningLesson> | null;
+};
+
+export type LearningEpisode = {
+  id: string;
+  created_at: number;
+  agent_id: string;
+  agent_name: string;
+  goal: string;
+  outcome: "success" | "failure" | "stopped" | "answered" | "error";
+  level: number;
+  reasons: string[];
+  trusted: boolean;
+  feedback: number;
+  feedback_note: string;
+  summary: string;
+  task_kind: string;
+  taint: string[];
+  tamper: { what: string; target: string; expected: boolean }[];
+  tools: { name: string; label: string; target: string; ok: boolean; not_run: boolean }[];
+  lessons_used: string[];
+  verified_success: boolean;
+  failed: boolean;
+};
+
+export type LearningKindStats = { wins: number; losses: number; checked: number; answered: number; confirmed: number; decided: number; rate: number };
+
+export type LearningProfile = {
+  agent_id: string;
+  name: string;
+  title: string;
+  episodes: number;
+  kinds: Record<string, LearningKindStats>;
+  strengths: string[];
+  weaknesses: string[];
+  false_success: number;
+  paused: boolean;
+  track_record: string;
+  lessons_proven: number;
+  lessons_unproven: number;
+};
+
+export type LearningStatus = {
+  mode: "on" | "off" | "control";
+  enabled: boolean;
+  reflection_daily_cap: number;
+  reflections_today: number;
+  playbook_size: number;
+  paused_agents: string[];
+  episodes: number;
+  lessons: Record<LessonStatus, number>;
+  reflections_pending: number;
+};
+
+export type ReliabilityRow = { name: string; ok: number; failed: number; recent_ok: number; recent_failed: number; last_failure_at: number; updated_at: number };

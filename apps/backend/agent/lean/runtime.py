@@ -94,6 +94,16 @@ def _session_lock(session_id: str) -> threading.RLock:
         return _SESSION_LOCKS.setdefault(key, threading.RLock())
 
 
+# Requests running now, and when the last one ended. Background work that needs
+# the model (learning's reflections) waits until chats have been quiet a while.
+_ACTIVITY = {"running": 0, "last_end": 0.0}
+
+
+def is_busy(quiet_seconds: float = 30.0) -> bool:
+    with _LOCKS_GUARD:
+        return _ACTIVITY["running"] > 0 or time.time() - float(_ACTIVITY["last_end"]) < quiet_seconds
+
+
 class LeanSession:
     """Runs one user message through one or more agents in a Session."""
 
@@ -140,6 +150,9 @@ class LeanSession:
         # carry that page's instructions.
         # A channel can hand over outside text with the message (e.g. Discord channel history).
         self._taint: list[str] = list(untrusted_sources or [])
+        # For learning (agent/learning): which lessons each agent read, and which model it ran on.
+        self._lessons_used: dict[str, list[str]] = {}
+        self._endpoints: dict[str, tuple[str, str]] = {}
         # Parallel agents share these.
         self._emit_lock = threading.Lock()
         self._state_lock = threading.Lock()
@@ -147,9 +160,14 @@ class LeanSession:
     # ── public ──────────────────────────────────────────────────────────
     def run(self, message: str, *, persona_id: str = "") -> dict[str, Any]:
         with _session_lock(self.session_id):
+            with _LOCKS_GUARD:
+                _ACTIVITY["running"] += 1
             try:
                 return self._run_locked(message, persona_id=persona_id)
             finally:
+                with _LOCKS_GUARD:
+                    _ACTIVITY["running"] -= 1
+                    _ACTIVITY["last_end"] = time.time()
                 for client in self._clients.values():
                     client.close()
 
@@ -285,6 +303,7 @@ class LeanSession:
             error=error[:1000],
             metadata={**dict(execution.metadata or {}), **({"outcome": outcome} if outcome else {})},
         )
+        self._learn(cancelled)
         store.update_thread_state(
             self.session_id,
             execution_status="cancelled" if cancelled else ("complete" if success else "failed"),
@@ -309,6 +328,30 @@ class LeanSession:
             "error": error,
             "outcome": outcome,
         }
+
+    def _learn(self, cancelled: bool) -> None:
+        """Grade what each agent did and keep it as experience (agent/learning).
+
+        Only the owner's requests; guests, channels' public callers and A2A never teach.
+        Learning catches its own errors: this can't fail or slow the reply.
+        """
+        from agent.learning import record_request
+
+        record_request(
+            goal=request_text(self._user_message),
+            results=self.results,
+            job=self.job,
+            taint=self._taint,
+            session_id=self.session_id,
+            execution_id=self.execution_id,
+            source=self.source,
+            caller_role=self.caller_role,
+            names={r.agent_id: self._name_of(r.agent_id) for r in self.results},
+            endpoints=dict(self._endpoints),
+            lessons_used={k: list(v) for k, v in self._lessons_used.items()},
+            team=self._job_needs_closing(),
+            cancelled=cancelled,
+        )
 
     # ── completion: when is the job done? ───────────────────────────────
     def _job_needs_closing(self) -> bool:
@@ -505,7 +548,13 @@ class LeanSession:
 
     def _model_route(self, message: str, members: list[AgentPersona], *, last: Optional[AgentPersona] = None) -> list[AgentPersona]:
         """Ask the model which agent(s) should answer. Never gates tools."""
-        roster = "\n".join(f"- {m.name}: {m.description or m.title}" for m in members)
+        from agent.learning import track_record
+
+        # Track records come from graded past work (agent/learning/profiles.py), not self-description.
+        roster = "\n".join(
+            f"- {m.name}: {m.description or m.title}" + (f" ({record})" if (record := track_record(m.id)) else "")
+            for m in members
+        )
         recent = self._history(exclude_execution=self.execution_id)[-4:]
         context = "\n".join(str(item.get("content") or "")[:300] for item in recent)
         prompt = (
@@ -841,11 +890,17 @@ class LeanSession:
         memories = [] if guest else self._recall(goal)
         from agent.project_context import context_for_session
         project_brief, project_evidence = ("", "") if guest else context_for_session(self.session_id)
+        # Lessons from this agent's own checked past work, and tools that keep failing lately.
+        from agent.learning import TurnLearning, prepare_turn
+        learned = TurnLearning() if guest else prepare_turn(persona.id, goal, toolbox.names)
+        if learned.lesson_ids:
+            with self._state_lock:
+                self._lessons_used.setdefault(persona.id, []).extend(learned.lesson_ids)
         prompt = build_system_prompt(
             persona=persona,
             soul_text=self._soul() if persona.id == "echo" else "",
             project_root=self.project_root,
-            notes=toolbox.notes,
+            notes=list(toolbox.notes) + learned.notes,
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
             project_overview=project_overview(self.project_root) if self.project_root else "",
             teammates=teammates if can_hand_off else [],
@@ -857,6 +912,7 @@ class LeanSession:
             past_chats=[] if guest else self._past_chats(),
             project_brief=project_brief,
             project_evidence=project_evidence,
+            playbook=learned.section,
         )
         turn = LeanTurn(
             client=self._client_for(persona),
@@ -887,6 +943,11 @@ class LeanSession:
                         self._clients[key] = live_client
                 previous.close()
                 turn.client = live_client
+        endpoint = getattr(turn.client, "endpoint", None)
+        if endpoint is not None:
+            # The reflector later uses the same model this agent worked with.
+            with self._state_lock:
+                self._endpoints[persona.id] = (str(endpoint.provider or ""), str(endpoint.model or ""))
         return turn
 
     def _record(self, persona: AgentPersona, part: TurnResult, depth: int, meta: dict[str, Any]) -> None:
@@ -1431,13 +1492,17 @@ _TOOLSET_ABILITIES = {
 
 def _roster_line(persona: AgentPersona) -> str:
     """'Jarvis (Researcher; can: search the web, recall memory; can't: read and write files, run terminal commands)'."""
+    from agent.learning import track_record
+
+    record = track_record(persona.id)
+    suffix = f" [{record}]" if record else ""
     toolsets = list(persona.toolsets or DEFAULT_TOOLSETS)
     if "all" in toolsets:
-        return f"{persona.name} ({persona.title or 'agent'}; can use every tool)"
+        return f"{persona.name} ({persona.title or 'agent'}; can use every tool){suffix}"
     can = [_TOOLSET_ABILITIES[t] for t in toolsets if t in _TOOLSET_ABILITIES]
     cannot = [_TOOLSET_ABILITIES[t] for t in ("core", "terminal") if t not in toolsets]
     return (f"{persona.name} ({persona.title or 'agent'}; can: {', '.join(can) or 'answer from what it knows'}"
-            + (f"; can't: {', '.join(cannot)}" if cannot else "") + ")")
+            + (f"; can't: {', '.join(cannot)}" if cannot else "") + ")" + suffix)
 
 
 def _first_sentence(text: str, limit: int = 200) -> str:

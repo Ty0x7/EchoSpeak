@@ -49,7 +49,7 @@ type SidebarProps = {
   onSearchChats?(query: string): Promise<ChatSearchHit[]>;
 };
 
-export type SidebarPage = "chat" | "groups" | "projects" | "artifacts" | "routines" | "creations";
+export type SidebarPage = "chat" | "groups" | "projects" | "artifacts" | "routines" | "creations" | "learning";
 
 const SECTION_TITLES: Record<SectionKey, string> = { agents: "Agents", chats: "Chats", projects: "Projects" };
 
@@ -59,11 +59,14 @@ const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string
   { id: "artifacts", label: "Artifacts", hint: "Apps, documents and diagrams your agents made" },
   { id: "routines", label: "Routines", hint: "Tasks that run on a schedule" },
   { id: "creations", label: "Creations", hint: "Your generated images and videos" },
+  { id: "learning", label: "Learning", hint: "What your agents learned from checked work" },
 ];
 
 function NavIcon({ name }: { name: Exclude<SidebarPage, "chat"> }) {
   const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   switch (name) {
+    case "learning":
+      return <svg {...common}><path d="M3 9l9-5 9 5-9 5z" /><path d="M7 11.2V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.8M21 9v6" /></svg>;
     case "creations":
       return <svg {...common}><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8" cy="8" r="1.5" /><path d="m3 17 6-6 5 5 3-3 4 4" /></svg>;
     case "groups":

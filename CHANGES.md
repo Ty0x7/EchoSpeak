@@ -1,5 +1,74 @@
 # Changes
 
+## v11.0.0 — 2026-10-06
+
+User-facing notes: [EchoSpeak 11.0.0](docs/releases/v11.0.0.md). Design and research basis: the 11.0 learning
+harness study (ReasoningBank, ACE, CoMem, the Verification Horizon, MINJA/A-MemGuard, Rule of Two).
+
+- **`agent/learning/`** (new package). Agents improve from verified experience through advisory lessons and
+  statistics. No retraining, and nothing that touches policy, approvals, toolsets, settings, tests or code.
+  - `store.py`: a separate SQLite file, `data/learning/experience.db`. It holds episodes, lessons,
+    `lesson_events` (before/after snapshots for history and rollback), reliability counts, the reflection queue
+    and per-agent pauses. It isn't more `records` kinds because `state.py` loads every record at startup.
+    Episodes are pruned at 5,000.
+  - `episodes.py`: one episode per agent per owner request, built from the tool timeline, stop reasons and the
+    job outcome.
+    - Verification ladder V0 claimed → V1 observed → V2 checked after the last change → V3 two check kinds or two
+      source domains → V4 owner confirmed.
+    - Terminal commands are classified as test / run / read / change.
+    - Tamper detection covers tests, CI, eval scripts, EchoSpeak's data folder and code, and `self_edit`.
+      Unexpected tampering caps the episode at V1; expected test writing caps it at V2.
+    - A failed model call is outcome `error`, which is neither a win nor a loss.
+  - `reflector.py`: background reflection by the agent's own model.
+    - Contrastive: it pairs the episode with a similar opposite-outcome one.
+    - The tool log is wrapped as untrusted. The reply is JSON, at most two lessons.
+    - Bounded by `learning_reflection_daily_cap`. It runs only when no request has been active for 30 s
+      (`runtime.is_busy`).
+    - Skips answers, unchecked successes and model errors. Retries a down model server three times.
+  - `curator.py`: deterministic admission.
+    - Refuses length violations, links, markup, stored credentials and injection phrasing.
+    - Refuses anything about permissions, approvals, safety, sandbox or secrets, and anything that weakens
+      checks unless negated ("don't skip the tests").
+    - Sends lessons to `pending_review` when they come from tainted or tampered episodes or mention external
+      actions.
+    - Refuses lessons that name a specific file (they don't transfer). Merges near-duplicates and paraphrases (keyword overlap). Caps 40 active and 20 pending per agent.
+  - `playbook.py`: selection and lifecycle.
+    - Up to `learning_playbook_size` (default 3) lessons by keyword and task-kind relevance (a shared word and the same task kind, or two shared words); established first,
+      at most 2 probation. Rendered as an advisory prompt section.
+    - Attribution counts wins (V2+ or owner confirmed) and losses, and feedback corrects them without double
+      counting.
+    - Promotion at 3+ wins and ≥75%; retirement at 3+ losses and <40%; demotion when losses exceed wins;
+      stale retirement at 60/120 days.
+    - `control` mode swaps in same-size unrelated notes.
+  - `profiles.py`: per-agent wins/decided by task kind over 90 days, plus strengths, weaknesses and false
+    successes. `track_record()` appears in the routing roster, delegate/assign tool descriptions and the
+    completion check's member list.
+  - `reliability.py`: per-tool recent outcomes give a prompt note at ≥60% failure over ≥5 calls (counts only,
+    never error text). Per search provider, `run_web_search` in auto mode tries a provider with three
+    consecutive failures within the hour last.
+- **Runtime** (`agent/lean/runtime.py`): `_build_turn` adds the playbook and reliability notes for owner turns
+  and records lessons used and each agent's endpoint. `_run_locked` calls `learning.record_request` after
+  persisting the execution. Guests, non-owner channels and A2A never record or read lessons. Learning errors
+  are caught and logged.
+- **Timeline:** tool items carry a redacted `target` (path, command, query, URL; `toolbox.call_target`).
+- **API** (`api/routes/learning.py`):
+  - `POST /lean/feedback`;
+  - `GET /lean/learning/{status,profiles,lessons,lessons/{id},episodes,reliability}`;
+  - `POST /lean/learning/lessons/{id}/{action,rollback}`, `PATCH`/`DELETE /lean/learning/lessons/{id}`;
+  - `POST /lean/learning/agents/{id}/pause`, `POST /lean/learning/reflect`.
+
+  The server lifespan runs the learning worker every 120 s.
+- **Settings:** `learning_enabled` (default on), `learning_reflection_daily_cap` (30), `learning_playbook_size` (3)
+  and `learning_mode` (`on` / `off` / `control`).
+- **Web:** Worked / Didn't work with an optional note under replies (`MessageActions.tsx`, vote remembered per
+  device). Learning sidebar page (`lean/LearningPage.tsx`, `lean/learning.css`). Settings › General › Learning
+  from experience.
+- **Evaluation:** `scripts/eval_learning.py` runs learn / held-out task families (script, data, bugfix,
+  research, canary) under on / off / control. It reports pass rate, false-success rate and canaries, with
+  `--repeat` and `--compare`, and caps reviews at 0 during held-out runs.
+- **Tests:** `tests/test_learning.py` (56). `tests/conftest.py` sets `LEARNING_ENABLED=0` by default so lessons
+  can't leak between tests; learning tests use a fresh store.
+
 ## v10.5.0 — 2026-10-06
 
 User-facing notes: [EchoSpeak 10.5.0](docs/releases/v10.5.0.md).

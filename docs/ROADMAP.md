@@ -42,13 +42,31 @@ installation and upgrading still require real-machine validation before release.
 - [x] Security audit fixes: terminal destination checks, complete approval arguments,
       image click gating, structured-output redaction and document-index migration.
 
+## Learning (11.x)
+
+11.0 shipped per-agent learning: graded episodes, lessons with probation, owner review and
+rollback, track records, reliability, and the ablation harness. Next:
+
+1. **Measure 11.0 with a real model.** Run `scripts/eval_learning.py`: learn split, then held-out
+   under on, off and control with `--repeat 3`. Keep learning on by default only if "on" beats
+   both "off" and "control" on held-out pass rate without a higher false-success rate. **S**
+2. **Team playbooks (11.1).** Promote a lesson proven by one agent to teammates as *unproven*
+   for them, after a challenger pass by another agent's model. **M**
+3. **Skill proposals from experience (11.1).** Repeated V3+ lessons become skill proposals
+   through `skill_contract.py`. A paired with/without audit runs before the owner approves. **M**
+4. **Pinned research evidence (11.1).** Lessons from research cite their notebook passages,
+   and a recheck retires lessons whose sources changed. **S**
+5. **Outbound A2A learning (experimental).** Only after signed Agent Cards. Peer claims go
+   through research-style verification and never write lessons directly. **L**
+
 ## Next
 
 1. **Validate Windows release distribution.** Use the local release script with the
    existing updater key, optionally configure Authenticode, and validate clean
    installation/upgrading before publishing the tagged release. **S**
-2. **Run the evaluation before every release.** `apps/backend/scripts/eval_gemma.py` needs a
-   live model; run it from the release script or a self-hosted runner and block on regressions. **S**
+2. **Run the evaluations before every release.** `apps/backend/scripts/eval_gemma.py` and
+   `eval_learning.py` need a live model; run them from the release script or a self-hosted
+   runner and block on regressions. **S**
 3. **Approvals page on the lean approvals.** The Approvals tab still reads the old approval
    store, which the lean runtime doesn't write; point it at `/lean/approvals`. **S**
 4. **Drop LangChain.** The lean runtime talks to models over plain HTTP. LangChain is left only

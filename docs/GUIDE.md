@@ -100,6 +100,24 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
   plan, split the work into tasks, do it, and keep going until a check confirms it's done
   (15, 30 or 60 turns).
 
+### Learning from experience
+
+- After each task, EchoSpeak grades what actually ran: **Claimed**, **Ran**, **Checked**,
+  **Double-checked** or **You confirmed**. When no chat is running, the agent reviews checked
+  work and failures with its own model and keeps up to two short lessons. It reads the relevant
+  ones before similar tasks.
+- Under a reply, **Worked** confirms it and **Didn't work** marks it failed, with an optional note
+  the agent reads when it reviews the task. Press the button again to take it back.
+- **Learning** in the sidebar shows track records, lessons with their source tasks and history,
+  recent grades and tool reliability. Approve or reject lessons waiting for your review. You can
+  edit, retire, restore, delete or **Undo** any change, and pause learning for one agent.
+- Lessons are advice only. They never change permissions, approvals, tools or settings. Lessons
+  learned while reading the web or email, or from a task that changed tests or EchoSpeak's own
+  files, wait for your approval. Guests on Discord, Telegram, Twitch or Twitter never teach and
+  never see lessons.
+- **Settings › General › Learning from experience** turns it off, limits reviews per day (each
+  is one call to the agent's model) and sets how many lessons an agent reads.
+
 ### Projects and coding
 
 - Drop a folder on the composer (or **Projects › Attach folder**) to work inside it. File tools
@@ -178,7 +196,8 @@ Everything lives in one data folder:
 - From source: `apps/backend/data` (override with `ECHOSPEAK_DATA_DIR`)
 
 It holds your settings, chats, memories, agents, projects, routines and downloaded
-models. Back it up by copying the folder while EchoSpeak is closed. Treat that backup
+models. What agents learned is in `learning/experience.db`; deleting it resets learning
+without touching anything else. Back it up by copying the folder while EchoSpeak is closed. Treat that backup
 as private: it can contain account credentials and personal conversations.
 Echo's personality is editable in **Settings › Personality**.
 

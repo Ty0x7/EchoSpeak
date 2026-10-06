@@ -81,11 +81,11 @@ Cloud settings retrieve the provider's model catalog and separately check the se
 
 ## Current development
 
-The source version is **10.5.0**. Recent updates improve provider selection, settings organization and expandable lists across Groups, Projects, Artifacts, Routines and Creations. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
+The source version is **11.0.0**. It adds learning from verified experience, described in the development preview below; whether it improves results is still being measured. 10.5.0 improved provider selection, settings organization and expandable lists. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
 
 The release badge follows the latest **published installer**, which may differ from source development.
 
-[10.5.0 notes](docs/releases/v10.5.0.md) · [10.4.3 notes](docs/releases/v10.4.3.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
+[11.0.0 notes](docs/releases/v11.0.0.md) · [10.5.0 notes](docs/releases/v10.5.0.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
 
 <details>
 <summary><strong>Development preview: learning from verified experience</strong></summary>

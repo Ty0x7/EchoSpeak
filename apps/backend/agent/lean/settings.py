@@ -97,3 +97,35 @@ def group_token_budget() -> int:
         return max(0, int(_setting("lean_group_token_budget", 200_000)))
     except (TypeError, ValueError):
         return 200_000
+
+
+def learning_mode() -> str:
+    """on: record experience and use lessons; off: neither.
+
+    control (evaluation only): record nothing, and put same-size unrelated notes
+    where lessons would go, so a measured gain can't come from a longer prompt.
+    """
+    if not _as_bool(_setting("learning_enabled", True)):
+        return "off"
+    mode = str(_setting("learning_mode", "on") or "on").strip().lower()
+    return mode if mode in {"on", "off", "control"} else "on"
+
+
+def learning_enabled() -> bool:
+    return learning_mode() == "on"
+
+
+def reflection_daily_cap() -> int:
+    """Background reflections per day across all agents; each is one model call."""
+    try:
+        return max(0, min(int(_setting("learning_reflection_daily_cap", 30)), 500))
+    except (TypeError, ValueError):
+        return 30
+
+
+def playbook_size() -> int:
+    """Lessons an agent reads before a task."""
+    try:
+        return max(0, min(int(_setting("learning_playbook_size", 3)), 8))
+    except (TypeError, ValueError):
+        return 3

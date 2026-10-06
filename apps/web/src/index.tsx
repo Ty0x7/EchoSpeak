@@ -15,6 +15,8 @@ import type {
 } from "./voiceTransport";
 import { canApplySessionHistory, ownsStreamCleanup } from "./desktop/sessionProjection";
 import leanCss from "./lean/lean.css?inline";
+import learningCss from "./lean/learning.css?inline";
+import { LearningPage } from "./lean/LearningPage";
 import settingsCss from "./settings/settings.css?inline";
 import chatPolishCss from "./dashboard/chatPolish.css?inline";
 import { CreationsPage } from "./creations/CreationsPage";
@@ -1624,6 +1626,7 @@ export const Dashboard: React.FC<{
       }} />
       <style>{globalCss}</style>
       <style>{leanCss}</style>
+      <style>{learningCss}</style>
       <style>{settingsCss}</style>
       <style>{chatPolishCss}</style>
       {agentEditor.open ? (
@@ -1827,6 +1830,8 @@ export const Dashboard: React.FC<{
               />
             ) : mainPage === "creations" ? (
               <CreationsPage apiBase={apiBase} sessionId={activeThreadId} onChat={id => { setMainPage("chat"); switchThread(id); }} onEdit={asset => { setMainPage("chat"); switchThread(asset.session_id); setInput(`Edit this image using input_asset_ids ["${asset.id}"]. Keep the composition and change the lighting to soft morning light.`); }} />
+            ) : mainPage === "learning" ? (
+              <LearningPage apiBase={apiBase} />
             ) : mainPage === "artifacts" ? (
               <ArtifactsPage apiBase={apiBase} onOpen={openArtifactFromPage} />
             ) : (
@@ -1936,7 +1941,7 @@ export const Dashboard: React.FC<{
                     pendingApproval={pendingApproval} threadState={threadState}
                     approvalDecisionBusy={approvalDecisionBusy} onApprovalDecision={decideApproval}
                     onLeanApproval={decideLeanApproval}
-                    actions={{ onRevise: reviseMessage, onRead: readMessage, readingId: speaking ? readingId : "", actionBusy: messageActionBusy }}
+                    actions={{ onRevise: reviseMessage, onRead: readMessage, onFeedback: (message, value, note) => leanClient.feedback(message.executionId || "", value, note || "", message.lean?.agent?.id || ""), readingId: speaking ? readingId : "", actionBusy: messageActionBusy }}
                     voiceStage={voiceConversationMode ? <VoiceStage apiBase={apiBase} phase={voicePhase} notice={voiceNotice} listening={listening} speaking={speaking} streaming={streaming} native={nativeLiveVoice} level={voiceInputLevel} tool={activityItems.find(item => item.status === "running")?.label || ""} online={Boolean(backendOnline)} onListen={() => { if (streaming) stopActiveTurn(); void start(); }} onPause={pauseVoice} onEnd={toggleVoiceMode} onSettings={openVoiceSettings} /> : undefined}
                   />
                   </WidgetEnvProvider>

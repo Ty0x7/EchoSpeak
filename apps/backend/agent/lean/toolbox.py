@@ -514,6 +514,22 @@ def describe_call(name: str, args: dict[str, Any]) -> str:
     return f"{name}({preview})" if preview else name
 
 
+# The argument that names what a call acted on. Kept on the timeline so finished
+# work can be graded afterwards (agent/learning): which file was written, which
+# command ran, what was searched. File contents and message bodies never are.
+_TARGET_KEYS = ("path", "file", "src", "source", "command", "query", "q", "url", "pattern", "glob")
+
+
+def call_target(args: dict[str, Any], limit: int = 300) -> str:
+    """'src/app.py', 'pytest -q', 'a.txt -> b.txt'; stored credentials redacted."""
+    from agent.lean.policy import redact_secrets
+
+    pick = lambda keys: next((str(args[k]) for k in keys if isinstance(args.get(k), str) and args[k].strip()), "")  # noqa: E731
+    first, dest = pick(_TARGET_KEYS), pick(("dst", "destination"))
+    text = f"{first} -> {dest}" if first and dest and dest != first else (first or dest)
+    return redact_secrets(" ".join(text.split()))[:limit]
+
+
 def safe_args_preview(args: dict[str, Any], limit: int = 600) -> dict[str, Any]:
     preview: dict[str, Any] = {}
     for key, value in list(args.items())[:12]:
