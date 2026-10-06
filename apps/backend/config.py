@@ -926,6 +926,16 @@ class Config:
         self.lean_approval_mode = os.getenv("LEAN_APPROVAL_MODE", "smart").strip().lower() or "smart"
         self.lean_max_iterations = int(os.getenv("LEAN_MAX_ITERATIONS", "60") or 60)
         self.lean_context_tokens = int(os.getenv("LEAN_CONTEXT_TOKENS", "0") or 0)
+        # Learning from verified experience (agent/learning). It writes advisory lessons and
+        # statistics only: never permissions, approvals, toolsets, policy, checks or code.
+        self.learning_enabled = os.getenv("LEARNING_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+        # Background reflections per day, across all agents (each one is a model call).
+        self.learning_reflection_daily_cap = int(os.getenv("LEARNING_REFLECTION_DAILY_CAP", "30") or 30)
+        # Lessons an agent reads before a task.
+        self.learning_playbook_size = int(os.getenv("LEARNING_PLAYBOOK_SIZE", "5") or 5)
+        # on (default) | off | control. "control" is for evaluation: learns nothing and shows
+        # same-size unrelated notes instead of lessons, so gains can't come from prompt length.
+        self.learning_mode = os.getenv("LEARNING_MODE", "on").strip().lower() or "on"
         self.user_display_name = os.getenv("USER_DISPLAY_NAME", "").strip()
         # Voice and generated-media work is opt-in even when the host action
         # gate is enabled. Provider credentials never imply permission.
@@ -1418,6 +1428,10 @@ class Config:
             "lean_approval_mode",
             "lean_max_iterations",
             "lean_context_tokens",
+            "learning_enabled",
+            "learning_reflection_daily_cap",
+            "learning_playbook_size",
+            "learning_mode",
             "user_display_name",
             "allow_voice_actions",
             "allow_generation_actions",

@@ -33,7 +33,7 @@ from agent.lean.job import claim_nudge, is_promise_without_action, promise_nudge
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
 from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
-from agent.lean.toolbox import Toolbox, describe_call, safe_args_preview
+from agent.lean.toolbox import Toolbox, call_target, describe_call, safe_args_preview
 
 Emit = Callable[[dict[str, Any]], None]
 
@@ -628,8 +628,12 @@ class LeanTurn:
     def _tool_started(self, call: Any, name: str, args: dict[str, Any], step: int) -> None:
         self._close_thinking()
         label = describe_call(name, args)
-        self.timeline.append({"kind": "tool", "step": step, "id": call.id, "name": name, "label": label,
-                              "status": "running", "output": "", "at": time.time()})
+        item = {"kind": "tool", "step": step, "id": call.id, "name": name, "label": label,
+                "status": "running", "output": "", "at": time.time()}
+        target = call_target(args)
+        if target:
+            item["target"] = target
+        self.timeline.append(item)
         self.emit({"type": "tool_start", "step": step, "id": call.id, "name": name, "label": label,
                    "input": json.dumps(safe_args_preview(args, 200), ensure_ascii=False)[:400]})
         if self.persist_tool_runs:
