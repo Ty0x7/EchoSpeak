@@ -1,23 +1,5 @@
-<h3 align="center">
-  <img src="apps/web/public/logo.png" alt="Echo avatar" width="48" height="48" />&nbsp; EchoSpeak
-</h3>
-
 <p align="center">
-  <strong>A desktop agent harness for research, coding and creation.</strong><br />
-  Your choice of model. One workspace for context, tools and results.
-</p>
-
-<p align="center">
-  <a href="https://github.com/Ty0x7/EchoSpeak/releases/latest"><strong>Download for Windows</strong></a>
-  &nbsp; · &nbsp;
-  <a href="https://ty0x7.github.io/EchoSpeak/">Website</a>
-  &nbsp; · &nbsp;
-  <a href="docs/GUIDE.md">User guide</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/Ty0x7/EchoSpeak/releases/latest"><img src="https://img.shields.io/github/v/release/Ty0x7/EchoSpeak?label=release&amp;color=222222" alt="Latest published release" /></a><br />
-  <sub>Windows 10 and 11 · 64 bit · <a href="LICENSE">MIT license</a></sub>
+  <img src="assets/readme/title.svg" alt="EchoSpeak" width="410" height="96" />
 </p>
 
 EchoSpeak connects a language model to the context, tools and execution controls needed to work on real tasks. Research a question, build in a project, create media or talk with Echo, while keeping the conversation and its results together.
@@ -101,7 +83,7 @@ Cloud settings retrieve the provider's model catalog and separately check the se
 
 The source version is **10.5.0**. Recent updates improve provider selection, settings organization and expandable lists across Groups, Projects, Artifacts, Routines and Creations. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
 
-The download link and release badge follow the latest **published installer**, which may differ from source development.
+The release badge follows the latest **published installer**, which may differ from source development.
 
 [10.5.0 notes](docs/releases/v10.5.0.md) · [10.4.3 notes](docs/releases/v10.4.3.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
 
@@ -146,3 +128,12 @@ The desktop host lives in `apps/desktop`, the React frontend in `apps/web`, and 
 Source development uses Python 3.11 or 3.12 and Node.js 22 or newer. See the [guide](docs/GUIDE.md) for setup and optional dependencies. Extend the existing systems and keep credentials, personal data and build artifacts out of commits.
 
 </details>
+
+<p align="center">
+  <strong>A desktop agent harness for research, coding and creation.</strong><br />
+  Your choice of model. One workspace for context, tools and results.
+</p>
+
+<p align="center">
+  <a href="https://github.com/Ty0x7/EchoSpeak/releases/latest"><img src="https://img.shields.io/github/v/release/Ty0x7/EchoSpeak?label=release&amp;color=222222" alt="Latest published release" /></a>
+</p>
