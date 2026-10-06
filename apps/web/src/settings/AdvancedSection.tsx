@@ -58,7 +58,7 @@ export function AdvancedSection(props: {
       {props.page === "memory" ? <MemoryPage apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
       {props.page === "connections" ? <ConnectionsPage apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
       {props.page === "companion" ? (
-        <Group title="Echo companion" description="How Echo looks in the floating companion window.">
+        <Group title="Echo companion" description="Echo’s shared appearance in voice conversations and the floating companion window.">
           <div className="st-embed">
             <AvatarEditor apiBase={props.apiBase} colors={COMPANION_COLORS} onConfigChange={props.onAvatarConfigChange} />
           </div>

@@ -1,11 +1,10 @@
+import { useAvatarConfig } from "../dashboard/useAvatarConfig";
 import React, { useEffect, useReducer, useRef, useState } from "react";
-import { SquareAvatarVisual } from "../components/SquareAvatarVisual";
-import type { ToolCategory } from "../components/echoAnimationUtils";
+import { EchoFace, echoFaceStyles } from "../components/EchoFace";
 import {
   activityActionsFromStreamEvent,
   agentActivityReducer,
   initialAgentActivity,
-  toolCategoryFromPhase,
 } from "../agentActivity";
 import {
   controlDesktopWindow,
@@ -55,7 +54,7 @@ export function CompanionApp({ backendReady }: { backendReady: boolean }) {
   const [alwaysOnTop, setAlwaysOnTop] = useState(
     () => window.localStorage.getItem("echospeak.companion.always_on_top") === "true",
   );
-  const [avatarConfig, setAvatarConfig] = useState<Record<string, unknown> | null>(null);
+  const avatarConfig = useAvatarConfig(apiBase, backendReady);
   const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -86,13 +85,7 @@ export function CompanionApp({ backendReady }: { backendReady: boolean }) {
     window.localStorage.setItem("echospeak.companion.always_on_top", String(alwaysOnTop));
   }, [alwaysOnTop]);
 
-  useEffect(() => {
-    if (!backendReady) return;
-    void fetch(`${apiBase}/avatar/config`)
-      .then((response) => response.ok ? response.json() : null)
-      .then((payload) => payload && setAvatarConfig(payload))
-      .catch(() => undefined);
-  }, [apiBase, backendReady]);
+
 
   useEffect(() => () => controllerRef.current?.abort(), []);
 
@@ -170,7 +163,6 @@ export function CompanionApp({ backendReady }: { backendReady: boolean }) {
         : inputFocused
           ? "listening"
           : "idle";
-  const activeTool = toolCategoryFromPhase(activity.phase) as ToolCategory;
 
   const status = !backendReady
     ? "Starting EchoSpeak"
@@ -207,16 +199,8 @@ export function CompanionApp({ backendReady }: { backendReady: boolean }) {
       </div>
       <div className="echo-companion-avatar" data-tauri-drag-region title="Drag Echo">
         <div data-tauri-drag-region>
-          <SquareAvatarVisual
-            speaking={false}
-            backendOnline={backendReady}
-            isThinking={mode === "thinking" || mode === "working"}
-            thinkingText={status}
-            toolCategory={activeTool}
-            userIsTyping={Boolean(input)}
-            reaction={mode === "error" ? "error" : null}
-            avatarConfig={{ ...(avatarConfig || {}), bg_color: "rgba(0,0,0,0)" }}
-          />
+          <style>{echoFaceStyles}</style>
+          <EchoFace size="clamp(100px, 54vw, 200px)" avatarConfig={avatarConfig} mode={mode} />
         </div>
       </div>
       <div className="echo-companion-status" aria-live="polite">{status}</div>

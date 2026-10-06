@@ -29,17 +29,41 @@ class Endpoint:
     local: bool
 
 
+def thinking_controls(provider: str, model: str, local: bool, metadata: Optional[dict] = None) -> dict:
+    """Controls the current adapter can actually apply; unknown models stay disabled."""
+    model = model.casefold()
+    live = provider == "gemini" and any(x in model for x in ("live", "native-audio"))
+    openai = provider == "openai" and model.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))
+    gemini = provider == "gemini" and ("2.5" in model or "-3" in model) and not live
+    local_reasoner = local and any(x in model for x in ("qwen3", "qwen-3", "qwq", "deepseek-r1", "gpt-oss", "gemma-4", "gemma4", "glm-4.5", "glm-4.6", "glm-5"))
+    metadata = metadata or {}
+    supported = openai or gemini or (local and bool(metadata.get("thinking_supported", local_reasoner)))
+    toggle = supported and not (openai and not model.startswith(("gpt-5.1", "gpt-5.2"))) and not (gemini and ("-3" in model or "pro" in model))
+    if local and any(x in model for x in ("qwq", "deepseek-r1", "gpt-oss", "-thinking")):
+        toggle = False
+    if local and "thinking_toggle_supported" in metadata:
+        toggle = supported and bool(metadata["thinking_toggle_supported"])
+    return {"supported": supported, "toggle": toggle, "effort": supported,
+            "reason": "Thinking stays on for this model; you can change effort." if supported and not toggle else
+                      "Thinking controls are unavailable for this model on its current adapter." if not supported else ""}
+
+
 def reasoning_effort_for(endpoint: Endpoint, thinking_enabled: bool, effort: str) -> str:
     """Map the composer's Think toggle and Effort picker onto the request."""
     effort = str(effort or "medium").lower()
     level = {"minimal": "low", "low": "low", "medium": "medium", "high": "high",
              "extra_high": "high", "max": "high", "ultra": "high"}.get(effort, "medium")
     if endpoint.local:
-        return level if thinking_enabled else "none"
+        registry = dict(getattr(config, "model_capability_profiles", {}) or {})
+        metadata = registry.get(f"{endpoint.provider}:{endpoint.model}") or registry.get(endpoint.model) or {}
+        controls = thinking_controls(endpoint.provider, endpoint.model, True, metadata)
+        if not controls["supported"]:
+            return ""
+        return level if thinking_enabled else ("none" if controls["toggle"] else "low")
     model = endpoint.model.lower()
     # Cloud: only reasoning models accept the parameter.
     if endpoint.provider == "openai" and (model.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))):
-        return level if thinking_enabled else "low"
+        return level if thinking_enabled else ("none" if thinking_controls("openai", model, False)["toggle"] else "low")
     if endpoint.provider == "gemini" and ("2.5" in model or "-3" in model):
         # Pro 2.5 and Gemini 3 cannot disable thinking, including side/review calls.
         return level if thinking_enabled else ("low" if "-3" in model or "pro" in model else "none")

@@ -296,6 +296,8 @@ class LeanSession:
         self._remember_async(message, final_text)
         if not cancelled and final_text:
             summaries.update_in_background(self.session_id, lambda: self._side_client(default_persona))
+            from agent.chat_titles import update_in_background as title_in_background
+            title_in_background(self.session_id, message, lambda: self._side_client(default_persona))
         return {
             "execution_id": execution.id,
             "success": bool(success and not cancelled),

@@ -920,7 +920,10 @@ async def get_provider_info(session_id: Optional[str] = Query(default=None)):
         real_window = trim or ctx_len
         if real_window > 0:
             overrides.setdefault("context_limit", real_window)
-        return resolve_model_profile(prov.value, model_name, overrides).as_dict()
+        profile = resolve_model_profile(prov.value, model_name, overrides).as_dict()
+        from agent.lean.provider import thinking_controls
+        profile["thinking_controls"] = thinking_controls(prov.value, model_name, prov.value not in CLOUD_PROVIDERS, profile.get("metadata"))
+        return profile
 
     if _is_lmstudio_only_enabled():
         _force_lmstudio_config()
@@ -1146,11 +1149,12 @@ _DEFAULT_AVATAR_CONFIG = {
     "body_color": "#ffffff",
     "eye_color": "#000000",
     "bg_color": "#0a0a0a",
-    "glow_color": "#4f8eff",
+    "glow_color": "#ffffff",
     "idle_activity": "auto",
     "breathing_speed": 1.0,
     "eye_size": 1.0,
     "body_roundness": 14,
+    "voice_avatar_scale": 1.0,
     "enable_glow": True,
     "enable_idle_activities": True,
     "custom_status_text": "",

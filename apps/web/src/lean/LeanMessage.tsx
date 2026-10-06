@@ -166,7 +166,7 @@ function ApprovalCard({
   return (
     <div className="lm-approval" data-decided={decided ? "true" : "false"} data-decision={seg.decision || "pending"}>
       <div className="lm-approval-text">
-        <span className="lm-approval-kicker">{decided ? verdict : "Needs your OK"}</span>
+        <span className="lm-approval-kicker">{decided ? verdict : "Permission request"}<span className="lm-approval-tool">{seg.tool.replace(/_/g, " ")}</span></span>
         <strong>{seg.summary}</strong>
         {seg.reason && !decided ? <span className="lm-approval-reason">Asking because {seg.reason}.</span> : null}
         {seg.args && Object.keys(seg.args).length ? (
@@ -175,9 +175,9 @@ function ApprovalCard({
       </div>
       {!decided ? (
         <div className="lm-approval-actions">
-          <button type="button" className="es-btn es-btn-primary" disabled={busy} onClick={() => void decide("allow")}>Allow</button>
-          <button type="button" className="es-btn" disabled={busy} onClick={() => void decide("always")} title={`Allow ${seg.tool} for the rest of this session`}>Always</button>
-          <button type="button" className="es-btn es-btn-quiet" disabled={busy} onClick={() => void decide("deny")}>Deny</button>
+          <button type="button" className="es-btn es-btn-primary" disabled={busy} onClick={() => void decide("allow")}>{busy ? "Applying…" : "Allow once"}</button>
+          <button type="button" className="es-btn" disabled={busy} onClick={() => void decide("always")} title={`Allow ${seg.tool} for the rest of this session`}>For this chat</button>
+          <button type="button" className="es-btn es-btn-quiet" disabled={busy} onClick={() => void decide("deny")}>Decline</button>
         </div>
       ) : null}
     </div>

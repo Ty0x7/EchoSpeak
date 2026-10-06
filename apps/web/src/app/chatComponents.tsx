@@ -444,6 +444,8 @@ export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number
   );
 };
 
+import { MessageActions, type MessageActionProps } from "../dashboard/MessageActions";
+
 export const ChatBubble: React.FC<{
   msg: Message;
   streaming?: boolean;
@@ -452,7 +454,8 @@ export const ChatBubble: React.FC<{
   contextWindow?: number;
   providerLabel?: string;
   modelLabel?: string;
-}> = ({ msg, streaming, typewriter = false, onQuickReply, contextWindow = 0, providerLabel, modelLabel }) => {
+  actions?: MessageActionProps;
+}> = ({ msg, streaming, typewriter = false, onQuickReply, contextWindow = 0, providerLabel, modelLabel, actions }) => {
   const isUser = msg.role === "user";
   // Approval controls are rendered only from an exact backend approval record.
   const isConfirmPrompt = false;
@@ -488,6 +491,7 @@ export const ChatBubble: React.FC<{
           at={msg.at}
           onContinue={!streaming && onQuickReply ? () => onQuickReply(`@${msg.lean!.agent.name || "Echo"} continue where you left off.`) : undefined}
         />
+        {actions ? <MessageActions message={msg} {...actions} disabled={streaming} /> : null}
       </div>
     );
   }
@@ -595,6 +599,7 @@ export const ChatBubble: React.FC<{
           </div>
         ) : null}
 
+        {actions && !stillTyping ? <MessageActions message={msg} {...actions} disabled={streaming} /> : null}
         {/* Single compact meta row: Time · Tokens · CTX · Sources · Search (wrap only when narrow). */}
         <div
           style={{

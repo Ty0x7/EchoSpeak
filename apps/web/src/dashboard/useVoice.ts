@@ -17,6 +17,7 @@ export function useVoice({
   speechEnabled,
   onTranscript,
   onInterrupt,
+  nativeLiveAvailable = false,
 }: {
   apiBase: string;
   activeThreadId: string;
@@ -29,6 +30,7 @@ export function useVoice({
   speechEnabled: boolean;
   onTranscript: (transcript: VoiceTranscript) => Promise<void>;
   onInterrupt?: () => void;
+  nativeLiveAvailable?: boolean;
 }) {
   const onTranscriptRef = useRef(onTranscript);
   onTranscriptRef.current = onTranscript;
@@ -43,19 +45,12 @@ export function useVoice({
   const [voicePhase, setVoicePhase] = useState<VoiceTransportPhase>("idle");
   const [voiceNotice, setVoiceNotice] = useState("");
   const [voiceInputLevel, setVoiceInputLevel] = useState(0);
-  const [nativeLiveVoice, setNativeLiveVoice] = useState(() => window.localStorage.getItem("echospeak.voice.native_live") === "true");
+  const nativeLiveVoice = voiceConversationMode && nativeLiveAvailable;
+  const voiceModeRef = useRef(voiceConversationMode);
+  voiceModeRef.current = voiceConversationMode;
+  const pausedRef = useRef(false);
   const voiceInputRef = useRef<LocalVoiceInput | NativeLiveInput | null>(null);
   if (voiceInputRef.current == null) voiceInputRef.current = new LocalVoiceInput();
-  const toggleNativeLiveVoice = () => {
-    void voiceInputRef.current?.stop(false);
-    stopTts();
-    setListening(false);
-    setVoicePhase("idle");
-    setNativeLiveVoice(value => {
-      window.localStorage.setItem("echospeak.voice.native_live", String(!value));
-      return !value;
-    });
-  };
 
   useEffect(() => {
     window.localStorage.setItem("echospeak.voice.read_aloud", String(voiceReadAloud));
@@ -63,11 +58,11 @@ export function useVoice({
 
   const speakLocalText = async (
     text: string,
-    metadata: Pick<SpeechScope, "clientTurnId" | "requestId" | "executionId" | "completeTurn">,
+    metadata: Pick<SpeechScope, "clientTurnId" | "requestId" | "executionId" | "completeTurn"> & { force?: boolean },
   ) => {
     const sessionId = String(activeThreadIdRef.current || "").trim();
     const cleaned = sanitizeForTTS(text);
-    if (!speechEnabled || !sessionId || !cleaned) return false;
+    if ((!useAppStore.getState().speechEnabled && !metadata.force) || !sessionId || !cleaned) return false;
     setVoiceNotice("");
     try {
       await localVoicePlayback.speak(
@@ -81,7 +76,7 @@ export function useVoice({
         {
           onPhase: (phase, detail) => {
             setVoicePhase(phase);
-            setVoiceNotice(detail || "");
+            setVoiceNotice(pausedRef.current && phase === "idle" ? "Microphone paused. Choose Listen to continue." : detail || "");
             useAppStore.getState().setSpeaking(phase === "speaking");
           },
           onLevel: (level) => {
@@ -106,9 +101,15 @@ export function useVoice({
     if (!enabled) stopTts();
   };
   const toggleVoiceMode = () => {
-    const enabled = !voiceConversationMode;
+    const enabled = !voiceModeRef.current;
+    voiceModeRef.current = enabled;
+    pausedRef.current = false;
     setVoiceConversationMode(enabled);
-    if (enabled && !streaming && !listening && voicePhase !== "transcribing") void start();
+    if (enabled) {
+      useAppStore.getState().setSpeechEnabled(true);
+      void liveAudioPlayback.unlock().catch(() => undefined);
+      if (!streaming && voicePhase !== "transcribing") void voiceInputRef.current?.stop(false).then(() => start(false, true));
+    }
     if (!enabled) {
       void voiceInputRef.current?.stop(false);
       setListening(false);
@@ -116,6 +117,16 @@ export function useVoice({
       setVoicePhase("idle");
       setVoiceNotice("");
     }
+  };
+
+  const pauseVoice = () => {
+    pausedRef.current = true;
+    void voiceInputRef.current?.stop(false);
+    stopTts(); setListening(false); setVoiceInputLevel(0); setVoicePhase("idle");
+    setVoiceNotice("Microphone paused. Choose Listen to continue.");
+  };
+  const resumeAfterReply = () => {
+    if (voiceModeRef.current && !pausedRef.current) void start(false, true);
   };
 
   const toggleWakeWord = () => {
@@ -127,7 +138,7 @@ export function useVoice({
   };
   // "Hey Echo": listen only while idle; release the mic during a voice turn,
   // while a reply streams or is read aloud, and when Wake is off.
-  const wakeIdle = wakeWordEnabled && !listening && !streaming && (voicePhase === "idle" || voicePhase === "error");
+  const wakeIdle = wakeWordEnabled && !voiceConversationMode && !listening && !streaming && (voicePhase === "idle" || voicePhase === "error");
   useEffect(() => {
     if (!wakeIdle) {
       wakeListenerRef.current?.stop();
@@ -156,7 +167,7 @@ export function useVoice({
     return () => listener.stop();
   }, [wakeIdle, apiBase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const start = async (background = false) => {
+  const start = async (background = false, conversation = voiceModeRef.current) => {
     const sessionId = String(activeThreadIdRef.current || "").trim();
     if (!sessionId || !voiceInputRef.current) {
       setVoicePhase("error");
@@ -164,11 +175,13 @@ export function useVoice({
       return;
     }
     if (voiceInputRef.current.active) return;
+    pausedRef.current = false;
+    const native = conversation && nativeLiveAvailable;
     if (!background) {
       stopTts();
-      if (nativeLiveVoice) onInterrupt?.();
+      if (native) onInterrupt?.();
     }
-    voiceInputRef.current = nativeLiveVoice ? new NativeLiveInput() : new LocalVoiceInput();
+    voiceInputRef.current = native ? new NativeLiveInput() : new LocalVoiceInput();
     setVoiceNotice("");
     try {
       await voiceInputRef.current.start(
@@ -180,12 +193,12 @@ export function useVoice({
         {
           onPhase: (phase, detail) => {
             setVoicePhase(phase);
-            setVoiceNotice(detail || "");
+            setVoiceNotice(pausedRef.current && phase === "idle" ? "Microphone paused. Choose Listen to continue." : detail || "");
             setListening(phase === "listening" || phase === "requesting_permission");
           },
           onLevel: setVoiceInputLevel,
           onSpeechStart: () => {
-            if (nativeLiveVoice) { stopTts(); onInterrupt?.(); }
+            if (native) { stopTts(); onInterrupt?.(); }
           },
           onFinalTranscript: (transcript) => {
             setListening(false);
@@ -244,7 +257,8 @@ export function useVoice({
     setVoicePhase("idle");
     setVoiceNotice("");
     stopTts();
-  }, [activeThreadId, activeProjectId]);
+    pausedRef.current = true;
+  }, [activeThreadId, activeProjectId, nativeLiveAvailable]);
 
   useEffect(() => {
     const listener = () => {
@@ -258,7 +272,7 @@ export function useVoice({
   return {
     voicePhase, setVoicePhase, voiceNotice, setVoiceNotice, voiceInputLevel,
     voiceReadAloud, voiceConversationMode, wakeWordEnabled,
-    nativeLiveVoice, toggleNativeLiveVoice,
+    nativeLiveVoice, pauseVoice, resumeAfterReply,
     toggleReadAloud, toggleVoiceMode, toggleWakeWord, start, stop, speakLocalText,
   };
 }

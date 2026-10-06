@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { CodeBlock, CopyButton } from "./CodeBlock";
 import { openExternal } from "./env";
 import { MermaidDiagram } from "./Mermaid";
@@ -45,6 +45,7 @@ function ArtifactFrame({ apiBase, id, version, title, reloadKey }: { apiBase: st
   useEffect(() => {
     let live = true;
     setSrc("");
+    setError("");
     fetch(`${apiBase}/lean/artifacts/${id}/frame-token`, { method: "POST" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data) => live && setSrc(`${apiBase}/lean/artifacts/${id}/frame?v=${version}&t=${encodeURIComponent(data.token)}`))
@@ -75,6 +76,7 @@ export function ArtifactPanel({
   overlay = false,
   embedded = false,
   onClose,
+  onEdit,
 }: {
   apiBase: string;
   artifactId: string;
@@ -84,6 +86,7 @@ export function ArtifactPanel({
   /** Inside the right panel, which has its own close button and placement. */
   embedded?: boolean;
   onClose(): void;
+  onEdit?(id: string, version: number, passage?: string): void;
 }) {
   const [detail, setDetail] = useState<ArtifactDetail | null>(null);
   const [error, setError] = useState("");
@@ -91,17 +94,24 @@ export function ArtifactPanel({
   const [view, setView] = useState<"preview" | "source">("preview");
   const [fullscreen, setFullscreen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const [selection, setSelection] = useState("");
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const loadSequence = useRef(0);
 
-  useEffect(() => setShown(version), [artifactId, version]);
+  useEffect(() => { setShown(version); setSelection(""); }, [artifactId, version]);
 
   const load = useCallback(
     async (n?: number) => {
+      const sequence = ++loadSequence.current;
       try {
         const response = await fetch(`${apiBase}/lean/artifacts/${artifactId}${n ? `?version=${n}` : ""}`);
         if (!response.ok) throw new Error(response.status === 404 ? "This artifact no longer exists." : `HTTP ${response.status}`);
-        setDetail(await response.json());
+        const next = await response.json();
+        if (sequence !== loadSequence.current) return;
+        setDetail(next);
         setError("");
       } catch (err: any) {
+        if (sequence !== loadSequence.current) return;
         setError(String(err?.message || err));
       }
     },
@@ -148,6 +158,9 @@ export function ArtifactPanel({
           </small>
         </div>
         <div className="ap-versions" role="group" aria-label="Versions">
+          {detail ? <select aria-label="Artifact version" value={n} onChange={event => { setShown(Number(event.target.value) === latest ? undefined : Number(event.target.value)); setSelection(""); }}>
+            {detail.history.map(item => <option key={item.n} value={item.n}>Version {item.n}{item.n === latest ? " · latest" : ""}{item.note ? ` · ${item.note}` : ""}</option>)}
+          </select> : null}
           <button type="button" className="wg-ghost" disabled={!detail || n <= (detail.history[0]?.n || 1)} onClick={() => setShown(Math.max(1, n - 1))} aria-label="Previous version">‹</button>
           <button type="button" className="wg-ghost" disabled={!detail || n >= latest} onClick={() => setShown(n + 1 >= latest ? undefined : n + 1)} aria-label="Next version">›</button>
         </div>
@@ -168,7 +181,11 @@ export function ArtifactPanel({
         {runnable && view === "preview" ? <button type="button" className="wg-ghost" onClick={() => setReloadKey((k) => k + 1)} title="Restart the app">Reload</button> : null}
         {!embedded && <button type="button" className="wg-ghost" onClick={() => setFullscreen((v) => !v)} aria-pressed={fullscreen}>{fullscreen ? "Exit full screen" : "Full screen"}</button>}
       </div>
-      <div className="ap-body">
+      <div className="ap-context-bar"><span>{n === latest ? "Latest version" : `Viewing version ${n}`} · saved in your library</span>{onEdit && current ? <button type="button" className="es-btn es-btn-sm" onClick={() => onEdit(artifactId, n, selection || undefined)}>{selection ? "Edit selection with Echo" : "Edit with Echo"}</button> : null}</div>
+      <div className="ap-body" ref={bodyRef} onMouseUp={() => {
+        const selected = window.getSelection();
+        setSelection(selected?.anchorNode && bodyRef.current?.contains(selected.anchorNode) ? selected.toString().slice(0, 2000) : "");
+      }}>
         {error ? (
           <div className="ap-empty">{error}</div>
         ) : !detail || !current ? (

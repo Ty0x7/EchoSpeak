@@ -16,6 +16,7 @@ import type {
 import { canApplySessionHistory, ownsStreamCleanup } from "./desktop/sessionProjection";
 import leanCss from "./lean/lean.css?inline";
 import settingsCss from "./settings/settings.css?inline";
+import chatPolishCss from "./dashboard/chatPolish.css?inline";
 import { CreationsPage } from "./creations/CreationsPage";
 import { FirstRunSetup } from "./setup/FirstRunSetup";
 import { SettingsPanel } from "./settings/SettingsPanel";
@@ -48,6 +49,7 @@ import { projectSessionHistory } from "./dashboard/historyProjection";
 import { ComposerInput } from "./dashboard/ComposerInput";
 import { ChatThread } from "./dashboard/ChatThread";
 import { recoverableQuery } from "./dashboard/recoverableStream";
+import { VoiceStage } from "./dashboard/VoiceStage";
 
 type DashboardTab = "chat" | "research" | "overview" | "skills" | "memory" | "docs" | "settings" | "search_settings" | "mcp_settings" | "advanced_settings" | "system_services" | "capabilities" | "approvals" | "executions" | "projects" | "automations" | "connections" | "soul" | "services" | "avatar_editor";
 
@@ -77,6 +79,8 @@ export const Dashboard: React.FC<{
   } = useAppStore();
 
   const [input, setInput] = useState("");
+  const [messageActionBusy, setMessageActionBusy] = useState(false);
+  const [readingId, setReadingId] = useState("");
   const [activities, setActivities] = useState<ActivityItem[]>([]);
   const updateComposerInput = useCallback((value: string) => {
     setInput(value);
@@ -945,6 +949,7 @@ export const Dashboard: React.FC<{
     const ctxWindow = Number(providerInfo?.context_window || 0) || 32768;
     const userMsg: Message = {
       id: crypto.randomUUID(),
+      clientRequestId: runRequestId,
       role: "user",
       text: raw,
       at: Date.now(),
@@ -1000,7 +1005,8 @@ export const Dashboard: React.FC<{
           include_memory: true,
           thread_id: streamThreadId,
           client_request_id: runRequestId,
-          thinking_enabled: thinkingEnabled,
+          thinking_enabled: providerInfo?.model_profile?.thinking_controls?.supported
+            ? (providerInfo.model_profile.thinking_controls.toggle ? thinkingEnabled : true) : false,
           reasoning_effort: reasoningEffort,
           transport: voiceTranscript ? "voice" : "chat",
           voice_turn_id: voiceTranscript?.voiceTurnId,
@@ -1070,6 +1076,7 @@ export const Dashboard: React.FC<{
               if (execId) {
                 durableTurnId = execId;
                 activeExecutionIdsRef.current.set(streamThreadId, execId);
+                if (!recovery) appendTurnMessage({ ...userMsg, executionId: execId });
               }
               // The legacy bootstrap "thinking…" card is not part of a lean turn.
               if (visible) setActivities((prev) => prev.filter((a) => !(a.kind === "thinking" && a.request_id === runRequestId)));
@@ -1130,11 +1137,13 @@ export const Dashboard: React.FC<{
                 executionId: finalExecId,
               }).then((played) => {
                 if (played && voiceConversationMode && activeThreadIdRef.current === streamThreadId && !streamControllersRef.current.has(streamThreadId)) {
-                  void start();
+                  resumeAfterReply();
                 }
               });
             }
             void refreshThreads();
+            // A topic title is generated independently of the reply; refresh without delaying it.
+            if (!messages.some(message => message.role === "user")) [2500, 7000, 15000].forEach(delay => window.setTimeout(() => void refreshThreads(), delay));
             void refreshRoster();
             continue;
           }
@@ -1338,14 +1347,60 @@ export const Dashboard: React.FC<{
   const {
     voicePhase, setVoicePhase, voiceNotice, setVoiceNotice, voiceInputLevel,
     voiceReadAloud, voiceConversationMode, wakeWordEnabled,
-    nativeLiveVoice, toggleNativeLiveVoice,
+    nativeLiveVoice, pauseVoice, resumeAfterReply,
     toggleReadAloud, toggleVoiceMode, toggleWakeWord, start, stop, speakLocalText,
   } = useVoice({
     apiBase, activeThreadId, activeProjectId, activeThreadIdRef, activeProjectIdRef,
     streaming, listening, setListening, speechEnabled, onTranscript: submitVoiceTranscript,
+    nativeLiveAvailable: providerInfo?.provider === "gemini" && /live|native-audio/i.test(providerInfo?.model || ""),
     onInterrupt: () => { if (streamControllersRef.current.has(activeThreadIdRef.current)) cancelSessionTurn(activeThreadIdRef.current, true); },
   });
 
+  useLayoutEffect(() => {
+    if (voiceConversationMode) scrollChatToBottom();
+  }, [voiceConversationMode, scrollChatToBottom]);
+
+  const reviseMessage = async (message: Message, text: string) => {
+    const source = activeThreadIdRef.current;
+    if (messageActionBusy || streamControllersRef.current.has(source)) throw new Error("Stop this chat or wait for its reply before retrying.");
+    if (!message.executionId && !message.clientRequestId) throw new Error("Reload this chat to retrieve the prompt's saved identity.");
+    setMessageActionBusy(true);
+    let continuationId = "";
+    try {
+      const response = await fetch(`${apiBase}/threads/${encodeURIComponent(source)}/branch`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ execution_id: message.executionId || "", client_request_id: message.clientRequestId || "" }),
+      });
+      const branch = await response.json();
+      if (!response.ok) throw new Error(typeof branch.detail === "string" ? branch.detail : "Couldn't continue from this prompt.");
+      await refreshThreads(); await refreshRoster();
+      if (activeThreadIdRef.current !== source) throw new Error("The branch is saved in your chats. Open it to continue; your current chat was left in place.");
+      stopTts();
+      switchThread(branch.thread_id);
+      activeProjectIdRef.current = String(branch.project_id || "");
+      setActiveProjectId(activeProjectIdRef.current);
+      await loadHistory(branch.thread_id);
+      await refreshProviderInfo({ allowRetry: true });
+      continuationId = branch.thread_id;
+    } finally { setMessageActionBusy(false); }
+    if (activeThreadIdRef.current !== continuationId) throw new Error("Your branch is saved. Open it to send the revised prompt.");
+    await sendText(text);
+  };
+
+  const readMessage = async (message: Message) => {
+    if (readingId === message.id) { stopTts(); setReadingId(""); return; }
+    if (voiceConversationMode) pauseVoice();
+    stopTts(); setReadingId(message.id); setSpeechEnabled(true);
+    await speakLocalText(message.text, { clientTurnId: `read-${crypto.randomUUID()}`, executionId: message.executionId, completeTurn: true, force: true });
+    setReadingId(current => current === message.id ? "" : current);
+  };
+
+  const openVoiceSettings = () => {
+    localStorage.setItem("echospeak.settings.section", "voice");
+    window.dispatchEvent(new CustomEvent("echospeak.settings.navigate", { detail: "voice" }));
+    if (desktopMode && !desktopSettingsWindow) void openDesktopSettingsWindow().catch(() => setDesktopSettingsOpen(true));
+    else setDesktopSettingsOpen(true);
+  };
 
 
   const refreshMonitor = async () => {
@@ -1434,7 +1489,7 @@ export const Dashboard: React.FC<{
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [desktopMode, studioOpen]);
 
-  const rightOpen = mainPage === "chat" && Boolean(openArtifact || activityOpen);
+  const rightOpen = mainPage === "chat" && !voiceConversationMode && Boolean(openArtifact || activityOpen);
   const rightDocked = rightOpen && !narrowLayout;
   const shellColumns = [
     desktopMode
@@ -1570,6 +1625,7 @@ export const Dashboard: React.FC<{
       <style>{globalCss}</style>
       <style>{leanCss}</style>
       <style>{settingsCss}</style>
+      <style>{chatPolishCss}</style>
       {agentEditor.open ? (
         <AgentEditor
           agent={agentEditor.agent}
@@ -1623,7 +1679,8 @@ export const Dashboard: React.FC<{
         className={
           "app-shell" +
           (studioOpen && !desktopMode ? " is-studio-covered" : "") +
-          (desktopMode ? " desktop-single-workspace" : "")
+          (desktopMode ? " desktop-single-workspace" : "") +
+          (voiceConversationMode && mainPage === "chat" ? " is-voice-mode" : "")
         }
         style={{
           gridTemplateColumns: shellColumns,
@@ -1717,6 +1774,11 @@ export const Dashboard: React.FC<{
             onTab={setRightTab}
             artifact={openArtifact}
             activity={activityItems}
+            onEditArtifact={(id, version, passage) => {
+              setMainPage("chat");
+              setInput(`Read artifact ${id} at version ${version}, then revise it and save a new version. Preserve the original version.${passage ? `\nSelected passage:\n${passage}\n` : "\n"}Changes I'd like: `);
+              window.setTimeout(() => textareaRef.current?.focus(), 0);
+            }}
             width={panelWidth}
             onWidth={setPanelWidth}
             measureRoom={measurePanelRoom}
@@ -1847,7 +1909,7 @@ export const Dashboard: React.FC<{
               {/* Chat Tab */}
                 <>
                   <WidgetEnvProvider value={widgetEnv}>
-                  {!rightOpen && activeThreadId ? (
+                  {!rightOpen && !voiceConversationMode && activeThreadId ? (
                     <button
                       type="button"
                       className="rp-toggle"
@@ -1874,9 +1936,11 @@ export const Dashboard: React.FC<{
                     pendingApproval={pendingApproval} threadState={threadState}
                     approvalDecisionBusy={approvalDecisionBusy} onApprovalDecision={decideApproval}
                     onLeanApproval={decideLeanApproval}
+                    actions={{ onRevise: reviseMessage, onRead: readMessage, readingId: speaking ? readingId : "", actionBusy: messageActionBusy }}
+                    voiceStage={voiceConversationMode ? <VoiceStage apiBase={apiBase} phase={voicePhase} notice={voiceNotice} listening={listening} speaking={speaking} streaming={streaming} native={nativeLiveVoice} level={voiceInputLevel} tool={activityItems.find(item => item.status === "running")?.label || ""} online={Boolean(backendOnline)} onListen={() => { if (streaming) stopActiveTurn(); void start(); }} onPause={pauseVoice} onEnd={toggleVoiceMode} onSettings={openVoiceSettings} /> : undefined}
                   />
                   </WidgetEnvProvider>
-                  <div className="input-bar">
+                  {!voiceConversationMode || mainPage !== "chat" ? <div className="input-bar">
                     <LiveStatusPill live={streaming ? lean.live : null} onStop={stopActiveTurn} />
                     {/* Row 1: session strip stacked on input (same column width) + context + send */}
                     <ComposerInput
@@ -1908,9 +1972,8 @@ export const Dashboard: React.FC<{
                       setThinkingEnabled={setThinkingEnabled} voiceReadAloud={voiceReadAloud}
                       toggleReadAloud={toggleReadAloud} voiceConversationMode={voiceConversationMode}
                       toggleVoiceMode={toggleVoiceMode} wakeWordEnabled={wakeWordEnabled} toggleWakeWord={toggleWakeWord}
-                      nativeLiveVoice={nativeLiveVoice} toggleNativeLiveVoice={toggleNativeLiveVoice}
                     />
-                  </div>
+                  </div> : null}
                 </>
 
               {studioOpen && (!desktopMode || desktopStudioHost) && createPortal(

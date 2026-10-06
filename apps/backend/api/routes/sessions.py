@@ -670,6 +670,32 @@ async def update_thread(thread_id: str, request: ThreadUpdateRequest):
     return _thread_response(thread)
 
 
+class PromptBranchRequest(BaseModel):
+    execution_id: str = Field(default="", max_length=200)
+    client_request_id: str = Field(default="", max_length=200)
+
+
+@router.post("/threads/{thread_id}/branch", response_model=ThreadResponse)
+def branch_prompt(thread_id: str, request: PromptBranchRequest):
+    if not request.execution_id and not request.client_request_id:
+        raise HTTPException(422, "A prompt identity is required")
+    agent = get_existing_agent(thread_id)
+    lock = getattr(agent, "_request_lock", None)
+    if lock and not lock.acquire(blocking=False):
+        raise HTTPException(409, "This chat is busy. Stop it or wait before retrying.")
+    try:
+        from agent.chat_branches import branch_before_prompt
+        return _thread_response(branch_before_prompt(thread_id, execution_id=request.execution_id,
+                                                    request_id=request.client_request_id))
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    finally:
+        if lock:
+            lock.release()
+
+
 @router.delete("/threads/{thread_id}")
 async def delete_thread(thread_id: str):
     """Delete a conversation thread."""
