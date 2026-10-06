@@ -89,19 +89,16 @@ For cloud chat, Settings loads the provider's available model catalog and separa
 
 These are starting prompts, not pre-recorded results. Available tools, model support and your settings determine what Echo can do.
 
-## What's new in 10.4.3
+## What's new in 10.5.0
 
-The current source includes 10.4.3 installation and documentation improvements, alongside the 10.4.2 chat and voice polish. The download button always points to the latest **published** release.
+The current source includes 10.5.0, alongside the 10.4.x installer, chat and voice improvements. The download button always points to the latest **published** release.
 
-- **Windows installation:** Echo-branded installer and uninstaller, with native shortcut maintenance during installation.
-- **Clearer guides:** everyday setup and use, with maintainer distribution instructions removed.
-- **Message actions:** copy prompts and replies, read replies aloud, and edit or retry a prompt while keeping the original conversation.
-- **Full voice view:** the new Echo avatar fills the conversation area, with a compact transcript below and shared companion appearance settings.
-- **Cleaner controls:** a compact model/voice toolbar, clearer approvals, and thinking controls that follow model and adapter support.
-- **Better saved work:** artifact version selection and editing through chat, plus topic-based titles for new conversations.
-- **Visible updates:** an available-update notice above Settings and a separate sidebar collapse control.
+- **Tidier lists:** Group chats, Projects, Artifacts, Routines and Creations show three items with **Show more** / **Show less**.
+- **Clearer model choice:** local and cloud providers grouped, each provider's saved model restored when you switch, and plain messages when a key or model is missing.
+- **Settings where you'd look:** voice, channel, search and heartbeat options sit with their features, Advanced keeps only rarely changed options, and Settings search finds options by name.
+- **From 10.4:** recoverable chats, research citations, image editing, message actions, full voice conversations with the new Echo avatar, and an Echo-branded installer.
 
-[10.4.3 release notes](docs/releases/v10.4.3.md) · [10.4.2 release notes](docs/releases/v10.4.2.md) · [10.4.1 cloud fixes](docs/releases/v10.4.1.md) · [10.4.0 reliability update](docs/releases/v10.4.0.md) · [10.x history](docs/releases/10.x-history.md)
+[10.5.0 release notes](docs/releases/v10.5.0.md) · [10.4.3 release notes](docs/releases/v10.4.3.md) · [10.4.2 release notes](docs/releases/v10.4.2.md) · [10.4.0 reliability update](docs/releases/v10.4.0.md) · [10.x history](docs/releases/10.x-history.md)
 
 ## Your data and your choices
 

@@ -1,5 +1,28 @@
 # Changes
 
+## v10.5.0 — 2026-10-06
+
+User-facing notes: [EchoSpeak 10.5.0](docs/releases/v10.5.0.md).
+
+- **Lists** (`apps/web/src/lean/ShowMore.tsx`): Group chats, Projects, Artifacts, Routines and Creations show three
+  items with "… Show more" / "Show less"; a selected item beyond the third opens the list expanded. Creations no longer
+  drops in-progress jobs past 12.
+- **Model selection:** the composer groups providers (On this PC / Cloud), hides `llama_cpp` (the lean runtime has no
+  endpoint for it) unless already bound, and shows loading / no-key / no-models states. `GET /provider/models` returns
+  `saved_model`; a provider switch restores it before falling back to the first catalog entry
+  (`dashboard/useProviderSettings.ts`).
+- **Settings › Models:** one cloud Model choice with key status and a "Use a custom model ID…" option (opens
+  automatically for a saved ID a loaded catalog lacks); provider names match the backend catalog; removed the 64358
+  context option; corrected the Gemini Live note.
+- **Settings layout:** Advanced keeps LM Studio only, memory search, app allowlist, webhooks, A2A and folders. Voice
+  engines → Voice; Discord access/changelog, mail ports/TLS, Twitter/X, WhatsApp → Channels; search timeout and odds
+  key → Web search (duplicate Brave key removed); heartbeat prompt → Automations; document search settings → Memory &
+  documents. Keys are unchanged. Settings search matches option names (`SEARCH_WORDS`).
+- **Fixes:** routine Run/enable errors show in the list; generic name placeholder; wake-word note matches the composer
+  menu; embedding choices named for what they select, with the model field only where used.
+- Docs: `docs/releases/10.x-history.md` covers 10.4.x and 10.5.0; this file gains 10.2.0–10.4.2 entries.
+- Tests: `test_cloud_models.py::test_model_lists_report_the_saved_model_so_pickers_restore_it`.
+
 ## v10.4.3 — 2026-10-06
 
 User-facing notes: [EchoSpeak 10.4.3](docs/releases/v10.4.3.md).
@@ -9,6 +32,43 @@ User-facing notes: [EchoSpeak 10.4.3](docs/releases/v10.4.3.md).
 - Optional Windows publisher verification covers the installer and installed executables; updater signatures remain required for publishing.
 - Public guides remove maintainer distribution recipes and correct voice setup instructions.
 - Windows warning guidance keeps protection enabled.
+
+## v10.4.2 — 2026-10-06
+
+User-facing notes: [EchoSpeak 10.4.2](docs/releases/v10.4.2.md). Message copy/read-aloud/edit/retry, one Voice
+conversation button with the new Echo avatar, restyled approvals, artifact versions and edits, topic titles,
+desktop update notice.
+
+## v10.4.1 — 2026-10-05
+
+User-facing notes: [EchoSpeak 10.4.1](docs/releases/v10.4.1.md). Parallel cloud tool calls keep their IDs and
+arguments; stricter model-response checks.
+
+## v10.4.0 — 2026-10-05
+
+User-facing notes: [EchoSpeak 10.4.0](docs/releases/v10.4.0.md). Recoverable chat runs and creation jobs, research
+citations and notes, project briefs, image editing, starter model downloads, native Gemini Live audio, Windows
+startup fixes.
+
+## v10.3.2 — 2026-10-05
+
+User-facing notes: [EchoSpeak 10.3.2](docs/releases/v10.3.2.md). Per-chat live transcripts while navigating, proper
+tables, Creations in the shared page style.
+
+## v10.3.1 — 2026-10-05
+
+User-facing notes: [EchoSpeak 10.3.1](docs/releases/v10.3.1.md). Live cloud model catalogs (OpenAI, Gemini, Claude,
+Grok), saved keys, custom model IDs, native Claude and Gemini Live APIs.
+
+## v10.3.0 — 2026-10-04
+
+User-facing notes: [EchoSpeak 10.3.0](docs/releases/v10.3.0.md). Creations with cloud and local image/video
+generation, research storage and parsing, guided first-run setup.
+
+## v10.2.0 — 2026-10-04
+
+User-facing notes: [EchoSpeak 10.2.0](docs/releases/v10.2.0.md). Legacy pipeline and TUIs removed, routers split,
+PyTorch replaced by optional ONNX search, security fixes.
 
 ## v10.1.0 — 2026-10-03
 
