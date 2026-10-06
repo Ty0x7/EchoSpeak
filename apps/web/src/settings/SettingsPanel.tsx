@@ -14,6 +14,8 @@ import { ChoiceCards, Group, ListEditor, Row, SecretField, Segmented, Select, St
 import { useSettings, type SettingsMap } from "./useSettings";
 import { AdvancedSection, type AdvancedPage } from "./AdvancedSection";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
+import { ThemePicker } from "../theme/ThemePicker";
+import { requestSetup } from "../setup/openSetup";
 
 type SectionId =
   | "general"
@@ -68,7 +70,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
 
 /** What each section holds, so searching for a setting finds the section it lives in. */
 const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
-  general: "name setup approvals approval mode step budget iterations learning lessons reviews reflections experience feedback",
+  general: "appearance theme light dark mode white black colours colors name setup approvals approval mode step budget iterations learning lessons reviews reflections experience feedback",
   models: "provider model api key openai gemini claude anthropic grok xai lm studio ollama localai vllm local cloud context temperature creativity custom model id",
   agents: "persona jarvis glados toolsets",
   personality: "soul personality tone",
@@ -423,8 +425,11 @@ export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMa
 function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
   return (
     <>
+      <Group title="Appearance" description="Light is the blueprint look; dark is the classic black. Every EchoSpeak window switches together.">
+        <div className="st-row is-stack"><ThemePicker /></div>
+      </Group>
       <Group>
-        <Row label="Setup" help="Revisit the first-time model and capability checklist."><button className="es-btn es-btn-sm" onClick={() => window.dispatchEvent(new Event("echospeak:open-setup"))}>Open setup</button></Row>
+        <Row label="Setup" help="Revisit the first-time model and capability checklist."><button className="es-btn es-btn-sm" onClick={() => void requestSetup()}>Open setup</button></Row>
         <Row label="Your name" help="How your agents refer to you.">
           <TextField value={s.user_display_name || ""} placeholder="Your first name" onCommit={(v) => save({ user_display_name: v })} />
         </Row>

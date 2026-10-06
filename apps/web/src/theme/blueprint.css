@@ -1,0 +1,270 @@
+/*
+ * Blueprint layer: the drafting-table details of the 11.1 look, in both themes.
+ * Light gets the full treatment (blue hairlines, glow, gradients); dark keeps its
+ * monochrome character with a faint echo of the same structure.
+ * Colours come from theme/tokens.css.
+ */
+
+/* ── the work area: a plain, calm surface (no grid lines) ─────────────── */
+.echo-root.echo-root .glow-panel,
+.echo-root.echo-root .es-page,
+.desktop-boot-state,
+.setup-window {
+  background-color: var(--es-bg);
+  background-image: none;
+}
+
+
+
+/* ── labels set like drawing annotations ─────────────────────────────── */
+.echo-root .es-sec-title,
+.echo-root .es-learn-detail h3,
+.desktop-titlebar-brand small,
+.setup-brand {
+  font-family: var(--es-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--es-label);
+}
+.echo-root .es-sec-count {
+  font-family: var(--es-mono);
+  background: var(--es-accent-soft);
+  color: var(--es-label);
+  border-radius: 999px;
+}
+
+/* ── agent faces keep their own colours in both themes ───────────────── */
+/* Teammates (Jarvis, Glados): black faces in dark, blue in light. Echo is the white one. */
+.lm-face[data-tone="dark"] {
+  background: #18181a;
+  border-color: #2c2c30;
+}
+:root[data-es-theme="light"] .lm-face[data-tone="dark"] {
+  background: linear-gradient(180deg, #4f97ff 0%, #2c73e8 100%);
+  border-color: #2c73e8;
+  box-shadow: 0 0 0 1px rgba(64, 145, 255, 0.45), 0 0 6px rgba(64, 145, 255, 0.35);
+}
+:root[data-es-theme="light"] .lm-face[data-tone="dark"] i { background: #ffffff; }
+
+/* ── the Echo face: a blue outer ring and a soft glow ────────────────── */
+/* Dark: a white glow (the blue one is light mode's, below). */
+.lm-face[data-tone="light"] {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 10px rgba(255, 255, 255, 0.28);
+}
+.echo-face {
+  box-shadow:
+    inset 0 calc(var(--face) * .012) 0 #ffffff,
+    inset 0 calc(var(--face) * -.02) 0 rgba(0, 0, 0, .06),
+    0 0 0 max(1px, calc(var(--face) * .006)) rgba(255, 255, 255, 0.45),
+    0 0 calc(var(--face) * .22) rgba(255, 255, 255, 0.3),
+    0 0 calc(var(--face) * .5) rgba(255, 255, 255, 0.12),
+    0 calc(var(--face) * .09) calc(var(--face) * .22) rgba(0, 0, 0, .55) !important;
+}
+
+/* ── voice: measuring rings around Echo ──────────────────────────────── */
+.echo-root .voice-stage-avatar { position: relative; }
+.echo-root .voice-stage-avatar::before,
+.echo-root .voice-stage-avatar::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+.echo-root .voice-stage-avatar::before {
+  width: clamp(220px, 46vh, 440px);
+  height: clamp(220px, 46vh, 440px);
+  border: 1px solid var(--es-mark);
+  opacity: 0.55;
+  background:
+    linear-gradient(var(--es-mark), var(--es-mark)) center top / 1px 14px no-repeat,
+    linear-gradient(var(--es-mark), var(--es-mark)) center bottom / 1px 14px no-repeat,
+    linear-gradient(var(--es-mark), var(--es-mark)) left center / 14px 1px no-repeat,
+    linear-gradient(var(--es-mark), var(--es-mark)) right center / 14px 1px no-repeat;
+}
+/* A soft blue glow behind Echo. */
+.echo-root .voice-stage-avatar::after {
+  width: clamp(300px, 62vh, 620px);
+  height: clamp(300px, 62vh, 620px);
+  background: radial-gradient(circle, var(--es-halo) 0%, var(--es-halo-mid) 32%, transparent 68%);
+  filter: blur(6px);
+}
+.echo-root .voice-stage-avatar::before,
+.echo-root .voice-stage-avatar::after { z-index: 0; }
+/* Echo sits above the ring and the glow. */
+.echo-root .voice-stage-avatar > div { position: relative; z-index: 1; }
+.echo-root .voice-stage-heading span { font-weight: 600; color: var(--es-text); font-size: 14px; }
+
+/* ── light theme: the full blueprint treatment ───────────────────────── */
+:root[data-es-theme="light"] .echo-root.echo-root .echo-sidebar,
+:root[data-es-theme="light"] .echo-root.echo-root .rp {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(6px);
+}
+
+/* Primary actions: a blue gradient with a soft lift. */
+/* The originals use !important (lean.css), so these must too. */
+:root[data-es-theme="light"] .echo-root.echo-root .es-new-chat,
+:root[data-es-theme="light"] .es-btn-primary,
+:root[data-es-theme="light"] .echo-root.echo-root .send-button:not(:disabled),
+:root[data-es-theme="light"] .setup-panel > footer .es-btn:last-child:not(:disabled) {
+  background: var(--es-emph-fill) !important;
+  color: #ffffff !important;
+  border-color: transparent !important;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 6px 16px -6px rgba(47, 125, 242, 0.6) !important;
+}
+:root[data-es-theme="light"] .echo-root.echo-root .es-new-chat:hover,
+:root[data-es-theme="light"] .es-btn-primary:hover:not(:disabled),
+:root[data-es-theme="light"] .echo-root.echo-root .send-button:hover:not(:disabled) {
+  background: linear-gradient(180deg, #5aa0ff 0%, #2f78ee 100%) !important;
+  color: #ffffff !important;
+}
+:root[data-es-theme="light"] .echo-root.echo-root .es-new-chat svg { stroke: currentColor; }
+
+/* Cards and bubbles: white sheets, outlined in blue. */
+:root[data-es-theme="light"] .echo-root .chat-user-bubble-wrap .chat-line-user,
+:root[data-es-theme="light"] .echo-root .composer-input-stack,
+:root[data-es-theme="light"] .echo-root .es-page-card,
+:root[data-es-theme="light"] .echo-root .es-learn-row,
+:root[data-es-theme="light"] .echo-root .wg,
+:root[data-es-theme="light"] .setup-panel {
+  background-color: #ffffff;
+  border-color: var(--es-border);
+  box-shadow: 0 1px 2px rgba(22, 54, 102, 0.05), 0 6px 18px -12px rgba(47, 110, 205, 0.35);
+}
+:root[data-es-theme="light"] .echo-root .composer-input-stack:focus-within {
+  border-color: rgba(47, 125, 242, 0.55);
+  box-shadow: 0 0 0 3px rgba(47, 125, 242, 0.12), 0 6px 18px -12px rgba(47, 110, 205, 0.4);
+}
+
+/* Tabs in the right panel: an outlined pill for the open one. */
+:root[data-es-theme="light"] .rp-tabs [role="tab"] {
+  font-family: var(--es-mono);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+:root[data-es-theme="light"] .rp-tabs [role="tab"].is-on {
+  color: var(--es-accent);
+  background: var(--es-accent-soft);
+  box-shadow: inset 0 0 0 1px rgba(47, 125, 242, 0.45);
+}
+
+/* The Echo face on white: a firmer blue outer line and a brighter glow. */
+:root[data-es-theme="light"] .lm-face[data-tone="light"] {
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgba(47, 125, 242, 0.6), 0 0 12px rgba(64, 145, 255, 0.6);
+}
+:root[data-es-theme="light"] .echo-face {
+  box-shadow:
+    inset 0 calc(var(--face) * .012) 0 #ffffff,
+    inset 0 calc(var(--face) * -.02) 0 rgba(20, 60, 120, .05),
+    0 0 0 max(1.5px, calc(var(--face) * .008)) rgba(47, 125, 242, 0.75),
+    0 0 calc(var(--face) * .25) rgba(64, 145, 255, 0.65),
+    0 0 calc(var(--face) * .6) rgba(64, 145, 255, 0.35),
+    0 calc(var(--face) * .06) calc(var(--face) * .2) rgba(30, 80, 160, .18) !important;
+}
+:root[data-es-theme="light"] .echo-face-shadow { background: rgba(47, 110, 205, 0.2); }
+:root[data-es-theme="light"] .echo-says {
+  background: #ffffff;
+  border-color: var(--es-border);
+  color: var(--es-text);
+  box-shadow: 0 10px 30px -14px rgba(47, 110, 205, 0.45);
+}
+
+/* Dropdown chevrons drawn as images need a dark stroke on white. */
+:root[data-es-theme="light"] .provider-picker,
+:root[data-es-theme="light"] .model-picker,
+:root[data-es-theme="light"] .mode-picker {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='rgba(14,34,64,0.55)' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+}
+
+/* Selection and focus in the accent. */
+:root[data-es-theme="light"] ::selection { background: rgba(47, 125, 242, 0.2); color: inherit; }
+
+/* ── appearance picker (theme/ThemePicker.tsx) ───────────────────────── */
+.es-theme-picker { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; width: 100%; }
+.es-theme-option {
+  display: grid; gap: 8px; padding: 8px; text-align: left; cursor: pointer;
+  border: 1px solid var(--es-line-2); border-radius: 12px; background: var(--es-glass);
+  color: var(--es-text); font: inherit;
+  transition: border-color var(--es-dur) var(--es-ease), box-shadow var(--es-dur) var(--es-ease);
+}
+.es-theme-option:hover { border-color: var(--es-line-3); }
+.es-theme-option.is-on { border-color: var(--es-accent); box-shadow: 0 0 0 1px var(--es-accent); }
+.es-theme-option:focus-visible { outline: 2px solid var(--es-focus); outline-offset: 2px; }
+.es-theme-option-text { display: grid; gap: 1px; padding: 0 2px 2px; }
+.es-theme-option-text strong { font-size: 12.5px; font-weight: 600; }
+.es-theme-option-text small { font-size: 11px; color: var(--es-text-3); }
+.es-theme-preview { display: grid; grid-template-columns: 26% 1fr; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid; }
+.es-theme-preview-side { display: grid; align-content: start; gap: 4px; padding: 7px 5px; }
+.es-theme-preview-side i { height: 3px; border-radius: 2px; }
+.es-theme-preview-side i:first-child { height: 6px; }
+.es-theme-preview-main { position: relative; display: grid; align-content: start; gap: 4px; padding: 7px 8px; }
+.es-theme-preview-face { display: inline-flex; gap: 2px; align-items: center; justify-content: center; width: 11px; height: 11px; border-radius: 3px; background: #f4f4f2; }
+.es-theme-preview-face b { width: 1.5px; height: 4px; border-radius: 1px; background: #070707; }
+.es-theme-preview-line { height: 3px; width: 80%; border-radius: 2px; }
+.es-theme-preview-line.is-short { width: 55%; }
+.es-theme-preview-bubble { position: absolute; right: 7px; bottom: 7px; width: 34%; height: 9px; border-radius: 4px; }
+.es-theme-preview.is-light { border-color: #d4e2f3; }
+.es-theme-preview.is-light .es-theme-preview-side { background: #ffffff; border-right: 1px solid #e1ebf7; }
+.es-theme-preview.is-light .es-theme-preview-side i { background: #c9daf0; }
+.es-theme-preview.is-light .es-theme-preview-side i:first-child { background: linear-gradient(180deg, #4f97ff, #2c73e8); }
+.es-theme-preview.is-light .es-theme-preview-main { background-color: #f5f8fc; }
+.es-theme-preview.is-light .es-theme-preview-face { box-shadow: 0 0 0 1px rgba(47, 125, 242, .6), 0 0 4px rgba(64, 145, 255, .5); }
+.es-theme-preview.is-light .es-theme-preview-line { background: #9fb4d0; }
+.es-theme-preview.is-light .es-theme-preview-bubble { background: #ffffff; border: 1px solid #c6d8ef; }
+.es-theme-preview.is-dark { border-color: #2a2a2e; }
+.es-theme-preview.is-dark .es-theme-preview-side { background: #0b0b0c; border-right: 1px solid #1d1d20; }
+.es-theme-preview.is-dark .es-theme-preview-side i { background: #2a2a2e; }
+.es-theme-preview.is-dark .es-theme-preview-side i:first-child { background: #f4f4f5; }
+.es-theme-preview.is-dark .es-theme-preview-main { background-color: #050505; }
+.es-theme-preview.is-dark .es-theme-preview-line { background: #3a3a3f; }
+.es-theme-preview.is-dark .es-theme-preview-bubble { background: #18181a; border: 1px solid #2c2c30; }
+.es-theme-preview.is-system { border-color: #9fb4d0; background: linear-gradient(135deg, #f5f8fc 0 50%, #050505 50% 100%); }
+.es-theme-preview.is-system .es-theme-preview-side { background: linear-gradient(135deg, #ffffff 0 50%, #0b0b0c 50% 100%); }
+.es-theme-preview.is-system .es-theme-preview-side i { background: #7f8ea3; }
+.es-theme-preview.is-system .es-theme-preview-line { background: #7f8ea3; }
+.es-theme-preview.is-system .es-theme-preview-bubble { background: #7f8ea3; opacity: .5; }
+@media (max-width: 520px) { .es-theme-picker { grid-template-columns: minmax(0, 1fr); } .es-theme-preview { height: 48px; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .echo-root .voice-stage-avatar::before,
+  .echo-root .voice-stage-avatar::after { transition: none; }
+}
+
+/* ── code on white: a light syntax palette (dark keeps widgets.css) ──── */
+:root[data-es-theme="light"] .hljs-keyword, :root[data-es-theme="light"] .hljs-selector-tag,
+:root[data-es-theme="light"] .hljs-built_in, :root[data-es-theme="light"] .hljs-meta .hljs-keyword { color: #cf222e; }
+:root[data-es-theme="light"] .hljs-string, :root[data-es-theme="light"] .hljs-attr,
+:root[data-es-theme="light"] .hljs-template-tag, :root[data-es-theme="light"] .hljs-regexp { color: #0a3069; }
+:root[data-es-theme="light"] .hljs-number, :root[data-es-theme="light"] .hljs-literal,
+:root[data-es-theme="light"] .hljs-symbol { color: #0550ae; }
+:root[data-es-theme="light"] .hljs-title, :root[data-es-theme="light"] .hljs-title.function_,
+:root[data-es-theme="light"] .hljs-section { color: #8250df; }
+:root[data-es-theme="light"] .hljs-type, :root[data-es-theme="light"] .hljs-class .hljs-title,
+:root[data-es-theme="light"] .hljs-title.class_ { color: #953800; }
+:root[data-es-theme="light"] .hljs-tag, :root[data-es-theme="light"] .hljs-name { color: #116329; }
+:root[data-es-theme="light"] .hljs-addition, :root[data-es-theme="light"] .wg-diff-line[data-kind="add"] { color: #116329; }
+:root[data-es-theme="light"] .hljs-deletion, :root[data-es-theme="light"] .wg-diff-line[data-kind="del"] { color: #82071e; }
+:root[data-es-theme="light"] .wg-diff-line[data-kind="add"] { background: #dafbe1; }
+:root[data-es-theme="light"] .wg-diff-line[data-kind="del"] { background: #ffebe9; }
+:root[data-es-theme="light"] .wg-diff-line[data-kind="hunk"] { color: #0550ae; }
+:root[data-es-theme="light"] .wg-live { color: var(--es-err) !important; }
+
+/* ── voice on the page ───────────────────────────────────────────────── */
+:root[data-es-theme="light"] .echo-root .conversation-view.is-voice { background: transparent; }
+/* The transcript fades into the page, not into a dark band. */
+:root[data-es-theme="light"] .echo-root .conversation-view.is-voice > .chat-scroll {
+  background: linear-gradient(180deg, rgba(245, 248, 252, 0), rgba(245, 248, 252, 0.94) 38%) !important;
+}
+
+/* Setup in its own window: content on the page colour, header and footer on white. */
+:root[data-es-theme="light"] .setup-panel.is-window { background-color: transparent; box-shadow: none; }
+:root[data-es-theme="light"] .setup-panel.is-window > header,
+:root[data-es-theme="light"] .setup-panel.is-window > footer { background: rgba(255, 255, 255, 0.92); }
+.es-theme-preview-faces { display: inline-flex; gap: 3px; }
+.es-theme-preview-face.is-mate { background: linear-gradient(180deg, #4f97ff, #2c73e8); }
+.es-theme-preview-face.is-mate b { background: #ffffff; }

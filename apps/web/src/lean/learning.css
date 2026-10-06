@@ -15,7 +15,7 @@
 .es-learn-seg button[aria-pressed="true"] { background: var(--es-glass-2); color: var(--es-text); }
 .es-learn-seg button:focus-visible, .es-learn-filters select:focus-visible { outline: 2px solid var(--es-focus); outline-offset: 2px; }
 .es-learn-list { display: grid; gap: 8px; }
-.es-learn-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 12px 14px; border: 1px solid var(--es-line); border-radius: var(--es-r); background: rgba(255, 255, 255, 0.02); }
+.es-learn-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; padding: 12px 14px; border: 1px solid var(--es-line); border-radius: var(--es-r); background: rgba(var(--es-wash-rgb), calc(0.02 * var(--es-wash-k))); }
 .es-learn-row.is-pending_review { border-color: rgba(214, 169, 85, 0.35); }
 .es-learn-row.is-retired, .es-learn-row.is-quarantined { opacity: 0.7; }
 .es-learn-row-main { min-width: 0; display: grid; gap: 5px; }
@@ -25,7 +25,7 @@
 .es-learn-tag { padding: 1px 7px; border: 1px solid var(--es-line-2); border-radius: 999px; color: var(--es-dim); font-size: 10.5px; white-space: nowrap; }
 .es-learn-tag.is-established, .es-learn-tag.is-verified { color: var(--es-ok); border-color: rgba(65, 199, 122, 0.4); }
 .es-learn-tag.is-pending_review { color: var(--es-warn); border-color: rgba(214, 169, 85, 0.45); }
-.es-learn-tag.is-failed, .es-learn-tag.is-quarantined { color: #f08a8d; border-color: rgba(229, 72, 77, 0.4); }
+.es-learn-tag.is-failed, .es-learn-tag.is-quarantined { color: var(--es-err-text); border-color: rgba(229, 72, 77, 0.4); }
 .es-learn-meta, .es-learn-why { color: var(--es-faint); font-size: 11px; }
 .es-learn-actions { display: flex; align-items: flex-start; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
 .es-learn-detail { grid-column: 1 / -1; display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--es-line); font-size: 12px; }
@@ -40,7 +40,7 @@
 .es-learn-tools li { display: flex; justify-content: space-between; gap: 10px; color: var(--es-dim); }
 .es-learn-tools li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .es-learn-tools li.is-ok small { color: var(--es-ok); }
-.es-learn-tools li.is-failed small { color: #f08a8d; }
+.es-learn-tools li.is-failed small { color: var(--es-err-text); }
 .es-learn-tools li.is-skipped small { color: var(--es-faint); }
 .es-learn-edit { display: grid; gap: 8px; }
 .es-learn-edit label { display: grid; gap: 4px; color: var(--es-faint); font-size: 11px; }
@@ -65,14 +65,14 @@
 .es-learn-level { color: var(--es-dim); font-size: 11px; white-space: nowrap; }
 .es-learn-goal { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .es-learn-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
-.es-learn-table { padding: 12px 14px; border: 1px solid var(--es-line); border-radius: var(--es-r); background: rgba(255, 255, 255, 0.02); overflow-x: auto; }
+.es-learn-table { padding: 12px 14px; border: 1px solid var(--es-line); border-radius: var(--es-r); background: rgba(var(--es-wash-rgb), calc(0.02 * var(--es-wash-k))); overflow-x: auto; }
 .es-learn-table h3 { margin: 0 0 8px; font: 600 12.5px var(--es-font); }
 .es-learn-table small { color: var(--es-faint); font-size: 11.5px; }
 .es-learn-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .es-learn-table th { text-align: left; padding: 4px 6px; color: var(--es-faint); font-weight: 500; font-size: 11px; border-bottom: 1px solid var(--es-line); }
 .es-learn-table td { padding: 5px 6px; color: var(--es-dim); border-bottom: 1px solid var(--es-line); }
 .es-learn-table tr:last-child td { border-bottom: 0; }
-.es-learn-table tr.is-failing td { color: #f08a8d; }
+.es-learn-table tr.is-failing td { color: var(--es-err-text); }
 .echo-root .message-feedback-note textarea { min-height: 60px; }
 @media (max-width: 640px) {
   .es-learn-row { grid-template-columns: minmax(0, 1fr); }
@@ -82,5 +82,5 @@
   .es-learn-episode-main small { grid-column: 1 / -1; }
 }
 .es-learn-card small { white-space: normal; }
-.es-learn-error { margin: 0; color: #f08a8d; font-size: 12px; }
+.es-learn-error { margin: 0; color: var(--es-err-text); font-size: 12px; }
 .es-learn-notice { position: sticky; top: 0; z-index: 2; padding: 6px 0; background: var(--es-bg); }

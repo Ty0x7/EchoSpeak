@@ -28,8 +28,7 @@
         "shadow": true,
         "visible": false,
         "center": true,
-        "theme": "Dark",
-        "backgroundColor": "#070707",
+        "backgroundColor": "#f5f8fc",
         "dragDropEnabled": true
       },
       {
@@ -49,8 +48,27 @@
         "shadow": true,
         "visible": false,
         "center": true,
-        "theme": "Dark",
-        "backgroundColor": "#0a0a0a",
+        "backgroundColor": "#f5f8fc",
+        "dragDropEnabled": false
+      },
+      {
+        "label": "setup",
+        "title": "EchoSpeak Setup",
+        "url": "index.html",
+        "width": 1000,
+        "height": 760,
+        "minWidth": 720,
+        "minHeight": 560,
+        "resizable": true,
+        "maximizable": true,
+        "minimizable": true,
+        "closable": true,
+        "fullscreen": false,
+        "decorations": false,
+        "shadow": true,
+        "visible": false,
+        "center": true,
+        "backgroundColor": "#f5f8fc",
         "dragDropEnabled": false
       },
       {

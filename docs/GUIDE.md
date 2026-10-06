@@ -86,6 +86,8 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
 - New chats get a topic title after the first reply. This uses a small additional
   request to the selected chat provider; manually renamed chats keep your name.
   Live-only models keep the cleaned-up fallback title.
+- **Appearance:** EchoSpeak starts in the light theme. Choose Light, Dark or Match system in
+  **Settings › General › Appearance** (or on the last setup step); every window switches together.
 - **Think** and effort controls follow the selected model and adapter. Unsupported
   thinking controls are disabled. Models that always think cannot turn thinking off.
 

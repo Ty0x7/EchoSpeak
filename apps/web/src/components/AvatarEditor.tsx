@@ -179,7 +179,7 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
         </div>
 
         {error ? (
-          <div style={{ color: colors.danger, padding: 12, borderRadius: 12, border: `1px solid ${colors.danger}33`, background: "rgba(239,68,68,0.08)", fontSize: 12 }}>
+          <div style={{ color: colors.danger, padding: 12, borderRadius: 12, border: "1px solid rgba(214, 60, 60, 0.2)", background: "rgba(239,68,68,0.08)", fontSize: 12 }}>
             {error}
           </div>
         ) : null}

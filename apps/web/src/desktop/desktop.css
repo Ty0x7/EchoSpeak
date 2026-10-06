@@ -1,6 +1,6 @@
 html.echospeak-desktop-root {
   color-scheme: dark;
-  background: #070707;
+  background: var(--es-bg);
 }
 
 html.echospeak-desktop-root,
@@ -10,17 +10,17 @@ html.echospeak-desktop-root #root {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: #070707;
+  background: var(--es-bg);
 }
 
 .desktop-window {
-  --desktop-bg: #070707;
-  --desktop-surface-1: #0b0b0c;
-  --desktop-surface-2: #111113;
-  --desktop-line: rgba(255, 255, 255, 0.095);
-  --desktop-line-strong: rgba(255, 255, 255, 0.16);
-  --desktop-text: #f4f4f5;
-  --desktop-muted: rgba(244, 244, 245, 0.52);
+  --desktop-bg: var(--es-bg);
+  --desktop-surface-1: var(--es-surface-1);
+  --desktop-surface-2: var(--es-surface-2);
+  --desktop-line: rgba(var(--es-edge-rgb), calc(0.095 * var(--es-edge-k)));
+  --desktop-line-strong: rgba(var(--es-edge-rgb), calc(0.16 * var(--es-edge-k)));
+  --desktop-text: var(--es-text);
+  --desktop-muted: rgba(var(--es-ink-rgb), 0.52);
   --desktop-red: #e5484d;
   display: grid;
   grid-template-rows: 42px minmax(0, 1fr);
@@ -53,7 +53,7 @@ html.echospeak-desktop-root #root {
   grid-template-columns: minmax(210px, 1fr) auto minmax(210px, 1fr);
   align-items: center;
   height: 42px;
-  background: #09090a;
+  background: var(--es-surface-1);
   border-bottom: 1px solid var(--desktop-line);
   position: relative;
   z-index: 10000;
@@ -104,12 +104,12 @@ html.echospeak-desktop-root #root {
   height: 5px;
   flex: 0 0 auto;
   border-radius: 50%;
-  background: #71717a;
+  background: var(--es-text-3);
 }
 
-.desktop-titlebar-status.is-ready i { background: #41c77a; box-shadow: 0 0 9px rgba(65, 199, 122, 0.55); }
+.desktop-titlebar-status.is-ready i { background: var(--es-ok); box-shadow: 0 0 9px rgba(65, 199, 122, 0.55); }
 .desktop-titlebar-status.is-recovering i,
-.desktop-titlebar-status.is-connecting i { background: #d6a955; animation: desktop-status-pulse 1.2s ease-in-out infinite; }
+.desktop-titlebar-status.is-connecting i { background: var(--es-warn); animation: desktop-status-pulse 1.2s ease-in-out infinite; }
 .desktop-titlebar-status.is-failed i { background: var(--desktop-red); box-shadow: 0 0 9px rgba(229, 72, 77, 0.55); }
 
 .desktop-titlebar-status span {
@@ -129,17 +129,17 @@ html.echospeak-desktop-root #root {
   height: 100%;
   display: grid;
   place-items: center;
-  color: rgba(255, 255, 255, 0.68);
+  color: rgba(var(--es-ink-rgb), 0.68);
   background: transparent;
   border: 0;
   border-left: 1px solid transparent;
   cursor: default;
 }
 
-.desktop-window-controls button:hover { background: rgba(255, 255, 255, 0.075); color: #fff; }
-.desktop-window-controls button:active { background: rgba(255, 255, 255, 0.12); }
+.desktop-window-controls button:hover { background: rgba(var(--es-wash-rgb), calc(0.075 * var(--es-wash-k))); color: var(--es-text-strong); }
+.desktop-window-controls button:active { background: rgba(var(--es-wash-rgb), calc(0.12 * var(--es-wash-k))); }
 .desktop-window-controls button.is-close:hover { background: #c42b1c; }
-.desktop-window-controls button:focus-visible { outline: 1px solid #fff; outline-offset: -2px; }
+.desktop-window-controls button:focus-visible { outline: 1px solid var(--es-emph); outline-offset: -2px; }
 .desktop-window-controls svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-width: 1; }
 
 .desktop-content {
@@ -165,7 +165,7 @@ html.echospeak-desktop-root #root {
   justify-content: center;
   padding: 48px;
   text-align: center;
-  background: #050505;
+  background: var(--es-bg);
   animation: desktop-boot-enter 220ms ease-out both;
 }
 
@@ -178,18 +178,18 @@ html.echospeak-desktop-root #root {
   justify-content: center;
   gap: 9px;
   border-radius: 30%;
-  background: #f4f4f2;
-  box-shadow: 0 14px 34px rgba(0,0,0,.5), inset 0 -2px 0 rgba(0,0,0,.08);
+  background: var(--es-emph);
+  box-shadow: 0 14px 34px rgba(var(--es-shade-rgb), calc(0.5 * var(--es-shade-k))), inset 0 -2px 0 rgba(var(--es-shade-rgb), calc(0.08 * var(--es-shade-k)));
   animation: echo-face-spin 1.9s cubic-bezier(.65,0,.35,1) infinite;
 }
-.desktop-boot-face i { width: 6px; height: 15px; border-radius: 99px; background: #070707; animation: echo-face-blink 3.8s infinite; }
+.desktop-boot-face i { width: 6px; height: 15px; border-radius: 99px; background: var(--es-bg); animation: echo-face-blink 3.8s infinite; }
 @keyframes echo-face-spin { 0% { transform: rotate(0deg); } 55%, 100% { transform: rotate(360deg); } }
 @keyframes echo-face-blink { 0%, 90%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.12); } }
-.desktop-boot-progress { width: min(240px, 56vw); height: 2px; margin-top: 28px; overflow: hidden; border-radius: 2px; background: rgba(255,255,255,.09); }
-.desktop-boot-progress span { display: block; width: 34%; height: 100%; background: rgba(255,255,255,.92); animation: desktop-progress 1.35s ease-in-out infinite; }
+.desktop-boot-progress { width: min(240px, 56vw); height: 2px; margin-top: 28px; overflow: hidden; border-radius: 2px; background: rgba(var(--es-wash-rgb), calc(0.09 * var(--es-wash-k))); }
+.desktop-boot-progress span { display: block; width: 34%; height: 100%; background: rgba(var(--es-wash-rgb), calc(0.92 * var(--es-wash-k))); animation: desktop-progress 1.35s ease-in-out infinite; }
 .desktop-boot-progress.is-determinate span { width: var(--progress, 0%); animation: none; transition: width .45s cubic-bezier(.2,.7,0,1); }
-.desktop-boot-detail { max-width: 560px; margin: 13px 0 0; color: rgba(255,255,255,.48); font-size: 11px; line-height: 1.5; letter-spacing: .015em; }
-.desktop-boot-step { margin: 5px 0 0; color: rgba(255,255,255,.25); font: 9px/1.4 "Cascadia Mono", monospace; letter-spacing: .08em; }
+.desktop-boot-detail { max-width: 560px; margin: 13px 0 0; color: rgba(var(--es-ink-rgb), 0.48); font-size: 11px; line-height: 1.5; letter-spacing: .015em; }
+.desktop-boot-step { margin: 5px 0 0; color: rgba(var(--es-ink-rgb), 0.25); font: 9px/1.4 "Cascadia Mono", monospace; letter-spacing: .08em; }
 
 .desktop-recovery-actions { display: flex; gap: 8px; margin-top: 24px; }
 .desktop-recovery-actions button,
@@ -197,13 +197,13 @@ html.echospeak-desktop-root #root {
   min-height: 32px;
   padding: 0 13px;
   color: var(--desktop-text);
-  background: #151517;
+  background: var(--es-surface-2);
   border: 1px solid var(--desktop-line-strong);
   font: 600 11px/1 "Segoe UI", sans-serif;
 }
 .desktop-recovery-actions button:hover,
-.desktop-service-banner button:hover { background: #1d1d20; border-color: rgba(255,255,255,.25); }
-.desktop-recovery-actions button.is-primary { color: #050505; background: #f2f2f2; border-color: #fff; }
+.desktop-service-banner button:hover { background: var(--es-surface-3); border-color: rgba(var(--es-edge-rgb), calc(0.25 * var(--es-edge-k))); }
+.desktop-recovery-actions button.is-primary { color: var(--es-on-emph); background: var(--es-emph); border-color: var(--es-emph); }
 
 .desktop-service-banner {
   position: absolute;
@@ -218,10 +218,10 @@ html.echospeak-desktop-root #root {
   justify-content: space-between;
   gap: 18px;
   padding: 9px 10px 9px 13px;
-  color: rgba(255,255,255,.76);
-  background: rgba(20, 20, 22, 0.96);
+  color: rgba(var(--es-ink-rgb), 0.76);
+  background: rgba(var(--es-surface-rgb), 0.96);
   border: 1px solid var(--desktop-line-strong);
-  box-shadow: 0 14px 42px rgba(0,0,0,.5);
+  box-shadow: 0 14px 42px rgba(var(--es-shade-rgb), calc(0.5 * var(--es-shade-k)));
   font-size: 11px;
 }
 .desktop-service-banner.is-failed { border-color: rgba(229, 72, 77, 0.52); }
@@ -249,14 +249,14 @@ html.echospeak-desktop-root #root {
   height: 100%;
   min-width: 0;
   min-height: 0;
-  background: #070707;
+  background: var(--es-bg);
 }
 
 .desktop-window .desktop-single-workspace > .echo-sidebar {
   grid-row: 1 / 3;
   min-height: 0;
   border-right-color: var(--desktop-line) !important;
-  background: #0a0a0a !important;
+  background: var(--es-surface-1) !important;
 }
 
 .desktop-window .desktop-single-workspace > .video-workspace-pane,
@@ -274,7 +274,7 @@ html.echospeak-desktop-root #root {
   overflow: auto;
   padding: 24px;
   border: 0 !important;
-  background: rgba(0, 0, 0, 0.72) !important;
+  background: rgba(var(--es-surface-rgb), 0.72) !important;
   backdrop-filter: blur(12px);
 }
 
@@ -292,7 +292,7 @@ html.echospeak-desktop-root #root {
   border: 0 !important;
   border-top: 1px solid var(--desktop-line) !important;
   border-bottom: 1px solid var(--desktop-line) !important;
-  background: #070707 !important;
+  background: var(--es-bg) !important;
 }
 
 /* Chat and contextual surfaces share the same shell docking:
@@ -326,7 +326,7 @@ html.echospeak-desktop-root #root {
   border: 0 !important;
   border-top: 1px solid var(--desktop-line) !important;
   border-bottom: 1px solid var(--desktop-line) !important;
-  background: #0a0a0a !important;
+  background: var(--es-surface-1) !important;
 }
 
 /* The desktop composer keeps Session/Project attachment implicit in the
@@ -343,7 +343,7 @@ html.echospeak-desktop-root #root {
   padding: 12px 16px !important;
   font-family: "Segoe UI Variable", "Segoe UI", sans-serif !important;
   font-size: 13px !important;
-  background: #111111 !important;
+  background: var(--es-surface-2) !important;
 }
 
 .desktop-window .desktop-chat-workspace .chat-flat {
@@ -360,9 +360,9 @@ html.echospeak-desktop-root #root {
   width: auto;
   max-width: none;
   padding: 13px 16px;
-  color: rgba(255, 255, 255, 0.92) !important;
-  background: #151515;
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  color: rgba(var(--es-ink-rgb), 0.92) !important;
+  background: var(--es-surface-2);
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.09 * var(--es-edge-k)));
   border-radius: 12px;
   text-align: left !important;
   font-family: "Segoe UI Variable", "Segoe UI", sans-serif !important;
@@ -393,9 +393,9 @@ html.echospeak-desktop-root #root {
   margin-top: 10px !important;
   gap: 0 !important;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.085);
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.085 * var(--es-edge-k)));
   border-radius: 8px;
-  background: #0d0d0d;
+  background: var(--es-surface-1);
 }
 
 .desktop-window .desktop-chat-workspace .chat-embed-weather,
@@ -407,7 +407,7 @@ html.echospeak-desktop-root #root {
 .desktop-window .desktop-chat-workspace .chat-embed-stat + .chat-embed-stat,
 .desktop-window .desktop-chat-workspace .chat-embed-schedule:not(:first-child),
 .desktop-window .desktop-chat-workspace .chat-embed-weather:not(:first-child) {
-  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  border-top: 1px solid rgba(var(--es-edge-rgb), calc(0.07 * var(--es-edge-k)));
 }
 
 .desktop-window .desktop-chat-workspace .chat-embed-schedule-row {
@@ -435,7 +435,7 @@ html.echospeak-desktop-root #root {
   min-width: 0;
   overflow: auto;
   box-sizing: border-box;
-  background: #0a0a0a !important;
+  background: var(--es-surface-1) !important;
   border-top: 1px solid var(--desktop-line) !important;
   position: relative;
   z-index: 2;
@@ -458,7 +458,7 @@ html.echospeak-desktop-root #root {
   z-index: 1 !important;
   border: 1px solid var(--desktop-line-strong);
   border-radius: 14px;
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.72);
+  box-shadow: 0 30px 90px rgba(var(--es-shade-rgb), calc(0.72 * var(--es-shade-k)));
 }
 
 .desktop-window .desktop-studio-host .studio-top {
@@ -476,13 +476,13 @@ html.echospeak-desktop-root #root {
   inset: 42px 0 0;
   padding: 0;
   overflow: hidden;
-  background: #0a0a0a !important;
+  background: var(--es-surface-1) !important;
   backdrop-filter: none;
 }
 
 .desktop-settings-window .desktop-studio-host .studio-backdrop {
   padding: 0;
-  background: #0a0a0a;
+  background: var(--es-surface-1);
   backdrop-filter: none;
 }
 
@@ -523,7 +523,7 @@ html.echospeak-desktop-root #root {
 .desktop-window .desktop-single-workspace button:focus-visible,
 .desktop-window .desktop-single-workspace select:focus-visible,
 .desktop-window .desktop-single-workspace textarea:focus-visible {
-  outline: 1px solid rgba(255, 255, 255, 0.82) !important;
+  outline: 1px solid rgba(var(--es-edge-rgb), calc(0.82 * var(--es-edge-k))) !important;
   outline-offset: 2px;
 }
 
@@ -636,7 +636,7 @@ html.echospeak-desktop-root #root {
 }
 .live-run-detail {
   min-width: 0;
-  color: rgba(255, 255, 255, 0.68);
+  color: rgba(var(--es-ink-rgb), 0.68);
   font-size: 11px;
   line-height: 1.45;
   overflow-wrap: anywhere;
@@ -645,7 +645,7 @@ html.echospeak-desktop-root #root {
 .live-run-detail > span {
   display: block;
   margin-bottom: 2px;
-  color: rgba(255, 255, 255, 0.34);
+  color: rgba(var(--es-ink-rgb), 0.34);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 9px;
   letter-spacing: 0.08em;
@@ -670,7 +670,7 @@ html.echospeak-companion-root #root {
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  color: #fff;
+  color: var(--es-text-strong);
   font-family: Inter, "Segoe UI", sans-serif;
   user-select: none;
   background: transparent;
@@ -716,18 +716,18 @@ html.echospeak-companion-root #root {
   height: 30px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.18 * var(--es-edge-k)));
   border-radius: 7px;
   padding: 0;
-  color: rgba(255, 255, 255, 0.72);
-  background: rgba(8, 8, 8, 0.76);
+  color: rgba(var(--es-ink-rgb), 0.72);
+  background: rgba(var(--es-surface-rgb), 0.76);
   cursor: pointer;
 }
 
 .echo-companion-controls button:hover {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.34);
-  background: rgba(20, 20, 21, 0.9);
+  color: var(--es-text-strong);
+  border-color: rgba(var(--es-edge-rgb), calc(0.34 * var(--es-edge-k)));
+  background: rgba(var(--es-surface-rgb), 0.9);
 }
 
 .echo-companion-controls svg {
@@ -736,8 +736,8 @@ html.echospeak-companion-root #root {
 }
 
 .echo-companion-controls button.is-active {
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.42);
+  color: var(--es-text-strong);
+  border-color: rgba(var(--es-edge-rgb), calc(0.42 * var(--es-edge-k)));
 }
 
 .echo-companion-status {
@@ -746,9 +746,9 @@ html.echospeak-companion-root #root {
   z-index: 3;
   padding: 3px 9px;
   border-radius: 999px;
-  color: rgba(255, 255, 255, 0.68);
+  color: rgba(var(--es-ink-rgb), 0.68);
   font-size: 10px;
-  background: rgba(8, 8, 8, 0.66);
+  background: rgba(var(--es-shade-rgb), calc(0.66 * var(--es-shade-k)));
   backdrop-filter: blur(10px);
 }
 
@@ -761,12 +761,12 @@ html.echospeak-companion-root #root {
   max-height: 54px;
   overflow: hidden;
   padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.16 * var(--es-edge-k)));
   border-radius: 11px;
-  color: rgba(255, 255, 255, 0.88);
+  color: rgba(var(--es-ink-rgb), 0.88);
   font-size: 11px;
   line-height: 1.45;
-  background: rgba(8, 8, 8, 0.84);
+  background: rgba(var(--es-surface-rgb), 0.84);
   backdrop-filter: blur(14px);
   user-select: text;
 }
@@ -780,12 +780,12 @@ html.echospeak-companion-root #root {
   margin-bottom: 10px;
   align-items: center;
   gap: 6px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.18 * var(--es-edge-k)));
   border-radius: 12px;
   padding: 5px;
   opacity: 0.08;
-  background: rgba(8, 8, 8, 0.92);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.36);
+  background: rgba(var(--es-surface-rgb), 0.92);
+  box-shadow: 0 10px 28px rgba(var(--es-shade-rgb), calc(0.36 * var(--es-shade-k)));
   backdrop-filter: blur(18px);
   transition: opacity 180ms ease, border-color 180ms ease;
 }
@@ -794,7 +794,7 @@ html.echospeak-companion-root #root {
 .echo-companion-input-shell:hover,
 .echo-companion-input-shell:focus-within {
   opacity: 1;
-  border-color: rgba(255, 255, 255, 0.32);
+  border-color: rgba(var(--es-edge-rgb), calc(0.32 * var(--es-edge-k)));
 }
 
 .echo-companion-input-shell textarea {
@@ -804,7 +804,7 @@ html.echospeak-companion-root #root {
   border: 0;
   outline: 0;
   padding: 6px 8px;
-  color: #fff;
+  color: var(--es-text-strong);
   font: inherit;
   font-size: 12px;
   line-height: 1.25;
@@ -817,11 +817,11 @@ html.echospeak-companion-root #root {
   flex: 0 0 34px;
   display: grid;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(var(--es-edge-rgb), calc(0.18 * var(--es-edge-k)));
   border-radius: 7px;
   padding: 0;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.1);
+  color: var(--es-text-strong);
+  background: rgba(var(--es-wash-rgb), calc(0.1 * var(--es-wash-k)));
   cursor: pointer;
 }
 

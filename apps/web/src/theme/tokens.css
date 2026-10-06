@@ -1,0 +1,142 @@
+/*
+ * EchoSpeak theme tokens. One set of names, two themes.
+ *
+ * Dark keeps the colours EchoSpeak has always used. Light ("blueprint") is the
+ * default since 11.1: white surfaces, navy text, blue hairlines and a blue accent.
+ * The theme is chosen in Settings › General › Appearance (theme/theme.ts sets
+ * data-es-theme on <html>); every window follows the same choice.
+ *
+ * Overlays are written as rgba(var(--es-*-rgb), alpha) so one rule serves both
+ * themes: white at 8% in dark becomes a blue line or wash at a stronger alpha
+ * in light (the *-k multipliers).
+ *   ink   text drawn over a surface
+ *   edge  lines and borders
+ *   wash  hover and glass fills
+ *   shade shadows and backdrops
+ */
+
+:root {
+  color-scheme: dark;
+  --es-dur: 160ms;
+  --es-dur-slow: 220ms;
+  --es-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  --es-ink-rgb: 255, 255, 255;
+  --es-edge-rgb: 255, 255, 255;
+  --es-edge-k: 1;
+  --es-wash-rgb: 255, 255, 255;
+  --es-wash-k: 1;
+  --es-shade-rgb: 0, 0, 0;
+  --es-shade-k: 1;
+  --es-surface-rgb: 10, 10, 11;
+
+  --es-bg-0: #000000;
+  --es-bg: #050505;
+  --es-surface-1: #0b0b0c;
+  --es-surface-2: #111112;
+  --es-surface-3: #18181a;
+  --es-border-soft: #222222;
+  --es-border: #333333;
+  --es-border-strong: #444444;
+
+  --es-text-strong: #ffffff;
+  --es-text: #f4f4f5;
+  --es-text-soft: #cccccc;
+  --es-text-2: #aaaaaa;
+  --es-text-3: #888888;
+  --es-text-4: #555555;
+  --es-dim: rgba(var(--es-ink-rgb), 0.62);
+  --es-faint: rgba(var(--es-ink-rgb), 0.5);
+
+  --es-line: rgba(var(--es-edge-rgb), calc(0.075 * var(--es-edge-k)));
+  --es-line-2: rgba(var(--es-edge-rgb), calc(0.13 * var(--es-edge-k)));
+  --es-line-3: rgba(var(--es-edge-rgb), calc(0.22 * var(--es-edge-k)));
+  --es-glass: rgba(var(--es-wash-rgb), calc(0.045 * var(--es-wash-k)));
+  --es-glass-2: rgba(var(--es-wash-rgb), calc(0.075 * var(--es-wash-k)));
+  --es-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.075);
+  --es-drop: 0 1px 2px rgba(var(--es-shade-rgb), calc(0.45 * var(--es-shade-k)));
+  --es-focus: rgba(var(--es-ink-rgb), 0.6);
+
+  /* The emphasised control: primary buttons, the send button, switches that are on. */
+  --es-emph: #f4f4f5;
+  --es-emph-fill: #f4f4f5;
+  --es-emph-hover: #ffffff;
+  --es-on-emph: #0a0a0a;
+  --es-accent: #f4f4f5;
+  --es-accent-soft: rgba(255, 255, 255, 0.08);
+
+  --es-ok: #41c77a;
+  --es-warn: #d6a955;
+  --es-err: #e5484d;
+  --es-err-text: #f08a8d;
+  --es-err-label: rgba(255, 120, 140, 0.9);
+  --es-err-soft: rgba(255, 180, 190, 0.85);
+  --es-info: #6aa7ef;
+
+  /* Blueprint layer (theme/blueprint.css): corner marks, rings and glow. */
+  --es-mark: rgba(255, 255, 255, 0.22);
+  --es-glow: rgba(255, 255, 255, 0.12);
+  --es-halo: rgba(255, 255, 255, 0.16);
+  --es-halo-mid: rgba(255, 255, 255, 0.05);
+  --es-label: rgba(244, 244, 245, 0.5);
+
+  --es-r-lg: 16px;
+  --es-r: 12px;
+  --es-r-sm: 10px;
+  --es-font: "Inter", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --es-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", monospace;
+}
+
+:root[data-es-theme="light"] {
+  color-scheme: light;
+  --es-ink-rgb: 10, 30, 60;
+  --es-edge-rgb: 47, 110, 205;
+  --es-edge-k: 2.4;
+  --es-wash-rgb: 37, 105, 205;
+  --es-wash-k: 1.25;
+  --es-shade-rgb: 22, 54, 102;
+  --es-shade-k: 0.32;
+  --es-surface-rgb: 255, 255, 255;
+
+  --es-bg-0: #eef3f9;
+  --es-bg: #f5f8fc;
+  --es-surface-1: #ffffff;
+  --es-surface-2: #f8fbff;
+  --es-surface-3: #edf3fa;
+  --es-border-soft: #e4edf8;
+  --es-border: #d4e2f3;
+  --es-border-strong: #b6cbe6;
+
+  --es-text-strong: #071a33;
+  --es-text: #0e2240;
+  --es-text-soft: #24395a;
+  --es-text-2: #3b5274;
+  --es-text-3: #5a6f8f;
+  --es-text-4: #8a9ab1;
+  --es-dim: #4a5f7f;
+  --es-faint: #7184a1;
+
+  --es-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  --es-focus: rgba(47, 125, 242, 0.55);
+
+  --es-emph: #2f7df2;
+  --es-emph-fill: linear-gradient(180deg, #4f97ff 0%, #2c73e8 100%);
+  --es-emph-hover: #2a6fe0;
+  --es-on-emph: #ffffff;
+  --es-accent: #2f7df2;
+  --es-accent-soft: #e8f1fe;
+
+  --es-ok: #14955a;
+  --es-warn: #a86a00;
+  --es-err: #d63c3c;
+  --es-err-text: #c2363a;
+  --es-err-label: #c62f35;
+  --es-err-soft: #9d2a2f;
+  --es-info: #2f7df2;
+
+  --es-mark: rgba(47, 110, 205, 0.45);
+  --es-glow: rgba(64, 145, 255, 0.35);
+  --es-halo: rgba(64, 145, 255, 0.42);
+  --es-halo-mid: rgba(64, 145, 255, 0.16);
+  --es-label: #5577a3;
+}

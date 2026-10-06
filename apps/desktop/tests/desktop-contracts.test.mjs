@@ -23,8 +23,23 @@ test("desktop window is a bounded native shell over the shared frontend", () => 
   assert.ok(config.bundle.targets.includes("msi"));
 });
 
+test("first-run setup opens in its own window, not over another one", () => {
+  const setup = config.app.windows.find((window) => window.label === "setup");
+  assert.ok(setup, "a setup window is declared");
+  assert.equal(setup.visible, false);
+  assert.equal(setup.decorations, false);
+  assert.ok(host.includes("fn open_setup_window"));
+  assert.ok(host.includes("open_setup_window,"), "the command is registered");
+  assert.match(host, /"settings" \| "setup" \| "companion"\) => window\.hide\(\)/);
+  assert.ok(desktopApp.includes('"setup"'), "the renderer knows the setup window");
+});
+
+test("windows follow the chosen theme instead of forcing dark", () => {
+  for (const window of config.app.windows) assert.equal(window.theme, undefined, `${window.label} must not force a theme`);
+});
+
 test("renderer capability cannot spawn arbitrary shell commands", () => {
-  assert.deepEqual(capability.windows, ["main", "settings", "companion"]);
+  assert.deepEqual(capability.windows, ["main", "settings", "setup", "companion"]);
   assert.ok(!capability.permissions.some((permission) => String(permission).startsWith("shell:")));
   assert.ok(config.app.security.csp.includes("http://127.0.0.1:*"));
   assert.ok(!config.app.security.csp.includes("http://0.0.0.0"));

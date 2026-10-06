@@ -13,7 +13,7 @@ import { safeUrl } from "../widgets/validate";
 
 export const SquareLoader: React.FC<{ size?: number; color?: string; active?: boolean }> = ({
   size = 12,
-  color = "rgba(255,255,255,0.88)",
+  color = "rgba(var(--es-ink-rgb), 0.88)",
   active = true,
 }) => (
   <span
@@ -62,7 +62,7 @@ export const LiveChatActivityBar: React.FC<{
     <div className="live-run" data-testid="chat-live-activity" data-expanded={expanded ? "true" : "false"}>
       <div className="live-run-header">
         <div className="live-run-heading">
-          <SquareLoader size={12} color="rgba(255,255,255,0.9)" active={showSpinner} />
+          <SquareLoader size={12} color="rgba(var(--es-ink-rgb), 0.9)" active={showSpinner} />
           <strong>{status.headline}</strong>
           <span className="live-run-meta">
             {elapsedSeconds}s{activity.iteration ? ` · pass ${activity.iteration}` : ""}
@@ -234,9 +234,9 @@ export const Toggle = ({ checked, onChange, label }: { checked: boolean; onChang
             width: 44,
             height: 24,
             borderRadius: 12,
-            background: checked ? "linear-gradient(135deg, rgba(45,108,255,0.8), rgba(45,108,255,0.6))" : "linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))",
-            border: checked ? "1px solid rgba(140,180,255,0.4)" : "1px solid rgba(255,255,255,0.15)",
-            boxShadow: checked ? "0 2px 8px rgba(45,108,255,0.4), inset 0 1px 0 rgba(255,255,255,0.2)" : "inset 0 1px 2px rgba(0,0,0,0.2)",
+            background: checked ? "linear-gradient(135deg, rgba(45,108,255,0.8), rgba(45,108,255,0.6))" : "linear-gradient(135deg, rgba(var(--es-wash-rgb), calc(0.1 * var(--es-wash-k))), rgba(var(--es-wash-rgb), calc(0.05 * var(--es-wash-k))))",
+            border: checked ? "1px solid rgba(140,180,255,0.4)" : "1px solid rgba(var(--es-edge-rgb), calc(0.15 * var(--es-edge-k)))",
+            boxShadow: checked ? "0 2px 8px rgba(45,108,255,0.4), inset 0 1px 0 rgba(255,255,255,0.2)" : "inset 0 1px 2px rgba(var(--es-shade-rgb), calc(0.2 * var(--es-shade-k)))",
             cursor: "pointer",
             transition: "all 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
             padding: 0,
@@ -249,11 +249,11 @@ export const Toggle = ({ checked, onChange, label }: { checked: boolean; onChang
               width: 18,
               height: 18,
               borderRadius: "50%",
-              background: "#fff",
+              background: "var(--es-emph)",
               position: "absolute",
               left: checked ? 24 : 2,
               transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-              boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+              boxShadow: "0 1px 3px rgba(var(--es-shade-rgb), calc(0.2 * var(--es-shade-k)))",
             }}
           />
         </button>
@@ -263,8 +263,8 @@ export const Toggle = ({ checked, onChange, label }: { checked: boolean; onChang
 };
 
 export const settingsSectionStyle: React.CSSProperties = {
-  background: "rgba(255, 255, 255, 0.02)",
-  border: "1px solid rgba(255, 255, 255, 0.08)",
+  background: "rgba(var(--es-wash-rgb), calc(0.02 * var(--es-wash-k)))",
+  border: "1px solid rgba(var(--es-edge-rgb), calc(0.08 * var(--es-edge-k)))",
   borderRadius: "12px",
   padding: "20px",
   marginBottom: "20px",
@@ -272,10 +272,10 @@ export const settingsSectionStyle: React.CSSProperties = {
 
 export const platformCardStyle: React.CSSProperties = {
   padding: 16,
-  background: "linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.015))",
+  background: "linear-gradient(135deg, rgba(var(--es-wash-rgb), calc(0.05 * var(--es-wash-k))), rgba(var(--es-wash-rgb), calc(0.015 * var(--es-wash-k))))",
   borderRadius: 16,
-  border: "1px solid rgba(255,255,255,0.08)",
-  boxShadow: "0 10px 30px -20px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.04)",
+  border: "1px solid rgba(var(--es-edge-rgb), calc(0.08 * var(--es-edge-k)))",
+  boxShadow: "0 10px 30px -20px rgba(var(--es-shade-rgb), calc(0.55 * var(--es-shade-k))), inset 0 1px 0 rgba(255,255,255,0.04)",
 };
 
 export const PlatformHeader = ({
@@ -321,8 +321,8 @@ export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number
   const displayPct = Math.round(pct * 100);
   const size = 40;
   const fillColor =
-    pct > 0.85 ? "rgba(255,255,255,0.95)" : pct > 0.6 ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.92)";
-  const trackColor = "rgba(255,255,255,0.14)";
+    pct > 0.85 ? "rgba(var(--es-ink-rgb), 0.95)" : pct > 0.6 ? "rgba(var(--es-ink-rgb), 0.88)" : "rgba(var(--es-ink-rgb), 0.92)";
+  const trackColor = "rgba(var(--es-ink-rgb), 0.14)";
   const warnTint =
     pct > 0.85 ? "rgba(255,90,90,0.18)" : pct > 0.6 ? "rgba(255,200,80,0.12)" : "transparent";
 
@@ -349,13 +349,13 @@ export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number
           width: size,
           height: size,
           borderRadius: 3,
-          background: warnTint || "rgba(255,255,255,0.03)",
+          background: warnTint || "rgba(var(--es-wash-rgb), calc(0.03 * var(--es-wash-k)))",
           border: `1px solid ${trackColor}`,
           overflow: "hidden",
           boxSizing: "border-box",
         }}
       >
-        <div style={{ position: "absolute", inset: 3, borderRadius: 2, background: "rgba(255,255,255,0.04)" }} />
+        <div style={{ position: "absolute", inset: 3, borderRadius: 2, background: "rgba(var(--es-wash-rgb), calc(0.04 * var(--es-wash-k)))" }} />
         <div
           style={{
             position: "absolute",
@@ -364,7 +364,7 @@ export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number
             bottom: 3,
             height: `calc((100% - 6px) * ${pct})`,
             borderRadius: 2,
-            background: `linear-gradient(180deg, ${fillColor} 0%, rgba(255,255,255,0.55) 100%)`,
+            background: `linear-gradient(180deg, ${fillColor} 0%, rgba(var(--es-wash-rgb), calc(0.55 * var(--es-wash-k))) 100%)`,
             transition: "height 0.4s ease",
           }}
         />
@@ -377,7 +377,7 @@ export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number
             fontSize: 10,
             fontWeight: 700,
             letterSpacing: "-0.3px",
-            color: pct > 0.45 ? "rgba(0,0,0,0.78)" : "rgba(255,255,255,0.72)",
+            color: pct > 0.45 ? "var(--es-surface-1)" : "rgba(var(--es-ink-rgb), 0.72)",
             userSelect: "none",
             fontVariantNumeric: "tabular-nums",
             fontFamily: "'JetBrains Mono', ui-monospace, monospace",
@@ -395,13 +395,13 @@ export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number
             right: 0,
             left: "auto",
             transform: "none",
-            background: "rgba(12,12,14,0.96)",
-            border: "1px solid rgba(255,255,255,0.14)",
+            background: "rgba(var(--es-surface-rgb), 0.96)",
+            border: "1px solid rgba(var(--es-edge-rgb), calc(0.14 * var(--es-edge-k)))",
             borderRadius: 10,
             padding: "10px 12px",
             whiteSpace: "nowrap",
             zIndex: 2000,
-            boxShadow: "0 8px 28px rgba(0,0,0,0.55)",
+            boxShadow: "0 8px 28px rgba(var(--es-shade-rgb), calc(0.55 * var(--es-shade-k)))",
             backdropFilter: "blur(12px)",
             fontSize: 12,
             color: colors.text,
@@ -410,7 +410,7 @@ export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number
             pointerEvents: "none",
           }}
         >
-          <div style={{ fontWeight: 700, marginBottom: 4, color: "#fff", letterSpacing: "-0.02em" }}>Context</div>
+          <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--es-text-strong)", letterSpacing: "-0.02em" }}>Context</div>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
             <span style={{ color: colors.textDim }}>Used</span>
             <span style={{ fontWeight: 600 }}>{formatTokenCount(estimatedTokens)}</span>
@@ -424,7 +424,7 @@ export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number
               marginTop: 8,
               height: 4,
               borderRadius: 2,
-              background: "rgba(255,255,255,0.1)",
+              background: "rgba(var(--es-wash-rgb), calc(0.1 * var(--es-wash-k)))",
               overflow: "hidden",
             }}
           >
@@ -432,7 +432,7 @@ export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number
               style={{
                 width: `${displayPct}%`,
                 height: "100%",
-                background: "#fff",
+                background: "var(--es-emph)",
                 borderRadius: 2,
                 transition: "width 0.3s ease",
               }}
@@ -544,7 +544,7 @@ export const ChatBubble: React.FC<{
                   height: 15,
                   marginLeft: 3,
                   borderRadius: 1,
-                  background: "rgba(255,255,255,0.75)",
+                  background: "rgba(var(--es-wash-rgb), calc(0.75 * var(--es-wash-k)))",
                   animation: "pulse 0.8s infinite",
                   verticalAlign: "text-bottom",
                 }}
@@ -564,7 +564,7 @@ export const ChatBubble: React.FC<{
               style={{
                 padding: "7px 12px",
                 borderRadius: 2,
-                border: `1px solid ${canQuickReply ? "rgba(255,255,255,0.35)" : colors.line}`,
+                border: `1px solid ${canQuickReply ? "rgba(var(--es-edge-rgb), calc(0.35 * var(--es-edge-k)))" : colors.line}`,
                 background: "transparent",
                 color: colors.text,
                 cursor: canQuickReply ? "pointer" : "not-allowed",
@@ -624,7 +624,7 @@ export const ChatBubble: React.FC<{
                 style={{
                   marginTop: 0,
                   fontSize: 10,
-                  color: "rgba(255,255,255,0.28)",
+                  color: "rgba(var(--es-ink-rgb), 0.28)",
                   fontFamily: "'JetBrains Mono', ui-monospace, monospace",
                   letterSpacing: "0.06em",
                   textAlign: isUser ? "right" : "left",
@@ -645,7 +645,7 @@ export const ChatBubble: React.FC<{
                   onMouseLeave={() => setMetaHover(false)}
                   style={{
                     cursor: "default",
-                    borderBottom: "1px dotted rgba(255,255,255,0.18)",
+                    borderBottom: "1px dotted rgba(var(--es-edge-rgb), calc(0.18 * var(--es-edge-k)))",
                     paddingBottom: 1,
                   }}
                 >
@@ -670,12 +670,12 @@ export const ChatBubble: React.FC<{
                       position: "absolute",
                       bottom: "calc(100% + 8px)",
                       [isUser ? "right" : "left"]: 0,
-                      background: "rgba(12,12,14,0.96)",
-                      border: "1px solid rgba(255,255,255,0.14)",
+                      background: "rgba(var(--es-surface-rgb), 0.96)",
+                      border: "1px solid rgba(var(--es-edge-rgb), calc(0.14 * var(--es-edge-k)))",
                       borderRadius: 8,
                       padding: "9px 11px",
                       zIndex: 50,
-                      boxShadow: "0 8px 24px rgba(0,0,0,0.5)",
+                      boxShadow: "0 8px 24px rgba(var(--es-shade-rgb), calc(0.5 * var(--es-shade-k)))",
                       backdropFilter: "blur(12px)",
                       fontSize: 11,
                       color: colors.text,
@@ -686,7 +686,7 @@ export const ChatBubble: React.FC<{
                       whiteSpace: "nowrap",
                     }}
                   >
-                    <div style={{ fontWeight: 700, color: "#fff", marginBottom: 4, letterSpacing: "-0.02em" }}>
+                    <div style={{ fontWeight: 700, color: "var(--es-text-strong)", marginBottom: 4, letterSpacing: "-0.02em" }}>
                       {isUser ? "Message" : "Response"} usage
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 18 }}>
@@ -706,11 +706,11 @@ export const ChatBubble: React.FC<{
                       <span style={{ fontWeight: 600 }}>{ctxPct}%</span>
                     </div>
                     {(prov || model) && (
-                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(255,255,255,0.08)", color: colors.textDim, fontSize: 10 }}>
+                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid rgba(var(--es-edge-rgb), calc(0.08 * var(--es-edge-k)))", color: colors.textDim, fontSize: 10 }}>
                         {[prov, model].filter(Boolean).join(" · ")}
                       </div>
                     )}
-                    <div style={{ marginTop: 4, fontSize: 9, color: "rgba(255,255,255,0.28)" }}>
+                    <div style={{ marginTop: 4, fontSize: 9, color: "rgba(var(--es-ink-rgb), 0.28)" }}>
                       Estimates (chars ÷ 3.5)
                     </div>
                   </div>
@@ -780,13 +780,13 @@ export const ThinkingActivityCard: React.FC<{
                   color: failed
                     ? "rgba(255,140,150,0.85)"
                     : running
-                      ? "rgba(255,255,255,0.72)"
-                      : "rgba(255,255,255,0.38)",
+                      ? "rgba(var(--es-ink-rgb), 0.72)"
+                      : "rgba(var(--es-ink-rgb), 0.38)",
                 }}
               >
                 <span style={{ marginTop: 3, flexShrink: 0 }}>
                   {spinHere ? (
-                    <SquareLoader size={9} color="rgba(255,255,255,0.85)" active />
+                    <SquareLoader size={9} color="rgba(var(--es-ink-rgb), 0.85)" active />
                   ) : failed ? (
                     <span
                       style={{
@@ -805,7 +805,7 @@ export const ThinkingActivityCard: React.FC<{
                         width: 7,
                         height: 7,
                         borderRadius: 1,
-                        background: running ? "rgba(255,255,255,0.55)" : "rgba(255,255,255,0.28)",
+                        background: running ? "rgba(var(--es-ink-rgb), 0.55)" : "rgba(var(--es-ink-rgb), 0.28)",
                       }}
                     />
                   )}
@@ -838,7 +838,7 @@ export const ActivityCard: React.FC<{ item: ActivityItem; primarySpinner?: boole
         transition={{ duration: 0.2 }}
         style={{ display: "flex", justifyContent: "flex-start", marginLeft: "0px", marginTop: "-6px", marginBottom: "4px" }}
       >
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", display: "flex", alignItems: "center", gap: 6, fontWeight: 500 }}>
+        <div style={{ fontSize: 11, color: "rgba(var(--es-ink-rgb), 0.4)", display: "flex", alignItems: "center", gap: 6, fontWeight: 500 }}>
           <span style={{ opacity: 0.7 }}>✓</span>
           <span>Memory saved ({item.memoryCount})</span>
         </div>
@@ -857,10 +857,10 @@ export const ActivityCard: React.FC<{ item: ActivityItem; primarySpinner?: boole
         style={{ display: "flex", justifyContent: "flex-start", padding: "6px 0" }}
       >
         <div className="chat-flat" style={{ width: "100%", fontFamily: "'JetBrains Mono', ui-monospace, monospace" }}>
-          <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,120,140,0.9)", marginBottom: 4 }}>
+          <div style={{ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--es-err-label)", marginBottom: 4 }}>
             error
           </div>
-          <div style={{ fontSize: 13, lineHeight: 1.55, color: "rgba(255,180,190,0.85)", whiteSpace: "pre-wrap" }}>{item.message}</div>
+          <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--es-err-soft)", whiteSpace: "pre-wrap" }}>{item.message}</div>
         </div>
       </motion.div>
     );
@@ -891,18 +891,18 @@ export const ActivityCard: React.FC<{ item: ActivityItem; primarySpinner?: boole
             fontSize: 12,
             lineHeight: 1.5,
             letterSpacing: "0.02em",
-            color: item.status === "running" ? "rgba(255,255,255,0.7)" : "rgba(255,255,255,0.38)",
+            color: item.status === "running" ? "rgba(var(--es-ink-rgb), 0.7)" : "rgba(var(--es-ink-rgb), 0.38)",
           }}
         >
           <span style={{ marginTop: 3, flexShrink: 0 }}>
             {item.status === "running" ? (
-              <SquareLoader size={9} color="rgba(255,255,255,0.7)" />
+              <SquareLoader size={9} color="rgba(var(--es-ink-rgb), 0.7)" />
             ) : (
-              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 1, background: "rgba(255,255,255,0.28)" }} />
+              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: 1, background: "rgba(var(--es-wash-rgb), calc(0.28 * var(--es-wash-k)))" }} />
             )}
           </span>
           <span style={{ flex: 1, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-            <span style={{ color: "rgba(255,255,255,0.45)" }}>{label}</span>
+            <span style={{ color: "rgba(var(--es-ink-rgb), 0.45)" }}>{label}</span>
             {body ? `  ${String(body).slice(0, 240)}${String(body).length > 240 ? "…" : ""}` : ""}
           </span>
         </div>
@@ -1024,7 +1024,7 @@ export const ConfirmationCard: React.FC<ConfirmationCardProps> = ({
           color: colors.accent,
           marginBottom: 8,
           padding: "6px 10px",
-          background: "rgba(0,0,0,0.2)",
+          background: "rgba(var(--es-shade-rgb), calc(0.2 * var(--es-shade-k)))",
           borderRadius: 6,
         }}>
           {toolName}
@@ -1051,7 +1051,7 @@ export const ConfirmationCard: React.FC<ConfirmationCardProps> = ({
           </div>
         )}
         {missingPolicyFlags.length > 0 ? (
-          <div style={{ fontSize: 10.5, color: "#f59e0b", marginBottom: 10 }}>
+          <div style={{ fontSize: 10.5, color: "var(--es-warn)", marginBottom: 10 }}>
             Configuration required: {missingPolicyFlags.join(", ")}. This is an EchoSpeak policy block, not a detected Windows administrator or signature failure.
           </div>
         ) : null}
@@ -1095,7 +1095,7 @@ export const ConfirmationCard: React.FC<ConfirmationCardProps> = ({
               borderRadius: 8,
               border: "none",
               background: riskLevel === "destructive" ? "#ef4444" : colors.accent,
-              color: "#fff",
+              color: "var(--es-text-strong)",
               cursor: missingPolicyFlags.length > 0 || decisionBusy ? "not-allowed" : "pointer",
               minWidth: 80,
               opacity: decisionBusy ? 0.7 : 1,

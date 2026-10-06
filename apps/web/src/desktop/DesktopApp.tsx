@@ -13,6 +13,7 @@ import {
 } from "./bridge";
 import { initialDesktopBootState, reduceDesktopBootState } from "./runtimeState";
 import { CompanionApp } from "./CompanionApp";
+import { SetupWindow } from "../setup/SetupWindow";
 import "./desktop.css";
 
 const WindowControls = () => (
@@ -31,7 +32,7 @@ const WindowControls = () => (
 
 export function DesktopApp() {
   document.documentElement.classList.add("echospeak-desktop-root");
-  const [windowKind, setWindowKind] = React.useState<"main" | "settings" | "companion" | null>(null);
+  const [windowKind, setWindowKind] = React.useState<"main" | "settings" | "setup" | "companion" | null>(null);
   const [boot, dispatch] = useReducer(reduceDesktopBootState, initialDesktopBootState);
   const startupStartedAtRef = useRef(Date.now());
   const bootstrappedInstanceRef = useRef("");
@@ -52,7 +53,7 @@ export function DesktopApp() {
     void readDesktopWindowLabel()
       .then((label) => {
         if (!disposed) {
-          setWindowKind(label === "settings" || label === "companion" ? label : "main");
+          setWindowKind(label === "settings" || label === "setup" || label === "companion" ? label : "main");
         }
       })
       .catch(() => {
@@ -149,14 +150,15 @@ export function DesktopApp() {
     return <CompanionApp backendReady={showWorkspace && boot.phase === "ready"} />;
   }
   const settingsWindow = windowKind === "settings";
+  const setupWindow = windowKind === "setup";
   const needsInstaller = boot.phase === "failed" && boot.detail.startsWith("The installed backend could not load:");
   return (
-    <div className={`desktop-window${settingsWindow ? " desktop-settings-window" : ""}`}>
+    <div className={`desktop-window${settingsWindow ? " desktop-settings-window" : ""}${setupWindow ? " desktop-setup-window" : ""}`}>
       <header className="desktop-titlebar" data-tauri-drag-region>
         <div className="desktop-titlebar-brand" data-tauri-drag-region>
           <img src="/logo.png" alt="" draggable={false} />
           <span data-tauri-drag-region>EchoSpeak</span>
-          <small data-tauri-drag-region>{settingsWindow ? "Settings" : "Desktop"}</small>
+          <small data-tauri-drag-region>{settingsWindow ? "Settings" : setupWindow ? "Setup" : "Desktop"}</small>
         </div>
         <div className={`desktop-titlebar-status is-${boot.phase}`} data-tauri-drag-region>
           <i aria-hidden />
@@ -166,7 +168,7 @@ export function DesktopApp() {
       </header>
 
       <main className="desktop-content">
-        {showWorkspace ? <Dashboard desktopSettingsWindow={settingsWindow} /> : null}
+        {showWorkspace ? (setupWindow ? <SetupWindow /> : <Dashboard desktopSettingsWindow={settingsWindow} />) : null}
         {!showWorkspace || bootLeaving ? (
           <section className={`desktop-boot-state${showWorkspace ? " is-leaving" : ""}`} aria-live="polite">
             <div className="desktop-boot-face" aria-hidden><i /><i /></div>

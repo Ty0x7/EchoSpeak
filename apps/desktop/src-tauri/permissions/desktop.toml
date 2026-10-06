@@ -9,6 +9,7 @@ commands.allow = [
   "open_desktop_logs",
   "control_desktop_window",
   "open_settings_window",
+  "open_setup_window",
   "open_companion_window",
   "set_companion_always_on_top",
   "desktop_window_label",
