@@ -5,8 +5,9 @@ import { Group, ListEditor, Row, SecretField, Segmented, Select, Status, TextFie
 import type { SettingsMap } from "./useSettings";
 
 /**
- * Settings › Advanced: everything that used to live in the classic settings
- * screen and is still in use. Same controls as the other sections.
+ * Settings › Advanced: settings that are still in use but rarely changed and have
+ * no feature section of their own. Settings for a feature live in that feature's
+ * section (voice in Voice, channel accounts in Channels, and so on).
  */
 
 type Save = (patch: SettingsMap) => Promise<void>;
@@ -55,7 +56,7 @@ export function AdvancedSection(props: {
         />
       </div>
       {props.page === "settings" ? <AdvancedSettings s={props.s} save={props.save} /> : null}
-      {props.page === "memory" ? <MemoryPage apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
+      {props.page === "memory" ? <MemoryPage s={props.s} save={props.save} apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
       {props.page === "connections" ? <ConnectionsPage apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
       {props.page === "companion" ? (
         <Group title="Echo companion" description="Echo’s shared appearance in voice conversations and the floating companion window.">
@@ -72,144 +73,33 @@ export function AdvancedSection(props: {
 
 function AdvancedSettings({ s, save }: { s: SettingsMap; save: Save }) {
   const embedding = s.embedding || {};
+  // "ollama" is the stored value for the built-in ONNX search model: memory.py uses
+  // OpenAI or the local model server for those two, and the private local model for anything else.
   const embeddingOptions = [
-    { value: "openai", label: "OpenAI" },
-    { value: "lmstudio", label: "LM Studio" },
-    // Any other provider uses the built-in local embedding model.
-    { value: "ollama", label: "Built-in on this PC" },
+    { value: "ollama", label: "Private search model on this PC" },
+    { value: "lmstudio", label: "Local model server (LM Studio)" },
+    { value: "openai", label: "OpenAI (needs an API key)" },
   ];
+  const embeddingProvider = String(embedding.provider || "openai");
   return (
     <>
-      <Group title="Models" description="Rarely needed. The model for chats is chosen in Models.">
+      <Group title="Models" description="Rarely needed. Chat models are chosen in Models.">
         <Row label="LM Studio only" help="Every chat uses LM Studio, whatever a chat had selected.">
           <Toggle checked={asBool(s.lm_studio_only)} onChange={(v) => save({ lm_studio_only: v })} label="LM Studio only" />
         </Row>
-        <Row label="Memory embeddings" help="Turns memories into vectors for search. LM Studio needs an embedding model loaded.">
-          <Select value={String(embedding.provider || "openai")} options={embeddingOptions} onChange={(v) => save({ embedding: { provider: v } })} />
+        <Row label="Memory search" help="Turns memories into vectors so they can be found by meaning. The private model is installed from Memory & documents; LM Studio needs an embedding model loaded.">
+          <Select value={embeddingProvider} options={embeddingOptions} onChange={(v) => save({ embedding: { provider: v } })} />
         </Row>
-        <Row label="Embedding model">
-          <TextField mono value={embedding.model || ""} placeholder="text-embedding-3-small" onCommit={(v) => save({ embedding: { model: v } })} />
-        </Row>
-      </Group>
-
-      <Group title="Voice providers" description="Usually set for you by Settings › Voice.">
-        <Row label="Speech to text">
-          <Select
-            value={String(s.voice_local_stt_provider || "windows-sapi")}
-            onChange={(v) => save({ voice_local_stt_provider: v })}
-            options={[
-              { value: "faster-whisper-local", label: "Whisper (faster-whisper)" },
-              { value: "whisper-cpp-local", label: "whisper.cpp" },
-              { value: "windows-sapi", label: "Windows speech" },
-            ]}
-          />
-        </Row>
-        <Row label="Read aloud">
-          <Select
-            value={String(s.voice_local_tts_provider || "windows-sapi")}
-            onChange={(v) => save({ voice_local_tts_provider: v })}
-            options={[
-              { value: "windows-sapi", label: "Windows voices" },
-              { value: "piper-local", label: "Piper" },
-            ]}
-          />
-        </Row>
-        <Row label="Cloud voice" help="Off keeps all audio on this PC.">
-          <Select
-            value={String(s.voice_cloud_provider || "")}
-            onChange={(v) => save({ voice_cloud_provider: v })}
-            options={[
-              { value: "", label: "Off" },
-              { value: "openai-audio", label: "OpenAI audio" },
-            ]}
-          />
-        </Row>
-      </Group>
-
-      <Group title="Search and sports data">
-        <Row label="Brave Search API key" help="Needed when the web search provider is Brave." stack>
-          <SecretField isSet={Boolean(s.brave_search_api_key)} onCommit={(v) => save({ brave_search_api_key: v })} />
-        </Row>
-        <Row label="Search timeout (seconds)">
-          <TextField type="number" value={s.web_search_timeout ?? 10} onCommit={(v) => save({ web_search_timeout: num(v, 10) })} />
-        </Row>
-        <Row label="Sports data API key" help="The Odds API key for live scores, schedules and odds." stack>
-          <SecretField isSet={Boolean(s.odds_api_key)} onCommit={(v) => save({ odds_api_key: v })} />
-        </Row>
-      </Group>
-
-      <Group title="Documents" description="Uploaded documents that agents can search (turn them on in Memory).">
-        <Row label="Rerank results"><Toggle checked={asBool(s.doc_rerank_enabled)} onChange={(v) => save({ doc_rerank_enabled: v })} label="Rerank" /></Row>
-        <Row label="Graph expansion" help="Also pull in passages about related names."><Toggle checked={asBool(s.doc_graph_enabled)} onChange={(v) => save({ doc_graph_enabled: v })} label="Graph expansion" /></Row>
-        <Row label="Largest upload (MB)">
-          <TextField type="number" value={s.doc_upload_max_mb ?? 25} onCommit={(v) => save({ doc_upload_max_mb: num(v, 25) })} />
-        </Row>
-        <Row label="Context per answer (characters)">
-          <TextField type="number" value={s.doc_context_max_chars ?? 6000} onCommit={(v) => save({ doc_context_max_chars: num(v, 6000) })} />
-        </Row>
+        {embeddingProvider === "openai" || embeddingProvider === "lmstudio" ? (
+          <Row label="Embedding model">
+            <TextField mono value={embedding.model || ""} placeholder={embeddingProvider === "openai" ? "text-embedding-3-small" : "text-embedding-nomic-embed-text-v1.5"} onCommit={(v) => save({ embedding: { model: v } })} />
+          </Row>
+        ) : null}
       </Group>
 
       <Group title="Apps agents may open" description="Exact app names Echo is allowed to launch (Permissions › open applications must be on).">
         <Row label="Allowed apps" stack>
           <ListEditor items={asList(s.open_application_allowlist)} onChange={(items) => save({ open_application_allowlist: items })} placeholder="e.g. notepad" />
-        </Row>
-      </Group>
-
-      <Group title="Email server">
-        <Row label="IMAP port"><TextField type="number" value={s.email_imap_port ?? 993} onCommit={(v) => save({ email_imap_port: num(v, 993) })} /></Row>
-        <Row label="SMTP port"><TextField type="number" value={s.email_smtp_port ?? 587} onCommit={(v) => save({ email_smtp_port: num(v, 587) })} /></Row>
-        <Row label="Use TLS"><Toggle checked={s.email_use_tls === undefined ? true : asBool(s.email_use_tls)} onChange={(v) => save({ email_use_tls: v })} label="TLS" /></Row>
-      </Group>
-
-      <Group title="Discord access" description="Who besides you may talk to the bot. Everyone else gets look-up tools only.">
-        <Row label="Trusted user IDs" stack>
-          <ListEditor mono items={asList(s.discord_bot_trusted_users)} onChange={(items) => save({ discord_bot_trusted_users: items })} placeholder="User ID" />
-        </Row>
-        <Row label="Allowed server roles" help="Members with these roles may use the bot in servers." stack>
-          <ListEditor items={asList(s.discord_bot_allowed_roles)} onChange={(items) => save({ discord_bot_allowed_roles: items })} placeholder="Role name" />
-        </Row>
-        <Row label="Allowed user IDs" help="Fallback when roles aren't used." stack>
-          <ListEditor mono items={asList(s.discord_bot_allowed_users)} onChange={(items) => save({ discord_bot_allowed_users: items })} placeholder="User ID" />
-        </Row>
-        <Row label="Post new commits to Discord" help="Announces git pushes in the first matching channel.">
-          <Toggle checked={asBool(s.discord_changelog_enabled)} onChange={(v) => save({ discord_changelog_enabled: v })} label="Changelog posts" />
-        </Row>
-        <Row label="Changelog channels" stack>
-          <ListEditor items={asList(s.discord_changelog_channels)} onChange={(items) => save({ discord_changelog_channels: items })} placeholder="#changelog" />
-        </Row>
-        <Row label="Changelog server" help="Name or ID; blank searches every server.">
-          <TextField value={s.discord_changelog_server || ""} onCommit={(v) => save({ discord_changelog_server: v })} />
-        </Row>
-      </Group>
-
-      <Group title="Twitter / X">
-        <Row label="Enable Twitter"><Toggle checked={asBool(s.allow_twitter)} onChange={(v) => save({ allow_twitter: v })} label="Twitter" /></Row>
-        <Row label="Post on its own" help="Writes posts about project updates on a schedule.">
-          <Toggle checked={asBool(s.twitter_autonomous_enabled)} onChange={(v) => save({ twitter_autonomous_enabled: v })} label="Autonomous posts" />
-        </Row>
-        <Row label="Ask before posting">
-          <Toggle checked={s.twitter_autonomous_require_approval === undefined ? true : asBool(s.twitter_autonomous_require_approval)} onChange={(v) => save({ twitter_autonomous_require_approval: v })} label="Require approval" />
-        </Row>
-        <Row label="Reply to mentions"><Toggle checked={asBool(s.twitter_auto_reply_mentions)} onChange={(v) => save({ twitter_auto_reply_mentions: v })} label="Auto-reply" /></Row>
-        <Row label="Consumer key (client ID)"><TextField mono value={s.twitter_client_id || ""} onCommit={(v) => save({ twitter_client_id: v })} /></Row>
-        <Row label="Consumer secret" stack><SecretField isSet={Boolean(s.twitter_client_secret)} onCommit={(v) => save({ twitter_client_secret: v })} /></Row>
-        <Row label="Access token" stack><SecretField isSet={Boolean(s.twitter_access_token)} onCommit={(v) => save({ twitter_access_token: v })} /></Row>
-        <Row label="Access token secret" stack><SecretField isSet={Boolean(s.twitter_access_token_secret)} onCommit={(v) => save({ twitter_access_token_secret: v })} /></Row>
-        <Row label="Bearer token" help="App-only access, for reading." stack><SecretField isSet={Boolean(s.twitter_bearer_token)} onCommit={(v) => save({ twitter_bearer_token: v })} /></Row>
-        <Row label="Bot user ID" help="Blank: detected from the access token."><TextField mono value={s.twitter_bot_user_id || ""} onCommit={(v) => save({ twitter_bot_user_id: v })} /></Row>
-        <Row label="Check mentions every (seconds)"><TextField type="number" value={s.twitter_poll_interval ?? 120} onCommit={(v) => save({ twitter_poll_interval: num(v, 120) })} /></Row>
-        <Row label="Post every (minutes)"><TextField type="number" value={s.twitter_autonomous_interval ?? 240} onCommit={(v) => save({ twitter_autonomous_interval: num(v, 240) })} /></Row>
-        <Row label="Most posts per day"><TextField type="number" value={s.twitter_autonomous_max_daily ?? 4} onCommit={(v) => save({ twitter_autonomous_max_daily: num(v, 4) })} /></Row>
-      </Group>
-
-      <Group title="WhatsApp" description="Through an external WhatsApp bridge.">
-        <Row label="Enable WhatsApp"><Toggle checked={asBool(s.allow_whatsapp)} onChange={(v) => save({ allow_whatsapp: v })} label="WhatsApp" /></Row>
-        <Row label="Bridge API URL"><TextField mono value={s.whatsapp_api_url || ""} placeholder="http://localhost:3000" onCommit={(v) => save({ whatsapp_api_url: v })} /></Row>
-      </Group>
-
-      <Group title="Heartbeat message" description="What the heartbeat asks Echo on each check-in (turn it on in Automations).">
-        <Row label="Prompt" stack>
-          <TextField wide value={s.heartbeat_prompt || ""} onCommit={(v) => save({ heartbeat_prompt: v })} />
         </Row>
       </Group>
 
@@ -257,7 +147,7 @@ async function post(url: string, body: unknown): Promise<any> {
   return data;
 }
 
-function MemoryPage({ apiBase, sessionId, projectId }: { apiBase: string; sessionId: string; projectId: string }) {
+function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap; save: Save; apiBase: string; sessionId: string; projectId: string }) {
   const [items, setItems] = useState<Memory[] | null>(null);
   const [filter, setFilter] = useState("");
   const [query, setQuery] = useState("");
@@ -441,6 +331,17 @@ function MemoryPage({ apiBase, sessionId, projectId }: { apiBase: string; sessio
             </button>
           </Row>
         ))}
+      </Group>
+
+      <Group title="Document search settings" description="How uploaded documents are searched. Turn document search on in Memory.">
+        <Row label="Rerank results"><Toggle checked={asBool(s.doc_rerank_enabled)} onChange={(v) => save({ doc_rerank_enabled: v })} label="Rerank" /></Row>
+        <Row label="Graph expansion" help="Also pull in passages about related names."><Toggle checked={asBool(s.doc_graph_enabled)} onChange={(v) => save({ doc_graph_enabled: v })} label="Graph expansion" /></Row>
+        <Row label="Largest upload (MB)">
+          <TextField type="number" value={s.doc_upload_max_mb ?? 25} onCommit={(v) => save({ doc_upload_max_mb: num(v, 25) })} />
+        </Row>
+        <Row label="Context per answer (characters)">
+          <TextField type="number" value={s.doc_context_max_chars ?? 6000} onCommit={(v) => save({ doc_context_max_chars: num(v, 6000) })} />
+        </Row>
       </Group>
 
       <Group title="Obsidian sync" description="Optional: copy memories to and from an Obsidian vault connected to this project. EchoSpeak's memory stays the source of truth.">

@@ -13,6 +13,7 @@ import {
 import { ChoiceCards, Group, ListEditor, Row, SecretField, Segmented, Select, Status, TextField, Toggle } from "./controls";
 import { useSettings, type SettingsMap } from "./useSettings";
 import { AdvancedSection, type AdvancedPage } from "./AdvancedSection";
+import { ShowMore, useShowMore } from "../lean/ShowMore";
 
 type SectionId =
   | "general"
@@ -65,6 +66,23 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
   },
 ];
 
+/** What each section holds, so searching for a setting finds the section it lives in. */
+const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
+  general: "name setup approvals approval mode step budget iterations",
+  models: "provider model api key openai gemini claude anthropic grok xai lm studio ollama localai vllm local cloud context temperature creativity custom model id",
+  agents: "persona jarvis glados toolsets",
+  personality: "soul personality tone",
+  permissions: "permissions files desktop applications system actions",
+  terminal: "terminal shell commands powershell allowlist",
+  voice: "voice whisper speech to text microphone wake word read aloud piper windows speech cloud voice openai audio tts stt",
+  search: "web search brave tavily searxng duckduckgo timeout results blocked sites sports odds live data",
+  memory: "memory documents embeddings recall",
+  automations: "routines heartbeat schedule check-in prompt",
+  channels: "discord telegram twitter x whatsapp email imap smtp tls port trusted users roles changelog",
+  advanced: "lm studio only embeddings memory search apps allowlist webhooks a2a agent-to-agent folders skills workspaces artifacts companion avatar connections mcp obsidian documents rerank upload",
+  about: "version update diagnostics logs",
+};
+
 type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "mic" | "globe" | "brain" | "clock" | "send" | "info" | "wrench";
 
 function Icon({ name }: { name: IconName }) {
@@ -91,6 +109,10 @@ function Icon({ name }: { name: IconName }) {
 }
 
 const asBool = (v: any) => v === true || v === "true";
+const num = (v: string, fallback: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
 const asList = (v: any): string[] => (Array.isArray(v) ? v.map(String) : String(v || "").split(/[,\n]/).map((s) => s.trim()).filter(Boolean));
 
 export type SettingsPanelProps = {
@@ -150,7 +172,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
   const nav = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return NAV;
-    return NAV.map((g) => ({ ...g, items: g.items.filter((i) => i.label.toLowerCase().includes(q) || i.id.includes(q)) })).filter((g) => g.items.length);
+    return NAV.map((g) => ({ ...g, items: g.items.filter((i) => i.label.toLowerCase().includes(q) || i.id.includes(q) || (SEARCH_WORDS[i.id] || "").includes(q)) })).filter((g) => g.items.length);
   }, [query]);
   const current = NAV.flatMap((g) => g.items).find((i) => i.id === section);
 
@@ -354,16 +376,45 @@ export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMa
           </Row>
         ))}
       </Group>
-      <Group title="Wake word" description="Say “Hey Echo” to start talking without touching the keyboard. Turn it on with Wake in the composer.">
+      <Group title="Wake word" description="Say “Hey Echo” to start talking without touching the keyboard. Turn it on in the composer's ⋯ menu, beside Voice.">
         <Row label="Wake word" help={usingWhisper ? "Listens for short bursts of speech and checks them on this PC." : "Set up speech to text above first."}>
           <TextField value={String(s.voice_wake_word || "echo")} onCommit={(v: string) => save({ voice_wake_word: v.trim().toLowerCase() || "echo" })} />
         </Row>
       </Group>
-      <Group title="More">
-        <Row label="Read-aloud, whisper.cpp and cloud voice providers">
-          <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => openAdvanced("settings")}>Open</button>
+      <Group title="Engines" description="Downloading a Whisper model above sets speech to text for you.">
+        <Row label="Speech to text">
+          <Select
+            value={String(s.voice_local_stt_provider || "windows-sapi")}
+            onChange={(v) => save({ voice_local_stt_provider: v })}
+            options={[
+              { value: "faster-whisper-local", label: "Whisper (faster-whisper)" },
+              { value: "whisper-cpp-local", label: "whisper.cpp" },
+              { value: "windows-sapi", label: "Windows speech" },
+            ]}
+          />
+        </Row>
+        <Row label="Read aloud">
+          <Select
+            value={String(s.voice_local_tts_provider || "windows-sapi")}
+            onChange={(v) => save({ voice_local_tts_provider: v })}
+            options={[
+              { value: "windows-sapi", label: "Windows voices" },
+              { value: "piper-local", label: "Piper" },
+            ]}
+          />
+        </Row>
+        <Row label="Cloud voice" help="Off keeps all audio on this PC.">
+          <Select
+            value={String(s.voice_cloud_provider || "")}
+            onChange={(v) => save({ voice_cloud_provider: v })}
+            options={[
+              { value: "", label: "Off" },
+              { value: "openai-audio", label: "OpenAI audio" },
+            ]}
+          />
         </Row>
       </Group>
+
     </>
   );
 }
@@ -375,7 +426,7 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
       <Group>
         <Row label="Setup" help="Revisit the first-time model and capability checklist."><button className="es-btn es-btn-sm" onClick={() => window.dispatchEvent(new Event("echospeak:open-setup"))}>Open setup</button></Row>
         <Row label="Your name" help="How your agents refer to you.">
-          <TextField value={s.user_display_name || ""} placeholder="Ty" onCommit={(v) => save({ user_display_name: v })} />
+          <TextField value={s.user_display_name || ""} placeholder="Your first name" onCommit={(v) => save({ user_display_name: v })} />
         </Row>
       </Group>
       <Group title="How agents work" description="These apply to Echo and every agent you create.">
@@ -417,6 +468,13 @@ const LOCAL_DEFAULT_URLS: Record<string, string> = {
   vllm: "http://localhost:8000",
 };
 
+const CLOUD_PROVIDERS = [
+  { value: "openai", label: "OpenAI" },
+  { value: "gemini", label: "Google Gemini" },
+  { value: "anthropic", label: "Claude" },
+  { value: "xai", label: "Grok" },
+];
+
 type DetectRow = { provider: string; base_url: string; running: boolean; models: string[] };
 
 export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBase: string }) {
@@ -431,6 +489,7 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
   const [detecting, setDetecting] = useState(false);
   const [test, setTest] = useState<{ busy: boolean; ok?: boolean; message?: string }>({ busy: false });
   const [reloadKey, setReloadKey] = useState(0);
+  const [customId, setCustomId] = useState(false);
   // Once the user picks an app themselves, never switch it for them.
   const userPicked = useRef(false);
 
@@ -503,6 +562,13 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
     const row = running.find((r) => r.provider === value);
     void save({ local: { provider: value, ...(isStock ? { base_url: LOCAL_DEFAULT_URLS[value] || current } : {}), model_name: row?.models[0] || "" } });
   };
+
+  const catalogRows = catalog.length ? catalog : (models || []).map(id => ({ id, name: id, chat: true, live: false, reason: "" }));
+  const savedModel = String(s[provider]?.model || "");
+  // A saved ID that a loaded catalog doesn't list is a custom one: show its field so it can be seen and changed.
+  // Without a catalog (no key yet) the saved ID is simply the current choice.
+  const inCatalog = catalogRows.some(m => m.id === savedModel);
+  const showCustom = !useLocal && (customId || Boolean(savedModel && catalogRows.length && !inCatalog));
 
   const runTest = async (check: "catalog" | "generation" = "catalog") => {
     setTest({ busy: true });
@@ -586,7 +652,7 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
             <Select
               value={String(local.context_length || 32768)}
               onChange={(v) => save({ local: { context_length: Number(v) } })}
-              options={[8192, 16384, 32768, 64358, 65536, 131072].map((n) => ({ value: String(n), label: `${Math.round(n / 1024)}k tokens` }))}
+              options={[8192, 16384, 32768, 65536, 131072].map((n) => ({ value: String(n), label: `${Math.round(n / 1024)}k tokens` }))}
             />
           </Row>
           <Row label="Creativity" help="Temperature. Lower is more focused, higher is more varied.">
@@ -605,26 +671,46 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
       ) : (
         <Group title="Cloud model">
           <Row label="Provider">
-            <Select value={provider} onChange={(v) => save({ default_cloud_provider: v })} options={[{ value: "openai", label: "OpenAI / ChatGPT" }, { value: "gemini", label: "Google Gemini" }, { value: "anthropic", label: "Anthropic / Claude" }, { value: "xai", label: "xAI / Grok" }]} />
+            <Select value={provider} onChange={(v) => { setCustomId(false); void save({ default_cloud_provider: v }); }} options={CLOUD_PROVIDERS} />
           </Row>
-          <Row label="API key" stack help="Use this provider's developer API key. Save it to load the models your account can access.">
+          <Row
+            label="API key"
+            stack
+            help={s[provider]?.api_key
+              ? <span className="st-ok">Saved. Paste a new key to replace it.</span>
+              : "Use this provider's developer API key. Saving it loads the models your account can use."}
+          >
             <SecretField isSet={Boolean(s[provider]?.api_key)} onCommit={(v) => save({ [provider]: { api_key: v } })} />
           </Row>
-          <Row label="Available models" help={models === null ? "Loading the provider's model catalog…" : catalogMessage}>
+          <Row
+            label="Model"
+            help={models === null
+              ? "Loading the provider's model catalog…"
+              : !s[provider]?.api_key && !(catalog.length || (models || []).length)
+                ? "Save an API key above to see the models your account can use."
+                : catalogMessage || undefined}
+          >
             <div style={{ display: "flex", gap: 6, width: "100%" }}>
-              <div className="st-select is-wide"><select aria-label="Available cloud models" value={String(s[provider]?.model || "")} onChange={(e) => void save({ [provider]: { model: e.target.value } })}>
-                <option value="" disabled>Choose a model</option>
-                {s[provider]?.model && !catalog.some(m => m.id === s[provider].model) ? <option value={s[provider].model}>{s[provider].model} (custom ID)</option> : null}
-                {(catalog.length ? catalog : (models || []).map(id => ({ id, name: id, chat: true, live: false, reason: "" }))).map(m => <option key={m.id} value={m.id} disabled={!m.chat}>{m.id}{m.live ? " · Live audio" : ""}{!m.chat ? " · specialized API" : ""}</option>)}
+              <div className="st-select is-wide"><select aria-label="Cloud model" value={showCustom ? "__custom" : String(s[provider]?.model || "")} disabled={models === null} onChange={(e) => {
+                if (e.target.value === "__custom") { setCustomId(true); return; }
+                setCustomId(false);
+                void save({ [provider]: { model: e.target.value } });
+              }}>
+                <option value="" disabled>{models === null ? "Loading models…" : catalogRows.length ? "Choose a model" : "No models yet"}</option>
+                {savedModel && !inCatalog && !showCustom ? <option value={savedModel}>{savedModel} (saved)</option> : null}
+                {catalogRows.map(m => <option key={m.id} value={m.id} disabled={!m.chat}>{m.id}{m.live ? " · Live audio" : ""}{!m.chat ? " · specialized API" : ""}</option>)}
+                <option value="__custom">Use a custom model ID…</option>
               </select></div>
               <button type="button" className="es-btn es-btn-sm" onClick={() => setReloadKey((k) => k + 1)}>Refresh</button>
             </div>
           </Row>
+          {showCustom ? (
+            <Row label="Custom model ID" help="The exact API ID. It stays selected even when the catalog doesn't list it.">
+              <TextField mono wide value={s[provider]?.model || ""} placeholder="e.g. a preview or fine-tuned model ID" onCommit={(v) => save({ [provider]: { model: v.trim() } })} />
+            </Row>
+          ) : null}
           {provider === "anthropic" && <Row label="Workspace ID" help="Optional. Required for Claude personal/service keys that can access multiple workspaces."><TextField mono value={s.anthropic?.workspace_id || ""} onCommit={(v) => save({ anthropic: { workspace_id: v } })} /></Row>}
-          <Row label="Model ID" help="The exact API ID. Custom IDs stay selected even when absent from the catalog.">
-            <TextField mono wide value={s[provider]?.model || ""} onCommit={(v) => save({ [provider]: { model: v } })} />
-          </Row>
-          {provider === "gemini" && /live|native-audio/i.test(String(s.gemini?.model || "")) && <p className="st-muted">Gemini Live returns speech and its transcription. Use Read or Voice to hear replies, and enable Live mic in the chat toolbar to stream your microphone to Google. Leave Live mic off for local transcription. API audio charges and account model access apply.</p>}
+          {provider === "gemini" && /live|native-audio/i.test(String(s.gemini?.model || "")) && <p className="st-muted">Gemini Live answers with speech and its transcription. Start Voice in the composer to talk with it; other models keep using local speech recognition. API audio charges and your account's model access apply.</p>}
           <Row label="Check provider" help="Catalog access and working chat are separate checks. Test response checks a reply and a harmless tool round-trip; it may incur API charges.">
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               <button type="button" className="es-btn es-btn-sm" disabled={test.busy} onClick={() => void runTest("catalog")}>Check catalog</button>
@@ -919,8 +1005,16 @@ export function SearchSection({ s, save }: { s: SettingsMap; save: Save }) {
         ) : null}
         <Row label="Brave API key"><SecretField isSet={Boolean(s.brave_search_api_key)} onCommit={v => save({ brave_search_api_key: v })} /></Row>
         <Row label="Tavily API key"><SecretField isSet={Boolean(s.tavily_api_key)} onCommit={v => save({ tavily_api_key: v })} /></Row>
+        <Row label="Search timeout (seconds)">
+          <TextField type="number" value={s.web_search_timeout ?? 10} onCommit={(v) => save({ web_search_timeout: num(v, 10) })} />
+        </Row>
         <Row label="Results per search">
           <Select value={String(s.web_search_max_results || 8)} onChange={(v) => save({ web_search_max_results: Number(v) })} options={[5, 8, 10, 15, 20].map((n) => ({ value: String(n), label: String(n) }))} />
+        </Row>
+      </Group>
+      <Group title="Live data">
+        <Row label="Sports odds API key" help="The Odds API key for betting lines. Scores and schedules work without it." stack>
+          <SecretField isSet={Boolean(s.odds_api_key)} onCommit={(v) => save({ odds_api_key: v })} />
         </Row>
       </Group>
       <Group title="Blocked sites" description="Results from these domains are dropped.">
@@ -997,6 +1091,7 @@ export function RoutinesGroup({ apiBase, agents, embedded = false }: { apiBase: 
   const [items, setItems] = useState<RoutineItem[]>([]);
   const [editing, setEditing] = useState<Partial<RoutineItem> | null>(null);
   const [error, setError] = useState("");
+  const more = useShowMore(items);
   const load = useCallback(async () => {
     try {
       const resp = await fetch(`${apiBase}/lean/routines`);
@@ -1038,7 +1133,8 @@ export function RoutinesGroup({ apiBase, agents, embedded = false }: { apiBase: 
         action={<button type="button" className="es-btn es-btn-sm es-btn-primary" onClick={() => setEditing({ name: "", prompt: "", schedule: "0 8 * * *", agent_id: "echo", delivery_channels: [] })}>New routine</button>}
       >
         {items.length === 0 && !editing ? <div className="st-empty-row">No routines yet. Try “Every morning, summarize today's weather and top tech news.”</div> : null}
-        {items.map((r) => {
+        {error && !editing ? <Row label={<Status tone="err">{error}</Status>} /> : null}
+        {more.shown.map((r) => {
           const agent = agents.find((a) => a.id === r.agent_id);
           return (
             <Row
@@ -1054,6 +1150,7 @@ export function RoutinesGroup({ apiBase, agents, embedded = false }: { apiBase: 
             </Row>
           );
         })}
+        {more.collapsible ? <div className="st-show-more"><ShowMore expanded={more.expanded} hidden={more.hidden} label="routines" onToggle={() => more.setExpanded((v) => !v)} /></div> : null}
         {editing ? (
           <RoutineEditor
             initial={editing}
@@ -1087,6 +1184,9 @@ function AutomationsSection({ s, save, apiBase, agents }: { s: SettingsMap; save
         </Row>
         <Row label="Check every" disabled={!asBool(s.heartbeat_enabled)}>
           <Select value={String(s.heartbeat_interval || 30)} onChange={(v) => save({ heartbeat_interval: Number(v) })} options={[15, 30, 60, 120, 240].map((n) => ({ value: String(n), label: n < 60 ? `${n} minutes` : `${n / 60} hour${n > 60 ? "s" : ""}` }))} />
+        </Row>
+        <Row label="What it asks" help="Blank uses Echo's default check-in." disabled={!asBool(s.heartbeat_enabled)} stack>
+          <TextField wide value={s.heartbeat_prompt || ""} onCommit={(v) => save({ heartbeat_prompt: v })} />
         </Row>
         <Row label="Also send to" disabled={!asBool(s.heartbeat_enabled)}>
           <ChannelPicks value={asList(s.heartbeat_channels).filter((c) => c !== "web")} onChange={(v) => save({ heartbeat_channels: ["web", ...v] })} />
@@ -1187,6 +1287,24 @@ function ChannelsSection({ s, save }: { s: SettingsMap; save: Save }) {
         <Row label="Your Discord user ID" help="Owner of the bot. Results are DMed to this account.">
           <TextField mono value={s.discord_bot_owner_id || ""} placeholder="123456789012345678" onCommit={(v) => save({ discord_bot_owner_id: v })} />
         </Row>
+        <Row label="Trusted user IDs" stack>
+          <ListEditor mono items={asList(s.discord_bot_trusted_users)} onChange={(items) => save({ discord_bot_trusted_users: items })} placeholder="User ID" />
+        </Row>
+        <Row label="Allowed server roles" help="Members with these roles may use the bot in servers." stack>
+          <ListEditor items={asList(s.discord_bot_allowed_roles)} onChange={(items) => save({ discord_bot_allowed_roles: items })} placeholder="Role name" />
+        </Row>
+        <Row label="Allowed user IDs" help="Fallback when roles aren't used." stack>
+          <ListEditor mono items={asList(s.discord_bot_allowed_users)} onChange={(items) => save({ discord_bot_allowed_users: items })} placeholder="User ID" />
+        </Row>
+        <Row label="Post new commits to Discord" help="Announces git pushes in the first matching channel.">
+          <Toggle checked={asBool(s.discord_changelog_enabled)} onChange={(v) => save({ discord_changelog_enabled: v })} label="Changelog posts" />
+        </Row>
+        <Row label="Changelog channels" stack>
+          <ListEditor items={asList(s.discord_changelog_channels)} onChange={(items) => save({ discord_changelog_channels: items })} placeholder="#changelog" />
+        </Row>
+        <Row label="Changelog server" help="Name or ID; blank searches every server.">
+          <TextField value={s.discord_changelog_server || ""} onCommit={(v) => save({ discord_changelog_server: v })} />
+        </Row>
       </Group>
       <Group title="Telegram" description="Message your agents from Telegram.">
         <Row label="Enable Telegram bot">
@@ -1206,7 +1324,36 @@ function ChannelsSection({ s, save }: { s: SettingsMap; save: Save }) {
             <TextField mono value={s.email_smtp_host || ""} placeholder="smtp.gmail.com" onCommit={(v) => save({ email_smtp_host: v })} />
           </div>
         </Row>
+        <Row label="IMAP port"><TextField type="number" value={s.email_imap_port ?? 993} onCommit={(v) => save({ email_imap_port: num(v, 993) })} /></Row>
+        <Row label="SMTP port"><TextField type="number" value={s.email_smtp_port ?? 587} onCommit={(v) => save({ email_smtp_port: num(v, 587) })} /></Row>
+        <Row label="Use TLS"><Toggle checked={s.email_use_tls === undefined ? true : asBool(s.email_use_tls)} onChange={(v) => save({ email_use_tls: v })} label="TLS" /></Row>
       </Group>
+
+      <Group title="Twitter / X">
+        <Row label="Enable Twitter"><Toggle checked={asBool(s.allow_twitter)} onChange={(v) => save({ allow_twitter: v })} label="Twitter" /></Row>
+        <Row label="Post on its own" help="Writes posts about project updates on a schedule.">
+          <Toggle checked={asBool(s.twitter_autonomous_enabled)} onChange={(v) => save({ twitter_autonomous_enabled: v })} label="Autonomous posts" />
+        </Row>
+        <Row label="Ask before posting">
+          <Toggle checked={s.twitter_autonomous_require_approval === undefined ? true : asBool(s.twitter_autonomous_require_approval)} onChange={(v) => save({ twitter_autonomous_require_approval: v })} label="Require approval" />
+        </Row>
+        <Row label="Reply to mentions"><Toggle checked={asBool(s.twitter_auto_reply_mentions)} onChange={(v) => save({ twitter_auto_reply_mentions: v })} label="Auto-reply" /></Row>
+        <Row label="Consumer key (client ID)"><TextField mono value={s.twitter_client_id || ""} onCommit={(v) => save({ twitter_client_id: v })} /></Row>
+        <Row label="Consumer secret" stack><SecretField isSet={Boolean(s.twitter_client_secret)} onCommit={(v) => save({ twitter_client_secret: v })} /></Row>
+        <Row label="Access token" stack><SecretField isSet={Boolean(s.twitter_access_token)} onCommit={(v) => save({ twitter_access_token: v })} /></Row>
+        <Row label="Access token secret" stack><SecretField isSet={Boolean(s.twitter_access_token_secret)} onCommit={(v) => save({ twitter_access_token_secret: v })} /></Row>
+        <Row label="Bearer token" help="App-only access, for reading." stack><SecretField isSet={Boolean(s.twitter_bearer_token)} onCommit={(v) => save({ twitter_bearer_token: v })} /></Row>
+        <Row label="Bot user ID" help="Blank: detected from the access token."><TextField mono value={s.twitter_bot_user_id || ""} onCommit={(v) => save({ twitter_bot_user_id: v })} /></Row>
+        <Row label="Check mentions every (seconds)"><TextField type="number" value={s.twitter_poll_interval ?? 120} onCommit={(v) => save({ twitter_poll_interval: num(v, 120) })} /></Row>
+        <Row label="Post every (minutes)"><TextField type="number" value={s.twitter_autonomous_interval ?? 240} onCommit={(v) => save({ twitter_autonomous_interval: num(v, 240) })} /></Row>
+        <Row label="Most posts per day"><TextField type="number" value={s.twitter_autonomous_max_daily ?? 4} onCommit={(v) => save({ twitter_autonomous_max_daily: num(v, 4) })} /></Row>
+      </Group>
+
+      <Group title="WhatsApp" description="Through an external WhatsApp bridge.">
+        <Row label="Enable WhatsApp"><Toggle checked={asBool(s.allow_whatsapp)} onChange={(v) => save({ allow_whatsapp: v })} label="WhatsApp" /></Row>
+        <Row label="Bridge API URL"><TextField mono value={s.whatsapp_api_url || ""} placeholder="http://localhost:3000" onCommit={(v) => save({ whatsapp_api_url: v })} /></Row>
+      </Group>
+
     </>
   );
 }

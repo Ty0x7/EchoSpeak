@@ -28,6 +28,7 @@ logs/
 **/logs/
 
 apps/backend/data/
+apps/backend/routines/
 apps/backend/tts.wav
 
 *.faiss
