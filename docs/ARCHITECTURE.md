@@ -46,7 +46,7 @@ flowchart LR
 - **Desktop shell.** `apps/desktop/src-tauri` is a Tauri 2 app with three windows: main, settings and companion. On launch, `backend.rs` reserves a free loopback port and generates a per-launch session key. It then starts the bundled backend (`backend-dist/echospeak-backend.exe`, a one-folder PyInstaller build) with `CREATE_NO_WINDOW`. It polls `/health`, then `/startup/readiness`, and only then shows the window. The backend is given the app's process id and exits when the app does.
 - **Web UI.** `apps/web` is a single React app. In the desktop window it runs as `DesktopApp`; in a browser it runs at `/app` (the website lives at `/`). Both use the same `Dashboard` (`apps/web/src/index.tsx`), with chat and composer components in `dashboard/`, the Project sidebar in `components/`, and streamed messages in `lean/`.
 - **Backend.** `apps/desktop/backend/echospeak_backend.py` is the packaged entry and `apps/backend/app.py --mode api` is the dev entry. Both serve `api/server.py`, which holds the app, lifespan and middleware and includes one router per area from `api/routes/`. The lean runtime is the only runtime: every source (app, voice, Discord, Telegram, routines) goes through `EchoSpeakAgent.process_query` → `run_lean_query`. `agent/core.py` (~1k lines) is the app object: model client, memory, soul, skill workspace, Project scope and the doctor report.
-- **Updates.** `src-tauri/src/updates.rs` reads `latest.json` from the newest GitHub release (`tauri-plugin-updater`), verifies the installer's signature against the public key in `tauri.conf.json`, stops the backend, and runs the installer, which restarts the app. `apps/desktop/scripts/release-windows.ps1` produces the signed installer and `latest.json`.
+- **Updates.** `src-tauri/src/updates.rs` reads `latest.json` from the newest GitHub release (`tauri-plugin-updater`), verifies the installer's signature against the public key in `tauri.conf.json`, stops the backend, and runs the installer, which restarts the app. Publisher identity and updater verification are separate checks.
 - **Models.** Every agent turn calls an OpenAI-compatible `/chat/completions` endpoint (`agent/lean/provider.py`). That's a local server or a cloud API, and each persona can name its own provider and model.
 
 ## 2. One message, from input to streamed reply
@@ -260,7 +260,7 @@ Reloading a chat calls the Session timeline (`StateStore.session_timeline`). Eac
 | --- | --- |
 | `apps/desktop/src-tauri/src/` | Window shell (`lib.rs`), backend supervisor (`backend.rs`), updates (`updates.rs`), window state, single instance |
 | `apps/desktop/backend/` | Packaged backend entry, PyInstaller spec, `--self-check` |
-| `apps/desktop/scripts/` | `build-sidecar.ps1` (backend bundle + self-check), `build-windows.ps1` (full installer), `setup-updater-key.ps1` (signing key, once), `release-windows.ps1` (signed release + `latest.json`, optional GitHub publish) |
+| `apps/desktop/scripts/` | Desktop packaging and release tooling |
 | `apps/backend/api/` | `server.py` (app, lifespan, middleware), `deps.py` (agent pool, model binding, stream runner), `auth.py` (loopback, API key, host and origin checks), `routes/` (chat, sessions, projects, memory, settings, capabilities, channels, gateway, system, lean, media, media_runtime) |
 | `apps/backend/agent/lean/` | **The agent runtime:** loop, session/routing/fan-out, provider client, toolbox, approvals, prompt, personas, rooms, coding tools, terminal, automations, settings |
 | `apps/backend/agent/state.py` | Durable turns, items, tool runs; Session timeline projection |
@@ -322,8 +322,8 @@ See [ROADMAP.md](ROADMAP.md).
 - Setup reuses Settings sections and delegates supported model downloads/loading to
   running Ollama/LM Studio APIs. The final inference check is independent of catalog
   access. Completion precedes first-chat creation; no request is automatically sent.
-- Windows GUI-subsystem builds hide the host console. NSIS post-install hooks and a
-  hidden production-launch helper repair recognized shortcuts while preserving newer
-  targets. Permanent startup import failures stop bounded crash recovery. The local
-  release script builds verified installer artifacts and publishes tagged GitHub
-  releases using the existing updater key.
+- Windows GUI-subsystem builds hide the host console. Native NSIS post-install hooks
+  repair standard shortcuts with known installation targets; the host does not launch
+  shortcut-repair shells. Permanent startup import failures stop bounded crash recovery.
+  Public distribution verifies Windows publisher signatures separately from updater
+  signatures.

@@ -43,7 +43,7 @@ test("custom chrome can drag while controls and composer remain interactive", ()
 
 test("desktop composer submits only into an explicitly selected Session", () => {
   assert.ok(dashboard.includes("Session creation has one explicit owner: the + controls in the sidebar."));
-  assert.ok(dashboard.includes('const streamThreadId = String(activeThreadIdRef.current || activeThreadId || "").trim()'));
+  assert.ok(dashboard.includes('const streamThreadId = String(recovery?.session || activeThreadIdRef.current || activeThreadId || "").trim()'));
   assert.ok(dashboard.includes("if (!streamThreadId) return"));
   assert.ok(composerInput.includes('e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing'));
   assert.ok(composerInput.includes("void onSend()"));
@@ -60,10 +60,16 @@ test("desktop startup and sidebar use one monochrome Echo identity", () => {
   assert.ok(!desktopApp.includes("desktop-boot-orbit"));
   assert.ok(desktopCss.includes("@keyframes echo-face-spin"));
   assert.ok(desktopCss.includes("@keyframes desktop-progress"));
-  assert.ok(sidebar.includes("{!props.desktop ? <div"));
-  assert.ok(sidebar.includes("Desktop identity belongs to the native title bar"));
-  assert.ok(sidebar.includes('title="Collapse sidebar"'));
-  assert.ok(sidebar.includes('title="Expand sidebar"'));
+  assert.ok(sidebar.includes('className="sidebar-navigation"'));
+  assert.ok(sidebar.includes('onClick={props.onToggleCollapsed}'));
+  assert.ok(sidebar.includes('aria-label={iconOnly ? "Expand sidebar" : "Collapse sidebar"}'));
+});
+
+test("production startup cannot run the retired shortcut-repair shell", async () => {
+  assert.doesNotMatch(host, /repair-shortcuts|ExecutionPolicy|powershell\.exe/i);
+  assert.ok(!Object.keys(config.bundle.resources).some((resource) => /\.ps1$/i.test(resource)));
+  const hooks = await readFile(new URL("../src-tauri/windows/hooks.nsh", import.meta.url), "utf8");
+  assert.doesNotMatch(hooks, /nsExec|ExecWait|powershell|ExecutionPolicy/i);
 });
 
 test("desktop opens only after the authenticated product-readiness contract", () => {
@@ -79,7 +85,8 @@ test("desktop hydration is retryable and Session navigation preserves request ow
   assert.ok(dashboard.includes('localStorage.getItem("echospeak.active_thread_id")'));
   assert.ok(dashboard.includes("streamControllersRef.current.has(id)"));
   assert.ok(dashboard.includes("Navigation changes only the projection"));
-  assert.ok(dashboard.includes("await loadHistory(streamThreadId)"));
+  assert.ok(dashboard.includes("await loadHistory(session)"));
+  assert.ok(dashboard.includes("activeThreadIdRef.current !== session"));
   assert.ok(!dashboard.includes("Abort synchronously BEFORE clearing UI"));
 });
 

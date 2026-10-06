@@ -1,5 +1,15 @@
 # Changes
 
+## v10.4.3 — 2026-10-06
+
+User-facing notes: [EchoSpeak 10.4.3](docs/releases/v10.4.3.md).
+
+- Echo-branded Windows installer and uninstaller.
+- Native installer shortcut maintenance replaces repeated startup PowerShell repair.
+- Windows publisher verification covers the installer and installed executables before public publishing.
+- Public guides remove maintainer distribution recipes and correct voice setup instructions.
+- Windows warning guidance keeps protection enabled.
+
 ## v10.1.0 — 2026-10-03
 
 User-facing notes: `docs/releases/v10.1.0.md`. Harness and Groups execution.
