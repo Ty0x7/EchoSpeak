@@ -15,6 +15,7 @@ An agent needs more than a model connection. EchoSpeak provides the surrounding 
 3. **Iteration.** Tool results feed the next step, allowing Echo to inspect files, refine a search or revise its work within a bounded execution loop.
 4. **Evidence.** Tool activity and saved outputs record what actually happened. Completion claims can be assessed against those records.
 5. **Continuity.** Chats, project context, artifacts and research stay available for later work. Active runs continue when you switch pages, and brief connection drops can reconnect to the existing backend run.
+6. **Learning.** Each finished task is graded from those records. Agents keep short lessons from checked work and failures, read them before similar tasks, and build track records that guide who does what. Lessons are advice only: they never change permissions, approvals or tools, and you can review, edit or undo every one.
 
 The harness combines a **React workspace, Python backend and Rust desktop host**. Its lean agent runtime connects supported models to the same tool and permission system. Model compatibility determines which capabilities are available; permission decisions remain enforced in code.
 
@@ -31,6 +32,7 @@ The harness combines a **React workspace, Python backend and Rust desktop host**
     <tr><td><strong>Creations</strong></td><td>Generate images and videos through supported Gemini image, Google Veo video, MiniMax video or local ComfyUI integrations. Keep outputs in a media library, with editing and related versions for supported images.</td></tr>
     <tr><td><strong>Voice</strong></td><td>Dictate messages, listen to replies or enter a full voice conversation with Echo. Compatible Gemini Live models use native audio; other chat models use the configured speech services.</td></tr>
     <tr><td><strong>Agents and groups</strong></td><td>Use Echo, Jarvis, Glados or custom agents with their own instructions, models and tools. Coordinate through mentions, group conversations and shared tasks.</td></tr>
+    <tr><td><strong>Learning</strong></td><td>Rate replies with Worked / Didn't work. Agents learn short lessons from checked work, and the Learning page shows track records, lessons with their evidence and history, and tool reliability. Approve, edit or undo anything they learned.</td></tr>
     <tr><td><strong>Memory and automation</strong></td><td>Search earlier chats, retain personal memories, use conversation summaries, schedule routines and connect supported messaging services or MCP tools.</td></tr>
   </tbody>
 </table>
@@ -81,11 +83,11 @@ Cloud settings retrieve the provider's model catalog and separately check the se
 
 ## Current development
 
-The source version is **10.5.0**. Recent updates improve provider selection, settings organization and expandable lists across Groups, Projects, Artifacts, Routines and Creations. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
+The source version is **11.0.0**. It adds learning from verified experience: graded tasks, lessons that must prove themselves, agent track records, Worked / Didn't work feedback and a Learning page, with every learned change reviewable and reversible. 10.5.0 improved provider selection, settings organization and expandable lists. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
 
 The release badge follows the latest **published installer**, which may differ from source development.
 
-[10.5.0 notes](docs/releases/v10.5.0.md) · [10.4.3 notes](docs/releases/v10.4.3.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
+[11.0.0 notes](docs/releases/v11.0.0.md) · [10.5.0 notes](docs/releases/v10.5.0.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
 
 <details>
 <summary><strong>Development preview: learning from verified experience</strong></summary>

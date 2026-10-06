@@ -244,6 +244,7 @@ flowchart LR
 | Turns, messages, tool runs, approvals | `phase3/state.db` (`agent/state.py`): `records` (one row per approval, execution, thread state, item, tool run), `events` (last 2,000), `message_search` (FTS5 over every chat message). Pre-10.0 JSON files are imported once and left as a backup | SQLite (WAL), changed rows only |
 | Agent messages | `assistant_message` items: `text`, `agent_id`, `message_id`, the full `timeline` (thinking, tools, approvals), `delegated_by`, `role`, `stop_reason` | `records` rows, kind `items` |
 | Chat summaries | `lean/summaries/<session>.json` (`agent/lean/summaries.py`) | JSON |
+| Learning | `learning/experience.db` (`agent/learning/store.py`): `episodes` (pruned at 5,000), `lessons`, `lesson_events` (before/after snapshots), `reliability`, `reflections` (queue), `agent_settings` (pauses). Deleting it resets learning only | SQLite (WAL) |
 | Voice models | `voice/models/faster-whisper-<size>/` | CTranslate2 |
 | Custom agents, group chats | `lean/agents.json`, `lean/rooms.json` | JSON |
 | Memory | `memory/` (FAISS vector index + items), `memory_files/` (`agent/memory.py`) | FAISS + JSON |
@@ -263,11 +264,13 @@ Reloading a chat calls the Session timeline (`StateStore.session_timeline`). Eac
 | `apps/desktop/scripts/` | Desktop packaging and release tooling |
 | `apps/backend/api/` | `server.py` (app, lifespan, middleware), `deps.py` (agent pool, model binding, stream runner), `auth.py` (loopback, API key, host and origin checks), `routes/` (chat, sessions, projects, memory, settings, capabilities, channels, gateway, system, lean, media, media_runtime) |
 | `apps/backend/agent/lean/` | **The agent runtime:** loop, session/routing/fan-out, provider client, toolbox, approvals, prompt, personas, rooms, coding tools, terminal, automations, settings |
+| `apps/backend/agent/learning/` | Learning from verified experience: episodes and grading, reflector, curator, playbook, profiles, reliability (see "Learning (11.0)" below) |
 | `apps/backend/agent/state.py` | Durable turns, items, tool runs; Session timeline projection |
 | `apps/backend/agent/tools.py`, `tool_registry.py` | Registered tools (web search, files, desktop, integrations) used by toolsets |
 | `apps/backend/agent/memory.py` | Long-term memory (FAISS) |
 | `apps/backend/agent/voice_runtime.py`, `voice_setup.py` | Voice provider detection and selection; guided Whisper download and the wake check |
 | `apps/backend/scripts/eval_gemma.py` | The 20-prompt evaluation against a live backend and model |
+| `apps/backend/scripts/eval_learning.py` | Learning ablation: learn / held-out task families under learning on, off and control |
 | `apps/backend/agent/core.py` | `EchoSpeakAgent`: model client, memory, soul, workspace and Project scope; `process_query` is the one entry for every channel and hands the turn to the lean runtime |
 | `apps/web/src/index.tsx` | Dashboard: Session state, history load, streaming glue and workspace layout |
 | `apps/web/src/dashboard/` | Chat timeline, composer input and controls, provider/voice hooks, history projection |
@@ -281,6 +284,60 @@ Reloading a chat calls the Session timeline (`StateStore.session_timeline`). Eac
 ## 8. What to work on next
 
 See [ROADMAP.md](ROADMAP.md).
+
+## Learning (11.0)
+
+Agents improve from verified experience by writing and reading advisory text. Weights, prompts' rules, policy,
+approvals, toolsets, settings, tests and code are never changed by learning.
+
+```mermaid
+flowchart LR
+    R[Owner request finishes] --> E[episodes.py: grade V0-V4, tamper, taint]
+    E --> S[(experience.db)]
+    E --> Rel[reliability.py: tool and provider counts]
+    E --> Q[reflection queue]
+    Q -->|idle, daily cap| Ref[reflector.py: agent's own model, contrastive, JSON]
+    Ref --> C{curator.py: code decides}
+    C -->|refused| X[dropped]
+    C -->|untrusted, tampered, outward| P[pending_review: owner]
+    C -->|ok| L[probation]
+    L --> PB[playbook.py: lessons in the next prompt]
+    PB --> A[attribution: wins / losses]
+    A -->|3+ wins, 75%+| Est[established]
+    A -->|3+ losses, under 40%| Ret[retired]
+    F[Worked / Didn't work] --> A
+```
+
+- **Hook points.**
+  - `LeanSession._build_turn` asks `learning.prepare_turn` for the playbook section and reliability notes
+    (owner turns only).
+  - `_model_route` and `_roster_line` append `learning.track_record`.
+  - `_run_locked` calls `learning.record_request` after `update_execution`.
+  - `run_web_search` reorders providers in auto mode with `reliability.provider_order` and records each
+    provider attempt.
+- **Grading** reads only the run's own records: timeline tool items (with the redacted `target`), stop reasons
+  (`unverified_claim`, `promise_unfulfilled`, `max_steps`), turn errors and the job outcome.
+  - A check counts only after the last successful change.
+  - Memory and soul writes verify themselves by reading back from disk.
+  - Background commands still running don't count as checks.
+- **Trust.**
+  - An episode is untrusted when the request read outside content (the policy taint list).
+  - Lessons from untrusted or unexpectedly tampered episodes, or that mention outward actions, start
+    `pending_review`. No agent reads them until the owner approves.
+  - The reflector sees tool output only inside `<untrusted-content>`.
+- **Owner control.**
+  - Every lesson change is a `lesson_events` row with before/after snapshots.
+  - Rollback restores the snapshot before any event, deletions included.
+  - Owner edits pass the same `curator.vet` rules.
+- **Proof.** `scripts/eval_learning.py` compares held-out pass and false-success rates under on, off and
+  control (same-size unrelated notes). Reviews are capped at 0 while testing so every mode sees one playbook.
+- **Not in 11.0:**
+  - promoting lessons across agents (team playbooks);
+  - skill proposals from repeated lessons;
+  - pinned research evidence;
+  - outbound A2A learning.
+
+  See [ROADMAP.md](ROADMAP.md).
 
 ## Reliability additions (10.4.0)
 
