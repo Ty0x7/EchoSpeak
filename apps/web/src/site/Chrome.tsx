@@ -1,8 +1,9 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useTheme } from "../theme/theme";
 import { GITHUB_URL, RELEASES_URL, useLatestRelease } from "./release";
 
-export type IconName = "chat" | "team" | "research" | "code" | "memory" | "voice" | "model" | "shield" | "windows" | "github" | "arrow" | "spark" | "house" | "book" | "check" | "chart";
+export type IconName = "chat" | "team" | "research" | "code" | "memory" | "voice" | "model" | "shield" | "windows" | "github" | "arrow" | "spark" | "house" | "book" | "check" | "chart" | "sun" | "moon" | "image" | "file" | "terminal" | "down" | "learn" | "clock" | "branch";
 
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const c = { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.65, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
@@ -22,6 +23,15 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
     case "book": return <svg {...c}><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5zM4 20.5A2.5 2.5 0 0 0 6.5 21H20" /></svg>;
     case "check": return <svg {...c}><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>;
     case "chart": return <svg {...c}><path d="M4 19h16M7 16V9M12 16V5M17 16v-4" /></svg>;
+    case "sun": return <svg {...c}><circle cx="12" cy="12" r="4" /><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4" /></svg>;
+    case "moon": return <svg {...c}><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" /></svg>;
+    case "image": return <svg {...c}><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="1.6" /><path d="m4 18 5.5-5.5 4 4 2.5-2.5L21 19" /></svg>;
+    case "file": return <svg {...c}><path d="M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" /><path d="M14 3v5h5M9 13h6M9 17h4" /></svg>;
+    case "terminal": return <svg {...c}><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="m7 9 3 3-3 3M12 15h5" /></svg>;
+    case "down": return <svg {...c}><path d="M12 5v14M6 13l6 6 6-6" /></svg>;
+    case "learn": return <svg {...c}><path d="M3 9l9-5 9 5-9 5z" /><path d="M7 11.2V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.8M21 9v6" /></svg>;
+    case "clock": return <svg {...c}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>;
+    case "branch": return <svg {...c}><circle cx="6" cy="5" r="2" /><circle cx="6" cy="19" r="2" /><circle cx="18" cy="8" r="2" /><path d="M6 7v10M18 10c0 4-6 3-11 7" /></svg>;
     default: return <svg {...c}><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
   }
 }
@@ -41,7 +51,7 @@ export function DownloadButton({ variant = "primary", compact = false }: { varia
   if (variant === "header") {
     return (
       <a className="header-download" href={release.exeUrl}>
-        <Icon name="windows" size={15} /> Download
+        <Icon name="windows" size={15} /> <span>Download</span>
       </a>
     );
   }
@@ -69,23 +79,55 @@ export function useScrollTo() {
   };
 }
 
+/** The display face for headings, loaded once for the website only. */
+function useSiteFonts() {
+  useEffect(() => {
+    if (document.getElementById("es-site-fonts")) return;
+    const link = document.createElement("link");
+    link.id = "es-site-fonts";
+    link.rel = "stylesheet";
+    link.href = "https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&display=swap";
+    document.head.appendChild(link);
+  }, []);
+}
+
+/** Light or dark, shared with the app (same setting, same colours). */
+export function ThemeToggle() {
+  const { theme, setChoice } = useTheme();
+  const next = theme === "dark" ? "light" : "dark";
+  return (
+    <button type="button" className="header-icon theme-toggle" onClick={() => setChoice(next)} aria-label={`Switch to ${next} mode`} title={`Switch to ${next} mode`}>
+      <Icon name={theme === "dark" ? "sun" : "moon"} size={17} />
+    </button>
+  );
+}
+
 export function SiteHeader() {
   const scrollTo = useScrollTo();
+  const [scrolled, setScrolled] = useState(false);
+  useSiteFonts();
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 8);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
   return (
-    <header className="site-header">
+    <header className="site-header" data-scrolled={scrolled ? "true" : "false"}>
       <Link className="wordmark" to="/" aria-label="EchoSpeak home">
         <Face size={26} />
         <span>EchoSpeak</span>
       </Link>
       <nav aria-label="Main">
-        <button type="button" onClick={() => scrollTo("ways")}>What Echo does</button>
-        <button type="button" onClick={() => scrollTo("creations")}>Creations</button>
-        <button type="button" onClick={() => scrollTo("about")}>About</button>
+        <button type="button" onClick={() => scrollTo("watch")}>Watch me work</button>
+        <button type="button" onClick={() => scrollTo("crew")}>The crew</button>
+        <button type="button" onClick={() => scrollTo("safe")}>Safety</button>
         <Link to="/docs">Docs</Link>
       </nav>
       <div className="header-right">
-        <a className="header-github" href={GITHUB_URL} target="_blank" rel="noreferrer" aria-label="EchoSpeak on GitHub" title="GitHub">
-          <Icon name="github" size={18} />
+        <ThemeToggle />
+        <a className="header-icon" href={GITHUB_URL} target="_blank" rel="noreferrer" aria-label="EchoSpeak on GitHub" title="GitHub">
+          <Icon name="github" size={17} />
         </a>
         <DownloadButton variant="header" />
       </div>
@@ -100,7 +142,7 @@ export function SiteFooter() {
         <Face size={24} />
         <span>EchoSpeak</span>
       </Link>
-      <p>A free AI assistant that lives on your PC.</p>
+      <p>Echo, a free AI agent that lives on your PC.</p>
       <div>
         <Link to="/docs">Docs</Link>
         <a href={RELEASES_URL} target="_blank" rel="noreferrer">Releases</a>

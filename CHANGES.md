@@ -1,5 +1,23 @@
 # Changes
 
+## Website refresh — 2026-10-07
+
+Public site only (`apps/web/src/site`, published by `.github/workflows/website.yml`); the app version is unchanged.
+
+- **Front page in five beats, in Echo's voice** (`Home.tsx`, `home.css`):
+  1. Echo says hi, reacts to the pointer, cycles through his moods, and can be poked.
+  2. "Watch me work" loops a live mini app through research, build (an interactive tip calculator) and create.
+  3. The crew, beside a playing group chat.
+  4. "I live on your PC and play it safe", with a clickable approval card.
+  5. Download.
+
+  About 4,000px tall at 1440×900 (was 7,200).
+- **Light and dark like the app:** the site uses the app's theme tokens and the same saved setting
+  (`echospeak.theme`), with a toggle in the header. Light is the default.
+- **Docs:** new Memory, Learning (verification ladder), Routines and Git & GitHub sections. Safety mentions git
+  approvals. Docs and diagrams are themed.
+- Removed the old front-page parts (`Capabilities.tsx`, `capabilities.css`); `site.css` rewritten on tokens.
+
 ## v11.3.0 — 2026-10-07
 
 User-facing notes: [EchoSpeak 11.3.0](docs/releases/v11.3.0.md).
