@@ -76,6 +76,8 @@ html.echospeak-desktop-root #root {
   border-radius: 0;
   object-fit: contain;
   pointer-events: none;
+  /* A glow behind Echo so the white face stands out (blue in light, theme/blueprint.css). */
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.45)) drop-shadow(0 0 8px rgba(255, 255, 255, 0.2));
 }
 
 .desktop-titlebar-brand small {

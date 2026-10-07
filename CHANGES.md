@@ -1,14 +1,34 @@
 # Changes
 
+## v11.1.2 — 2026-10-07
+
+User-facing notes: [EchoSpeak 11.1.2](docs/releases/v11.1.2.md).
+
+- **Slimmer sidebar** (`runtimeLayout.ts` `SIDEBAR_WIDTH`): 196px in the web app and desktop (was 252 / 288).
+  The "Navigation" header row is gone; collapse is a 26px icon beside New chat, and the collapsed rail shows
+  only a small expand icon.
+- **Page nav shows three, then More** (`ProjectSidebar.tsx`): Group chats, Projects and Artifacts by default;
+  More reveals Routines, Creations and Learning (`echospeak.sidebar.more`). A hidden page that is open stays
+  shown. Page icons are blue in light.
+- **Blue text in light** (`theme/tokens.css`): the text tokens are a blue family; `.chat-scroll` and the
+  composer reset to the neutral ink so messages stay neutral.
+- **Echo on the voice stage** (`components/EchoFace.tsx`): no rings or round halo. A glow in Echo's own shape
+  (`aura`, blue in light, white in dark) follows the microphone level. Each state has its own motion:
+  listening leans in with wide eyes, thinking looks up with a light sweep, working scans, speaking bounces,
+  error tilts with a red glow. Mode changes play a one-off perk, happy hop or shake. The white top highlight
+  and the white listening outline are gone. Reduced motion stops all of it.
+- **Titlebar Echo** (`desktop.css`, `blueprint.css`): a drop-shadow glow behind the logo, blue in light.
+- Unused `--es-mark` / `--es-halo*` tokens removed. Fixed two corrupted paths in the v11.1.1 entry below.
+
 ## v11.1.1 — 2026-10-07
 
 User-facing notes: [EchoSpeak 11.1.1](docs/releases/v11.1.1.md).
 
 - **Clean installs** (`apps/desktop/src-tauri/windows/hooks.nsh`): `NSIS_HOOK_PREINSTALL` removes
-  `$INSTDIRackend` before copying. NSIS only adds and overwrites files, so 11.1.0 kept modules from older
+  `$INSTDIR\backend` before copying. NSIS only adds and overwrites files, so 11.1.0 kept modules from older
   bundles. A stale `backports/zstd/_zstd.pyd` broke an optional-zstd probe during `langchain_core.runnables`
   lazy imports, which surfaced as "cannot import name 'Runnable'". Found by bisecting the installed `_internal`
-  against a fresh build. User data (`%LOCALAPPDATA%i.echospeak.desktop`) is outside `$INSTDIR`. Contract test
+  against a fresh build. User data (`%LOCALAPPDATA%\ai.echospeak.desktop`) is outside `$INSTDIR`. Contract test
   added.
 - **Light theme legibility:** inherited font weight 500 in light; darker `--es-text-3/4`, `--es-dim`,
   `--es-faint`, `--es-label`, and solid secondary text in Settings.

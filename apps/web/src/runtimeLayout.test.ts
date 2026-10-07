@@ -3,7 +3,7 @@ import { defaultRuntimeLayout, loadRuntimeLayout, runtimeGridColumns, saveRuntim
 
 describe("runtime layout", () => {
   it("supports independent sidebar and visualizer visibility", () => {
-    expect(runtimeGridColumns({ ...defaultRuntimeLayout, visualizerVisible: false })).toEqual("252px minmax(0, 1fr)");
+    expect(runtimeGridColumns({ ...defaultRuntimeLayout, visualizerVisible: false })).toEqual("196px minmax(0, 1fr)");
     expect(runtimeGridColumns({ ...defaultRuntimeLayout, sidebarVisible: false })).toEqual(
       "minmax(320px, 1.2fr) minmax(340px, 1fr)",
     );
@@ -14,7 +14,7 @@ describe("runtime layout", () => {
       "56px minmax(320px, 1.2fr) minmax(340px, 1fr)",
     );
     expect(runtimeGridColumns(defaultRuntimeLayout)).toEqual(
-      "252px minmax(320px, 1.2fr) minmax(340px, 1fr)",
+      "196px minmax(320px, 1.2fr) minmax(340px, 1fr)",
     );
   });
 

@@ -77,7 +77,10 @@ test("desktop startup and sidebar use one monochrome Echo identity", () => {
   assert.ok(desktopCss.includes("@keyframes desktop-progress"));
   assert.ok(sidebar.includes('className="sidebar-navigation"'));
   assert.ok(sidebar.includes('onClick={props.onToggleCollapsed}'));
-  assert.ok(sidebar.includes('aria-label={iconOnly ? "Expand sidebar" : "Collapse sidebar"}'));
+  // Collapse sits beside New chat; the collapsed rail keeps a small expand button.
+  assert.ok(sidebar.includes('className="es-side-collapse" onClick={props.onToggleCollapsed} aria-label="Collapse sidebar"'));
+  assert.ok(sidebar.includes('aria-label="Expand sidebar"'));
+  assert.ok(!sidebar.includes("<span>Navigation</span>"));
 });
 
 test("production startup cannot run the retired shortcut-repair shell", async () => {

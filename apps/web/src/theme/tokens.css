@@ -73,11 +73,8 @@
   --es-err-soft: rgba(255, 180, 190, 0.85);
   --es-info: #6aa7ef;
 
-  /* Blueprint layer (theme/blueprint.css): corner marks, rings and glow. */
-  --es-mark: rgba(255, 255, 255, 0.22);
+  /* Blueprint layer (theme/blueprint.css): glow and mono labels. */
   --es-glow: rgba(255, 255, 255, 0.12);
-  --es-halo: rgba(255, 255, 255, 0.16);
-  --es-halo-mid: rgba(255, 255, 255, 0.05);
   --es-label: rgba(244, 244, 245, 0.5);
 
   --es-r-lg: 16px;
@@ -89,7 +86,7 @@
 
 :root[data-es-theme="light"] {
   color-scheme: light;
-  --es-ink-rgb: 10, 30, 60;
+  --es-ink-rgb: 18, 58, 122;
   --es-edge-rgb: 47, 110, 205;
   --es-edge-k: 2.4;
   --es-wash-rgb: 37, 105, 205;
@@ -107,14 +104,16 @@
   --es-border: #d4e2f3;
   --es-border-strong: #b6cbe6;
 
-  --es-text-strong: #071a33;
-  --es-text: #0e2240;
-  --es-text-soft: #24395a;
-  --es-text-2: #3b5274;
-  --es-text-3: #4c6182;
-  --es-text-4: #74869e;
-  --es-dim: #3c5171;
-  --es-faint: #5d7090;
+  /* Blue ink everywhere outside the chat; .chat-scroll and the composer
+     switch back to the neutral ink in blueprint.css. */
+  --es-text-strong: #0a2b63;
+  --es-text: #123a7a;
+  --es-text-soft: #1d4a8e;
+  --es-text-2: #275aa3;
+  --es-text-3: #3566b0;
+  --es-text-4: #6a8cc2;
+  --es-dim: #275aa3;
+  --es-faint: #4a76b8;
 
   --es-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.9);
   --es-focus: rgba(47, 125, 242, 0.55);
@@ -134,9 +133,6 @@
   --es-err-soft: #9d2a2f;
   --es-info: #2f7df2;
 
-  --es-mark: rgba(47, 110, 205, 0.45);
   --es-glow: rgba(64, 145, 255, 0.35);
-  --es-halo: rgba(64, 145, 255, 0.42);
-  --es-halo-mid: rgba(64, 145, 255, 0.16);
-  --es-label: #43669a;
+  --es-label: #2f63b0;
 }

@@ -12,7 +12,7 @@ export function VoiceStage({ apiBase, phase, notice, listening, speaking, stream
   return <section className="voice-stage" aria-label="Voice conversation">
     <div className="voice-stage-heading"><span>Voice with Echo</span><small>{native ? "Gemini Live · native audio" : "Your selected model · voice conversation"}</small></div>
     <style>{echoFaceStyles}</style>
-    <div className="voice-stage-avatar"><div style={{ transform: `scale(${config.voice_avatar_scale})` }}><EchoFace size="clamp(128px, 28vh, 280px)" avatarConfig={config} mode={(phase === "error" || !online ? "error" : speaking ? "speaking" : streaming ? (tool ? "working" : "thinking") : listening ? "listening" : "idle") as EchoFaceMode} /></div></div>
+    <div className="voice-stage-avatar"><div style={{ transform: `scale(${config.voice_avatar_scale})` }}><EchoFace size="clamp(128px, 28vh, 280px)" avatarConfig={config} aura level={listening ? level : 0} mode={(phase === "error" || !online ? "error" : speaking ? "speaking" : streaming ? (tool ? "working" : "thinking") : listening ? "listening" : "idle") as EchoFaceMode} /></div></div>
     <div className="voice-stage-status" role="status"><strong>{status}</strong><span>{notice || (tool ? tool.replace(/_/g, " ") : config.custom_status_text || "Your transcript and tool activity stay below.")}</span></div>
     <div className="voice-stage-controls">
       <button type="button" className={`es-btn ${listening ? "is-listening" : ""}`} aria-label={listening || speaking ? "Pause voice" : "Resume microphone"} onClick={listening || speaking ? onPause : onListen}><ActionIcon name={listening || speaking ? "stop" : "mic"} />{listening || speaking ? "Pause" : "Listen"}</button>

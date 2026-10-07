@@ -73,8 +73,8 @@
 .echo-root .ap-tools { background: var(--es-surface-2); gap: 5px; padding: 10px 12px; }
 .echo-root .ap-seg { border-radius: 7px; overflow: hidden; background: var(--es-surface-3); }
 .echo-root .ap-versions select { max-width: 130px; background: var(--es-surface-3); color: var(--es-text-2); border: 1px solid var(--es-border); border-radius: 6px; font-size: 10px; padding: 5px; }
-.echo-root .sidebar-navigation { flex: 0 0 auto; padding: 2px 4px 10px; border-bottom: 1px solid var(--es-border-soft); margin-bottom: 8px; }
-.echo-root .sidebar-navigation button { height: 30px; display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--es-text-3); cursor: pointer; font: 10px var(--es-font, sans-serif); }
+.echo-root .sidebar-navigation { flex: 0 0 auto; display: flex; justify-content: center; padding: 0 6px 0 0; }
+.echo-root .sidebar-navigation button { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--es-faint); cursor: pointer; }
 .echo-root .sidebar-navigation button:hover { color: var(--es-text); background: var(--es-surface-3); }
 .echo-root .sidebar-navigation button:has(svg:only-child) { justify-content: center; }
 .echo-root .sidebar-update-notice { display: flex; align-items: center; justify-content: flex-start; gap: 9px; width: 100%; padding: 10px; margin-bottom: 5px; border: 1px solid var(--es-border); border-radius: 7px; background: var(--es-surface-3); color: var(--es-text); text-align: left; cursor: pointer; }
