@@ -44,7 +44,7 @@ function storeVote(message: Message, value: Vote) {
   } catch { /* storage unavailable: the vote still counts on the server */ }
 }
 
-export function MessageActions({ message, disabled = false, onRevise, onRead, onFeedback, readingId, actionBusy }: MessageActionProps & { message: Message; disabled?: boolean }) {
+export function MessageActions({ message, disabled = false, onRevise, onRead, onFeedback, readingId, actionBusy, meta }: MessageActionProps & { message: Message; disabled?: boolean; meta?: React.ReactNode }) {
   const [editing, setEditing] = useState(false);
   const canRate = message.role === "assistant" && Boolean(message.executionId) && Boolean(onFeedback);
   const [vote, setVote] = useState<Vote>(() => (canRate ? storedVote(message) : 0));
@@ -109,6 +109,7 @@ export function MessageActions({ message, disabled = false, onRevise, onRead, on
           setNote(""); setNoting(true); void rate(-1);
         }}><ActionIcon name="down" /></button>
       </> : null}
+      {meta ? <span className="message-meta">{meta}</span> : null}
       {notice ? <span role="status">{notice}</span> : null}
     </div>
   </div>;

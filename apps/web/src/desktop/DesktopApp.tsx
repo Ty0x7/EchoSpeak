@@ -154,18 +154,18 @@ export function DesktopApp() {
   const needsInstaller = boot.phase === "failed" && boot.detail.startsWith("The installed backend could not load:");
   return (
     <div className={`desktop-window${settingsWindow ? " desktop-settings-window" : ""}${setupWindow ? " desktop-setup-window" : ""}`}>
-      <header className="desktop-titlebar" data-tauri-drag-region>
+      {setupWindow ? null : <header className="desktop-titlebar" data-tauri-drag-region>
         <div className="desktop-titlebar-brand" data-tauri-drag-region>
           <img src="/logo.png" alt="" draggable={false} />
           <span data-tauri-drag-region>EchoSpeak</span>
           <small data-tauri-drag-region>{settingsWindow ? "Settings" : setupWindow ? "Setup" : "Desktop"}</small>
         </div>
+        {/* Only worth showing while starting or when something is wrong. */}
         <div className={`desktop-titlebar-status is-${boot.phase}`} data-tauri-drag-region>
-          <i aria-hidden />
-          <span data-tauri-drag-region>{boot.phase === "ready" ? "Local service ready" : boot.detail}</span>
+          {boot.phase === "ready" ? null : <><i aria-hidden /><span data-tauri-drag-region>{boot.detail}</span></>}
         </div>
         <WindowControls />
-      </header>
+      </header>}
 
       <main className="desktop-content">
         {showWorkspace ? (setupWindow ? <SetupWindow /> : <Dashboard desktopSettingsWindow={settingsWindow} />) : null}

@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import memory_quality, recall, settings, soul, summaries
+from agent.lean import git_context, memory_quality, recall, settings, soul, summaries
 from agent.lean.job import ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, needs_action, parse_review
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import AgentPersona, get_persona_store
@@ -896,12 +896,16 @@ class LeanSession:
         if learned.lesson_ids:
             with self._state_lock:
                 self._lessons_used.setdefault(persona.id, []).extend(learned.lesson_ids)
+        # Where the repo stands (branch, ahead/behind, changes), like a coding agent's git status.
+        repo_note = git_context.summary(self.project_root) if self.project_root and "terminal" in toolbox.names else ""
         prompt = build_system_prompt(
             persona=persona,
             soul_text=self._soul() if persona.id == "echo" else "",
             project_root=self.project_root,
             notes=list(toolbox.notes) + learned.notes,
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
+            git_note=repo_note,
+            git_rules="terminal" in toolbox.names and git_context.wants_rules(goal, repo_note),
             project_overview=project_overview(self.project_root) if self.project_root else "",
             teammates=teammates if can_hand_off else [],
             room_name=self.room.name if self.room and self.room.kind == "group" else "",

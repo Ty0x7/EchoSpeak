@@ -12,6 +12,7 @@ import platform
 from datetime import datetime
 from typing import Any, Optional
 
+from agent.lean.git_context import RULES as GIT_RULES
 from agent.lean.personas import AgentPersona
 
 WORKING_RULES = """\
@@ -122,6 +123,8 @@ def build_system_prompt(
     memories: Optional[list[dict[str, Any]]] = None,
     chat_summary: str = "",
     terminal_note: str = "",
+    git_note: str = "",
+    git_rules: bool = False,
     project_overview: str = "",
     caller_note: str = "",
     past_chats: Optional[list[str]] = None,
@@ -140,7 +143,10 @@ def build_system_prompt(
         WRITING_REPLIES,
         SHOWING_ANSWERS,
         _team(persona, list(teammates or []), room_name),
-        _environment(project_root=project_root, notes=list(notes or []), terminal_note=terminal_note, project_overview=project_overview),
+        _environment(project_root=project_root, notes=list(notes or []) + ([git_note] if git_note else []),
+                     terminal_note=terminal_note, project_overview=project_overview),
+        # Only for repos and git/GitHub requests (agent/lean/git_context.py).
+        GIT_RULES if git_rules else "",
         _memory(list(memories or [])),
         # Advisory lessons from this agent's own checked work (agent/learning/playbook.py).
         playbook.strip(),

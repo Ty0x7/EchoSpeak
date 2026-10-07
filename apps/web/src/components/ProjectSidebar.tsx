@@ -696,9 +696,11 @@ export function ProjectSidebar(props: SidebarProps) {
                   disabled={hiddenActive}
                   title={moreOpen ? "Show fewer pages" : "Show Routines, Creations and Learning"}
                 >
-                  <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d={moreOpen ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} />
-                  </svg>
+                  <span className="es-nav-more-icon" aria-hidden>
+                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d={moreOpen ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} />
+                    </svg>
+                  </span>
                   <span>{moreOpen ? "Less" : "More"}</span>
                 </button>
               </nav>

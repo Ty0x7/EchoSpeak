@@ -18,7 +18,7 @@ type ComposerToolbarProps = {
   wakeWordEnabled: boolean; toggleWakeWord(): void;
 };
 
-/** One compact model strip, dictation and conversation, with optional controls in one menu. */
+/** Thinking, dictation, voice and a ··· menu (model, provider, preferences), shown inside the input card. */
 export function ComposerToolbar(p: ComposerToolbarProps) {
   const [open, setOpen] = useState(false);
   const menu = useRef<HTMLDivElement>(null);
@@ -37,39 +37,40 @@ export function ComposerToolbar(p: ComposerToolbarProps) {
   const onlineProviders = providers.filter(provider => !provider.local);
   const isCloud = cloudProviders.includes(p.providerDraft.provider);
   const modelPlaceholder = p.modelsLoading ? "Loading models…" : isCloud ? "Add an API key in Settings" : "No models found";
+  const modelName = p.providerInfo?.model || p.providerDraft.model || "";
   return <div className="composer-tools-shell">
     <div className="composer-tools" role="group" aria-label="Chat controls">
-      <div className="composer-model-strip">
-        <select className="composer-provider" aria-label="AI provider" value={p.providerDraft.provider} disabled={p.switchingProvider || p.lmStudioOnly} onChange={e => {
-          p.setProviderDraft(old => ({ ...old, provider: e.target.value, model: "" })); p.setProviderModels([]);
-        }}>
-          {localProviders.length ? <optgroup label="On this PC">{localProviders.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</optgroup> : null}
-          {onlineProviders.length ? <optgroup label="Cloud">{onlineProviders.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</optgroup> : null}
-        </select>
-        {p.showModelPicker || p.modelsLoading ? <select className="composer-model" aria-label="Model" value={p.modelPickerOptions.length ? p.modelPickerValue : ""} disabled={p.switchingProvider || !p.modelPickerOptions.length} title={p.modelPickerValue || modelPlaceholder} onChange={e => p.setProviderDraft(old => ({ ...old, model: e.target.value }))}>
-          {p.modelPickerOptions.length ? p.modelPickerOptions.map(model => <option key={model} value={model}>{model}</option>) : <option value="">{modelPlaceholder}</option>}
-        </select> : <span className="composer-model-name" title={p.providerInfo?.model}>{p.providerInfo?.model || "Choose a model in Settings"}</span>}
-      </div>
-      <div className="composer-tool-buttons">
-        <button type="button" className={`composer-tool ${thinking?.supported && (p.thinkingEnabled || !thinking.toggle) ? "is-on" : ""}`} aria-label="Toggle thinking" aria-pressed={Boolean(thinking?.supported && (p.thinkingEnabled || !thinking.toggle))} title={thinking?.reason || "Toggle thinking"} disabled={!thinking?.toggle || p.switchingProvider} onClick={() => p.setThinkingEnabled(!p.thinkingEnabled)}><ActionIcon name="think" /></button>
-        {!p.voiceConversationMode ? <button type="button" className={`composer-tool ${p.listening ? "is-on" : ""}`} aria-label={p.listening ? "Finish dictation" : "Dictate a message"} title={p.listening ? "Finish dictation (Ctrl+M)" : "Dictate a message (Ctrl+M)"} disabled={p.voicePhase === "transcribing"} onClick={p.listening ? p.stopMic : p.startMic}><ActionIcon name="mic" /></button> : null}
-        <button type="button" className={`composer-tool composer-voice ${p.voiceConversationMode ? "is-on" : ""}`} aria-label="Voice conversation" aria-pressed={p.voiceConversationMode} onClick={p.toggleVoiceMode} title="Talk with Echo using your selected model"><ActionIcon name="voice" /><span>Voice</span></button>
-        <div className="composer-options" ref={menu}>
-          <button type="button" className="composer-tool" aria-label="More chat controls" aria-expanded={open} aria-controls="composer-options-menu" onClick={() => setOpen(v => !v)}><ActionIcon name="more" /></button>
-          {open ? <div id="composer-options-menu" className="composer-options-menu" aria-label="More chat controls">
-            <div className="composer-options-heading">Conversation preferences</div>
-            {([
-              ["Read replies aloud", p.voiceReadAloud, p.toggleReadAloud],
-              ["Sound", p.speechEnabled, () => p.setSpeechEnabled(!p.speechEnabled)],
-              ["Wake word", p.wakeWordEnabled, p.toggleWakeWord],
-              ["Screen monitor", p.monitoring, p.toggleMonitor],
-            ] as [string, boolean, () => void][]).map(([label, on, toggle]) => <button type="button" key={label} aria-pressed={on} onClick={toggle}><span>{label}</span><i data-on={on ? "true" : "false"}>{on ? "On" : "Off"}</i></button>)}
-            <label className="composer-effort"><span>Thinking effort</span><select aria-label="Reasoning effort" disabled={!thinking?.effort || p.switchingProvider} title={thinking?.reason} value={p.reasoningEffort} onChange={e => p.setReasoningEffort(e.target.value as ReasoningEffort)}>
-              {(["minimal", "low", "medium", "high", "extra_high", "max", "ultra"] as ReasoningEffort[]).map(effort => <option key={effort} value={effort}>{effort.replace(/_/g, " ")}</option>)}
-            </select></label>
-            {!thinking?.supported ? <small>Thinking controls are unavailable for this model.</small> : !thinking.toggle ? <small>{thinking.reason}</small> : null}
-          </div> : null}
-        </div>
+      <button type="button" className={`composer-tool ${thinking?.supported && (p.thinkingEnabled || !thinking.toggle) ? "is-on" : ""}`} aria-label="Toggle thinking" aria-pressed={Boolean(thinking?.supported && (p.thinkingEnabled || !thinking.toggle))} title={thinking?.reason || "Toggle thinking"} disabled={!thinking?.toggle || p.switchingProvider} onClick={() => p.setThinkingEnabled(!p.thinkingEnabled)}><ActionIcon name="think" /></button>
+      {!p.voiceConversationMode ? <button type="button" className={`composer-tool ${p.listening ? "is-on" : ""}`} aria-label={p.listening ? "Finish dictation" : "Dictate a message"} title={p.listening ? "Finish dictation (Ctrl+M)" : "Dictate a message (Ctrl+M)"} disabled={p.voicePhase === "transcribing"} onClick={p.listening ? p.stopMic : p.startMic}><ActionIcon name="mic" /></button> : null}
+      <button type="button" className={`composer-tool composer-voice ${p.voiceConversationMode ? "is-on" : ""}`} aria-label="Voice conversation" aria-pressed={p.voiceConversationMode} onClick={p.toggleVoiceMode} title="Talk with Echo using your selected model"><ActionIcon name="voice" /><span>Voice</span></button>
+      <div className="composer-options" ref={menu}>
+        <button type="button" className="composer-tool" aria-label="Model and chat options" aria-expanded={open} aria-controls="composer-options-menu" title={modelName ? `Model: ${modelName}` : "Model and chat options"} onClick={() => setOpen(v => !v)}><ActionIcon name="more" /></button>
+        {open ? <div id="composer-options-menu" className="composer-options-menu" aria-label="Model and chat options">
+          {/* The model choice lives here so it never takes a row under the input. */}
+          <div className="composer-options-heading">Model</div>
+          <div className="composer-model-strip">
+            <select className="composer-provider" aria-label="AI provider" value={p.providerDraft.provider} disabled={p.switchingProvider || p.lmStudioOnly} onChange={e => {
+              p.setProviderDraft(old => ({ ...old, provider: e.target.value, model: "" })); p.setProviderModels([]);
+            }}>
+              {localProviders.length ? <optgroup label="On this PC">{localProviders.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</optgroup> : null}
+              {onlineProviders.length ? <optgroup label="Cloud">{onlineProviders.map(provider => <option key={provider.id} value={provider.id}>{provider.name}</option>)}</optgroup> : null}
+            </select>
+            {p.showModelPicker || p.modelsLoading ? <select className="composer-model" aria-label="Model" value={p.modelPickerOptions.length ? p.modelPickerValue : ""} disabled={p.switchingProvider || !p.modelPickerOptions.length} title={p.modelPickerValue || modelPlaceholder} onChange={e => p.setProviderDraft(old => ({ ...old, model: e.target.value }))}>
+              {p.modelPickerOptions.length ? p.modelPickerOptions.map(model => <option key={model} value={model}>{model}</option>) : <option value="">{modelPlaceholder}</option>}
+            </select> : <span className="composer-model-name" title={p.providerInfo?.model}>{p.providerInfo?.model || "Choose a model in Settings"}</span>}
+          </div>
+          <div className="composer-options-heading">Conversation</div>
+          {([
+            ["Read replies aloud", p.voiceReadAloud, p.toggleReadAloud],
+            ["Sound", p.speechEnabled, () => p.setSpeechEnabled(!p.speechEnabled)],
+            ["Wake word", p.wakeWordEnabled, p.toggleWakeWord],
+            ["Screen monitor", p.monitoring, p.toggleMonitor],
+          ] as [string, boolean, () => void][]).map(([label, on, toggle]) => <button type="button" key={label} aria-pressed={on} onClick={toggle}><span>{label}</span><i data-on={on ? "true" : "false"}>{on ? "On" : "Off"}</i></button>)}
+          <label className="composer-effort"><span>Thinking effort</span><select aria-label="Reasoning effort" disabled={!thinking?.effort || p.switchingProvider} title={thinking?.reason} value={p.reasoningEffort} onChange={e => p.setReasoningEffort(e.target.value as ReasoningEffort)}>
+            {(["minimal", "low", "medium", "high", "extra_high", "max", "ultra"] as ReasoningEffort[]).map(effort => <option key={effort} value={effort}>{effort.replace(/_/g, " ")}</option>)}
+          </select></label>
+          {!thinking?.supported ? <small>Thinking controls are unavailable for this model.</small> : !thinking.toggle ? <small>{thinking.reason}</small> : null}
+        </div> : null}
       </div>
     </div>
     {!p.voiceConversationMode && (p.voiceNotice || p.listening || p.voicePhase === "transcribing") ? <div className="composer-notice" role="status">{p.voiceNotice || (p.listening ? "Listening · pause to send your message" : "Transcribing your message…")}</div> : null}

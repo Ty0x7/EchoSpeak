@@ -101,6 +101,8 @@ export const Dashboard: React.FC<{
   /** Shared right side panel: selected tab, open state and remembered width. */
   const [rightTab, setRightTab] = useState<RightTab>("artifact");
   const [activityOpen, setActivityOpen] = useState(false);
+  // The research & activity button stays out of the way until the pointer nears the chat's top-right corner.
+  const [rpPeek, setRpPeek] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(() => loadPanelWidth());
   const shellRef = useRef<HTMLDivElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarCollapsed);
@@ -803,8 +805,9 @@ export const Dashboard: React.FC<{
       el.scrollTop = el.scrollHeight;
     };
 
+    pin();
     if (pinBottomRafRef.current) cancelAnimationFrame(pinBottomRafRef.current);
-    // Two frames: after React paint, then after layout (markdown / framer-motion / embeds).
+    // Two more frames: after React paint, then after layout (markdown / framer-motion / embeds).
     pinBottomRafRef.current = requestAnimationFrame(() => {
       pin();
       pinBottomRafRef.current = requestAnimationFrame(pin);
@@ -833,11 +836,13 @@ export const Dashboard: React.FC<{
     const el = chatScrollRef.current;
     if (!el || !activeThreadId) return;
     const saved = sessionScrollRef.current.get(activeThreadId);
-    requestAnimationFrame(() => {
+    const restore = () => {
       if (saved?.atBottom || !saved) el.scrollTop = el.scrollHeight;
       else el.scrollTop = Math.min(saved.top, Math.max(0, el.scrollHeight - el.clientHeight));
       followerRef.current.reset(saved?.atBottom ?? true, el);
-    });
+    };
+    restore();
+    requestAnimationFrame(restore);
   }, [activeThreadId]);
 
   useEffect(() => {
@@ -927,7 +932,11 @@ export const Dashboard: React.FC<{
     activeRequestIdsRef.current.set(streamThreadId, runRequestId);
     setSessionInFlight(streamThreadId, true);
 
-    if (!recovery) followerRef.current.reset(true); // sending a message follows its reply
+    if (!recovery) {
+      // Sending a message (or resending after a failure) jumps to the newest message and follows the reply.
+      followerRef.current.reset(true, chatScrollRef.current || undefined);
+      scrollChatToBottom(true);
+    }
     if (!recovery && !overrideText) setInput("");
 
     const clampContext = (t: string, n: number) => {
@@ -1386,6 +1395,8 @@ export const Dashboard: React.FC<{
       continuationId = branch.thread_id;
     } finally { setMessageActionBusy(false); }
     if (activeThreadIdRef.current !== continuationId) throw new Error("Your branch is saved. Open it to send the revised prompt.");
+    followerRef.current.reset(true, chatScrollRef.current || undefined);
+    scrollChatToBottom(true);
     await sendText(text);
   };
 
@@ -1918,14 +1929,22 @@ export const Dashboard: React.FC<{
             </div>
           </div>
           <div className="panel-body">
-            <div className="research-panel">
+            <div
+              className="research-panel"
+              onMouseMove={(event) => {
+                const box = event.currentTarget.getBoundingClientRect();
+                const near = event.clientX > box.right - 260 && event.clientY < box.top + 80;
+                if (near !== rpPeek) setRpPeek(near);
+              }}
+              onMouseLeave={() => setRpPeek(false)}
+            >
               {/* Chat Tab */}
                 <>
                   <WidgetEnvProvider value={widgetEnv}>
                   {!rightOpen && !voiceConversationMode && activeThreadId ? (
                     <button
                       type="button"
-                      className="rp-toggle"
+                      className={`rp-toggle${rpPeek ? " is-peek" : ""}`}
                       aria-label="Research & activity"
                       onClick={() => {
                         setActivityOpen(true);
@@ -1955,7 +1974,7 @@ export const Dashboard: React.FC<{
                   </WidgetEnvProvider>
                   {!voiceConversationMode || mainPage !== "chat" ? <div className="input-bar">
                     <LiveStatusPill live={streaming ? lean.live : null} onStop={stopActiveTurn} />
-                    {/* Row 1: session strip stacked on input (same column width) + context + send */}
+                    {/* One card: session strip, the text box, then tools · context · send */}
                     <ComposerInput
                       threads={threads} projects={projects} activeThreadId={activeThreadId}
                       activeProjectId={activeProjectId} threadState={threadState} providerError={providerError}
@@ -1969,22 +1988,23 @@ export const Dashboard: React.FC<{
                       textareaRef={textareaRef} input={input} onInput={updateComposerInput} onSend={() => void sendText()}
                       activeRoom={activeRoom} roomMembers={roomMembers} mention={mention} setMention={setMention}
                       messages={messages} providerInfo={providerInfo}
-                    />
-                    {/* Row 2: mic mon viz | Provider | Model */}
-                    <ComposerToolbar
-                      listening={listening} voicePhase={voicePhase} voiceNotice={voiceNotice}
-                      voiceInputLevel={voiceInputLevel} startMic={() => void start()} stopMic={() => void stop()}
-                      monitoring={monitoring} toggleMonitor={toggleMonitor}
-                      speechEnabled={speechEnabled} setSpeechEnabled={setSpeechEnabled}
-                      providerDraft={providerDraft} setProviderDraft={setProviderDraft}
-                      setProviderModels={setProviderModels} switchingProvider={switchingProvider}
-                      lmStudioOnly={lmStudioOnly} providerInfo={providerInfo}
-                      modelPickerValue={modelPickerValue} modelPickerOptions={modelPickerOptions}
-                      showModelPicker={showModelPicker} modelsLoading={modelsLoading} reasoningEffort={reasoningEffort}
-                      setReasoningEffort={setReasoningEffort} thinkingEnabled={thinkingEnabled}
-                      setThinkingEnabled={setThinkingEnabled} voiceReadAloud={voiceReadAloud}
-                      toggleReadAloud={toggleReadAloud} voiceConversationMode={voiceConversationMode}
-                      toggleVoiceMode={toggleVoiceMode} wakeWordEnabled={wakeWordEnabled} toggleWakeWord={toggleWakeWord}
+                      toolbar={
+                        <ComposerToolbar
+                          listening={listening} voicePhase={voicePhase} voiceNotice={voiceNotice}
+                          voiceInputLevel={voiceInputLevel} startMic={() => void start()} stopMic={() => void stop()}
+                          monitoring={monitoring} toggleMonitor={toggleMonitor}
+                          speechEnabled={speechEnabled} setSpeechEnabled={setSpeechEnabled}
+                          providerDraft={providerDraft} setProviderDraft={setProviderDraft}
+                          setProviderModels={setProviderModels} switchingProvider={switchingProvider}
+                          lmStudioOnly={lmStudioOnly} providerInfo={providerInfo}
+                          modelPickerValue={modelPickerValue} modelPickerOptions={modelPickerOptions}
+                          showModelPicker={showModelPicker} modelsLoading={modelsLoading} reasoningEffort={reasoningEffort}
+                          setReasoningEffort={setReasoningEffort} thinkingEnabled={thinkingEnabled}
+                          setThinkingEnabled={setThinkingEnabled} voiceReadAloud={voiceReadAloud}
+                          toggleReadAloud={toggleReadAloud} voiceConversationMode={voiceConversationMode}
+                          toggleVoiceMode={toggleVoiceMode} wakeWordEnabled={wakeWordEnabled} toggleWakeWord={toggleWakeWord}
+                        />
+                      }
                     />
                   </div> : null}
                 </>

@@ -132,7 +132,13 @@ function AdvancedSettings({ s, save }: { s: SettingsMap; save: Save }) {
 // ── Memory & documents ──────────────────────────────────────────────────
 
 type Memory = { id: string; text: string; memory_type?: string; pinned?: boolean; timestamp?: string };
-const MEMORY_TYPES = ["preference", "profile", "project", "contacts", "note"];
+const MEMORY_TYPES = ["preference", "profile", "relationship", "project", "workflow_preference", "goal", "contacts", "note"];
+/** Plain names for the stored memory types. */
+const TYPE_LABEL: Record<string, string> = {
+  preference: "Preference", profile: "About you", relationship: "People", project: "Project",
+  workflow_preference: "How to work", goal: "Goal", contacts: "Contacts", note: "Fact", conversation: "Chat transcript",
+};
+const typeLabel = (t?: string) => TYPE_LABEL[t || ""] || (t ? t[0].toUpperCase() + t.slice(1).replace(/_/g, " ") : "Untyped");
 
 function scope(sessionId: string, projectId: string, extra: Record<string, string> = {}) {
   const q = new URLSearchParams(extra);
@@ -215,6 +221,11 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
     return (items || []).filter((m) => (!filter || m.memory_type === filter) && (!words || m.text.toLowerCase().includes(words)));
   }, [items, filter, query]);
   const transcripts = useMemo(() => (items || []).filter((m) => m.memory_type === "conversation"), [items]);
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const m of items || []) counts[m.memory_type || "note"] = (counts[m.memory_type || "note"] || 0) + 1;
+    return Object.fromEntries(Object.entries(counts).sort((x, y) => y[1] - x[1]));
+  }, [items]);
 
   const upload = async (file: File | undefined) => {
     if (!file) return;
@@ -280,11 +291,31 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
     <>
       <Group
         title="Saved memories"
-        description="Facts Echo keeps about you. Pinned ones are always recalled."
+        description="Short facts agents keep about you. Pinned ones ride along in every chat; the rest are recalled when they matter."
         action={<button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => void load()}>Refresh</button>}
       >
-        <Row label={<Status tone={doctor ? (doctor.ok ? "ok" : "warn") : "idle"}>{doctor ? (doctor.ok ? "Healthy" : "Needs review") : "Checking…"}</Status>}
-          help={items ? `${items.length} memories · ${items.filter((m) => m.pinned).length} pinned${doctor?.duplicate_groups?.length ? ` · ${doctor.duplicate_groups.length} duplicate group(s)` : ""}${doctor?.warnings?.length ? ` · ${doctor.warnings[0]}` : ""}` : undefined}>
+        {/* Overview: how much is remembered, what kinds, and whether it's healthy. */}
+        <div className="st-mem-overview">
+          <div className="st-mem-stats">
+            <div><strong>{items ? items.length : "–"}</strong><span>memories</span></div>
+            <div><strong>{items ? items.filter((m) => m.pinned).length : "–"}</strong><span>pinned · always recalled</span></div>
+            <div><strong>{Object.keys(typeCounts).length}</strong><span>kinds</span></div>
+            <div className={doctor ? (doctor.ok ? "is-ok" : "is-warn") : ""}><strong>{doctor ? (doctor.ok ? "Healthy" : "Review") : "…"}</strong><span>{doctor?.duplicate_groups?.length ? `${doctor.duplicate_groups.length} duplicate group(s)` : doctor?.warnings?.[0] || "no duplicates"}</span></div>
+          </div>
+          {items?.length ? (
+            <div className="st-mem-bar" role="img" aria-label={Object.entries(typeCounts).map(([t, n]) => `${typeLabel(t)} ${n}`).join(", ")}>
+              {Object.entries(typeCounts).map(([t, n]) => <i key={t} className={`t-${t}`} style={{ flexGrow: n }} title={`${typeLabel(t)}: ${n}`} />)}
+            </div>
+          ) : null}
+          <div className="st-mem-chips" role="group" aria-label="Filter by kind">
+            <button type="button" aria-pressed={!filter} onClick={() => setFilter("")}>All <small>{items?.length || 0}</small></button>
+            {Object.entries(typeCounts).map(([t, n]) => (
+              <button key={t} type="button" aria-pressed={filter === t} onClick={() => setFilter(filter === t ? "" : t)}><i className={`t-${t}`} />{typeLabel(t)} <small>{n}</small></button>
+            ))}
+          </div>
+        </div>
+        <div className="st-mem-toolbar">
+          <TextField value={query} placeholder="Search memories" onCommit={setQuery} />
           <button type="button" className="es-btn es-btn-sm" disabled={!items?.length} onClick={() => void act(() => post(`${apiBase}/memory/compact?${scope(sessionId, projectId)}`, {}))}>Merge duplicates</button>
           {/* Older versions copied every chat turn into memory; those transcripts aren't facts. */}
           {transcripts.length ? (
@@ -298,21 +329,28 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
             onClick={() => window.confirm("Delete every saved memory?") && void act(() => post(`${apiBase}/memory/clear?${scope(sessionId, projectId)}`, {}))}>
             Clear all
           </button>
-        </Row>
-        <Row label="Find">
-          <TextField value={query} placeholder="Search memories" onCommit={setQuery} />
-          <Select value={filter} onChange={setFilter} options={[{ value: "", label: "All types" }, ...MEMORY_TYPES.map((t) => ({ value: t, label: t[0].toUpperCase() + t.slice(1) }))]} />
-        </Row>
+        </div>
         {error ? <Row label={<Status tone="err">{error}</Status>} /> : null}
         {items === null ? <Row label="Loading…" /> : null}
-        {items !== null && !shown.length ? <Row label={<span className="st-muted">{items.length ? "No memories match." : "No saved memories yet."}</span>} /> : null}
-        {shown.slice(0, 200).map((m) => (
-          <Row key={m.id} label={<MemoryText memory={m} onSave={(text) => update(m.id, { text })} />} help={[m.memory_type || "untyped", m.pinned ? "pinned" : "", m.timestamp ? new Date(m.timestamp).toLocaleDateString() : ""].filter(Boolean).join(" · ")}>
-            <Select value={m.memory_type || ""} onChange={(v) => update(m.id, { memory_type: v })} options={[{ value: "", label: "Type" }, ...MEMORY_TYPES.map((t) => ({ value: t, label: t }))]} />
-            <Toggle checked={Boolean(m.pinned)} onChange={(v) => update(m.id, { pinned: v })} label="Pinned" />
-            <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => void act(() => post(`${apiBase}/memory/delete`, { ids: [m.id], thread_id: sessionId, project_id: projectId }))}>Delete</button>
-          </Row>
-        ))}
+        {items !== null && !shown.length ? <Row label={<span className="st-muted">{items.length ? "No memories match." : "No saved memories yet. Agents save lasting facts as you chat."}</span>} /> : null}
+        <div className="st-mem-list">
+          {shown.slice(0, 200).map((m) => (
+            <div key={m.id} className={`st-mem-item${m.pinned ? " is-pinned" : ""}`}>
+              <button type="button" className="st-mem-pin" aria-pressed={Boolean(m.pinned)} title={m.pinned ? "Pinned: always recalled. Click to unpin." : "Pin: always recall this"}
+                aria-label={m.pinned ? "Unpin memory" : "Pin memory"} onClick={() => void update(m.id, { pinned: !m.pinned })}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill={m.pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" aria-hidden><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z" /></svg>
+              </button>
+              <div className="st-mem-body">
+                <MemoryText memory={m} onSave={(text) => update(m.id, { text })} />
+                <small><span className={`st-mem-type t-${m.memory_type || "note"}`}>{typeLabel(m.memory_type)}</span>{m.timestamp ? ` · ${new Date(m.timestamp).toLocaleDateString()}` : ""}</small>
+              </div>
+              <Select value={m.memory_type || ""} onChange={(v) => update(m.id, { memory_type: v })} options={[{ value: "", label: "Kind" }, ...[...MEMORY_TYPES, ...(m.memory_type && !MEMORY_TYPES.includes(m.memory_type) ? [m.memory_type] : [])].map((t) => ({ value: t, label: typeLabel(t) }))]} />
+              <button type="button" className="st-mem-delete" title="Delete memory" aria-label="Delete memory" onClick={() => void act(() => post(`${apiBase}/memory/delete`, { ids: [m.id], thread_id: sessionId, project_id: projectId }))}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M5.5 7.5h13M9 7.5V5.7h6v1.8M7.5 7.5l.7 11h7.6l.7-11" /></svg>
+              </button>
+            </div>
+          ))}
+        </div>
       </Group>
 
       <Group title="Local search model" description="Optional ONNX model for private memory and document search. Model-server embeddings can be used instead.">
@@ -473,9 +511,32 @@ function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; s
   const tone = (card: any): "ok" | "warn" | "err" | "idle" =>
     card.ready ? "ok" : card.status === "disabled" ? "idle" : card.issue ? "warn" : "idle";
 
+  const summary = [
+    { key: "connections", label: "Connections", noun: "connected" },
+    { key: "skills", label: "Skills", noun: "ready" },
+    { key: "mcp", label: "MCP servers", noun: "running" },
+  ].map((kind) => ({ ...kind, total: byCategory(kind.key).length, ready: byCategory(kind.key).filter((c) => c.ready).length }));
+  /** A tile with the first letter, tinted by status, then the name and its status. */
+  const nameOf = (card: any) => (
+    <span className="st-conn-name">
+      <span className={`st-conn-tile is-${tone(card)}`} aria-hidden>{String(card.name || "?").trim().charAt(0).toUpperCase()}</span>
+      <span>{card.name}</span>
+      <Status tone={tone(card)}>{card.status_label}</Status>
+    </span>
+  );
+
   return (
     <>
       {error ? <Group><Row label={<Status tone="err">{error}</Status>} /></Group> : null}
+      <div className="st-conn-summary">
+        {summary.map((item) => (
+          <div key={item.key}>
+            <strong>{cards === null ? "…" : item.total ? `${item.ready}/${item.total}` : "0"}</strong>
+            <span>{item.label}{item.total ? ` ${item.noun}` : ""}</span>
+            <i className="st-conn-meter" aria-hidden><b style={{ width: `${item.total ? (item.ready / item.total) * 100 : 0}%` }} /></i>
+          </div>
+        ))}
+      </div>
       <Group
         title="Connections"
         description={projectId ? "Accounts and apps agents can use in this project." : "Open a chat in a project to connect accounts and apps to it."}
@@ -489,7 +550,7 @@ function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; s
           const reconnect = card.status === "reconnect_required" || connection?.authentication === "expired";
           return (
             <React.Fragment key={card.id}>
-              <Row label={<>{card.name} <Status tone={tone(card)}>{card.status_label}</Status></>} help={card.issue || card.description}>
+              <Row label={nameOf(card)} help={card.issue || card.description}>
                 {connection && projectId ? (
                   <>
                     <button type="button" className="es-btn es-btn-sm" disabled={busy === key} onClick={() => void connectionAction(provider, reconnect ? "reconnect" : "probe")}>{reconnect ? "Reconnect" : "Check"}</button>
@@ -513,13 +574,15 @@ function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; s
         })}
       </Group>
       <Group title="Skills" description="Installed workflow packages and whether the tools they need are reachable.">
+        {cards !== null && !byCategory("skills").length ? <Row label={<span className="st-muted">No skills installed.</span>} /> : null}
         {byCategory("skills").map((card) => (
-          <Row key={card.id} label={<>{card.name} <Status tone={tone(card)}>{card.status_label}</Status></>} help={card.issue || `${card.capabilities?.length || 0} tools`} />
+          <Row key={card.id} label={nameOf(card)} help={card.issue || `${card.capabilities?.length || 0} tools`} />
         ))}
       </Group>
       <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide.">
+        {cards !== null && !byCategory("mcp").length ? <Row label={<span className="st-muted">No MCP servers configured.</span>} /> : null}
         {byCategory("mcp").map((card) => (
-          <Row key={card.id} label={<>{card.name} <Status tone={tone(card)}>{card.status_label}</Status></>} help={card.issue || card.detail} />
+          <Row key={card.id} label={nameOf(card)} help={card.issue || card.detail} />
         ))}
       </Group>
     </>

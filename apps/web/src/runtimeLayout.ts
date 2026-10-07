@@ -38,7 +38,7 @@ export function saveRuntimeLayout(storage: Pick<Storage, "setItem"> | null, layo
  * neither dominates. Hidden sidebar/visualizer lets remaining columns expand.
  */
 /** The open left sidebar, in pre-zoom layout px (collapsed: 56). */
-export const SIDEBAR_WIDTH = 196;
+export const SIDEBAR_WIDTH = 216;
 
 export function runtimeGridColumns(layout: RuntimeLayout): string {
   const columns: string[] = [];

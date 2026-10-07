@@ -126,12 +126,13 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
     setSaved(false);
   };
 
+  // Theme surfaces, so the editor matches the rest of Settings in light and dark.
   const cardStyle: React.CSSProperties = {
-    background: "linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02))",
-    border: `1px solid ${colors.line}`,
-    borderRadius: 10,
+    background: "var(--es-surface-1)",
+    border: "1px solid var(--es-border)",
+    borderRadius: 12,
     padding: 16,
-    boxShadow: "0 18px 40px rgba(0,0,0,0.18)",
+    boxShadow: "0 8px 24px -18px rgba(var(--es-shade-rgb), calc(0.9 * var(--es-shade-k)))",
   };
 
   const labelStyle: React.CSSProperties = {
@@ -145,8 +146,8 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
 
   const inputStyle: React.CSSProperties = {
     width: "100%",
-    background: "rgba(255,255,255,0.05)",
-    border: `1px solid ${colors.line}`,
+    background: "var(--es-surface-2)",
+    border: "1px solid var(--es-border)",
     borderRadius: 10,
     padding: "10px 12px",
     color: colors.text,
@@ -190,7 +191,7 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
               <div style={labelStyle}>Presets</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {PRESETS.map((preset) => (
-                  <button key={preset.name} type="button" onClick={() => applyPreset(preset.config)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 999, border: `1px solid ${colors.line}`, background: "rgba(255,255,255,0.04)", color: colors.text, cursor: "pointer", fontSize: 12 }}>
+                  <button key={preset.name} type="button" onClick={() => applyPreset(preset.config)} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--es-border)", background: "var(--es-surface-2)", color: colors.text, cursor: "pointer", fontSize: 12 }}>
                     <span style={{ width: 10, height: 10, borderRadius: "50%", background: preset.config.body_color || "#fff", boxShadow: `0 0 0 2px ${(preset.config.glow_color || "#fff")}33` }} />
                     {preset.name}
                   </button>
@@ -253,7 +254,7 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
                 ] as const).map(([label, field]) => (
                   <div key={field} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                     <span style={{ fontSize: 12, color: colors.textDim }}>{label}</span>
-                    <button type="button" onClick={() => updateField(field, (!config[field]) as never)} style={{ width: 42, height: 24, borderRadius: 999, border: "none", background: config[field] ? `${config.glow_color}66` : "rgba(255,255,255,0.1)", cursor: "pointer", position: "relative" }}>
+                    <button type="button" onClick={() => updateField(field, (!config[field]) as never)} style={{ width: 42, height: 24, borderRadius: 999, border: "none", background: config[field] ? "var(--es-accent)" : "var(--es-glass-2)", cursor: "pointer", position: "relative" }}>
                       <motion.div animate={{ x: config[field] ? 20 : 2 }} transition={{ duration: 0.16 }} style={{ position: "absolute", top: 2, width: 20, height: 20, borderRadius: "50%", background: config[field] ? "#ffffff" : colors.textDim }} />
                     </button>
                   </div>
@@ -263,13 +264,13 @@ export const AvatarEditor: React.FC<AvatarEditorProps> = ({ apiBase, colors, onC
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ ...cardStyle, padding: 18, background: `linear-gradient(180deg, ${config.bg_color}, rgba(255,255,255,0.02))` }}>
+            <div className="avatar-preview-card" style={{ ...cardStyle, padding: 18 }}>
               <div style={labelStyle}>Echo in voice & companion</div>
               <div className="avatar-preview-states" role="group" aria-label="Preview avatar state">
-                {["idle", "listening", "thinking", "speaking", "working"].map(state => <button type="button" key={state} aria-pressed={preview === state} onClick={() => setPreview(state as EchoFaceMode)}>{state}</button>)}
+                {["idle", "listening", "thinking", "working", "speaking", "error"].map(state => <button type="button" key={state} aria-pressed={preview === state} onClick={() => setPreview(state as EchoFaceMode)}>{state}</button>)}
               </div>
               <div className="avatar-live-preview" style={{ transform: `scale(${config.voice_avatar_scale})` }}>
-                <style>{echoFaceStyles}</style><EchoFace size={150} avatarConfig={config} mode={preview} />
+                <style>{echoFaceStyles}</style><EchoFace size={140} avatarConfig={config} mode={preview} aura level={preview === "listening" ? 0.5 : 0} />
               </div>
             </div>
 
