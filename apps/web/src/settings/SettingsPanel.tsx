@@ -231,9 +231,12 @@ export function SettingsPanel(props: SettingsPanelProps) {
               <span className="st-save" data-state={saveState} title={saveError || undefined}>
                 {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : saveState === "error" ? "Couldn't save" : ""}
               </span>
-              <button type="button" className="es-icon-btn st-close" aria-label="Close settings" onClick={props.onClose}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
-              </button>
+              {/* The Settings window has its own close button in the titlebar. */}
+              {props.fullscreen ? null : (
+                <button type="button" className="es-icon-btn st-close" aria-label="Close settings" onClick={props.onClose}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                </button>
+              )}
             </div>
           </header>
           <div className="st-scroll">{body}</div>
@@ -1149,12 +1152,61 @@ export function RoutinesGroup({ apiBase, agents, embedded = false }: { apiBase: 
     return true;
   };
 
+  const startNew = () => setEditing({ name: "", prompt: "", schedule: "0 8 * * *", agent_id: "echo", delivery_channels: [] });
+  // The Routines page lists them as rows like the other pages; the editor below handles changes.
+  if (embedded && !editing) {
+    return (
+      <div className="es-routines">
+        <div className="es-page-toolbar is-end">
+          <button type="button" className="es-btn es-btn-primary" onClick={startNew}>New routine</button>
+        </div>
+        {error ? <p className="st-err" role="alert">{error}</p> : null}
+        {items.length === 0 ? (
+          <button type="button" className="es-page-empty" onClick={startNew}>
+            <strong>No routines yet</strong>
+            <span>Try “Every morning, summarize today's weather and top tech news.”</span>
+          </button>
+        ) : (
+          <>
+            <div className="es-page-list">
+              {more.shown.map((r) => {
+                const agent = agents.find((a) => a.id === r.agent_id);
+                const failed = r.last_result_status === "failed";
+                return (
+                  <div key={r.id} className={`es-page-row${r.enabled ? "" : " is-off"}`}>
+                    <button type="button" className="es-page-row-main" onClick={() => setEditing({ ...r })} title="Edit routine">
+                      <span className="es-row-tile is-folder" aria-hidden>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>
+                      </span>
+                      <span className="es-page-row-text">
+                        <strong>{r.name}</strong>
+                        <small>{describeSchedule(r)} · {agent?.name || "Echo"}{r.next_run && r.enabled && r.trigger_type === "schedule" ? ` · next ${when(r.next_run)}` : ""}</small>
+                      </span>
+                      <span className="es-row-meta">
+                        <Status tone={failed ? "err" : r.last_result_status ? "ok" : "idle"}>{failed ? "Last run failed" : r.last_run ? `Ran ${when(r.last_run)}` : "Not run yet"}</Status>
+                      </span>
+                    </button>
+                    <div className="es-row-actions">
+                      <Toggle checked={r.enabled} onChange={(v) => void call(`/${r.id}`, "PATCH", { enabled: v })} label={`Enable ${r.name}`} />
+                      <button type="button" className="es-btn es-btn-sm" onClick={() => void call(`/${r.id}/run`, "POST")}>Run</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {more.collapsible ? <ShowMore expanded={more.expanded} hidden={more.hidden} label="routines" onToggle={() => more.setExpanded((v) => !v)} /> : null}
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <Group
         title={embedded ? "Your routines" : "Routines"}
         description={embedded ? undefined : "Tasks your agents run on a schedule or when you tap Run. Results show up in their own chat."}
-        action={<button type="button" className="es-btn es-btn-sm es-btn-primary" onClick={() => setEditing({ name: "", prompt: "", schedule: "0 8 * * *", agent_id: "echo", delivery_channels: [] })}>New routine</button>}
+        action={<button type="button" className="es-btn es-btn-sm es-btn-primary" onClick={startNew}>New routine</button>}
       >
         {items.length === 0 && !editing ? <div className="st-empty-row">No routines yet. Try “Every morning, summarize today's weather and top tech news.”</div> : null}
         {error && !editing ? <Row label={<Status tone="err">{error}</Status>} /> : null}

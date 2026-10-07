@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import recall, settings, soul, summaries
+from agent.lean import memory_quality, recall, settings, soul, summaries
 from agent.lean.job import ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, needs_action, parse_review
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import AgentPersona, get_persona_store
@@ -1065,17 +1065,32 @@ class LeanSession:
             ))
         if memory is not None:
             def memory_save(args: dict[str, Any]) -> str:
-                fact = str(args.get("fact") or args.get("text") or "").strip()
-                if not fact:
-                    return "Error: give the fact to remember in 'fact'."
+                fact = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))
+                problem = memory_quality.check_fact(fact)
+                if problem:
+                    return problem
+                key = memory_quality.normalize_key(str(args.get("key") or ""))
+                if not key:
+                    # A reworded copy of something already saved: keep the one we have.
+                    owner_of = getattr(memory, "_owner_id", None)
+                    owner = owner_of() if callable(owner_of) else ""
+                    existing = memory_quality.find_duplicate(fact, (
+                        record for record in list((getattr(memory, "_records", None) or {}).values())
+                        if (not owner or str(record.get("owner_id") or "") == owner)
+                        and str(record.get("scope") or "account") == "account"
+                    ))
+                    if existing is not None:
+                        return f"Already remembered: {existing.get('text')}"
                 memory_id = memory.add_memory_item(
                     fact,
-                    memory_type=str(args.get("type") or "note"),
+                    memory_type=memory_quality.KINDS.get(str(args.get("type") or "fact").lower(), "note"),
                     pinned=bool(args.get("pinned", False)),
                     thread_id=self.session_id,
                     source="agent",
                     scope="account",
                     source_execution_id=self.execution_id,
+                    # Same key, new value: the old memory is superseded, not kept alongside.
+                    semantic_key=key,
                 )
                 if not memory_id:
                     return "Failed: that could not be saved (empty, duplicate, or looks like a secret)."
@@ -1093,7 +1108,9 @@ class LeanSession:
                 rows = self._recall(query, limit=10)
                 try:
                     docs = memory.retrieve_relevant(query, k=5, thread_id=self.session_id)
-                    rows += [{"content": getattr(doc, "page_content", "")} for doc in docs]
+                    # Saved facts only; old chat transcripts are found with chat_search.
+                    rows += [{"content": getattr(doc, "page_content", "")} for doc in docs
+                             if str((getattr(doc, "metadata", None) or {}).get("type") or "") != "conversation"]
                 except Exception:
                     pass
                 lines = list(dict.fromkeys(str(r.get("content") or "").strip() for r in rows if str(r.get("content") or "").strip()))
@@ -1101,10 +1118,19 @@ class LeanSession:
 
             tools.append(NativeTool(
                 name="memory_save",
-                description="Save a lasting fact about the user or their preferences, projects, or people so you remember it in future chats.",
+                description="Save one lasting fact about the user so you remember it in future chats: who they are, what they "
+                "prefer, people and projects in their life, how they like you to work. Save when the user tells you something "
+                "durable or asks you to remember it. Don't save one-off requests, things that only matter in this chat, web "
+                "content, or secrets. One fact per call.",
                 parameters={"type": "object", "properties": {
-                    "fact": {"type": "string", "description": "The fact, written as a full sentence."},
-                    "pinned": {"type": "boolean", "description": "True for core facts that should always be recalled."},
+                    "fact": {"type": "string", "description": "One short third-person sentence that still makes sense later, "
+                             "e.g. \"Prefers short answers.\" or \"Partner is called Sam.\""},
+                    "type": {"type": "string", "enum": list(memory_quality.KINDS),
+                             "description": "What kind of fact this is."},
+                    "key": {"type": "string", "description": "For facts that can change, a short stable name like home_city, "
+                            "job or diet. A new fact with the same key replaces the old one."},
+                    "pinned": {"type": "boolean", "description": "True only for core facts that matter in almost every chat "
+                               "(name, key preferences). Pinned facts are always in your context."},
                 }, "required": ["fact"]},
                 func=memory_save,
             ))
@@ -1447,6 +1473,12 @@ class LeanSession:
         if memory is None or not answer or self.source in {"routine", "heartbeat", "proactive"}:
             return
         if self.caller_role != "owner":
+            return
+        # Raw transcripts are opt-in (Settings › Memory). Chats are already kept and searchable
+        # (chat_search); copying every turn into memory only crowded out the real facts.
+        from config import config
+
+        if not bool(getattr(config, "memory_auto_store_conversations", False)):
             return
 
         def work() -> None:

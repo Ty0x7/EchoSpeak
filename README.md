@@ -81,11 +81,11 @@ Cloud settings retrieve the provider's model catalog and separately check the se
 
 ## Current development
 
-The source version is **11.1.2**: a slimmer sidebar, blue text and icons in the light theme, and a livelier Echo in voice. 11.1.1 fixed starting after an update. 11.1.0 added a light theme (now the default) with the classic dark theme a click away, and setup in its own window. 11.0.0 added learning from verified experience, described in the development preview below; whether it improves results is still being measured. 10.5.0 improved provider selection, settings organization and expandable lists. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
+The source version is **11.2.0**: memory that keeps only lasting facts, an artifact library and viewer, pages as rows, a chart-first Learning page and better-shaped answers. 11.1.2 slimmed the sidebar and brought a livelier Echo in voice. 11.1.1 fixed starting after an update. 11.1.0 added a light theme (now the default) with the classic dark theme a click away, and setup in its own window. 11.0.0 added learning from verified experience, described in the development preview below; whether it improves results is still being measured. 10.5.0 improved provider selection, settings organization and expandable lists. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
 
 The release badge follows the latest **published installer**, which may differ from source development.
 
-[11.1.2 notes](docs/releases/v11.1.2.md) · [11.1.1 notes](docs/releases/v11.1.1.md) · [11.1.0 notes](docs/releases/v11.1.0.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
+[11.2.0 notes](docs/releases/v11.2.0.md) · [11.1.2 notes](docs/releases/v11.1.2.md) · [11.1.1 notes](docs/releases/v11.1.1.md) · [11.1.0 notes](docs/releases/v11.1.0.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
 
 <details>
 <summary><strong>Development preview: learning from verified experience</strong></summary>

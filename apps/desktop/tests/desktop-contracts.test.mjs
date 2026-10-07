@@ -108,7 +108,7 @@ test("desktop opens only after the authenticated product-readiness contract", ()
 });
 
 test("desktop hydration is retryable and Session navigation preserves request ownership", () => {
-  assert.ok(sidebar.includes("Restoring Projects and Sessions"));
+  assert.ok(sidebar.includes("Restoring chats…"));
   assert.ok(dashboard.includes("for (let attempt = 0; attempt < 4"));
   assert.ok(dashboard.includes('localStorage.getItem("echospeak.active_thread_id")'));
   assert.ok(dashboard.includes("streamControllersRef.current.has(id)"));

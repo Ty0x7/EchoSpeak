@@ -70,11 +70,34 @@ def _save(record: dict[str, Any]) -> None:
     tmp.replace(path)
 
 
+def excerpt(kind: str, content: str, title: str = "", limit: int = 160) -> str:
+    """A one-line glimpse of an artifact for the library: readable text, not markup."""
+    text = str(content or "")
+    if kind in {"svg", "mermaid", "code"}:
+        return ""  # source isn't a readable glimpse; the library shows the type and size instead
+    if kind == "html":
+        text = re.sub(r"(?is)<(script|style|title)\b.*?</\1>", " ", text)
+        text = re.sub(r"(?s)<[^>]+>", " ", text)
+    elif kind == "markdown":
+        text = re.sub(r"(?m)^\s{0,3}(#{1,6}|[-*+>]|\d+\.)\s+", "", text)
+        text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
+        text = re.sub(r"[*_`]{1,3}", "", text)
+        text = re.sub(r"(?m)^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$", "", text)  # table rules
+        text = text.replace("|", " ")
+    text = " ".join(text.split())
+    # The first heading is usually the title, which the library already shows.
+    if title and text.lower().startswith(title.strip().lower()):
+        text = text[len(title.strip()):].lstrip(" :-·")
+    return text[:limit].rstrip() + ("…" if len(text) > limit else "")
+
+
 def summary(record: dict[str, Any]) -> dict[str, Any]:
     latest = record["versions"][-1]
+    content = str(latest.get("content") or "")
+    title = latest.get("title") or record.get("title") or "Artifact"
     return {
         "id": record["id"],
-        "title": latest.get("title") or record.get("title") or "Artifact",
+        "title": title,
         "kind": record["kind"],
         "language": record.get("language", ""),
         "version": latest["n"],
@@ -83,6 +106,8 @@ def summary(record: dict[str, Any]) -> dict[str, Any]:
         "agent_id": record.get("agent_id", ""),
         "created_at": record.get("created_at", 0),
         "updated_at": record.get("updated_at", 0),
+        "excerpt": excerpt(record["kind"], content, title),
+        "lines": content.count("\n") + 1 if content else 0,
     }
 
 
