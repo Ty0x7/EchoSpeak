@@ -20,15 +20,16 @@ const num = (v: string, fallback: number) => {
   return Number.isFinite(n) ? n : fallback;
 };
 
+// Theme tokens (theme/tokens.css), so the preview matches the companion in light and dark.
 const COMPANION_COLORS = {
-  bg: "#000000",
-  panel: "#0a0a0a",
-  panel2: "#111111",
-  accent: "#ffffff",
-  text: "#ffffff",
-  textDim: "#888888",
-  line: "#333333",
-  danger: "#ff4444",
+  bg: "var(--es-bg-0)",
+  panel: "var(--es-surface-1)",
+  panel2: "var(--es-surface-2)",
+  accent: "var(--es-text-strong)",
+  text: "var(--es-text-strong)",
+  textDim: "var(--es-text-3)",
+  line: "var(--es-border)",
+  danger: "var(--es-err)",
 };
 
 export function AdvancedSection(props: {
