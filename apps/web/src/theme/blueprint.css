@@ -268,3 +268,15 @@
 .es-theme-preview-faces { display: inline-flex; gap: 3px; }
 .es-theme-preview-face.is-mate { background: linear-gradient(180deg, #4f97ff, #2c73e8); }
 .es-theme-preview-face.is-mate b { background: #ffffff; }
+
+/* ── light: a heavier text weight ────────────────────────────────────── */
+/* Dark text on white reads thinner than light text on black, so light mode
+   sets the inherited weight one step up. Explicit weights (headings, buttons) keep theirs. */
+:root[data-es-theme="light"] body,
+:root[data-es-theme="light"] .echo-root,
+:root[data-es-theme="light"] .st-root,
+:root[data-es-theme="light"] .setup-panel {
+  font-weight: 500;
+}
+/* Settings sets its own secondary text by transparency; on white that is too pale. */
+:root[data-es-theme="light"] .st-root { --es-dim: #3c5171; --es-faint: #5d7090; }

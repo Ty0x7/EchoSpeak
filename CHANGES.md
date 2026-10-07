@@ -1,5 +1,18 @@
 # Changes
 
+## v11.1.1 — 2026-10-07
+
+User-facing notes: [EchoSpeak 11.1.1](docs/releases/v11.1.1.md).
+
+- **Clean installs** (`apps/desktop/src-tauri/windows/hooks.nsh`): `NSIS_HOOK_PREINSTALL` removes
+  `$INSTDIRackend` before copying. NSIS only adds and overwrites files, so 11.1.0 kept modules from older
+  bundles. A stale `backports/zstd/_zstd.pyd` broke an optional-zstd probe during `langchain_core.runnables`
+  lazy imports, which surfaced as "cannot import name 'Runnable'". Found by bisecting the installed `_internal`
+  against a fresh build. User data (`%LOCALAPPDATA%i.echospeak.desktop`) is outside `$INSTDIR`. Contract test
+  added.
+- **Light theme legibility:** inherited font weight 500 in light; darker `--es-text-3/4`, `--es-dim`,
+  `--es-faint`, `--es-label`, and solid secondary text in Settings.
+
 ## v11.1.0 — 2026-10-06
 
 User-facing notes: [EchoSpeak 11.1.0](docs/releases/v11.1.0.md).
