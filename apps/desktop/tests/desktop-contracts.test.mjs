@@ -87,6 +87,16 @@ test("production startup cannot run the retired shortcut-repair shell", async ()
   assert.doesNotMatch(hooks, /nsExec|ExecWait|powershell|ExecutionPolicy/i);
 });
 
+test("each install starts from a clean backend folder, never the user's data", async () => {
+  const hooks = await readFile(new URL("../src-tauri/windows/hooks.nsh", import.meta.url), "utf8");
+  const preinstall = hooks.match(/!macro NSIS_HOOK_PREINSTALL([\s\S]*?)!macroend/)?.[1] || "";
+  // Files left by an older version broke 11.1.0's backend (a stale backports/zstd module).
+  assert.match(preinstall, /RMDir \/r "\$INSTDIR\\backend"/);
+  assert.match(preinstall, /\$INSTDIR != ""/, "never runs with an empty install path");
+  assert.equal(config.bundle.resources["backend-dist/"], "backend/", "the folder it clears is the bundled backend");
+  assert.doesNotMatch(preinstall, /ai\.echospeak\.desktop|LOCALAPPDATA|APPDATA/, "user data is never touched");
+});
+
 test("desktop opens only after the authenticated product-readiness contract", () => {
   assert.ok(desktopApp.includes("readDesktopReadiness"));
   assert.ok(desktopApp.includes("startup_timeout"));

@@ -18,6 +18,17 @@
   ${EndIf}
 !macroend
 
+; Start every install with a clean backend folder. The installer only adds and
+; overwrites files, so modules left by an older version stayed behind and could
+; break the new one (11.1.0: a stale backports/zstd extension made langchain's
+; imports fail). Your data is elsewhere (%LOCALAPPDATA%\ai.echospeak.desktop).
+!macro NSIS_HOOK_PREINSTALL
+  ${If} $INSTDIR != ""
+  ${AndIf} ${FileExists} "$INSTDIR\backend\*.*"
+    RMDir /r "$INSTDIR\backend"
+  ${EndIf}
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   !insertmacro EchoSpeakRepairShortcut "$DESKTOP\EchoSpeak.lnk"
   !insertmacro EchoSpeakRepairShortcut "$SMPROGRAMS\EchoSpeak.lnk"

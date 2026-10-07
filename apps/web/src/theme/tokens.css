@@ -111,10 +111,10 @@
   --es-text: #0e2240;
   --es-text-soft: #24395a;
   --es-text-2: #3b5274;
-  --es-text-3: #5a6f8f;
-  --es-text-4: #8a9ab1;
-  --es-dim: #4a5f7f;
-  --es-faint: #7184a1;
+  --es-text-3: #4c6182;
+  --es-text-4: #74869e;
+  --es-dim: #3c5171;
+  --es-faint: #5d7090;
 
   --es-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.9);
   --es-focus: rgba(47, 125, 242, 0.55);
@@ -138,5 +138,5 @@
   --es-glow: rgba(64, 145, 255, 0.35);
   --es-halo: rgba(64, 145, 255, 0.42);
   --es-halo-mid: rgba(64, 145, 255, 0.16);
-  --es-label: #5577a3;
+  --es-label: #43669a;
 }
