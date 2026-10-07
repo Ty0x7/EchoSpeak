@@ -873,6 +873,7 @@
 .es-side-top {
   flex: 0 0 auto;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   padding: 0 6px 2px 1px;
 }
@@ -898,6 +899,42 @@
 .es-nav-item:hover { background: var(--es-glass); color: var(--es-text); }
 .es-nav-item.is-active { background: var(--es-glass-2); color: var(--es-text); box-shadow: var(--es-sheen); }
 .es-nav-item:focus-visible { outline: 2px solid var(--es-focus); outline-offset: -2px; }
+/* New chat with a small collapse toggle tucked beside it. */
+.es-new-chat-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.echo-root.echo-root .es-new-chat-row .es-new-chat { flex: 1 1 auto; width: auto; min-width: 0; }
+.es-side-collapse {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--es-faint);
+  cursor: pointer;
+  transition: background var(--es-dur) var(--es-ease), color var(--es-dur) var(--es-ease);
+}
+.es-side-collapse:hover { background: var(--es-glass); color: var(--es-text); }
+.es-side-collapse:focus-visible, .es-nav-more:focus-visible { outline: 2px solid var(--es-focus); outline-offset: -2px; }
+/* More / Less: reveals the pages past the first three. */
+.es-nav-more {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 10px 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--es-faint);
+  font: 600 10.5px/1 var(--es-font);
+  text-align: left;
+  cursor: pointer;
+}
+.es-nav-more:hover:not(:disabled) { color: var(--es-text); background: var(--es-glass); }
+.es-nav-more:disabled { display: none; }
 /* Agents / Chats / Projects fill the rest of the sidebar; only each list scrolls. */
 .es-split { flex: 1 1 0; min-height: 96px; overflow: hidden; display: flex; flex-direction: column; border-top: 1px solid var(--es-line); padding-top: 4px; }
 .es-sec {

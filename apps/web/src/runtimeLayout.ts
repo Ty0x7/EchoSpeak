@@ -37,9 +37,12 @@ export function saveRuntimeLayout(storage: Pick<Storage, "setItem"> | null, layo
  * Three-up: visualizer slightly larger for Echo, chat a bit wider than before —
  * neither dominates. Hidden sidebar/visualizer lets remaining columns expand.
  */
+/** The open left sidebar, in pre-zoom layout px (collapsed: 56). */
+export const SIDEBAR_WIDTH = 196;
+
 export function runtimeGridColumns(layout: RuntimeLayout): string {
   const columns: string[] = [];
-  if (layout.sidebarVisible) columns.push(layout.sidebarCollapsed ? "56px" : "252px");
+  if (layout.sidebarVisible) columns.push(layout.sidebarCollapsed ? "56px" : `${SIDEBAR_WIDTH}px`);
   if (layout.visualizerVisible) {
     // ~55/45 visualizer:chat when both free-grow; mins keep balance on narrow windows
     columns.push("minmax(320px, 1.2fr)");

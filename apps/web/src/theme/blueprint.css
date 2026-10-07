@@ -51,50 +51,18 @@
 .lm-face[data-tone="light"] {
   box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 0 10px rgba(255, 255, 255, 0.28);
 }
+/* Dark: a soft white glow, no outline. */
 .echo-face {
   box-shadow:
-    inset 0 calc(var(--face) * .012) 0 #ffffff,
     inset 0 calc(var(--face) * -.02) 0 rgba(0, 0, 0, .06),
-    0 0 0 max(1px, calc(var(--face) * .006)) rgba(255, 255, 255, 0.45),
-    0 0 calc(var(--face) * .22) rgba(255, 255, 255, 0.3),
-    0 0 calc(var(--face) * .5) rgba(255, 255, 255, 0.12),
+    0 0 calc(var(--face) * .22) rgba(255, 255, 255, 0.22),
     0 calc(var(--face) * .09) calc(var(--face) * .22) rgba(0, 0, 0, .55) !important;
 }
+/* The aura behind Echo on the voice stage (EchoFace `aura`). */
+.echo-face-wrap { --echo-aura: #ffffff; --echo-aura-strength: 0.2; --echo-aura-error: #e5484d; }
 
-/* ── voice: measuring rings around Echo ──────────────────────────────── */
+/* ── voice: no rings or circles, just Echo and his own glow ──────────── */
 .echo-root .voice-stage-avatar { position: relative; }
-.echo-root .voice-stage-avatar::before,
-.echo-root .voice-stage-avatar::after {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  border-radius: 50%;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-}
-.echo-root .voice-stage-avatar::before {
-  width: clamp(220px, 46vh, 440px);
-  height: clamp(220px, 46vh, 440px);
-  border: 1px solid var(--es-mark);
-  opacity: 0.55;
-  background:
-    linear-gradient(var(--es-mark), var(--es-mark)) center top / 1px 14px no-repeat,
-    linear-gradient(var(--es-mark), var(--es-mark)) center bottom / 1px 14px no-repeat,
-    linear-gradient(var(--es-mark), var(--es-mark)) left center / 14px 1px no-repeat,
-    linear-gradient(var(--es-mark), var(--es-mark)) right center / 14px 1px no-repeat;
-}
-/* A soft blue glow behind Echo. */
-.echo-root .voice-stage-avatar::after {
-  width: clamp(300px, 62vh, 620px);
-  height: clamp(300px, 62vh, 620px);
-  background: radial-gradient(circle, var(--es-halo) 0%, var(--es-halo-mid) 32%, transparent 68%);
-  filter: blur(6px);
-}
-.echo-root .voice-stage-avatar::before,
-.echo-root .voice-stage-avatar::after { z-index: 0; }
-/* Echo sits above the ring and the glow. */
-.echo-root .voice-stage-avatar > div { position: relative; z-index: 1; }
 .echo-root .voice-stage-heading span { font-weight: 600; color: var(--es-text); font-size: 14px; }
 
 /* ── light theme: the full blueprint treatment ───────────────────────── */
@@ -159,12 +127,22 @@
 }
 :root[data-es-theme="light"] .echo-face {
   box-shadow:
-    inset 0 calc(var(--face) * .012) 0 #ffffff,
     inset 0 calc(var(--face) * -.02) 0 rgba(20, 60, 120, .05),
     0 0 0 max(1.5px, calc(var(--face) * .008)) rgba(47, 125, 242, 0.75),
     0 0 calc(var(--face) * .25) rgba(64, 145, 255, 0.65),
     0 0 calc(var(--face) * .6) rgba(64, 145, 255, 0.35),
     0 calc(var(--face) * .06) calc(var(--face) * .2) rgba(30, 80, 160, .18) !important;
+}
+:root[data-es-theme="light"] .echo-face-wrap { --echo-aura: #3d8bff; --echo-aura-strength: 0.62; }
+/* Something is wrong: the blue glow gives way to the warm one from the aura. */
+.echo-face-wrap[data-mode="error"] .echo-face.echo-face {
+  box-shadow:
+    inset 0 calc(var(--face) * -.02) 0 rgba(0, 0, 0, .06),
+    0 calc(var(--face) * .06) calc(var(--face) * .2) rgba(0, 0, 0, .25) !important;
+}
+/* The titlebar Echo: a blue glow behind the white face. */
+:root[data-es-theme="light"] .desktop-titlebar-brand img {
+  filter: drop-shadow(0 0 0.5px rgba(47, 125, 242, 0.9)) drop-shadow(0 0 4px rgba(64, 145, 255, 0.75)) drop-shadow(0 0 9px rgba(64, 145, 255, 0.45));
 }
 :root[data-es-theme="light"] .echo-face-shadow { background: rgba(47, 110, 205, 0.2); }
 :root[data-es-theme="light"] .echo-says {
@@ -279,4 +257,27 @@
   font-weight: 500;
 }
 /* Settings sets its own secondary text by transparency; on white that is too pale. */
-:root[data-es-theme="light"] .st-root { --es-dim: #3c5171; --es-faint: #5d7090; }
+:root[data-es-theme="light"] .st-root { --es-dim: #275aa3; --es-faint: #4a76b8; }
+
+/* ── light: blue text, except inside the chat ────────────────────────── */
+/* The tokens make the app's text blue; messages and the composer keep a
+   neutral ink so long answers stay easy to read. */
+:root[data-es-theme="light"] .echo-root .chat-scroll,
+:root[data-es-theme="light"] .echo-root .composer-input-stack {
+  --es-ink-rgb: 10, 30, 60;
+  --es-text-strong: #071a33;
+  --es-text: #0e2240;
+  --es-text-soft: #24395a;
+  --es-text-2: #3b5274;
+  --es-text-3: #4c6182;
+  --es-text-4: #74869e;
+  --es-dim: #3c5171;
+  --es-faint: #5d7090;
+  color: var(--es-text);
+}
+
+/* ── light: blue sidebar page icons ──────────────────────────────────── */
+:root[data-es-theme="light"] .es-nav-item svg { color: var(--es-accent); opacity: 1; }
+:root[data-es-theme="light"] .es-nav-more,
+:root[data-es-theme="light"] .es-side-collapse,
+:root[data-es-theme="light"] .echo-root .sidebar-navigation button { color: var(--es-accent); }

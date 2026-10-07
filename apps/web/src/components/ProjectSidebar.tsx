@@ -62,6 +62,14 @@ const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string
   { id: "learning", label: "Learning", hint: "What your agents learned from checked work" },
 ];
 
+/** How many pages show before "More". */
+const NAV_PRIMARY = 3;
+const NAV_MORE_KEY = "echospeak.sidebar.more";
+
+function readNavMore(): boolean {
+  try { return window.localStorage.getItem(NAV_MORE_KEY) === "1"; } catch { return false; }
+}
+
 function NavIcon({ name }: { name: Exclude<SidebarPage, "chat"> }) {
   const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   switch (name) {
@@ -281,6 +289,14 @@ export function ProjectSidebar(props: SidebarProps) {
     };
   }, [query, searching, onSearchChats]);
   const iconOnly = props.collapsed;
+  // Three pages show by default; More reveals the rest. A hidden page that is open stays visible.
+  const [navMore, setNavMore] = useState(readNavMore);
+  useEffect(() => {
+    try { window.localStorage.setItem(NAV_MORE_KEY, navMore ? "1" : "0"); } catch { /* storage unavailable */ }
+  }, [navMore]);
+  const hiddenActive = NAV_ITEMS.slice(NAV_PRIMARY).some((item) => item.id === props.page);
+  const moreOpen = navMore || hiddenActive;
+  const shownNav = moreOpen ? NAV_ITEMS : NAV_ITEMS.slice(0, NAV_PRIMARY);
   const projects = useMemo(() => props.projects.filter((project) => !project.archived), [props.projects]);
   const sessions = props.sessions;
   const looseSessions = sessions.filter((session) => !session.projectId);
@@ -715,33 +731,40 @@ export function ProjectSidebar(props: SidebarProps) {
       }
     `}</style>
 
-      <div className="sidebar-navigation">
-        <button type="button" onClick={props.onToggleCollapsed} aria-label={iconOnly ? "Expand sidebar" : "Collapse sidebar"} title={iconOnly ? "Expand sidebar" : "Collapse sidebar"}>
-          {!iconOnly ? <span>Navigation</span> : null}<Icon name={iconOnly ? "expand" : "collapse"} size={16} />
-        </button>
-      </div>
+      {iconOnly ? (
+        <div className="sidebar-navigation">
+          <button type="button" onClick={props.onToggleCollapsed} aria-label="Expand sidebar" title="Expand sidebar">
+            <Icon name="expand" size={14} />
+          </button>
+        </div>
+      ) : null}
 
       {!iconOnly ? (
         <div className="es-side-body">
           <div className="es-side-top">
-            <button
-              className="echo-side-button es-new-chat"
-              type="button"
-              onClick={() => {
-                props.onView("chat");
-                props.onPage?.("chat");
-                props.onNewSession();
-              }}
-              title="New chat"
-              aria-label="New chat"
-            >
-              <span style={iconSlot(false)}>
-                <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                  <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
-                </svg>
-              </span>
-              <span style={titleEllipsis}>New chat</span>
-            </button>
+            <div className="es-new-chat-row">
+              <button
+                className="echo-side-button es-new-chat"
+                type="button"
+                onClick={() => {
+                  props.onView("chat");
+                  props.onPage?.("chat");
+                  props.onNewSession();
+                }}
+                title="New chat"
+                aria-label="New chat"
+              >
+                <span style={iconSlot(false)}>
+                  <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+                  </svg>
+                </span>
+                <span style={titleEllipsis}>New chat</span>
+              </button>
+              <button type="button" className="es-side-collapse" onClick={props.onToggleCollapsed} aria-label="Collapse sidebar" title="Collapse sidebar">
+                <Icon name="collapse" size={14} />
+              </button>
+            </div>
             {props.onSearchChats ? (
               <label className="es-chat-search">
                 <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
@@ -762,7 +785,7 @@ export function ProjectSidebar(props: SidebarProps) {
             ) : null}
             {props.onPage ? (
               <nav className="es-nav" aria-label="Pages">
-                {NAV_ITEMS.map((item) => {
+                {shownNav.map((item) => {
                   const active = props.page === item.id;
                   const count = props.pageCounts?.[item.id];
                   return (
@@ -780,6 +803,19 @@ export function ProjectSidebar(props: SidebarProps) {
                     </button>
                   );
                 })}
+                <button
+                  type="button"
+                  className="es-nav-more"
+                  aria-expanded={moreOpen}
+                  onClick={() => setNavMore(!navMore)}
+                  disabled={hiddenActive}
+                  title={moreOpen ? "Show fewer pages" : "Show Routines, Creations and Learning"}
+                >
+                  <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d={moreOpen ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} />
+                  </svg>
+                  <span>{moreOpen ? "Less" : "More"}</span>
+                </button>
               </nav>
             ) : null}
           </div>

@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ProjectSidebar, type SidebarPage } from "./components/ProjectSidebar";
 import { MediaLibraryView } from "./features/media/MediaLibraryView.tsx";
-import { loadRuntimeLayout, runtimeGridColumns, saveRuntimeLayout } from "./runtimeLayout";
+import { loadRuntimeLayout, runtimeGridColumns, saveRuntimeLayout, SIDEBAR_WIDTH } from "./runtimeLayout";
 import {
   shouldIncludeChatActivity,
 } from "./chatPresentation";
@@ -1495,7 +1495,7 @@ export const Dashboard: React.FC<{
   const rightDocked = rightOpen && !narrowLayout;
   const shellColumns = [
     desktopMode
-      ? [showSidebar ? (sidebarCollapsed || narrowLayout ? "56px" : "288px") : null, "minmax(0, 1fr)"].filter(Boolean).join(" ")
+      ? [showSidebar ? (sidebarCollapsed || narrowLayout ? "56px" : `${SIDEBAR_WIDTH}px`) : null, "minmax(0, 1fr)"].filter(Boolean).join(" ")
       : runtimeGridColumns({
         sidebarVisible: showSidebar,
         sidebarCollapsed: sidebarCollapsed || narrowLayout,
@@ -1506,7 +1506,7 @@ export const Dashboard: React.FC<{
   ].filter(Boolean).join(" ");
 
   const closePage = useCallback(() => setMainPage("chat"), []);
-  const sidebarWidthPx = showSidebar ? (sidebarCollapsed || narrowLayout ? 56 : desktopMode ? 288 : 252) : 0;
+  const sidebarWidthPx = showSidebar ? (sidebarCollapsed || narrowLayout ? 56 : SIDEBAR_WIDTH) : 0;
   /** Room chat + side panel share (the shell minus the left sidebar). */
   const measurePanelRoom = useCallback(() => {
     const el = shellRef.current;
