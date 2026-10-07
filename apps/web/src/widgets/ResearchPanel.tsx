@@ -7,6 +7,9 @@ type Source = { id: string; url: string; title: string; excerpt: string; inspect
 type Notebook = { session_id: string; sources: Source[]; notes: string; retention_days: number };
 type Passage = { text: string; next_offset: number | null; total_chars: number };
 
+/** Small line icons for the panel's quiet text actions. */
+const LINK_ICON = { width: 12, height: 12, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
+
 export function ResearchPanel({ apiBase, sessionId, active = true }: { apiBase: string; sessionId: string; active?: boolean }) {
   const [book, setBook] = useState<Notebook | null>(null);
   const [query, setQuery] = useState("");
@@ -77,11 +80,11 @@ export function ResearchPanel({ apiBase, sessionId, active = true }: { apiBase: 
     <p className="notebook-hint">Sources and working notes for this chat. Kept for seven days; separate from personal memory.</p>
     <input className="notebook-search" aria-label="Search notebook sources" placeholder="Search sources…" value={query} onChange={e => setQuery(e.target.value)} />
     {error && <p role="status" className="notebook-error">{error}</p>}
-    <div className="notebook-pages"><button className="es-btn es-btn-sm" onClick={() => { setDraft(book?.notes || "## Findings\n\n## Open questions\n\n## Conflicting findings\n"); setEditing(true); }}>Edit working notes</button><button className="es-btn es-btn-sm" disabled={busy} onClick={() => void action(async () => {
+    <div className="notebook-actions"><button type="button" className="notebook-link" onClick={() => { setDraft(book?.notes || "## Findings\n\n## Open questions\n\n## Conflicting findings\n"); setEditing(true); }}><svg {...LINK_ICON}><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>Edit notes</button><button type="button" className="notebook-link" disabled={busy} onClick={() => void action(async () => {
       const report = await creationRequest(apiBase, `/sessions/${encodeURIComponent(sessionId)}/research/report`);
       const url = URL.createObjectURL(new Blob([report.text], { type: "text/markdown;charset=utf-8" }));
       const a = document.createElement("a"); a.href = url; a.download = report.filename; a.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-    })}>Export report</button></div>
+    })}><svg {...LINK_ICON}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>Export report</button></div>
     {editing && <div className="notebook-editor"><label>Findings, open questions and conflicts<textarea aria-label="Working research notes" value={draft} maxLength={8000} onChange={e => setDraft(e.target.value)} /></label><div className="notebook-pages"><button className="es-btn es-btn-sm" disabled={busy} onClick={() => void action(async () => { const data = await creationRequest(apiBase, `/sessions/${encodeURIComponent(sessionId)}/research/notes`, "PUT", { text: draft }); setBook(current => current ? { ...current, notes: data.notes } : current); setEditing(false); })}>Save notes</button><button className="es-btn es-btn-sm" onClick={() => setEditing(false)}>Cancel</button></div></div>}
     {project && <details className="notebook-notes"><summary>Project · {project.name}</summary><div className="notebook-editor"><label>Project brief<textarea aria-label="Project brief" value={brief} maxLength={4000} onChange={e => setBrief(e.target.value)} /></label><div className="notebook-pages"><button className="es-btn es-btn-sm" disabled={busy} onClick={() => void action(async () => { await creationRequest(apiBase, `/sessions/${encodeURIComponent(sessionId)}/project-brief`, "PUT", { text: brief }); setNotice("Project brief saved for future chats."); })}>Save brief</button><button className="es-btn es-btn-sm" disabled={busy || editing} onClick={() => void action(async () => { const data = await creationRequest(apiBase, `/sessions/${encodeURIComponent(sessionId)}/research/save-to-project`, "POST", { project_id: project.id, source_ids: sources.filter(s => s.inspected).slice(0, 20).map(s => s.id), notes: book?.notes || "" }); setNotice(`Saved notes and ${data.source_count} read sources to ${project.name}.`); })}>Save findings to project</button></div><small>Saves working notes and up to 20 read sources from the current filter. This is separate from personal memory.</small></div></details>}
     {notice && <p role="status">{notice}</p>}
@@ -94,7 +97,7 @@ export function ResearchPanel({ apiBase, sessionId, active = true }: { apiBase: 
         <p>{source.excerpt}</p>
         <small>Expires {new Date(source.expires_at * 1000).toLocaleString()}</small>
       </button>
-      {/^https?:\/\//i.test(source.url) && <button type="button" className="es-btn es-btn-sm" onClick={() => void openExternal(source.url)}>Open original</button>}
+      {/^https?:\/\//i.test(source.url) && <button type="button" className="notebook-link" onClick={() => void openExternal(source.url)}><svg {...LINK_ICON}><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>Open original</button>}
       {selected === source.id && <div className="notebook-passage">
         {loading ? <p>Loading passage…</p> : passage && <>
           <pre>{passage.text}</pre>

@@ -127,6 +127,24 @@
 .lm-text ul, .lm-text ol { padding-left: 1.3em; }
 .lm-text table:not(.wg-table) { border-collapse: collapse; font-size: 13px; }
 .lm-text table:not(.wg-table) th, .lm-text table:not(.wg-table) td { border-bottom: 1px solid var(--es-line); padding: 6px 12px 6px 0; text-align: left; }
+/* Long answers read like a well-set document: clear headings, airy lists, quiet markers. */
+.lm-text > :first-child { margin-top: 0; }
+.lm-text > :last-child { margin-bottom: 0; }
+.lm-text h1, .lm-text h2, .lm-text h3, .lm-text h4 { color: var(--es-text-strong); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; }
+.lm-text h1 { margin: 1.2em 0 0.45em; font-size: 1.32em; }
+.lm-text h2 { margin: 1.35em 0 0.4em; font-size: 1.16em; }
+.lm-text h3 { margin: 1.15em 0 0.3em; font-size: 1.02em; }
+.lm-text h4 { margin: 1em 0 0.25em; font-size: 0.95em; color: var(--es-text); }
+.lm-text p { margin: 0.6em 0; }
+.lm-text ul, .lm-text ol { margin: 0.5em 0 0.8em; }
+.lm-text li { margin: 0.32em 0; padding-left: 0.15em; }
+.lm-text li > p { margin: 0.2em 0; }
+.lm-text li::marker { color: var(--es-faint); }
+.lm-text ol > li::marker { font-weight: 600; font-variant-numeric: tabular-nums; }
+.lm-text strong { font-weight: 650; color: var(--es-text-strong); }
+.lm-text hr { margin: 1.4em 0; border: 0; border-top: 1px solid var(--es-line); }
+.lm-text blockquote { margin: 0.8em 0; padding: 0.1em 0 0.1em 1em; border-left: 3px solid var(--es-accent); color: var(--es-dim); }
+.lm-text table:not(.wg-table) { margin: 0.8em 0; }
 .lm-text-wrap[data-tail="true"] .lm-text > :last-child::after {
   content: "";
   display: inline-block;
@@ -899,9 +917,11 @@
 .es-nav-item:hover { background: var(--es-glass); color: var(--es-text); }
 .es-nav-item.is-active { background: var(--es-glass-2); color: var(--es-text); box-shadow: var(--es-sheen); }
 .es-nav-item:focus-visible { outline: 2px solid var(--es-focus); outline-offset: -2px; }
-/* New chat with a small collapse toggle tucked beside it. */
-.es-new-chat-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.echo-root.echo-root .es-new-chat-row .es-new-chat { flex: 1 1 auto; width: auto; min-width: 0; }
+/* Search with the small collapse toggle tucked beside it. */
+.es-side-search-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.es-side-search-row .es-chat-search { flex: 1 1 auto; min-width: 0; }
+/* New chat leads the page list, styled like the pages under it. */
+.es-nav-new { color: var(--es-text); font-weight: 600; }
 .es-side-collapse {
   flex: 0 0 auto;
   display: grid;
@@ -1173,6 +1193,31 @@
 .es-page-row-text strong { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .es-page-row-text small { color: var(--es-faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .es-page-row time { flex: 0 0 auto; color: var(--es-faint); font-size: 11px; }
+/* Rows: a leading tile, title and one-line detail, then meta on the right. */
+.es-row-tile { flex: 0 0 auto; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--es-glass-2); color: var(--es-dim); }
+.es-row-tile.is-html { background: rgba(47, 125, 242, 0.12); color: #2f7df2; }
+.es-row-tile.is-markdown { background: rgba(20, 149, 90, 0.12); color: #14955a; }
+.es-row-tile.is-code { background: rgba(124, 92, 230, 0.13); color: #7c5ce6; }
+.es-row-tile.is-mermaid { background: rgba(214, 120, 30, 0.13); color: #c46a12; }
+.es-row-tile.is-svg { background: rgba(214, 64, 120, 0.12); color: #c8406f; }
+.es-row-tile.is-folder { background: rgba(47, 125, 242, 0.1); color: var(--es-accent); }
+.es-row-meta { flex: 0 0 auto; display: grid; justify-items: end; gap: 3px; color: var(--es-faint); font-size: 11.5px; white-space: nowrap; }
+.es-row-meta time { font-size: 11px; }
+.es-page-row .es-page-row-text small.is-mono { font-family: var(--es-mono); font-size: 11px; }
+/* Library toolbar: search and type chips in one row. */
+.es-page-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 16px; }
+.es-page-search { flex: 1 1 220px; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border: 1px solid var(--es-line-2); border-radius: 10px; background: var(--es-surface-1); color: var(--es-faint); }
+.es-page-search:focus-within { border-color: var(--es-line-3); color: var(--es-dim); }
+.es-page-search input { flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--es-text); font: 500 13px var(--es-font); }
+.es-page-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.es-page-chips button { height: 30px; padding: 0 12px; border: 1px solid var(--es-line-2); border-radius: 999px; background: transparent; color: var(--es-dim); font: 550 12px var(--es-font); cursor: pointer; }
+.es-page-chips button small { margin-left: 3px; color: var(--es-faint); font: 600 10.5px var(--es-mono); }
+.es-page-chips button:hover { color: var(--es-text); background: var(--es-glass); }
+.es-page-chips button[aria-pressed="true"] { border-color: var(--es-accent); background: var(--es-accent-soft, var(--es-glass-2)); color: var(--es-text); }
+.es-page-chips button:focus-visible { outline: 2px solid var(--es-focus); outline-offset: 2px; }
+.es-page-group { margin: 0 0 18px; }
+.es-page-group h2 { margin: 0 0 6px 12px; color: var(--es-faint); font: 600 11px/1.3 var(--es-font); letter-spacing: 0.06em; text-transform: uppercase; }
+.es-art-row .es-page-row-text small { white-space: nowrap; }
 .es-page-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
 .es-show-more { display: inline-flex; align-items: center; gap: 6px; margin: 10px 0 0 4px; padding: 6px 10px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--es-dim); font: 500 12.5px var(--es-font); cursor: pointer; transition: color var(--es-dur) var(--es-ease), background var(--es-dur) var(--es-ease), border-color var(--es-dur) var(--es-ease); }
 .es-show-more:hover { color: var(--es-text); background: var(--es-glass); border-color: var(--es-line); }
@@ -1195,3 +1240,7 @@
 
 /* While an agent is answering, keep its reply clear of the Stop/timer pill. */
 .echo-root.echo-root .chat-scroll[data-live="true"] { padding-bottom: 64px; }
+.es-page-toolbar.is-end { justify-content: flex-end; }
+.es-row-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding-right: 6px; }
+.es-page-row.is-off .es-page-row-text { opacity: 0.6; }
+.es-routines .st-err { margin: 0 0 10px; }

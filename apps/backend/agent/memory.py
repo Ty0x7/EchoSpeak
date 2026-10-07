@@ -64,6 +64,9 @@ def _synchronized_records(*, refresh: bool = True):
 class AgentMemory:
     """Manages conversation memory using FAISS vector store."""
 
+    # Pinned memories that reach the prompt even when they don't match the request.
+    PINNED_ALWAYS = 8
+
     MEMORY_TYPES = {
         "conversation",
         "preference",
@@ -1723,6 +1726,9 @@ class AgentMemory:
             if not content:
                 continue
             memory_type = str(record.get("memory_type") or metadata.get("type") or "note").strip().lower()
+            if memory_type == "conversation":
+                # Raw transcripts are not facts; past chats are reached through chat search.
+                continue
             pinned = metadata.get("pinned") is True
             content_tokens = set(re.findall(r"[a-z0-9]{2,}", content.casefold()))
             overlap = len(query_tokens & content_tokens) / max(1, len(query_tokens)) if query_tokens else 0.0
@@ -1756,7 +1762,13 @@ class AgentMemory:
         rows.sort(key=lambda item: (item[0], -item[1], item[2]))
         projection: List[Dict[str, Any]] = []
         used = 0
-        for _priority, _relevance, _memory_id, item in rows:
+        pinned_kept = 0
+        for priority, relevance, _memory_id, item in rows:
+            # Pinned facts ride along on every turn; past a handful, only the relevant ones do.
+            if item.get("pinned") and (priority == 0 or relevance <= 0.25):
+                if pinned_kept >= getattr(self, "PINNED_ALWAYS", 8):
+                    continue
+                pinned_kept += 1
             size = len(str(item.get("content") or ""))
             if projection and used + size > max(256, int(max_chars)):
                 continue

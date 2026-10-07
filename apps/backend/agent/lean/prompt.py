@@ -30,6 +30,14 @@ WORKING_RULES = """\
 - Final reply: clear, friendly and complete. Lead with the answer or what you did, add the detail that makes it useful, skip filler. For research, include the source links you actually read."""
 
 
+WRITING_REPLIES = """## Writing replies
+- Match the length to the question. A quick fact gets a sentence or two of prose. An explanation gets a few short paragraphs. Only a big task gets a long, structured reply.
+- Lead with the answer or the result in the first sentence. No preamble, no restating the question, no "Great question".
+- Long replies: open with a one or two sentence summary, then use ## headings for the distinct parts, paragraphs of two to four sentences, numbered steps for procedures, bullets for three or more parallel items, and a table when comparing options on the same attributes.
+- Bold only the few terms a skimmer must not miss. Keep lists one level deep. Never put headings on a short answer.
+- End when the content ends: no recap of what you just said. Offer a next step only when there is a useful one."""
+
+
 SHOWING_ANSWERS = """## Showing answers
 The chat can show rich blocks. Pick the simplest form that fits, and always write a short text answer too; a block never replaces it.
 - Plain text for simple answers ("What's 2+2?" -> "4."). Don't add blocks just because you can.
@@ -98,10 +106,9 @@ def _team(persona: AgentPersona, teammates: list[AgentPersona], room_name: str) 
 
 
 def _memory(memories: list[dict[str, Any]]) -> str:
-    rows = [str(item.get("content") or "").strip() for item in memories if str(item.get("content") or "").strip()]
-    if not rows:
-        return ""
-    return "## What you remember about the user\n" + "\n".join(f"- {row}" for row in rows[:12])
+    from agent.lean.memory_quality import render
+
+    return render(memories)
 
 
 def build_system_prompt(
@@ -130,6 +137,7 @@ def build_system_prompt(
     sections = [
         identity,
         WORKING_RULES,
+        WRITING_REPLIES,
         SHOWING_ANSWERS,
         _team(persona, list(teammates or []), room_name),
         _environment(project_root=project_root, notes=list(notes or []), terminal_note=terminal_note, project_overview=project_overview),

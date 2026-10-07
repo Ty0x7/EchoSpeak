@@ -103,7 +103,7 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
   return (
     <PageShell
       title="Learning"
-      lead="What your agents learned from their own checked work. Lessons are advice they read before similar tasks: they never change permissions, approvals or tools."
+      lead="Lessons your agents took from their own checked work. Advice only: never permissions, approvals or tools."
       action={<button type="button" className="es-btn" disabled={!data?.status.enabled || !data?.status.reflections_pending}
         title="Review finished tasks now instead of waiting for a quiet moment"
         onClick={() => void act(() => api.reflectNow(), "Reviewing finished tasks in the background. Refresh in a minute.")}>Review now</button>}
@@ -118,19 +118,26 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
               : "Learning is off. Agents don't record new experience or read lessons. Turn it on in Settings › General."}
           </div>
         ) : null}
-        <p className="es-learn-summary" aria-live="polite">
-          <span><strong>{data.status.episodes}</strong> {data.status.episodes === 1 ? "task" : "tasks"} graded</span>
-          <span><strong>{data.status.lessons.established || 0}</strong> proven {(data.status.lessons.established || 0) === 1 ? "lesson" : "lessons"}</span>
-          <span><strong>{data.status.lessons.probation || 0}</strong> unproven</span>
-          <span><strong>{data.status.reflections_today}</strong> of {data.status.reflection_daily_cap} reviews today</span>
-          {data.status.reflections_pending ? <span>{plural(data.status.reflections_pending, "task")} waiting to be reviewed</span> : null}
-        </p>
+        <div className="es-learn-stats" aria-live="polite">
+          <Stat value={data.status.episodes} label={data.status.episodes === 1 ? "task graded" : "tasks graded"} />
+          <Stat value={data.status.lessons.established || 0} label="proven lessons" tone="ok" />
+          <Stat value={data.status.lessons.probation || 0} label="unproven" />
+          <Stat value={pending.length} label="waiting for you" tone={pending.length ? "warn" : undefined} />
+          <Stat value={`${data.status.reflections_today}/${data.status.reflection_daily_cap}`} label="reviews today"
+            fill={data.status.reflection_daily_cap ? data.status.reflections_today / data.status.reflection_daily_cap : 0} />
+        </div>
+        {data.episodes.length ? (
+          <div className="es-learn-charts">
+            <OutcomeChart episodes={data.episodes} />
+            <LadderChart episodes={data.episodes} />
+          </div>
+        ) : null}
         {notice ? <p className="es-learn-notice" role="status">{notice}</p> : null}
 
         {pending.length ? (
           <section className="es-learn-section" aria-labelledby="learn-review">
             <h2 id="learn-review">Waiting for your review</h2>
-            <p className="es-learn-lead">Learned from work that read outside content, changed tests or EchoSpeak's own files, or that is about sending things for you. No agent reads these until you approve them.</p>
+            <p className="es-learn-lead">No agent reads these until you approve them.</p>
             <div className="es-learn-list">
               {pending.map((lesson) => (
                 <LessonRow key={lesson.id} lesson={lesson} agentName={names.get(lesson.agent_id) || lesson.agent_id}
@@ -143,9 +150,8 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
 
         <section className="es-learn-section" aria-labelledby="learn-agents">
           <h2 id="learn-agents">Agents</h2>
-          <p className="es-learn-lead">Track records come from graded work, not from what an agent says about itself. Group chats use them to pick who does what.</p>
-          <div className="es-page-grid">
-            {data.profiles.map((profile) => <ProfileCard key={profile.agent_id} profile={profile} onPause={(paused) => void act(() => api.pauseLearning(profile.agent_id, paused))} />)}
+          <div className="es-page-list">
+            {data.profiles.map((profile) => <AgentRow key={profile.agent_id} profile={profile} onPause={(paused) => void act(() => api.pauseLearning(profile.agent_id, paused))} />)}
           </div>
         </section>
 
@@ -187,7 +193,6 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
 
         <section className="es-learn-section" aria-labelledby="learn-episodes">
           <h2 id="learn-episodes">Recent tasks</h2>
-          <p className="es-learn-lead">How sure EchoSpeak is that each task worked: {LEVEL_LABEL.join(" → ")}.</p>
           {data.episodes.length === 0 ? (
             <div className="es-sec-empty">No graded tasks yet.</div>
           ) : (
@@ -202,10 +207,9 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
 
         <section className="es-learn-section" aria-labelledby="learn-reliability">
           <h2 id="learn-reliability">Reliability</h2>
-          <p className="es-learn-lead">How tools and search providers have been doing lately. A tool that keeps failing gets a note in the agent's instructions; a search provider failing right now is tried after the ones that work.</p>
           <div className="es-learn-tables">
-            <ReliabilityTable title="Tools" rows={data.reliability.tool || []} />
-            <ReliabilityTable title="Search providers" rows={data.reliability.search_provider || []} />
+            <ReliabilityBars title="Tools" rows={data.reliability.tool || []} />
+            <ReliabilityBars title="Search providers" rows={data.reliability.search_provider || []} />
           </div>
         </section>
       </> : null}
@@ -213,31 +217,106 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
   );
 }
 
-function ProfileCard({ profile, onPause }: { profile: LearningProfile; onPause(paused: boolean): void }) {
-  const kinds = Object.entries(profile.kinds).filter(([, row]) => row.decided > 0).sort((a, b) => b[1].decided - a[1].decided).slice(0, 4);
+/** One big number with a label; `fill` (0–1) draws a thin meter under it. */
+function Stat({ value, label, tone, fill }: { value: number | string; label: string; tone?: "ok" | "warn"; fill?: number }) {
   return (
-    <div className="es-page-card es-learn-card">
-      <div className="es-learn-card-head">
-        <strong>{profile.name}</strong>
-        <button type="button" className="es-btn es-btn-sm es-btn-quiet" aria-pressed={!profile.paused}
-          title={profile.paused ? "Let this agent learn and read lessons again" : "Stop this agent learning or reading lessons"}
-          onClick={() => onPause(!profile.paused)}>{profile.paused ? "Paused" : "Learning"}</button>
+    <div className={`es-learn-stat${tone ? ` is-${tone}` : ""}`}>
+      <strong>{value}</strong>
+      <span>{label}</span>
+      {fill !== undefined ? <i className="es-learn-meter" aria-hidden><b style={{ width: `${Math.round(Math.min(1, fill) * 100)}%` }} /></i> : null}
+    </div>
+  );
+}
+
+type Bucket = "worked" | "answered" | "failed";
+const BUCKET_LABEL: Record<Bucket, string> = { worked: "Worked", answered: "Answered", failed: "Failed" };
+const bucketOf = (ep: LearningEpisode): Bucket => ep.failed || ep.outcome === "error" || ep.feedback < 0 ? "failed" : ep.verified_success || ep.feedback > 0 ? "worked" : "answered";
+
+/** Graded tasks per day for the last two weeks, stacked by how they went. */
+function OutcomeChart({ episodes }: { episodes: LearningEpisode[] }) {
+  const days = 14;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const start = today.getTime() / 1000 - (days - 1) * 86400;
+  const cols = Array.from({ length: days }, (_, i) => ({ at: start + i * 86400, worked: 0, answered: 0, failed: 0 }));
+  for (const ep of episodes) {
+    const i = Math.floor((ep.created_at - start) / 86400);
+    if (i >= 0 && i < days) cols[i][bucketOf(ep)] += 1;
+  }
+  const peak = Math.max(1, ...cols.map((c) => c.worked + c.answered + c.failed));
+  const totals = { worked: 0, answered: 0, failed: 0 };
+  for (const c of cols) { totals.worked += c.worked; totals.answered += c.answered; totals.failed += c.failed; }
+  return (
+    <figure className="es-learn-chart">
+      <figcaption>
+        <strong>Tasks, last 14 days</strong>
+        <span className="es-learn-legend">
+          {(Object.keys(BUCKET_LABEL) as Bucket[]).map((b) => <span key={b}><i className={`is-${b}`} />{BUCKET_LABEL[b]} {totals[b]}</span>)}
+        </span>
+      </figcaption>
+      <div className="es-learn-cols" role="img" aria-label={`Tasks in the last 14 days: ${totals.worked} worked, ${totals.answered} answered, ${totals.failed} failed`}>
+        {cols.map((c) => {
+          const total = c.worked + c.answered + c.failed;
+          const day = new Date(c.at * 1000).toLocaleDateString([], { month: "short", day: "numeric" });
+          return (
+            <div key={c.at} className="es-learn-col" title={total ? `${day}: ${c.worked} worked, ${c.answered} answered, ${c.failed} failed` : `${day}: no tasks`}>
+              <div className="es-learn-stack" style={{ height: `${(total / peak) * 100}%` }}>
+                {(["failed", "answered", "worked"] as Bucket[]).map((b) => c[b] ? <i key={b} className={`is-${b}`} style={{ flexGrow: c[b] }} /> : null)}
+              </div>
+            </div>
+          );
+        })}
       </div>
-      <small>{profile.title}</small>
-      {kinds.length ? (
-        <ul className="es-learn-kinds">
-          {kinds.map(([kind, row]) => (
-            <li key={kind}>
-              <span>{sentenceCase(kindLabel(kind))}</span>
-              <span className="es-learn-bar" aria-hidden><i style={{ width: `${Math.round(row.rate * 100)}%` }} /></span>
-              <span>{row.wins}/{row.decided}</span>
-            </li>
-          ))}
-        </ul>
-      ) : <span>Not enough graded work yet.</span>}
-      {profile.strengths.length ? <span>Good at {profile.strengths.map(kindLabel).join(", ")}</span> : null}
-      {profile.weaknesses.length ? <span>Struggles with {profile.weaknesses.map(kindLabel).join(", ")}</span> : null}
-      <small>{profile.lessons_proven} proven · {profile.lessons_unproven} unproven lessons{profile.false_success ? ` · ${profile.false_success} claimed done when it wasn't` : ""}</small>
+      <div className="es-learn-axis" aria-hidden>
+        <span>{new Date(start * 1000).toLocaleDateString([], { month: "short", day: "numeric" })}</span>
+        <span>Today</span>
+      </div>
+    </figure>
+  );
+}
+
+/** How sure EchoSpeak is that tasks worked: one bar per rung of the ladder. */
+function LadderChart({ episodes }: { episodes: LearningEpisode[] }) {
+  const counts = LEVEL_LABEL.map(() => 0);
+  for (const ep of episodes) counts[ep.feedback > 0 ? 4 : Math.max(0, Math.min(3, ep.level))] += 1;
+  const peak = Math.max(1, ...counts);
+  return (
+    <figure className="es-learn-chart">
+      <figcaption><strong>How sure it worked</strong><span className="es-learn-legend">{episodes.length} recent tasks</span></figcaption>
+      <ul className="es-learn-hbars">
+        {LEVEL_LABEL.map((label, i) => (
+          <li key={label} title={`${label}: ${counts[i]}`}>
+            <span>{label}</span>
+            <span className="es-learn-hbar" aria-hidden><i style={{ width: `${(counts[i] / peak) * 100}%`, opacity: 0.45 + i * 0.14 }} /></span>
+            <span>{counts[i]}</span>
+          </li>
+        ))}
+      </ul>
+    </figure>
+  );
+}
+
+function AgentRow({ profile, onPause }: { profile: LearningProfile; onPause(paused: boolean): void }) {
+  const kinds = Object.entries(profile.kinds).filter(([, row]) => row.decided > 0).sort((a, b) => b[1].decided - a[1].decided).slice(0, 4);
+  const wins = kinds.reduce((n, [, row]) => n + row.wins, 0);
+  const decided = kinds.reduce((n, [, row]) => n + row.decided, 0);
+  return (
+    <div className="es-page-row es-learn-agent">
+      <span className="es-page-row-text">
+        <strong>{profile.name}</strong>
+        <small>{profile.title}{profile.false_success ? ` · claimed done ${plural(profile.false_success, "time")} when it wasn't` : ""}</small>
+      </span>
+      <span className="es-learn-agent-rate" title={decided ? `${wins} of ${decided} checked tasks worked` : "No checked tasks yet"}>
+        <span className="es-learn-bar" aria-hidden><i style={{ width: `${decided ? Math.round((wins / decided) * 100) : 0}%` }} /></span>
+        <small>{decided ? `${Math.round((wins / decided) * 100)}%` : "–"}</small>
+      </span>
+      <span className="es-learn-kind-chips">
+        {kinds.map(([kind, row]) => <span key={kind} title={`${sentenceCase(kindLabel(kind))}: ${row.wins} of ${row.decided} worked`}>{sentenceCase(kindLabel(kind))} <b>{row.wins}/{row.decided}</b></span>)}
+      </span>
+      <small className="es-learn-agent-lessons">{profile.lessons_proven} proven · {profile.lessons_unproven} unproven</small>
+      <button type="button" className="es-btn es-btn-sm es-btn-quiet" aria-pressed={!profile.paused}
+        title={profile.paused ? "Let this agent learn and read lessons again" : "Stop this agent learning or reading lessons"}
+        onClick={() => onPause(!profile.paused)}>{profile.paused ? "Paused" : "Learning"}</button>
     </div>
   );
 }
@@ -388,29 +467,29 @@ function EpisodeRow({ episode }: { episode: LearningEpisode }) {
   );
 }
 
-function ReliabilityTable({ title, rows }: { title: string; rows: ReliabilityRow[] }) {
-  const sorted = rows.slice().sort((a, b) => b.recent_failed / Math.max(1, b.recent_ok + b.recent_failed) - a.recent_failed / Math.max(1, a.recent_ok + a.recent_failed));
+function ReliabilityBars({ title, rows }: { title: string; rows: ReliabilityRow[] }) {
+  const sorted = rows.slice().sort((a, b) => (b.recent_ok + b.recent_failed) - (a.recent_ok + a.recent_failed));
   return (
-    <div className="es-learn-table">
-      <h3>{title}</h3>
-      {sorted.length === 0 ? <small>Nothing recorded yet.</small> : (
-        <table>
-          <thead><tr><th scope="col">Name</th><th scope="col">Lately</th><th scope="col">All time</th></tr></thead>
-          <tbody>
-            {sorted.slice(0, 12).map((row) => {
-              const recent = row.recent_ok + row.recent_failed;
-              const failing = recent >= 3 && row.recent_failed / recent >= 0.6;
-              return (
-                <tr key={row.name} className={failing ? "is-failing" : undefined}>
-                  <td>{sentenceCase(row.name.replace(/_/g, " "))}</td>
-                  <td>{row.recent_ok} of {recent} worked{failing ? " · failing" : ""}</td>
-                  <td>{row.ok} ok · {row.failed} failed</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+    <figure className="es-learn-chart">
+      <figcaption><strong>{title}</strong><span className="es-learn-legend"><span><i className="is-worked" />Worked</span><span><i className="is-failed" />Failed</span></span></figcaption>
+      {sorted.length === 0 ? <small className="es-learn-none">Nothing recorded yet.</small> : (
+        <ul className="es-learn-hbars is-split">
+          {sorted.slice(0, 10).map((row) => {
+            const recent = row.recent_ok + row.recent_failed;
+            const failing = recent >= 3 && row.recent_failed / recent >= 0.6;
+            return (
+              <li key={row.name} className={failing ? "is-failing" : undefined} title={`Lately ${row.recent_ok} of ${recent} worked · all time ${row.ok} ok, ${row.failed} failed`}>
+                <span>{sentenceCase(row.name.replace(/_/g, " "))}</span>
+                <span className="es-learn-hbar" aria-hidden>
+                  <i className="is-worked" style={{ flexGrow: row.recent_ok }} />
+                  <i className="is-failed" style={{ flexGrow: row.recent_failed }} />
+                </span>
+                <span>{recent ? `${row.recent_ok}/${recent}` : "–"}</span>
+              </li>
+            );
+          })}
+        </ul>
       )}
-    </div>
+    </figure>
   );
 }

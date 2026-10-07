@@ -1598,6 +1598,15 @@ export const Dashboard: React.FC<{
     setThreads((prev) => (prev.some((t) => t.id === room.thread_id) ? prev : [{ id: room.thread_id, name: room.name, at: Date.now() }, ...prev]));
     switchThread(room.thread_id);
   };
+  /** Removes a project; its chats stay and become ordinary chats. */
+  const deleteProject = async (id: string) => {
+    const response = await fetch(`${apiBase}/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!response.ok) return;
+    setThreads(items => items.map(item => item.projectId === id ? { ...item, projectId: "" } : item));
+    if (activeProjectId === id) { setActiveProjectId(""); await refreshThreadState(activeThreadId); }
+    await refreshProjects();
+  };
+
   const openArtifactFromPage = (item: ArtifactSummary) => {
     setMainPage("chat");
     if (item.session_id && item.session_id !== activeThreadId) switchThread(item.session_id);
@@ -1729,13 +1738,7 @@ export const Dashboard: React.FC<{
           onSearchChats={searchChats}
           onRenameSession={(id, title) => void renameThread(id, title)}
           onDeleteSession={(id) => void deleteThread(id)}
-          onDeleteProject={async (id) => {
-            const response = await fetch(`${apiBase}/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
-            if (!response.ok) return;
-            setThreads(items => items.map(item => item.projectId === id ? { ...item, projectId: "" } : item));
-            if (activeProjectId === id) { setActiveProjectId(""); await refreshThreadState(activeThreadId); }
-            await refreshProjects();
-          }}
+          onDeleteProject={(id) => void deleteProject(id)}
           onSettings={() => {
             setLeftTab("settings");
             if (desktopMode && !desktopSettingsWindow) {
@@ -1821,6 +1824,11 @@ export const Dashboard: React.FC<{
                   return acc;
                 }, {})}
                 onAdd={() => void attachFolder()}
+                onNewChat={(project) => {
+                  setMainPage("chat");
+                  void createNewThread(project.id);
+                }}
+                onDelete={(project) => void deleteProject(project.id)}
                 onOpen={(project) => {
                   setMainPage("chat");
                   const recent = threads.find((t) => t.projectId === project.id);

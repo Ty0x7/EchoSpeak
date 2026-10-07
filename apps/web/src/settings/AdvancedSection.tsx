@@ -214,6 +214,7 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
     const words = query.trim().toLowerCase();
     return (items || []).filter((m) => (!filter || m.memory_type === filter) && (!words || m.text.toLowerCase().includes(words)));
   }, [items, filter, query]);
+  const transcripts = useMemo(() => (items || []).filter((m) => m.memory_type === "conversation"), [items]);
 
   const upload = async (file: File | undefined) => {
     if (!file) return;
@@ -285,6 +286,14 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
         <Row label={<Status tone={doctor ? (doctor.ok ? "ok" : "warn") : "idle"}>{doctor ? (doctor.ok ? "Healthy" : "Needs review") : "Checking…"}</Status>}
           help={items ? `${items.length} memories · ${items.filter((m) => m.pinned).length} pinned${doctor?.duplicate_groups?.length ? ` · ${doctor.duplicate_groups.length} duplicate group(s)` : ""}${doctor?.warnings?.length ? ` · ${doctor.warnings[0]}` : ""}` : undefined}>
           <button type="button" className="es-btn es-btn-sm" disabled={!items?.length} onClick={() => void act(() => post(`${apiBase}/memory/compact?${scope(sessionId, projectId)}`, {}))}>Merge duplicates</button>
+          {/* Older versions copied every chat turn into memory; those transcripts aren't facts. */}
+          {transcripts.length ? (
+            <button type="button" className="es-btn es-btn-sm" title="Chats stay in your history and chat search; this only removes the copies kept as memories."
+              onClick={() => window.confirm(`Remove ${transcripts.length} saved chat transcript${transcripts.length === 1 ? "" : "s"} from memory? Your chats themselves are kept.`)
+                && void act(() => post(`${apiBase}/memory/delete`, { ids: transcripts.map((m) => m.id), thread_id: sessionId, project_id: projectId }))}>
+              Remove {transcripts.length} chat transcript{transcripts.length === 1 ? "" : "s"}
+            </button>
+          ) : null}
           <button type="button" className="es-btn es-btn-sm es-btn-quiet" disabled={!items?.length}
             onClick={() => window.confirm("Delete every saved memory?") && void act(() => post(`${apiBase}/memory/clear?${scope(sessionId, projectId)}`, {}))}>
             Clear all

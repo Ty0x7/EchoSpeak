@@ -68,7 +68,7 @@
 .echo-root .lm-approval-text strong { font-size: 13px; font-weight: 500; }
 .echo-root.echo-root .lm-approval-args { border-radius: 6px; max-height: 150px; padding: 11px; background: var(--es-surface-2); word-break: normal; overflow-wrap: anywhere; }
 .echo-root .lm-approval-actions { flex-wrap: wrap; }
-.echo-root .ap-context-bar { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--es-border); color: var(--es-text-3); font-size: 10px; background: var(--es-surface-2); }
+.echo-root .ap-context-bar { font-size: 12px; }
 .echo-root .ap-head { background: var(--es-surface-2); padding: 16px; }
 .echo-root .ap-tools { background: var(--es-surface-2); gap: 5px; padding: 10px 12px; }
 .echo-root .ap-seg { border-radius: 7px; overflow: hidden; background: var(--es-surface-3); }

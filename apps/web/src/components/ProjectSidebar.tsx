@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   fitLayout,
   loadStackLayout,
@@ -124,7 +124,6 @@ function Snippet({ text }: { text: string }) {
 
 const surface = "var(--es-surface-1)";
 const border = "rgba(var(--es-edge-rgb), calc(0.1 * var(--es-edge-k)))";
-const muted = "rgba(var(--es-ink-rgb), 0.48)";
 
 /** Minimal monochrome icons — readable in the 50px collapsed rail. */
 function Icon({
@@ -248,8 +247,6 @@ export function ProjectSidebar(props: SidebarProps) {
     props.onSettings();
   };
   const updateNotice = updateInfo?.configured && updateInfo.available ? <button type="button" className="sidebar-update-notice" onClick={openUpdate} title={`EchoSpeak ${updateInfo.version} is available`} aria-label={`Update to EchoSpeak ${updateInfo.version}`}><span aria-hidden>↑</span>{!props.collapsed ? <span><strong>Update available</strong><small>EchoSpeak {updateInfo.version}</small></span> : null}</button> : null;
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [projectsOpen, setProjectsOpen] = useState(true);
   const [layout, setLayout] = useState<StackLayout>(() => loadStackLayout());
   const [dragging, setDragging] = useState(false);
   const splitRef = useRef<HTMLDivElement | null>(null);
@@ -297,9 +294,7 @@ export function ProjectSidebar(props: SidebarProps) {
   const hiddenActive = NAV_ITEMS.slice(NAV_PRIMARY).some((item) => item.id === props.page);
   const moreOpen = navMore || hiddenActive;
   const shownNav = moreOpen ? NAV_ITEMS : NAV_ITEMS.slice(0, NAV_PRIMARY);
-  const projects = useMemo(() => props.projects.filter((project) => !project.archived), [props.projects]);
   const sessions = props.sessions;
-  const looseSessions = sessions.filter((session) => !session.projectId);
 
   const railButton = (active = false): React.CSSProperties => ({
     // Do not force width:100% here — row items share space with fixed action buttons.
@@ -411,7 +406,7 @@ export function ProjectSidebar(props: SidebarProps) {
   // space by flex-grow, so the browser sizes them and changes animate; only a
   // drag needs to measure.
   const SECTION_HEAD_PX = 30;
-  const present: SectionKey[] = props.agents ? ["agents", "chats", "projects"] : ["chats", "projects"];
+  const present: SectionKey[] = props.agents ? ["agents", "chats"] : ["chats"];
   const listArea = Math.max(0, splitHeight - SECTION_HEAD_PX * present.length - 9 * (present.length - 1));
   const effective = fitLayout(layout, props.agents?.count || 0, listArea);
   const fractions = sectionFractions(effective, present);
@@ -472,7 +467,7 @@ export function ProjectSidebar(props: SidebarProps) {
     if (key === "chats") {
       return (
         <section {...sectionProps}>
-          {sectionHead("chats", looseSessions.length, (
+          {sectionHead("chats", sessions.length, (
             <>
               <button className="es-sec-action" type="button" onClick={() => { props.onPage?.("chat"); props.onNewSession(); }} title="Start new chat" aria-label="Start new chat">
                 <Icon name="plus" size={14} />
@@ -483,8 +478,8 @@ export function ProjectSidebar(props: SidebarProps) {
           <div className="es-sec-list" id="es-sec-chats" hidden={!layout.open.chats}>
             {props.hydrating ? (
               <div role="status" className="es-sec-empty">Restoring chats…</div>
-            ) : looseSessions.length ? (
-              looseSessions.map((session) => sessionRow(session))
+            ) : sessions.length ? (
+              sessions.map((session) => sessionRow(session))
             ) : (
               <div className="es-sec-empty">No chats yet. Start one with +.</div>
             )}
@@ -492,114 +487,9 @@ export function ProjectSidebar(props: SidebarProps) {
         </section>
       );
     }
-    return (
-      <section {...sectionProps}>
-        {sectionHead("projects", projects.length, (
-          <button className="es-sec-action" type="button" onClick={props.onAddFolder} title="Add Project folder" aria-label="Add Project folder">
-            <Icon name="plus" size={14} />
-          </button>
-        ))}
-        <div className="es-sec-list" id="es-sec-projects" hidden={!layout.open.projects}>
-          {props.hydrating ? (
-            <div role="status" className="es-sec-empty">Restoring projects…</div>
-          ) : projects.length ? (
-            projects.map((project) => projectRow(project))
-          ) : (
-            <button className="echo-footer-action es-sec-cta" type="button" onClick={props.onAddFolder}>
-              <span>Add your first Project</span>
-              <small>Attach a local folder</small>
-            </button>
-          )}
-        </div>
-      </section>
-    );
+    return null;
   };
 
-  const projectRow = (project: Project) => {
-    const childSessions = sessions.filter((session) => session.projectId === project.id);
-    const open = expanded[project.id] ?? props.activeProjectId === project.id;
-    const isActive = props.activeProjectId === project.id;
-    return (
-      <div key={project.id} style={{ minWidth: 0, maxWidth: "100%" }}>
-        <div
-          className="echo-side-row"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            width: "100%",
-            maxWidth: "100%",
-            minWidth: 0,
-            boxSizing: "border-box",
-          }}
-        >
-          <button
-            className={`echo-side-button ${isActive ? "is-active" : ""}`}
-            type="button"
-            style={{
-              ...railButton(isActive),
-              flex: "1 1 auto",
-              minWidth: 0,
-              width: "auto",
-            }}
-            onClick={() => {
-              setExpanded((value) => ({ ...value, [project.id]: !open }));
-              // A Project row is navigation, never Session creation.
-              // Select an existing child only; the adjacent + owns creation.
-              if (!isActive && childSessions[0]) props.onSelectSession(childSessions[0].id);
-            }}
-            title={project.workspace_root || project.name}
-            aria-label={`Project: ${project.name}`}
-          >
-            <span style={iconSlot(isActive)}>
-              <Icon name="folder" size={iconOnly ? 16 : 15} active={isActive} />
-            </span>
-            {!iconOnly && <span style={titleEllipsis}>{project.name}</span>}
-          </button>
-          {!iconOnly && (
-            <div className="echo-row-actions" aria-label="Project actions">
-              <button type="button" title="New Session in Project" aria-label={`New Session in ${project.name}`} onClick={() => props.onNewSession(project.id)}>
-                <Icon name="plus" size={14} />
-              </button>
-              <button
-                type="button"
-                title="Delete Project"
-                aria-label={`Delete ${project.name}`}
-                onClick={() => {
-                  if (
-                    window.confirm(
-                      `Delete Project “${project.name}”? Its Sessions will become independent.`,
-                    )
-                  )
-                    props.onDeleteProject(project.id);
-                }}
-              >
-                <Icon name="trash" size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-        {/* Sessions under a project: hide in rail to keep icons clear; open sidebar to manage */}
-        {!props.hydrating && !iconOnly && open && childSessions.map((session) => sessionRow(session, true))}
-        {!iconOnly && open && !childSessions.length && (
-          <button
-            type="button"
-            className="echo-side-button"
-            onClick={() => props.onNewSession(project.id)}
-            style={{
-              ...railButton(),
-              width: "100%",
-              maxWidth: "100%",
-              boxSizing: "border-box",
-              paddingLeft: 21,
-              color: muted,
-            }}
-          >
-            + Session in Project
-          </button>
-        )}
-      </div>
-    );
-  };
 
   return (
     <aside
@@ -742,29 +632,7 @@ export function ProjectSidebar(props: SidebarProps) {
       {!iconOnly ? (
         <div className="es-side-body">
           <div className="es-side-top">
-            <div className="es-new-chat-row">
-              <button
-                className="echo-side-button es-new-chat"
-                type="button"
-                onClick={() => {
-                  props.onView("chat");
-                  props.onPage?.("chat");
-                  props.onNewSession();
-                }}
-                title="New chat"
-                aria-label="New chat"
-              >
-                <span style={iconSlot(false)}>
-                  <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
-                  </svg>
-                </span>
-                <span style={titleEllipsis}>New chat</span>
-              </button>
-              <button type="button" className="es-side-collapse" onClick={props.onToggleCollapsed} aria-label="Collapse sidebar" title="Collapse sidebar">
-                <Icon name="collapse" size={14} />
-              </button>
-            </div>
+            <div className="es-side-search-row">
             {props.onSearchChats ? (
               <label className="es-chat-search">
                 <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
@@ -783,8 +651,25 @@ export function ProjectSidebar(props: SidebarProps) {
                 />
               </label>
             ) : null}
+            <button type="button" className="es-side-collapse" onClick={props.onToggleCollapsed} aria-label="Collapse sidebar" title="Collapse sidebar">
+              <Icon name="collapse" size={14} />
+            </button>
+            </div>
             {props.onPage ? (
               <nav className="es-nav" aria-label="Pages">
+                <button
+                  type="button"
+                  className="es-nav-item es-nav-new"
+                  onClick={() => {
+                    props.onView("chat");
+                    props.onPage?.("chat");
+                    props.onNewSession();
+                  }}
+                  title="Start a new chat"
+                >
+                  <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+                  <span>New chat</span>
+                </button>
                 {shownNav.map((item) => {
                   const active = props.page === item.id;
                   const count = props.pageCounts?.[item.id];
@@ -897,8 +782,8 @@ export function ProjectSidebar(props: SidebarProps) {
             aria-label="New chat"
           >
             <span style={iconSlot(false)}>
-              <svg width={iconOnly ? 16 : 15} height={iconOnly ? 16 : 15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" />
+              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden>
+                <path d="M12 5v14M5 12h14" />
               </svg>
             </span>
             {!iconOnly && <span style={titleEllipsis}>New chat</span>}
@@ -914,130 +799,8 @@ export function ProjectSidebar(props: SidebarProps) {
           </>
         ) : null}
 
-        <section aria-label="Workspace" style={{ padding: iconOnly ? "0 1px" : 0, display: "grid", gap: 7, flex: "0 0 auto" }}>
-          <div style={{ display: "grid", gap: 2 }}>
-
-            {!iconOnly && (
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "4px 4px 2px",
-                  minWidth: 0,
-                  width: "100%",
-                  boxSizing: "border-box",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: muted,
-                    letterSpacing: ".1em",
-                    textTransform: "uppercase",
-                    minWidth: 0,
-                    flex: "1 1 auto",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  Chats
-                </span>
-                <button
-                  className="echo-side-button"
-                  type="button"
-                  onClick={() => props.onNewSession()}
-                  title="Start new chat"
-                  aria-label="Start new chat"
-                  style={{
-                    width: 26,
-                    height: 26,
-                    border: "1px solid rgba(var(--es-edge-rgb), calc(0.09 * var(--es-edge-k)))",
-                    background: "rgba(var(--es-wash-rgb), calc(0.025 * var(--es-wash-k)))",
-                    color: "rgba(var(--es-ink-rgb), 0.78)",
-                    borderRadius: 3,
-                    cursor: "pointer",
-                    display: "grid",
-                    placeItems: "center",
-                    padding: 0,
-                    flex: "0 0 auto",
-                    flexShrink: 0,
-                  }}
-                >
-                  <Icon name="plus" size={14} />
-                </button>
-
-              </div>
-            )}
-
-            {iconOnly && (
-              <button
-                className="echo-side-button"
-                type="button"
-                style={railButton()}
-                onClick={() => props.onNewSession()}
-                title="New chat"
-                aria-label="New chat"
-              >
-                <span style={iconSlot()}>
-                  <Icon name="plus" size={16} />
-                </span>
-              </button>
-            )}
-
-            {!props.hydrating && looseSessions.map((session) => sessionRow(session))}
-
-            <div className="echo-rail-divider" />
-
-            {!iconOnly && (
-              <div style={{ display: "flex", alignItems: "center", minWidth: 0 }}>
-                <button
-                  className="echo-side-button"
-                  type="button"
-                  onClick={() => setProjectsOpen((value) => !value)}
-                  aria-expanded={projectsOpen}
-                  style={{ ...railButton(), flex: "1 1 auto", minWidth: 0, minHeight: 28, padding: "0 4px", color: muted }}
-                >
-                  <span style={{ flex: 1, fontSize: 10, letterSpacing: ".1em", textTransform: "uppercase" }}>Projects</span>
-                  <span style={{ minWidth: 18, height: 18, padding: "0 5px", display: "inline-grid", placeItems: "center", borderRadius: 9, background: "rgba(var(--es-wash-rgb), calc(0.045 * var(--es-wash-k)))", color: "rgba(var(--es-ink-rgb), 0.45)", fontSize: 9 }}>{projects.length}</span>
-                  <span style={{ display: "grid", placeItems: "center", transform: projectsOpen ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform .15s ease" }}><Icon name="chevron" size={13} /></span>
-                </button>
-                <button
-                  className="echo-side-button"
-                  type="button"
-                  onClick={props.onAddFolder}
-                  title="Add Project folder"
-                  aria-label="Add Project folder"
-                  style={{ ...railButton(), width: "auto", minHeight: 28, padding: "0 5px", justifyContent: "center", flex: "0 0 auto", fontSize: 10.5 }}
-                >
-                  <Icon name="plus" size={14} />
-                  <span>New Project</span>
-                </button>
-              </div>
-            )}
-
-            {!iconOnly && projectsOpen && !projects.length && !props.hydrating && (
-              <button
-                className="echo-footer-action"
-                type="button"
-                onClick={props.onAddFolder}
-                style={{ margin: "2px 3px 4px", minHeight: 46, borderRadius: 3, padding: "8px 10px", cursor: "pointer", textAlign: "left", fontFamily: "'Inter', 'Segoe UI', sans-serif" }}
-              >
-                <span style={{ display: "block", fontSize: 10.5, color: "rgba(var(--es-ink-rgb), 0.72)" }}>Add your first Project</span>
-                <span style={{ display: "block", marginTop: 4, fontSize: 9, color: "rgba(var(--es-ink-rgb), 0.36)" }}>Attach a local folder</span>
-              </button>
-            )}
-
-            {!iconOnly && props.hydrating ? (
-              <div role="status" style={{ padding: "7px 7px 5px", color: muted, fontSize: 9.5 }}>
-                Restoring Projects and Sessions…
-              </div>
-            ) : null}
-
-            {(iconOnly || projectsOpen) && projects.map((project) => projectRow(project))}
-
-          </div>
+        <section aria-label="Chats" style={{ padding: "0 1px", display: "grid", gap: 2, flex: "0 0 auto" }}>
+          {!props.hydrating && sessions.map((session) => sessionRow(session))}
         </section>
 
       </div>
@@ -1058,9 +821,6 @@ export function ProjectSidebar(props: SidebarProps) {
         </footer>
       ) : (
         <div className="echo-sidebar-edge-pad" style={{ display: "grid", gap: 4, flexShrink: 0, paddingTop: 5, borderTop: "1px solid rgba(var(--es-edge-rgb), calc(0.07 * var(--es-edge-k)))" }}>
-          <button className="echo-side-button" type="button" title="Add Project folder" aria-label="Add Project folder" onClick={props.onAddFolder} style={railButton()}>
-            <span style={iconSlot()}><Icon name="folder" size={16} /></span>
-          </button>
           {updateNotice}
           <button className="echo-side-button" type="button" title="Settings" aria-label="Settings" aria-pressed={props.settingsOpen} onClick={props.onSettings} style={railButton(Boolean(props.settingsOpen))}>
             <span style={iconSlot(Boolean(props.settingsOpen))}><Icon name="studio" size={16} active={Boolean(props.settingsOpen)} /></span>

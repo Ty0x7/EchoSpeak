@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { RoutinesGroup } from "../settings/SettingsPanel";
+import { ArtifactKindIcon, ARTIFACT_KIND_LABEL } from "../widgets/ArtifactPanel";
 import { AvatarStack } from "./Roster";
 import { ShowMore, useShowMore } from "./ShowMore";
 import type { LeanPersona, LeanRoom } from "./types";
@@ -10,11 +11,16 @@ export type ArtifactSummary = {
   id: string;
   title: string;
   kind: string;
+  language?: string;
   version: number;
   versions: number;
   session_id: string;
   agent_id?: string;
+  created_at?: number;
   updated_at: number;
+  /** A one-line glimpse of the content (empty for images). */
+  excerpt?: string;
+  lines?: number;
 };
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean };
@@ -128,18 +134,24 @@ export function GroupChatsPage({
   );
 }
 
+const TRASH = <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M5.5 7.5h13M9 7.5V5.7h6v1.8M7.5 7.5l.7 11h7.6l.7-11" /></svg>;
+
 export function ProjectsPage({
   projects,
   chatCounts,
   activeProjectId,
   onOpen,
   onAdd,
+  onNewChat,
+  onDelete,
 }: {
   projects: Project[];
   chatCounts: Record<string, number>;
   activeProjectId: string;
   onOpen(project: Project): void;
   onAdd(): void;
+  onNewChat(project: Project): void;
+  onDelete(project: Project): void;
 }) {
   const shown = projects.filter((p) => !p.archived);
   const more = useShowMore(shown, shown.findIndex((project) => project.id === activeProjectId));
@@ -156,14 +168,30 @@ export function ProjectsPage({
         </button>
       ) : (
         <>
-        <div className="es-page-grid">
-          {more.shown.map((project) => (
-            <button key={project.id} type="button" className={`es-page-card${project.id === activeProjectId ? " is-active" : ""}`} onClick={() => onOpen(project)}>
-              <strong>{project.name}</strong>
-              <small className="is-mono">{project.workspace_root || "No folder"}</small>
-              <span>{chatCounts[project.id] ? `${chatCounts[project.id]} chat${chatCounts[project.id] === 1 ? "" : "s"}` : "No chats yet"}</span>
-            </button>
-          ))}
+        <div className="es-page-list">
+          {more.shown.map((project) => {
+            const chats = chatCounts[project.id] || 0;
+            return (
+              <div key={project.id} className={`es-page-row${project.id === activeProjectId ? " is-active" : ""}`}>
+                <button type="button" className="es-page-row-main" onClick={() => onOpen(project)}>
+                  <span className="es-row-tile is-folder" aria-hidden>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2h8.8A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /></svg>
+                  </span>
+                  <span className="es-page-row-text">
+                    <strong>{project.name}</strong>
+                    <small className="is-mono">{project.workspace_root || "No folder"}</small>
+                  </span>
+                  <span className="es-row-meta">{chats ? `${chats} chat${chats === 1 ? "" : "s"}` : "No chats yet"}</span>
+                </button>
+                <button type="button" className="es-icon-btn" title="New chat in this project" aria-label={`New chat in ${project.name}`} onClick={() => onNewChat(project)}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+                </button>
+                <button type="button" className="es-icon-btn" title="Remove project" aria-label={`Remove ${project.name}`} onClick={() => {
+                  if (window.confirm(`Remove the project “${project.name}”? Its chats are kept, and the folder on disk is not touched.`)) onDelete(project);
+                }}>{TRASH}</button>
+              </div>
+            );
+          })}
         </div>
         {more.collapsible ? <ShowMore expanded={more.expanded} hidden={more.hidden} label="projects" onToggle={() => more.setExpanded((v) => !v)} /> : null}
         </>
@@ -172,10 +200,29 @@ export function ProjectsPage({
   );
 }
 
-const KIND_LABEL: Record<string, string> = { html: "App", svg: "SVG", mermaid: "Diagram", markdown: "Document", code: "Code" };
+/** Artifact kinds as the library shows them, in filter order. */
+const KINDS: { id: string; label: string }[] = [
+  { id: "html", label: "Apps" },
+  { id: "markdown", label: "Documents" },
+  { id: "code", label: "Code" },
+  { id: "mermaid", label: "Diagrams" },
+  { id: "svg", label: "Images" },
+];
+const KIND_ONE = ARTIFACT_KIND_LABEL;
+
+/** Today, this week, earlier: how the library groups artifacts. */
+function whenGroup(seconds: number): string {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() / 1000;
+  if (seconds >= startOfToday) return "Today";
+  if (seconds >= startOfToday - 6 * 86400) return "Previous 7 days";
+  return "Earlier";
+}
 
 export function ArtifactsPage({ apiBase, onOpen }: { apiBase: string; onOpen(item: ArtifactSummary): void }) {
   const [items, setItems] = useState<ArtifactSummary[] | null>(null);
+  const [query, setQuery] = useState("");
+  const [kind, setKind] = useState("");
   useEffect(() => {
     let live = true;
     fetch(`${apiBase}/lean/artifacts`)
@@ -186,7 +233,24 @@ export function ArtifactsPage({ apiBase, onOpen }: { apiBase: string; onOpen(ite
       live = false;
     };
   }, [apiBase]);
-  const more = useShowMore(items || []);
+  const all = (items || []).slice().sort((a, b) => b.updated_at - a.updated_at);
+  const counts = all.reduce<Record<string, number>>((acc, item) => ((acc[item.kind] = (acc[item.kind] || 0) + 1), acc), {});
+  const needle = query.trim().toLowerCase();
+  const filtered = all.filter((item) => (!kind || item.kind === kind)
+    && (!needle || `${item.title} ${item.excerpt || ""}`.toLowerCase().includes(needle)));
+  const more = useShowMore(filtered, -1, 12);
+  const remove = async (item: ArtifactSummary) => {
+    if (!window.confirm(`Delete “${item.title}” and all of its versions?`)) return;
+    const response = await fetch(`${apiBase}/lean/artifacts/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+    if (response.ok) setItems((current) => (current || []).filter((row) => row.id !== item.id));
+  };
+  const groups: { label: string; rows: ArtifactSummary[] }[] = [];
+  for (const item of more.shown) {
+    const label = whenGroup(item.updated_at);
+    const last = groups[groups.length - 1];
+    if (last && last.label === label) last.rows.push(item);
+    else groups.push({ label, rows: [item] });
+  }
   return (
     <PageShell title="Artifacts" lead="Apps, documents, diagrams and code your agents made. Open one to keep working on it.">
       {items === null ? (
@@ -198,15 +262,43 @@ export function ArtifactsPage({ apiBase, onOpen }: { apiBase: string; onOpen(ite
         </div>
       ) : (
         <>
-        <div className="es-page-grid">
-          {more.shown.map((item) => (
-            <button key={item.id} type="button" className="es-page-card" onClick={() => onOpen(item)}>
-              <span className="es-art-kind">{KIND_LABEL[item.kind] || item.kind}</span>
-              <strong>{item.title}</strong>
-              <span>{item.versions > 1 ? `v${item.version} of ${item.versions} · ` : ""}{ago(item.updated_at * 1000)}</span>
-            </button>
-          ))}
+        <div className="es-page-toolbar">
+          <label className="es-page-search">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+            <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search artifacts" aria-label="Search artifacts" />
+          </label>
+          <div className="es-page-chips" role="group" aria-label="Type">
+            <button type="button" aria-pressed={!kind} onClick={() => setKind("")}>All <small>{all.length}</small></button>
+            {KINDS.filter((k) => counts[k.id]).map((k) => (
+              <button key={k.id} type="button" aria-pressed={kind === k.id} onClick={() => setKind(kind === k.id ? "" : k.id)}>{k.label} <small>{counts[k.id]}</small></button>
+            ))}
+          </div>
         </div>
+        {filtered.length === 0 ? (
+          <div className="es-sec-empty">No artifacts match.</div>
+        ) : groups.map((group) => (
+          <section key={group.label} className="es-page-group" aria-label={group.label}>
+            <h2>{group.label}</h2>
+            <div className="es-page-list">
+              {group.rows.map((item) => (
+                <div key={item.id} className="es-page-row es-art-row">
+                  <button type="button" className="es-page-row-main" onClick={() => onOpen(item)}>
+                    <span className={`es-row-tile is-${item.kind}`} aria-hidden><ArtifactKindIcon kind={item.kind} /></span>
+                    <span className="es-page-row-text">
+                      <strong>{item.title}</strong>
+                      <small>{item.excerpt || [item.kind === "code" && item.language ? item.language.charAt(0).toUpperCase() + item.language.slice(1) : KIND_ONE[item.kind] || item.kind, item.lines ? `${item.lines} line${item.lines === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")}</small>
+                    </span>
+                    <span className="es-row-meta">
+                      <span>{KIND_ONE[item.kind] || item.kind}{item.versions > 1 ? ` · v${item.version}` : ""}</span>
+                      <time>{ago(item.updated_at * 1000)}</time>
+                    </span>
+                  </button>
+                  <button type="button" className="es-icon-btn" title="Delete artifact" aria-label={`Delete ${item.title}`} onClick={() => void remove(item)}>{TRASH}</button>
+                </div>
+              ))}
+            </div>
+          </section>
+        ))}
         {more.collapsible ? <ShowMore expanded={more.expanded} hidden={more.hidden} label="artifacts" onToggle={() => more.setExpanded((v) => !v)} /> : null}
         </>
       )}

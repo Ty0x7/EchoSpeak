@@ -1,5 +1,48 @@
 # Changes
 
+## v11.2.0 — 2026-10-07
+
+User-facing notes: [EchoSpeak 11.2.0](docs/releases/v11.2.0.md).
+
+- **Memory quality** (`agent/lean/memory_quality.py`, `runtime.py`, `memory.py`, `prompt.py`):
+  - `_remember_async` now honours `memory_auto_store_conversations` (default off). The lean loop had been
+    copying every turn ("User: … AI: … Timestamp") into durable memory regardless of that setting.
+  - `runtime_memory_projection` and `memory_search` skip `conversation` records, so old transcripts no longer
+    reach the prompt.
+  - Pinned facts that don't match the request are capped at `PINNED_ALWAYS = 8`.
+  - `memory_save` tidies the fact into one sentence and rejects facts that are too long, questions, or transient.
+    It also takes `type` (preference, profile, person, project, instruction, goal, fact).
+  - `memory_save` takes an optional `key`, passed as `semantic_key`: a new value supersedes the old one, mem0's
+    UPDATE. Without a key, a reworded duplicate (difflib ≥ 0.88 or content-word Jaccard ≥ 0.8) is not stored again.
+  - The prompt section renders pinned facts first and is capped at 12 rows and 1,600 characters. It uses compact
+    wording ("The user prefers …" → "Prefers …") and folds near-duplicates.
+  - Saved memories gains **Remove N chat transcripts**. Tests: `tests/test_memory_quality.py`.
+- **Writing replies** (`prompt.py` `WRITING_REPLIES`): length matched to the question; lead with the answer;
+  headings, steps, bullets and tables only for long replies; no recap. Chat markdown gets heading, list,
+  blockquote and rule styles (`lean.css`).
+- **Sidebar** (`ProjectSidebar.tsx`):
+  - New chat is the first page row (+ icon); collapse sits beside search.
+  - The Projects section and the rail's folders are gone; Chats lists every chat.
+- **Pages as rows** (`lean/Pages.tsx`):
+  - Projects rows have New chat and Remove.
+  - Artifacts has search, type chips with counts, Today / Previous 7 days / Earlier groups, a kind tile,
+    a one-line excerpt and Delete. The artifact summary gains `excerpt` and `lines`.
+  - Routines (`RoutinesGroup` embedded) are rows with toggle and Run; the row opens the editor.
+- **Artifact viewer** (`widgets/ArtifactPanel.tsx`):
+  - Kind tile and a meta line.
+  - Icon tools; Edit with Echo is the primary action.
+  - The version picker shows only with several versions; Restore appears only on an older version.
+  - Documents render as a centred page.
+- **Learning** (`lean/LearningPage.tsx`):
+  - Stat tiles, a 14-day stacked outcome chart and a "how sure it worked" bar chart.
+  - Agents are rows with a success bar and kind chips; reliability shows as bars instead of tables.
+  - Most explanatory text is removed.
+- **Research panel:**
+  - Edit notes, Export report and Open original are quiet text actions.
+  - The expanded side panel is positioned in the app shell (absolute), so the desktop titlebar no longer covers
+    its close buttons.
+- **Settings window:** no in-app ✕ when Settings is its own window; the titlebar close is the one.
+
 ## v11.1.2 — 2026-10-07
 
 User-facing notes: [EchoSpeak 11.1.2](docs/releases/v11.1.2.md).
