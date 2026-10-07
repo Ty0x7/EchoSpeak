@@ -1,5 +1,51 @@
 # Changes
 
+## v11.3.0 — 2026-10-07
+
+User-facing notes: [EchoSpeak 11.3.0](docs/releases/v11.3.0.md).
+
+- **Composer** (`ComposerInput.tsx`, `ComposerToolbar.tsx`, `chatPolish.css`):
+  - One card: session strip, text box, then one row of thinking / dictate / Voice / ··· on the left and
+    context + send on the right.
+  - Provider and model moved into the ··· menu, so there's no row under the input.
+- **Context meter** (`chatComponents.tsx` `ContextMeter`): the square is replaced by a ring + percentage pill.
+  A hover/focus card shows status, used, remaining, window, model and message count.
+- **Chat scroll** (`index.tsx`):
+  - `scrollChatToBottom` pins synchronously as well as on two frames, and restoring a chat's position does too.
+  - Sending, resending after a failure, and retrying force-follow to the newest message.
+  - `.chat-scroll` uses `overflow-x: clip`; code, tables and long words scroll or wrap inside themselves.
+- **Message meta:** time and tokens sit in the action row (`MessageActions` `meta`), after copy/edit/retry for
+  prompts and after copy/read/thumbs for replies. The agent header no longer shows the time.
+- **Research & activity button:** hidden until the pointer nears the chat's top-right corner (or it has keyboard
+  focus). Detected by pointer position, so nothing overlays the chat.
+- **Right panel full screen:** the absolute panel now spans the whole shell grid (`grid-column/row: 1 / -1`). As
+  an absolute grid child it had been sized by its own column.
+- **Sidebar:**
+  - 216px wide.
+  - More/Less share the page rows' 15px icon column and 10px gap.
+  - The collapsed New chat button is a 30px square, the size of the agent faces.
+- **Desktop titlebar:** no bottom rule and no label divider. The status shows only while starting or failing
+  ("Local service ready" is gone).
+- **Setup window:**
+  - No desktop titlebar; setup's own header (mini Echo, "Set up EchoSpeak", progress segments, Set up later) is
+    the drag region.
+  - Settings steps get a headline and a Recommended/Optional tag, and optional steps get "Skip for now".
+- **Settings › Agents:** `.st-agent-label > span` no longer hits the avatar (`:not(.lm-face)`), which had stacked
+  the eyes.
+- **Settings › Advanced:**
+  - Memory has an overview (counts, a kind-coloured bar), kind chips, and one row per memory with a pin star,
+    kind and delete.
+  - Connections & skills has summary tiles and lettered status tiles.
+  - The companion editor uses theme surfaces, and its preview has the voice aura and the error state.
+- **Git and GitHub** (`agent/lean/git_context.py`):
+  - A repo summary (branch, upstream, ahead/behind, changes) goes into the environment.
+  - Working rules (branch first, stage by name, push / PR / merge only when asked, no force-push or discarding
+    changes, `gh` for PRs and CI) load only for repos and git requests.
+  - Git failure hints added.
+  - More commands need approval: rebase, restore, stash drop/clear, filter-branch, gh pr merge/close,
+    gh repo delete, gh release create/delete, gh issue close/delete.
+  - Tests: `tests/test_git_context.py`.
+
 ## v11.2.0 — 2026-10-07
 
 User-facing notes: [EchoSpeak 11.2.0](docs/releases/v11.2.0.md).

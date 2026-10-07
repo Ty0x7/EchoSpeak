@@ -117,7 +117,9 @@ def docker_network() -> str:
 # In the sandbox the workspace folders are still your real files.
 _WORKSPACE_DESTRUCTIVE = re.compile(
     r"(?ix)(^|[\s;&|(])(rm\s|rmdir|unlink\s|shred\s|git\s+reset\s+--hard|git\s+clean|git\s+checkout\s+--|"
-    r"git\s+push|find\s+.*-delete|truncate\s)"
+    r"git\s+push|git\s+rebase|git\s+restore|git\s+branch\s+-D|git\s+stash\s+(?:drop|clear)|git\s+filter-branch|"
+    r"gh\s+(?:pr\s+(?:merge|close)|repo\s+delete|release\s+(?:create|delete)|issue\s+(?:close|delete))|"
+    r"find\s+.*-delete|truncate\s)"
 )
 
 
@@ -215,6 +217,10 @@ def failure_hint(code: int, text: str, where: str) -> str:
         return "Hint: Windows PowerShell 5.1 has no &&. Use ; between commands."
     if "empty commit message" in low:
         return "Hint: git commit needs the message in the command: git commit -m \"...\"."
+    from agent.lean.git_context import failure_hint as git_hint
+
+    if (hint := git_hint(text)):
+        return hint
     if any(phrase in low for phrase in ("could not resolve host", "temporary failure in name resolution",
                                         "network is unreachable", "getaddrinfo enotfound", "eai_again")):
         return "Hint: no internet for this command" + (". Run it again with network=true." if where == "docker" else ".")

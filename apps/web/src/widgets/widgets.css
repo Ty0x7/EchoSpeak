@@ -343,6 +343,8 @@
    titlebar, which hid its close buttons. */
 .app-shell { position: relative; }
 .rp.is-overlay, .rp.is-expanded { position: absolute; inset: 0; z-index: 150500; border-left: 0; }
+/* An absolute grid child is sized by its grid area, so span the whole shell grid. */
+.app-shell > .rp.is-overlay, .app-shell > .rp.is-expanded { grid-column: 1 / -1 !important; grid-row: 1 / -1 !important; }
 .rp-resize { position: absolute; left: -4px; top: 0; bottom: 0; z-index: 5; width: 8px; cursor: col-resize; touch-action: none; display: grid; place-items: center; }
 .rp-resize > span { width: 2px; height: 100%; background: transparent; transition: background 120ms ease; }
 .rp-resize:hover > span, .rp-resize:focus-visible > span, .rp[data-dragging="true"] .rp-resize > span { background: rgba(var(--es-wash-rgb), calc(0.28 * var(--es-wash-k))); }
@@ -402,6 +404,10 @@ body.rp-resizing iframe { pointer-events: none; }
 /* Opens the Activity tab from the chat when the side panel is closed. */
 .rp-toggle { position: sticky; top: 6px; z-index: 6; align-self: flex-end; display: inline-flex; align-items: center; gap: 7px; height: 28px; margin: 0 0 -28px; padding: 0 10px; border: 1px solid rgba(var(--es-edge-rgb), calc(0.12 * var(--es-edge-k))); border-radius: 999px; background: rgba(var(--es-surface-rgb), 0.9); backdrop-filter: blur(10px); color: rgba(var(--es-ink-rgb), 0.7); font: 550 11.5px "Inter", system-ui, sans-serif; cursor: pointer; }
 .rp-toggle:hover { color: var(--es-text); border-color: rgba(var(--es-edge-rgb), calc(0.22 * var(--es-edge-k))); }
+/* Hidden until the pointer is near the chat's top-right corner (or it has keyboard focus). */
+.rp-toggle { opacity: 0; pointer-events: none; transform: translateY(-4px); background: rgba(var(--es-surface-rgb), 0.55); transition: opacity .18s ease, transform .18s ease, background .18s ease; }
+.rp-toggle.is-peek, .rp-toggle:focus-visible { opacity: 1; pointer-events: auto; transform: none; }
+.rp-toggle.is-peek:hover { background: rgba(var(--es-surface-rgb), 0.95); }
 .rp-toggle small { color: rgba(var(--es-ink-rgb), 0.45); font: 600 10px ui-monospace, monospace; }
 @media (prefers-reduced-motion: reduce) { .rp, .rp-live { animation: none; } }
 

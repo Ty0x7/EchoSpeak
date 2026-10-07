@@ -313,133 +313,54 @@ export const PlatformHeader = ({
   </div>
 );
 
-export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number }> = ({ messages, contextWindow }) => {
-  const [hover, setHover] = React.useState(false);
+/**
+ * How full the model's context window is: a small ring and percentage in the
+ * composer, with a card on hover or focus that explains the numbers.
+ */
+export const ContextMeter: React.FC<{ messages: Message[]; contextWindow: number; model?: string }> = ({ messages, contextWindow, model }) => {
+  const [open, setOpen] = React.useState(false);
   if (!contextWindow || contextWindow <= 0) return null;
-  const estimatedTokens = messages.reduce((sum, m) => sum + (m.usage?.tokens ?? estimateTokens(m.text)), 0);
-  const pct = Math.min(estimatedTokens / contextWindow, 1);
-  const displayPct = Math.round(pct * 100);
-  const size = 40;
-  const fillColor =
-    pct > 0.85 ? "rgba(var(--es-ink-rgb), 0.95)" : pct > 0.6 ? "rgba(var(--es-ink-rgb), 0.88)" : "rgba(var(--es-ink-rgb), 0.92)";
-  const trackColor = "rgba(var(--es-ink-rgb), 0.14)";
-  const warnTint =
-    pct > 0.85 ? "rgba(255,90,90,0.18)" : pct > 0.6 ? "rgba(255,200,80,0.12)" : "transparent";
-
+  const used = messages.reduce((sum, m) => sum + (m.usage?.tokens ?? estimateTokens(m.text)), 0);
+  const pct = Math.min(used / contextWindow, 1);
+  const shown = Math.round(pct * 100);
+  const level = pct > 0.85 ? "full" : pct > 0.6 ? "filling" : "ok";
+  const status = level === "full" ? "Nearly full" : level === "filling" ? "Filling up" : "Plenty of room";
+  const r = 7;
+  const circumference = 2 * Math.PI * r;
   return (
     <div
-      className="context-meter-wrap"
-      style={{
-        position: "relative",
-        width: size,
-        height: size,
-        flexShrink: 0,
-        cursor: "default",
-        display: "grid",
-        placeItems: "center",
-      }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      title={`Context ${displayPct}%`}
-      aria-label={`Context ${displayPct}% used`}
+      className="ctx"
+      data-level={level}
+      tabIndex={0}
+      aria-label={`Context ${shown}% used: about ${formatTokenCount(used)} of ${formatTokenCount(contextWindow)} tokens`}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
     >
-      <div
-        style={{
-          position: "relative",
-          width: size,
-          height: size,
-          borderRadius: 3,
-          background: warnTint || "rgba(var(--es-wash-rgb), calc(0.03 * var(--es-wash-k)))",
-          border: `1px solid ${trackColor}`,
-          overflow: "hidden",
-          boxSizing: "border-box",
-        }}
-      >
-        <div style={{ position: "absolute", inset: 3, borderRadius: 2, background: "rgba(var(--es-wash-rgb), calc(0.04 * var(--es-wash-k)))" }} />
-        <div
-          style={{
-            position: "absolute",
-            left: 3,
-            right: 3,
-            bottom: 3,
-            height: `calc((100% - 6px) * ${pct})`,
-            borderRadius: 2,
-            background: `linear-gradient(180deg, ${fillColor} 0%, rgba(var(--es-wash-rgb), calc(0.55 * var(--es-wash-k))) 100%)`,
-            transition: "height 0.4s ease",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "grid",
-            placeItems: "center",
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: "-0.3px",
-            color: pct > 0.45 ? "var(--es-surface-1)" : "rgba(var(--es-ink-rgb), 0.72)",
-            userSelect: "none",
-            fontVariantNumeric: "tabular-nums",
-            fontFamily: "'JetBrains Mono', ui-monospace, monospace",
-          }}
-        >
-          {displayPct}
+      <svg className="ctx-ring" width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+        <circle cx="9" cy="9" r={r} className="ctx-track" />
+        <circle cx="9" cy="9" r={r} className="ctx-fill" strokeDasharray={circumference}
+          strokeDashoffset={circumference * (1 - Math.max(pct, 0.02))} transform="rotate(-90 9 9)" />
+      </svg>
+      <span className="ctx-pct">{shown}%</span>
+      {open ? (
+        <div className="ctx-card" role="tooltip">
+          <div className="ctx-card-head">
+            <strong>Context window</strong>
+            <span className="ctx-badge">{status}</span>
+          </div>
+          <div className="ctx-big"><b>{shown}%</b> used{model ? <small>{model}</small> : null}</div>
+          <div className="ctx-bar"><i style={{ width: `${Math.max(shown, 1)}%` }} /></div>
+          <dl className="ctx-rows">
+            <div><dt>Used</dt><dd>~{formatTokenCount(used)}</dd></div>
+            <div><dt>Remaining</dt><dd>~{formatTokenCount(Math.max(0, contextWindow - used))}</dd></div>
+            <div><dt>Window</dt><dd>{formatTokenCount(contextWindow)}</dd></div>
+            <div><dt>Messages</dt><dd>{messages.length}</dd></div>
+          </dl>
+          <p>Tokens are estimated. When the chat gets long, older turns are summarized so the agent keeps the thread.</p>
         </div>
-      </div>
-      {hover && (
-        <div
-          style={{
-            position: "absolute",
-            bottom: "calc(100% + 10px)",
-            /* Open toward the left so the full panel stays visible next to send */
-            right: 0,
-            left: "auto",
-            transform: "none",
-            background: "rgba(var(--es-surface-rgb), 0.96)",
-            border: "1px solid rgba(var(--es-edge-rgb), calc(0.14 * var(--es-edge-k)))",
-            borderRadius: 10,
-            padding: "10px 12px",
-            whiteSpace: "nowrap",
-            zIndex: 2000,
-            boxShadow: "0 8px 28px rgba(var(--es-shade-rgb), calc(0.55 * var(--es-shade-k)))",
-            backdropFilter: "blur(12px)",
-            fontSize: 12,
-            color: colors.text,
-            lineHeight: 1.5,
-            minWidth: 160,
-            pointerEvents: "none",
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--es-text-strong)", letterSpacing: "-0.02em" }}>Context</div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
-            <span style={{ color: colors.textDim }}>Used</span>
-            <span style={{ fontWeight: 600 }}>{formatTokenCount(estimatedTokens)}</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 16 }}>
-            <span style={{ color: colors.textDim }}>Window</span>
-            <span style={{ fontWeight: 600 }}>{formatTokenCount(contextWindow)}</span>
-          </div>
-          <div
-            style={{
-              marginTop: 8,
-              height: 4,
-              borderRadius: 2,
-              background: "rgba(var(--es-wash-rgb), calc(0.1 * var(--es-wash-k)))",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                width: `${displayPct}%`,
-                height: "100%",
-                background: "var(--es-emph)",
-                borderRadius: 2,
-                transition: "width 0.3s ease",
-              }}
-            />
-          </div>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 };
@@ -488,10 +409,11 @@ export const ChatBubble: React.FC<{
       <div style={{ width: "100%", minWidth: 0 }} data-testid="lean-message">
         <LeanMessage
           data={msg.lean}
-          at={msg.at}
+          at={actions ? undefined : msg.at}
           onContinue={!streaming && onQuickReply ? () => onQuickReply(`@${msg.lean!.agent.name || "Echo"} continue where you left off.`) : undefined}
         />
-        {actions ? <MessageActions message={msg} {...actions} disabled={streaming} /> : null}
+        {actions ? <MessageActions message={msg} {...actions} disabled={streaming}
+          meta={msg.at ? <time dateTime={new Date(msg.at).toISOString()}>{new Date(msg.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time> : null} /> : null}
       </div>
     );
   }
@@ -599,19 +521,9 @@ export const ChatBubble: React.FC<{
           </div>
         ) : null}
 
-        {actions && !stillTyping ? <MessageActions message={msg} {...actions} disabled={streaming} /> : null}
-        {/* Single compact meta row: Time · Tokens · CTX · Sources · Search (wrap only when narrow). */}
-        <div
-          style={{
-            marginTop: 4,
-            display: "flex",
-            flexDirection: "column",
-            gap: 0,
-            minWidth: 0,
-            width: "100%",
-          }}
-        >
-          {(() => {
+        {/* Time · tokens · ctx · sources: on the action row (copy, edit, retry…) when it shows, else on its own. */}
+        {(() => {
+          const metaRow = (() => {
             const msgTokens = msg.usage?.tokens ?? estimateTokens(msg.text);
             const ctxUsed = msg.usage?.contextUsed ?? msgTokens;
             const ctxWindow = msg.usage?.contextWindow || contextWindow || 32768;
@@ -637,7 +549,7 @@ export const ChatBubble: React.FC<{
                   rowGap: 4,
                 }}
               >
-                <span data-testid="chat-meta-time">{new Date(msg.at).toLocaleTimeString()}</span>
+                <span data-testid="chat-meta-time">{new Date(msg.at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
                 <span style={{ opacity: 0.45 }}>·</span>
                 <span
                   data-testid="chat-meta-tokens"
@@ -717,8 +629,11 @@ export const ChatBubble: React.FC<{
                 )}
               </div>
             );
-          })()}
-        </div>
+          })();
+          return actions && !stillTyping
+            ? <MessageActions message={msg} {...actions} disabled={streaming} meta={metaRow} />
+            : <div style={{ marginTop: 4, minWidth: 0, width: "100%" }}>{metaRow}</div>;
+        })()}
       </div>
     </motion.div>
   );

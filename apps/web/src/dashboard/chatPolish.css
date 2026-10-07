@@ -83,10 +83,11 @@
 .echo-root .sidebar-update-notice strong { font-size: 11px; font-weight: 500; }
 .echo-root .sidebar-update-notice small { font-size: 9px; color: var(--es-text-2); }
 .avatar-settings-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 16px; }
-.avatar-preview-states { display: flex; flex-wrap: wrap; gap: 3px; }
-.avatar-preview-states button { background: transparent; color: var(--es-text-3); border: 1px solid transparent; border-radius: 5px; font-size: 10px; padding: 5px 7px; text-transform: capitalize; cursor: pointer; }
-.avatar-preview-states button[aria-pressed=true] { border-color: var(--es-border-strong); color: var(--es-text); background: var(--es-surface-3); }
-.avatar-live-preview { height: 220px; display: grid; place-items: center; }
+.avatar-preview-states { display: flex; flex-wrap: wrap; gap: 4px; }
+.avatar-preview-card { background: var(--es-bg) !important; }
+.avatar-preview-states button { background: transparent; color: var(--es-text-3); border: 1px solid var(--es-border); border-radius: 999px; font-size: 11px; padding: 4px 10px; text-transform: capitalize; cursor: pointer; }
+.avatar-preview-states button[aria-pressed=true] { border-color: var(--es-accent); color: var(--es-text); background: var(--es-accent-soft); }
+.avatar-live-preview { height: 240px; display: grid; place-items: center; }
 .echo-root :is(.composer-tool, .message-actions button, .sidebar-navigation button, .sidebar-update-notice):focus-visible { outline: 1px solid var(--es-text-3); outline-offset: 2px; }
 @media (max-width: 680px) {
   .avatar-settings-grid { grid-template-columns: minmax(0,1fr); }
@@ -102,3 +103,65 @@
   .echo-root .voice-stage-status span { display: none; }
   .echo-root .voice-stage-controls { margin-top: 10px; }
 }
+
+/* ── Composer card (11.3): strip, text box and one tool row in a single card ── */
+.echo-root.echo-root .composer-card { display: flex; flex-direction: column; gap: 0; padding: 4px 6px 6px; border: 1px solid var(--es-line-2); border-radius: 16px; background: var(--es-surface-2); box-shadow: var(--es-sheen); transition: border-color var(--es-dur) var(--es-ease), box-shadow var(--es-dur) var(--es-ease); }
+.echo-root.echo-root .composer-card:focus-within { border-color: var(--es-line-3); box-shadow: var(--es-sheen), 0 0 0 4px rgba(var(--es-edge-rgb), calc(0.04 * var(--es-edge-k))); }
+.echo-root.echo-root .composer-card .session-folder-strip { border: 0; background: transparent; padding: 4px 8px 0; border-radius: 0; font-size: 10px; }
+.echo-root.echo-root .composer-card .input-field,
+.echo-root.echo-root .desktop-single-workspace .composer-card .input-field { border: 0 !important; background: transparent !important; box-shadow: none !important; border-radius: 0 !important; padding: 8px 8px 6px !important; min-height: 40px !important; }
+.echo-root.echo-root .composer-bottom { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 0 2px; }
+.echo-root.echo-root .composer-spacer { flex: 1 1 auto; }
+.echo-root.echo-root .composer-card .composer-tools-shell { padding-top: 0; min-width: 0; }
+.echo-root.echo-root .composer-card .composer-tools { flex-wrap: nowrap; gap: 2px; }
+.echo-root.echo-root .composer-card .composer-tool { height: 30px; min-width: 30px; border-radius: 9px; }
+.echo-root.echo-root .composer-card .composer-voice { height: 30px; border-radius: 999px; }
+.echo-root.echo-root .composer-card .composer-trailing { gap: 6px; }
+.echo-root.echo-root .composer-card .send-button { width: 34px; height: 34px; flex-basis: 34px; border-radius: 11px; }
+.echo-root.echo-root .composer-card .composer-notice { position: absolute; left: 10px; bottom: calc(100% + 6px); padding: 5px 10px; border: 1px solid var(--es-line-2); border-radius: 999px; background: var(--es-surface-1); }
+/* The ··· menu opens upward from the left tools and holds the model choice. */
+.echo-root.echo-root .composer-card .composer-options-menu { left: 0; right: auto; width: min(300px, calc(100vw - 50px)); }
+.echo-root.echo-root .composer-options-menu .composer-model-strip { flex-direction: column; align-items: stretch; gap: 6px; padding: 0 8px 8px; overflow: visible; }
+.echo-root.echo-root .composer-options-menu .composer-model-strip select { width: 100%; max-width: none; flex: none; height: 32px; padding: 0 26px 0 10px; border: 1px solid var(--es-border) !important; border-radius: 8px; background-color: var(--es-surface-2); color: var(--es-text); font-size: 12px; }
+.echo-root.echo-root .composer-options-menu .composer-model-name { padding: 6px 2px; font-size: 12px; }
+.echo-root.echo-root .composer-options-heading { padding: 8px 8px 6px; font: 600 10px/1.2 var(--es-font, sans-serif); letter-spacing: .06em; text-transform: uppercase; color: var(--es-faint); }
+
+/* Context: a ring and a percentage; details in a card on hover or focus. */
+.echo-root .ctx { position: relative; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px 0 7px; border-radius: 999px; color: var(--es-dim); font: 600 11px/1 var(--es-mono); font-variant-numeric: tabular-nums; cursor: default; outline: none; transition: background var(--es-dur) var(--es-ease); }
+.echo-root .ctx:hover, .echo-root .ctx:focus-visible { background: var(--es-glass); }
+.echo-root .ctx:focus-visible { box-shadow: 0 0 0 2px var(--es-focus); }
+.echo-root .ctx-track { fill: none; stroke: var(--es-glass-2); stroke-width: 2.5; }
+.echo-root .ctx-fill { fill: none; stroke: var(--es-accent); stroke-width: 2.5; stroke-linecap: round; transition: stroke-dashoffset .4s ease; }
+.echo-root .ctx[data-level="filling"] .ctx-fill { stroke: var(--es-warn); }
+.echo-root .ctx[data-level="full"] .ctx-fill { stroke: var(--es-err); }
+.echo-root .ctx-card { position: absolute; right: -40px; bottom: calc(100% + 12px); z-index: 2000; width: 250px; padding: 12px 14px; border: 1px solid var(--es-line-2); border-radius: 12px; background: var(--es-surface-1); box-shadow: 0 16px 40px -18px rgba(var(--es-shade-rgb), calc(0.9 * var(--es-shade-k))); color: var(--es-text); font: 500 12px/1.45 var(--es-font); cursor: default; }
+.echo-root .ctx-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.echo-root .ctx-card-head strong { font-size: 12.5px; font-weight: 650; }
+.echo-root .ctx-badge { padding: 2px 8px; border-radius: 999px; background: var(--es-accent-soft); color: var(--es-accent); font-size: 10.5px; font-weight: 600; }
+.echo-root .ctx[data-level="filling"] .ctx-badge { color: var(--es-warn); background: rgba(214, 160, 40, 0.14); }
+.echo-root .ctx[data-level="full"] .ctx-badge { color: var(--es-err-text); background: rgba(229, 72, 77, 0.12); }
+.echo-root .ctx-big { display: flex; align-items: baseline; gap: 6px; margin: 10px 0 6px; color: var(--es-dim); }
+.echo-root .ctx-big b { font: 650 22px/1 var(--es-font); color: var(--es-text-strong); }
+.echo-root .ctx-big small { margin-left: auto; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--es-faint); font: 500 10.5px var(--es-mono); }
+.echo-root .ctx-bar { height: 5px; border-radius: 999px; background: var(--es-glass-2); overflow: hidden; }
+.echo-root .ctx-bar i { display: block; height: 100%; border-radius: 999px; background: var(--es-accent); }
+.echo-root .ctx[data-level="filling"] .ctx-bar i { background: var(--es-warn); }
+.echo-root .ctx[data-level="full"] .ctx-bar i { background: var(--es-err); }
+.echo-root .ctx-rows { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin: 10px 0 8px; }
+.echo-root .ctx-rows div { display: flex; justify-content: space-between; gap: 6px; }
+.echo-root .ctx-rows dt { color: var(--es-faint); }
+.echo-root .ctx-rows dd { margin: 0; font: 600 11.5px var(--es-mono); font-variant-numeric: tabular-nums; }
+.echo-root .ctx-card p { margin: 0; padding-top: 8px; border-top: 1px solid var(--es-line); color: var(--es-faint); font-size: 11px; }
+
+/* The chat only ever scrolls up and down. Wide content scrolls inside itself. */
+.echo-root .chat-scroll, .desktop-window .chat-scroll { overflow-x: clip !important; overscroll-behavior-x: none; }
+.echo-root .chat-scroll .lm, .echo-root .chat-scroll .lm-body, .echo-root .chat-scroll .lm-text-wrap { min-width: 0; max-width: 100%; }
+.echo-root .lm-text { overflow-wrap: anywhere; }
+.echo-root .lm-text pre, .echo-root .lm-text .wg-code { max-width: 100%; overflow-x: auto; }
+.echo-root .lm-text table:not(.wg-table) { display: block; max-width: 100%; overflow-x: auto; }
+
+/* Time and tokens sit at the end of the action row, after copy / edit / retry or the thumbs. */
+.echo-root .message-actions .message-meta { display: inline-flex; align-items: center; margin-left: 8px; color: var(--es-faint); font: 500 10.5px/1 var(--es-mono); letter-spacing: 0.02em; }
+.echo-root .message-actions .message-meta [data-testid="chat-bubble-meta"] { color: inherit !important; font: inherit !important; letter-spacing: inherit !important; }
+.echo-root .message-actions .message-meta span { margin-left: 0; font: inherit; }
+.echo-root .message-actions-wrap[data-role="user"] .message-actions { justify-content: flex-end; }

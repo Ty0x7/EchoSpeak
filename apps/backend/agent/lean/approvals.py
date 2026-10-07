@@ -44,6 +44,8 @@ _DANGEROUS_COMMAND = re.compile(
         reg|regedit|bcdedit|takeown|icacls|cipher|set-executionpolicy|
         stop-process|kill|taskkill|net\s+user|new-service|sc\s+delete|
         git\s+push|git\s+reset\s+--hard|git\s+clean|git\s+checkout\s+--|git\s+branch\s+-D|
+        git\s+rebase|git\s+restore|git\s+stash\s+(?:drop|clear)|git\s+filter-branch|
+        gh\s+pr\s+(?:merge|close)|gh\s+repo\s+delete|gh\s+release\s+(?:create|delete)|gh\s+issue\s+(?:close|delete)|
         npm\s+publish|pip\s+uninstall|winget\s+uninstall|choco\s+uninstall|
         invoke-webrequest|iwr|curl|wget|start-bitstransfer
     )\b

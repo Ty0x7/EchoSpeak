@@ -26,15 +26,17 @@ type ComposerInputProps = {
   setMention(value: Mention): void;
   messages: Message[];
   providerInfo: ProviderInfo | null;
+  /** Thinking, dictation, voice and options: the row under the text box, inside the card. */
+  toolbar?: React.ReactNode;
 };
 
 export function ComposerInput({ threads, projects, activeThreadId, activeProjectId, threadState,
   providerError, folderPathFromDrop, attachFolder, onRemoveFolder, textareaRef, input, onInput, onSend,
-  activeRoom, roomMembers, mention, setMention, messages, providerInfo }: ComposerInputProps) {
+  activeRoom, roomMembers, mention, setMention, messages, providerInfo, toolbar }: ComposerInputProps) {
   const [folderDropActive, setFolderDropActive] = useState(false);
   return (
                     <div className="input-row">
-                      <div className="composer-input-stack">
+                      <div className="composer-input-stack composer-card">
                         <div
                           className={"session-folder-strip" + (folderDropActive ? " is-drop-active" : "")}
                           aria-label="Session and Project folder attachment. Drop a local folder here to create or select its Project."
@@ -167,9 +169,11 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                             }}
                           />
                         ) : null}
-                      </div>
+                      <div className="composer-bottom">
+                        {toolbar}
+                        <span className="composer-spacer" />
                       <div className="composer-trailing">
-                        <ContextMeter messages={messages} contextWindow={providerInfo?.context_window || 0} />
+                        <ContextMeter messages={messages} contextWindow={providerInfo?.context_window || 0} model={providerInfo?.model} />
                         <button
                           className="send-button"
                           onClick={() => void onSend()}
@@ -182,6 +186,8 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                             <path d="M5 12L19 12M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         </button>
+                      </div>
+                      </div>
                       </div>
                     </div>
   );

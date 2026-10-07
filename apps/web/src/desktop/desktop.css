@@ -54,7 +54,7 @@ html.echospeak-desktop-root #root {
   align-items: center;
   height: 42px;
   background: var(--es-surface-1);
-  border-bottom: 1px solid var(--desktop-line);
+  /* No rule under the titlebar or between its labels: it reads as one surface with the app. */
   position: relative;
   z-index: 10000;
 }
@@ -81,8 +81,6 @@ html.echospeak-desktop-root #root {
 }
 
 .desktop-titlebar-brand small {
-  border-left: 1px solid var(--desktop-line-strong);
-  padding-left: 8px;
   color: var(--desktop-muted);
   font-size: 10px;
   font-weight: 600;
@@ -847,3 +845,6 @@ html.echospeak-companion-root #root {
 @media (prefers-reduced-motion: reduce) {
   .desktop-boot-state, .desktop-boot-state.is-leaving, .desktop-content > .echo-root { animation-duration: 1ms !important; }
 }
+
+/* The setup window has no titlebar: setup draws its own top row (setup/FirstRunSetup.tsx). */
+.desktop-window.desktop-setup-window { grid-template-rows: minmax(0, 1fr); }
