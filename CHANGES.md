@@ -1,6 +1,8 @@
 # Changes
 
-## Unreleased: light theme and setup window
+## v11.1.0 — 2026-10-06
+
+User-facing notes: [EchoSpeak 11.1.0](docs/releases/v11.1.0.md).
 
 - **Light theme, now the default** (`apps/web/src/theme/`). White surfaces, navy text, blue hairlines and a blue
   accent; blue gradient primary and send buttons; mono uppercase section labels; outlined pill tabs in the right
