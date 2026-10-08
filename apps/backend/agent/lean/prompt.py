@@ -85,6 +85,11 @@ def _environment(*, project_root: str, notes: list[str], terminal_note: str = ""
         lines.append("- You may read and write files under: " + "; ".join(roots[:6]))
     if terminal_note:
         lines.append(f"- The {terminal_note}")
+    from agent.health import prompt_note
+
+    health = prompt_note()  # e.g. web search is broken on this install (agent/health.py)
+    if health:
+        lines.append(f"- {health}")
     if project_overview:
         lines.append("- Project files (top level):\n" + project_overview)
     for note in notes:

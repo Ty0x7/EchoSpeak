@@ -80,6 +80,15 @@ async def health_check():
     return {"status": "healthy", "version": APP_VERSION}
 
 
+@router.get("/health/capabilities")
+def health_capabilities(refresh: bool = False):
+    """System check for Settings and the startup notice: what works on this computer (agent/health.py)."""
+    from agent.health import check_all
+
+    items = check_all(force=refresh)
+    return {"items": items, "problems": sum(1 for item in items if item["status"] != "ok")}
+
+
 @router.get("/startup/readiness")
 def startup_readiness():
     # Sync on purpose: FastAPI runs it in a worker thread, so readiness checks

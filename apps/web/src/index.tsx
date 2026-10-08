@@ -22,6 +22,7 @@ import chatPolishCss from "./dashboard/chatPolish.css?inline";
 import { CreationsPage } from "./creations/CreationsPage";
 import { FirstRunSetup } from "./setup/FirstRunSetup";
 import { SettingsPanel } from "./settings/SettingsPanel";
+import { SystemCheckNotice } from "./settings/SystemCheck";
 import { LeanMessage } from "./lean/LeanMessage";
 import { ChatFollower } from "./app/chatFollow";
 import { isLeanEvent } from "./lean/liveReducer";
@@ -1484,6 +1485,18 @@ export const Dashboard: React.FC<{
   const mediaWorkspaceOpen = !desktopMode && mediaRouteActive;
   const desktopContextualWorkspace = false;
   const activeWorkspaceLabel = desktopMode ? "Conversation" : "EchoSpeak";
+  /** Open Settings, optionally at a section (the Settings window reads the saved section on open). */
+  const openSettingsAt = (section?: string) => {
+    if (section) {
+      try { localStorage.setItem("echospeak.settings.section", section); } catch { /* private mode */ }
+    }
+    setLeftTab("settings");
+    if (desktopMode && !desktopSettingsWindow) {
+      void openDesktopSettingsWindow().catch(() => setDesktopSettingsOpen(true));
+    } else {
+      setDesktopSettingsOpen(true);
+    }
+  };
   const closeStudio = () => {
     if (desktopSettingsWindow) {
       void controlDesktopWindow("close");
@@ -1750,14 +1763,7 @@ export const Dashboard: React.FC<{
           onRenameSession={(id, title) => void renameThread(id, title)}
           onDeleteSession={(id) => void deleteThread(id)}
           onDeleteProject={(id) => void deleteProject(id)}
-          onSettings={() => {
-            setLeftTab("settings");
-            if (desktopMode && !desktopSettingsWindow) {
-              void openDesktopSettingsWindow().catch(() => setDesktopSettingsOpen(true));
-            } else {
-              setDesktopSettingsOpen(true);
-            }
-          }}
+          onSettings={() => openSettingsAt()}
           settingsOpen={studioOpen}
           onView={() => {
             setLeftTab("chat");
@@ -1957,6 +1963,7 @@ export const Dashboard: React.FC<{
                       <small>{activityItems.length}</small>
                     </button>
                   ) : null}
+                  <SystemCheckNotice apiBase={apiBase} onOpen={() => openSettingsAt("system")} />
                   <ChatThread
                     activeThreadId={activeThreadId} streaming={streaming} scrollRef={chatScrollRef}
                     onScroll={onChatScroll} onWheel={onChatWheel} onKeyDown={onChatKeyDown}
