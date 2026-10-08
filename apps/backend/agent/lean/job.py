@@ -125,6 +125,33 @@ def unbacked_claim(text: str, succeeded: set[str]) -> str:
     return ""
 
 
+# The check step: code changed in this reply must be run before it's called done.
+CHANGE_TOOLS = {"file_write", "file_edit", "file_move", "file_copy"}
+CHECK_TOOLS = {"terminal", "terminal_run", "process_start"}
+CODE_SUFFIXES = (
+    ".py", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".html", ".css", ".scss", ".vue", ".svelte",
+    ".rs", ".go", ".java", ".kt", ".c", ".h", ".cpp", ".hpp", ".cs", ".rb", ".php", ".swift",
+    ".sh", ".ps1", ".bat", ".sql", ".toml", ".gradle",
+)
+
+
+def changed_code_file(name: str, args: dict) -> str:
+    """The code file a successful change tool touched, or ''."""
+    if name not in CHANGE_TOOLS:
+        return ""
+    path = str(args.get("destination") or args.get("path") or args.get("file_path") or "").strip()
+    return path if path.lower().endswith(CODE_SUFFIXES) else ""
+
+
+def check_nudge(files: list[str]) -> str:
+    shown = ", ".join(files[:4]) + (f" and {len(files) - 4} more" if len(files) > 4 else "")
+    return (
+        f"You changed {shown} but haven't run anything to check it since. Before you say it's done, run it or its "
+        "tests with the terminal and look at the result. If it can't be run here, say plainly that it isn't checked "
+        "and why. If the check fails, fix it or say what's left."
+    )
+
+
 def claim_nudge(claim: str) -> str:
     return (
         f"You wrote \"{claim[:200]}\", but no tool call in this turn did that, so it isn't true yet. "

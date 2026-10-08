@@ -30,7 +30,8 @@ from loguru import logger
 from agent.lean import policy, settings
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, outbound
-from agent.lean.job import claim_nudge, is_promise_without_action, promise_nudge, unbacked_claim
+from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, is_promise_without_action,
+                            promise_nudge, unbacked_claim)
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
 from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
@@ -110,6 +111,8 @@ class LeanTurn:
         self.completed_summary: Optional[str] = None
         # Tools that worked in this turn: what a reply's "I've saved it" must be backed by.
         self.succeeded: set[str] = set()
+        # Code files changed since the last terminal run (the check step before 'done').
+        self._unchecked: dict[str, bool] = {}
         self._on_seal = on_seal
         self._handed_off = False
         self.compactions = 0
@@ -232,6 +235,7 @@ class LeanTurn:
         nudges = 0
         promise_nudges = 0
         claim_nudges = 0
+        check_nudges = 0
         final_text = ""
         error = ""
         success = True
@@ -310,6 +314,14 @@ class LeanTurn:
                         note = f"Not verified: no tool call in this reply did this (“{claim[:160]}”)."
                         self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
                         self.emit({"type": "claim_unverified", "step": step, "claim": claim[:200], "note": note})
+                    if (self.promise_guard and not stop_reason and self._unchecked and check_nudges < 1
+                            and any(name in self.toolbox.names for name in CHECK_TOOLS)):
+                        # Code changed and nothing ran since: check it before calling it done (once).
+                        check_nudges += 1
+                        messages.append({"role": "user", "content": check_nudge(list(self._unchecked))})
+                        self.emit({"type": "check_nudge", "step": step, "files": list(self._unchecked)[:5]})
+                        self._retract_text(step)
+                        continue
                     final_text = content.strip()
                     break
                 if self._handed_off:
@@ -711,6 +723,12 @@ class LeanTurn:
         from agent.lean import steps
 
         facts = {**steps.widget_counts(widgets), **(meta or {})}
+        if name in CHECK_TOOLS:
+            self._unchecked.clear()  # something ran after the changes, pass or fail
+        elif ok:
+            changed = changed_code_file(name, args)
+            if changed:
+                self._unchecked[changed] = True
         label = describe_call(name, args)
         done = steps.done_label(label) if ok else label
         summary = steps.summarize(name, args, ok, output, facts)
