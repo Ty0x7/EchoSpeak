@@ -197,7 +197,9 @@ class LeanSession:
         if self.job is None:
             return
         name = self._name_of(result.agent_id)
-        self.job.record_text(name, result.text, int((result.usage or {}).get("total") or 0))
+        usage = result.usage or {}
+        # New tokens, not the conversation re-read at every step (agent/lean/loop.py "fresh").
+        self.job.record_text(name, result.text, int(usage.get("fresh", usage.get("total")) or 0))
         # What the agent actually ran is the evidence the completion check reads.
         for item in result.timeline or []:
             if item.get("kind") != "tool" or str(item.get("name") or "") in _BOOKKEEPING_TOOLS:

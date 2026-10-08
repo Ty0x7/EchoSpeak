@@ -208,6 +208,10 @@ class Subtask:
     actions: int = 0
 
 
+# Hard ceiling on rounds for one message, even while work keeps progressing.
+ROUND_CEILING = 60
+
+
 @dataclass
 class Job:
     goal: str
@@ -296,10 +300,17 @@ class Job:
         if self.repeats >= 2:
             return "the agents started repeating themselves"
         if self.token_budget and self.tokens >= self.token_budget:
-            return f"it used its token budget ({self.tokens:,} of {self.token_budget:,})"
+            return (f"it used its token budget ({self.tokens:,} new tokens of {self.token_budget:,}). "
+                    "Press Continue to keep going from where it stopped")
         if self.max_stalls and self.stalls >= self.max_stalls:
             return f"{self.stalls} rounds in a row made no progress (no tool succeeded and no task was finished)"
-        if self.rounds >= self.max_rounds:
+        if self.rounds >= ROUND_CEILING:
+            return f"it reached {ROUND_CEILING} rounds, the most one message may run"
+        # Work (files, commands, builds) keeps going while every round gets something done:
+        # a team building a game shouldn't stop halfway and wait for "continue". Questions and
+        # discussions can "progress" forever with new words, so the round limit still holds there.
+        working = needs_action(self.goal) and self.stalls == 0
+        if self.rounds >= self.max_rounds and not working:
             return f"it reached the limit of {self.max_rounds} rounds"
         return ""
 

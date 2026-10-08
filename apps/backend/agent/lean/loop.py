@@ -132,7 +132,8 @@ class LeanTurn:
         self.message_id = f"msg_{uuid.uuid4().hex[:12]}"
         self._emit = emit
         self.timeline: list[dict[str, Any]] = []
-        self.usage = {"prompt": 0, "completion": 0, "total": 0}
+        self.usage = {"prompt": 0, "completion": 0, "total": 0, "fresh": 0}
+        self._last_prompt = 0
         self._emit_lock = threading.Lock()
 
     # ── events ──────────────────────────────────────────────────────────
@@ -450,8 +451,7 @@ class LeanTurn:
             temperature=self.temperature,
         )
         if turn.usage:
-            for key in ("prompt", "completion", "total"):
-                self.usage[key] += int(turn.usage.get(key) or 0)
+            self._account_usage(turn.usage)
             self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens()})
         # In group chats the transcript shows "[Name]: text"; models sometimes copy
         # that onto their own reply. Drop it.
@@ -473,6 +473,25 @@ class LeanTurn:
                         break
                 self.emit({"type": "text_replace", "step": step, "text": cleaned})
         return turn
+
+    def _account_usage(self, usage: dict[str, Any]) -> None:
+        """Add one step's token counts to the turn's.
+
+        "fresh" is what the step added. Every step re-sends the whole conversation, so
+        summing prompt tokens counts it again each time: a 20-step build with a 10k
+        context showed ~200k "used" after writing a few files. Fresh counts only the new
+        input plus the reply; group jobs budget by it (agent/lean/job.py).
+        """
+        for key in ("prompt", "completion", "total"):
+            self.usage[key] += int(usage.get(key) or 0)
+        if "prompt" in usage or "completion" in usage:
+            prompt = int(usage.get("prompt") or 0)
+            grown = prompt - self._last_prompt if self._last_prompt and prompt >= self._last_prompt else prompt
+            self._last_prompt = prompt
+            fresh = max(0, grown) + int(usage.get("completion") or 0)
+        else:  # a provider that reports only a total
+            fresh = int(usage.get("total") or 0)
+        self.usage["fresh"] = self.usage.get("fresh", 0) + fresh
 
     # ── tools ───────────────────────────────────────────────────────────
     def _run_tools(self, calls: list[Any], messages: list[dict[str, Any]], step: int, call_counts: dict[str, int]) -> None:
