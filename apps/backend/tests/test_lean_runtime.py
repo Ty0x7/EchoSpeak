@@ -457,3 +457,26 @@ def test_unknown_printed_tool_is_hidden_and_reported_back():
 def test_example_json_in_an_answer_is_left_alone():
     text = 'Here is the payload format:\n```json\n{"name": "widget", "size": 3}\n```'
     assert extract_text_tool_calls(text, _KNOWN) == ([], text)
+
+
+def test_tools_report_live_progress_and_finish_with_a_summary():
+    from agent.lean import progress
+
+    def build(args):
+        progress.report("Compiling 3 files")
+        progress.report("Linking")
+        return "===== 12 passed in 0.4s =====\n[exit code 0]"
+
+    client = ScriptedClient([
+        ModelTurn(content="I'll build it and run the tests.", tool_calls=[ToolCall("c1", "terminal", '{"command": "make test"}')]),
+        ModelTurn(content="Built and tested."),
+    ])
+    events: list[dict[str, Any]] = []
+    turn = _turn(client, _toolbox({"terminal": build}), events)
+    turn.run("build it")
+    progress_events = [e for e in events if e["type"] == "tool_progress"]
+    assert progress_events and progress_events[0]["text"] == "Compiling 3 files" and progress_events[0]["id"] == "c1"
+    end = next(e for e in events if e["type"] == "tool_end")
+    assert end["done_label"] == "Ran `make test`" and end["summary"] == "Tests: 12 passed"
+    tool_item = next(item for item in turn.timeline if item.get("kind") == "tool")
+    assert tool_item["summary"] == "Tests: 12 passed" and "detail" not in tool_item

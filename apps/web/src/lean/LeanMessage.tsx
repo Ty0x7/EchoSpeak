@@ -4,6 +4,7 @@ import { safeMarkdownComponents } from "../widgets/SafeImage";
 import remarkGfm from "remark-gfm";
 import { RichMarkdown } from "../widgets/RichMarkdown";
 import { WidgetView } from "../widgets/WidgetView";
+import { groupSteps, phaseOf, stepsSummary, type ToolSeg } from "./steps";
 import type { LeanMessageData, LeanSegment } from "./types";
 
 /**
@@ -110,27 +111,67 @@ function ThinkingBlock({ seg, live }: { seg: Extract<LeanSegment, { kind: "think
   );
 }
 
-function ToolRow({ seg }: { seg: Extract<LeanSegment, { kind: "tool" }> }) {
+function StateMark({ status }: { status: "running" | "done" | "failed" }) {
+  return (
+    <span className="lm-tool-state" aria-hidden>
+      {status === "running" ? (
+        <span className="lm-spin" />
+      ) : status === "done" ? (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+      ) : (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M7 7l10 10M17 7L7 17" /></svg>
+      )}
+    </span>
+  );
+}
+
+function ToolRow({ seg }: { seg: ToolSeg }) {
   const [open, setOpen] = useState(false);
   useTicker(seg.status === "running");
   const elapsed = seg.status === "running" ? Date.now() - seg.startedAt : seg.durationMs || 0;
+  const label = seg.status === "done" && seg.doneLabel ? seg.doneLabel : seg.label;
+  const sub = seg.status === "running" ? seg.detail : seg.summary;
   return (
     <div className="lm-tool" data-status={seg.status}>
       <button type="button" className="lm-tool-head" onClick={() => setOpen((v) => !v)} aria-expanded={open} disabled={!seg.output}>
-        <span className="lm-tool-state" aria-hidden>
-          {seg.status === "running" ? (
-            <span className="lm-spin" />
-          ) : seg.status === "done" ? (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
-          ) : (
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M7 7l10 10M17 7L7 17" /></svg>
-          )}
+        <StateMark status={seg.status} />
+        <span className="lm-tool-text">
+          <span className="lm-tool-label">{label}</span>
+          {sub ? <span className="lm-tool-sub" key={seg.status === "running" ? sub : "summary"}>{sub}</span> : null}
         </span>
-        <span className="lm-tool-label">{seg.label}</span>
         {elapsed > 400 ? <span className="lm-tool-time">{fmtSeconds(elapsed)}</span> : null}
         {seg.output ? <Chevron open={open} /> : null}
       </button>
       {open && seg.output ? <pre className="lm-tool-output">{seg.output}</pre> : null}
+    </div>
+  );
+}
+
+/**
+ * Several steps in a row fold into one line ("Searched the web ×3 · Read 5 pages"),
+ * with the step that is running right now shown live under it. Click to see every step.
+ */
+function StepGroup({ tools }: { tools: ToolSeg[] }) {
+  const [open, setOpen] = useState(false);
+  const running = tools.filter((t) => t.status === "running");
+  useTicker(running.length > 0);
+  const summary = stepsSummary(tools);
+  const status = running.length ? "running" : tools.some((t) => t.status === "failed") && tools.every((t) => t.status === "failed") ? "failed" : "done";
+  const started = Math.min(...tools.map((t) => t.startedAt || Date.now()));
+  const total = running.length ? Date.now() - started : tools.reduce((sum, t) => sum + (t.durationMs || 0), 0);
+  return (
+    <div className="lm-steps" data-status={status}>
+      <button type="button" className="lm-steps-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <StateMark status={status} />
+        <span className="lm-steps-summary">{summary || `Working through ${tools.length} steps`}</span>
+        <span className="lm-steps-count">{tools.length} steps{total > 400 ? ` · ${fmtSeconds(total)}` : ""}</span>
+        <Chevron open={open} />
+      </button>
+      {open ? (
+        <div className="lm-steps-list">{tools.map((tool) => <ToolRow key={tool.id} seg={tool} />)}</div>
+      ) : running.length ? (
+        <div className="lm-steps-list is-live">{running.map((tool) => <ToolRow key={tool.id} seg={tool} />)}</div>
+      ) : null}
     </div>
   );
 }
@@ -223,7 +264,8 @@ export function LeanMessage({
   const streaming = live && data.status === "streaming";
   const segments = data.segments;
   const lastText = [...segments].reverse().find((s) => s.kind === "text");
-  const waiting = streaming && segments.length === 0;
+  const phase = live ? phaseOf(data) : "";
+  const items = React.useMemo(() => groupSteps(segments), [segments]);
   const sources = React.useMemo(() => mergedCitations(segments), [segments]);
   return (
     <article className="lm" data-status={data.status} data-live={streaming ? "true" : "false"} data-role={data.role || undefined}>
@@ -238,23 +280,21 @@ export function LeanMessage({
         </header>
       ) : null}
       <div className="lm-body">
-        {waiting ? (
-          <div className="lm-waiting" aria-hidden><span className="lm-dots"><i /><i /><i /></span></div>
-        ) : null}
-        {segments.map((seg, index) => {
-          if (seg.kind === "thinking") return <ThinkingBlock key={`t${index}`} seg={seg} live={streaming} />;
-          if (seg.kind === "tool") {
-            const cards = (seg.widgets || []).filter((w) => (w as { type?: string })?.type !== "citations");
+        {items.map((item) => {
+          if (item.kind === "steps") {
+            const cards = item.tools.flatMap((tool) => (tool.widgets || []).filter((w) => (w as { type?: string })?.type !== "citations"));
             return (
-              <React.Fragment key={`x${seg.id || index}`}>
-                <ToolRow seg={seg} />
+              <React.Fragment key={item.key}>
+                {item.tools.length > 1 ? <StepGroup tools={item.tools} /> : <ToolRow seg={item.tools[0]} />}
                 {cards.map((widget, k) => <WidgetView key={k} widget={widget} />)}
               </React.Fragment>
             );
           }
+          const { seg, index } = item;
+          if (seg.kind === "thinking") return <ThinkingBlock key={`t${index}`} seg={seg} live={streaming} />;
           if (seg.kind === "approval") return <ApprovalCard key={`a${seg.id}`} seg={seg} onDecide={onDecide} />;
           if (seg.kind === "note") return <div key={`n${index}`} className="lm-note">{seg.text}</div>;
-          if (!seg.text.trim()) return null;
+          if (seg.kind !== "text" || !seg.text.trim()) return null;
           const isTail = seg === lastText && streaming;
           return (
             <div key={`m${index}`} className="lm-text-wrap" data-tail={isTail ? "true" : "false"}>
@@ -262,6 +302,9 @@ export function LeanMessage({
             </div>
           );
         })}
+        {phase ? (
+          <div className="lm-phase" role="status"><span className="lm-dots" aria-hidden><i /><i /><i /></span><span key={phase}>{phase}</span></div>
+        ) : null}
         {!streaming && sources ? <WidgetView widget={sources} /> : null}
         {data.outcome && !streaming ? (
           <div className="lm-outcome" data-status={data.outcome.status} role="status">

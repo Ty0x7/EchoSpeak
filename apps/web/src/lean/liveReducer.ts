@@ -11,6 +11,7 @@ export const LEAN_EVENT_TYPES = new Set([
   "text_replace",
   "tool_start",
   "tool_end",
+  "tool_progress",
   "approval_request",
   "approval_resolved",
   "agent_done",
@@ -23,6 +24,16 @@ export const LEAN_EVENT_TYPES = new Set([
   "task_board",
   "claim_unverified",
 ]);
+
+/** Only numeric facts (results, pages, products) are kept from a step's meta. */
+function numericMeta(raw: unknown): Record<string, number> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
 
 export function isLeanEvent(evt: LeanEvent): boolean {
   if (evt.type === "final") return evt.runtime === "lean";
@@ -145,6 +156,13 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
           },
         ],
       }));
+    case "tool_progress":
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: m.segments.map((s) =>
+          s.kind === "tool" && s.id === evt.id && s.status === "running" ? { ...s, detail: String(evt.text || "") } : s
+        ),
+      }));
     case "tool_end":
       return patchMessage(state, id, (m) => ({
         ...m,
@@ -156,6 +174,10 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
                 output: String(evt.output || ""),
                 durationMs: Number(evt.duration_ms || 0),
                 widgets: Array.isArray(evt.widgets) && evt.widgets.length ? evt.widgets : undefined,
+                detail: undefined,
+                doneLabel: evt.done_label ? String(evt.done_label) : undefined,
+                summary: evt.summary ? String(evt.summary) : undefined,
+                meta: numericMeta(evt.meta),
               }
             : s
         ),
@@ -246,6 +268,9 @@ export function messageFromTimeline(args: {
         durationMs: Number(row.duration_ms || 0),
         startedAt,
         widgets: Array.isArray(row.widgets) && row.widgets.length ? row.widgets : undefined,
+        doneLabel: row.done_label ? String(row.done_label) : undefined,
+        summary: row.summary ? String(row.summary) : undefined,
+        meta: numericMeta(row.meta),
       });
     else if (row?.kind === "approval")
       segments.push({
