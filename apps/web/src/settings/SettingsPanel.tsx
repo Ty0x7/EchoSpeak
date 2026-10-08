@@ -13,6 +13,8 @@ import {
 import { ChoiceCards, Group, ListEditor, Row, SecretField, Segmented, Select, Status, TextField, Toggle } from "./controls";
 import { useSettings, type SettingsMap } from "./useSettings";
 import { AdvancedSection, type AdvancedPage } from "./AdvancedSection";
+import { SystemCheckSection } from "./SystemCheck";
+import { AgentSkillsSection } from "./AgentSkillsSection";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
 import { requestSetup } from "../setup/openSetup";
@@ -27,9 +29,11 @@ type SectionId =
   | "voice"
   | "search"
   | "memory"
+  | "skills"
   | "automations"
   | "channels"
   | "advanced"
+  | "system"
   | "about";
 
 const NAV: { group: string; items: { id: SectionId; label: string; icon: IconName }[] }[] = [
@@ -50,6 +54,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
       { id: "voice", label: "Voice", icon: "mic" },
       { id: "search", label: "Web search", icon: "globe" },
       { id: "memory", label: "Memory", icon: "brain" },
+      { id: "skills", label: "Skills", icon: "spark" },
     ],
   },
   {
@@ -63,6 +68,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
     group: "",
     items: [
       { id: "advanced", label: "Advanced", icon: "wrench" },
+      { id: "system", label: "System check", icon: "shield" },
       { id: "about", label: "About", icon: "info" },
     ],
   },
@@ -83,6 +89,8 @@ const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
   channels: "discord telegram twitter x whatsapp email imap smtp tls port trusted users roles changelog",
   advanced: "lm studio only embeddings memory search apps allowlist webhooks a2a agent-to-agent folders skills workspaces artifacts companion avatar connections mcp obsidian documents rerank upload",
   about: "version update diagnostics logs",
+  skills: "skills skill.md agent skills import review approve instructions lessons",
+  system: "system check health doctor broken not working search status diagnose fix problems",
 };
 
 type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "mic" | "globe" | "brain" | "clock" | "send" | "info" | "wrench";
@@ -303,6 +311,10 @@ function SectionBody({
           onAvatarConfigChange={props.onAvatarConfigChange}
         />
       );
+    case "skills":
+      return <AgentSkillsSection apiBase={props.apiBase} />;
+    case "system":
+      return <SystemCheckSection apiBase={props.apiBase} />;
     case "about":
       return <AboutSection apiBase={props.apiBase} openAdvanced={openAdvanced} reload={reload} />;
   }

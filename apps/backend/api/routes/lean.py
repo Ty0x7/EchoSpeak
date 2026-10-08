@@ -17,7 +17,7 @@ router = APIRouter(prefix="/lean", tags=["lean"])
 
 
 class ApprovalDecisionRequest(BaseModel):
-    decision: str = Field(description="allow | deny | always")
+    decision: str = Field(description="allow | deny | always, or the answer to an ask_user question")
 
 
 class AgentModelPayload(BaseModel):
@@ -262,6 +262,181 @@ def decide_approval(approval_id: str, request: ApprovalDecisionRequest) -> dict[
     if approval is None:
         raise HTTPException(status_code=404, detail="That approval is no longer waiting.")
     return {"ok": True, "approval": approval.public()}
+
+
+class SkillImportRequest(BaseModel):
+    path: str = Field(default="", description="A folder that contains SKILL.md")
+    text: str = Field(default="", description="The contents of a SKILL.md file")
+
+
+class SkillApproveRequest(BaseModel):
+    digest: str = Field(default="", description="The digest shown when the skill was reviewed")
+
+
+class SkillFromLessonRequest(BaseModel):
+    lesson_id: str
+    name: str = ""
+
+
+@router.get("/mcp/approvals")
+def mcp_approvals() -> dict[str, Any]:
+    """MCP servers waiting for the owner's review (agent/mcp_trust.py)."""
+    from agent import mcp_trust
+    from agent.mcp_client import get_mcp_manager
+    from config import config
+
+    raw_servers = dict(getattr(config, "mcp_servers", None) or {})
+    items = [
+        {"name": row["name"], "approval": row["approval"], "detail": mcp_trust.describe(raw_servers.get(row["name"]) or {}),
+         "message": row["last_error"]}
+        for row in get_mcp_manager().status()["servers"] if row.get("approval")
+    ]
+    return {"items": items}
+
+
+@router.post("/mcp/{name}/approve")
+def approve_mcp_server(name: str) -> dict[str, Any]:
+    from agent import mcp_trust
+    from agent.mcp_client import get_mcp_manager
+    from config import config
+
+    raw_servers = dict(getattr(config, "mcp_servers", None) or {})
+    raw = raw_servers.get(name)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=404, detail="No MCP server with that name in settings")
+    mcp_trust.approve(name, raw)
+    status = get_mcp_manager().initialize_servers(raw_servers)
+    return {"ok": True, "status": status}
+
+
+class ContradictionResolveRequest(BaseModel):
+    a: str
+    b: str
+    keep: str = Field(description="The id of the memory to keep, or 'both'")
+
+
+def _memory_store():
+    from api.deps import get_agent
+
+    memory = getattr(get_agent(), "memory", None)
+    if memory is None or not hasattr(memory, "_records_lock"):
+        raise HTTPException(status_code=503, detail="Memory isn't available right now")
+    return memory
+
+
+@router.get("/memory/tidy")
+def memory_tidy_status() -> dict[str, Any]:
+    """The last idle clean-up and the contradictions waiting for the owner (agent/lean/memory_tidy.py)."""
+    from agent.lean import memory_tidy
+
+    return {"report": memory_tidy.last_report(), "contradictions": memory_tidy.open_contradictions(_memory_store())}
+
+
+@router.post("/memory/tidy")
+def memory_tidy_now() -> dict[str, Any]:
+    from agent.lean import memory_tidy
+
+    memory = _memory_store()
+    report = memory_tidy.tidy(memory)
+    return {"report": report, "contradictions": memory_tidy.open_contradictions(memory)}
+
+
+@router.post("/memory/contradictions/resolve")
+def resolve_contradiction(request: ContradictionResolveRequest) -> dict[str, Any]:
+    from agent.lean import memory_tidy
+
+    memory = _memory_store()
+    try:
+        memory_tidy.resolve(memory, request.a, request.b, request.keep)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory not found") from exc
+    return {"ok": True, "contradictions": memory_tidy.open_contradictions(memory)}
+
+
+@router.post("/stop-all")
+def stop_all() -> dict[str, Any]:
+    """Stop everything: cancel every running agent and pause routines, channels and A2A."""
+    from agent.lean import stop
+
+    return stop.stop_everything("Stopped from the app")
+
+
+@router.post("/resume")
+def resume_all() -> dict[str, Any]:
+    from agent.lean import stop
+
+    return stop.resume()
+
+
+@router.get("/stop-status")
+def stop_status() -> dict[str, Any]:
+    from agent.lean import outbound, stop
+
+    return {**stop.status(), "outbound": outbound.counts(),
+            "limits": {"per_minute": outbound.per_minute(), "per_hour": outbound.per_hour()}}
+
+
+@router.get("/agent-skills")
+def list_agent_skills() -> dict[str, Any]:
+    """Open-format Agent Skills (agent/lean/agent_skills.py), with their review status."""
+    from agent.lean import agent_skills
+
+    return {"items": [skill.public(with_body=True) for skill in agent_skills.list_skills()]}
+
+
+@router.post("/agent-skills/import")
+def import_agent_skill(request: SkillImportRequest) -> dict[str, Any]:
+    from agent.lean import agent_skills
+
+    try:
+        if request.text.strip():
+            skill = agent_skills.import_text(request.text)
+        elif request.path.strip():
+            skill = agent_skills.import_folder(request.path)
+        else:
+            raise ValueError("Give a folder or paste a SKILL.md.")
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "skill": skill.public(with_body=True)}
+
+
+@router.post("/agent-skills/from-lesson")
+def agent_skill_from_lesson(request: SkillFromLessonRequest) -> dict[str, Any]:
+    from agent import learning
+    from agent.lean import agent_skills
+
+    lesson = learning.get_experience_store().get_lesson(request.lesson_id)
+    if lesson is None:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    try:
+        skill = agent_skills.skill_from_lesson(lesson, request.name.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "skill": skill.public(with_body=True)}
+
+
+@router.post("/agent-skills/{name}/approve")
+def approve_agent_skill(name: str, request: SkillApproveRequest) -> dict[str, Any]:
+    from agent.lean import agent_skills
+
+    try:
+        skill = agent_skills.approve(name, request.digest.strip())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "skill": skill.public(with_body=True)}
+
+
+@router.delete("/agent-skills/{name}")
+def remove_agent_skill(name: str) -> dict[str, Any]:
+    from agent.lean import agent_skills
+
+    if not agent_skills.remove(name):
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return {"ok": True}
 
 
 @router.get("/agents")

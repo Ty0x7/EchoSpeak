@@ -514,6 +514,8 @@ class Toolbox:
 def describe_call(name: str, args: dict[str, Any]) -> str:
     """One readable line for the chat timeline and approval cards."""
     pick = lambda *keys: next((str(args[k]) for k in keys if args.get(k)), "")  # noqa: E731
+    if name == "ask_user":
+        return f"Asking you: {pick('question')[:90]}"
     if name == "web_search":
         return f"Searching “{pick('query', 'q')}”"
     if name == "stock_history":

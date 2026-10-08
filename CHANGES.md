@@ -1,5 +1,37 @@
 # Changes
 
+## v11.5.0 — 2026-10-08
+
+User-facing notes: [EchoSpeak 11.5.0](docs/releases/v11.5.0.md).
+
+- **ask_user** (`agent/lean/ask.py`): agents ask a question with 2–4 choices (plus free text). It reuses the approval pause
+  (`approvals.open_question`), the answer is the tool result, and channels without cards are told to ask in text.
+  Chat: `QuestionCard` in `LeanMessage.tsx`, restored from history.
+- **Actionable search errors** (`web_search_providers.describe_search_failure`): the cause (missing package, rate limit,
+  network), one fallback route, then ask_user. The step row says "Search isn't working". Prompt rule: try one other route,
+  then ask; never end on an apology.
+- **System check** (`agent/health.py`, `GET /health/capabilities`): web search, page reading, model, speech to text,
+  memory search. Shown in Settings › System check and as a startup notice above the chat; the prompt carries a
+  known-problems line; startup readiness reports web search.
+- **Agent Skills** (`agent/lean/agent_skills.py`): open SKILL.md folders; names and descriptions in the prompt, `read_skill`
+  for the body or files; owner approval pins a folder SHA-256 (any change needs approval again). Import a folder or text,
+  or turn an established lesson into a draft. Settings › Skills.
+- **Stop everything** (`agent/lean/stop.py`, `/lean/stop-all`, `/lean/resume`): cancels running turns (all sources) and
+  waiting approvals, pauses non-interactive sources (routines, channels, A2A) and routine deliveries; persisted.
+- **Outbound limits** (`agent/lean/outbound.py`): per-channel 5/minute and 30/hour (`ECHOSPEAK_OUTBOUND_PER_MINUTE`,
+  `..._PER_HOUR`) for send tools and routine deliveries.
+- **MCP review and pin** (`agent/mcp_trust.py`): config and tool fingerprints; new or changed servers wait for approval,
+  tool changes register nothing; existing servers adopted once. `GET /lean/mcp/approvals`, `POST /lean/mcp/{name}/approve`.
+- **Replay tests** (`agent/lean/replays.py`, `tests/replays/`, `scripts/replay_eval.py`, `scripts/replay_capture.py`):
+  failed chats as cases; offline harness replay in the test suite, live model scoring before releases. Saved timelines keep
+  a short, redacted copy of tool arguments.
+- **Memory clean-up** (`agent/lean/memory_tidy.py`): daily after 10 idle minutes: merge near-duplicates, retire facts not
+  recalled for 90 days (counting from when recall tracking began), flag contradictions. `AgentMemory.note_recalled`.
+  Settings › Advanced › Memory › Clean-up.
+- **Check step** (`job.check_nudge`): code changed and nothing ran since → asked once to run it or its tests.
+- **MCP 2026-07-28**: `mcp>=2.3,<3`. The client works on SDK 1.x and 2.x (`negotiate_auto` discover with legacy fallback,
+  paginated params, httpx2, two-value transport streams). The release build requires SDK 2.3+ (`python-env.ps1`).
+
 ## v11.4.1 — 2026-10-08
 
 User-facing notes: [EchoSpeak 11.4.1](docs/releases/v11.4.1.md).

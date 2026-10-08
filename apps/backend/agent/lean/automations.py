@@ -34,9 +34,16 @@ AUTOMATION_PREFIX = (
 
 def deliver(text: str, channels: list[str], label: str) -> list[str]:
     """Send a finished automation result to external channels. Returns where it went."""
+    from agent.lean import outbound, stop
+
     sent: list[str] = []
+    if stop.paused():
+        return sent
     body = f"{label}\n\n{text}".strip()
     for channel in {str(c).strip().lower() for c in channels or []}:
+        if outbound.take(channel):
+            logger.warning("Routine result not sent to {}: outbound limit reached", channel)
+            continue
         try:
             if channel == "discord":
                 owner = str(getattr(config, "discord_bot_owner_id", "") or "").strip()

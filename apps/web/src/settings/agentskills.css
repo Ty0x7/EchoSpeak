@@ -1,0 +1,24 @@
+/* Settings › Skills (AgentSkillsSection.tsx). */
+.st-skills-intro { margin: 4px 0 14px; color: var(--es-dim); font-size: 12.5px; max-width: 62ch; }
+.st-skills-notice { margin: 0 0 12px; color: var(--es-text); font-size: 12.5px; }
+.st-skills-waiting { margin: 0 0 4px; color: var(--es-warn); font-size: 12.5px; font-weight: 600; }
+.st-skills-list { display: grid; gap: 8px; }
+.st-skill { border: 1px solid var(--es-line-2); border-radius: var(--es-r); background: var(--es-surface-1); }
+.st-skill[data-status="needs_review"], .st-skill[data-status="changed"] { border-color: color-mix(in srgb, var(--es-warn) 45%, var(--es-line-2)); }
+.st-skill-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 12px 14px; }
+.st-skill-head > div { display: grid; gap: 2px; min-width: 0; }
+.st-skill-head b { color: var(--es-text-strong); font: 600 13.5px var(--es-mono); }
+.st-skill-head p { margin: 0; color: var(--es-dim); font-size: 12.5px; overflow-wrap: anywhere; }
+.st-skill-status { color: var(--es-ok); font: 600 10.5px var(--es-font); letter-spacing: .08em; text-transform: uppercase; }
+.st-skill[data-status="needs_review"] .st-skill-status, .st-skill[data-status="changed"] .st-skill-status { color: var(--es-warn); }
+.st-skill[data-status="invalid"] .st-skill-status { color: var(--es-err-text); }
+.st-skill-body { display: grid; gap: 8px; padding: 0 14px 12px; }
+.st-skill-body pre { max-height: 280px; margin: 0; padding: 10px 12px; overflow: auto; border-radius: 8px; border: 1px solid var(--es-line-2); background: var(--es-surface-2); color: var(--es-text); font: 12px/1.5 var(--es-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.st-skill-files { margin: 0; color: var(--es-dim); font-size: 12px; }
+.st-skill-actions { display: flex; gap: 6px; }
+.st-skills-import { display: grid; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--es-line-2); }
+.st-skills-tabs { display: inline-flex; gap: 4px; }
+.st-skills-tabs button { padding: 5px 10px; border: 1px solid var(--es-line-2); border-radius: 8px; background: transparent; color: var(--es-dim); font: 600 12px var(--es-font); cursor: pointer; }
+.st-skills-tabs button.is-on { border-color: var(--es-accent); color: var(--es-text); background: var(--es-accent-soft); }
+.st-skills-import input, .st-skills-import textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--es-line-3); background: var(--es-surface-1); color: var(--es-text); font: 12.5px var(--es-mono); }
+.st-skills-import > .es-btn { justify-self: start; }

@@ -47,6 +47,15 @@ Install them into it:  & "$where" -m pip install -r "$requirements" pyinstaller=
 Or build with a Python that has them: -PythonExecutable <path>, or set ECHOSPEAK_PYTHON.
 "@
     }
+    # MCP: the app must ship SDK 2.3+ so it can talk to servers on the stateless 2026-07-28 spec.
+    $mcpVersion = ([string](& $PythonExecutable -c "import importlib.metadata as m; print(m.version('mcp'))" 2>$null)).Trim()
+    if (-not $mcpVersion -or [int]($mcpVersion.Split('.')[0]) -lt 2) {
+        $requirements = (Resolve-Path (Join-Path $PSScriptRoot "..\..\backend\requirements.txt")).Path
+        throw @"
+The Python at $where has MCP SDK $mcpVersion; the app needs 2.3 or newer (MCP 2026-07-28 spec).
+Update it:  & "$where" -m pip install -r "$requirements"
+"@
+    }
     Write-Host "Building with Python: $where"
     return $where
 }

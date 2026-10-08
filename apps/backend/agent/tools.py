@@ -2230,6 +2230,7 @@ def web_search(
         from urllib.parse import urlparse
         from agent.web_search_providers import (
             SearchProviderResult,
+            describe_search_failure,
             format_hits_for_tool,
             run_web_search,
         )
@@ -2329,7 +2330,7 @@ def web_search(
 
         if not deduped:
             if errors:
-                return errors[0]
+                return describe_search_failure(errors)
             return "No search results found."
 
         result = SearchProviderResult(
@@ -2361,7 +2362,9 @@ def web_search(
             "\nNotebook source IDs (search leads, not inspected pages): " + ", ".join(source_ids) if source_ids else "")
     except Exception as e:
         logger.error(f"Web search failed: {e}")
-        return f"Search failed: {str(e)}"
+        from agent.web_search_providers import describe_search_failure
+
+        return describe_search_failure([str(e)])
 
 
 @tool(args_schema=AnalyzeScreenArgs, description="Capture the screen, run OCR, and return relevant text.")

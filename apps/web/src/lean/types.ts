@@ -42,7 +42,12 @@ export type LeanSegment =
       summary: string;
       args?: Record<string, unknown>;
       reason: string;
-      decision: "" | "allow" | "deny" | "timeout" | "cancelled";
+      decision: "" | "allow" | "deny" | "timeout" | "cancelled" | "answered";
+      /** ask_user: a question with choices instead of a permission request. */
+      question?: string;
+      options?: string[];
+      allowOther?: boolean;
+      answer?: string;
     };
 
 export type LeanMessageData = {

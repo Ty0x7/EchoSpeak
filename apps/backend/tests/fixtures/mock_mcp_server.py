@@ -5,10 +5,17 @@ from __future__ import annotations
 
 import argparse
 
-from mcp.server.fastmcp import FastMCP
+try:  # SDK 1.x
+    from mcp.server.fastmcp import FastMCP as Server
+
+    SDK2 = False
+except ImportError:  # SDK 2.x renamed FastMCP to MCPServer
+    from mcp.server.mcpserver import MCPServer as Server
+
+    SDK2 = True
 
 
-server = FastMCP("echospeak-mcp-fixture")
+server = Server("echospeak-mcp-fixture")
 
 
 @server.tool(structured_output=True)
@@ -28,7 +35,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--http-port", type=int, default=0)
     args = parser.parse_args()
-    if args.http_port:
+    if args.http_port and SDK2:
+        server.run(transport="streamable-http", host="127.0.0.1", port=args.http_port)
+    elif args.http_port:
         server.settings.host = "127.0.0.1"
         server.settings.port = args.http_port
         server.run(transport="streamable-http")

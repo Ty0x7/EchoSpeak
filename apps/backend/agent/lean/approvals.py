@@ -97,6 +97,12 @@ class PendingApproval:
     created_at: float = field(default_factory=time.time)
     decision: str = ""
     event: threading.Event = field(default_factory=threading.Event)
+    # "approval" (allow/deny a tool) or "question" (ask_user: pick an option or type an answer).
+    kind: str = "approval"
+    question: str = ""
+    options: list[str] = field(default_factory=list)
+    allow_other: bool = False
+    answer: str = ""
 
     def public(self) -> dict[str, Any]:
         return {
@@ -109,6 +115,11 @@ class PendingApproval:
             "args": self.args,
             "created_at": self.created_at,
             "decision": self.decision,
+            "kind": self.kind,
+            "question": self.question,
+            "options": list(self.options),
+            "allow_other": self.allow_other,
+            "answer": self.answer,
         }
 
 
@@ -137,6 +148,26 @@ class ApprovalBroker:
             self._pending[approval.id] = approval
         return approval
 
+    def open_question(self, *, session_id: str, request_id: str, question: str, options: list[str],
+                      allow_other: bool) -> PendingApproval:
+        """An ask_user question: waits like an approval, resolved with the user's answer."""
+        pending = PendingApproval(
+            id=f"ask_{uuid.uuid4().hex[:12]}",
+            session_id=session_id,
+            request_id=request_id,
+            tool="ask_user",
+            summary=question,
+            args={},
+            reason="",
+            kind="question",
+            question=question,
+            options=list(options),
+            allow_other=allow_other,
+        )
+        with self._lock:
+            self._pending[pending.id] = pending
+        return pending
+
     def wait(self, approval: PendingApproval, cancel: Optional[threading.Event]) -> str:
         deadline = time.monotonic() + settings.approval_timeout_seconds()
         while not approval.event.wait(0.25):
@@ -151,7 +182,20 @@ class ApprovalBroker:
         return approval.decision or "deny"
 
     def resolve(self, approval_id: str, decision: str) -> Optional[PendingApproval]:
-        decision = str(decision or "").strip().lower()
+        text = " ".join(str(decision or "").split())
+        with self._lock:
+            question = self._pending.get(approval_id)
+            if question is not None and question.kind == "question":
+                # The answer is one of the options, or the user's own words when allowed.
+                if not text:
+                    raise ValueError("an answer is required")
+                if not question.allow_other and text.lower() not in {o.lower() for o in question.options}:
+                    raise ValueError("answer must be one of the options")
+                question.answer = text[:500]
+                question.decision = "answered"
+                question.event.set()
+                return question
+        decision = text.lower()
         if decision not in {"allow", "deny", "always"}:
             raise ValueError("decision must be allow, deny, or always")
         with self._lock:
@@ -163,6 +207,16 @@ class ApprovalBroker:
             approval.decision = "allow" if decision == "always" else decision
         approval.event.set()
         return approval
+
+    def cancel_all(self) -> int:
+        """Stop everything: every approval or question still waiting ends as cancelled."""
+        with self._lock:
+            waiting = list(self._pending.values())
+        for item in waiting:
+            if not item.decision:
+                item.decision = "cancelled"
+            item.event.set()
+        return len(waiting)
 
     def pending_for(self, session_id: str = "") -> list[dict[str, Any]]:
         with self._lock:

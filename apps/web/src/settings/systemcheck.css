@@ -1,0 +1,25 @@
+/* System check (SystemCheck.tsx): the Settings list and the chat notice. Colour = state. */
+
+.st-syscheck-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
+.st-syscheck-summary { margin: 0; color: var(--es-text); font-size: 13.5px; font-weight: 600; }
+.st-syscheck-error { margin: 0 0 12px; color: var(--es-err-text); font-size: 12.5px; }
+.st-syscheck { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.st-syscheck li { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--es-r); border: 1px solid var(--es-line-2); background: var(--es-surface-1); }
+.st-syscheck li > div { display: grid; gap: 2px; min-width: 0; }
+.st-syscheck b { color: var(--es-text-strong); font-size: 13.5px; }
+.st-syscheck p { margin: 0; color: var(--es-dim); font-size: 12.5px; overflow-wrap: anywhere; }
+.st-syscheck .st-syscheck-fix { color: var(--es-text); }
+.st-syscheck-status { color: var(--es-faint); font: 600 10.5px var(--es-font); letter-spacing: .08em; text-transform: uppercase; }
+.st-syscheck-dot { flex: 0 0 auto; width: 10px; height: 10px; margin-top: 4px; border-radius: 50%; background: var(--es-ok); }
+.st-syscheck li[data-status="warn"] .st-syscheck-dot { background: var(--es-warn); }
+.st-syscheck li[data-status="fail"] .st-syscheck-dot { background: var(--es-err); }
+.st-syscheck li[data-status="fail"] { border-color: color-mix(in srgb, var(--es-err) 40%, var(--es-line-2)); }
+.st-syscheck li[data-status="warn"] .st-syscheck-status { color: var(--es-warn); }
+.st-syscheck li[data-status="fail"] .st-syscheck-status { color: var(--es-err-text); }
+
+.syscheck-notice { display: flex; align-items: center; gap: 10px; max-width: 760px; margin: 10px auto 0; padding: 8px 8px 8px 12px; border-radius: var(--es-r); border: 1px solid color-mix(in srgb, var(--es-err) 35%, var(--es-line-2)); background: color-mix(in srgb, var(--es-err) 8%, var(--es-surface-1)); color: var(--es-text); font-size: 12.5px; }
+.syscheck-notice-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 50%; background: var(--es-err); }
+.syscheck-notice-text { flex: 1 1 auto; min-width: 0; }
+.syscheck-notice-text b { color: var(--es-err-text); }
+.syscheck-notice-close { flex: 0 0 auto; width: 26px; height: 26px; border: 0; border-radius: 6px; background: transparent; color: var(--es-dim); font-size: 16px; line-height: 1; cursor: pointer; }
+.syscheck-notice-close:hover { background: rgba(var(--es-wash-rgb), calc(0.06 * var(--es-wash-k))); color: var(--es-text); }

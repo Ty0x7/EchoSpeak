@@ -154,6 +154,67 @@ async function post(url: string, body: unknown): Promise<any> {
   return data;
 }
 
+type TidyMemo = { id: string; text: string };
+type TidyState = {
+  report: { ran_at?: number; merged?: unknown[]; retired?: unknown[]; flagged?: unknown[] };
+  contradictions: { a: TidyMemo; b: TidyMemo }[];
+};
+
+/** Idle clean-up (backend: agent/lean/memory_tidy.py): last run, Tidy now, and pairs that may disagree. */
+function MemoryTidy({ apiBase }: { apiBase: string }) {
+  const [state, setState] = useState<TidyState | null>(null);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const call = useCallback(async (path: string, init?: RequestInit) => {
+    const res = await fetch(`${apiBase}/lean/memory/${path}`, { cache: "no-store", ...init });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(String(data?.detail || `Request failed (${res.status})`));
+    return data;
+  }, [apiBase]);
+  useEffect(() => {
+    call("tidy").then((data) => setState({ report: data.report || {}, contradictions: data.contradictions || [] })).catch(() => setState(null));
+  }, [call]);
+  const run = async (key: string, work: () => Promise<any>) => {
+    setBusy(key);
+    setError("");
+    try {
+      const data = await work();
+      setState((prev) => ({ report: data.report || prev?.report || {}, contradictions: data.contradictions || [] }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy("");
+    }
+  };
+  const resolve = (a: string, b: string, keep: string) => run(`${a}|${b}`, () => call("contradictions/resolve", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ a, b, keep }),
+  }));
+  const report = state?.report || {};
+  const when = report.ran_at ? new Date(report.ran_at * 1000).toLocaleString() : "";
+  const counts = report.ran_at
+    ? `Last tidy ${when}: merged ${report.merged?.length || 0}, retired ${report.retired?.length || 0}, flagged ${report.flagged?.length || 0}.`
+    : "Runs once a day when the PC has been quiet for ten minutes.";
+  return (
+    <Group title="Clean-up" description="Merges memories saved twice, retires facts nobody has used for 90 days (never pinned ones), and flags pairs that may disagree. Nothing is deleted.">
+      <Row label={counts}>
+        <button type="button" className="es-btn es-btn-sm" disabled={Boolean(busy)} onClick={() => void run("tidy", () => call("tidy", { method: "POST" }))}>
+          {busy === "tidy" ? "Tidying…" : "Tidy now"}
+        </button>
+      </Row>
+      {(state?.contradictions || []).map(({ a, b }) => (
+        <Row key={`${a.id}|${b.id}`} label={<span>These may disagree: <b>{a.text}</b> / <b>{b.text}</b></span>}>
+          <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+            <button type="button" className="es-btn es-btn-sm" disabled={Boolean(busy)} onClick={() => void resolve(a.id, b.id, a.id)} title={`Keep: ${a.text}`}>Keep first</button>
+            <button type="button" className="es-btn es-btn-sm" disabled={Boolean(busy)} onClick={() => void resolve(a.id, b.id, b.id)} title={`Keep: ${b.text}`}>Keep second</button>
+            <button type="button" className="es-btn es-btn-sm es-btn-quiet" disabled={Boolean(busy)} onClick={() => void resolve(a.id, b.id, "both")}>Both are true</button>
+          </span>
+        </Row>
+      ))}
+      {error ? <Row label={<span className="st-muted">{error}</span>} /> : null}
+    </Group>
+  );
+}
+
 function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap; save: Save; apiBase: string; sessionId: string; projectId: string }) {
   const [items, setItems] = useState<Memory[] | null>(null);
   const [filter, setFilter] = useState("");
@@ -353,6 +414,8 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
         </div>
       </Group>
 
+      <MemoryTidy apiBase={apiBase} />
+
       <Group title="Local search model" description="Optional ONNX model for private memory and document search. Model-server embeddings can be used instead.">
         <Row label={<Status tone={embeddingStatus?.installed ? "ok" : "idle"}>{embeddingStatus?.installed ? "Installed" : "Not installed"}</Status>}
           help={embeddingRestart ? "Restart EchoSpeak to use the newly installed model." : "About 90 MB; downloaded only when you choose Install."}>
@@ -429,6 +492,55 @@ function MemoryText({ memory, onSave }: { memory: Memory; onSave(text: string): 
 }
 
 // ── Connections, skills, MCP ────────────────────────────────────────────
+
+type McpApproval = { name: string; approval: string; detail: string; message: string };
+
+/** MCP servers waiting for review (backend: agent/mcp_trust.py): new, launch settings changed, or tools changed. */
+function McpApprovals({ apiBase }: { apiBase: string }) {
+  const [items, setItems] = useState<McpApproval[]>([]);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/lean/mcp/approvals`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setItems(Array.isArray(data?.items) ? data.items : []);
+    } catch {
+      setItems([]);
+    }
+  }, [apiBase]);
+  useEffect(() => { void load(); }, [load]);
+  const approve = async (name: string) => {
+    setBusy(name);
+    setError("");
+    try {
+      const res = await fetch(`${apiBase}/lean/mcp/${encodeURIComponent(name)}/approve`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.detail || `Approval failed (${res.status})`));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy("");
+    }
+  };
+  if (!items.length && !error) return null;
+  const why: Record<string, string> = { new: "New server", changed: "How it starts changed", tools_changed: "Its tools changed" };
+  return (
+    <>
+      {items.map((item) => (
+        <Row key={item.name}
+          label={<span><b>{item.name}</b> · {why[item.approval] || "Needs review"}</span>}
+          help={item.detail}>
+          <button type="button" className="es-btn es-btn-sm es-btn-primary" disabled={busy === item.name} onClick={() => void approve(item.name)}>
+            {busy === item.name ? "Approving…" : "Approve"}
+          </button>
+        </Row>
+      ))}
+      {error ? <Row label={<span className="st-muted">{error}</span>} /> : null}
+    </>
+  );
+}
 
 function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; sessionId: string; projectId: string }) {
   const [cards, setCards] = useState<any[] | null>(null);
@@ -579,7 +691,8 @@ function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; s
           <Row key={card.id} label={nameOf(card)} help={card.issue || `${card.capabilities?.length || 0} tools`} />
         ))}
       </Group>
-      <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide.">
+      <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide. A new or changed server waits for your approval before it runs.">
+        <McpApprovals apiBase={apiBase} />
         {cards !== null && !byCategory("mcp").length ? <Row label={<span className="st-muted">No MCP servers configured.</span>} /> : null}
         {byCategory("mcp").map((card) => (
           <Row key={card.id} label={nameOf(card)} help={card.issue || card.detail} />

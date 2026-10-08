@@ -29,7 +29,7 @@ type ChatThreadProps = {
   threadState: ThreadSessionState | null;
   approvalDecisionBusy: boolean;
   onApprovalDecision(id: string, decision: "confirm" | "cancel"): void;
-  onLeanApproval(id: string, decision: "allow" | "deny" | "always"): void;
+  onLeanApproval(id: string, decision: string): void;
   actions?: MessageActionProps;
   voiceStage?: React.ReactNode;
 };

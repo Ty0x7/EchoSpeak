@@ -314,6 +314,14 @@ def _schema() -> dict[str, Any]:
     return {"version": version, "detail": "Schema is compatible"}
 
 
+def _web_search() -> dict[str, Any]:
+    from agent.health import web_search
+
+    check = web_search()
+    ok = check["status"] == "ok"
+    return {"ready": ok, "degraded": not ok, "detail": check["detail"], "fix": check["fix"]}
+
+
 def build_startup_readiness() -> dict[str, Any]:
     components = [
         _component("backend", "Starting local runtime", lambda: {"healthy": True}),
@@ -328,6 +336,7 @@ def build_startup_readiness() -> dict[str, Any]:
         _component("model", "Checking model provider", _model, critical=False),
         _component("adapter", "Resolving model adapter", _adapter, critical=False),
         _component("connections_mcp", "Checking Connections and MCP", _connections_mcp, critical=False),
+        _component("web_search", "Checking web search", _web_search, critical=False),
         _component("embeddings", "Checking semantic retrieval", _embeddings, critical=False),
         _component("document_retrieval", "Checking document retrieval", _document_retrieval, critical=False),
         _component("runtime_state", "Restoring work", _runtime_state),

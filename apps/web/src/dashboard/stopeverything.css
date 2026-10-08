@@ -1,0 +1,10 @@
+/* Stop everything (StopEverything.tsx): the sidebar button and the paused notice. */
+.stop-all { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; margin: 0 0 4px; padding: 0 11px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--es-dim); font: 500 11.5px var(--es-font); cursor: pointer; text-align: left; }
+.stop-all:hover { color: var(--es-err-text); background: color-mix(in srgb, var(--es-err) 7%, transparent); }
+.stop-all.is-armed { color: #fff; background: var(--es-err); border-color: var(--es-err); font-weight: 600; }
+.stop-all:disabled { opacity: .6; cursor: default; }
+
+.paused-notice { display: flex; align-items: center; gap: 10px; max-width: 760px; margin: 10px auto 0; padding: 8px 8px 8px 12px; border-radius: var(--es-r); border: 1px solid color-mix(in srgb, var(--es-warn) 45%, var(--es-line-2)); background: color-mix(in srgb, var(--es-warn) 9%, var(--es-surface-1)); color: var(--es-text); font-size: 12.5px; }
+.paused-notice-dot { flex: 0 0 auto; width: 8px; height: 8px; border-radius: 2px; background: var(--es-warn); }
+.paused-notice-text { flex: 1 1 auto; min-width: 0; }
+.paused-notice-text b { color: var(--es-text-strong); }
