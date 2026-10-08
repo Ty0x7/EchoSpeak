@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { EchoFace, echoFaceStyles } from "../components/EchoFace";
 import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
-import { GITHUB_URL, useLatestRelease } from "./release";
+import { GITHUB_URL } from "./release";
 import "./site.css";
 import "./home.css";
 
@@ -134,7 +134,7 @@ function Extra({ kind }: { kind: Scenario["extra"] }) {
   return <span className="h-x h-x-saved"><Icon name="file" size={14} /> tip-calculator · App · v1</span>;
 }
 
-function Watch() {
+function Watch({ visible }: { visible: boolean }) {
   const { ref, inView } = useInView<HTMLElement>(true);
   const [active, setActive] = useState(0);
   const [elapsed, setElapsed] = useState(0);
@@ -146,7 +146,7 @@ function Watch() {
   elapsedRef.current = elapsed;
   useEffect(() => {
     if (still) { setElapsed(Number.MAX_SAFE_INTEGER); return; }
-    if (!inView || hold) return;
+    if (!visible || !inView || hold) return;
     const started = performance.now() - elapsedRef.current;
     const tick = window.setInterval(() => {
       const e = performance.now() - started;
@@ -154,7 +154,7 @@ function Watch() {
       setElapsed(e);
     }, 40);
     return () => window.clearInterval(tick);
-  }, [active, inView, hold, still, t]);
+  }, [active, inView, visible, hold, still, t]);
   const typed = scenario.ask.slice(0, Math.max(0, Math.floor((elapsed - 450) / 28)));
   const sent = elapsed >= t.sent;
   const words = scenario.reply.split(" ");
@@ -238,18 +238,18 @@ const GROUP: { who: "you" | Mate["id"]; text: React.ReactNode }[] = [
   { who: "echo", text: "Dinner's sorted. Want me to set a reminder?" },
 ];
 
-function Crew() {
+function Crew({ visible }: { visible: boolean }) {
   const { ref, inView } = useInView<HTMLElement>(true);
   const [step, setStep] = useState(0);
   const [hovered, setHovered] = useState("");
   const still = reducedMotion();
   useEffect(() => {
     if (still) { setStep(GROUP.length + 1); return; }
-    if (!inView) return;
+    if (!visible || !inView) return;
     const wait = step > GROUP.length ? 4200 : step === 0 ? 600 : 1300;
     const timer = window.setTimeout(() => setStep((s) => (s > GROUP.length ? 0 : s + 1)), wait);
     return () => window.clearTimeout(timer);
-  }, [step, inView, still]);
+  }, [step, inView, visible, still]);
   const talking = step > 0 && step <= GROUP.length ? GROUP[step - 1].who : "";
   return (
     <section className="h-crew" id="crew" ref={ref} aria-labelledby="crew-title">
@@ -339,61 +339,78 @@ function Safe() {
 // ── 5. Take me home ──────────────────────────────────────────────────
 
 function TakeMeHome() {
-  const release = useLatestRelease();
   return (
     <section className="h-home" id="download" aria-labelledby="home-title">
       <div className="shell">
         <div className="h-home-card">
-          <div className="h-home-echo"><EchoFace size={116} avatarConfig={{ idle_activity: "breathe", breathing_speed: .5 }} /></div>
-          <h2 id="home-title">Take me home.</h2>
-          <p>Install, choose a model, then start your first conversation.</p>
-          <DownloadButton />
-          <div className="h-brains">
-            <div><b>Free, on your PC</b><span>Run a compatible model with LM Studio or Ollama. Online tools are optional.</span></div>
-            <div><b>Or a cloud model</b><span>Bring your own OpenAI, Gemini, Claude or Grok key. Switch any time.</span></div>
+          <div className="h-home-copy">
+            <h2 id="home-title">Take me home.</h2>
+            <p>Your next idea starts here.</p>
+            <DownloadButton variant="light" />
+            <Link className="h-home-guide" to="/docs/getting-started">A little help getting started <Icon name="arrow" size={14} /></Link>
           </div>
-          <div className="h-home-links">
-            <Link className="text-link" to="/docs/getting-started">Setup guide <Icon name="arrow" size={15} /></Link>
-            <a className="text-link" href={release.notesUrl} target="_blank" rel="noreferrer">What's new <Icon name="arrow" size={15} /></a>
-            <Link className="text-link" to="/docs/how-it-works">How I work <Icon name="arrow" size={15} /></Link>
+          <div className="h-home-echo" aria-hidden="true">
+            <EchoFace size="var(--home-echo-size)" avatarConfig={{ idle_activity: "breathe", breathing_speed: .5 }} />
           </div>
-          <small className="h-req">Windows 10 or 11 · 64-bit · MIT licensed</small>
         </div>
       </div>
     </section>
   );
 }
 
+type HomeSection = "top" | "watch" | "crew" | "safe" | "download";
+
+function FollowingEcho({ section }: { section: HomeSection }) {
+  const stops = { top: [74, 0], watch: [65, 18], crew: [57, 6], safe: [70, 24], download: [64, 10] };
+  return (
+    <div className="h-follow" data-section={section} aria-hidden="true" style={{ "--follow-y": `${stops[section][0]}%`, "--follow-rise": `${stops[section][1]}px` } as React.CSSProperties}>
+      <span className="h-follow-move" key={section}>
+        <EchoFace size={48} avatarConfig={{ idle_activity: "breathe", breathing_speed: .5 }} />
+      </span>
+    </div>
+  );
+}
+
 export function Home() {
   const page = useRef<HTMLDivElement>(null);
+  const [active, setActive] = useState<HomeSection>("top");
   useEffect(() => {
     document.documentElement.classList.add("site-guided-scroll");
-    const sections = page.current?.querySelectorAll<HTMLElement>("main > section");
-    const observer = typeof IntersectionObserver !== "undefined" ? new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("has-entered");
-          observer?.unobserve(entry.target);
-        }
-      }
-    }, { threshold: .12 }) : null;
-    sections?.forEach((section) => observer?.observe(section));
+    const sections = Array.from(page.current?.querySelectorAll<HTMLElement>("main > section") ?? []);
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      const readingLine = 68 + Math.min(150, window.innerHeight * .2);
+      const atEnd = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 2;
+      const current = atEnd ? sections[sections.length - 1] : sections.filter((section) => section.getBoundingClientRect().top <= readingLine).pop() ?? sections[0];
+      if (current) setActive(current.id as HomeSection);
+    };
+    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(update); };
+    update();
+    window.addEventListener("scroll", schedule, { passive: true });
+    window.addEventListener("resize", schedule);
     return () => {
-      observer?.disconnect();
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", schedule);
+      window.removeEventListener("resize", schedule);
       document.documentElement.classList.remove("site-guided-scroll");
     };
   }, []);
   return (
-    <div className="site site-home" ref={page}>
+    <div className="site site-home" ref={page} data-current={active} onFocusCapture={(event) => {
+      const section = (event.target as HTMLElement).closest<HTMLElement>("main > section");
+      if (section) setActive(section.id as HomeSection);
+    }}>
       <style>{echoFaceStyles}</style>
       <SiteHeader />
       <main>
         <Hero />
-        <Watch />
-        <Crew />
+        <Watch visible={active === "watch"} />
+        <Crew visible={active === "crew"} />
         <Safe />
         <TakeMeHome />
       </main>
+      <FollowingEcho section={active} />
       <SiteFooter />
     </div>
   );
