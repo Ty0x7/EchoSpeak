@@ -148,6 +148,12 @@ def _self_check() -> int:
     import onnxruntime  # noqa: F401  (local embeddings for memory and documents)
     import tokenizers  # noqa: F401
     from agent.embeddings import OnnxEmbeddings  # noqa: F401
+    # Web search and page reading. PyInstaller skips a missing package without
+    # failing, and a build from the wrong Python once shipped without these.
+    from ddgs import DDGS  # noqa: F401
+    import primp  # noqa: F401
+    import lxml.html  # noqa: F401
+    from trafilatura import extract  # noqa: F401
     print("echospeak-backend self-check ok")
     return 0
 

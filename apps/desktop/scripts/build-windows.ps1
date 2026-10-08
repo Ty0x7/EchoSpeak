@@ -1,10 +1,12 @@
 param(
-    [string]$PythonExecutable = "python",
+    [string]$PythonExecutable = "",
     # Extra Tauri config merged at build time (release-windows.ps1 uses it to sign updates).
     [string]$TauriConfigPath = ""
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "python-env.ps1")
+$PythonExecutable = Assert-EchoPythonReady (Resolve-EchoPython $PythonExecutable)
 $DesktopRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepoRoot = (Resolve-Path (Join-Path $DesktopRoot "..\..")).Path
 $WebRoot = Join-Path $RepoRoot "apps\web"
