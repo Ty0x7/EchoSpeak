@@ -933,6 +933,9 @@ class AgentMemory:
     def _load_or_create_vectorstore(self, path: Path, create_if_missing: bool = True) -> Optional[FAISS]:
         if self.use_faiss and self._has_index_files(path):
             try:
+                from agent.index_integrity import check as _check_index
+
+                _check_index(path)  # a pickle changed outside EchoSpeak is never loaded
                 vector_store = FAISS.load_local(
                     str(path),
                     self.embeddings,
@@ -952,7 +955,14 @@ class AgentMemory:
                     logger.info("Loaded existing memory from disk")
                     return vector_store
             except Exception as e:
-                logger.warning(f"Failed to load existing memory: {e}. Creating new memory.")
+                from agent.index_integrity import TamperedIndex
+
+                if isinstance(e, TamperedIndex):
+                    # records.json is the source of truth: rebuild the index from it.
+                    self._index_needs_rebuild = True
+                    logger.warning("{}. Rebuilding the memory index from records.", e)
+                else:
+                    logger.warning(f"Failed to load existing memory: {e}. Creating new memory.")
         if not create_if_missing:
             return None
         path.mkdir(parents=True, exist_ok=True)
@@ -1048,6 +1058,9 @@ class AgentMemory:
         try:
             path.mkdir(parents=True, exist_ok=True)
             store.save_local(str(path))
+            from agent.index_integrity import pin as _pin_index
+
+            _pin_index(path)
             logger.debug("Memory saved to disk")
             return True
         except Exception as e:
@@ -2328,6 +2341,9 @@ class AgentMemory:
                         self._save_vector_store(store, path)
                 elif self.vector_store is not None:
                     self.vector_store.save_local(self.memory_path)
+                    from agent.index_integrity import pin as _pin_index
+
+                    _pin_index(self.memory_path)
                     logger.debug("Memory saved to disk")
             except Exception as e:
                 logger.error(f"Failed to save memory: {e}")

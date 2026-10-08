@@ -90,3 +90,21 @@ def test_file_tools_cannot_touch_echospeaks_own_data(monkeypatch, tmp_path):
         assert tools._safe_file_path(str(Path(DATA_DIR) / target)) is None, target
     assert tools._safe_file_path(str(Path(DATA_DIR).parent / "elsewhere.txt")) is not None
     assert tools._safe_file_path(str(tmp_path / "project" / "main.py")) is not None
+
+
+def test_a_tampered_index_pickle_is_never_loaded(tmp_path):
+    from agent import index_integrity
+
+    folder = tmp_path / "index"
+    folder.mkdir()
+    (folder / "index.pkl").write_bytes(b"saved by echospeak")
+    index_integrity.pin(folder)
+    index_integrity.check(folder)  # unchanged: loads
+    (folder / "index.pkl").write_bytes(b"swapped for a malicious pickle")  # e.g. one that runs calc.exe
+    with pytest.raises(index_integrity.TamperedIndex):
+        index_integrity.check(folder)
+    legacy = tmp_path / "legacy"
+    legacy.mkdir()
+    (legacy / "index.pkl").write_bytes(b"older release")
+    assert index_integrity.verified(legacy) and (legacy / index_integrity.PIN_NAME).is_file()  # pinned on first load
+
