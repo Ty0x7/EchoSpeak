@@ -53,9 +53,13 @@ TOOLSETS: dict[str, list[str]] = {
     ],
     "self": ["self_list", "self_read", "self_grep", "self_git_status", "self_edit", "self_rollback", "project_update_context"],
     "memory": ["memory_save", "memory_search", "chat_search", "document_search", "soul_update"],
-    # Skill, MCP, and Connection tools that registered at runtime.
-    "skills": ["@external"],
+    # Skill, MCP, and Connection tools that registered at runtime, plus finding,
+    # proposing and checking new connections (agent/integrations.py).
+    "skills": ["@external", "find_tools", "find_integrations", "propose_integration", "check_integration"],
 }
+
+# External tools sent with every request before the rest wait for find_tools.
+EXTERNAL_INLINE_LIMIT = 12
 
 # Names kept so stored personas and API callers keep working; not offered in the editor.
 TOOLSET_ALIASES: dict[str, list[str]] = {"research": ["web", "live"]}
@@ -271,6 +275,54 @@ class Toolbox:
         # Native tools only appear when one of their toolsets was requested.
         requested = set(wanted)
         self.native = {name: tool for name, tool in self.native.items() if name in requested or tool.always}
+        # Connected apps can bring dozens of tools each (one Photoshop server has 128). Past a
+        # few, their schemas wait until find_tools asks for them (Anthropic's Tool Search,
+        # "deferred loading"): every schema is sent on every request, and small models
+        # choose worse from long lists. A deferred tool is still callable by name.
+        self.deferred: set[str] = set()
+        # Bumped whenever the schemas change mid-turn, so the loop re-sends them.
+        self.schema_version = 0
+        external = [name for name, entry in self.entries.items()
+                    if str(getattr(entry, "origin", "native")) in {"skill", "mcp", "connection"}]
+        if len(external) > EXTERNAL_INLINE_LIMIT and "find_tools" in requested:
+            self.deferred = set(external)
+            self.native["find_tools"] = NativeTool(
+                name="find_tools",
+                description=("Load tools from the user's connected apps (MCP servers, skills) by what they do, e.g. "
+                             "\"blender render\" or \"obs scenes\". They become callable from your next step."),
+                parameters={"type": "object", "properties": {
+                    "query": {"type": "string", "description": "What you need to do, or the app's name."},
+                }, "required": ["query"]},
+                func=self._find_tools,
+            )
+            groups: dict[str, int] = {}
+            for name in external:
+                entry = self.entries[name]
+                group = str(getattr(entry, "mcp_server", "") or getattr(entry, "owner", "") or "skills").split(":")[-1]
+                groups[group] = groups.get(group, 0) + 1
+            listing = ", ".join(f"{group} ({count})" for group, count in sorted(groups.items()))
+            self.notes.append(f"{len(external)} tools from connected apps load on demand: {listing}. "
+                              "Call find_tools with what you need before using one.")
+
+    def _find_tools(self, args: dict[str, Any]) -> str:
+        words = [w for w in re.findall(r"[a-z0-9]+", str(args.get("query") or "").lower()) if len(w) > 1]
+        if not words:
+            return "Error: say what the tool should do, e.g. \"render\" or the app's name."
+        scored: list[tuple[int, str]] = []
+        for name in self.deferred | {n for n in self.entries if n not in self.deferred and n.startswith("mcp__")}:
+            entry = self.entries.get(name)
+            text = f"{name.replace('_', ' ')} {getattr(entry, 'description', '')}".lower()
+            score = sum(3 if w in name.lower() else 1 for w in words if w in text)
+            if score:
+                scored.append((score, name))
+        scored.sort(key=lambda row: (-row[0], row[1]))
+        found = [name for _, name in scored[:8]]
+        if not found:
+            return f"No connected-app tool matches \"{args.get('query')}\". Use find_integrations to connect a new app."
+        self.deferred.difference_update(found)
+        self.schema_version += 1
+        lines =[f"- {name}: {_compact_description(getattr(self.entries[name], 'description', ''), 160)}" for name in found]
+        return "Loaded these tools; call them from your next step:\n" + "\n".join(lines)
 
     @property
     def names(self) -> list[str]:
@@ -284,6 +336,8 @@ class Toolbox:
     def schemas(self) -> list[dict[str, Any]]:
         rendered: list[dict[str, Any]] = []
         for name, entry in self.entries.items():
+            if name in self.deferred:
+                continue
             schema: dict[str, Any] = dict(getattr(entry, "input_schema", {}) or {})
             if not schema.get("properties"):
                 func = getattr(entry, "func", None)
@@ -417,6 +471,9 @@ class Toolbox:
                               redact_payload(widgets) if ok else [])
         if name == "web_search" and name in self.entries:
             return self._search_and_read(args)
+        if name in self.deferred:  # called by name: keep its schema from now on
+            self.deferred.discard(name)
+            self.schema_version += 1
         return self._run_entry(name, args)
 
     def _search_and_read(self, args: dict[str, Any]) -> ToolResult:

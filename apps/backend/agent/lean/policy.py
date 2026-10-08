@@ -39,6 +39,8 @@ UNTRUSTED_SOURCES = {
     "stock_history", "product_search", "video_search", "image_search",
     # Uploaded documents can come from anywhere (a downloaded PDF, a forwarded email).
     "document_search", "research_notebook",
+    # MCP registry listings and third-party servers' error text (agent/integrations.py).
+    "find_integrations", "check_integration",
 }
 
 # (C) Actions that leave the machine, speak for the user, or persist something

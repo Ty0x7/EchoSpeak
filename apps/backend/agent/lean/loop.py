@@ -224,6 +224,7 @@ class LeanTurn:
         if announce:
             self.announce()
         tools = self.toolbox.schemas()
+        tools_version = getattr(self.toolbox, "schema_version", 0)
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self.history)
         self._history_in_messages = len(self.history)
@@ -248,6 +249,10 @@ class LeanTurn:
                 success = False
                 break
             step += 1
+            if getattr(self.toolbox, "schema_version", 0) != tools_version:
+                # find_tools loaded connected-app tools in the last step.
+                tools_version = self.toolbox.schema_version
+                tools = self.toolbox.schemas()
             self._fit_context(messages, tools)
             self.emit({"type": "step_start", "step": step})
             try:
