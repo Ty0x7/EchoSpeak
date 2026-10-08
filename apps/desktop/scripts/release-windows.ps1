@@ -10,7 +10,7 @@
 # Settings > About. Bump the backend, web, desktop, Cargo and Tauri versions before the next
 # release; the app only offers versions newer than its own.
 param(
-    [string]$PythonExecutable = "python",
+    [string]$PythonExecutable = "",
     [string]$KeyPath = (Join-Path $HOME ".tauri\echospeak.key"),
     [string]$NotesPath = "",
     [string]$Repo = "Ty0x7/EchoSpeak",
@@ -22,6 +22,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "python-env.ps1")
+$PythonExecutable = Assert-EchoPythonReady (Resolve-EchoPython $PythonExecutable)
 $DesktopRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepoRoot = (Resolve-Path (Join-Path $DesktopRoot "..\..")).Path
 $ConfPath = Join-Path $DesktopRoot "src-tauri\tauri.conf.json"

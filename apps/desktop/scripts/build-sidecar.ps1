@@ -1,8 +1,10 @@
 param(
-    [string]$PythonExecutable = "python"
+    [string]$PythonExecutable = ""
 )
 
 $ErrorActionPreference = "Stop"
+. (Join-Path $PSScriptRoot "python-env.ps1")
+$PythonExecutable = Assert-EchoPythonReady (Resolve-EchoPython $PythonExecutable)
 $DesktopRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $SpecPath = Join-Path $DesktopRoot "backend\echospeak_backend.spec"
 $TauriRoot = Join-Path $DesktopRoot "src-tauri"

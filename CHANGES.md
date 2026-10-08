@@ -1,5 +1,16 @@
 # Changes
 
+## v11.4.1 — 2026-10-08
+
+User-facing notes: [EchoSpeak 11.4.1](docs/releases/v11.4.1.md).
+
+- **Root cause:** the release scripts built with the first `python` on PATH, which on the release machine was another agent's virtualenv (Python 3.11). It had PyInstaller but not `ddgs`, `primp`, `lxml` or `trafilatura`. PyInstaller skipped them without failing, so 11.4.0 shipped with no web search and degraded page reading.
+- **`apps/desktop/scripts/python-env.ps1` (new):**
+  - `Resolve-EchoPython` picks, in order: `-PythonExecutable`, `ECHOSPEAK_PYTHON`, `apps/backend/.venv`, `.venv`, `py -3.12`, then `python`.
+  - `Assert-EchoPythonReady` fails the build before PyInstaller runs when a bundle-critical package is missing. It names the packages and the exact `pip install` command.
+  - `build-sidecar.ps1`, `build-windows.ps1` and `release-windows.ps1` use both.
+- **Self-check** (`apps/desktop/backend/echospeak_backend.py`): the packaged backend now also imports `ddgs`, `primp`, `lxml.html` and `trafilatura`, so a bundle without search or page reading fails the build.
+
 ## Website restored to the hero-tweaks version — 2026-10-07
 
 Public site only. `apps/web/src/site` is back to how it was after PR #57: the five-beat front page with little agents wandering behind Echo, the blue highlighter swipe under "Echo", and GitHub next to Download. This undoes the later website changes from #59, #60 and #61 (the orbiting crew, the scroll-driven intro and The Living Workspace) and removes `Workspace.tsx`, `runs.ts` and `runs.test.ts`. The app is unchanged.
