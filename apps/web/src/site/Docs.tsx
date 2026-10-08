@@ -43,7 +43,7 @@ const SECTIONS: Section[] = [
     title: "Creations",
     icon: "spark",
     body: <>
-      <p>In 10.3, images and videos have a home below Routines: <em>Creations</em>.</p>
+      <p>Images and videos you make with Echo have their own home: <em>Creations</em>, in the sidebar.</p>
       <Steps items={[<>Open <em>Creations › Creation settings</em> and enable creation. Choose Gemini for images, Veo or MiniMax for videos, or ComfyUI locally.</>, <>Add your provider key or connect a local server. Optional managed setup detects Windows NVIDIA hardware and downloads an isolated runtime and starter models after you choose to install.</>, <>Ask Echo to create an image or make a video in chat. Cloud requests ask approval before submission. The finished result appears in chat and your library.</>]} />
       <p>Preview, download, rename, archive and restore your creations. Open the original chat to return to the idea behind them.</p>
       <Tip>Cloud providers may charge for generation. Local models are large optional downloads and need compatible hardware. Stopping a job does not guarantee that provider processing or billing stops.</Tip>
@@ -78,6 +78,59 @@ const SECTIONS: Section[] = [
           <li><strong>Make your own agent:</strong> the <em>+</em> next to Agents. Give it a name, personality, model and allowed tools.</li>
         </ul>
         <GroupChatDiagram />
+      </>
+    ),
+  },
+  {
+    id: "memory",
+    title: "Memory",
+    icon: "memory",
+    body: (
+      <>
+        <p>Agents remember short, lasting facts about you, like “Prefers short answers” or “Partner is called Sam”. One fact per memory, so they stay easy to read and fix.</p>
+        <div className="doc-loop" aria-label="How a memory is saved">
+          <span>You mention something lasting</span><i>→</i><span>Echo saves one short fact</span><i>→</i><span>Recalled when it matters</span>
+        </div>
+        <ul className="doc-list">
+          <li><strong>What isn't saved:</strong> one-off requests, reminders, questions, things that only matter in the current chat, web content, and anything that looks like a password or key.</li>
+          <li><strong>Facts that change replace themselves:</strong> tell Echo you moved and the new city replaces the old one.</li>
+          <li><strong>Pinned facts</strong> ride along in every chat; the rest are recalled only when they relate to what you asked.</li>
+          <li><strong>You're in charge:</strong> <em>Settings › Advanced › Memory &amp; documents</em> shows everything, by kind. Edit, pin, change or delete any memory.</li>
+          <li><strong>Safety:</strong> if an agent read a web page or email in that chat, it asks before saving a memory, so nothing online can plant one.</li>
+        </ul>
+        <Tip>Your chats themselves are kept separately and searchable. Memory is only for the facts worth carrying between chats.</Tip>
+      </>
+    ),
+  },
+  {
+    id: "learning",
+    title: "Learning",
+    icon: "learn",
+    body: (
+      <>
+        <p>Agents learn from their own checked work. When a task is verified, the agent writes down a short lesson about what to repeat or avoid next time. This is an experimental preview.</p>
+        <ol className="doc-ladder" aria-label="How sure EchoSpeak is that a task worked">
+          {[["Claimed", "The agent said it was done"], ["Ran", "A tool actually ran"], ["Checked", "The result was read back or tested"], ["Double-checked", "Checked a second way"], ["You confirmed", "You pressed Worked"]].map(([t, d], i) => (
+            <li key={t} style={{ "--n": i + 1 } as React.CSSProperties}><b>{t}</b>{d}</li>
+          ))}
+        </ol>
+        <ul className="doc-list">
+          <li><strong>Lessons are advice only.</strong> They can never change permissions, approvals, tools, settings or code.</li>
+          <li><strong>You review the risky ones.</strong> Anything learned from web pages, email or other outside content waits for your approval.</li>
+          <li><strong>Everything has an undo.</strong> The <em>Learning</em> page shows each lesson, where it came from, and its history.</li>
+          <li><strong>Tell it how it went:</strong> the thumbs under a reply mean Worked or Didn't work. Agents learn from that too.</li>
+        </ul>
+      </>
+    ),
+  },
+  {
+    id: "routines",
+    title: "Routines",
+    icon: "clock",
+    body: (
+      <>
+        <p>Routines are tasks an agent runs on a schedule, or when you press Run. Each one gets its own chat, so the results are easy to find.</p>
+        <Steps items={[<>Open <em>Routines</em> in the sidebar and choose <em>New routine</em>.</>, <>Say what to do (“Every morning, summarize today's weather and top tech news”), pick a time and the agent.</>, <>Turn it on. Use the switch on its row to pause it, or <em>Run</em> to try it now.</>]} />
       </>
     ),
   },
@@ -131,6 +184,23 @@ const SECTIONS: Section[] = [
     ),
   },
   {
+    id: "git",
+    title: "Git & GitHub",
+    icon: "branch",
+    body: (
+      <>
+        <p>In a project folder that is a git repository, agents work the way a careful developer does.</p>
+        <ul className="doc-list">
+          <li><strong>They look first:</strong> agents see the branch and what changed before they touch anything.</li>
+          <li><strong>They work on a branch,</strong> stage the files they changed by name, and write clear commit messages.</li>
+          <li><strong>Pushing waits for you.</strong> Push, merge or close pull requests, create releases, rebase or throw away changes: each of these asks first.</li>
+          <li><strong>Never sneaky:</strong> no force-pushing and no discarding work they didn't make, unless you ask for exactly that.</li>
+          <li><strong>GitHub:</strong> install the GitHub CLI and run <code>gh auth login</code> once. Agents can then open pull requests, read issues and check why CI failed.</li>
+        </ul>
+      </>
+    ),
+  },
+  {
     id: "voice",
     title: "Voice",
     icon: "voice",
@@ -151,7 +221,7 @@ const SECTIONS: Section[] = [
         <ul className="doc-list">
           <li><strong>Stays on your PC:</strong> chats, memory, agents, settings and files.</li>
           <li><strong>Leaves your PC only when needed:</strong> messages go to your model provider if you use a cloud one (OpenAI, Gemini), and web searches and look-ups go to those sites. With a local model and no web tools, nothing leaves.</li>
-          <li><strong>Approvals:</strong> reading and searching just run. Deleting, sending messages and controlling your desktop wait for your OK.</li>
+          <li><strong>Approvals:</strong> reading and searching just run. Deleting, sending messages, pushing code and controlling your desktop wait for your OK, and the card shows the exact command.</li>
           <li><strong>Prompt-injection guard:</strong> after an agent reads a web page or email, anything that sends data out needs your approval, even if approvals are off. Your API keys are never sent anywhere. (Based on Meta's “Rule of Two”.)</li>
           <li><strong>Strangers on Discord</strong> only get look-up tools, never your files, memory or terminal.</li>
         </ul>
@@ -250,7 +320,7 @@ export function Docs() {
             <Face size={48} />
             <div>
               <h1>EchoSpeak docs</h1>
-              <p>Everything you need, in plain words.</p>
+              <p>Everything you need, in plain words. New here? Start with <Link to="/docs/getting-started">Getting started</Link>.</p>
             </div>
           </header>
           {SECTIONS.map((s) => (
