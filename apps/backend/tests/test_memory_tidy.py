@@ -123,3 +123,26 @@ def test_chat_transcripts_are_left_alone():
     memory_tidy._report_path().write_text('{"tracking_since": "2025-01-01T00:00:00"}', encoding="utf-8")
     report = memory_tidy.tidy(memory, now=NOW)
     assert report["merged"] == report["retired"] == [] and all(r["active"] for r in memory._records.values())
+
+
+def test_a_memory_edited_during_the_pass_is_left_alone(monkeypatch):
+    memory = FakeMemory(rec("a", "Prefers short answers.", days_old=10), rec("b", "Prefers short answers", days_old=2))
+    real_plan = memory_tidy.plan
+
+    def plan_then_user_edits(records, **kwargs):
+        actions = real_plan(records, **kwargs)
+        memory._records["a"]["updated_at"] = "2026-10-08T12:30:00"  # the user edited it meanwhile
+        return actions
+
+    monkeypatch.setattr(memory_tidy, "plan", plan_then_user_edits)
+    report = memory_tidy.tidy(memory, now=NOW)
+    assert report["merged"] == [] and memory._records["a"]["active"]
+
+
+def test_many_memories_tidy_quickly():
+    import time as _time
+
+    memory = FakeMemory(*[rec(f"m{i}", f"Fact number {i} about topic {i % 37} and detail {i * 7}", days_old=5) for i in range(1500)])
+    started = _time.perf_counter()
+    memory_tidy.tidy(memory, now=NOW)
+    assert _time.perf_counter() - started < 30

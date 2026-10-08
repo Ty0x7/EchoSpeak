@@ -43,6 +43,13 @@ try:
 except Exception:
     BM25Okapi = None
 
+
+def _pin_saved_index(folder) -> None:
+    """Record the saved index.pkl's hash so a tampered one is never unpickled (agent/index_integrity.py)."""
+    from agent.index_integrity import pin
+
+    pin(folder)
+
 class DocumentStore:
     """Persistent FAISS-backed document store for RAG."""
 
@@ -412,6 +419,9 @@ class DocumentStore:
     def _load_or_create_vectorstore(self) -> FAISS:
         if self.index_dir.exists() and any(self.index_dir.iterdir()):
             try:
+                from agent.index_integrity import check as _check_index
+
+                _check_index(self.index_dir)  # a pickle changed outside EchoSpeak is never loaded
                 vs = FAISS.load_local(
                     str(self.index_dir),
                     self.embeddings,
@@ -469,6 +479,7 @@ class DocumentStore:
                 metadatas.append({**dict(meta), "doc_id": doc_id, "chunk": index})
         rebuilt = FAISS.from_texts(texts, self.embeddings, metadatas=metadatas)
         rebuilt.save_local(str(self.index_dir))
+        _pin_saved_index(self.index_dir)
         return rebuilt
 
     def rebuild_index(self) -> dict[str, Any]:
@@ -593,6 +604,7 @@ class DocumentStore:
 
         self.vector_store.add_documents(documents)
         self.vector_store.save_local(str(self.index_dir))
+        _pin_saved_index(self.index_dir)
 
         meta = {
             "id": doc_id,
@@ -688,6 +700,7 @@ class DocumentStore:
         else:
             self.vector_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
         self.vector_store.save_local(str(self.index_dir))
+        _pin_saved_index(self.index_dir)
 
         for doc_id in list(self._docs.keys()):
             if doc_id in id_set:
@@ -703,6 +716,7 @@ class DocumentStore:
             return
         self.vector_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
         self.vector_store.save_local(str(self.index_dir))
+        _pin_saved_index(self.index_dir)
         ids = list(self._docs)
         self._docs = {}
         self._save_meta()
