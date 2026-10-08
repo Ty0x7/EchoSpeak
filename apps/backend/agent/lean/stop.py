@@ -22,6 +22,7 @@ PAUSED_REPLY = "All agents are paused right now: the owner pressed Stop everythi
 _lock = threading.Lock()
 _running: set[threading.Event] = set()
 _state: dict[str, Any] | None = None
+_last_activity = time.time()
 
 
 def _path() -> Path:
@@ -66,13 +67,22 @@ def status() -> dict[str, Any]:
 @contextmanager
 def tracking(cancel: threading.Event) -> Iterator[None]:
     """Register a running turn so Stop everything can cancel it."""
+    global _last_activity
     with _lock:
         _running.add(cancel)
+        _last_activity = time.time()
     try:
         yield
     finally:
         with _lock:
             _running.discard(cancel)
+            _last_activity = time.time()
+
+
+def idle_seconds() -> float:
+    """How long no agent has been running (0 while one is). Background upkeep waits for quiet."""
+    with _lock:
+        return 0.0 if _running else max(0.0, time.time() - _last_activity)
 
 
 def stop_everything(reason: str = "") -> dict[str, Any]:

@@ -1610,6 +1610,21 @@ class AgentMemory:
             return False
 
     @_synchronized_records()
+    @_synchronized_records()
+    def note_recalled(self, ids: List[str]) -> int:
+        """Remember when facts were last used, so idle clean-up can retire ones nobody needs."""
+        now = datetime.now().isoformat()
+        changed = 0
+        for memory_id in dict.fromkeys(str(i) for i in ids or [] if i):
+            record = self._records.get(memory_id)
+            if record and bool(record.get("active", True)):
+                record["last_recalled_at"] = now
+                record["recall_count"] = int(record.get("recall_count") or 0) + 1
+                changed += 1
+        if changed:
+            self._save_records()
+        return changed
+
     def list_items(
         self,
         offset: int = 0,

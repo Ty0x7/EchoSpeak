@@ -1429,10 +1429,14 @@ class LeanSession:
             from agent.state import get_state_store
 
             project_id = str(get_state_store().get_thread_state(self.session_id).active_project_id or "")
-            return list(memory.runtime_memory_projection(
+            rows = list(memory.runtime_memory_projection(
                 query, session_id=self.session_id, project_id=project_id,
                 project_path=self.project_root or None, limit=limit,
             ) or [])
+            if rows and hasattr(memory, "note_recalled"):
+                # Used facts stay; ones nobody recalls for months are retired at idle (agent/lean/memory_tidy.py).
+                memory.note_recalled([str(r.get("memory_id") or "") for r in rows])
+            return rows
         except Exception:
             logger.debug("Lean memory recall failed", exc_info=True)
             return []
@@ -1585,6 +1589,10 @@ def run_lean_query(
     # Stop everything pauses routines, channels and inbound A2A; the owner's own chats keep working.
     if source not in INTERACTIVE_SOURCES and stop.paused():
         return {"response": stop.PAUSED_REPLY, "success": False, "paused": True}
+    # Once a day, after ten quiet minutes: merge, retire and flag memories (agent/lean/memory_tidy.py).
+    from agent.lean import memory_tidy
+
+    memory_tidy.ensure_scheduler(lambda: getattr(agent, "memory", None))
     room = get_room_store().by_thread(session_id)
     session = LeanSession(
         agent=agent,

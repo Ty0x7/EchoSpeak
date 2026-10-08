@@ -309,6 +309,52 @@ def approve_mcp_server(name: str) -> dict[str, Any]:
     return {"ok": True, "status": status}
 
 
+class ContradictionResolveRequest(BaseModel):
+    a: str
+    b: str
+    keep: str = Field(description="The id of the memory to keep, or 'both'")
+
+
+def _memory_store():
+    from api.deps import get_agent
+
+    memory = getattr(get_agent(), "memory", None)
+    if memory is None or not hasattr(memory, "_records_lock"):
+        raise HTTPException(status_code=503, detail="Memory isn't available right now")
+    return memory
+
+
+@router.get("/memory/tidy")
+def memory_tidy_status() -> dict[str, Any]:
+    """The last idle clean-up and the contradictions waiting for the owner (agent/lean/memory_tidy.py)."""
+    from agent.lean import memory_tidy
+
+    return {"report": memory_tidy.last_report(), "contradictions": memory_tidy.open_contradictions(_memory_store())}
+
+
+@router.post("/memory/tidy")
+def memory_tidy_now() -> dict[str, Any]:
+    from agent.lean import memory_tidy
+
+    memory = _memory_store()
+    report = memory_tidy.tidy(memory)
+    return {"report": report, "contradictions": memory_tidy.open_contradictions(memory)}
+
+
+@router.post("/memory/contradictions/resolve")
+def resolve_contradiction(request: ContradictionResolveRequest) -> dict[str, Any]:
+    from agent.lean import memory_tidy
+
+    memory = _memory_store()
+    try:
+        memory_tidy.resolve(memory, request.a, request.b, request.keep)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Memory not found") from exc
+    return {"ok": True, "contradictions": memory_tidy.open_contradictions(memory)}
+
+
 @router.post("/stop-all")
 def stop_all() -> dict[str, Any]:
     """Stop everything: cancel every running agent and pause routines, channels and A2A."""
