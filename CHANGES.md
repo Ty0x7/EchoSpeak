@@ -1,5 +1,16 @@
 # Changes
 
+## Website motion — 2026-10-07
+
+Public site only (`apps/web/src/site`); the app version is unchanged.
+
+- **Dark mode:** the blue glows are gone (hero, download card, approval card, crew background). The only light is a soft white one behind Echo.
+- **Orbiting crew** (`Home.tsx` `Orbiters`): the little agents circle Echo on their own ellipses, drawn with the Web Animations API. They stay in his column, clear of the headline and the speech bubble, which moved to the column's top-left.
+- **"Echo" underline:** a digital strip that types itself out in pixel blocks, with a blinking caret and a light sweep that runs along it.
+- **Scroll story** (`Watch`): on screens 900px and wider, the section is a sticky stage. The scroll position plays each scenario in turn (one screen each), with a big line that slides in per scenario. Tabs jump to a scenario. Phones and reduced motion keep the timed autoplay.
+- **Word band** (`Band`): a band of words between the story and the crew drifts sideways as you scroll past it.
+- **Reveals** (`Reveal`): the crew, the safety copy and the download card slide or rise in as they reach the screen. Reduced motion turns them off.
+
 ## v11.4.0 — 2026-10-07
 
 User-facing notes: [EchoSpeak 11.4.0](docs/releases/v11.4.0.md).
