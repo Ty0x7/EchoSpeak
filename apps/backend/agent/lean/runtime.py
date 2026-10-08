@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import git_context, memory_quality, recall, settings, soul, summaries
+from agent.lean import agent_skills, git_context, memory_quality, recall, settings, soul, summaries
 from agent.lean.job import ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, needs_action, parse_review
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import AgentPersona, get_persona_store
@@ -917,6 +917,7 @@ class LeanSession:
             project_brief=project_brief,
             project_evidence=project_evidence,
             playbook=learned.section,
+            skills="" if guest else agent_skills.prompt_section(),
         )
         turn = LeanTurn(
             client=self._client_for(persona),
@@ -1071,6 +1072,8 @@ class LeanSession:
         from agent.lean.ask import ask_user_tool
 
         tools.append(ask_user_tool())
+        if agent_skills.approved():
+            tools.append(agent_skills.read_skill_tool())
         if memory is not None:
             def memory_save(args: dict[str, Any]) -> str:
                 fact = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))

@@ -264,6 +264,81 @@ def decide_approval(approval_id: str, request: ApprovalDecisionRequest) -> dict[
     return {"ok": True, "approval": approval.public()}
 
 
+class SkillImportRequest(BaseModel):
+    path: str = Field(default="", description="A folder that contains SKILL.md")
+    text: str = Field(default="", description="The contents of a SKILL.md file")
+
+
+class SkillApproveRequest(BaseModel):
+    digest: str = Field(default="", description="The digest shown when the skill was reviewed")
+
+
+class SkillFromLessonRequest(BaseModel):
+    lesson_id: str
+    name: str = ""
+
+
+@router.get("/agent-skills")
+def list_agent_skills() -> dict[str, Any]:
+    """Open-format Agent Skills (agent/lean/agent_skills.py), with their review status."""
+    from agent.lean import agent_skills
+
+    return {"items": [skill.public(with_body=True) for skill in agent_skills.list_skills()]}
+
+
+@router.post("/agent-skills/import")
+def import_agent_skill(request: SkillImportRequest) -> dict[str, Any]:
+    from agent.lean import agent_skills
+
+    try:
+        if request.text.strip():
+            skill = agent_skills.import_text(request.text)
+        elif request.path.strip():
+            skill = agent_skills.import_folder(request.path)
+        else:
+            raise ValueError("Give a folder or paste a SKILL.md.")
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "skill": skill.public(with_body=True)}
+
+
+@router.post("/agent-skills/from-lesson")
+def agent_skill_from_lesson(request: SkillFromLessonRequest) -> dict[str, Any]:
+    from agent import learning
+    from agent.lean import agent_skills
+
+    lesson = learning.get_experience_store().get_lesson(request.lesson_id)
+    if lesson is None:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    try:
+        skill = agent_skills.skill_from_lesson(lesson, request.name.strip())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "skill": skill.public(with_body=True)}
+
+
+@router.post("/agent-skills/{name}/approve")
+def approve_agent_skill(name: str, request: SkillApproveRequest) -> dict[str, Any]:
+    from agent.lean import agent_skills
+
+    try:
+        skill = agent_skills.approve(name, request.digest.strip())
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"ok": True, "skill": skill.public(with_body=True)}
+
+
+@router.delete("/agent-skills/{name}")
+def remove_agent_skill(name: str) -> dict[str, Any]:
+    from agent.lean import agent_skills
+
+    if not agent_skills.remove(name):
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return {"ok": True}
+
+
 @router.get("/agents")
 def list_agents() -> dict[str, Any]:
     return {"items": [_agent_public(agent) for agent in get_persona_store().list()]}

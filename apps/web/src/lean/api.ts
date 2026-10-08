@@ -10,6 +10,16 @@ import type {
   ReliabilityRow,
 } from "./types";
 
+export type AgentSkillInfo = {
+  name: string;
+  description: string;
+  status: "approved" | "needs_review" | "changed" | "invalid";
+  problem: string;
+  files: string[];
+  digest: string;
+  body?: string;
+};
+
 async function json<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
     let detail = `HTTP ${resp.status}`;
@@ -88,6 +98,26 @@ export const leanApi = (apiBase: string) => ({
   async lessonAction(id: string, action: "approve" | "reject" | "promote" | "retire" | "restore"): Promise<LearningLesson> {
     const data = await json<{ lesson: LearningLesson }>(await fetch(`${apiBase}/lean/learning/lessons/${encodeURIComponent(id)}/action`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action }) }));
     return data.lesson;
+  },
+  /** Turn a proven lesson into a draft Agent Skill (it still needs approving in Settings › Skills). */
+  async skillFromLesson(lessonId: string): Promise<AgentSkillInfo> {
+    const data = await json<{ skill: AgentSkillInfo }>(await fetch(`${apiBase}/lean/agent-skills/from-lesson`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lesson_id: lessonId }) }));
+    return data.skill;
+  },
+  // ── agent skills (open SKILL.md format) ───────────────────────────────
+  async agentSkills(): Promise<AgentSkillInfo[]> {
+    return (await json<{ items: AgentSkillInfo[] }>(await fetch(`${apiBase}/lean/agent-skills`, { cache: "no-store" }))).items || [];
+  },
+  async importAgentSkill(input: { path?: string; text?: string }): Promise<AgentSkillInfo> {
+    const data = await json<{ skill: AgentSkillInfo }>(await fetch(`${apiBase}/lean/agent-skills/import`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
+    return data.skill;
+  },
+  async approveAgentSkill(name: string, digest: string): Promise<AgentSkillInfo> {
+    const data = await json<{ skill: AgentSkillInfo }>(await fetch(`${apiBase}/lean/agent-skills/${encodeURIComponent(name)}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ digest }) }));
+    return data.skill;
+  },
+  async removeAgentSkill(name: string): Promise<void> {
+    await json(await fetch(`${apiBase}/lean/agent-skills/${encodeURIComponent(name)}`, { method: "DELETE" }));
   },
   async editLesson(id: string, patch: { title?: string; text?: string }): Promise<LearningLesson> {
     const data = await json<{ lesson: LearningLesson }>(await fetch(`${apiBase}/lean/learning/lessons/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) }));

@@ -389,6 +389,10 @@ function LessonRow({ lesson, agentName, open, onToggle, api, act }: {
       <div className="es-learn-actions">
         {lesson.status === "pending_review" ? <>{action("approve", "Approve", true)}{action("reject", "Reject")}</> : null}
         {lesson.status === "probation" ? action("promote", "Mark proven") : null}
+        {lesson.status === "established" ? (
+          <button type="button" className="es-btn es-btn-sm" title="Save this proven lesson as an Agent Skill (you approve it in Settings › Skills)"
+            onClick={() => void act(() => api.skillFromLesson(lesson.id), "Made a draft skill. Review and approve it in Settings › Skills.")}>Make a skill</button>
+        ) : null}
         {lesson.status === "probation" || lesson.status === "established" ? action("retire", "Retire") : null}
         {lesson.status === "retired" || lesson.status === "quarantined" ? action("restore", "Restore") : null}
         <button type="button" className="es-btn es-btn-sm es-btn-quiet" aria-expanded={open} onClick={onToggle}>{open ? "Hide" : "Details"}</button>
