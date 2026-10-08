@@ -690,6 +690,8 @@ class LeanTurn:
         target = call_target(args)
         if target:
             item["target"] = target
+        # A short, redacted copy of the arguments, so a saved chat can become a replay case (agent/lean/replays.py).
+        item["args"] = policy.redact_payload(safe_args_preview(args, 200))
         self.timeline.append(item)
         self.emit({"type": "tool_start", "step": step, "id": call.id, "name": name, "label": label,
                    "input": json.dumps(safe_args_preview(args, 200), ensure_ascii=False)[:400]})

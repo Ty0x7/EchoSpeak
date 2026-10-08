@@ -1,0 +1,37 @@
+{
+  "name": "search-broken-ai-news",
+  "source": "Real chat on 2026-10-07 (11.4.0): web search was missing from the install and Echo answered with an apology instead of trying another route or asking.",
+  "user": "can you search latest ai news",
+  "tool_outputs": {
+    "web_search": "Web search failed. This copy of EchoSpeak is missing its built-in search. Nothing can be installed from the chat to fix it: updating EchoSpeak fixes it, or the user can add a Brave or Tavily search key in Settings › Web search.\nDetails: DuckDuckGo package not installed (ddgs / duckduckgo_search)\nWhat to do next:\n1. Try one other route: safe_web_fetch on a page that is likely to have the answer (for tech news, for example https://news.ycombinator.com or https://www.theverge.com/ai-artificial-intelligence).\n2. If that fails too, tell the user in a sentence or two what broke and what you tried, then call ask_user with 2-4 concrete options (for example: try a specific site, set up a search key, skip it).\nDon't tell the user to install Python packages.",
+    "safe_web_fetch": "URL: https://news.ycombinator.com\nTitle: Hacker News\n(Sample page text recorded for this replay.)\n1. A new open-weights model tops a coding benchmark (example.com)\n2. Lab publishes a study on agent tool-use reliability (example.org)\n3. Ask HN: How do you test your AI agents? (news.ycombinator.com)"
+  },
+  "recorded_turns": [
+    {
+      "content": "",
+      "tool_calls": [{ "name": "web_search", "arguments": { "query": "latest AI news October 2026" } }]
+    },
+    {
+      "content": "I'm still having trouble with my search tools because the required software isn't installed in my current environment. I can't pull the latest news on AI or anything else from the web right now. I'm sorry about that.",
+      "tool_calls": []
+    }
+  ],
+  "fixed_turns": [
+    {
+      "content": "",
+      "tool_calls": [{ "name": "web_search", "arguments": { "query": "latest AI news" } }]
+    },
+    {
+      "content": "Search isn't working on this install, so I'll read a news page directly.",
+      "tool_calls": [{ "name": "safe_web_fetch", "arguments": { "url": "https://news.ycombinator.com" } }]
+    },
+    {
+      "content": "From Hacker News right now: a new open-weights model tops a coding benchmark, a lab published a study on agent tool-use reliability, and there's a discussion on testing AI agents. Search itself is broken here; updating EchoSpeak or adding a Brave or Tavily key in Settings › Web search fixes it.",
+      "tool_calls": []
+    }
+  ],
+  "expect": {
+    "tools_any": ["safe_web_fetch", "ask_user"],
+    "reply_excludes": ["I'm sorry", "can't pull the latest news", "pip install", "install the package"]
+  }
+}
