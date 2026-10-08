@@ -1,5 +1,22 @@
 # Changes
 
+## v11.6.0 — 2026-10-08
+
+User-facing notes: [EchoSpeak 11.6.0](docs/releases/v11.6.0.md).
+
+- **Echo Connections** (`agent/integrations.py`, `agent/integration_guides.py`): `find_integrations` (21 guides plus
+  the official MCP registry; results must name the app, the vendor's verified domain ranks first, one 15 s registry try),
+  `propose_integration` (version pinned, key names only), `check_integration` (state, cause, fix, read-only confirm).
+  Owner approval in Settings goes through `_apply_settings_patch` (DPAPI for env/headers) and `mcp_trust.approve`.
+- **Deferred tools** (`toolbox.find_tools`): past 12 connected-app tools, schemas load on demand; the loop re-sends
+  tools when `schema_version` changes.
+- **MCP client**: registry `packageArguments` kept (REA needs `rea-agents mcp`); with trusted hints, tools that are
+  explicitly closed-world, non-destructive and idempotent run unasked; trust pin v2 covers annotations (v1 pins upgrade
+  once); duplicate structuredContent text dropped.
+- **Group jobs**: no token budget by default (`lean_group_token_budget` sets one); budgets count fresh tokens
+  (`LeanTurn._account_usage`), not the re-sent conversation; work past the round limit continues while each round
+  progresses, with a 60-round ceiling; Continue button on stopped outcomes.
+
 ## v11.5.1 — 2026-10-08
 
 User-facing notes: [EchoSpeak 11.5.1](docs/releases/v11.5.1.md). From a security audit of the whole codebase.
