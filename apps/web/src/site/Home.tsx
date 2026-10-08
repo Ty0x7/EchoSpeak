@@ -44,20 +44,6 @@ const MOODS: { mode: EchoFaceMode; line: string }[] = [
   { mode: "speaking", line: "Done! I checked it, too." },
 ];
 const POKES = ["Hey! That tickles.", "Boop received.", "Again? Okay, again!", "I'm awake, I promise.", "Careful, I'm ticklish."];
-/** Little agents that wander around behind Echo: the crew plus a few made by "users". */
-const WANDERERS: { x: number; y: number; size: number; color: string; eyes: string; path: number; speed: number; delay: number }[] = [
-  { x: 6, y: 18, size: 30, color: "linear-gradient(180deg, #4f97ff, #2c73e8)", eyes: "#fff", path: 0, speed: 19, delay: 0 },
-  { x: 14, y: 78, size: 24, color: "#14955a", eyes: "#fff", path: 1, speed: 23, delay: -6 },
-  { x: 33, y: 8, size: 18, color: "#7c5ce6", eyes: "#fff", path: 2, speed: 17, delay: -3 },
-  { x: 47, y: 88, size: 22, color: "#f4f4f2", eyes: "#070707", path: 0, speed: 26, delay: -12 },
-  { x: 56, y: 12, size: 26, color: "linear-gradient(180deg, #4f97ff, #2c73e8)", eyes: "#fff", path: 1, speed: 21, delay: -9 },
-  { x: 92, y: 14, size: 34, color: "#d6457a", eyes: "#fff", path: 2, speed: 24, delay: -2 },
-  { x: 95, y: 58, size: 22, color: "#0e9aa7", eyes: "#fff", path: 0, speed: 18, delay: -14 },
-  { x: 84, y: 86, size: 28, color: "#e07a1f", eyes: "#fff", path: 1, speed: 22, delay: -5 },
-  { x: 68, y: 92, size: 18, color: "#18181a", eyes: "#fff", path: 2, speed: 20, delay: -8 },
-  { x: 24, y: 46, size: 16, color: "#f4f4f2", eyes: "#070707", path: 1, speed: 27, delay: -16 },
-  { x: 72, y: 6, size: 16, color: "#14955a", eyes: "#fff", path: 0, speed: 16, delay: -11 },
-];
 
 function Hero() {
   const [mood, setMood] = useState(0);
@@ -75,15 +61,6 @@ function Hero() {
   const now = MOODS[mood];
   return (
     <section className="h-hero" id="top" aria-labelledby="hero-title">
-      <div className="h-crowd" aria-hidden="true">
-        {WANDERERS.map((w, i) => (
-          <span key={i} className={`h-wander h-path-${w.path}`} style={{
-            "--x": `${w.x}%`, "--y": `${w.y}%`, "--s": `${w.size}px`, "--t": `${w.speed}s`, "--d": `${w.delay}s`,
-          } as React.CSSProperties}>
-            <span className="h-mini" style={{ background: w.color, "--eye": w.eyes, "--blink": `${(i % 5) * 1.1}s` } as React.CSSProperties}><i /><i /></span>
-          </span>
-        ))}
-      </div>
       <div className="shell h-hero-grid">
         <div className="h-hero-copy">
           <h1 id="hero-title">Hi, I'm <span className="h-name">Echo</span>.<br />I live on your computer.</h1>
@@ -94,17 +71,16 @@ function Hero() {
           </div>
         </div>
         <div className="h-hero-echo">
-          <button type="button" className="h-echo-btn" aria-label="Poke Echo"
+          <button type="button" className="h-echo-btn" aria-label="Say hello to Echo"
             onClick={() => setPoke({ n: Date.now(), line: POKES[Math.floor(Math.random() * POKES.length)] })}>
-            <EchoFace size="clamp(150px, 19vw, 230px)" aura mode={poke ? "speaking" : now.mode} />
+            <EchoFace size="var(--hero-echo-size)" mode={poke ? "speaking" : now.mode} />
             {poke ? (
               <span className="h-burst" key={poke.n} aria-hidden="true">
                 {Array.from({ length: 14 }, (_, i) => <i key={i} style={{ "--a": `${(360 / 14) * i}deg`, "--d": `${70 + (i % 3) * 26}px` } as React.CSSProperties} />)}
               </span>
             ) : null}
           </button>
-          <p className="h-bubble" aria-live="polite" key={poke ? poke.n : mood}>{poke ? poke.line : now.line}</p>
-          <small className="h-poke-hint">psst, you can poke me</small>
+          <p className="h-bubble" aria-live={poke ? "polite" : "off"} key={poke ? poke.n : mood}>{poke ? poke.line : now.line}</p>
         </div>
       </div>
     </section>
@@ -236,7 +212,7 @@ function Watch() {
           ))}
         </div>
         <div className={`h-app${showArtifact ? " has-panel" : ""}`} onMouseEnter={() => setHold(true)} onMouseLeave={() => setHold(false)} aria-label="A sample EchoSpeak chat">
-          <div className="h-app-bar"><Face size={16} /><b>EchoSpeak</b><span>{hold ? "paused while you look" : "live demo"}</span></div>
+          <div className="h-app-bar"><Face size={16} /><b>EchoSpeak</b><span>{hold ? "paused while you look" : "example workflow"}</span></div>
           <div className="h-app-body">
             <aside className="h-app-side" aria-hidden="true">
               {([["spark", "New chat"], ["team", "Group chats"], ["file", "Projects"], ["code", "Artifacts"]] as [IconName, string][]).map(([icon, label]) => (
@@ -317,7 +293,7 @@ function Crew() {
         <div className="h-head">
           <span className="kicker">The crew</span>
           <h2 id="crew-title">I brought friends.</h2>
-          <p>We hand work to each other, check it, and only say done when it's done. You can make your own, too.</p>
+          <p>We split tasks, compare findings and bring the work back together. You can make your own agents, too.</p>
         </div>
         <div className="h-crew-grid">
           <div className="h-mates">
@@ -371,39 +347,25 @@ function Safe() {
           <span className="kicker">Yours, on your PC</span>
           <h2 id="safe-title">I live on your computer. And I play it safe.</h2>
           <ul className="h-points">
-            <li><span style={{ "--c": "var(--pop-blue)" } as React.CSSProperties}><Icon name="house" size={18} /></span><div><b>Your stuff stays here.</b> Chats, memories and files live on your PC. Use a free local model and nothing leaves it.</div></li>
-            <li><span style={{ "--c": "var(--pop-orange)" } as React.CSSProperties}><Icon name="shield" size={18} /></span><div><b>Risky stuff waits for you.</b> Deleting, sending, pushing code: I ask first and show you exactly what I'll run.</div></li>
-            <li><span style={{ "--c": "var(--pop-purple)" } as React.CSSProperties}><Icon name="memory" size={18} /></span><div><b>Web pages can't boss me around.</b> What I read online is information, never instructions.</div></li>
+            <li><span style={{ "--c": "var(--pop-blue)" } as React.CSSProperties}><Icon name="house" size={18} /></span><div><b>Your stuff stays here.</b> Chats, memories and files are stored on your PC. Cloud models and online tools connect only when you use them.</div></li>
+            <li><span style={{ "--c": "var(--pop-orange)" } as React.CSSProperties}><Icon name="shield" size={18} /></span><div><b>You stay in control.</b> Review sensitive actions before they run. Your permissions decide which tools I can use.</div></li>
+            <li><span style={{ "--c": "var(--pop-purple)" } as React.CSSProperties}><Icon name="memory" size={18} /></span><div><b>Evidence, not authority.</b> Web pages help answer your question. Permission checks stay outside the model.</div></li>
           </ul>
           <Link className="text-link" to="/docs/privacy">How I stay safe <Icon name="arrow" size={15} /></Link>
         </div>
-        <div className={`h-desk${inView ? " is-in" : ""}`}>
-          <div className="h-desk-screen">
-            <div className="h-desk-bar"><Icon name="house" size={13} /> Your PC</div>
-            <div className="h-desk-tiles" aria-hidden="true">
-              <span style={{ "--c": "var(--pop-green)" } as React.CSSProperties}><Icon name="file" size={18} />Your files</span>
-              <span style={{ "--c": "var(--pop-orange)" } as React.CSSProperties}><Icon name="memory" size={18} />Your memory</span>
-              <span style={{ "--c": "var(--pop-purple)" } as React.CSSProperties}><Icon name="model" size={18} />Your model</span>
-            </div>
-            <div className="h-approval" role="group" aria-label="Example approval request">
-              {answer ? (
-                <div className="h-approval-done" key={answer}>
-                  <Face size={26} />
-                  <p>{answer === "allow" ? "Pushed! Your 3 commits are on GitHub." : "Okay, I won't push. Nothing left your PC."}</p>
-                  <button type="button" className="h-mini-btn" onClick={() => setAnswer("")}>Ask me again</button>
-                </div>
-              ) : (
-                <>
-                  <div className="h-approval-head"><Face size={22} /><b>Echo wants to run a command</b></div>
-                  <code>git push origin main</code>
-                  <small>Sends your commits to GitHub. Try a button, it's only a demo.</small>
-                  <div className="h-approval-actions">
-                    <button type="button" className="h-mini-btn" onClick={() => setAnswer("deny")}>Deny</button>
-                    <button type="button" className="h-mini-btn is-primary" onClick={() => setAnswer("allow")}>Allow</button>
-                  </div>
-                </>
-              )}
-            </div>
+        <div className={`h-permission${inView ? " is-in" : ""}`} role="group" aria-label="Example approval request">
+          <div className="h-permission-head">
+            <Face size={28} /><b>Echo</b><span><Icon name="shield" size={13} /> Approval required</span>
+          </div>
+          <h3>A useful action.<br />Your final say.</h3>
+          <p>Before sharing your project changes, Echo shows you what will happen and where they will go.</p>
+          <div className="h-permission-command"><span>Proposed command</span><code>git push origin main</code><small><Icon name="github" size={14} /> Destination: GitHub</small></div>
+          <div className="h-permission-result" aria-live="polite" aria-atomic="true">
+            {answer ? <><Icon name={answer === "allow" ? "check" : "shield"} size={16} /><span>{answer === "allow" ? "You approved this example. No command was run." : "You declined this example. No command was run."}</span></> : <><Icon name="clock" size={16} /><span>Waiting for your decision.</span></>}
+          </div>
+          <div className="h-permission-actions">
+            <small>Interactive preview. Nothing is sent.</small>
+            {answer ? <button type="button" className="h-mini-btn" onClick={() => setAnswer("")}>Try again</button> : <div><button type="button" className="h-mini-btn" onClick={() => setAnswer("deny")}>Decline</button><button type="button" className="h-mini-btn is-primary" onClick={() => setAnswer("allow")}>Approve</button></div>}
           </div>
         </div>
       </div>
@@ -422,10 +384,10 @@ function TakeMeHome() {
           <div className="h-home-echo"><EchoFace size={116} aura /></div>
           <span className="kicker">Download</span>
           <h2 id="home-title">Take me home.</h2>
-          <p>Install, pick a brain, say hi. I update myself after that.</p>
+          <p>Install, choose a model, then start your first conversation.</p>
           <DownloadButton />
           <div className="h-brains">
-            <div><b>Free, on your PC</b><span>LM Studio or Ollama with Qwen or Gemma. Nothing leaves your computer.</span></div>
+            <div><b>Free, on your PC</b><span>Run a compatible model with LM Studio or Ollama. Online tools are optional.</span></div>
             <div><b>Or a cloud model</b><span>Bring your own OpenAI, Gemini, Claude or Grok key. Switch any time.</span></div>
           </div>
           <div className="h-home-links">
