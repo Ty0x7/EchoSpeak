@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { EchoFace, echoFaceStyles, type EchoFaceMode } from "../components/EchoFace";
-import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, useScrollTo, type IconName } from "./Chrome";
-import { useLatestRelease } from "./release";
+import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
+import { GITHUB_URL, useLatestRelease } from "./release";
 import "./site.css";
 import "./home.css";
 
@@ -44,18 +44,22 @@ const MOODS: { mode: EchoFaceMode; line: string }[] = [
   { mode: "speaking", line: "Done! I checked it, too." },
 ];
 const POKES = ["Hey! That tickles.", "Boop received.", "Again? Okay, again!", "I'm awake, I promise.", "Careful, I'm ticklish."];
-const ORBIT: { icon: IconName; label: string; color: string }[] = [
-  { icon: "research", label: "Search", color: "var(--pop-blue)" },
-  { icon: "file", label: "Files", color: "var(--pop-green)" },
-  { icon: "terminal", label: "Terminal", color: "var(--pop-purple)" },
-  { icon: "image", label: "Images", color: "var(--pop-pink)" },
-  { icon: "memory", label: "Memory", color: "var(--pop-orange)" },
-  { icon: "voice", label: "Voice", color: "var(--pop-teal)" },
+/** Little agents that wander around behind Echo: the crew plus a few made by "users". */
+const WANDERERS: { x: number; y: number; size: number; color: string; eyes: string; path: number; speed: number; delay: number }[] = [
+  { x: 6, y: 18, size: 30, color: "linear-gradient(180deg, #4f97ff, #2c73e8)", eyes: "#fff", path: 0, speed: 19, delay: 0 },
+  { x: 14, y: 78, size: 24, color: "#14955a", eyes: "#fff", path: 1, speed: 23, delay: -6 },
+  { x: 33, y: 8, size: 18, color: "#7c5ce6", eyes: "#fff", path: 2, speed: 17, delay: -3 },
+  { x: 47, y: 88, size: 22, color: "#f4f4f2", eyes: "#070707", path: 0, speed: 26, delay: -12 },
+  { x: 56, y: 12, size: 26, color: "linear-gradient(180deg, #4f97ff, #2c73e8)", eyes: "#fff", path: 1, speed: 21, delay: -9 },
+  { x: 92, y: 14, size: 34, color: "#d6457a", eyes: "#fff", path: 2, speed: 24, delay: -2 },
+  { x: 95, y: 58, size: 22, color: "#0e9aa7", eyes: "#fff", path: 0, speed: 18, delay: -14 },
+  { x: 84, y: 86, size: 28, color: "#e07a1f", eyes: "#fff", path: 1, speed: 22, delay: -5 },
+  { x: 68, y: 92, size: 18, color: "#18181a", eyes: "#fff", path: 2, speed: 20, delay: -8 },
+  { x: 24, y: 46, size: 16, color: "#f4f4f2", eyes: "#070707", path: 1, speed: 27, delay: -16 },
+  { x: 72, y: 6, size: 16, color: "#14955a", eyes: "#fff", path: 0, speed: 16, delay: -11 },
 ];
-const BITS = Array.from({ length: 18 }, (_, i) => i);
 
 function Hero() {
-  const scrollTo = useScrollTo();
   const [mood, setMood] = useState(0);
   const [poke, setPoke] = useState<{ n: number; line: string } | null>(null);
   useEffect(() => {
@@ -71,30 +75,25 @@ function Hero() {
   const now = MOODS[mood];
   return (
     <section className="h-hero" id="top" aria-labelledby="hero-title">
-      <div className="h-bits" aria-hidden="true">
-        {BITS.map((i) => <i key={i} style={{
-          "--x": `${(i * 37 + 7) % 100}%`, "--y": `${(i * 53 + 11) % 100}%`, "--s": `${8 + (i % 4) * 4}px`,
-          "--t": `${7 + (i % 5) * 1.6}s`, "--d": `${(i % 7) * -1.3}s`,
-        } as React.CSSProperties} />)}
+      <div className="h-crowd" aria-hidden="true">
+        {WANDERERS.map((w, i) => (
+          <span key={i} className={`h-wander h-path-${w.path}`} style={{
+            "--x": `${w.x}%`, "--y": `${w.y}%`, "--s": `${w.size}px`, "--t": `${w.speed}s`, "--d": `${w.delay}s`,
+          } as React.CSSProperties}>
+            <span className="h-mini" style={{ background: w.color, "--eye": w.eyes, "--blink": `${(i % 5) * 1.1}s` } as React.CSSProperties}><i /><i /></span>
+          </span>
+        ))}
       </div>
       <div className="shell h-hero-grid">
         <div className="h-hero-copy">
-          <span className="h-hello"><b aria-hidden="true" /> Free · open source · runs on Windows</span>
           <h1 id="hero-title">Hi, I'm <span className="h-name">Echo</span>.<br />I live on your computer.</h1>
           <p className="h-lede">Ask me anything. I'll look it up, build it, make it, or grab my crew to help. Your files and memories stay with you.</p>
           <div className="h-actions">
             <DownloadButton />
-            <button type="button" className="btn btn-ghost" onClick={() => scrollTo("watch")}>Watch me work <Icon name="down" size={17} /></button>
+            <a className="btn btn-ghost" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={18} /> View on GitHub</a>
           </div>
         </div>
         <div className="h-hero-echo">
-          <div className="h-orbit" aria-hidden="true">
-            {ORBIT.map((chip, i) => (
-              <span key={chip.label} className="h-orbit-chip" style={{ "--i": i, "--c": chip.color } as React.CSSProperties}>
-                <span><Icon name={chip.icon} size={15} />{chip.label}</span>
-              </span>
-            ))}
-          </div>
           <button type="button" className="h-echo-btn" aria-label="Poke Echo"
             onClick={() => setPoke({ n: Date.now(), line: POKES[Math.floor(Math.random() * POKES.length)] })}>
             <EchoFace size="clamp(150px, 19vw, 230px)" aura mode={poke ? "speaking" : now.mode} />
