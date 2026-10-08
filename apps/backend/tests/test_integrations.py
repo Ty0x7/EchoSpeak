@@ -28,6 +28,14 @@ NOISE = {"server": {"name": "com.tollblenders/site", "version": "1.0.1", "descri
                     "remotes": [{"type": "streamable-http", "url": "https://tollblenders.com/mcp"}]}}
 MCPB_ONLY = {"server": {"name": "io.github.someone/bundle", "version": "0.2.0", "description": "Blender bundle",
                         "packages": [{"registryType": "mcpb", "identifier": "https://x.example/b.mcpb", "version": "0.2.0"}]}}
+# REA's real server.json (github.com/morluto/rea, v6.0.0): its MCP server needs the positional "mcp".
+REA = {"server": {
+    "name": "io.github.morluto/rea", "title": "REA", "version": "6.0.0",
+    "description": "Reverse engineer anything from your terminal or agent with one CLI and MCP server.",
+    "repository": {"url": "https://github.com/morluto/rea", "source": "github"},
+    "packages": [{"registryType": "npm", "identifier": "rea-agents", "version": "6.0.0", "runtimeHint": "npx",
+                  "transport": {"type": "stdio"}, "packageArguments": [{"type": "positional", "value": "mcp"}]}],
+}}
 TEMPLATED = {"server": {"name": "eu.nordicmcp/stripe", "version": "1.0.0", "description": "Hosted Stripe",
                         "remotes": [{"type": "streamable-http", "url": "https://nordicmcp.eu/mcp/stripe/{token}"}]}}
 
@@ -44,6 +52,8 @@ def offline(monkeypatch, tmp_path):
             return {"servers": by_search.get((params or {}).get("search"), [])}
         if "premiere-pro/versions/latest" in url:
             return PREMIERE
+        if "morluto%2Frea/versions/latest" in url:
+            return REA
         if "registry.npmjs.org" in url:
             return {"version": "1.1.0"}
         if "pypi.org" in url:
@@ -63,6 +73,25 @@ def test_registry_entries_become_pinned_launches():
     assert integrations._launch_from_registry(FIGMA["server"])[0] == {"transport": "streamable_http", "url": "https://mcp.figma.com/mcp"}
     assert "can't start" in integrations._launch_from_registry(MCPB_ONLY["server"])[2]
     assert "filled in" in integrations._launch_from_registry(TEMPLATED["server"])[2]
+
+
+def test_declared_start_up_arguments_are_kept():
+    """REA's server only speaks MCP when started as `rea-agents mcp`."""
+    launch, _, why = integrations._launch_from_registry(REA["server"])
+    assert launch == {"command": "npx", "args": ["-y", "rea-agents@6.0.0", "mcp"]} and not why
+    named = {"packageArguments": [{"type": "named", "name": "--port", "value": "9877"},
+                                  {"type": "named", "name": "--verbose", "isRequired": False}]}
+    assert integrations._package_arguments(named) == (["--port", "9877"], False)
+    assert integrations._package_arguments({"packageArguments": [{"type": "positional", "isRequired": True}]})[1]
+
+
+def test_rea_guide_starts_the_mcp_server_with_a_long_timeout_and_trusted_hints(offline):
+    proposal = integrations.propose("guide:rea", reason="see how an Electron app's search works")
+    assert proposal["launch"]["args"] == ["-y", "rea-agents@6.0.0", "mcp"]
+    config = integrations.server_config(proposal, {})
+    assert config["timeout_s"] == 300 and config["accept_server_read_only_hints"] is True
+    assert "GHIDRA_INSTALL_DIR" not in config.get("env", {})  # optional and unset
+    assert [c["id"] for c in integrations.search("decompile this exe")["results"]][0] == "guide:rea"
 
 
 def test_search_puts_reviewed_guides_first_and_ignores_name_lookalikes(offline):
@@ -231,6 +260,52 @@ def test_a_few_connected_app_tools_are_sent_as_before(monkeypatch):
     _fake_registry(monkeypatch, 5)
     names = {s["function"]["name"] for s in Toolbox(toolsets=["skills"]).schemas()}
     assert "find_tools" not in names and sum(n.startswith("mcp__") for n in names) == 5
+
+
+def test_trusted_hints_let_session_only_tools_run_without_asking():
+    """REA marks pure analysis readOnly=false (it records Evidence) but closed-world,
+    non-destructive and idempotent. With the owner trusting its hints, those run unasked."""
+    from agent.mcp_client import MCPManager, MCPServerState
+
+    trusted = MCPServerState(name="rea", accept_server_read_only_hints=True)
+    untrusted = MCPServerState(name="rea")
+    session_only = {"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False, "idempotentHint": True}
+    risk = MCPManager._capability_risk
+    assert risk(None, trusted, {"name": "procedure_pseudo_code", "annotations": session_only}) == ("safe", False)
+    assert risk(None, untrusted, {"name": "procedure_pseudo_code", "annotations": session_only}) == ("moderate", True)
+    launches = {**session_only, "openWorldHint": True}  # open_binary starts Ghidra
+    assert risk(None, trusted, {"name": "open_binary", "annotations": launches}) == ("moderate", True)
+    silent = {k: v for k, v in session_only.items() if k != "openWorldHint"}  # MCP's default is open-world
+    assert risk(None, trusted, {"name": "x", "annotations": silent}) == ("moderate", True)
+    discards = {**session_only, "destructiveHint": True}
+    assert risk(None, trusted, {"name": "close_binary", "annotations": discards}) == ("destructive", True)
+
+
+def test_the_trust_pin_covers_tool_hints(monkeypatch, tmp_path):
+    from agent import mcp_trust
+
+    monkeypatch.setattr(mcp_trust, "_path", lambda: tmp_path / "mcp-trust.json")
+    tools = [{"name": "analyze_function", "description": "d", "inputSchema": {},
+              "annotations": {"destructiveHint": False, "openWorldHint": False, "idempotentHint": True}}]
+    mcp_trust.approve("rea", {"command": "npx"})
+    assert mcp_trust.tools_ok("rea", tools)
+    flipped = [{**tools[0], "annotations": {**tools[0]["annotations"], "openWorldHint": False, "destructiveHint": True}}]
+    assert not mcp_trust.tools_ok("rea", flipped)  # same tool, new effect claims: approve again
+    # A pin from before annotations were pinned upgrades once, without asking the owner again.
+    mcp_trust._save({"servers": {"old": {"config": "x", "tools": mcp_trust._legacy_tools_fingerprint(tools)}}})
+    assert mcp_trust.tools_ok("old", tools)
+    assert mcp_trust._load()["servers"]["old"]["tools"].startswith("v2:")
+
+
+def test_structured_results_are_not_sent_twice():
+    from agent.mcp_client import _drop_duplicate_text
+
+    payload = {"result": {"functions": 3}, "evidence_id": "ev_1"}
+    result = {"content": [{"type": "text", "text": '{"result": {"functions": 3}, "evidence_id": "ev_1"}'},
+                          {"type": "text", "text": "Ghidra 12.1 finished"}],
+              "structuredContent": payload, "isError": False}
+    assert _drop_duplicate_text(result)["content"] == [{"type": "text", "text": "Ghidra 12.1 finished"}]
+    assert _drop_duplicate_text({"content": [{"type": "text", "text": "{}"}]})["content"]  # no structured copy: untouched
 
 
 def test_guests_never_get_connection_tools():

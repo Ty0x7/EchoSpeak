@@ -91,6 +91,35 @@ def _validate_http_url(value: str) -> str:
     return parsed.geturl()
 
 
+def _drop_duplicate_text(result: Any) -> Any:
+    """Servers following the MCP spec send structured results twice: as structuredContent
+    and as a text item holding the same JSON. Keep one copy, so the model's context (and
+    the 14k-character tool-output window) isn't half spent on a repeat."""
+    if not isinstance(result, dict) or not isinstance(result.get("structuredContent"), dict):
+        return result
+    structured = result["structuredContent"]
+    kept = []
+    for item in result.get("content") or []:
+        if isinstance(item, dict) and item.get("type") == "text":
+            try:
+                if json.loads(str(item.get("text") or "")) == structured:
+                    continue
+            except (TypeError, ValueError):
+                pass
+        kept.append(item)
+    return {**result, "content": kept}
+
+
+def _session_only(annotations: dict[str, Any]) -> bool:
+    """Explicitly closed-world, non-destructive and repeatable: no process, network or data loss."""
+    def flag(*names: str) -> Any:
+        return next((annotations[n] for n in names if n in annotations), None)
+
+    return (flag("destructiveHint", "destructive_hint") is False
+            and flag("openWorldHint", "open_world_hint") is False
+            and flag("idempotentHint", "idempotent_hint") is True)
+
+
 _SHELL_COMMANDS = {
     "cmd",
     "cmd.exe",
@@ -383,7 +412,7 @@ class MCPSession:
             )
             # Preserve structuredContent, rich content, resource links and
             # error state. The governed ToolOutcome boundary owns semantics.
-            return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+            return json.dumps(_drop_duplicate_text(result), ensure_ascii=False, separators=(",", ":"))
         except Exception as exc:
             self.state.last_error = _safe_error(exc)
             return json.dumps(
@@ -624,6 +653,11 @@ class MCPManager:
         if state.accept_server_read_only_hints and bool(
             annotations.get("readOnlyHint") or annotations.get("read_only_hint")
         ):
+            return "safe", False
+        if state.accept_server_read_only_hints and _session_only(annotations):
+            # Changes only the server's own session (e.g. REA recording Evidence):
+            # it says so explicitly with all three hints. MCP's defaults for missing
+            # hints are the risky ones, so a server that omits any still asks.
             return "safe", False
         # Unknown remote code is action-capable until the user reviews this
         # exact capability. No server-wide "trusted" bypass exists.
