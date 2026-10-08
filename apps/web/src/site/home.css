@@ -5,8 +5,8 @@
  * tokens via site.css, so light and dark follow the app's switch.
  */
 
-/* Quiet depth keeps the avatar, rather than its glow, in focus. */
-.site-home .echo-face { box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .04), 0 0 0 1px rgba(20, 25, 35, .08), 0 24px 48px -24px rgba(20, 25, 35, .22) !important; }
+/* Echo keeps the same soft blue edge as the light-mode wordmark. */
+.site-home .echo-face { box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .04), 0 0 0 1px rgba(47, 125, 242, .45), 0 0 32px rgba(64, 145, 255, .24), 0 24px 48px -24px rgba(20, 25, 35, .22) !important; }
 .site-home .echo-face-shadow { background: rgba(20, 25, 35, .12); }
 :root[data-es-theme="dark"] .site-home .echo-face { box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .05), 0 0 0 1px rgba(255, 255, 255, .12), 0 28px 56px -24px rgba(0, 0, 0, .55) !important; }
 
@@ -14,13 +14,34 @@
 .site-home { --home-gutter: clamp(40px, 6vw, 88px); }
 .site-home .shell, .site-home .site-footer { width: min(1180px, calc(100% - var(--home-gutter) * 2)); }
 .site-home .site-header { padding-inline: max(var(--home-gutter), calc((100vw - 1180px) / 2)); }
-.site-home main > section.has-entered > .shell { animation: h-section-in .8s cubic-bezier(.2, .7, .2, 1) both; }
-@keyframes h-section-in { from { opacity: .65; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-/* Each desktop section settles below the fixed header. Long sections remain readable. */
-@media (min-width: 769px) and (prefers-reduced-motion: no-preference) {
-  html.site-guided-scroll { scroll-snap-type: y mandatory; scroll-padding-top: 68px; }
+.site-home main > section > .shell { opacity: 0; pointer-events: none; transform: translateY(18px); transition: opacity .4s ease, transform .7s cubic-bezier(.2, .7, .2, 1); }
+.site-home[data-current="top"] #top > .shell,
+.site-home[data-current="watch"] #watch > .shell,
+.site-home[data-current="crew"] #crew > .shell,
+.site-home[data-current="safe"] #safe > .shell,
+.site-home[data-current="download"] #download > .shell { opacity: 1; pointer-events: auto; transform: none; }
+.site-home .site-footer { opacity: 0; pointer-events: none; transition: opacity .4s; }
+.site-home[data-current="download"] .site-footer, .site-home .site-footer:focus-within { opacity: 1; pointer-events: auto; }
+
+/* A companion in the outer margin; the content and its controls stay clickable. */
+.h-follow { position: fixed; z-index: 60; top: var(--follow-y); right: max(4px, calc((100vw - 1180px) / 4 - 28px)); width: 56px; pointer-events: none; transition: top .9s cubic-bezier(.2, .7, .2, 1), opacity .35s; }
+.h-follow-move { display: grid; place-items: center; width: 56px; animation: h-follow-arrive .9s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes h-follow-arrive { 0% { transform: translateY(16px) rotate(-7deg); } 55% { transform: translateY(-4px) rotate(3deg); } 100% { transform: none; } }
+@media (min-width: 561px) {
+  .h-follow[data-section="top"], .h-follow[data-section="download"] { opacity: 0; visibility: hidden; }
+}
+@media (max-width: 980px) {
+  .h-follow { top: auto; bottom: calc(18px + env(safe-area-inset-bottom) + var(--follow-rise)); right: 8px; transition: bottom .9s cubic-bezier(.2, .7, .2, 1), opacity .35s; }
+  .site-home .site-footer { padding-bottom: 92px; }
+}
+/* Phone sections settle gently; long sections remain readable within their own stage. */
+@media (prefers-reduced-motion: no-preference) {
+  html.site-guided-scroll { scroll-snap-type: y proximity; scroll-padding-top: 68px; }
   .site-home main > section, .site-home .site-footer { scroll-snap-align: start; scroll-snap-stop: always; }
   .site-home .h-hero { scroll-snap-align: start; scroll-margin-top: -68px; }
+}
+@media (min-width: 769px) and (prefers-reduced-motion: no-preference) {
+  html.site-guided-scroll { scroll-snap-type: y mandatory; }
 }
 .h-head { display: grid; justify-items: center; gap: 10px; text-align: center; margin: 0 auto 30px; max-width: 680px; }
 .h-head h2 { margin: 0; font-size: clamp(32px, 4.4vw, 54px); line-height: 1.02; font-weight: 800; }
@@ -174,13 +195,13 @@
 .h-safe :focus-visible { outline-color: var(--dim); }
 .h-safe .text-link { color: var(--dim); }
 .h-safe .h-mini-btn { color: var(--text); }
-.h-safe-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: center; }
+.h-safe-grid { display: grid; grid-template-columns: minmax(0, .96fr) minmax(0, 1.04fr); gap: 36px; align-items: center; }
 .h-safe-copy h2 { margin: 12px 0 22px; font-size: clamp(32px, 4.2vw, 50px); line-height: 1.02; font-weight: 800; }
 .h-points { display: grid; gap: 16px; margin: 0 0 22px; padding: 0; list-style: none; }
 .h-points li { display: flex; gap: 14px; align-items: flex-start; color: var(--body); font-size: 15.5px; }
 .h-points li > span { flex: 0 0 auto; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--panel-2); color: var(--dim); }
 .h-points b { color: var(--text); }
-.h-permission { width: 100%; max-width: 470px; justify-self: end; padding: clamp(24px, 3vw, 36px); border: 1px solid var(--line); border-radius: 24px; background: var(--panel); box-shadow: 0 24px 64px -40px rgba(0, 0, 0, .24); }
+.h-permission { width: 100%; max-width: 500px; justify-self: end; padding: clamp(26px, 3.2vw, 40px); border: 1px solid var(--line); border-radius: 24px; background: var(--panel); box-shadow: 0 24px 64px -40px rgba(0, 0, 0, .24); }
 .h-permission.is-in { animation: h-permission-in .65s ease-out both; }
 @keyframes h-permission-in { from { opacity: 0; transform: translateY(18px); } }
 .h-permission-head { display: flex; align-items: center; gap: 10px; color: var(--text); font-size: 14px; }
@@ -203,17 +224,17 @@
 
 /* ── 5. Take me home ───────────────────────────────────────────────── */
 .h-home { padding: 32px 0 48px; }
-.h-home-card { display: grid; justify-items: center; gap: 12px; padding: 48px 24px 40px; border: 1px solid var(--line); border-radius: 32px; text-align: center;
-  background: var(--panel); }
-.h-home-echo { margin-bottom: 4px; }
-.h-home-card h2 { margin: 0; font-size: clamp(40px, 6vw, 72px); line-height: 1; font-weight: 800; }
-.h-home-card > p { margin: 0 0 8px; color: var(--dim); font-size: 17px; }
-.h-brains { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; width: min(620px, 100%); margin-top: 14px; text-align: left; }
-.h-brains div { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--panel-2); }
-.h-brains b { color: var(--text); font-family: var(--display); font-size: 16px; }
-.h-brains span { color: var(--dim); font-size: 13.5px; }
-.h-home-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 20px; margin-top: 8px; }
-.h-req { color: var(--faint); font-size: 12.5px; }
+.h-home-card { --text: #f7f7f8; --body: #d1d1d6; --home-echo-size: clamp(170px, 19vw, 240px); position: relative; isolation: isolate; display: grid; grid-template-columns: 1.25fr .75fr; gap: 24px; min-height: 360px; padding: clamp(32px, 4.5vw, 64px); border: 1px solid #343438; border-radius: 28px; overflow: hidden; color: var(--body); background: linear-gradient(120deg, #232328, #101013 65%); box-shadow: 0 28px 64px -42px rgba(0, 0, 0, .4); }
+.h-home-card::before { content: ""; position: absolute; z-index: -1; inset: 0; background: linear-gradient(110deg, transparent 44%, rgba(255, 255, 255, .035) 44.1%, transparent 74%); pointer-events: none; }
+.h-home-copy { position: relative; z-index: 2; display: grid; justify-items: start; align-content: center; gap: 20px; }
+.h-home-card h2 { margin: 0; font-size: clamp(42px, 5.5vw, 70px); line-height: 1.02; font-weight: 800; }
+.h-home-copy > p { margin: 0 0 6px; color: var(--body); font-size: 18px; }
+.h-home-card .btn-light { background: #f7f7f8; color: #151518 !important; box-shadow: 0 8px 24px -16px rgba(255, 255, 255, .4); }
+.h-home-card .btn-light:hover { background: #fff; box-shadow: 0 8px 32px -14px rgba(255, 255, 255, .4); }
+.h-home-guide { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.h-home-guide:hover { color: #fff; text-decoration: underline; text-underline-offset: 4px; }
+.h-home-echo { position: relative; display: grid; align-content: end; justify-content: center; margin-bottom: -90px; transform: rotate(-8deg); }
+.h-home-echo .echo-face { box-shadow: 0 0 0 1px rgba(88, 155, 255, .55), 0 0 50px rgba(64, 145, 255, .25), 0 24px 50px -20px #000 !important; }
 
 /* ── Smaller screens ───────────────────────────────────────────────── */
 @media (max-width: 980px) {
@@ -231,7 +252,6 @@
 @media (max-width: 560px) {
   .site-home { --home-gutter: 20px; }
   .h-hero { min-height: 0; }
-  .h-brains { grid-template-columns: minmax(0, 1fr); }
   .h-watch, .h-crew, .h-safe { padding: 36px 0; }
 }
 
@@ -244,9 +264,14 @@
   .h-permission { padding: 22px; border-radius: 18px; }
   .h-permission-head > span:last-child { font-size: 9px; }
   .h-permission-actions { align-items: flex-start; }
+  .h-home-card { grid-template-columns: minmax(0, 1fr); gap: 0; min-height: 0; padding: 36px 24px 40px; border-radius: 22px; }
+  .h-home-copy { justify-items: center; text-align: center; gap: 18px; }
+  .h-home-copy > p { font-size: 16px; }
+  .h-home-echo { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .site-home main > section.has-entered > .shell { animation: none; }
+  .site-home main > section > .shell, .h-follow, .site-home .site-footer { transition: none; }
+  .h-follow-move { animation: none; }
   .h-permission.is-in, .h-name::after { animation: none; }
   .h-name::after { clip-path: none; }
 }
