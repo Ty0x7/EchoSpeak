@@ -1,5 +1,29 @@
 # Changes
 
+## v11.5.1 — 2026-10-08
+
+User-facing notes: [EchoSpeak 11.5.1](docs/releases/v11.5.1.md). From a security audit of the whole codebase.
+
+- **Rule of Two on host terminals** (`policy.is_external_action`): in host mode every terminal call counts as
+  outward-facing, so after untrusted content any command asks. Before, only calls with `where=host` or `network` did,
+  and a page could steer an unlisted command (for example `irm -Method Post -Body (gc ~/.ssh/id_rsa) ...`).
+- **Risky command list** (`approvals._DANGEROUS_COMMAND`): adds `irm`/`Invoke-RestMethod`, `certutil`, `bitsadmin`,
+  `scp`/`sftp`/`ftp`/`ssh`/`nc`, `ri`, `Remove-ItemProperty`, `Clear-Content`/`Set-Content`/`Out-File`,
+  `mv`/`move`/`Move-Item`/`ren`, encoded PowerShell, and Python file deletion.
+- **Child environments** (`child_env`): every secret EchoSpeak reads is private (it was 10 of 31), plus any
+  `ECHOSPEAK_*` key, token or secret. Settings configured for one child pass, except auth keys.
+- **DATA_DIR off-limits to file tools** (`tools._safe_file_path`): trust pins, settings, the pause switch and pickled
+  indexes can't be read or written by agents (in dev the default file root contained DATA_DIR).
+- **Index pinning** (`agent/index_integrity.py`): index.pkl SHA-256 recorded on save, checked before
+  `FAISS.load_local`; a tampered file is refused and memory rebuilds from records.
+- **Untrusted wrapper** (`policy.wrap_untrusted`): defuses wrapper-like tags in any case, spacing or separator.
+- **File roots**: no more project parent folder.
+- **Memory tidy**: plans on a snapshot and locks only to apply; length pre-check for big stores.
+- **KaTeX**: npm override to 0.19 for rehype-katex and mermaid (npm audit clean).
+- Reviewed and sound: API auth (per-launch key, Host and Origin checks), SSRF guards (pinned DNS, public addresses,
+  redirect re-checks), media proxy, artifact sandbox, settings redaction, inbound A2A (public role), webhook HMAC,
+  Tauri capabilities and CSP, link opening. LangChain advisories affect functions EchoSpeak doesn't call.
+
 ## v11.5.0 — 2026-10-08
 
 User-facing notes: [EchoSpeak 11.5.0](docs/releases/v11.5.0.md).
