@@ -316,6 +316,15 @@ def _candidate_file_path(path: str, root: Path) -> Path:
     return candidate
 
 
+def _inside(path: Path, folder: Path) -> bool:
+    try:
+        path.relative_to(folder)
+        return True
+    except ValueError:
+        parts, base = [p.casefold() for p in path.parts], [p.casefold() for p in folder.parts]
+        return len(parts) >= len(base) and parts[: len(base)] == base
+
+
 def _safe_file_path(path: str) -> Optional[Path]:
     if not path:
         return None
@@ -323,6 +332,14 @@ def _safe_file_path(path: str) -> Optional[Path]:
     candidate = _candidate_file_path(path, root)
     try:
         resolved = candidate.expanduser().resolve()
+    except Exception:
+        return None
+    # EchoSpeak's own data (settings, trust pins for skills and MCP servers, the pause
+    # switch, memory indexes that load with pickle) is never readable or writable by
+    # agents, wherever the file roots point: an agent could otherwise approve itself.
+    try:
+        if _inside(resolved, Path(DATA_DIR).expanduser().resolve()):
+            return None
     except Exception:
         return None
     # Windows: compare case-insensitively and with normalized separators so

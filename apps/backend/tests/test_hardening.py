@@ -1,6 +1,8 @@
 """11.5.1 hardening: holes found in the security audit, each pinned by a test."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent.lean import policy, terminal
@@ -76,3 +78,15 @@ def test_pages_cannot_fake_the_end_of_untrusted_content(trick):
     body = wrapped.split("\n", 1)[1].rsplit("\n</untrusted-content>", 1)[0]
     assert "untrusted content tag removed" in body
     assert not policy._WRAPPER_TAG.search(body)
+
+
+def test_file_tools_cannot_touch_echospeaks_own_data(monkeypatch, tmp_path):
+    """Trust pins, settings, the pause switch and pickled indexes live in DATA_DIR; agents can't reach them."""
+    import agent.tools as tools
+    from config import DATA_DIR
+
+    monkeypatch.setattr(tools, "_file_tool_roots", lambda: [Path(DATA_DIR).parent, tmp_path])
+    for target in ("mcp-trust.json", "agent-skills/.trust.json", "paused.json", "memory/index.pkl", "settings.json"):
+        assert tools._safe_file_path(str(Path(DATA_DIR) / target)) is None, target
+    assert tools._safe_file_path(str(Path(DATA_DIR).parent / "elsewhere.txt")) is not None
+    assert tools._safe_file_path(str(tmp_path / "project" / "main.py")) is not None
