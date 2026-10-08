@@ -108,6 +108,9 @@ def plan(records: dict[str, dict[str, Any]], *, now: Optional[datetime] = None, 
             for other in members[i + 1:]:
                 if other["id"] in dropped:
                     continue
+                la, lb = len(str(keep.get("text") or "")), len(str(other.get("text") or ""))
+                if min(la, lb) * 2 < max(la, lb) and not _same_subject(keep, other):
+                    continue  # too different in length to be either (keeps big memories fast)
                 ratio = _similar(keep, other)
                 if ratio >= DUPLICATE_RATIO and not _pinned(other):
                     merges.append((other["id"], keep["id"]))
@@ -132,13 +135,27 @@ def tidy(memory: Any, *, now: Optional[datetime] = None, stale_days: int = STALE
     stamp = (now or datetime.now()).isoformat()
     previous = last_report()
     tracking_since = _when(previous.get("tracking_since")) or (now or datetime.now())
+    # Plan on a copy, so chats can save and recall memories while the comparisons run;
+    # lock again only to apply, skipping anything that changed in between.
+    with memory._records_lock:
+        memory._load_records()
+        snapshot = {mid: json.loads(json.dumps(r, default=str)) for mid, r in memory._records.items()}
+    actions = plan(snapshot, now=now, stale_days=stale_days, tracking_since=tracking_since)
     with memory._records_lock:
         memory._load_records()
         records = memory._records
-        actions = plan(records, now=now, stale_days=stale_days, tracking_since=tracking_since)
+
+        def unchanged(mid: str) -> bool:
+            live = records.get(mid)
+            return bool(live) and bool(live.get("active", True)) and live.get("updated_at") == snapshot[mid].get("updated_at")
+
+        actions = {
+            "merge": [(gone, kept) for gone, kept in actions["merge"] if unchanged(gone) and kept in records],
+            "retire": [mid for mid in actions["retire"] if unchanged(mid)],
+            "flag": [(a, b) for a, b in actions["flag"] if a in records and b in records],
+        }
         for gone, kept in actions["merge"]:
-            record = records[gone]
-            record.update({"active": False, "status": "merged", "superseded_by": kept, "deleted_at": stamp, "updated_at": stamp})
+            records[gone].update({"active": False, "status": "merged", "superseded_by": kept, "deleted_at": stamp, "updated_at": stamp})
         for memory_id in actions["retire"]:
             records[memory_id].update({"active": False, "status": "retired", "deleted_at": stamp, "updated_at": stamp})
         for a, b in actions["flag"]:
