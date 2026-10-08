@@ -1,5 +1,23 @@
 # Changes
 
+## Website: The Living Workspace — 2026-10-07
+
+Public site only (`apps/web/src/site`); the app version is unchanged. Proposal (audit, system, architecture, motion): https://claude.ai/artifact/2XVkaC8GkuPhZm8d2xregb
+
+- **Positioning:** "Meet Echo. Agents that show their work." A personal agent workspace, not a chatbot. The hero keeps the blue line drawing through "Echo" and adds a live step card under him.
+- **Four answers:** what it will do, when it asks, how to stop it, what it did. Each answer has a small product visual.
+- **Watch a run** (`Workspace.tsx`, `runs.ts`): an interactive workspace with three tasks (research, code, team).
+  - The plan, the agent and tool canvas with live hand-off edges, the step trace with live lines and summaries, and an inspector.
+  - The code run stops at a `git push` approval until the visitor clicks Allow or Deny. Both paths are covered by tests (`runs.test.ts`).
+  - It plays only on screen. With reduced motion it starts finished and moves one step per click.
+- **How a run works:** one pinned scroll loop (Recall, Plan, Act, Check, Answer, Learn) with a real-run example for each stage. On phones and with reduced motion it becomes a plain list.
+- **Agents, memory, team:**
+  - Agents have identity cards: what each can use and what it remembers.
+  - Memory shows what it keeps and what it skips.
+  - The group chat, plus optional A2A (off by default, needs a key) and learning, labelled Preview.
+- **Safety:** six boundaries that match `policy.py`, `approvals.py` and the learning limits, plus a live approval card.
+- Header nav: Watch a run, How it works, Agents, Safety, Docs.
+
 ## Website intro and scroll story — 2026-10-07
 
 Public site only (`apps/web/src/site`); the app version is unchanged.
