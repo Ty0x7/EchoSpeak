@@ -17,7 +17,7 @@ router = APIRouter(prefix="/lean", tags=["lean"])
 
 
 class ApprovalDecisionRequest(BaseModel):
-    decision: str = Field(description="allow | deny | always")
+    decision: str = Field(description="allow | deny | always, or the answer to an ask_user question")
 
 
 class AgentModelPayload(BaseModel):

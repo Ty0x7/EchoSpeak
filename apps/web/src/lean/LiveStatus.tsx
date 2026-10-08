@@ -10,7 +10,7 @@ function activityOf(msg: LeanMessageData): string {
   if (!last) return msg.role === "merge" ? `${name} is summarizing` : `${name} is starting`;
   if (last.kind === "thinking") return `${name} is thinking it through`;
   if (last?.kind === "tool" && last.status === "running") return last.detail ? `${last.label} · ${last.detail}` : last.label;
-  if (last?.kind === "approval" && !last.decision) return `${name} needs your OK`;
+  if (last?.kind === "approval" && !last.decision) return last.question ? `${name} is asking you something` : `${name} needs your OK`;
   if (last?.kind === "text") return `${name} is writing the answer`;
   const phase = phaseOf({ ...msg, status: "streaming" });
   if (phase) return `${name}: ${phase.replace(/…$/, "")}`;
@@ -32,7 +32,7 @@ export function describeLive(live: LeanLiveState): { agents: LeanAgentRef[]; act
   });
   // Several agents answering at once (a fan-out).
   if (working.length > 1) {
-    const waiting = working.find((m) => activityOf(m).endsWith("needs your OK"));
+    const waiting = working.find((m) => /needs your OK|asking you something/.test(activityOf(m)));
     return {
       agents: working.map((m) => m.agent),
       activity: waiting ? activityOf(waiting) : `${joinNames(working.map((m) => m.agent.name || "Echo"))} are working`,

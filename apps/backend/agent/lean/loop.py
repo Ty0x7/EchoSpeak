@@ -29,6 +29,7 @@ from loguru import logger
 
 from agent.lean import policy, settings
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
+from agent.lean import ask
 from agent.lean.job import claim_nudge, is_promise_without_action, promise_nudge, unbacked_claim
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
@@ -524,6 +525,11 @@ class LeanTurn:
                 results[call.id] = (False, output)
                 self._tool_finished(call, name, args, step, False, output, 0)
                 continue
+            if name == ask.ASK_USER:
+                ok, output = self._ask_user(call, args, step)
+                results[call.id] = (ok, output)
+                self._tool_finished(call, name, args, step, ok, output, 0)
+                continue
             handoff = self.toolbox.handoff(name)
             if handoff is not None:
                 note = str(handoff(args) or "")
@@ -626,6 +632,35 @@ class LeanTurn:
         if decision == "cancelled":
             return False, "The user stopped this request."
         return False, f"The user denied permission to run {name}. Do not retry it; continue without it or explain what is blocked."
+
+    def _ask_user(self, call: Any, args: dict[str, Any], step: int) -> tuple[bool, str]:
+        """Show a question card and wait for the user's answer (agent/lean/ask.py)."""
+        question, options, allow_other, problem = ask.parse(args)
+        if problem:
+            return False, problem
+        if not self.interactive:
+            return False, ("A question card can't be shown here. Ask the user in plain text, list the options, "
+                           "and end your reply so they can answer.")
+        broker = get_approval_broker()
+        pending = broker.open_question(session_id=self.session_id, request_id=self.request_id,
+                                       question=question, options=options, allow_other=allow_other)
+        self.timeline.append({"kind": "approval", "step": step, "id": pending.id, "tool_call_id": call.id,
+                              "tool": ask.ASK_USER, "summary": question, "question": question, "options": options,
+                              "allow_other": allow_other, "reason": "", "decision": "", "answer": "", "at": time.time()})
+        self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **pending.public()})
+        decision = broker.wait(pending, self.cancel)
+        for item in self.timeline:
+            if item.get("kind") == "approval" and item.get("id") == pending.id:
+                item["decision"] = decision
+                item["answer"] = pending.answer
+        self.emit({"type": "approval_resolved", "id": pending.id, "decision": decision, "answer": pending.answer,
+                   "tool_call_id": call.id})
+        if decision == "answered":
+            return True, f"The user answered: {pending.answer}"
+        if decision == "cancelled":
+            return False, "The user stopped this request."
+        return False, ("The user didn't answer. Don't ask again right away: go ahead with the safest option, "
+                       "or end your reply saying what you need from them.")
 
     def _run_tool(self, call: Any, name: str, args: dict[str, Any], step: int):
         """Run one tool with a live progress line: what it reports shows under its row (agent/lean/progress.py)."""

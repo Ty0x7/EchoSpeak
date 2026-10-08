@@ -176,12 +176,64 @@ function StepGroup({ tools }: { tools: ToolSeg[] }) {
   );
 }
 
+/** ask_user: the agent stopped to ask. Pick a choice or type an answer; the run continues with it. */
+function QuestionCard({
+  seg,
+  agentName,
+  onDecide,
+}: {
+  seg: Extract<LeanSegment, { kind: "approval" }>;
+  agentName: string;
+  onDecide?: (id: string, decision: string) => Promise<void> | void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [other, setOther] = useState("");
+  const answer = async (text: string) => {
+    const value = text.trim();
+    if (!onDecide || busy || !value) return;
+    setBusy(true);
+    try {
+      await onDecide(seg.id, value);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (seg.decision) {
+    const what = seg.decision === "answered" ? `You answered: ${seg.answer || ""}` : seg.decision === "cancelled" ? "Stopped" : "No answer";
+    return (
+      <div className="lm-approval-done lm-question-done" data-decision={seg.decision}>
+        <span>{what}</span>
+        <span className="lm-approval-done-what">{seg.question || seg.summary}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="lm-approval lm-question" role="group" aria-label={`${agentName} is asking you`}>
+      <div className="lm-approval-text">
+        <span className="lm-approval-kicker">{agentName} is asking</span>
+        <strong>{seg.question || seg.summary}</strong>
+      </div>
+      <div className="lm-question-options">
+        {(seg.options || []).map((option) => (
+          <button key={option} type="button" className="es-btn" disabled={busy} onClick={() => void answer(option)}>{option}</button>
+        ))}
+      </div>
+      {seg.allowOther ? (
+        <form className="lm-question-other" onSubmit={(e) => { e.preventDefault(); void answer(other); }}>
+          <input value={other} onChange={(e) => setOther(e.target.value)} placeholder="Something else…" aria-label="Your own answer" maxLength={500} disabled={busy} />
+          <button type="submit" className="es-btn es-btn-primary" disabled={busy || !other.trim()}>Send</button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
 function ApprovalCard({
   seg,
   onDecide,
 }: {
   seg: Extract<LeanSegment, { kind: "approval" }>;
-  onDecide?: (id: string, decision: "allow" | "deny" | "always") => Promise<void> | void;
+  onDecide?: (id: string, decision: string) => Promise<void> | void;
 }) {
   const [busy, setBusy] = useState(false);
   const decided = Boolean(seg.decision);
@@ -256,7 +308,7 @@ export function LeanMessage({
   data: LeanMessageData;
   live?: boolean;
   showHeader?: boolean;
-  onDecide?: (id: string, decision: "allow" | "deny" | "always") => Promise<void> | void;
+  onDecide?: (id: string, decision: string) => Promise<void> | void;
   /** Offered when the agent stopped at the step limit. */
   onContinue?: () => void;
   at?: number;
@@ -292,7 +344,10 @@ export function LeanMessage({
           }
           const { seg, index } = item;
           if (seg.kind === "thinking") return <ThinkingBlock key={`t${index}`} seg={seg} live={streaming} />;
-          if (seg.kind === "approval") return <ApprovalCard key={`a${seg.id}`} seg={seg} onDecide={onDecide} />;
+          if (seg.kind === "approval")
+            return seg.question
+              ? <QuestionCard key={`q${seg.id}`} seg={seg} agentName={data.agent.name || "Echo"} onDecide={onDecide} />
+              : <ApprovalCard key={`a${seg.id}`} seg={seg} onDecide={onDecide} />;
           if (seg.kind === "note") return <div key={`n${index}`} className="lm-note">{seg.text}</div>;
           if (seg.kind !== "text" || !seg.text.trim()) return null;
           const isTail = seg === lastText && streaming;

@@ -1067,6 +1067,10 @@ class LeanSession:
                 ends_turn=True,
                 always=True,
             ))
+        # Every agent can stop and ask the user when it is blocked or the choice is theirs.
+        from agent.lean.ask import ask_user_tool
+
+        tools.append(ask_user_tool())
         if memory is not None:
             def memory_save(args: dict[str, Any]) -> str:
                 fact = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))

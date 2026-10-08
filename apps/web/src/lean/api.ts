@@ -55,7 +55,8 @@ export const leanApi = (apiBase: string) => ({
   async deleteRoom(id: string): Promise<void> {
     await json(await fetch(`${apiBase}/lean/rooms/${encodeURIComponent(id)}`, { method: "DELETE" }));
   },
-  async decide(approvalId: string, decision: "allow" | "deny" | "always"): Promise<void> {
+  /** allow / deny / always for an approval, or the answer to an ask_user question. */
+  async decide(approvalId: string, decision: string): Promise<void> {
     await json(await fetch(`${apiBase}/lean/approvals/${encodeURIComponent(approvalId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision }) }));
   },
   async toolsets(): Promise<{ id: string; tools: string[] }[]> {

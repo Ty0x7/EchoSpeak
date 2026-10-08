@@ -655,10 +655,47 @@ def run_web_search(
     )
 
 
+SEARCH_FAILED = "Web search failed."
+
+
+def describe_search_failure(errors: Sequence[str]) -> str:
+    """What the agent reads when every provider failed: what broke, and what to do next.
+
+    Tool errors are prompts. A bare "DuckDuckGo package not installed" left agents
+    apologising and stopping; this names the cause, one fallback route, and when to
+    hand the choice to the user (ask_user) instead of giving up.
+    """
+    errs = [e for e in dict.fromkeys(str(e or "").strip() for e in errors) if e]
+    joined = " ".join(errs).lower()
+    if "too vague" in joined:
+        return errs[0]
+    if "not installed" in joined:
+        cause = ("This copy of EchoSpeak is missing its built-in search. Nothing can be installed from the chat to fix it: "
+                 "updating EchoSpeak fixes it, or the user can add a Brave or Tavily search key in Settings › Web search.")
+    elif "ratelimit" in joined or "rate limit" in joined or "429" in joined:
+        cause = ("The search service is rate-limiting requests right now. Waiting a minute usually helps, "
+                 "or the user can add a Brave or Tavily search key in Settings › Web search.")
+    elif any(word in joined for word in ("timed out", "timeout", "connect", "network", "resolve", "ssl", "unreachable")):
+        cause = "The search request couldn't reach the internet; the connection may be down."
+    else:
+        cause = "Every search provider failed."
+    details = "; ".join(errs[:3]) or "no details"
+    return (
+        f"{SEARCH_FAILED} {cause}\n"
+        f"Details: {details}\n"
+        "What to do next:\n"
+        "1. Try one other route: safe_web_fetch on a page that is likely to have the answer "
+        "(for tech news, for example https://news.ycombinator.com or https://www.theverge.com/ai-artificial-intelligence).\n"
+        "2. If that fails too, tell the user in a sentence or two what broke and what you tried, then call ask_user "
+        "with 2-4 concrete options (for example: try a specific site, set up a search key, skip it).\n"
+        "Don't tell the user to install Python packages."
+    )
+
+
 def format_hits_for_tool(result: SearchProviderResult, *, multi_query: bool = False) -> str:
     if not result.hits:
         if result.errors:
-            return result.errors[0]
+            return describe_search_failure(result.errors)
         return "No search results found."
     blocks = []
     for i, h in enumerate(result.hits[:10], 1):

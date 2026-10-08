@@ -171,7 +171,7 @@ export const Dashboard: React.FC<{
     [activeRoom, agents]
   );
   const decideLeanApproval = useCallback(
-    async (approvalId: string, decision: "allow" | "deny" | "always") => {
+    async (approvalId: string, decision: string) => {
       try {
         await leanClient.decide(approvalId, decision);
       } catch (error) {

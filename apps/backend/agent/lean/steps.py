@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 # Present-tense openings from describe_call -> what they read as once done.
 _PAST = (
+    ("Asking you", "Asked you"),
     ("Shopping for", "Checked prices for"),
     ("Searching your documents", "Searched your documents"),
     ("Searching code", "Searched code"),
@@ -122,11 +123,13 @@ def summarize(name: str, args: dict[str, Any], ok: bool, output: str, meta: dict
     if not ok:
         reason = _first_line(output.removeprefix("Error:").strip(), 80)
         return f"Failed: {reason}" if reason else "Failed"
+    if name == "ask_user":
+        return f"You chose: {_first_line(output.removeprefix('The user answered:').strip(), 80)}"
     if name == "web_search":
         results = int(meta.get("results") or 0)
         pages = int(meta.get("pages") or 0)
         if not results:
-            return "No results"
+            return "Search isn't working" if output.startswith("Web search failed") else "No results"
         return _plural(results, "result") + (f" · read {_plural(pages, 'page')}" if pages else "")
     if name == "safe_web_fetch":
         words = int(meta.get("words") or _words(_page_text(output)))

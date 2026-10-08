@@ -197,6 +197,7 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
             args: evt.args && typeof evt.args === "object" ? (evt.args as Record<string, unknown>) : undefined,
             reason: String(evt.reason || ""),
             decision: "",
+            ...questionFields(evt),
           },
         ],
       }));
@@ -208,7 +209,9 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
     case "approval_resolved":
       return patchMessage(state, id, (m) => ({
         ...m,
-        segments: m.segments.map((s) => (s.kind === "approval" && s.id === evt.id ? { ...s, decision: evt.decision } : s)),
+        segments: m.segments.map((s) =>
+          s.kind === "approval" && s.id === evt.id ? { ...s, decision: evt.decision, ...(evt.answer ? { answer: String(evt.answer) } : {}) } : s
+        ),
       }));
     case "agent_done":
       // A continuation after a handoff that had nothing to add: drop it.
@@ -281,6 +284,7 @@ export function messageFromTimeline(args: {
         summary: String(row.summary || ""),
         reason: String(row.reason || ""),
         decision: row.decision || "deny",
+        ...questionFields(row),
       });
   }
   // Thinking durations: end at the next segment's start when known.
@@ -302,5 +306,16 @@ export function messageFromTimeline(args: {
     delegatedBy: args.delegatedBy || undefined,
     role: args.role || undefined,
     stopReason: args.stopReason || undefined,
+  };
+}
+
+/** ask_user questions travel as approvals with a question, choices and (once answered) the answer. */
+function questionFields(src: Record<string, any>): { question?: string; options?: string[]; allowOther?: boolean; answer?: string } {
+  if (src?.kind !== "question" && !src?.question) return {};
+  return {
+    question: String(src.question || src.summary || ""),
+    options: Array.isArray(src.options) ? src.options.map((o: unknown) => String(o)) : [],
+    allowOther: Boolean(src.allow_other),
+    ...(src.answer ? { answer: String(src.answer) } : {}),
   };
 }

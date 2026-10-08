@@ -355,6 +355,17 @@
 .lm-approval-args { margin: 6px 0 0; max-height: 220px; overflow: auto; padding: 8px 10px; border-radius: 6px; background: rgba(var(--es-shade-rgb), calc(0.35 * var(--es-shade-k))); border: 1px solid rgba(var(--es-edge-rgb), calc(0.08 * var(--es-edge-k))); font: 11.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all; color: var(--es-text, var(--es-text)); }
 .lm-approval-actions { display: flex; gap: 6px; }
 
+/* ask_user: a question with choices. Stacks: question, choice buttons, then "Something else". */
+.lm-question { flex-direction: column; align-items: stretch; gap: 10px; }
+.lm-question .lm-approval-kicker { color: var(--es-accent); }
+.lm-question .lm-approval-text strong { font-size: 14px; }
+.lm-question-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.lm-question-options .es-btn { white-space: normal; text-align: left; }
+.lm-question-other { display: flex; gap: 6px; }
+.lm-question-other input { flex: 1 1 auto; min-width: 0; padding: 7px 10px; border-radius: 8px; border: 1px solid var(--es-line-3); background: var(--es-surface-1); color: var(--es-text); font: inherit; font-size: 13px; }
+.lm-question-other input:focus { outline: 2px solid var(--es-focus); outline-offset: 1px; }
+.lm-question-done[data-decision="answered"] > span:first-child { color: var(--es-accent); }
+
 .lm-dots { display: inline-flex; gap: 3px; }
 .lm-dots i { width: 4px; height: 4px; border-radius: 50%; background: rgba(var(--es-wash-rgb), calc(0.7 * var(--es-wash-k))); animation: lm-dot 1.1s ease-in-out infinite; }
 .lm-dots i:nth-child(2) { animation-delay: 0.15s; }
