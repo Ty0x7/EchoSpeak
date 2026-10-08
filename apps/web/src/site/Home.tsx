@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { EchoFace, echoFaceStyles, type EchoFaceMode } from "../components/EchoFace";
+import { EchoFace, echoFaceStyles } from "../components/EchoFace";
 import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
 import { GITHUB_URL, useLatestRelease } from "./release";
 import "./site.css";
@@ -8,7 +8,7 @@ import "./home.css";
 
 /**
  * The front page, in five beats and in Echo's own voice:
- * 1. Echo says hi (and reacts to you)   2. Watch me work (a looping mini chat)
+ * 1. Echo says hi                      2. An example workflow (a looping mini chat)
  * 3. Meet the crew (a group chat)       4. I live on your PC and play it safe
  * 5. Take me home (download).
  * Details live in the docs; this page shows instead of explains.
@@ -36,29 +36,7 @@ function useInView<T extends HTMLElement>(live = false) {
 
 // ── 1. Echo says hi ──────────────────────────────────────────────────
 
-const MOODS: { mode: EchoFaceMode; line: string }[] = [
-  { mode: "idle", line: "Hi! I'm Echo." },
-  { mode: "listening", line: "I'm all ears. What are we doing?" },
-  { mode: "thinking", line: "Hmm… let me look that up." },
-  { mode: "working", line: "Building it now. Two secs." },
-  { mode: "speaking", line: "Done! I checked it, too." },
-];
-const POKES = ["Hey! That tickles.", "Boop received.", "Again? Okay, again!", "I'm awake, I promise.", "Careful, I'm ticklish."];
-
 function Hero() {
-  const [mood, setMood] = useState(0);
-  const [poke, setPoke] = useState<{ n: number; line: string } | null>(null);
-  useEffect(() => {
-    if (reducedMotion() || poke) return;
-    const timer = window.setTimeout(() => setMood((m) => (m + 1) % MOODS.length), 3200);
-    return () => window.clearTimeout(timer);
-  }, [mood, poke]);
-  useEffect(() => {
-    if (!poke) return;
-    const timer = window.setTimeout(() => setPoke(null), 1600);
-    return () => window.clearTimeout(timer);
-  }, [poke]);
-  const now = MOODS[mood];
   return (
     <section className="h-hero" id="top" aria-labelledby="hero-title">
       <div className="shell h-hero-grid">
@@ -71,16 +49,7 @@ function Hero() {
           </div>
         </div>
         <div className="h-hero-echo">
-          <button type="button" className="h-echo-btn" aria-label="Say hello to Echo"
-            onClick={() => setPoke({ n: Date.now(), line: POKES[Math.floor(Math.random() * POKES.length)] })}>
-            <EchoFace size="var(--hero-echo-size)" mode={poke ? "speaking" : now.mode} />
-            {poke ? (
-              <span className="h-burst" key={poke.n} aria-hidden="true">
-                {Array.from({ length: 14 }, (_, i) => <i key={i} style={{ "--a": `${(360 / 14) * i}deg`, "--d": `${70 + (i % 3) * 26}px` } as React.CSSProperties} />)}
-              </span>
-            ) : null}
-          </button>
-          <p className="h-bubble" aria-live={poke ? "polite" : "off"} key={poke ? poke.n : mood}>{poke ? poke.line : now.line}</p>
+          <EchoFace size="var(--hero-echo-size)" mode="idle" avatarConfig={{ idle_activity: "breathe", breathing_speed: .5 }} />
         </div>
       </div>
     </section>
@@ -195,13 +164,8 @@ function Watch() {
   const showArtifact = scenario.extra === "artifact" && elapsed >= t.extraAt;
   const ring = 2 * Math.PI * 7;
   return (
-    <section className="h-watch" id="watch" ref={ref} aria-labelledby="watch-title">
+    <section className="h-watch" id="watch" ref={ref} aria-label="EchoSpeak in action">
       <div className="shell">
-        <div className="h-head">
-          <span className="kicker">Watch me work</span>
-          <h2 id="watch-title">Ask once. I'll take it from there.</h2>
-          <p>I search, read, build and make things, and I show you exactly what I did.</p>
-        </div>
         <div className="h-tabs" role="tablist" aria-label="What I can do">
           {SCENARIOS.map((s, i) => (
             <button key={s.id} type="button" role="tab" aria-selected={i === active} className={i === active ? "is-on" : ""}
@@ -291,7 +255,6 @@ function Crew() {
     <section className="h-crew" id="crew" ref={ref} aria-labelledby="crew-title">
       <div className="shell">
         <div className="h-head">
-          <span className="kicker">The crew</span>
           <h2 id="crew-title">I brought friends.</h2>
           <p>We split tasks, compare findings and bring the work back together. You can make your own agents, too.</p>
         </div>
@@ -347,9 +310,9 @@ function Safe() {
           <span className="kicker">Yours, on your PC</span>
           <h2 id="safe-title">I live on your computer. And I play it safe.</h2>
           <ul className="h-points">
-            <li><span style={{ "--c": "var(--pop-blue)" } as React.CSSProperties}><Icon name="house" size={18} /></span><div><b>Your stuff stays here.</b> Chats, memories and files are stored on your PC. Cloud models and online tools connect only when you use them.</div></li>
-            <li><span style={{ "--c": "var(--pop-orange)" } as React.CSSProperties}><Icon name="shield" size={18} /></span><div><b>You stay in control.</b> Review sensitive actions before they run. Your permissions decide which tools I can use.</div></li>
-            <li><span style={{ "--c": "var(--pop-purple)" } as React.CSSProperties}><Icon name="memory" size={18} /></span><div><b>Evidence, not authority.</b> Web pages help answer your question. Permission checks stay outside the model.</div></li>
+            <li><span><Icon name="house" size={18} /></span><div><b>Your stuff stays here.</b> Chats, memories and files are stored on your PC. Cloud models and online tools connect only when you use them.</div></li>
+            <li><span><Icon name="shield" size={18} /></span><div><b>You stay in control.</b> Review sensitive actions before they run. Your permissions decide which tools I can use.</div></li>
+            <li><span><Icon name="memory" size={18} /></span><div><b>Evidence, not authority.</b> Web pages help answer your question. Permission checks stay outside the model.</div></li>
           </ul>
           <Link className="text-link" to="/docs/privacy">How I stay safe <Icon name="arrow" size={15} /></Link>
         </div>
@@ -381,8 +344,7 @@ function TakeMeHome() {
     <section className="h-home" id="download" aria-labelledby="home-title">
       <div className="shell">
         <div className="h-home-card">
-          <div className="h-home-echo"><EchoFace size={116} aura /></div>
-          <span className="kicker">Download</span>
+          <div className="h-home-echo"><EchoFace size={116} avatarConfig={{ idle_activity: "breathe", breathing_speed: .5 }} /></div>
           <h2 id="home-title">Take me home.</h2>
           <p>Install, choose a model, then start your first conversation.</p>
           <DownloadButton />
@@ -403,8 +365,26 @@ function TakeMeHome() {
 }
 
 export function Home() {
+  const page = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    document.documentElement.classList.add("site-guided-scroll");
+    const sections = page.current?.querySelectorAll<HTMLElement>("main > section");
+    const observer = typeof IntersectionObserver !== "undefined" ? new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("has-entered");
+          observer?.unobserve(entry.target);
+        }
+      }
+    }, { threshold: .12 }) : null;
+    sections?.forEach((section) => observer?.observe(section));
+    return () => {
+      observer?.disconnect();
+      document.documentElement.classList.remove("site-guided-scroll");
+    };
+  }, []);
   return (
-    <div className="site site-home">
+    <div className="site site-home" ref={page}>
       <style>{echoFaceStyles}</style>
       <SiteHeader />
       <main>
