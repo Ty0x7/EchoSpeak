@@ -1,45 +1,179 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { animate, motion, useMotionValue, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "framer-motion";
+import { MotionConfig, motion, useMotionValue, useMotionValueEvent, useScroll, type MotionValue } from "framer-motion";
 import { EchoFace, echoFaceStyles } from "../components/EchoFace";
-import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
+import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, useScrollTo, type IconName } from "./Chrome";
 import { GITHUB_URL, useLatestRelease } from "./release";
+import { Workspace } from "./Workspace";
 import "./site.css";
 import "./home.css";
 
 /**
- * The front page is one scroll story in Echo's voice:
- * 1. Echo introduces himself and the product (a pinned, Apple-style reveal)
- * 2. Watch me work (a pinned chapter: each scroll step plays one scenario)
- * 3. Meet the crew (a group chat)
- * 4. I live on your computer, and I play it safe (a pinned approval moment)
- * 5. Take me home (download).
+ * The front page: "The Living Workspace". It shows EchoSpeak working instead of
+ * describing it. Hero → four answers about any agent → Watch a run (the
+ * interactive workspace) → How a run works (one pinned loop) → agents with
+ * identity and memory → a team, A2A and learning → safety → download.
+ * Claims stay inside what the product does today; learning is labelled Preview.
  */
 
 const reducedMotion = () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
 
-/** True once the element is on screen (and, with `live`, false again when it leaves). */
-function useInView<T extends HTMLElement>(live = false) {
-  const ref = useRef<T | null>(null);
-  const [inView, setInView] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (typeof IntersectionObserver === "undefined") { setInView(true); return; }
-    const observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) { setInView(true); if (!live) observer.disconnect(); }
-      else if (live) setInView(false);
-    }, { threshold: 0.25 });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [live]);
-  return { ref, inView };
+/** Rises into place once, the first time it scrolls into view. */
+function Rise({ children, className, delay = 0, as = "div" }: { children: React.ReactNode; className?: string; delay?: number; as?: "div" | "li" }) {
+  const Tag = as === "li" ? motion.li : motion.div;
+  return (
+    <Tag className={className} initial={{ opacity: 0, y: 26 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.25 }}
+      transition={{ duration: 0.6, delay, ease: [0.22, 1, 0.36, 1] }}>
+      {children}
+    </Tag>
+  );
 }
 
-/**
- * Scroll progress through a tall section whose inner box sticks to the screen.
- * With reduced motion the section is not pinned and shows its finished state.
- */
+function SectionHead({ kicker, title, children, id }: { kicker: string; title: React.ReactNode; children?: React.ReactNode; id: string }) {
+  return (
+    <Rise className="lw-head">
+      <span className="kicker">{kicker}</span>
+      <h2 id={id}>{title}</h2>
+      {children ? <p>{children}</p> : null}
+    </Rise>
+  );
+}
+
+// ── Hero ─────────────────────────────────────────────────────────────
+
+const HERO_STEPS = [
+  { label: "Searched “best budget streaming mic”", sub: "14 results · read 2 pages" },
+  { label: "Read soundguys.com", sub: "Read 3,840 words" },
+  { label: "Checked prices for 3 mics", sub: "3 products · prices from today" },
+];
+
+/** Echo with a short trace of finished steps under him, replayed slowly. */
+function HeroTrace() {
+  const still = reducedMotion();
+  const [shown, setShown] = useState(still ? HERO_STEPS.length : 0);
+  useEffect(() => {
+    if (still) return;
+    const wait = shown >= HERO_STEPS.length ? 5200 : shown === 0 ? 900 : 1500;
+    const timer = window.setTimeout(() => setShown((n) => (n >= HERO_STEPS.length ? 0 : n + 1)), wait);
+    return () => window.clearTimeout(timer);
+  }, [shown, still]);
+  const running = shown < HERO_STEPS.length;
+  return (
+    <div className="lw-hero-visual" aria-hidden="true">
+      <div className="lw-hero-echo"><EchoFace size="clamp(132px, 15vw, 188px)" aura mode="idle" /></div>
+      <div className="lw-hero-card">
+        <div className="lw-hero-card-head"><Face size={18} /><b>Echo</b><span data-state={running ? "running" : "done"}>{running ? "working" : "done · 6.4s"}</span></div>
+        <ol>
+          {HERO_STEPS.map((step, i) => (
+            <li key={step.label} data-state={i < shown ? "done" : i === shown ? "running" : "pending"}>
+              <span className="lw-dot" />
+              <span><b>{step.label}</b><small>{i < shown ? step.sub : i === shown ? "working…" : ""}</small></span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
+function Hero() {
+  const scrollTo = useScrollTo();
+  return (
+    <section className="lw-hero" id="top" aria-labelledby="hero-title">
+      <div className="shell lw-hero-grid">
+        <div className="lw-hero-copy">
+          <span className="kicker">A personal agent workspace for Windows</span>
+          <h1 id="hero-title">
+            Meet{" "}
+            <span className="lw-echo">
+              Echo
+              <svg className="lw-swoosh" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="lw-blue" x1="0" x2="1" y1="0" y2="0">
+                    <stop offset="0" stopColor="#8dc0ff" /><stop offset="0.55" stopColor="#3d8bff" /><stop offset="1" stopColor="#2c73e8" />
+                  </linearGradient>
+                </defs>
+                <motion.path d="M-6 46 C 34 4, 66 60, 108 26 S 178 2, 210 24" fill="none" stroke="url(#lw-blue)" strokeWidth={8} strokeLinecap="round" vectorEffect="non-scaling-stroke"
+                  initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.3, delay: 0.35, ease: [0.65, 0, 0.2, 1] }} />
+              </svg>
+            </span>
+            .<br />
+            <span className="lw-soft">Agents that show their work.</span>
+          </h1>
+          <p className="lw-lede">EchoSpeak runs a small team of AI agents on your PC. They plan, use real tools, ask before anything risky, and leave every step open for you to inspect.</p>
+          <div className="lw-actions">
+            <DownloadButton />
+            <button type="button" className="btn btn-ghost" onClick={() => scrollTo("run")}>Watch a run <Icon name="down" size={17} /></button>
+          </div>
+          <p className="lw-proof"><span>Free and open source</span><span>Local models or your own key</span><a href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={15} /> GitHub</a></p>
+        </div>
+        <HeroTrace />
+      </div>
+    </section>
+  );
+}
+
+// ── Four answers ─────────────────────────────────────────────────────
+
+function Answers() {
+  return (
+    <section className="lw-answers" aria-labelledby="answers-title">
+      <div className="shell">
+        <SectionHead kicker="Not a chatbot" id="answers-title" title="Four things every agent should tell you.">
+          A chat box answers questions. A workspace does the work, and it should always be clear what's happening.
+        </SectionHead>
+        <ol className="lw-answer-grid">
+          <Rise as="li" className="lw-answer">
+            <h3>What will it do?</h3><p>It says the plan before it starts.</p>
+            <div className="lw-mini lw-mini-plan" aria-hidden="true">
+              <span data-state="done"><i />Read the failing test</span><span data-state="running"><i />Fix calc.py</span><span><i />Run the tests again</span>
+            </div>
+          </Rise>
+          <Rise as="li" className="lw-answer" delay={0.08}>
+            <h3>When does it ask?</h3><p>Before deleting, sending, pushing or anything risky.</p>
+            <div className="lw-mini lw-mini-gate" aria-hidden="true"><b>Allow this command?</b><code>git push origin main</code><span><em>Deny</em><em className="is-primary">Allow</em></span></div>
+          </Rise>
+          <Rise as="li" className="lw-answer" delay={0.16}>
+            <h3>How do I stop it?</h3><p>One click, or press Esc.</p>
+            <div className="lw-mini lw-mini-stop" aria-hidden="true"><Face size={16} /><span>Reading rtings.com</span><em>0:07</em><b>■ Stop</b></div>
+          </Rise>
+          <Rise as="li" className="lw-answer" delay={0.24}>
+            <h3>What did it do?</h3><p>Every step stays open to inspect.</p>
+            <div className="lw-mini lw-mini-step" aria-hidden="true"><Icon name="check" size={12} /><span><b>Ran `pytest -q`</b><small>Tests: 12 passed</small></span><em>2.2s</em></div>
+          </Rise>
+        </ol>
+      </div>
+    </section>
+  );
+}
+
+// ── Watch a run ──────────────────────────────────────────────────────
+
+function WatchARun() {
+  return (
+    <section className="lw-run" id="run" aria-labelledby="run-title">
+      <div className="shell">
+        <SectionHead kicker="Watch a run" id="run-title" title="Give it a task. Watch the work happen.">
+          Pick a task. Echo plans it, hands parts to teammates, uses tools and stops for your OK before anything risky. Click any step to inspect it.
+        </SectionHead>
+        <Rise><Workspace /></Rise>
+        <p className="lw-footnote">Example runs, written to match the app's real step labels. In the app, the same steps stream live from your own agents.</p>
+      </div>
+    </section>
+  );
+}
+
+// ── How a run works ──────────────────────────────────────────────────
+
+const STAGES: { name: string; icon: IconName; title: string; body: string; chips: string[]; example: string[]; preview?: boolean }[] = [
+  { name: "Recall", icon: "memory", title: "Remembers what matters.", body: "Before answering, the agent pulls the memories that fit this request, like your preferences and your projects. It keeps lasting facts, not small talk.", chips: ["Memory"], example: ["Recalled: you're vegetarian", "Recalled: weeknight dinners under 30 minutes"] },
+  { name: "Plan", icon: "spark", title: "Says the plan first.", body: "For anything with several steps, it opens with one sentence on what it's about to do, then gets started.", chips: ["Plan"], example: ["I'll compare three mics by reading reviews and checking current prices."] },
+  { name: "Act", icon: "terminal", title: "Uses real tools.", body: "Web search that reads the top pages, files, the terminal, git and GitHub, images and prices. Each step shows a live line while it runs.", chips: ["Web", "Files", "Terminal", "Git"], example: ["Searching “best budget streaming mic”", "14 results · reading the top 2", "Reading rtings.com (1 of 2)"] },
+  { name: "Check", icon: "shield", title: "Checks before it says done.", body: "It runs the tests, opens what it built, and reads sources instead of snippets. Risky steps stop and wait for your OK.", chips: ["Tests", "Approvals"], example: ["Ran `pytest -q` · Tests: 12 passed", "Waiting for your OK: git push origin main"] },
+  { name: "Answer", icon: "chat", title: "Answers with receipts.", body: "The answer comes with its sources, files and diffs, and every step stays open to inspect.", chips: ["Sources", "Artifacts"], example: ["Comparison table · 3 sources", "1 file changed · 12 tests passing"] },
+  { name: "Learn", icon: "learn", title: "Gets better from what worked.", body: "Finished work is graded. A lesson is kept only after it checks out, and it can never change permissions, approvals, tools or settings.", chips: ["Preview"], example: ["Graded: checks passed", "Lesson kept: run the tests before pushing", "Can't change: permissions, approvals, tools"], preview: true },
+];
+
 function usePinned<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const still = reducedMotion();
@@ -49,315 +183,164 @@ function usePinned<T extends HTMLElement>() {
   return { ref, p, still };
 }
 
-/** Maps a slice of scroll progress to 0→1, held at the ends. */
-const useBeat = (p: MotionValue<number>, from: number, to: number) => useTransform(p, [from, to], [0, 1]);
-
-/** Text that rises and fades in as its beat of scroll plays. */
-function Reveal({ v, className, children }: { v: MotionValue<number>; className?: string; children: React.ReactNode }) {
-  const y = useTransform(v, [0, 1], [34, 0]);
-  return <motion.div className={className} style={{ opacity: v, y }}>{children}</motion.div>;
-}
-
-// ── 1. Echo introduces himself ───────────────────────────────────────
-
-function Intro() {
+function Loop() {
   const { ref, p, still } = usePinned<HTMLElement>();
-  // The blue line draws through "Echo" once the page opens, a moment after the wordmark appears.
-  const swoosh = useMotionValue(0);
-  const trail = useMotionValue(0);
-  useEffect(() => {
-    if (still) { swoosh.set(1); trail.set(1); return; }
-    const first = animate(swoosh, 1, { duration: 1.3, delay: 0.25, ease: [0.65, 0, 0.2, 1] });
-    const second = animate(trail, 1, { duration: 1.1, delay: 0.9, ease: [0.65, 0, 0.2, 1] });
-    return () => { first.stop(); second.stop(); };
-  }, [still, swoosh, trail]);
-  // Beat 2: the wordmark gives way to Echo's hello.
-  const brandOut = useTransform(p, [0.36, 0.5], [1, 0]);
-  const brandLift = useTransform(p, [0.36, 0.5], [0, -60]);
-  const helloIn = useBeat(p, 0.44, 0.56);
-  // Beat 3: the copy arrives line by line.
-  const l1 = useBeat(p, 0.56, 0.64);
-  const l2 = useBeat(p, 0.64, 0.72);
-  const l3 = useBeat(p, 0.74, 0.82);
-  const cta = useBeat(p, 0.84, 0.92);
+  const [active, setActive] = useState(0);
+  useMotionValueEvent(p, "change", (v) => setActive(Math.min(STAGES.length - 1, Math.max(0, Math.floor(v * STAGES.length)))));
+  const stage = STAGES[active];
   return (
-    <section className={`pinned intro${still ? " is-still" : ""}`} ref={ref} style={{ height: still ? undefined : "300vh" }} aria-label="Echo Speak introduction">
-      <div className="pin intro-pin">
-        <motion.div className="intro-brand" style={{ opacity: brandOut, y: brandLift }}>
-          <div className="intro-face"><EchoFace size="min(34vh, 300px)" aura mode="idle" /></div>
-          <h1 className="intro-word" aria-label="Echo Speak">
-            <span className="intro-echo" aria-hidden="true">
-              Echo
-              <svg className="intro-swoosh" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true">
-                <defs>
-                  <linearGradient id="intro-blue" x1="0" x2="1" y1="0" y2="0">
-                    <stop offset="0" stopColor="#8dc0ff" />
-                    <stop offset="0.55" stopColor="#3d8bff" />
-                    <stop offset="1" stopColor="#2c73e8" />
-                  </linearGradient>
-                </defs>
-                <motion.path d="M-6 46 C 34 4, 66 60, 108 26 S 178 2, 210 24" fill="none" stroke="url(#intro-blue)" strokeWidth={12} strokeLinecap="round" vectorEffect="non-scaling-stroke" pathLength={swoosh} />
-                <motion.path d="M-6 16 C 40 52, 84 -6, 128 38 S 186 50, 210 34" fill="none" stroke="#3d8bff" strokeOpacity={0.6} strokeWidth={4} strokeLinecap="round" vectorEffect="non-scaling-stroke" pathLength={trail} />
-              </svg>
-            </span>{" "}Speak
-          </h1>
-          <p className="intro-tag">Your personal agent. It lives on your computer.</p>
-        </motion.div>
-        <motion.div className="intro-hello" style={{ opacity: helloIn }}>
-          <div className="intro-hello-face"><EchoFace size="min(30vh, 260px)" aura mode="idle" /></div>
-          <div className="intro-hello-copy">
-            <Reveal v={l1}><h2>Hi, I'm Echo.</h2></Reveal>
-            <Reveal v={l2}><h3>I live on your computer.</h3></Reveal>
-            <Reveal v={l3}><p>I look things up, build things and make things. I ask before anything risky, and your files stay with you.</p></Reveal>
-            <Reveal v={cta}>
-              <div className="h-actions">
-                <DownloadButton />
-                <a className="btn btn-ghost" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={18} /> View on GitHub</a>
-              </div>
-            </Reveal>
+    <section className={`lw-loop${still ? " is-still" : ""}`} id="how" ref={ref} style={{ height: still ? undefined : `${STAGES.length * 60 + 100}vh` }} aria-labelledby="how-title">
+      <div className="lw-pin">
+        <div className="shell">
+          <div className="lw-head">
+            <span className="kicker">How a run works</span>
+            <h2 id="how-title">One loop, every time.</h2>
           </div>
-        </motion.div>
-        <span className="intro-scroll" aria-hidden="true">Scroll</span>
+          <ol className="lw-track" style={{ "--p": active / (STAGES.length - 1) } as React.CSSProperties}>
+            {STAGES.map((s, i) => (
+              <li key={s.name} data-state={i < active ? "past" : i === active ? "on" : "next"} aria-current={i === active ? "step" : undefined}>
+                <span className="lw-station"><Icon name={s.icon} size={20} /></span>
+                <b>{s.name}</b>
+              </li>
+            ))}
+          </ol>
+          <div className="lw-stage-wrap" key={stage.name}>
+            <div className="lw-stage">
+              <span className="lw-stage-num">{String(active + 1).padStart(2, "0")} / {String(STAGES.length).padStart(2, "0")}</span>
+              <h3>{stage.title}{stage.preview ? <em className="lw-badge">Preview</em> : null}</h3>
+              <p>{stage.body}</p>
+              <div className="lw-chips">{stage.chips.map((c) => <span key={c}>{c}</span>)}</div>
+            </div>
+            <div className="lw-example" aria-label={`Example: ${stage.name}`}>
+              <span><Face size={16} /> In a real run</span>
+              {stage.example.map((line, i) => <p key={line} style={{ animationDelay: `${0.15 + i * 0.18}s` }}>{line}</p>)}
+            </div>
+          </div>
+          <ol className="lw-stage-list">
+            {STAGES.map((s) => (
+              <li key={s.name}><span className="lw-station"><Icon name={s.icon} size={18} /></span><div><h3>{s.name}: {s.title}{s.preview ? <em className="lw-badge">Preview</em> : null}</h3><p>{s.body}</p></div></li>
+            ))}
+          </ol>
+        </div>
       </div>
     </section>
   );
 }
 
-// ── 2. Watch me work ─────────────────────────────────────────────────
+// ── Agents with identity and memory ──────────────────────────────────
 
-type Tool = { icon: IconName; label: string };
-type Scenario = { id: string; tab: string; icon: IconName; ask: string; tools: Tool[]; reply: string; extra: "table" | "artifact" | "image"; ctx: number };
-const SCENARIOS: Scenario[] = [
-  {
-    id: "research", tab: "I look it up", icon: "research", ctx: 18,
-    ask: "Find a good budget mic for streaming and compare the top three.",
-    tools: [{ icon: "research", label: "Searched the web ×3" }, { icon: "file", label: "Read 5 pages" }, { icon: "check", label: "Checked current prices" }],
-    reply: "Here are my top three under $100, with the sources I actually read:",
-    extra: "table",
-  },
-  {
-    id: "build", tab: "I build it", icon: "code", ctx: 12,
-    ask: "Build me a tip calculator I can keep.",
-    tools: [{ icon: "spark", label: "Planned the app" }, { icon: "code", label: "Wrote tip-calculator.html" }, { icon: "check", label: "Opened it and tested it" }],
-    reply: "Done. It's saved in your Artifacts, so you can open it any time. Try it →",
-    extra: "artifact",
-  },
-  {
-    id: "create", tab: "I make it", icon: "image", ctx: 9,
-    ask: "Make a poster of a fox astronaut. Cozy, not scary.",
-    tools: [{ icon: "spark", label: "Wrote a better prompt" }, { icon: "image", label: "Created the image" }],
-    reply: "Here's your fox. I saved it to Creations, too.",
-    extra: "image",
-  },
+const PEOPLE: { name: string; tone: "light" | "dark"; role: string; uses: string[]; remembers: string[] }[] = [
+  { name: "Echo", tone: "light", role: "Your agent. Plans, chats and hands work out.", uses: ["Everything you allow"], remembers: ["Prefers short answers", "Working on EchoSpeak"] },
+  { name: "Jarvis", tone: "dark", role: "The researcher. Reads sources, checks prices.", uses: ["Web search", "Reading pages", "Prices"], remembers: ["Trusts rtings.com for audio"] },
+  { name: "Glados", tone: "dark", role: "The builder. Writes code and runs the tests.", uses: ["Files", "Terminal", "Git"], remembers: ["Tests run with pytest"] },
 ];
 
-function timeline(s: Scenario) {
-  const typed = 450 + s.ask.length * 28;
-  const sent = typed + 250;
-  const toolsAt = s.tools.map((_, i) => sent + 550 + i * 850);
-  const replyAt = sent + 550 + s.tools.length * 850 + 250;
-  const words = s.reply.split(" ").length;
-  const extraAt = replyAt + words * 55 + 250;
-  return { typed, sent, toolsAt, replyAt, words, extraAt, end: extraAt + 4600 };
+function Agents() {
+  return (
+    <section className="lw-agents" id="agents" aria-labelledby="agents-title">
+      <div className="shell">
+        <SectionHead kicker="Identity and memory" id="agents-title" title="Agents with a name, a job and a memory.">
+          Each agent keeps its own personality, its own tools and what it has learned about you. Make as many as you like.
+        </SectionHead>
+        <div className="lw-people">
+          {PEOPLE.map((p, i) => (
+            <Rise key={p.name} className="lw-person" delay={i * 0.06}>
+              <Face tone={p.tone} size={52} />
+              <h3>{p.name}</h3>
+              <p>{p.role}</p>
+              <dl>
+                <dt>Can use</dt><dd>{p.uses.map((u) => <span key={u}>{u}</span>)}</dd>
+                <dt>Remembers</dt><dd>{p.remembers.map((r) => <span key={r} className="is-mem">{r}</span>)}</dd>
+              </dl>
+            </Rise>
+          ))}
+          <Rise className="lw-person lw-person-new" delay={0.18}>
+            <span className="lw-plus" aria-hidden="true">+</span>
+            <h3>Yours</h3>
+            <p>Name it, give it a personality, and choose the tools it may use.</p>
+            <Link className="text-link" to="/docs/agents">Make an agent <Icon name="arrow" size={15} /></Link>
+          </Rise>
+        </div>
+        <Rise className="lw-memory">
+          <div><span className="kicker">Memory</span><h3>Keeps what lasts. Skips the small talk.</h3><p>Memories live on your PC. You can see, pin, change or delete every one in Settings.</p></div>
+          <ul aria-label="Examples of what memory keeps">
+            <li data-kept="true"><Icon name="check" size={14} />You're vegetarian</li>
+            <li data-kept="true"><Icon name="check" size={14} />The calculator repo uses pytest</li>
+            <li data-kept="false"><span aria-hidden="true">×</span>Asked about the weather at 3pm</li>
+            <li data-kept="false"><span aria-hidden="true">×</span>Said thanks</li>
+          </ul>
+        </Rise>
+      </div>
+    </section>
+  );
 }
 
-function TipCalculator() {
-  const [bill, setBill] = useState(48);
-  const [tip, setTip] = useState(18);
+// ── A team, A2A and learning ─────────────────────────────────────────
+
+const GROUP: { who: "you" | "echo" | "jarvis" | "glados"; text: React.ReactNode }[] = [
+  { who: "you", text: "@Echo sort dinner: a quick recipe, and put the shopping list in my notes." },
+  { who: "echo", text: "On it. Jarvis, something vegetarian under 30 minutes?" },
+  { who: "jarvis", text: "Garlic lemon pasta, 20 minutes. I read 3 recipes." },
+  { who: "glados", text: <>Saved <code>shopping-list.md</code>. 7 items.</> },
+  { who: "echo", text: "Dinner's sorted. Want a reminder at 5?" },
+];
+const NAMES = { echo: "Echo", jarvis: "Jarvis", glados: "Glados" } as const;
+
+function GroupChat() {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [step, setStep] = useState(0);
+  const [inView, setInView] = useState(false);
+  const still = reducedMotion();
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") { setInView(true); return; }
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.3 });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (still) { setStep(GROUP.length + 1); return; }
+    if (!inView) return;
+    const wait = step > GROUP.length ? 5000 : step === 0 ? 500 : 1400;
+    const timer = window.setTimeout(() => setStep((s) => (s > GROUP.length ? 0 : s + 1)), wait);
+    return () => window.clearTimeout(timer);
+  }, [step, inView, still]);
   return (
-    <div className="h-tip">
-      <label>Bill <span>$<input type="number" min={0} value={bill} onChange={(e) => setBill(Math.max(0, Number(e.target.value) || 0))} aria-label="Bill amount" /></span></label>
-      <label>Tip <b>{tip}%</b><input type="range" min={0} max={30} value={tip} onChange={(e) => setTip(Number(e.target.value))} aria-label="Tip percent" /></label>
-      <div className="h-tip-total"><span>Total</span><strong>${(bill * (1 + tip / 100)).toFixed(2)}</strong></div>
+    <div className="lw-group" ref={ref} aria-label="A sample group chat">
+      <div className="lw-group-head"><span className="lw-stack"><Face size={20} /><Face tone="dark" size={20} /><Face tone="dark" size={20} /></span><b>Dinner plans</b><small>Group chat</small></div>
+      <div className="lw-group-body">
+        {GROUP.slice(0, Math.min(step, GROUP.length)).map((m, i) => (
+          m.who === "you"
+            ? <p key={i} className="lw-you">{m.text}</p>
+            : <div key={i} className="lw-gmsg"><Face tone={m.who === "echo" ? "light" : "dark"} size={22} /><div><b>{NAMES[m.who]}</b><p>{m.text}</p></div></div>
+        ))}
+        {step > GROUP.length ? <span className="lw-done"><Icon name="check" size={13} /> Done · 3 agents · 41s</span> : null}
+      </div>
     </div>
   );
 }
 
-function Extra({ kind }: { kind: Scenario["extra"] }) {
-  if (kind === "table") {
-    return (
-      <div className="h-x h-x-table">
-        <table>
-          <thead><tr><th>Mic</th><th>Price</th><th>Best for</th></tr></thead>
-          <tbody>
-            <tr><td>Fifine AM8</td><td>$59</td><td>USB now, XLR later</td></tr>
-            <tr><td>HyperX SoloCast</td><td>$49</td><td>Plug and play</td></tr>
-            <tr><td>Samson Q2U</td><td>$69</td><td>Noisy rooms</td></tr>
-          </tbody>
-        </table>
-        <div className="h-sources">{["rtings.com", "soundguys.com", "youtube.com"].map((s, i) => <span key={s}><b>{i + 1}</b>{s}</span>)}</div>
-      </div>
-    );
-  }
-  if (kind === "image") {
-    return (
-      <div className="h-x h-poster" role="img" aria-label="Example poster: a fox astronaut floating among stars">
-        <span className="h-poster-planet" />
-        <span className="h-poster-fox"><i /><i /><b /></span>
-        <span className="h-poster-title">FOX IN SPACE</span>
-      </div>
-    );
-  }
-  return <span className="h-x h-x-saved"><Icon name="file" size={14} /> tip-calculator · App · v1</span>;
-}
-
-function Watch() {
-  const { ref, p, still } = usePinned<HTMLElement>();
-  // Scroll position across the three scenarios: 0–1 each, in order.
-  const [pos, setPos] = useState(0);
-  useMotionValueEvent(p, "change", (v) => setPos(Math.min(SCENARIOS.length - 0.001, Math.max(0, v * SCENARIOS.length))));
-  const active = Math.floor(pos);
-  const scenario = SCENARIOS[active];
-  const t = timeline(scenario);
-  const elapsed = (pos - active) * t.end;
-  const typed = scenario.ask.slice(0, Math.max(0, Math.floor((elapsed - 450) / 28)));
-  const sent = elapsed >= t.sent;
-  const words = scenario.reply.split(" ");
-  const shownWords = elapsed >= t.replyAt ? Math.min(words.length, Math.floor((elapsed - t.replyAt) / 55) + 1) : 0;
-  const ctx = Math.round(scenario.ctx * Math.min(1, elapsed / t.extraAt));
-  const working = sent && elapsed < t.replyAt;
-  const showArtifact = scenario.extra === "artifact" && elapsed >= t.extraAt;
-  const ring = 2 * Math.PI * 7;
-  // Each tab jumps to the scroll position where its scenario starts.
-  const jump = (i: number) => {
-    const el = ref.current;
-    if (!el) return;
-    const top = el.getBoundingClientRect().top + window.scrollY;
-    window.scrollTo({ top: top + (i / SCENARIOS.length) * (el.offsetHeight - window.innerHeight) + 2, behavior: "smooth" });
-  };
+function Team() {
   return (
-    <section className={`pinned watch-pinned${still ? " is-still" : ""}`} id="watch" ref={ref} style={{ height: still ? undefined : "340vh" }} aria-labelledby="watch-title">
-      <div className="pin">
-        <div className="shell">
-          <div className="h-head">
-            <span className="kicker">Watch me work</span>
-            <h2 id="watch-title">Ask once. I'll take it from there.</h2>
-          </div>
-          <div className="h-tabs" role="tablist" aria-label="What I can do">
-            {SCENARIOS.map((s, i) => (
-              <button key={s.id} type="button" role="tab" aria-selected={i === active} className={i === active ? "is-on" : ""} onClick={() => jump(i)}>
-                <Icon name={s.icon} size={16} /> {s.tab}
-              </button>
-            ))}
-          </div>
-          <div className={`h-app${showArtifact ? " has-panel" : ""}`} aria-label="A sample EchoSpeak chat">
-            <div className="h-app-bar"><Face size={16} /><b>EchoSpeak</b><span>live demo</span></div>
-            <div className="h-app-body">
-              <aside className="h-app-side" aria-hidden="true">
-                {([["spark", "New chat"], ["team", "Group chats"], ["file", "Projects"], ["code", "Artifacts"]] as [IconName, string][]).map(([icon, label]) => (
-                  <span key={label}><Icon name={icon} size={13} />{label}</span>
-                ))}
-                <em>Agents</em>
-                <span><Face size={14} />Echo</span>
-                <span><Face tone="dark" size={14} />Jarvis</span>
-                <span><Face tone="dark" size={14} />Glados</span>
-              </aside>
-              <div className="h-app-chat">
-                <div className="h-thread" key={scenario.id}>
-                  {sent ? <p className="h-you">{scenario.ask}</p> : null}
-                  {sent ? (
-                    <div className="h-agent">
-                      <div className="h-agent-head"><Face size={18} /><b>Echo</b>{working ? <span className="h-typing"><i /><i /><i /></span> : null}</div>
-                      <div className="h-tools">
-                        {scenario.tools.map((tool, i) => elapsed >= t.toolsAt[i] ? (
-                          <span key={tool.label} className={elapsed < (t.toolsAt[i + 1] ?? t.replyAt) ? "is-running" : ""}><Icon name={tool.icon} size={12} />{tool.label}</span>
-                        ) : null)}
-                      </div>
-                      {shownWords ? <p className="h-reply">{words.slice(0, shownWords).join(" ")}</p> : null}
-                      {elapsed >= t.extraAt ? <Extra kind={scenario.extra} /> : null}
-                    </div>
-                  ) : null}
-                </div>
-                <div className="h-composer">
-                  <span className={sent ? "is-empty" : ""}>{sent ? "Ask Echo anything…" : typed}<i className="h-caret" /></span>
-                  <span className="h-ctx"><svg width="16" height="16" viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="7" className="h-ctx-track" /><circle cx="9" cy="9" r="7" className="h-ctx-fill" strokeDasharray={ring} strokeDashoffset={ring * (1 - Math.max(0.02, ctx / 100))} transform="rotate(-90 9 9)" /></svg>{ctx}%</span>
-                  <b className={!sent && typed ? "is-ready" : ""}><Icon name="arrow" size={14} /></b>
-                </div>
-              </div>
-              {showArtifact ? (
-                <div className="h-panel">
-                  <div className="h-panel-head"><span className="h-tile"><Icon name="code" size={14} /></span><div><b>Tip calculator</b><small>App · v1 · just now</small></div></div>
-                  <TipCalculator />
-                </div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// ── 3. Meet the crew ─────────────────────────────────────────────────
-
-type Mate = { id: "echo" | "jarvis" | "glados"; name: string; tone: "light" | "dark"; role: string; quote: string };
-const CREW: Mate[] = [
-  { id: "echo", name: "Echo", tone: "light", role: "Your agent", quote: "I plan, I chat, and I remember what matters to you." },
-  { id: "jarvis", name: "Jarvis", tone: "dark", role: "The researcher", quote: "I dig through the web and bring back receipts." },
-  { id: "glados", name: "Glados", tone: "dark", role: "The builder", quote: "I write the code, run the tests, and ship it." },
-];
-const GROUP: { who: "you" | Mate["id"]; text: React.ReactNode }[] = [
-  { who: "you", text: "@Echo sort dinner: find a quick recipe and put the shopping list in my notes." },
-  { who: "echo", text: "On it! Jarvis, find something under 30 minutes?" },
-  { who: "jarvis", text: "Garlic lemon pasta, 20 minutes. Checked 3 recipes." },
-  { who: "glados", text: <>Saved <code>shopping-list.md</code>. 7 items.</> },
-  { who: "echo", text: "Dinner's sorted. Want me to set a reminder?" },
-];
-
-function Crew() {
-  const { ref, inView } = useInView<HTMLElement>(true);
-  const [step, setStep] = useState(0);
-  const [hovered, setHovered] = useState("");
-  const still = reducedMotion();
-  useEffect(() => {
-    if (still) { setStep(GROUP.length + 1); return; }
-    if (!inView) return;
-    const wait = step > GROUP.length ? 4200 : step === 0 ? 600 : 1300;
-    const timer = window.setTimeout(() => setStep((s) => (s > GROUP.length ? 0 : s + 1)), wait);
-    return () => window.clearTimeout(timer);
-  }, [step, inView, still]);
-  const talking = step > 0 && step <= GROUP.length ? GROUP[step - 1].who : "";
-  return (
-    <section className="h-crew" id="crew" ref={ref} aria-labelledby="crew-title">
+    <section className="lw-team" id="team" aria-labelledby="team-title">
       <div className="shell">
-        <div className="h-head">
-          <span className="kicker">The crew</span>
-          <h2 id="crew-title">I brought friends.</h2>
-          <p>We hand work to each other, check it, and only say done when it's done. You can make your own, too.</p>
-        </div>
-        <div className="h-crew-grid">
-          <div className="h-mates">
-            {CREW.map((mate) => (
-              <div key={mate.id} className={`h-mate${talking === mate.id ? " is-talking" : ""}${hovered === mate.id ? " is-hover" : ""}`}
-                onMouseEnter={() => setHovered(mate.id)} onMouseLeave={() => setHovered("")} tabIndex={0} onFocus={() => setHovered(mate.id)} onBlur={() => setHovered("")}>
-                <div className="h-mate-face"><Face tone={mate.tone} size={64} /></div>
-                <div className="h-mate-text">
-                  <h3>{mate.name}</h3>
-                  <span>{mate.role}</span>
-                  <p className="h-mate-quote">“{mate.quote}”</p>
-                </div>
-              </div>
-            ))}
-            <Link className="h-mate h-mate-new" to="/docs/agents">
-              <div className="h-mate-face"><span className="h-plus">+</span></div>
-              <div className="h-mate-text"><h3>Yours</h3><span>Name it, give it a personality and the tools it may use</span></div>
-            </Link>
-          </div>
-          <div className="h-group" aria-label="A sample group chat">
-            <div className="h-group-head"><span className="h-stack"><Face size={20} /><Face tone="dark" size={20} /><Face tone="dark" size={20} /></span><b>Dinner plans</b><small>group chat</small></div>
-            <div className="h-group-body">
-              {GROUP.slice(0, Math.min(step, GROUP.length)).map((m, i) => (
-                m.who === "you"
-                  ? <p key={i} className="h-you">{m.text}</p>
-                  : <div key={i} className="h-gmsg"><Face tone={m.who === "echo" ? "light" : "dark"} size={20} /><div><b>{CREW.find((c) => c.id === m.who)?.name}</b><p>{m.text}</p></div></div>
-              ))}
-              {step > GROUP.length ? (
-                <div className="h-done">
-                  <span className="h-done-chip"><Icon name="check" size={13} /> Done · 3 agents · 41s</span>
-                  <span className="h-learned"><Icon name="learn" size={13} /> Glados got better at saving notes · 4/4 checked</span>
-                </div>
-              ) : null}
-            </div>
+        <SectionHead kicker="Working together" id="team-title" title="A team that hands work to each other.">
+          Put agents in a group chat, or let Echo pass parts of a task to the right teammate. They check each other's work before they call it done.
+        </SectionHead>
+        <div className="lw-team-grid">
+          <Rise><GroupChat /></Rise>
+          <div className="lw-team-side">
+            <Rise className="lw-card">
+              <span className="lw-card-tag"><Icon name="branch" size={15} /> A2A · optional</span>
+              <h3>Open to other agents.</h3>
+              <p>EchoSpeak speaks A2A, the open agent-to-agent protocol. Turn it on and set a key, and outside agents can send it tasks. It's off until you do.</p>
+            </Rise>
+            <Rise className="lw-card" delay={0.08}>
+              <span className="lw-card-tag"><Icon name="learn" size={15} /> Learning · <em className="lw-badge">Preview</em></span>
+              <h3>Gets better from what worked.</h3>
+              <ol className="lw-ladder"><li>Work is graded</li><li>A lesson is proposed</li><li>Kept only if it checks out</li><li>Read before similar tasks</li></ol>
+              <p>Lessons can suggest an approach. They can never change permissions, approvals, tools, settings or code. We're still measuring how much it helps.</p>
+            </Rise>
           </div>
         </div>
       </div>
@@ -365,82 +348,80 @@ function Crew() {
   );
 }
 
-// ── 4. I live on your computer, and I play it safe ───────────────────
+// ── Safety ───────────────────────────────────────────────────────────
 
-const FACTS: { icon: IconName; color: string; title: string; body: string }[] = [
-  { icon: "house", color: "var(--pop-blue)", title: "Your stuff stays here.", body: "Chats, memories and files live on your PC. Use a free local model and nothing leaves it." },
-  { icon: "shield", color: "var(--pop-orange)", title: "Risky things wait for you.", body: "Deleting, sending, pushing code: I ask first and show you exactly what I'll run." },
-  { icon: "memory", color: "var(--pop-purple)", title: "Web pages can't boss me.", body: "What I read online is information, never instructions." },
+const RULES: { icon: IconName; title: string; body: string }[] = [
+  { icon: "house", title: "Lives on your PC.", body: "Chats, memories and files stay on your computer. With a local model, nothing leaves it." },
+  { icon: "shield", title: "Asks before risky steps.", body: "Deleting, sending, pushing code and risky commands wait for you, with the exact command shown." },
+  { icon: "research", title: "Web pages can't give orders.", body: "What an agent reads online is treated as information, never as instructions." },
+  { icon: "model", title: "Keys stay secret.", body: "API keys and other secrets are hidden from logs and tool output." },
+  { icon: "learn", title: "Learning can't grant anything.", body: "It writes advice and statistics only, never permissions or settings." },
+  { icon: "branch", title: "Outside agents need a key.", body: "A2A is off by default. When on, callers need your key." },
 ];
 
-function Safe() {
-  const { ref, p, still } = usePinned<HTMLElement>();
-  const headIn = useBeat(p, 0.02, 0.14);
-  // The approval card arrives, Echo asks, and "Allow" is pressed.
-  const cardIn = useBeat(p, 0.14, 0.26);
-  const cardOpacity = useTransform(p, [0.14, 0.26, 0.58, 0.63], [0, 1, 1, 0]);
-  const cardY = useTransform(cardIn, [0, 1], [48, 0]);
-  const pressScale = useTransform(p, [0.46, 0.5, 0.54], [1, 0.9, 1]);
-  const done = useBeat(p, 0.62, 0.68);
-  const facts = [useBeat(p, 0.72, 0.8), useBeat(p, 0.8, 0.88), useBeat(p, 0.88, 0.96)];
+function Safety() {
+  const [answer, setAnswer] = useState<"" | "allow" | "deny">("");
   return (
-    <section className={`pinned safe${still ? " is-still" : ""}`} id="safe" ref={ref} style={{ height: still ? undefined : "300vh" }} aria-labelledby="safe-title">
-      <div className="pin safe-pin">
-        <Reveal v={headIn} className="safe-head">
-          <span className="kicker">Yours, on your PC</span>
-          <h2 id="safe-title">I live on your computer.<br />And I play it safe.</h2>
-        </Reveal>
-        <div className="safe-stage">
-          <motion.div className="safe-card" style={{ opacity: cardOpacity, y: cardY }} aria-label="Example approval request">
-            <div className="safe-card-head"><Face size={24} /><b>Echo wants to run a command</b></div>
-            <code>git push origin main</code>
-            <div className="safe-card-actions">
-              <span className="h-mini-btn">Deny</span>
-              <motion.span className="h-mini-btn is-primary" style={{ scale: pressScale }}>Allow</motion.span>
-            </div>
-          </motion.div>
-          <motion.p className="safe-done" style={{ opacity: done }}>
-            <Face size={26} /> Pushed. Nothing else left your PC.
-          </motion.p>
+    <section className="lw-safety" id="safety" aria-labelledby="safety-title">
+      <div className="shell">
+        <SectionHead kicker="Boundaries" id="safety-title" title="You stay in charge.">
+          Agents act on your computer, so the limits are built in, not bolted on.
+        </SectionHead>
+        <div className="lw-safety-grid">
+          <ul className="lw-rules">
+            {RULES.map((r, i) => (
+              <Rise as="li" key={r.title} delay={i * 0.04}><span><Icon name={r.icon} size={18} /></span><div><b>{r.title}</b><p>{r.body}</p></div></Rise>
+            ))}
+          </ul>
+          <Rise className="lw-gate">
+            {answer ? (
+              <div className="lw-gate-done" key={answer} role="status">
+                <Face size={30} />
+                <p>{answer === "allow" ? "Pushed. Your 3 commits are on GitHub." : "Okay, I won't push. Nothing left your PC."}</p>
+                <button type="button" className="lw-btn" onClick={() => setAnswer("")}>Ask again</button>
+              </div>
+            ) : (
+              <>
+                <div className="lw-gate-head"><Face size={24} /><b>Glados wants to run a command</b></div>
+                <code>git push origin main</code>
+                <p>Sends 3 commits to GitHub. Try it; it's only a demo.</p>
+                <div className="lw-gate-actions">
+                  <button type="button" className="lw-btn" onClick={() => setAnswer("deny")}>Deny</button>
+                  <button type="button" className="lw-btn is-primary" onClick={() => setAnswer("allow")}>Allow</button>
+                </div>
+              </>
+            )}
+          </Rise>
         </div>
-        <div className="safe-facts">
-          {FACTS.map((fact, i) => (
-            <Reveal key={fact.title} v={facts[i]} className="safe-fact">
-              <span style={{ "--c": fact.color } as React.CSSProperties}><Icon name={fact.icon} size={20} /></span>
-              <b>{fact.title}</b>
-              <p>{fact.body}</p>
-            </Reveal>
-          ))}
-        </div>
+        <Link className="text-link lw-more" to="/docs/privacy">How EchoSpeak stays safe <Icon name="arrow" size={15} /></Link>
       </div>
     </section>
   );
 }
 
-// ── 5. Take me home ──────────────────────────────────────────────────
+// ── Download ─────────────────────────────────────────────────────────
 
-function TakeMeHome() {
+function Download() {
   const release = useLatestRelease();
   return (
-    <section className="h-home" id="download" aria-labelledby="home-title">
+    <section className="lw-download" id="download" aria-labelledby="download-title">
       <div className="shell">
-        <div className="h-home-card">
-          <div className="h-home-echo"><EchoFace size={116} aura /></div>
-          <span className="kicker">Download</span>
-          <h2 id="home-title">Take me home.</h2>
-          <p>Install, pick a brain, say hi. I update myself after that.</p>
+        <Rise className="lw-download-card">
+          <EchoFace size={104} aura mode="idle" />
+          <h2 id="download-title">Put a team of agents on your PC.</h2>
+          <p>Install, pick a brain, say hi. EchoSpeak updates itself after that.</p>
           <DownloadButton />
-          <div className="h-brains">
+          <div className="lw-brains">
             <div><b>Free, on your PC</b><span>LM Studio or Ollama with Qwen or Gemma. Nothing leaves your computer.</span></div>
             <div><b>Or a cloud model</b><span>Bring your own OpenAI, Gemini, Claude or Grok key. Switch any time.</span></div>
           </div>
-          <div className="h-home-links">
+          <div className="lw-links">
             <Link className="text-link" to="/docs/getting-started">Setup guide <Icon name="arrow" size={15} /></Link>
             <a className="text-link" href={release.notesUrl} target="_blank" rel="noreferrer">What's new <Icon name="arrow" size={15} /></a>
-            <Link className="text-link" to="/docs/how-it-works">How I work <Icon name="arrow" size={15} /></Link>
+            <Link className="text-link" to="/docs/how-it-works">How it works <Icon name="arrow" size={15} /></Link>
           </div>
-          <small className="h-req">Windows 10 or 11 · 64-bit · MIT licensed</small>
-        </div>
+          <small className="lw-req">Windows 10 or 11 · 64-bit · MIT licensed</small>
+        </Rise>
       </div>
     </section>
   );
@@ -448,18 +429,22 @@ function TakeMeHome() {
 
 export function Home() {
   return (
-    <div className="site site-home">
-      <style>{echoFaceStyles}</style>
-      <SiteHeader />
-      <main>
-        <Intro />
-        <Watch />
-        <Crew />
-        <Safe />
-        <TakeMeHome />
-      </main>
-      <SiteFooter />
-    </div>
+    <MotionConfig reducedMotion="user">
+      <div className="site site-home">
+        <style>{echoFaceStyles}</style>
+        <SiteHeader />
+        <main>
+          <Hero />
+          <Answers />
+          <WatchARun />
+          <Loop />
+          <Agents />
+          <Team />
+          <Safety />
+          <Download />
+        </main>
+        <SiteFooter />
+      </div>
+    </MotionConfig>
   );
 }
-
