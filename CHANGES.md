@@ -1,5 +1,32 @@
 # Changes
 
+## v11.4.0 — 2026-10-07
+
+User-facing notes: [EchoSpeak 11.4.0](docs/releases/v11.4.0.md).
+
+- **Live progress inside tools** (`agent/lean/progress.py`, new): `progress.report(text)` writes to a
+  contextvar sink that `LeanLoop._run_tool` installs per call (throttled to 0.25s, with the last line flushed on
+  exit). The progress text arrives as `tool_progress` events and is stored as the timeline item's `detail` until the
+  tool ends. It works inside the parallel pool, because `toolbox.run` copies the context.
+- **Step summaries** (`agent/lean/steps.py`, new): `done_label` (past-tense labels), `summarize` (per-tool result
+  lines: results/pages, words read, test counts, exit codes, line deltas, matches, products, memories) and
+  `widget_counts`. `tool_end` and the saved timeline carry `done_label`, `summary` and `meta`.
+- **Search and read** (`toolbox.py` `_search_and_read`):
+  - `web_search` accepts `read` (0–3) and opens the top results with `safe_web_fetch`, reporting each page.
+  - Defaults to 2 for comparison, price, review and "best X" queries (`steps.default_reads`).
+  - Pages are appended to the output under "Pages read from the top results" and their widgets are kept.
+  - `ToolResult.meta` carries `results` and `pages`.
+- **Terminal progress** (`terminal.py`): host commands poll in slices of 0.6s or less until the foreground deadline
+  and report the latest output line.
+- **Prompt** (`prompt.py` `WORKING_RULES`): read at least two sources before comparing, and open multi-step work
+  with a one-sentence preamble in the same reply as the tool calls.
+- **Chat UI** (`lean/steps.ts`, new; `LeanMessage.tsx`, `LiveStatus.tsx`, `liveReducer.ts`, `lean.css`):
+  - `ToolRow` shows the done label and a sub-line (live detail while running, summary when done).
+  - `groupSteps` + `StepGroup` fold consecutive tools into one line built by `stepsSummary`. The line expands,
+    and the running rows stay visible while it's collapsed.
+  - `phaseOf` drives a between-steps line in the message, and the composer pill shows the same text.
+- Tests: `test_live_steps.py` (8), a new loop test in `test_lean_runtime.py`, and `steps.test.ts` (5).
+
 ## Website refresh — 2026-10-07
 
 Public site only (`apps/web/src/site`, published by `.github/workflows/website.yml`); the app version is unchanged.

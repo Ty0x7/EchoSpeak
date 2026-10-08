@@ -128,6 +128,8 @@ TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
         "If the snippets don't answer the question, open the best result with safe_web_fetch.",
         "drop": ["objective", "local_first", "freshness"],
         "params": {"query": "A short keyword query, e.g. 'Edmonton population 2024'."},
+        "add": {"read": {"type": "integer", "description": "Also open and read this many top results (0-3). "
+                         "Use 2-3 for comparisons, prices, reviews and 'best X' questions."}},
     },
     "safe_web_fetch": {
         "params": {"max_text_chars": "Cap on the page text returned; leave it unset unless the page is huge."},
@@ -158,6 +160,8 @@ class ToolResult:
     duration_ms: int
     # Cards for the chat built from the tool's own data (see agent/lean/widgets.py).
     widgets: list[dict[str, Any]] = field(default_factory=list)
+    # Facts for the step's summary line (agent/lean/steps.py), e.g. results and pages read.
+    meta: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -301,6 +305,8 @@ class Toolbox:
             for param, text in (override.get("params") or {}).items():
                 if param in parameters["properties"]:
                     parameters["properties"][param]["description"] = text
+            for param, spec in (override.get("add") or {}).items():
+                parameters["properties"].setdefault(param, dict(spec))
             rendered.append({
                 "type": "function",
                 "function": {
@@ -409,6 +415,55 @@ class Toolbox:
                 output, ok = f"Error: {exc}", False
             return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000),
                               redact_payload(widgets) if ok else [])
+        if name == "web_search" and name in self.entries:
+            return self._search_and_read(args)
+        return self._run_entry(name, args)
+
+    def _search_and_read(self, args: dict[str, Any]) -> ToolResult:
+        """web_search, then (for comparisons, prices, 'best X', or when asked) read the top results.
+
+        Snippets are leads; reading two or three pages is what makes a comparison or a price
+        trustworthy, and small models rarely open them on their own. Each page goes through
+        safe_web_fetch, so it is fetched safely and kept in the chat's research notebook.
+        """
+        from agent.lean import progress, steps
+
+        started = time.perf_counter()
+        args = dict(args)
+        raw_read = args.pop("read", None)
+        query = str(args.get("query") or args.get("q") or "")
+        try:
+            read = steps.default_reads(query) if raw_read in (None, "") else int(raw_read)
+        except (TypeError, ValueError):
+            read = 0
+        read = max(0, min(3, read)) if "safe_web_fetch" in self.entries else 0
+        progress.report(f"Searching for “{query[:70]}”")
+        result = self._run_entry("web_search", args)
+        urls = steps.result_urls(result.output) if result.ok else []
+        result.meta = {"results": len(urls)}
+        if not urls or not read:
+            return result
+        targets = urls[:read]
+        progress.report(f"{len(urls)} results · reading the top {len(targets)}")
+        pages: list[str] = []
+        widgets = list(result.widgets)
+        for index, url in enumerate(targets, 1):
+            progress.report(f"Reading {steps.short_url(url)} ({index} of {len(targets)})")
+            page = self._run_entry("safe_web_fetch", {"url": url, "objective": query, "max_text_chars": 3500})
+            if page.ok and "safe_fetch_error" not in page.output:
+                pages.append(f"### {url}\n{page.output.strip()}")
+                widgets.extend(page.widgets)
+        result.meta["pages"] = len(pages)
+        if pages:
+            result.output += ("\n\n## Pages read from the top results (inspected, not just snippets)\n\n"
+                              + "\n\n".join(pages))
+        result.widgets = widgets
+        result.duration_ms = int((time.perf_counter() - started) * 1000)
+        return result
+
+    def _run_entry(self, name: str, args: dict[str, Any]) -> ToolResult:
+        """Run a registry tool (agent/tools.py) with this toolbox's context."""
+        started = time.perf_counter()
         entry = self.entries.get(name)
         if entry is None:
             close = ", ".join(sorted(self.names)[:40])
@@ -473,7 +528,9 @@ def describe_call(name: str, args: dict[str, Any]) -> str:
     if name in {"create_artifact", "update_artifact"}:
         return f"{'Creating' if name == 'create_artifact' else 'Updating'} {pick('title', 'artifact_id') or 'artifact'}"
     if name == "safe_web_fetch":
-        return f"Reading {pick('url')}"
+        from agent.lean.steps import short_url
+
+        return f"Reading {short_url(pick('url', 'link'))}"
     if name in {"file_read", "file_list"}:
         return f"{'Reading' if name == 'file_read' else 'Listing'} {pick('path') or '.'}"
     if name == "file_write":

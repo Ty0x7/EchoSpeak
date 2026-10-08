@@ -557,6 +557,15 @@ def _read(path: Optional[Path], chars: int = 0) -> str:
     return data[-chars:] if chars else data
 
 
+def _last_line(path: Optional[Path]) -> str:
+    """The newest non-empty output line, for the live line under a running command."""
+    for line in reversed(_read(path, 2000).splitlines()):
+        line = line.strip()
+        if line:
+            return line[:140]
+    return ""
+
+
 # ── background processes ────────────────────────────────────────────────
 @dataclass
 class BackgroundProcess:
@@ -724,12 +733,22 @@ class Terminal:
             _PROC_DIR.mkdir(parents=True, exist_ok=True)
             log, err = _PROC_DIR / f"{proc_id}.log", _PROC_DIR / f"{proc_id}.err"
             popen = _host_launch(command, cwd, log, err)
-            try:
-                code = popen.wait(timeout=wait)
-            except subprocess.TimeoutExpired:
-                proc = BackgroundProcess(id=proc_id, command=command, cwd=str(cwd), mode="host", log_path=log,
-                                         err_path=err, popen=popen)
-                return Launch(False, proc=proc)
+            # Wait in short slices, showing the newest output line under the step as it runs.
+            from agent.lean import progress
+
+            deadline = time.monotonic() + wait
+            while True:
+                try:
+                    code = popen.wait(timeout=max(0.05, min(0.6, deadline - time.monotonic())))
+                    break
+                except subprocess.TimeoutExpired:
+                    if time.monotonic() >= deadline:
+                        proc = BackgroundProcess(id=proc_id, command=command, cwd=str(cwd), mode="host", log_path=log,
+                                                 err_path=err, popen=popen)
+                        return Launch(False, proc=proc)
+                    latest = _last_line(log) or _last_line(err)
+                    if latest:
+                        progress.report(latest)
             out, error = _read(log), _read(err)
             for path in (log, err):
                 try:

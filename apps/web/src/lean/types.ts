@@ -24,6 +24,14 @@ export type LeanSegment =
       startedAt: number;
       /** Cards built from the tool's own data (weather, products, sources...). Validated before rendering. */
       widgets?: unknown[];
+      /** Live line while it runs ("Reading rtings.com (1 of 2)"), from tool_progress. */
+      detail?: string;
+      /** Past-tense label once finished ("Searched “budget mic”"). */
+      doneLabel?: string;
+      /** What came back, in a few words ("14 results · read 2 pages"). */
+      summary?: string;
+      /** Counts behind the summary (results, pages, products). */
+      meta?: Record<string, number>;
     }
   | {
       kind: "approval";

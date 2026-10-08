@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from "react";
 import { AgentAvatar } from "./LeanMessage";
+import { phaseOf } from "./steps";
 import type { LeanAgentRef, LeanLiveState, LeanMessageData, LeanSegment } from "./types";
 
+/** The same words the message shows: the running step and its live line, or the phase between steps. */
 function activityOf(msg: LeanMessageData): string {
   const name = msg.agent.name || "Echo";
   const last = msg.segments[msg.segments.length - 1] as LeanSegment | undefined;
-  if (last?.kind === "thinking") return `${name} is thinking`;
-  if (last?.kind === "tool" && last.status === "running") return last.label;
+  if (!last) return msg.role === "merge" ? `${name} is summarizing` : `${name} is starting`;
+  if (last.kind === "thinking") return `${name} is thinking it through`;
+  if (last?.kind === "tool" && last.status === "running") return last.detail ? `${last.label} · ${last.detail}` : last.label;
   if (last?.kind === "approval" && !last.decision) return `${name} needs your OK`;
-  if (last?.kind === "text") return `${name} is writing`;
-  if (last) return `${name} is working`;
-  return msg.role === "merge" ? `${name} is summarizing` : `${name} is starting`;
+  if (last?.kind === "text") return `${name} is writing the answer`;
+  const phase = phaseOf({ ...msg, status: "streaming" });
+  if (phase) return `${name}: ${phase.replace(/…$/, "")}`;
+  return msg.role === "merge" ? `${name} is summarizing` : `${name} is working`;
 }
 
 const joinNames = (names: string[]) =>

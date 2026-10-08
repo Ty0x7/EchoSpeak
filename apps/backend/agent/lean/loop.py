@@ -488,12 +488,13 @@ class LeanTurn:
             for call, name, args, _ in parallel:
                 self._tool_started(call, name, args, step)
             with ThreadPoolExecutor(max_workers=min(4, len(parallel))) as pool:
-                futures = {call.id: pool.submit(self.toolbox.run, name, args) for call, name, args, _ in parallel}
+                futures = {call.id: pool.submit(self._run_tool, call, name, args, step) for call, name, args, _ in parallel}
                 for call, name, args, _ in parallel:
                     result = futures[call.id].result()
                     results[call.id] = (result.ok, result.output)
                     self._note_source(name, args, result.ok)
-                    self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets)
+                    self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets,
+                                        meta=result.meta)
         else:
             sequential = prepared
 
@@ -532,7 +533,7 @@ class LeanTurn:
                     continue
                 self._tool_finished(call, name, args, step, True, note, 0)
                 self._seal_for_handoff(step)
-                result = self.toolbox.run(name, args)
+                result = self._run_tool(call, name, args, step)
                 results[call.id] = (result.ok, result.output)
                 # Open the continuation only now, so it sorts after the teammate's reply.
                 self._start_message(continues=True, **self.meta)
@@ -542,9 +543,10 @@ class LeanTurn:
                 results[call.id] = (False, denial)
                 self._tool_finished(call, name, args, step, False, denial, 0)
                 continue
-            result = self.toolbox.run(name, args)
+            result = self._run_tool(call, name, args, step)
             results[call.id] = (result.ok, result.output)
-            self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets)
+            self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets,
+                                meta=result.meta)
             self._note_source(name, args, result.ok)
 
         limit = 14000
@@ -625,6 +627,19 @@ class LeanTurn:
             return False, "The user stopped this request."
         return False, f"The user denied permission to run {name}. Do not retry it; continue without it or explain what is blocked."
 
+    def _run_tool(self, call: Any, name: str, args: dict[str, Any], step: int):
+        """Run one tool with a live progress line: what it reports shows under its row (agent/lean/progress.py)."""
+        from agent.lean import progress
+
+        def emit(text: str) -> None:
+            for item in self.timeline:
+                if item.get("kind") == "tool" and item.get("id") == call.id:
+                    item["detail"] = text
+            self.emit({"type": "tool_progress", "step": step, "id": call.id, "text": text})
+
+        with progress.reporting(emit):
+            return self.toolbox.run(name, args)
+
     def _tool_started(self, call: Any, name: str, args: dict[str, Any], step: int) -> None:
         self._close_thinking()
         label = describe_call(name, args)
@@ -648,7 +663,13 @@ class LeanTurn:
                 logger.debug("Lean tool run persistence failed", exc_info=True)
 
     def _tool_finished(self, call: Any, name: str, args: dict[str, Any], step: int, ok: bool, output: str, duration_ms: int,
-                       widgets: Optional[list[dict[str, Any]]] = None) -> None:
+                       widgets: Optional[list[dict[str, Any]]] = None, meta: Optional[dict[str, Any]] = None) -> None:
+        from agent.lean import steps
+
+        facts = {**steps.widget_counts(widgets), **(meta or {})}
+        label = describe_call(name, args)
+        done = steps.done_label(label) if ok else label
+        summary = steps.summarize(name, args, ok, output, facts)
         preview = (output or "").strip()
         if len(preview) > 1600:
             preview = preview[:1600] + "…"
@@ -658,11 +679,13 @@ class LeanTurn:
             self.succeeded.add(name)
         for item in self.timeline:
             if item.get("kind") == "tool" and item.get("id") == call.id:
-                item.update({"status": "done" if ok else "failed", "output": preview, "duration_ms": duration_ms})
+                item.update({"status": "done" if ok else "failed", "output": preview, "duration_ms": duration_ms,
+                             "done_label": done, "summary": summary, "meta": facts})
+                item.pop("detail", None)
                 if cards:
                     item["widgets"] = cards
         event = {"type": "tool_end", "step": step, "id": call.id, "name": name, "ok": ok,
-                 "output": preview, "duration_ms": duration_ms}
+                 "output": preview, "duration_ms": duration_ms, "done_label": done, "summary": summary, "meta": facts}
         if cards:
             event["widgets"] = cards
         self.emit(event)
