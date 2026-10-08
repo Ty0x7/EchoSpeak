@@ -542,6 +542,108 @@ function McpApprovals({ apiBase }: { apiBase: string }) {
   );
 }
 
+type SuggestionSetting = { name: string; secret?: boolean; required?: boolean; default?: string; about?: string };
+type Suggestion = {
+  id: string; title: string; summary: string; publisher: string; version: string; server_name: string;
+  launch: { command?: string; args?: string[]; url?: string }; settings: SuggestionSetting[];
+  needs: string[]; missing: string[]; steps: string[]; watch_out: string[]; homepage: string; reason: string;
+};
+
+/** Connections an agent suggested (backend: agent/integrations.py). Nothing runs until approved here;
+ * keys are typed here only and stored encrypted like every MCP secret. */
+function ConnectionSuggestions({ apiBase }: { apiBase: string }) {
+  const [items, setItems] = useState<Suggestion[]>([]);
+  const [values, setValues] = useState<Record<string, Record<string, string>>>({});
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/lean/integrations/proposals`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setItems(Array.isArray(data?.items) ? data.items : []);
+    } catch {
+      setItems([]);
+    }
+  }, [apiBase]);
+  useEffect(() => { void load(); }, [load]);
+  const act = async (item: Suggestion, verb: "approve" | "dismiss") => {
+    setBusy(item.id);
+    setMessage("");
+    try {
+      const res = await fetch(`${apiBase}/lean/integrations/proposals/${encodeURIComponent(item.id)}/${verb}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(verb === "approve" ? { values: values[item.id] || {} } : {}),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.detail || `Failed (${res.status})`));
+      if (verb === "approve") {
+        const server = data?.server || {};
+        setMessage(server.running
+          ? `${item.title} is connected with ${server.tool_count || 0} tools. Ask Echo to check it.`
+          : `${item.title} was added but isn't running yet${server.last_error ? `: ${server.last_error}` : ""}. Ask Echo to check it.`);
+      }
+      setValues((current) => ({ ...current, [item.id]: {} }));
+      await load();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy("");
+    }
+  };
+  if (!items.length && !message) return null;
+  return (
+    <>
+      {items.map((item) => {
+        const runs = item.launch.url || [item.launch.command, ...(item.launch.args || [])].filter(Boolean).join(" ");
+        const typed = values[item.id] || {};
+        const missingRequired = item.settings.some((s) => s.required && !s.default && !String(typed[s.name] || "").trim());
+        return (
+          <div key={item.id} className="st-suggestion">
+            <Row stack
+              label={<span><b>{item.title}</b> · suggested by Echo</span>}
+              help={
+                <>
+                  {item.reason ? <div>For: {item.reason}</div> : null}
+                  <div>{item.publisher}{item.version ? ` · version ${item.version}` : ""}</div>
+                  <div className="is-mono">Runs: {runs}</div>
+                  {item.needs.length ? <div>Needs: {item.needs.join(", ")}{item.missing.length ? ` (not installed: ${item.missing.join(", ")})` : ""}</div> : null}
+                  {item.steps.length ? <ol>{item.steps.map((s) => <li key={s}>{s}</li>)}</ol> : null}
+                  {item.watch_out.map((w) => <div key={w}>Watch out: {w}</div>)}
+                  {item.homepage ? <div><a href={item.homepage} target="_blank" rel="noreferrer">Project page</a></div> : null}
+                </>
+              }
+            />
+            {item.settings.map((s) => (
+              <Row key={s.name} label={<span className="is-mono">{s.name}{s.required ? "" : " (optional)"}</span>} help={s.about}>
+                <input
+                  className="st-input is-wide is-mono"
+                  type={s.secret ? "password" : "text"}
+                  aria-label={s.name}
+                  value={typed[s.name] || ""}
+                  placeholder={s.default || (s.secret ? "Paste key" : "")}
+                  onChange={(e) => setValues((current) => ({ ...current, [item.id]: { ...typed, [s.name]: e.target.value } }))}
+                />
+              </Row>
+            ))}
+            <Row label="">
+              <button type="button" className="es-btn es-btn-sm" disabled={busy === item.id} onClick={() => void act(item, "dismiss")}>
+                Not now
+              </button>
+              <button type="button" className="es-btn es-btn-sm es-btn-primary" disabled={busy === item.id || missingRequired}
+                title={missingRequired ? "Fill in the required settings first" : undefined}
+                onClick={() => void act(item, "approve")}>
+                {busy === item.id ? "Connecting…" : "Approve and connect"}
+              </button>
+            </Row>
+          </div>
+        );
+      })}
+      {message ? <Row label={<span className="st-muted">{message}</span>} /> : null}
+    </>
+  );
+}
+
 function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; sessionId: string; projectId: string }) {
   const [cards, setCards] = useState<any[] | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
@@ -691,7 +793,8 @@ function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; s
           <Row key={card.id} label={nameOf(card)} help={card.issue || `${card.capabilities?.length || 0} tools`} />
         ))}
       </Group>
-      <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide. A new or changed server waits for your approval before it runs.">
+      <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide. A new or changed server waits for your approval before it runs, and so does any connection Echo suggests.">
+        <ConnectionSuggestions apiBase={apiBase} />
         <McpApprovals apiBase={apiBase} />
         {cards !== null && !byCategory("mcp").length ? <Row label={<span className="st-muted">No MCP servers configured.</span>} /> : null}
         {byCategory("mcp").map((card) => (

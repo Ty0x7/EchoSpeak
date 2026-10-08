@@ -420,3 +420,8 @@
 .st-conn-tile.is-warn { background: rgba(214, 160, 40, 0.14); color: var(--es-warn); }
 .st-conn-tile.is-err { background: rgba(229, 72, 77, 0.12); color: var(--es-err-text); }
 .st-mem-body .st-memory-text { font: 500 13px/1.5 var(--es-font); text-align: left; }
+
+/* Connections Echo suggested (ConnectionSuggestions): one block per suggestion. */
+.st-suggestion + .st-suggestion, .st-suggestion + .st-row { border-top: 1px solid var(--es-line); }
+.st-suggestion .st-row-help ol { margin: 4px 0; padding-left: 18px; }
+.st-suggestion .st-row-help .is-mono { overflow-wrap: anywhere; }

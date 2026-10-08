@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -307,6 +308,60 @@ def approve_mcp_server(name: str) -> dict[str, Any]:
     mcp_trust.approve(name, raw)
     status = get_mcp_manager().initialize_servers(raw_servers)
     return {"ok": True, "status": status}
+
+
+class ProposalApproveRequest(BaseModel):
+    values: dict[str, str] = Field(default_factory=dict, description="The settings the user typed, by name")
+
+
+@router.get("/integrations/proposals")
+def integration_proposals() -> dict[str, Any]:
+    """Connections agents suggested, waiting for the owner (agent/integrations.py)."""
+    from agent import integrations
+
+    return {"items": integrations.proposals("waiting")}
+
+
+@router.post("/integrations/proposals/{proposal_id}/approve")
+def approve_integration(proposal_id: str, request: ProposalApproveRequest) -> dict[str, Any]:
+    """Add a suggested connection as an MCP server, pin it, and start it.
+
+    Keys go through the settings path that stores MCP env and headers with DPAPI.
+    """
+    from agent import integrations, mcp_trust
+    from agent.mcp_client import get_mcp_manager
+    from api.routes.settings import _apply_settings_patch, _sanitize_incoming_settings
+    from config import config
+
+    proposal = integrations.get_proposal(proposal_id)
+    if proposal is None or proposal.get("status") != "waiting":
+        raise HTTPException(status_code=404, detail="No suggestion waiting with that id")
+    name = str(proposal["server_name"])
+    if name in dict(getattr(config, "mcp_servers", None) or {}):
+        raise HTTPException(status_code=409, detail=f"A connection called {name} already exists")
+    try:
+        server = integrations.server_config(proposal, request.values)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    _apply_settings_patch(_sanitize_incoming_settings({"mcp_servers": {name: server}}))
+    raw_servers = dict(getattr(config, "mcp_servers", None) or {})
+    raw = raw_servers.get(name)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=500, detail="The connection was not saved")
+    mcp_trust.approve(name, raw)
+    status = get_mcp_manager().initialize_servers(raw_servers)
+    integrations.mark(proposal_id, "approved", approved_at=time.time())
+    row = next((r for r in status.get("servers") or [] if r.get("name") == name), {})
+    return {"ok": True, "name": name, "server": {k: row.get(k) for k in ("running", "tool_count", "last_error")}}
+
+
+@router.post("/integrations/proposals/{proposal_id}/dismiss")
+def dismiss_integration(proposal_id: str) -> dict[str, Any]:
+    from agent import integrations
+
+    if integrations.mark(proposal_id, "dismissed") is None:
+        raise HTTPException(status_code=404, detail="No suggestion with that id")
+    return {"ok": True}
 
 
 class ContradictionResolveRequest(BaseModel):
