@@ -136,6 +136,28 @@ def _setting_rows(package: dict[str, Any], kind: str) -> list[dict[str, Any]]:
     return rows
 
 
+def _package_arguments(package: dict[str, Any]) -> tuple[list[str], bool]:
+    """Fixed start-up arguments a package declares (e.g. rea's positional "mcp"), and
+    whether a required one has no value EchoSpeak could supply."""
+    args: list[str] = []
+    for item in package.get("packageArguments") or []:
+        value = item.get("value")
+        if value in (None, "") and item.get("isRequired"):
+            value = item.get("default")  # a required argument's default is what the server would get anyway
+            if value in (None, ""):
+                return [], True
+        if value in (None, ""):
+            continue  # optional and unset: the server uses its own default
+        if str(item.get("type") or "positional") == "named":
+            name = str(item.get("name") or "").strip()
+            if not name:
+                continue
+            args += [name, str(value)] if value is not True else [name]
+        else:
+            args.append(str(value))
+    return args, False
+
+
 def _launch_from_registry(server: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
     """(launch, settings, unsupported_reason) for one registry server.json."""
     reasons = []
@@ -147,14 +169,14 @@ def _launch_from_registry(server: dict[str, Any]) -> tuple[dict[str, Any], list[
         if transport != "stdio":
             reasons.append(f"{kind} package over {transport}")
             continue
-        required_args = [a for a in package.get("packageArguments") or [] if a.get("isRequired") and not a.get("value")]
-        if required_args:
+        extra, missing_args = _package_arguments(package)
+        if missing_args:
             reasons.append(f"{ident} needs start-up arguments EchoSpeak can't fill in yet")
             continue
         if kind == "npm" and ident and version:
-            return {"command": "npx", "args": ["-y", f"{ident}@{version}"]}, _setting_rows(package, "env"), ""
+            return {"command": "npx", "args": ["-y", f"{ident}@{version}", *extra]}, _setting_rows(package, "env"), ""
         if kind == "pypi" and ident and version:
-            return {"command": "uvx", "args": [f"{ident}=={version}"]}, _setting_rows(package, "env"), ""
+            return {"command": "uvx", "args": [f"{ident}=={version}", *extra]}, _setting_rows(package, "env"), ""
         reasons.append(f"a {kind or 'unknown'} package")
     for remote in server.get("remotes") or []:
         kind = str(remote.get("type") or "").lower()
@@ -230,6 +252,8 @@ def _guide_summary(item: dict[str, Any]) -> dict[str, Any]:
         "watch_out": list(item.get("watch_out", [])),
         "verify": item.get("verify", ""),
         "capability_policies": dict(item.get("capability_policies") or {}),
+        # Server settings the guide chose: a longer timeout, trusting the server's effect hints.
+        "options": {k: item[k] for k in ("timeout_s", "accept_server_read_only_hints") if k in item},
         "homepage": item.get("homepage", ""),
         "field": item["field"],
         "source": "guide",
@@ -331,15 +355,19 @@ def resolve(candidate_id: str) -> dict[str, Any]:
             if not version:
                 raise ValueError(f"Couldn't find the current version of {how['package']}.")
             candidate["version"] = version
-            candidate["launch"] = ({"command": "npx", "args": ["-y", f"{how['package']}@{version}"]} if how["kind"] == "npm"
-                                   else {"command": "uvx", "args": [f"{how['package']}=={version}"]})
+            extra = [str(a) for a in how.get("args", [])]
             if how.get("registry"):
-                # Settings the package itself declares, after the guide's own.
+                # Settings and start-up arguments the package itself declares, after the guide's own.
                 data = _get_json(f"{REGISTRY}/servers/{quote(how['registry'], safe='')}/versions/latest") or {}
                 for package in (data.get("server") or {}).get("packages") or []:
                     if package.get("identifier") == how["package"]:
                         names = {s["name"] for s in candidate["settings"]}
                         candidate["settings"] += [s for s in _setting_rows(package, "env") if s["name"] not in names]
+                        if not extra:
+                            extra = _package_arguments(package)[0]
+            candidate["launch"] = ({"command": "npx", "args": ["-y", f"{how['package']}@{version}", *extra]}
+                                   if how["kind"] == "npm"
+                                   else {"command": "uvx", "args": [f"{how['package']}=={version}", *extra]})
         return candidate
     if not re.fullmatch(r"[A-Za-z0-9.-]+/[A-Za-z0-9._-]+", candidate_id):
         raise ValueError("Use an id exactly as find_integrations gave it.")
@@ -432,6 +460,7 @@ def propose(candidate_id: str, *, reason: str = "", session_id: str = "",
             "watch_out": candidate["watch_out"],
             "verify": candidate["verify"],
             "capability_policies": candidate["capability_policies"],
+            "options": dict(candidate.get("options") or {}),
             "homepage": candidate["homepage"],
             "reason": " ".join(str(reason or "").split())[:300],
             "session_id": session_id,
@@ -464,6 +493,11 @@ def server_config(proposal: dict[str, Any], values: dict[str, str]) -> dict[str,
     launch = dict(proposal.get("launch") or {})
     config: dict[str, Any] = {"enabled": True, "connection_id": f"mcp-{proposal['server_name']}",
                               "capability_policies": dict(proposal.get("capability_policies") or {})}
+    options = dict(proposal.get("options") or {})
+    if "timeout_s" in options:
+        config["timeout_s"] = max(1, min(int(options["timeout_s"]), 300))
+    if options.get("accept_server_read_only_hints"):
+        config["accept_server_read_only_hints"] = True
     if launch.get("url"):
         config.update(transport=launch.get("transport") or "streamable_http", url=launch["url"])
         if headers:

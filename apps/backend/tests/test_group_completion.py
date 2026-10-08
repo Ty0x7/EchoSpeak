@@ -278,6 +278,40 @@ def test_near_duplicates_are_detected():
     assert not near_duplicate("Falcon is a good name.", "Orchard sounds calmer and fits the brand.")
 
 
+def test_groups_have_no_token_budget_unless_one_is_set(monkeypatch):
+    """A team building something works until it's done, not until a token count runs out."""
+    monkeypatch.setattr(lean_runtime.settings, "_setting", lambda key, default=None: default)
+    assert lean_runtime.settings.group_token_budget() == 0
+
+
+def test_work_keeps_going_past_the_round_limit_while_it_progresses():
+    job = Job(goal="build a zombie shooter game in index.html with waves and a score", max_rounds=2)
+    job.rounds = 5
+    assert job.backstop() == ""  # last round got something done: keep working
+    job.stalls = 1
+    assert "limit of 2 rounds" in job.backstop()  # stopped moving: the limit applies again
+    job.stalls, job.rounds = 0, 60
+    assert "60 rounds" in job.backstop()  # the hard ceiling holds even while progressing
+
+
+def test_budget_counts_new_tokens_not_the_re_sent_conversation():
+    """Live report: 'used its token budget (234,845 of 200,000)' after only a project skeleton.
+    Each step re-sends the whole chat; only what a step adds should count."""
+    from agent.lean.loop import LeanTurn
+
+    turn = LeanTurn.__new__(LeanTurn)
+    turn.usage, turn._last_prompt = {"prompt": 0, "completion": 0, "total": 0, "fresh": 0}, 0
+    turn.emit = lambda event: None
+    turn.persona = type("P", (), {"name": "Echo"})()
+    turn.timeline = []
+    steps = [(10_000, 300), (10_400, 250), (10_800, 400)]  # the same chat, a little longer each step
+    for prompt, completion in steps:
+        usage = {"prompt": prompt, "completion": completion, "total": prompt + completion}
+        LeanTurn._account_usage(turn, usage)
+    assert turn.usage["total"] == 32_150  # the old measure: the chat counted three times
+    assert turn.usage["fresh"] == 10_000 + 300 + 400 + 250 + 400 + 400  # 11,750 actually new
+
+
 def test_job_backstops_report_their_reason():
     job = Job(goal="x", max_rounds=2, token_budget=100)
     assert job.backstop() == ""

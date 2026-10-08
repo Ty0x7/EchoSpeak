@@ -369,7 +369,10 @@ export function LeanMessage({
                 <span><b>Done:</b> {data.outcome.summary || "Finished."}</span>
               </>
             ) : (
-              <span><b>Stopped:</b> {data.outcome.reason || "it could not continue."}</span>
+              <>
+                <span><b>Stopped:</b> {data.outcome.reason || "it could not continue."}</span>
+                {onContinue ? <button type="button" className="es-btn es-btn-sm" onClick={onContinue}>Continue</button> : null}
+              </>
             )}
           </div>
         ) : null}

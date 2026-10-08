@@ -267,6 +267,38 @@ GUIDES: list[dict[str, Any]] = [
         "capability_policies": {},
         "homepage": "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.ChengJiale150%2Fjupyter-mcp-server/versions/latest",
     },
+    {
+        "id": "rea",
+        "app": "REA (reverse engineering)",
+        "field": "reverse engineering and security research",
+        "keywords": ["rea", "reverse", "engineer", "engineering", "decompile", "decompiler", "disassemble", "binary",
+                     "ghidra", "ida", "hopper", "electron", "asar", "malware", "ctf", "exe", "dll"],
+        "publisher": "community (morluto/rea, MIT, 23k stars)",
+        "how": {"kind": "npm", "package": "rea-agents", "registry": "io.github.morluto/rea"},
+        "needs": ["Node.js 22.19 or newer", "Ghidra or IDA only for native .exe/.dll analysis (Windows Ghidra support is experimental)"],
+        "settings": [
+            {"name": "GHIDRA_INSTALL_DIR", "secret": False, "required": False,
+             "about": "Your Ghidra folder, only for native binaries. REA never installs or changes Ghidra."},
+            {"name": "JAVA_HOME", "secret": False, "required": False, "about": "The JDK Ghidra uses, if it isn't found on its own."},
+        ],
+        "steps": [
+            "Nothing else for JavaScript/Electron apps, .NET assemblies, packages, websites and HAR captures.",
+            "For native .exe/.dll analysis, install Ghidra yourself and fill in GHIDRA_INSTALL_DIR.",
+            "Don't run `rea-agents setup`: it registers REA with other agents (Claude Code, Codex...), not EchoSpeak.",
+        ],
+        "watch_out": [
+            "Only analyze software you're allowed to; REA's license is for lawful research.",
+            "Not a sandbox: an untrusted binary is parsed by Ghidra with your Windows permissions.",
+            "EchoSpeak trusts REA's own effect labels here: analysis that only adds to REA's notes runs without asking; "
+            "anything that launches the target, uses the network, writes files or may discard data still asks.",
+            "Tools that run the target app (capture_*_scenario, observe_native_calls) really run it.",
+        ],
+        "verify": "Call binary_session with {}: it lists every REA tool and whether it works on this PC.",
+        "capability_policies": {},
+        "timeout_s": 300,
+        "accept_server_read_only_hints": True,
+        "homepage": "https://github.com/morluto/rea",
+    },
     # ── business ──────────────────────────────────────────────────────
     {
         "id": "stripe",

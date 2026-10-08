@@ -66,13 +66,26 @@ def config_fingerprint(raw: dict[str, Any]) -> str:
     })
 
 
-def tools_fingerprint(tools: list[dict[str, Any]]) -> str:
+def _legacy_tools_fingerprint(tools: list[dict[str, Any]]) -> str:
+    """Names, descriptions and input schemas only (pins recorded before 11.6)."""
     rows = sorted(
         (str(t.get("name") or ""), str(t.get("description") or ""),
          json.dumps(t.get("inputSchema") or t.get("input_schema") or {}, sort_keys=True))
         for t in tools or []
     )
     return _sha(rows)
+
+
+def tools_fingerprint(tools: list[dict[str, Any]]) -> str:
+    """Also pins each tool's annotations: an owner can let a server's own effect hints
+    decide what runs without asking, so a later change to those hints needs approval too."""
+    rows = sorted(
+        (str(t.get("name") or ""), str(t.get("description") or ""),
+         json.dumps(t.get("inputSchema") or t.get("input_schema") or {}, sort_keys=True),
+         json.dumps(t.get("annotations") or {}, sort_keys=True))
+        for t in tools or []
+    )
+    return "v2:" + _sha(rows)
 
 
 def adopt_existing(servers: dict[str, Any]) -> None:
@@ -102,6 +115,11 @@ def tools_ok(name: str, tools: list[dict[str, Any]]) -> bool:
             return False
         fingerprint = tools_fingerprint(tools)
         if not entry.get("tools"):
+            entry["tools"] = fingerprint
+            _save(data)
+            return True
+        if entry["tools"] == _legacy_tools_fingerprint(tools):
+            # Approved before annotations were pinned and otherwise unchanged: pin them now.
             entry["tools"] = fingerprint
             _save(data)
             return True

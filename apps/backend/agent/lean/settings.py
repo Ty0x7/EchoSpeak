@@ -92,11 +92,13 @@ def group_max_rounds() -> int:
 
 
 def group_token_budget() -> int:
-    """Backstop: model tokens one group-chat message may use (0 = no limit)."""
+    """Optional cap on new model tokens one group-chat message may use. 0 (the default) means
+    none: a team works until the job is done, stuck (no progress, repeating) or at the round
+    ceiling. Set lean_group_token_budget to cap spend on paid cloud models."""
     try:
-        return max(0, int(_setting("lean_group_token_budget", 200_000)))
+        return max(0, int(_setting("lean_group_token_budget", 0)))
     except (TypeError, ValueError):
-        return 200_000
+        return 0
 
 
 def learning_mode() -> str:
