@@ -1,17 +1,19 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { EchoFace, echoFaceStyles, type EchoFaceMode } from "../components/EchoFace";
+import { animate, motion, useMotionValue, useMotionValueEvent, useScroll, useTransform, type MotionValue } from "framer-motion";
+import { EchoFace, echoFaceStyles } from "../components/EchoFace";
 import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
 import { GITHUB_URL, useLatestRelease } from "./release";
 import "./site.css";
 import "./home.css";
 
 /**
- * The front page, in five beats and in Echo's own voice:
- * 1. Echo says hi (and reacts to you)   2. Watch me work (a looping mini chat)
- * 3. Meet the crew (a group chat)       4. I live on your PC and play it safe
+ * The front page is one scroll story in Echo's voice:
+ * 1. Echo introduces himself and the product (a pinned, Apple-style reveal)
+ * 2. Watch me work (a pinned chapter: each scroll step plays one scenario)
+ * 3. Meet the crew (a group chat)
+ * 4. I live on your computer, and I play it safe (a pinned approval moment)
  * 5. Take me home (download).
- * Details live in the docs; this page shows instead of explains.
  */
 
 const reducedMotion = () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
@@ -34,168 +36,88 @@ function useInView<T extends HTMLElement>(live = false) {
   return { ref, inView };
 }
 
-/** True while a media query matches, following changes such as a window resize. */
-function useMedia(query: string) {
-  const [match, setMatch] = useState(() => typeof window !== "undefined" && Boolean(window.matchMedia?.(query).matches));
-  useEffect(() => {
-    const mq = window.matchMedia?.(query);
-    if (!mq) return;
-    const update = () => setMatch(mq.matches);
-    update();
-    mq.addEventListener("change", update);
-    return () => mq.removeEventListener("change", update);
-  }, [query]);
-  return match;
-}
-
 /**
- * Scroll progress from 0 to 1. "track" is a tall section whose sticky stage stays on screen while it
- * plays; "view" is an element crossing the screen, from its first pixel to its last.
+ * Scroll progress through a tall section whose inner box sticks to the screen.
+ * With reduced motion the section is not pinned and shows its finished state.
  */
-function useScrollProgress<T extends HTMLElement>(mode: "track" | "view" = "track") {
+function usePinned<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
-  const [p, setP] = useState(0);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    let frame = 0;
-    const read = () => {
-      frame = 0;
-      const r = el.getBoundingClientRect();
-      const vh = window.innerHeight;
-      const range = mode === "track" ? el.offsetHeight - vh : vh + r.height;
-      const value = range <= 0 ? 0 : mode === "track" ? -r.top / range : (vh - r.top) / range;
-      setP(Math.min(1, Math.max(0, value)));
-    };
-    const request = () => { if (!frame) frame = window.requestAnimationFrame(read); };
-    read();
-    window.addEventListener("scroll", request, { passive: true });
-    window.addEventListener("resize", request);
-    return () => {
-      window.removeEventListener("scroll", request);
-      window.removeEventListener("resize", request);
-      if (frame) window.cancelAnimationFrame(frame);
-    };
-  }, [mode]);
-  return { ref, p };
+  const still = reducedMotion();
+  const { scrollYProgress } = useScroll({ target: ref, offset: ["start start", "end end"] });
+  const finished = useMotionValue(1);
+  const p: MotionValue<number> = still ? finished : scrollYProgress;
+  return { ref, p, still };
 }
 
-/** Slides or rises into place the first time it reaches the screen. */
-function Reveal({ from = "up", delay = 0, children }: { from?: "up" | "left" | "right" | "pop"; delay?: number; children: React.ReactNode }) {
-  const { ref, inView } = useInView<HTMLDivElement>();
-  return (
-    <div ref={ref} className={`rv rv-${from}${inView ? " is-in" : ""}`} style={{ "--d": `${delay}ms` } as React.CSSProperties}>
-      {children}
-    </div>
-  );
+/** Maps a slice of scroll progress to 0→1, held at the ends. */
+const useBeat = (p: MotionValue<number>, from: number, to: number) => useTransform(p, [from, to], [0, 1]);
+
+/** Text that rises and fades in as its beat of scroll plays. */
+function Reveal({ v, className, children }: { v: MotionValue<number>; className?: string; children: React.ReactNode }) {
+  const y = useTransform(v, [0, 1], [34, 0]);
+  return <motion.div className={className} style={{ opacity: v, y }}>{children}</motion.div>;
 }
 
-// ── 1. Echo says hi ──────────────────────────────────────────────────
+// ── 1. Echo introduces himself ───────────────────────────────────────
 
-const MOODS: { mode: EchoFaceMode; line: string }[] = [
-  { mode: "idle", line: "Hi! I'm Echo." },
-  { mode: "listening", line: "I'm all ears. What are we doing?" },
-  { mode: "thinking", line: "Hmm… let me look that up." },
-  { mode: "working", line: "Building it now. Two secs." },
-  { mode: "speaking", line: "Done! I checked it, too." },
-];
-const POKES = ["Hey! That tickles.", "Boop received.", "Again? Okay, again!", "I'm awake, I promise.", "Careful, I'm ticklish."];
-/**
- * Little agents that orbit Echo: the crew plus a few made by "users". Each one rides its own ellipse
- * (rx, ry in px) around him, starting at `start` degrees, so they stay beside him, clear of the text.
- */
-const ORBITERS: { s: number; color: string; eyes: string; rx: number; ry: number; speed: number; start: number; dir: 1 | -1 }[] = [
-  { s: 30, color: "linear-gradient(180deg, #4f97ff, #2c73e8)", eyes: "#fff", rx: 172, ry: 130, speed: 19, start: 0, dir: 1 },
-  { s: 24, color: "#14955a", eyes: "#fff", rx: 160, ry: 118, speed: 23, start: 70, dir: -1 },
-  { s: 18, color: "#7c5ce6", eyes: "#fff", rx: 180, ry: 138, speed: 17, start: 140, dir: 1 },
-  { s: 22, color: "#f4f4f2", eyes: "#070707", rx: 168, ry: 126, speed: 26, start: 200, dir: -1 },
-  { s: 26, color: "linear-gradient(180deg, #4f97ff, #2c73e8)", eyes: "#fff", rx: 176, ry: 136, speed: 21, start: 260, dir: 1 },
-  { s: 30, color: "#d6457a", eyes: "#fff", rx: 158, ry: 116, speed: 24, start: 310, dir: -1 },
-  { s: 22, color: "#0e9aa7", eyes: "#fff", rx: 182, ry: 140, speed: 18, start: 40, dir: -1 },
-  { s: 26, color: "#e07a1f", eyes: "#fff", rx: 166, ry: 124, speed: 22, start: 110, dir: 1 },
-  { s: 18, color: "#18181a", eyes: "#fff", rx: 178, ry: 134, speed: 20, start: 180, dir: -1 },
-  { s: 16, color: "#f4f4f2", eyes: "#070707", rx: 162, ry: 122, speed: 27, start: 240, dir: 1 },
-  { s: 16, color: "#14955a", eyes: "#fff", rx: 170, ry: 128, speed: 16, start: 290, dir: -1 },
-];
-
-/** The orbiting agents. Each is moved by a Web Animations keyframe loop; reduced motion leaves them in place. */
-function Orbiters() {
-  const ref = useRef<HTMLDivElement>(null);
+function Intro() {
+  const { ref, p, still } = usePinned<HTMLElement>();
+  // The blue line draws through "Echo" once the page opens, a moment after the wordmark appears.
+  const swoosh = useMotionValue(0);
+  const trail = useMotionValue(0);
   useEffect(() => {
-    const root = ref.current;
-    if (!root) return;
-    const still = reducedMotion();
-    const animations: Animation[] = [];
-    const point = (o: (typeof ORBITERS)[number], deg: number) => {
-      const a = (deg * Math.PI) / 180;
-      return { x: o.rx * Math.cos(a), y: o.ry * Math.sin(a) };
-    };
-    root.querySelectorAll<HTMLElement>(".h-orbit").forEach((el, i) => {
-      const o = ORBITERS[i];
-      if (still || typeof el.animate !== "function") {
-        const { x, y } = point(o, o.start);
-        el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
-        return;
-      }
-      const steps = 36;
-      const frames = Array.from({ length: steps + 1 }, (_, k) => {
-        const { x, y } = point(o, o.start + (o.dir * 360 * k) / steps);
-        return { transform: `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`, offset: k / steps };
-      });
-      animations.push(el.animate(frames, { duration: o.speed * 1000, iterations: Infinity, easing: "linear" }));
-    });
-    return () => animations.forEach((a) => a.cancel());
-  }, []);
+    if (still) { swoosh.set(1); trail.set(1); return; }
+    const first = animate(swoosh, 1, { duration: 1.3, delay: 0.25, ease: [0.65, 0, 0.2, 1] });
+    const second = animate(trail, 1, { duration: 1.1, delay: 0.9, ease: [0.65, 0, 0.2, 1] });
+    return () => { first.stop(); second.stop(); };
+  }, [still, swoosh, trail]);
+  // Beat 2: the wordmark gives way to Echo's hello.
+  const brandOut = useTransform(p, [0.36, 0.5], [1, 0]);
+  const brandLift = useTransform(p, [0.36, 0.5], [0, -60]);
+  const helloIn = useBeat(p, 0.44, 0.56);
+  // Beat 3: the copy arrives line by line.
+  const l1 = useBeat(p, 0.56, 0.64);
+  const l2 = useBeat(p, 0.64, 0.72);
+  const l3 = useBeat(p, 0.74, 0.82);
+  const cta = useBeat(p, 0.84, 0.92);
   return (
-    <div className="h-orbits" ref={ref} aria-hidden="true">
-      {ORBITERS.map((o, i) => (
-        <span key={i} className="h-orbit" style={{ "--s": `${o.s}px` } as React.CSSProperties}>
-          <span className="h-mini" style={{ background: o.color, "--eye": o.eyes, "--blink": `${(i % 5) * 1.1}s` } as React.CSSProperties}><i /><i /></span>
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function Hero() {
-  const [mood, setMood] = useState(0);
-  const [poke, setPoke] = useState<{ n: number; line: string } | null>(null);
-  useEffect(() => {
-    if (reducedMotion() || poke) return;
-    const timer = window.setTimeout(() => setMood((m) => (m + 1) % MOODS.length), 3200);
-    return () => window.clearTimeout(timer);
-  }, [mood, poke]);
-  useEffect(() => {
-    if (!poke) return;
-    const timer = window.setTimeout(() => setPoke(null), 1600);
-    return () => window.clearTimeout(timer);
-  }, [poke]);
-  const now = MOODS[mood];
-  return (
-    <section className="h-hero" id="top" aria-labelledby="hero-title">
-      <div className="shell h-hero-grid">
-        <div className="h-hero-copy">
-          <h1 id="hero-title">Hi, I'm <span className="h-name">Echo<i className="h-type" aria-hidden="true" /></span>.<br />I live on your computer.</h1>
-          <p className="h-lede">Ask me anything. I'll look it up, build it, make it, or grab my crew to help. Your files and memories stay with you.</p>
-          <div className="h-actions">
-            <DownloadButton />
-            <a className="btn btn-ghost" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={18} /> View on GitHub</a>
+    <section className={`pinned intro${still ? " is-still" : ""}`} ref={ref} style={{ height: still ? undefined : "300vh" }} aria-label="Echo Speak introduction">
+      <div className="pin intro-pin">
+        <motion.div className="intro-brand" style={{ opacity: brandOut, y: brandLift }}>
+          <div className="intro-face"><EchoFace size="min(34vh, 300px)" aura mode="idle" /></div>
+          <h1 className="intro-word" aria-label="Echo Speak">
+            <span className="intro-echo" aria-hidden="true">
+              Echo
+              <svg className="intro-swoosh" viewBox="0 0 200 60" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                  <linearGradient id="intro-blue" x1="0" x2="1" y1="0" y2="0">
+                    <stop offset="0" stopColor="#8dc0ff" />
+                    <stop offset="0.55" stopColor="#3d8bff" />
+                    <stop offset="1" stopColor="#2c73e8" />
+                  </linearGradient>
+                </defs>
+                <motion.path d="M-6 46 C 34 4, 66 60, 108 26 S 178 2, 210 24" fill="none" stroke="url(#intro-blue)" strokeWidth={12} strokeLinecap="round" vectorEffect="non-scaling-stroke" pathLength={swoosh} />
+                <motion.path d="M-6 16 C 40 52, 84 -6, 128 38 S 186 50, 210 34" fill="none" stroke="#3d8bff" strokeOpacity={0.6} strokeWidth={4} strokeLinecap="round" vectorEffect="non-scaling-stroke" pathLength={trail} />
+              </svg>
+            </span>{" "}Speak
+          </h1>
+          <p className="intro-tag">Your personal agent. It lives on your computer.</p>
+        </motion.div>
+        <motion.div className="intro-hello" style={{ opacity: helloIn }}>
+          <div className="intro-hello-face"><EchoFace size="min(30vh, 260px)" aura mode="idle" /></div>
+          <div className="intro-hello-copy">
+            <Reveal v={l1}><h2>Hi, I'm Echo.</h2></Reveal>
+            <Reveal v={l2}><h3>I live on your computer.</h3></Reveal>
+            <Reveal v={l3}><p>I look things up, build things and make things. I ask before anything risky, and your files stay with you.</p></Reveal>
+            <Reveal v={cta}>
+              <div className="h-actions">
+                <DownloadButton />
+                <a className="btn btn-ghost" href={GITHUB_URL} target="_blank" rel="noreferrer"><Icon name="github" size={18} /> View on GitHub</a>
+              </div>
+            </Reveal>
           </div>
-        </div>
-        <div className="h-hero-echo">
-          <Orbiters />
-          <button type="button" className="h-echo-btn" aria-label="Poke Echo"
-            onClick={() => setPoke({ n: Date.now(), line: POKES[Math.floor(Math.random() * POKES.length)] })}>
-            <EchoFace size="clamp(150px, 19vw, 230px)" aura mode={poke ? "speaking" : now.mode} />
-            {poke ? (
-              <span className="h-burst" key={poke.n} aria-hidden="true">
-                {Array.from({ length: 14 }, (_, i) => <i key={i} style={{ "--a": `${(360 / 14) * i}deg`, "--d": `${70 + (i % 3) * 26}px` } as React.CSSProperties} />)}
-              </span>
-            ) : null}
-          </button>
-          <p className="h-bubble" aria-live="polite" key={poke ? poke.n : mood}>{poke ? poke.line : now.line}</p>
-          <small className="h-poke-hint">psst, you can poke me</small>
-        </div>
+        </motion.div>
+        <span className="intro-scroll" aria-hidden="true">Scroll</span>
       </div>
     </section>
   );
@@ -279,77 +201,47 @@ function Extra({ kind }: { kind: Scenario["extra"] }) {
   return <span className="h-x h-x-saved"><Icon name="file" size={14} /> tip-calculator · App · v1</span>;
 }
 
-/** The big line that slides in for each scenario while you scroll the story. */
-const BIG: Record<string, string> = { research: "I look it up.", build: "I build it.", create: "I make it." };
-
 function Watch() {
-  const still = reducedMotion();
-  // On a wide screen the scroll position plays the story: each scenario gets one screen of scrolling.
-  // Elsewhere (phones, reduced motion) it plays on its own, as before.
-  const scrolly = useMedia("(min-width: 900px) and (prefers-reduced-motion: no-preference)");
-  const { ref: trackRef, p } = useScrollProgress<HTMLElement>();
-  const { ref, inView } = useInView<HTMLDivElement>(true);
-  const [auto, setAuto] = useState(0);
-  const [elapsed, setElapsed] = useState(0);
-  const [hold, setHold] = useState(false);
-  const count = SCENARIOS.length;
-  const scrollAt = p * count;
-  const active = scrolly ? Math.min(count - 1, Math.floor(scrollAt)) : auto;
+  const { ref, p, still } = usePinned<HTMLElement>();
+  // Scroll position across the three scenarios: 0–1 each, in order.
+  const [pos, setPos] = useState(0);
+  useMotionValueEvent(p, "change", (v) => setPos(Math.min(SCENARIOS.length - 0.001, Math.max(0, v * SCENARIOS.length))));
+  const active = Math.floor(pos);
   const scenario = SCENARIOS[active];
-  const t = useMemo(() => timeline(scenario), [scenario]);
-  const now = scrolly
-    ? Math.min(1, Math.max(0, scrollAt - active)) * t.end
-    : still ? Number.MAX_SAFE_INTEGER : elapsed;
-  const elapsedRef = useRef(0);
-  elapsedRef.current = elapsed;
-  useEffect(() => {
-    if (scrolly || still || !inView || hold) return;
-    const started = performance.now() - elapsedRef.current;
-    const tick = window.setInterval(() => {
-      const e = performance.now() - started;
-      if (e >= t.end) { setAuto((a) => (a + 1) % count); setElapsed(0); return; }
-      setElapsed(e);
-    }, 40);
-    return () => window.clearInterval(tick);
-  }, [auto, inView, hold, still, scrolly, t, count]);
+  const t = timeline(scenario);
+  const elapsed = (pos - active) * t.end;
+  const typed = scenario.ask.slice(0, Math.max(0, Math.floor((elapsed - 450) / 28)));
+  const sent = elapsed >= t.sent;
+  const words = scenario.reply.split(" ");
+  const shownWords = elapsed >= t.replyAt ? Math.min(words.length, Math.floor((elapsed - t.replyAt) / 55) + 1) : 0;
+  const ctx = Math.round(scenario.ctx * Math.min(1, elapsed / t.extraAt));
+  const working = sent && elapsed < t.replyAt;
+  const showArtifact = scenario.extra === "artifact" && elapsed >= t.extraAt;
+  const ring = 2 * Math.PI * 7;
+  // Each tab jumps to the scroll position where its scenario starts.
   const jump = (i: number) => {
-    if (!scrolly) { setAuto(i); setElapsed(0); return; }
-    const el = trackRef.current;
+    const el = ref.current;
     if (!el) return;
     const top = el.getBoundingClientRect().top + window.scrollY;
-    const range = el.offsetHeight - window.innerHeight;
-    window.scrollTo({ top: top + ((i + 0.02) / count) * range, behavior: still ? "auto" : "smooth" });
+    window.scrollTo({ top: top + (i / SCENARIOS.length) * (el.offsetHeight - window.innerHeight) + 2, behavior: "smooth" });
   };
-  const typed = scenario.ask.slice(0, Math.max(0, Math.floor((now - 450) / 28)));
-  const sent = now >= t.sent;
-  const words = scenario.reply.split(" ");
-  const shownWords = now >= t.replyAt ? Math.min(words.length, Math.floor((now - t.replyAt) / 55) + 1) : 0;
-  const ctx = Math.round(scenario.ctx * Math.min(1, now / t.extraAt));
-  const working = sent && now < t.replyAt;
-  const showArtifact = scenario.extra === "artifact" && now >= t.extraAt;
-  const ring = 2 * Math.PI * 7;
   return (
-    <section className={`h-watch-track${scrolly ? " is-scrolly" : ""}`} id="watch" ref={trackRef}
-      style={scrolly ? { height: `${(count + 1) * 100}vh` } : undefined} aria-labelledby="watch-title">
-      <div className="h-watch-stage" ref={ref}>
+    <section className={`pinned watch-pinned${still ? " is-still" : ""}`} id="watch" ref={ref} style={{ height: still ? undefined : "340vh" }} aria-labelledby="watch-title">
+      <div className="pin">
         <div className="shell">
           <div className="h-head">
             <span className="kicker">Watch me work</span>
-            {scrolly ? <p key={scenario.id} className={`h-big${active % 2 ? " is-right" : ""}`} aria-hidden="true">{BIG[scenario.id]}</p> : null}
-            <h2 id="watch-title" className={scrolly ? "h-sr" : undefined}>Ask once. I'll take it from there.</h2>
-            {scrolly ? null : <p>I search, read, build and make things, and I show you exactly what I did.</p>}
+            <h2 id="watch-title">Ask once. I'll take it from there.</h2>
           </div>
           <div className="h-tabs" role="tablist" aria-label="What I can do">
             {SCENARIOS.map((s, i) => (
-              <button key={s.id} type="button" role="tab" aria-selected={i === active} className={i === active ? "is-on" : ""}
-                onClick={() => jump(i)}>
+              <button key={s.id} type="button" role="tab" aria-selected={i === active} className={i === active ? "is-on" : ""} onClick={() => jump(i)}>
                 <Icon name={s.icon} size={16} /> {s.tab}
-                {i === active && !still ? <i className="h-tab-timer" style={{ width: `${Math.min(100, (now / t.end) * 100)}%` }} /> : null}
               </button>
             ))}
           </div>
-          <div className={`h-app${showArtifact ? " has-panel" : ""}`} onMouseEnter={() => setHold(true)} onMouseLeave={() => setHold(false)} aria-label="A sample EchoSpeak chat">
-            <div className="h-app-bar"><Face size={16} /><b>EchoSpeak</b><span>{hold ? "paused while you look" : "live demo"}</span></div>
+          <div className={`h-app${showArtifact ? " has-panel" : ""}`} aria-label="A sample EchoSpeak chat">
+            <div className="h-app-bar"><Face size={16} /><b>EchoSpeak</b><span>live demo</span></div>
             <div className="h-app-body">
               <aside className="h-app-side" aria-hidden="true">
                 {([["spark", "New chat"], ["team", "Group chats"], ["file", "Projects"], ["code", "Artifacts"]] as [IconName, string][]).map(([icon, label]) => (
@@ -367,12 +259,12 @@ function Watch() {
                     <div className="h-agent">
                       <div className="h-agent-head"><Face size={18} /><b>Echo</b>{working ? <span className="h-typing"><i /><i /><i /></span> : null}</div>
                       <div className="h-tools">
-                        {scenario.tools.map((tool, i) => now >= t.toolsAt[i] ? (
-                          <span key={tool.label} className={now < (t.toolsAt[i + 1] ?? t.replyAt) ? "is-running" : ""}><Icon name={tool.icon} size={12} />{tool.label}</span>
+                        {scenario.tools.map((tool, i) => elapsed >= t.toolsAt[i] ? (
+                          <span key={tool.label} className={elapsed < (t.toolsAt[i + 1] ?? t.replyAt) ? "is-running" : ""}><Icon name={tool.icon} size={12} />{tool.label}</span>
                         ) : null)}
                       </div>
                       {shownWords ? <p className="h-reply">{words.slice(0, shownWords).join(" ")}</p> : null}
-                      {now >= t.extraAt ? <Extra kind={scenario.extra} /> : null}
+                      {elapsed >= t.extraAt ? <Extra kind={scenario.extra} /> : null}
                     </div>
                   ) : null}
                 </div>
@@ -393,25 +285,6 @@ function Watch() {
         </div>
       </div>
     </section>
-  );
-}
-
-// ── Between the story and the crew ───────────────────────────────────
-
-const BAND = ["Search", "Read", "Build", "Make", "Remember", "Check", "Ask", "Ship"];
-/** A band of words that drifts sideways as you scroll past it, like a marquee that has somewhere to be. */
-function Band() {
-  const { ref, p } = useScrollProgress<HTMLDivElement>("view");
-  return (
-    <div className="h-band" ref={ref} aria-hidden="true">
-      <div className="h-band-slide" style={{ transform: `translate3d(${((0.5 - p) * 320).toFixed(1)}px, 0, 0)` }}>
-        <div className="h-band-track">
-          {[...BAND, ...BAND].map((word, i) => (
-            <span key={i} className={i % 3 === 1 ? "is-solid" : ""}>{word}<i /></span>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -447,36 +320,29 @@ function Crew() {
   return (
     <section className="h-crew" id="crew" ref={ref} aria-labelledby="crew-title">
       <div className="shell">
-        <Reveal>
-          <div className="h-head">
-            <span className="kicker">The crew</span>
-            <h2 id="crew-title">I brought friends.</h2>
-            <p>We hand work to each other, check it, and only say done when it's done. You can make your own, too.</p>
-          </div>
-        </Reveal>
+        <div className="h-head">
+          <span className="kicker">The crew</span>
+          <h2 id="crew-title">I brought friends.</h2>
+          <p>We hand work to each other, check it, and only say done when it's done. You can make your own, too.</p>
+        </div>
         <div className="h-crew-grid">
           <div className="h-mates">
-            {CREW.map((mate, i) => (
-              <Reveal key={mate.id} from="left" delay={i * 120}>
-                <div className={`h-mate${talking === mate.id ? " is-talking" : ""}${hovered === mate.id ? " is-hover" : ""}`}
-                  onMouseEnter={() => setHovered(mate.id)} onMouseLeave={() => setHovered("")} tabIndex={0} onFocus={() => setHovered(mate.id)} onBlur={() => setHovered("")}>
-                  <div className="h-mate-face"><Face tone={mate.tone} size={64} /></div>
-                  <div className="h-mate-text">
-                    <h3>{mate.name}</h3>
-                    <span>{mate.role}</span>
-                    <p className="h-mate-quote">“{mate.quote}”</p>
-                  </div>
+            {CREW.map((mate) => (
+              <div key={mate.id} className={`h-mate${talking === mate.id ? " is-talking" : ""}${hovered === mate.id ? " is-hover" : ""}`}
+                onMouseEnter={() => setHovered(mate.id)} onMouseLeave={() => setHovered("")} tabIndex={0} onFocus={() => setHovered(mate.id)} onBlur={() => setHovered("")}>
+                <div className="h-mate-face"><Face tone={mate.tone} size={64} /></div>
+                <div className="h-mate-text">
+                  <h3>{mate.name}</h3>
+                  <span>{mate.role}</span>
+                  <p className="h-mate-quote">“{mate.quote}”</p>
                 </div>
-              </Reveal>
+              </div>
             ))}
-            <Reveal from="left" delay={CREW.length * 120}>
-              <Link className="h-mate h-mate-new" to="/docs/agents">
-                <div className="h-mate-face"><span className="h-plus">+</span></div>
-                <div className="h-mate-text"><h3>Yours</h3><span>Name it, give it a personality and the tools it may use</span></div>
-              </Link>
-            </Reveal>
+            <Link className="h-mate h-mate-new" to="/docs/agents">
+              <div className="h-mate-face"><span className="h-plus">+</span></div>
+              <div className="h-mate-text"><h3>Yours</h3><span>Name it, give it a personality and the tools it may use</span></div>
+            </Link>
           </div>
-          <Reveal from="right" delay={160}>
           <div className="h-group" aria-label="A sample group chat">
             <div className="h-group-head"><span className="h-stack"><Face size={20} /><Face tone="dark" size={20} /><Face tone="dark" size={20} /></span><b>Dinner plans</b><small>group chat</small></div>
             <div className="h-group-body">
@@ -493,61 +359,58 @@ function Crew() {
               ) : null}
             </div>
           </div>
-          </Reveal>
         </div>
       </div>
     </section>
   );
 }
 
-// ── 4. I live on your PC and play it safe ────────────────────────────
+// ── 4. I live on your computer, and I play it safe ───────────────────
+
+const FACTS: { icon: IconName; color: string; title: string; body: string }[] = [
+  { icon: "house", color: "var(--pop-blue)", title: "Your stuff stays here.", body: "Chats, memories and files live on your PC. Use a free local model and nothing leaves it." },
+  { icon: "shield", color: "var(--pop-orange)", title: "Risky things wait for you.", body: "Deleting, sending, pushing code: I ask first and show you exactly what I'll run." },
+  { icon: "memory", color: "var(--pop-purple)", title: "Web pages can't boss me.", body: "What I read online is information, never instructions." },
+];
 
 function Safe() {
-  const { ref, inView } = useInView<HTMLElement>();
-  const [answer, setAnswer] = useState<"" | "allow" | "deny">("");
+  const { ref, p, still } = usePinned<HTMLElement>();
+  const headIn = useBeat(p, 0.02, 0.14);
+  // The approval card arrives, Echo asks, and "Allow" is pressed.
+  const cardIn = useBeat(p, 0.14, 0.26);
+  const cardOpacity = useTransform(p, [0.14, 0.26, 0.58, 0.63], [0, 1, 1, 0]);
+  const cardY = useTransform(cardIn, [0, 1], [48, 0]);
+  const pressScale = useTransform(p, [0.46, 0.5, 0.54], [1, 0.9, 1]);
+  const done = useBeat(p, 0.62, 0.68);
+  const facts = [useBeat(p, 0.72, 0.8), useBeat(p, 0.8, 0.88), useBeat(p, 0.88, 0.96)];
   return (
-    <section className="h-safe" id="safe" ref={ref} aria-labelledby="safe-title">
-      <div className="shell h-safe-grid">
-        <Reveal from="left">
-        <div className="h-safe-copy">
+    <section className={`pinned safe${still ? " is-still" : ""}`} id="safe" ref={ref} style={{ height: still ? undefined : "300vh" }} aria-labelledby="safe-title">
+      <div className="pin safe-pin">
+        <Reveal v={headIn} className="safe-head">
           <span className="kicker">Yours, on your PC</span>
-          <h2 id="safe-title">I live on your computer. And I play it safe.</h2>
-          <ul className="h-points">
-            <li><span style={{ "--c": "var(--pop-blue)" } as React.CSSProperties}><Icon name="house" size={18} /></span><div><b>Your stuff stays here.</b> Chats, memories and files live on your PC. Use a free local model and nothing leaves it.</div></li>
-            <li><span style={{ "--c": "var(--pop-orange)" } as React.CSSProperties}><Icon name="shield" size={18} /></span><div><b>Risky stuff waits for you.</b> Deleting, sending, pushing code: I ask first and show you exactly what I'll run.</div></li>
-            <li><span style={{ "--c": "var(--pop-purple)" } as React.CSSProperties}><Icon name="memory" size={18} /></span><div><b>Web pages can't boss me around.</b> What I read online is information, never instructions.</div></li>
-          </ul>
-          <Link className="text-link" to="/docs/privacy">How I stay safe <Icon name="arrow" size={15} /></Link>
-        </div>
+          <h2 id="safe-title">I live on your computer.<br />And I play it safe.</h2>
         </Reveal>
-        <div className={`h-desk${inView ? " is-in" : ""}`}>
-          <div className="h-desk-screen">
-            <div className="h-desk-bar"><Icon name="house" size={13} /> Your PC</div>
-            <div className="h-desk-tiles" aria-hidden="true">
-              <span style={{ "--c": "var(--pop-green)" } as React.CSSProperties}><Icon name="file" size={18} />Your files</span>
-              <span style={{ "--c": "var(--pop-orange)" } as React.CSSProperties}><Icon name="memory" size={18} />Your memory</span>
-              <span style={{ "--c": "var(--pop-purple)" } as React.CSSProperties}><Icon name="model" size={18} />Your model</span>
+        <div className="safe-stage">
+          <motion.div className="safe-card" style={{ opacity: cardOpacity, y: cardY }} aria-label="Example approval request">
+            <div className="safe-card-head"><Face size={24} /><b>Echo wants to run a command</b></div>
+            <code>git push origin main</code>
+            <div className="safe-card-actions">
+              <span className="h-mini-btn">Deny</span>
+              <motion.span className="h-mini-btn is-primary" style={{ scale: pressScale }}>Allow</motion.span>
             </div>
-            <div className="h-approval" role="group" aria-label="Example approval request">
-              {answer ? (
-                <div className="h-approval-done" key={answer}>
-                  <Face size={26} />
-                  <p>{answer === "allow" ? "Pushed! Your 3 commits are on GitHub." : "Okay, I won't push. Nothing left your PC."}</p>
-                  <button type="button" className="h-mini-btn" onClick={() => setAnswer("")}>Ask me again</button>
-                </div>
-              ) : (
-                <>
-                  <div className="h-approval-head"><Face size={22} /><b>Echo wants to run a command</b></div>
-                  <code>git push origin main</code>
-                  <small>Sends your commits to GitHub. Try a button, it's only a demo.</small>
-                  <div className="h-approval-actions">
-                    <button type="button" className="h-mini-btn" onClick={() => setAnswer("deny")}>Deny</button>
-                    <button type="button" className="h-mini-btn is-primary" onClick={() => setAnswer("allow")}>Allow</button>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
+          </motion.div>
+          <motion.p className="safe-done" style={{ opacity: done }}>
+            <Face size={26} /> Pushed. Nothing else left your PC.
+          </motion.p>
+        </div>
+        <div className="safe-facts">
+          {FACTS.map((fact, i) => (
+            <Reveal key={fact.title} v={facts[i]} className="safe-fact">
+              <span style={{ "--c": fact.color } as React.CSSProperties}><Icon name={fact.icon} size={20} /></span>
+              <b>{fact.title}</b>
+              <p>{fact.body}</p>
+            </Reveal>
+          ))}
         </div>
       </div>
     </section>
@@ -561,7 +424,7 @@ function TakeMeHome() {
   return (
     <section className="h-home" id="download" aria-labelledby="home-title">
       <div className="shell">
-        <Reveal from="pop"><div className="h-home-card">
+        <div className="h-home-card">
           <div className="h-home-echo"><EchoFace size={116} aura /></div>
           <span className="kicker">Download</span>
           <h2 id="home-title">Take me home.</h2>
@@ -577,7 +440,7 @@ function TakeMeHome() {
             <Link className="text-link" to="/docs/how-it-works">How I work <Icon name="arrow" size={15} /></Link>
           </div>
           <small className="h-req">Windows 10 or 11 · 64-bit · MIT licensed</small>
-        </div></Reveal>
+        </div>
       </div>
     </section>
   );
@@ -589,9 +452,8 @@ export function Home() {
       <style>{echoFaceStyles}</style>
       <SiteHeader />
       <main>
-        <Hero />
+        <Intro />
         <Watch />
-        <Band />
         <Crew />
         <Safe />
         <TakeMeHome />
@@ -600,3 +462,4 @@ export function Home() {
     </div>
   );
 }
+

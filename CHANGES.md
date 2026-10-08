@@ -1,5 +1,15 @@
 # Changes
 
+## Website intro and scroll story — 2026-10-07
+
+Public site only (`apps/web/src/site`); the app version is unchanged.
+
+- **Intro:** the blue line draws through "Echo" on load, the wordmark gives way to Echo's hello, and the copy arrives line by line as you scroll (`Intro` in `Home.tsx`).
+- **Watch me work** is a pinned, full-screen chapter. Scrolling plays each scenario, and the tabs jump to them.
+- **Echo's motion is calmer:** the wandering crew and the mood cycling are gone, so Echo no longer twitches between poses.
+- **I live on your computer, and I play it safe:** a pinned approval moment (the card arrives, Allow is pressed, then three promises). The desk mockup is removed.
+- Reduced motion shows every chapter in its finished state, with no pinning.
+
 ## Website motion — 2026-10-07
 
 Public site only (`apps/web/src/site`); the app version is unchanged.
