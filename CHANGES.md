@@ -1,5 +1,9 @@
 # Changes
 
+## Website restored to the hero-tweaks version — 2026-10-07
+
+Public site only. `apps/web/src/site` is back to how it was after PR #57: the five-beat front page with little agents wandering behind Echo, the blue highlighter swipe under "Echo", and GitHub next to Download. This undoes the later website changes from #59, #60 and #61 (the orbiting crew, the scroll-driven intro and The Living Workspace) and removes `Workspace.tsx`, `runs.ts` and `runs.test.ts`. The app is unchanged.
+
 ## Website: The Living Workspace — 2026-10-07
 
 Public site only (`apps/web/src/site`); the app version is unchanged. Proposal (audit, system, architecture, motion): https://claude.ai/artifact/2XVkaC8GkuPhZm8d2xregb

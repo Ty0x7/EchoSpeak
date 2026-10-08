@@ -119,10 +119,9 @@ export function SiteHeader() {
         <span>EchoSpeak</span>
       </Link>
       <nav aria-label="Main">
-        <button type="button" onClick={() => scrollTo("run")}>Watch a run</button>
-        <button type="button" onClick={() => scrollTo("how")}>How it works</button>
-        <button type="button" onClick={() => scrollTo("agents")}>Agents</button>
-        <button type="button" onClick={() => scrollTo("safety")}>Safety</button>
+        <button type="button" onClick={() => scrollTo("watch")}>Watch me work</button>
+        <button type="button" onClick={() => scrollTo("crew")}>The crew</button>
+        <button type="button" onClick={() => scrollTo("safe")}>Safety</button>
         <Link to="/docs">Docs</Link>
       </nav>
       <div className="header-right">
@@ -143,7 +142,7 @@ export function SiteFooter() {
         <Face size={24} />
         <span>EchoSpeak</span>
       </Link>
-      <p>A personal agent workspace for your PC. Free and open source.</p>
+      <p>Echo, a free AI agent that lives on your PC.</p>
       <div>
         <Link to="/docs">Docs</Link>
         <a href={RELEASES_URL} target="_blank" rel="noreferrer">Releases</a>
