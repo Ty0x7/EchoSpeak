@@ -342,15 +342,17 @@ function TakeMeHome() {
   return (
     <section className="h-home" id="download" aria-labelledby="home-title">
       <div className="shell">
-        <div className="h-home-card">
-          <div className="h-home-copy">
-            <h2 id="home-title">Take me home.</h2>
-            <p>Your next idea starts here.</p>
-            <DownloadButton variant="light" />
-            <Link className="h-home-guide" to="/docs/getting-started">A little help getting started <Icon name="arrow" size={14} /></Link>
-          </div>
+        <div className="h-home-stage">
           <div className="h-home-echo" aria-hidden="true">
             <EchoFace size="var(--home-echo-size)" avatarConfig={{ idle_activity: "breathe", breathing_speed: .5 }} />
+          </div>
+          <div className="h-home-copy">
+            <h2 id="home-title">Take me home.</h2>
+            <p>Your next idea. Let’s make it happen.</p>
+            <div className="h-home-actions">
+              <DownloadButton />
+              <Link className="h-home-guide" to="/docs/getting-started">Setup guide <Icon name="arrow" size={14} /></Link>
+            </div>
           </div>
         </div>
       </div>
