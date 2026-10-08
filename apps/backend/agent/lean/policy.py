@@ -19,6 +19,7 @@ it. Every decision that isn't a plain "allow" is written to an audit log.
 from __future__ import annotations
 
 import hashlib
+import re
 import json
 import threading
 import time
@@ -98,9 +99,16 @@ def is_external_action(name: str, entry: Any = None, args: Optional[dict[str, An
     return False
 
 
+_WRAPPER_TAG = re.compile(r"<\s*(/?)\s*untrusted[\s_-]*content\b[^>]*>", re.IGNORECASE)
+
+
 def wrap_untrusted(name: str, output: str) -> str:
-    """Mark content from outside so the model treats it as data (spotlighting)."""
-    body = str(output or "").replace("</untrusted-content>", "</untrusted_content>")
+    """Mark content from outside so the model treats it as data (spotlighting).
+
+    Any tag in the content that looks like the wrapper's own (any case, spacing or
+    separator, opening or closing) is defused, so a page can't pretend its text ended.
+    """
+    body = _WRAPPER_TAG.sub(lambda m: f"[{m.group(1)}untrusted content tag removed]", str(output or ""))
     return f'<untrusted-content source="{name}">\n{body}\n</untrusted-content>\n{_UNTRUSTED_NOTE}'
 
 
