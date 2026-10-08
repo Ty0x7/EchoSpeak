@@ -59,8 +59,8 @@ export function SystemDiagram() {
         <desc id="sd-desc">
           On your PC, the EchoSpeak window talks to a local backend over HTTP with a live stream. The backend routes each message,
           runs the agent loop and asks for approvals; it uses tools (files and projects, terminal or Docker, web search, memory) and
-          saves every message to disk. It calls a model provider through an OpenAI-compatible API: a local server such as LM Studio or
-          Ollama, or a cloud API such as OpenAI or Gemini.
+          saves every message to disk. Provider adapters connect to compatible local servers or cloud APIs, including OpenAI, Gemini, Claude and Grok.
+          Some providers use native protocols, including Claude Messages and Gemini Live audio.
         </desc>
         <defs>
           <marker id="sd-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -106,7 +106,7 @@ export function SystemDiagram() {
         {/* backend -> provider */}
         <line x1={812} y1={140} x2={900} y2={140} className="sd-line" markerEnd="url(#sd-arrow)" />
         <text x={856} y={128} textAnchor="middle" className="sd-label">MODEL CALLS</text>
-        {node(900, 80, 284, 150, "Model provider", ["Local: LM Studio, Ollama,", "llama.cpp, vLLM, LocalAI", "Cloud: OpenAI, Gemini"], undefined, true)}
+        {node(900, 80, 284, 170, "Model provider", ["Local: LM Studio, Ollama", "and compatible servers", "Cloud: OpenAI, Gemini,", "Claude, Grok"], undefined, true)}
         <text x={1042} y={262} textAnchor="middle" className="sd-note">Each agent can use its own model</text>
       </svg>
 
@@ -117,7 +117,7 @@ export function SystemDiagram() {
         <li className="is-link">Tools · saves to disk</li>
         <li><strong>Files · Terminal · Web search · Memory</strong><span>Chats, memory and settings stay on your PC</span></li>
         <li className="is-link">Model calls</li>
-        <li className="is-strong"><strong>Model provider</strong><span>LM Studio, Ollama, llama.cpp, vLLM, LocalAI, or OpenAI / Gemini</span></li>
+        <li className="is-strong"><strong>Model provider</strong><span>LM Studio, Ollama or compatible local servers; OpenAI, Gemini, Claude or Grok</span></li>
       </ol>
     </figure>
   );

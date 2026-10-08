@@ -16,7 +16,8 @@
   font: 500 16px/1.6 var(--font); -webkit-font-smoothing: antialiased;
   transition: background-color .3s ease, color .3s ease;
 }
-:root[data-es-theme="dark"] .site { --pop-orange: #f0913a; --pop-pink: #ec6b98; }
+:root[data-es-theme="light"] .site { --bg: #fafafa; --panel: #ffffff; --panel-2: #f4f5f7; }
+:root[data-es-theme="dark"] .site { --bg: #080809; --panel: #101013; --panel-2: #17171b; --pop-orange: #f0913a; --pop-pink: #ec6b98; }
 html, body { margin: 0; background: var(--es-bg); scroll-behavior: smooth; }
 * { box-sizing: border-box; }
 .site a { color: inherit; text-decoration: none; }

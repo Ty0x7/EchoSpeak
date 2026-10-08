@@ -25,12 +25,12 @@ const SECTIONS: Section[] = [
     icon: "spark",
     body: (
       <>
-        <p>Three steps and you're chatting.</p>
+        <p>Set up a responding model before starting your first conversation. Optional features can be configured later.</p>
         <Steps
           items={[
             <><strong>Download and install.</strong> Download from the official releases. If Windows reports a threat or blocks the app, stop and check Windows Security’s Protection history. Report the app version and warning through GitHub issues; keep Windows protection enabled.</>,
-            <><strong>Pick a brain (a model).</strong> Free and private: install <a href="https://lmstudio.ai" target="_blank" rel="noreferrer">LM Studio</a>, download <em>Gemma 4 E4B</em> (great on an 8 GB graphics card) and start its server. Or paste an OpenAI or Gemini key instead. The first-launch setup guides you through choosing a model, search and optional tools. You can reopen it from <em>Settings › General › Setup</em>.</>,
-            <><strong>Say hi.</strong> Type in the box at the bottom, or turn on <em>Wake</em> and say “Hey Echo”.</>,
+            <><strong>Choose and verify a model.</strong> Use a running <a href="https://lmstudio.ai" target="_blank" rel="noreferrer">LM Studio</a> or Ollama installation for local chat, or add an OpenAI, Gemini, Claude or Grok API key. Setup helps you select a model and check its response. Model catalog access alone does not prove generation works. Reopen setup from <em>Settings › General › Setup</em>.</>,
+            <><strong>Start your first chat.</strong> After setup, type a request, attach a project or choose <em>Voice</em>. Optional wake word controls are in the composer’s more menu.</>,
           ]}
         />
         <div className="doc-cta"><DownloadButton compact /></div>
@@ -50,13 +50,29 @@ const SECTIONS: Section[] = [
     </>,
   },
   {
+    id: "whats-new",
+    title: "What's new in 11.4",
+    icon: "clock",
+    body: <>
+      <p>11.4.0 makes ongoing work easier to follow and strengthens source reading during research.</p>
+      <ul className="doc-list">
+        <li><strong>Live step details.</strong> A running search shows what is being read, and terminal steps can show the latest output line.</li>
+        <li><strong>Useful completion summaries.</strong> Finished steps report results such as pages read, test outcomes or file changes.</li>
+        <li><strong>Grouped activity.</strong> Consecutive steps fold into a concise line. Expand it to inspect the individual actions; the current step remains visible while it runs.</li>
+        <li><strong>Clearer progress.</strong> Status messages explain when Echo is reviewing results, checking output or choosing the next action.</li>
+        <li><strong>Read before comparing.</strong> Comparison, price and review searches try to open the top two results rather than relying on snippets. Pages that cannot be fetched still need other evidence.</li>
+      </ul>
+      <p>Earlier chats can show grouped activity, but may not include the newer step summaries. <a href={`${GITHUB_URL}/releases/tag/v11.4.0`} target="_blank" rel="noreferrer">Read the 11.4.0 release notes</a>.</p>
+    </>,
+  },
+  {
     id: "research",
     title: "Web research",
     icon: "research",
     body: <>
       <p>Ask a concrete question and let Echo search different angles, open useful sources, read webpages and PDFs, and compare what it finds.</p>
-      <p>DuckDuckGo works without a key. Configure Brave, Tavily or a SearXNG server in <em>Settings › Web search</em> for another search index.</p>
-      <p>A research notebook retains source passages and working notes for seven days within each chat. It is separate from personal memory. Source links help you check the evidence yourself.</p>
+      <p>The built-in DuckDuckGo option does not need an API key. Configure Brave, Tavily or a SearXNG server in <em>Settings › Web search</em> for another search index.</p>
+      <p>A research notebook retains source passages and working notes for seven days within each chat, separately from personal memory. Open the shared right panel’s Research tab to inspect sources and notes. Clicking a supported citation opens its retained passage; you can export findings or explicitly save them to the attached project.</p>
     </>,
   },
   {
@@ -95,7 +111,7 @@ const SECTIONS: Section[] = [
           <li><strong>What isn't saved:</strong> one-off requests, reminders, questions, things that only matter in the current chat, web content, and anything that looks like a password or key.</li>
           <li><strong>Facts that change replace themselves:</strong> tell Echo you moved and the new city replaces the old one.</li>
           <li><strong>Pinned facts</strong> ride along in every chat; the rest are recalled only when they relate to what you asked.</li>
-          <li><strong>You're in charge:</strong> <em>Settings › Advanced › Memory &amp; documents</em> shows everything, by kind. Edit, pin, change or delete any memory.</li>
+          <li><strong>You're in charge:</strong> <em>Settings › Memory</em> shows everything, by kind. Edit, pin, change or delete any memory.</li>
           <li><strong>Safety:</strong> if an agent read a web page or email in that chat, it asks before saving a memory, so nothing online can plant one.</li>
         </ul>
         <Tip>Your chats themselves are kept separately and searchable. Memory is only for the facts worth carrying between chats.</Tip>
@@ -117,7 +133,7 @@ const SECTIONS: Section[] = [
         <ul className="doc-list">
           <li><strong>Lessons are advice only.</strong> They can never change permissions, approvals, tools, settings or code.</li>
           <li><strong>You review the risky ones.</strong> Anything learned from web pages, email or other outside content waits for your approval.</li>
-          <li><strong>Everything has an undo.</strong> The <em>Learning</em> page shows each lesson, where it came from, and its history.</li>
+          <li><strong>Review and manage lessons.</strong> The <em>Learning</em> page shows each lesson, where it came from, and its history.</li>
           <li><strong>Tell it how it went:</strong> the thumbs under a reply mean Worked or Didn't work. Agents learn from that too.</li>
         </ul>
       </>
@@ -204,13 +220,15 @@ const SECTIONS: Section[] = [
     id: "voice",
     title: "Voice",
     icon: "voice",
-    body: (
+    body: <>
       <ul className="doc-list">
-        <li><em>Settings › Voice</em> downloads a speech model (75–480 MB) that runs on your PC, so nothing you say leaves your computer.</li>
-        <li>Press the mic to talk, or turn on <strong>Wake</strong> and say “Hey Echo”.</li>
-        <li><strong>Read aloud</strong> speaks Echo's replies.</li>
+        <li><strong>Dictation</strong> turns speech into a prompt. <strong>Voice</strong> opens a continuous conversation with Echo’s avatar and a live transcript.</li>
+        <li><strong>Settings › Voice</strong> configures speech recognition and playback. Local speech models are optional downloads; cloud speech services send audio or text to the selected provider.</li>
+        <li><strong>Gemini Live</strong> uses native audio with compatible API models. Other chat models use configured speech recognition, normal chat and speech playback.</li>
+        <li><strong>Read aloud</strong> is available under assistant replies. Voice mode includes microphone and playback controls; optional wake word is in the composer’s more menu.</li>
+        <li>Microphone permission and provider access are required where applicable. Voice tools follow the same permissions and approval rules as text chat.</li>
       </ul>
-    ),
+    </>,
   },
   {
     id: "privacy",
@@ -220,9 +238,9 @@ const SECTIONS: Section[] = [
       <>
         <ul className="doc-list">
           <li><strong>Stays on your PC:</strong> chats, memory, agents, settings and files.</li>
-          <li><strong>Leaves your PC only when needed:</strong> messages go to your model provider if you use a cloud one (OpenAI, Gemini), and web searches and look-ups go to those sites. With a local model and no web tools, nothing leaves.</li>
-          <li><strong>Approvals:</strong> reading and searching just run. Deleting, sending messages, pushing code and controlling your desktop wait for your OK, and the card shows the exact command.</li>
-          <li><strong>Prompt-injection guard:</strong> after an agent reads a web page or email, anything that sends data out needs your approval, even if approvals are off. Your API keys are never sent anywhere. (Based on Meta's “Rule of Two”.)</li>
+          <li><strong>Network use depends on your choices:</strong> cloud models receive request context, search contacts online services, and cloud speech or media generation sends the relevant audio, text or approved references. Local storage alone does not make every feature offline.</li>
+          <li><strong>Permissions and approvals:</strong> tool access depends on the agent, project scope and configured policy. Sensitive actions may require approval; review the proposed action and arguments. Docker can isolate terminal work when available. Host terminal mode runs with your Windows account’s access.</li>
+          <li><strong>Outside content is untrusted:</strong> after reading a webpage or email, actions covered by the external action policy require approval or are refused where no one can approve. These checks run outside the model. Provider credentials authenticate requests to the selected service; never include keys in public screenshots or issues.</li>
           <li><strong>Strangers on Discord</strong> only get look-up tools, never your files, memory or terminal.</li>
         </ul>
       </>
@@ -234,7 +252,7 @@ const SECTIONS: Section[] = [
     icon: "model",
     body: (
       <>
-        <p>For the curious. Everything runs on your PC except the model, which can be local or in the cloud.</p>
+        <p>EchoSpeak is the harness around your selected model: a desktop host, chat workspace and local agent runtime that prepares context, checks tool requests and records execution results. Models can run locally or through cloud APIs; configured online integrations also use network services.</p>
         <SystemDiagram />
         <MessageTimeline />
       </>
@@ -248,10 +266,10 @@ const SECTIONS: Section[] = [
       <dl className="doc-reqs">
         {[
           ["System", "Windows 10 or 11, 64-bit"],
-          ["Disk", "About 1.5 GB for the app"],
-          ["Memory", "8 GB RAM (16 GB for local models)"],
-          ["Local models", "A GPU with 8 GB of VRAM runs 4B–9B models well (LM Studio or Ollama)"],
-          ["Cloud models", "An OpenAI or Gemini API key instead of a GPU"],
+          ["Disk", "App storage plus separate space for optional speech and generation models"],
+          ["Memory", "Local model requirements depend on model size, quantization and runtime"],
+          ["Local models", "A compatible LM Studio, Ollama or model server; check its model hardware requirements"],
+          ["Cloud models", "OpenAI, Gemini, Claude or Grok API access, with billing where required"],
           ["Optional", "Docker Desktop for the sandboxed terminal"],
         ].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
       </dl>
@@ -266,8 +284,8 @@ const SECTIONS: Section[] = [
         {[
           ["Is it free?", "Yes. EchoSpeak is free and open source (MIT). Local models are free too; cloud models bill you directly."],
           ["Mac or Linux?", "Not yet. Windows only for now."],
-          ["Which model should I use?", "Gemma 4 E4B in LM Studio is what EchoSpeak is tested with every release. Bigger models are smarter if your GPU can fit them."],
-          ["Does it need the internet?", "Only for web tools (search, weather, sports, shopping) or a cloud model. Chat and files work offline with a local model."],
+          ["Which model should I use?", "Choose a compatible model that supports the tools you need and fits your machine or API account. Verify its response in setup or Settings before starting work."],
+          ["Does it need the internet?", "Configured local chat and file tools can work offline. Downloads, web tools, cloud models, cloud speech and cloud generation need network access."],
           ["How do I update?", "Settings › About › Update. It downloads, checks the signature, and restarts."],
           ["Where's my data?", "In your Windows user folder, under AppData › Local."],
         ].map(([q, a]) => (
@@ -319,6 +337,7 @@ export function Docs() {
           <header className="docs-hero">
             <Face size={48} />
             <div>
+              <span className="kicker">11.4.0 guide</span>
               <h1>EchoSpeak docs</h1>
               <p>Everything you need, in plain words. New here? Start with <Link to="/docs/getting-started">Getting started</Link>.</p>
             </div>
