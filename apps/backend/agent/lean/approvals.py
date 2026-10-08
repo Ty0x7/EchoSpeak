@@ -47,9 +47,13 @@ _DANGEROUS_COMMAND = re.compile(
         git\s+rebase|git\s+restore|git\s+stash\s+(?:drop|clear)|git\s+filter-branch|
         gh\s+pr\s+(?:merge|close)|gh\s+repo\s+delete|gh\s+release\s+(?:create|delete)|gh\s+issue\s+(?:close|delete)|
         npm\s+publish|pip\s+uninstall|winget\s+uninstall|choco\s+uninstall|
-        invoke-webrequest|iwr|curl|wget|start-bitstransfer
+        invoke-webrequest|iwr|invoke-restmethod|irm|curl|wget|start-bitstransfer|certutil|bitsadmin|
+        scp|sftp|ftp|ssh|nc|ncat|
+        ri|remove-itemproperty|clear-content|set-content|out-file|mv|move|move-item|ren|rename-item
     )\b
     |>\s*[a-z]:\\|\|\s*(iex|invoke-expression|sh|bash)\b
+    |\b(?:powershell|pwsh)(?:\.exe)?\b[^|;&]*\s-e(?:nc|ncodedcommand)?\b
+    |\b(?:shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|send2trash)\b|\.unlink\(
     """
 )
 

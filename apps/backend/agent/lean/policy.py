@@ -88,8 +88,13 @@ def is_external_action(name: str, entry: Any = None, args: Optional[dict[str, An
         return True
     if name in {"terminal", "terminal_run", "process_start"}:
         args = args or {}
-        # Online commands can send data out; host commands can do anything.
-        return bool(args.get("network")) or str(args.get("where") or "").lower() in {"host", "pc", "this_pc"}
+        # Online commands can send data out; host commands can do anything. In host
+        # mode every command runs on this PC, whether or not the call says where.
+        if bool(args.get("network")) or str(args.get("where") or "").lower() in {"host", "pc", "this_pc"}:
+            return True
+        from agent.lean.terminal import resolved_mode
+
+        return resolved_mode() == "host"
     return False
 
 
