@@ -39,6 +39,20 @@ except Exception as exc:  # pragma: no cover - dependency/readiness boundary
     _SDK_AVAILABLE = False
     _SDK_ERROR = str(exc)
 
+# SDK 2.x speaks the stateless 2026-07-28 spec: `server/discover` first, falling back to the
+# legacy initialize handshake for older servers. SDK 1.x only knows the handshake. Both work here.
+try:
+    import httpx2 as _http
+    from mcp.client._probe import negotiate_auto as _negotiate_auto
+    from mcp.types import PaginatedRequestParams as _PaginatedRequestParams
+
+    _SDK_MAJOR = 2
+except Exception:  # SDK 1.x
+    _http = httpx
+    _negotiate_auto = None
+    _PaginatedRequestParams = None
+    _SDK_MAJOR = 1
+
 
 def re_sub_safe(name: str) -> str:
     value = re.sub(r"[^a-zA-Z0-9_]+", "_", str(name or "").strip())
@@ -240,16 +254,18 @@ class MCPSession:
                 read_stream, write_stream = await stack.enter_async_context(stdio_client(parameters))
             else:
                 client = await stack.enter_async_context(
-                    httpx.AsyncClient(
+                    _http.AsyncClient(
                         headers=dict(self.state.headers),
-                        timeout=httpx.Timeout(self.state.timeout_s),
+                        timeout=_http.Timeout(self.state.timeout_s),
                         follow_redirects=True,
                     )
                 )
                 if self.state.transport == "streamable_http":
-                    read_stream, write_stream, _session_id = await stack.enter_async_context(
+                    # SDK 1.x yields (read, write, session id); 2.x has no sessions and yields (read, write).
+                    streams = await stack.enter_async_context(
                         streamable_http_client(self.state.url, http_client=client)
                     )
+                    read_stream, write_stream = streams[0], streams[1]
                 else:
                     read_stream, write_stream = await stack.enter_async_context(
                         sse_client(
@@ -263,19 +279,27 @@ class MCPSession:
                 ClientSession(
                     read_stream,
                     write_stream,
-                    read_timeout_seconds=timedelta(seconds=self.state.timeout_s),
+                    read_timeout_seconds=(
+                        timedelta(seconds=self.state.timeout_s) if _SDK_MAJOR == 1 else float(self.state.timeout_s)
+                    ),
                     message_handler=self._message_handler,
                 )
             )
-            result = await session.initialize()
-            self._session = session
-            initialized = _model_dump(result)
-            self.state.protocol_version = str(
-                initialized.get("protocolVersion")
-                or initialized.get("protocol_version")
-                or ""
-            )
-            self.state.server_capabilities = dict(initialized.get("capabilities") or {})
+            if _negotiate_auto is not None:
+                await _negotiate_auto(session)
+                self._session = session
+                self.state.protocol_version = str(getattr(session, "protocol_version", "") or "")
+                self.state.server_capabilities = _model_dump(getattr(session, "server_capabilities", None))
+            else:
+                result = await session.initialize()
+                self._session = session
+                initialized = _model_dump(result)
+                self.state.protocol_version = str(
+                    initialized.get("protocolVersion")
+                    or initialized.get("protocol_version")
+                    or ""
+                )
+                self.state.server_capabilities = dict(initialized.get("capabilities") or {})
             await self._refresh_inventory()
             self.state.running = True
             self.state.started_at = time.time()
@@ -289,7 +313,11 @@ class MCPSession:
         rows: list[dict[str, Any]] = []
         cursor: Optional[str] = None
         while True:
-            result = await getattr(self._session, method_name)(cursor=cursor)
+            if _PaginatedRequestParams is not None:
+                page = {"params": _PaginatedRequestParams(cursor=cursor)} if cursor else {}
+            else:
+                page = {"cursor": cursor}
+            result = await getattr(self._session, method_name)(**page)
             payload = _model_dump(result)
             raw_rows = payload.get(field_name) or []
             rows.extend(_model_dump(item) for item in raw_rows)
@@ -340,7 +368,9 @@ class MCPSession:
         result = await self._session.call_tool(
             name,
             arguments,
-            read_timeout_seconds=timedelta(seconds=self.state.timeout_s),
+            read_timeout_seconds=(
+                timedelta(seconds=self.state.timeout_s) if _SDK_MAJOR == 1 else float(self.state.timeout_s)
+            ),
             progress_callback=progress,
         )
         return _model_dump(result)
@@ -454,7 +484,7 @@ class MCPManager:
                 row for row in servers if row["last_error"] and not row["running"]
             ],
             "client_present": _SDK_AVAILABLE,
-            "client_version": "official-python-sdk-1.x",
+            "client_version": f"official-python-sdk-{_SDK_MAJOR}.x",
             "supported_transports": ["stdio", "streamable_http", "sse"],
         }
 

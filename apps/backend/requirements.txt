@@ -32,7 +32,7 @@ py7zr>=1.0,<2
 ddgs>=9,<10
 
 # Official Model Context Protocol client (stable 1.x SDK boundary).
-mcp>=1.27,<2
+mcp>=2.3,<3
 
 youtube-transcript-api>=0.6.2
 
