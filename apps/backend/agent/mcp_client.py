@@ -119,6 +119,8 @@ class MCPServerState:
     inventory_changed: bool = False
     last_progress: Dict[str, Any] = field(default_factory=dict)
     started_at: Optional[float] = None
+    # Review and pin (agent/mcp_trust.py): "" when approved, else new | changed | tools_changed.
+    approval: str = ""
 
 
 class MCPSession:
@@ -436,6 +438,7 @@ class MCPManager:
                 "protocol_version": state.protocol_version,
                 "inventory_changed": state.inventory_changed,
                 "last_progress": dict(state.last_progress),
+                "approval": state.approval,
             }
             for name, state in self.servers.items()
         ]
@@ -487,11 +490,14 @@ class MCPManager:
         )
 
     def initialize_servers(self, servers: Any) -> Dict[str, Any]:
+        from agent import mcp_trust
+
         with self._lock:
             self.shutdown()
             self.last_error = ""
             if not isinstance(servers, dict) or not servers:
                 return self.status()
+            mcp_trust.adopt_existing(servers)
             for name, raw in servers.items():
                 if not isinstance(raw, dict):
                     continue
@@ -502,12 +508,38 @@ class MCPManager:
                     self._sync_connection(state, raw)
                     continue
                 session = MCPSession(state, self._inventory_changed)
+                try:
+                    # A broken config fails loud whether or not it's approved.
+                    session._validate_configuration()
+                except Exception as exc:
+                    state.last_error = _safe_error(exc)
+                    self.last_error = state.last_error
+                    self._sync_connection(state, raw)
+                    continue
+                verdict = mcp_trust.check(state.name, raw)
+                if verdict != "trusted":
+                    # A new or edited server waits for the owner instead of starting.
+                    state.approval = verdict
+                    state.last_error = ("New server: waiting for your approval in Settings › Advanced › Connections & skills."
+                                        if verdict == "new" else
+                                        "How it starts changed: approve it again in Settings › Advanced › Connections & skills.")
+                    self._sync_connection(state, raw)
+                    continue
                 self.sessions[state.name] = session
                 if not session.start():
                     self.last_error = state.last_error or self.last_error
                     self._sync_connection(state, raw)
                     continue
-                for definition in session.list_tools():
+                definitions = session.list_tools()
+                if not mcp_trust.tools_ok(state.name, definitions):
+                    # Same server, different tools since approval: register none of them.
+                    state.approval = "tools_changed"
+                    state.last_error = "Its tools changed since you approved it: approve it again in Settings › Advanced › Connections & skills."
+                    session.stop()
+                    state.running = False
+                    self._sync_connection(state, raw)
+                    continue
+                for definition in definitions:
                     try:
                         self._register_tool(state.name, definition, session)
                     except Exception as exc:

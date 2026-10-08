@@ -29,7 +29,7 @@ from loguru import logger
 
 from agent.lean import policy, settings
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
-from agent.lean import ask
+from agent.lean import ask, outbound
 from agent.lean.job import claim_nudge, is_promise_without_action, promise_nudge, unbacked_claim
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
@@ -549,6 +549,13 @@ class LeanTurn:
                 results[call.id] = (False, denial)
                 self._tool_finished(call, name, args, step, False, denial, 0)
                 continue
+            if outbound.is_outbound(name, self.toolbox.entry(name)):
+                # Per-channel send budget (agent/lean/outbound.py): no spamming the user's contacts.
+                limited = outbound.take(outbound.channel_of(name))
+                if limited:
+                    results[call.id] = (False, limited)
+                    self._tool_finished(call, name, args, step, False, limited, 0)
+                    continue
             result = self._run_tool(call, name, args, step)
             results[call.id] = (result.ok, result.output)
             self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets,

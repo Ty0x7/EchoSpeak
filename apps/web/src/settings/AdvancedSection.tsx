@@ -430,6 +430,55 @@ function MemoryText({ memory, onSave }: { memory: Memory; onSave(text: string): 
 
 // ── Connections, skills, MCP ────────────────────────────────────────────
 
+type McpApproval = { name: string; approval: string; detail: string; message: string };
+
+/** MCP servers waiting for review (backend: agent/mcp_trust.py): new, launch settings changed, or tools changed. */
+function McpApprovals({ apiBase }: { apiBase: string }) {
+  const [items, setItems] = useState<McpApproval[]>([]);
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/lean/mcp/approvals`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setItems(Array.isArray(data?.items) ? data.items : []);
+    } catch {
+      setItems([]);
+    }
+  }, [apiBase]);
+  useEffect(() => { void load(); }, [load]);
+  const approve = async (name: string) => {
+    setBusy(name);
+    setError("");
+    try {
+      const res = await fetch(`${apiBase}/lean/mcp/${encodeURIComponent(name)}/approve`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.detail || `Approval failed (${res.status})`));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy("");
+    }
+  };
+  if (!items.length && !error) return null;
+  const why: Record<string, string> = { new: "New server", changed: "How it starts changed", tools_changed: "Its tools changed" };
+  return (
+    <>
+      {items.map((item) => (
+        <Row key={item.name}
+          label={<span><b>{item.name}</b> · {why[item.approval] || "Needs review"}</span>}
+          help={item.detail}>
+          <button type="button" className="es-btn es-btn-sm es-btn-primary" disabled={busy === item.name} onClick={() => void approve(item.name)}>
+            {busy === item.name ? "Approving…" : "Approve"}
+          </button>
+        </Row>
+      ))}
+      {error ? <Row label={<span className="st-muted">{error}</span>} /> : null}
+    </>
+  );
+}
+
 function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; sessionId: string; projectId: string }) {
   const [cards, setCards] = useState<any[] | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
@@ -579,7 +628,8 @@ function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; s
           <Row key={card.id} label={nameOf(card)} help={card.issue || `${card.capabilities?.length || 0} tools`} />
         ))}
       </Group>
-      <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide.">
+      <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide. A new or changed server waits for your approval before it runs.">
+        <McpApprovals apiBase={apiBase} />
         {cards !== null && !byCategory("mcp").length ? <Row label={<span className="st-muted">No MCP servers configured.</span>} /> : null}
         {byCategory("mcp").map((card) => (
           <Row key={card.id} label={nameOf(card)} help={card.issue || card.detail} />

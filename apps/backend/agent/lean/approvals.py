@@ -208,6 +208,16 @@ class ApprovalBroker:
         approval.event.set()
         return approval
 
+    def cancel_all(self) -> int:
+        """Stop everything: every approval or question still waiting ends as cancelled."""
+        with self._lock:
+            waiting = list(self._pending.values())
+        for item in waiting:
+            if not item.decision:
+                item.decision = "cancelled"
+            item.event.set()
+        return len(waiting)
+
     def pending_for(self, session_id: str = "") -> list[dict[str, Any]]:
         with self._lock:
             return [

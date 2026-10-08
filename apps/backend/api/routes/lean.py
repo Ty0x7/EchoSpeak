@@ -278,6 +278,60 @@ class SkillFromLessonRequest(BaseModel):
     name: str = ""
 
 
+@router.get("/mcp/approvals")
+def mcp_approvals() -> dict[str, Any]:
+    """MCP servers waiting for the owner's review (agent/mcp_trust.py)."""
+    from agent import mcp_trust
+    from agent.mcp_client import get_mcp_manager
+    from config import config
+
+    raw_servers = dict(getattr(config, "mcp_servers", None) or {})
+    items = [
+        {"name": row["name"], "approval": row["approval"], "detail": mcp_trust.describe(raw_servers.get(row["name"]) or {}),
+         "message": row["last_error"]}
+        for row in get_mcp_manager().status()["servers"] if row.get("approval")
+    ]
+    return {"items": items}
+
+
+@router.post("/mcp/{name}/approve")
+def approve_mcp_server(name: str) -> dict[str, Any]:
+    from agent import mcp_trust
+    from agent.mcp_client import get_mcp_manager
+    from config import config
+
+    raw_servers = dict(getattr(config, "mcp_servers", None) or {})
+    raw = raw_servers.get(name)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=404, detail="No MCP server with that name in settings")
+    mcp_trust.approve(name, raw)
+    status = get_mcp_manager().initialize_servers(raw_servers)
+    return {"ok": True, "status": status}
+
+
+@router.post("/stop-all")
+def stop_all() -> dict[str, Any]:
+    """Stop everything: cancel every running agent and pause routines, channels and A2A."""
+    from agent.lean import stop
+
+    return stop.stop_everything("Stopped from the app")
+
+
+@router.post("/resume")
+def resume_all() -> dict[str, Any]:
+    from agent.lean import stop
+
+    return stop.resume()
+
+
+@router.get("/stop-status")
+def stop_status() -> dict[str, Any]:
+    from agent.lean import outbound, stop
+
+    return {**stop.status(), "outbound": outbound.counts(),
+            "limits": {"per_minute": outbound.per_minute(), "per_hour": outbound.per_hour()}}
+
+
 @router.get("/agent-skills")
 def list_agent_skills() -> dict[str, Any]:
     """Open-format Agent Skills (agent/lean/agent_skills.py), with their review status."""

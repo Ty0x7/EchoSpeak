@@ -1580,6 +1580,11 @@ def run_lean_query(
     caller_role: str = "owner",
     untrusted_sources: Optional[list[str]] = None,
 ) -> dict[str, Any]:
+    from agent.lean import stop
+
+    # Stop everything pauses routines, channels and inbound A2A; the owner's own chats keep working.
+    if source not in INTERACTIVE_SOURCES and stop.paused():
+        return {"response": stop.PAUSED_REPLY, "success": False, "paused": True}
     room = get_room_store().by_thread(session_id)
     session = LeanSession(
         agent=agent,
@@ -1594,7 +1599,8 @@ def run_lean_query(
         caller_role=caller_role,
         untrusted_sources=untrusted_sources,
     )
-    return session.run(message, persona_id=persona_id)
+    with stop.tracking(cancel):
+        return session.run(message, persona_id=persona_id)
 
 
 def run_lean_text(agent: Any, *, message: str, session_id: str, source: str, request_id: str = "",

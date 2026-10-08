@@ -36,6 +36,8 @@ type SidebarProps = {
   onDeleteProject(id: string): void;
   onView(view: "chat"): void;
   onSettings(): void;
+  /** Shown above Settings in the open sidebar (Stop everything). */
+  footerExtra?: React.ReactNode;
   settingsOpen?: boolean;
   /** Agents section (lean runtime): compact rows, a count and a + action. */
   agents?: { count: number; list: React.ReactNode; onNew(): void };
@@ -811,6 +813,7 @@ export function ProjectSidebar(props: SidebarProps) {
       {!iconOnly ? (
         <footer className="echo-sidebar-footer" style={{ padding: "6px 10px 0 0" }}>
           {updateNotice}
+          {props.footerExtra}
           <button
             className={`echo-footer-action ${props.settingsOpen ? "is-active" : ""}`}
             type="button"

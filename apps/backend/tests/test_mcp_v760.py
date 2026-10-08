@@ -27,8 +27,14 @@ PY = sys.executable
 
 
 @pytest.fixture(autouse=True)
-def _clean_mcp():
+def _clean_mcp(monkeypatch):
     """Isolate each test from the singleton + registry MCP entries."""
+    from agent import mcp_trust
+
+    # These tests are about sessions and tools; review-and-pin has its own tests
+    # (tests/test_security_controls.py), so every server here counts as approved.
+    monkeypatch.setattr(mcp_trust, "check", lambda name, raw: "trusted")
+    monkeypatch.setattr(mcp_trust, "tools_ok", lambda name, tools: True)
     reset_mcp_manager()
     # Drop any leftover mcp__ entries from prior tests/agent loads
     for name in list(ToolRegistry._entries.keys()):

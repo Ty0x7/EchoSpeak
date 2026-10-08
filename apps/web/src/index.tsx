@@ -23,6 +23,7 @@ import { CreationsPage } from "./creations/CreationsPage";
 import { FirstRunSetup } from "./setup/FirstRunSetup";
 import { SettingsPanel } from "./settings/SettingsPanel";
 import { SystemCheckNotice } from "./settings/SystemCheck";
+import { PausedNotice, StopEverythingButton } from "./dashboard/StopEverything";
 import { LeanMessage } from "./lean/LeanMessage";
 import { ChatFollower } from "./app/chatFollow";
 import { isLeanEvent } from "./lean/liveReducer";
@@ -1764,6 +1765,7 @@ export const Dashboard: React.FC<{
           onDeleteSession={(id) => void deleteThread(id)}
           onDeleteProject={(id) => void deleteProject(id)}
           onSettings={() => openSettingsAt()}
+          footerExtra={<StopEverythingButton apiBase={apiBase} />}
           settingsOpen={studioOpen}
           onView={() => {
             setLeftTab("chat");
@@ -1963,6 +1965,7 @@ export const Dashboard: React.FC<{
                       <small>{activityItems.length}</small>
                     </button>
                   ) : null}
+                  <PausedNotice apiBase={apiBase} />
                   <SystemCheckNotice apiBase={apiBase} onOpen={() => openSettingsAt("system")} />
                   <ChatThread
                     activeThreadId={activeThreadId} streaming={streaming} scrollRef={chatScrollRef}
