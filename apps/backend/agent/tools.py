@@ -242,12 +242,9 @@ def _file_tool_roots() -> list[Path]:
         active_project_root = get_active_project_root()
         if active_project_root is not None:
             ap = active_project_root.resolve()
-            # Allow the project dir itself and its parent (for relative resolves)
+            # The project folder only: its parent could be the whole user folder (.ssh, AppData).
             if ap not in roots:
                 roots.append(ap)
-            parent = ap.parent
-            if parent not in roots:
-                roots.append(parent)
     except Exception:
         pass
     return roots
