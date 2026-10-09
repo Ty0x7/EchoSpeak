@@ -1,5 +1,34 @@
 # Changes
 
+## v11.7.0 — 2026-10-09
+
+User-facing notes: [EchoSpeak 11.7.0](docs/releases/v11.7.0.md).
+
+- **Privacy** (`agent/privacy.py`, `agent/privacy_check.py`, `/privacy/*`, Settings › Privacy):
+  - Modes: `privacy_mode` standard | private | offline, `privacy_overrides` per component, and
+    `privacy_trusted_hosts`. Components: models, search, web_pages, live_data, connections_catalog,
+    remote_connections, downloads, updates, channels, creation, a2a.
+  - Gates in the provider stream, the search cascade, `safe_web_retrieval` (every hop), the toolbox
+    (`TOOL_COMPONENTS`, `create_media`), integrations, embeddings download, MCP http transports, A2A,
+    channel startup and reconcile (`_reconcile_privacy_runtime`), the sandbox network (Offline:
+    off) and the desktop update check (`privacyGate.ts`).
+  - Backstop: `sys.addaudithook` on `socket.getaddrinfo` and `socket.connect`. In Private/Offline it
+    refuses internet destinations that no gate permitted (5-minute host and IP permits, a contextvar
+    scope per tool). Standard only counts.
+  - In-memory connection log. The check probes local models and SearXNG.
+- **Smart model choice** (`agent/learning/routing.py`, `GET /lean/routing`, Settings › Models):
+  - Modes: `routing_mode` off | suggest | auto. Settings: `routing_pool`, `routing_auto_agents`,
+    `routing_allow_cloud`, `routing_daily_cloud_tokens`.
+  - Profiles per (provider, model, kind) from episodes. Episodes gain `error_kind`, `duration_s`,
+    `tokens`, `role` and `routed`.
+  - Rule: Wilson lower bound (z = 1.28) of at least 5 decided tasks must beat the current mean
+    + 0.05. Local wins ties; an unavailable model falls back to an available listed one.
+  - `LeanSession._route_model` + `_endpoint_for` override. The note goes in the `agent_start`
+    `model_route` and the timeline.
+- **Semantic matching** (`agent/semantic.py`): `find_tools` and guide search use the local ONNX
+  embedder when installed. `find_integrations` shows the setup history per source id.
+- README: Who Echo is for, Run it fully private. Site docs: Private and Offline modes.
+
 ## v11.6.0 — 2026-10-08
 
 User-facing notes: [EchoSpeak 11.6.0](docs/releases/v11.6.0.md).
