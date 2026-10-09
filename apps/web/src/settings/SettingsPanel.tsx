@@ -14,6 +14,8 @@ import { ChoiceCards, Group, ListEditor, Row, SecretField, Segmented, Select, St
 import { useSettings, type SettingsMap } from "./useSettings";
 import { AdvancedSection, type AdvancedPage } from "./AdvancedSection";
 import { SystemCheckSection } from "./SystemCheck";
+import { PrivacySection } from "./PrivacySection";
+import { UPDATES_OFF_MESSAGE, updatesAllowed } from "../desktop/privacyGate";
 import { AgentSkillsSection } from "./AgentSkillsSection";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
@@ -33,6 +35,7 @@ type SectionId =
   | "automations"
   | "channels"
   | "advanced"
+  | "privacy"
   | "system"
   | "about";
 
@@ -68,6 +71,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
     group: "",
     items: [
       { id: "advanced", label: "Advanced", icon: "wrench" },
+      { id: "privacy", label: "Privacy", icon: "shield" },
       { id: "system", label: "System check", icon: "shield" },
       { id: "about", label: "About", icon: "info" },
     ],
@@ -91,6 +95,7 @@ const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
   about: "version update diagnostics logs",
   skills: "skills skill.md agent skills import review approve instructions lessons",
   system: "system check health doctor broken not working search status diagnose fix problems",
+  privacy: "privacy private offline off-grid local only internet network egress connections searxng trusted hosts telemetry cloud data leaves",
 };
 
 type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "mic" | "globe" | "brain" | "clock" | "send" | "info" | "wrench";
@@ -313,6 +318,8 @@ function SectionBody({
       );
     case "skills":
       return <AgentSkillsSection apiBase={props.apiBase} />;
+    case "privacy":
+      return <PrivacySection s={s} save={save} apiBase={props.apiBase} />;
     case "system":
       return <SystemCheckSection apiBase={props.apiBase} />;
     case "about":
@@ -1463,6 +1470,7 @@ function UpdateRow() {
     setBusy("checking");
     setError("");
     try {
+      if (!(await updatesAllowed())) throw new Error(UPDATES_OFF_MESSAGE);
       const result = await checkForDesktopUpdate();
       setInfo(result); announceUpdate(result);
     } catch (err) {

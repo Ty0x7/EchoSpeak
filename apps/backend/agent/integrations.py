@@ -65,8 +65,13 @@ def _get_json(url: str, *, params: Optional[dict[str, Any]] = None, timeout: flo
     """GET JSON from a fixed public catalog (registry, npm, PyPI), cached."""
     import requests
 
+    from agent import privacy
     from version import APP_VERSION
 
+    try:
+        privacy.require("connections_catalog", url)
+    except privacy.PrivacyBlocked as exc:
+        raise RuntimeError(str(exc)) from None
     key = url + "?" + json.dumps(params or {}, sort_keys=True)
     with _lock:
         hit = _cache.get(key)

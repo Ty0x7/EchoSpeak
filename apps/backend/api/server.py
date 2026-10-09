@@ -101,6 +101,11 @@ async def lifespan(app: FastAPI):
     # The API lifespan is the sole scheduler/coordinator owner in server and
     # desktop processes. Agent instances must not start competing daemons.
     os.environ["ECHOSPEAK_API_RUNTIME"] = "1"
+    # Private/Offline mode backstop: refuses internet connections no component's gate approved
+    # (agent/privacy.py). In Standard mode it only counts connections.
+    from agent import privacy
+
+    privacy.install_backstop()
     try:
         from agent.lean.soul_defaults import refresh_default_soul
 
@@ -161,7 +166,12 @@ async def lifespan(app: FastAPI):
     _start_background_warmup()
     
     # --- Telegram Bot startup (v5.4.0) ---
-    if bool(getattr(config, "allow_telegram_bot", False)):
+    from agent import privacy as _privacy
+
+    _channels_ok = _privacy.decide("channels").allowed
+    if not _channels_ok:
+        logger.info("Private/Offline mode: chat channels (Telegram, Twitch, X) are not started")
+    if bool(getattr(config, "allow_telegram_bot", False)) and _channels_ok:
         try:
             from telegram_bot import TelegramBotManager, set_telegram_bot
             tg_agent = get_agent()
@@ -173,7 +183,7 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Failed to start Telegram bot: {e}")
     
     # --- Twitch Bot startup (v6.7.0) ---
-    if bool(getattr(config, "allow_twitch", False)):
+    if bool(getattr(config, "allow_twitch", False)) and _channels_ok:
         try:
             from twitch_bot import get_twitch_bot
             twitch = get_twitch_bot()
@@ -184,7 +194,7 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Failed to start Twitch bot: {e}")
 
     # --- Twitter/X Bot startup (v6.7.0) ---
-    if bool(getattr(config, "allow_twitter", False)):
+    if bool(getattr(config, "allow_twitter", False)) and _channels_ok:
         try:
             from twitter_bot import get_twitter_bot
             twitter = get_twitter_bot()
@@ -323,9 +333,9 @@ app = FastAPI(
 )
 
 
-from api.routes import creations, onboarding, live_voice
+from api.routes import creations, onboarding, live_voice, privacy as privacy_routes
 
-for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, learning, media, media_runtime, creations, onboarding, live_voice):
+for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, learning, media, media_runtime, creations, onboarding, live_voice, privacy_routes):
     app.include_router(_routes.router)
 # Ensure domain ToolRegistry entries load independently of agent import order.
 for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):

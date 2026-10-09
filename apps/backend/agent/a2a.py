@@ -321,6 +321,13 @@ class A2ATaskManager:
 # A2A Client (Outbound)
 # ═══════════════════════════════════════════════════════════════════
 
+def _privacy_check(url: str) -> None:
+    """Private/Offline mode: a task sent to an agent outside your machines carries your request."""
+    from agent import privacy
+
+    privacy.require("a2a", url)
+
+
 class A2AClient:
     """Client for communicating with remote A2A agents."""
 
@@ -331,6 +338,7 @@ class A2AClient:
         """Fetch a remote agent's Agent Card from /.well-known/agent.json."""
         url = base_url.rstrip("/") + "/.well-known/agent.json"
         try:
+            _privacy_check(url)
             resp = requests.get(url, timeout=self.timeout)
             resp.raise_for_status()
             return resp.json()
@@ -357,6 +365,7 @@ class A2AClient:
             headers["Authorization"] = f"Bearer {auth_key}"
 
         try:
+            _privacy_check(rpc_url)
             resp = requests.post(rpc_url, json=payload, headers=headers, timeout=self.timeout)
             resp.raise_for_status()
             result = resp.json()
@@ -382,6 +391,7 @@ class A2AClient:
             headers["Authorization"] = f"Bearer {auth_key}"
 
         try:
+            _privacy_check(rpc_url)
             resp = requests.post(rpc_url, json=payload, headers=headers, timeout=self.timeout)
             resp.raise_for_status()
             result = resp.json()
@@ -404,6 +414,7 @@ class A2AClient:
             headers["Authorization"] = f"Bearer {auth_key}"
 
         try:
+            _privacy_check(rpc_url)
             resp = requests.post(rpc_url, json=payload, headers=headers, timeout=self.timeout)
             resp.raise_for_status()
             return True

@@ -448,8 +448,20 @@ class Toolbox:
         }
 
     def run(self, name: str, args: dict[str, Any]) -> ToolResult:
-        started = time.perf_counter()
+        from agent import privacy
+
         name = self.resolve_name(name)
+        blocked = privacy.tool_block_reason(name, args)
+        if blocked:
+            return ToolResult(False, f"Blocked by the user's privacy setting: {blocked} This is intended, not a fault: "
+                              "don't retry it or look for another way around it. Continue without it, or tell the "
+                              "user what it would need.", 0)
+        # Connections the tool makes count as its component's (agent/privacy.py backstop).
+        with privacy.scope(privacy.tool_component(name, args)):
+            return self._run(name, args)
+
+    def _run(self, name: str, args: dict[str, Any]) -> ToolResult:
+        started = time.perf_counter()
         if name in self.native:
             from agent.tools import _tool_execution_context
 

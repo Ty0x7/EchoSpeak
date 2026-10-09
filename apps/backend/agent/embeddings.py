@@ -76,6 +76,9 @@ def download_local_model() -> Path:
             return folder
         from huggingface_hub import hf_hub_download
 
+        from agent import privacy
+
+        privacy.require("downloads", "https://huggingface.co")  # Offline mode: no downloads
         folder.mkdir(parents=True, exist_ok=True)
         for name in LOCAL_MODEL_FILES:
             # hf_hub_download writes to a temporary file and renames it into place.

@@ -101,6 +101,10 @@ def resolved_mode() -> str:
 
 def network_policy() -> str:
     """Sandbox internet access: "ask" (off until a command needs it and you approve), "on" or "off"."""
+    from agent import privacy
+
+    if privacy.mode() == "offline":
+        return "off"  # Offline mode: the sandbox container has no network at all
     value = str(getattr(config, "terminal_docker_network", "") or os.getenv("TERMINAL_DOCKER_NETWORK", "ask")).strip().lower()
     if value in {"none", "off", "false", "0"}:
         return "off"
