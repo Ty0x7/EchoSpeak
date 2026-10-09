@@ -304,6 +304,15 @@ def search(query: str, limit: int = 6) -> dict[str, Any]:
         score = _score(candidate, terms, item.get("keywords", []))
         if score:  # reviewed guides first
             scored.append((score + 10, _names_app(candidate, primary, item.get("keywords", [])), candidate))
+    if not scored:
+        # No app named: match by meaning ("cut my stream highlights" → OBS, Premiere) with the
+        # local embedding model when it's installed (agent/semantic.py).
+        from agent import semantic
+
+        texts = [f"{g['app']}: {g['field']}. {', '.join(g.get('keywords', []))}" for g in GUIDES]
+        for item, similarity in zip(GUIDES, semantic.similarities(query, texts) or []):
+            if similarity >= 0.4:
+                scored.append((10 + 10 * similarity, True, _guide_summary(item)))
     seen = {c["id"] for _, _, c in scored}
     covered_ids = {g["how"].get("registry") for g in GUIDES}
     covered_urls = {g["how"].get("url", "").rstrip("/") for g in GUIDES if g["how"].get("url")}
@@ -615,6 +624,25 @@ def check(name: str = "", *, status: Optional[dict[str, Any]] = None, registry_t
 
 # ── agent tools ─────────────────────────────────────────────────────────
 
+def _history() -> dict[str, str]:
+    """What happened to earlier suggestions, by source id: setup experience reused next time."""
+    notes: dict[str, str] = {}
+    for p in sorted(proposals(), key=lambda p: float(p.get("updated_at") or 0)):
+        when = time.strftime("%Y-%m-%d", time.localtime(float(p.get("connected_at") or p.get("updated_at") or 0)))
+        status = p.get("status")
+        if status == "approved" and p.get("connected_at"):
+            notes[p["source_id"]] = (f"already set up as \"{p['server_name']}\" and connected on {when} "
+                                     f"({p.get('tool_count', 0)} tools). Use check_integration, not a new suggestion.")
+        elif status == "approved":
+            notes[p["source_id"]] = (f"approved as \"{p['server_name']}\" on {when} but never seen running. "
+                                     "Use check_integration to find out why.")
+        elif status == "dismissed":
+            notes[p["source_id"]] = f"the user dismissed this suggestion on {when}. Ask before suggesting it again."
+        elif status == "waiting":
+            notes[p["source_id"]] = "already suggested and waiting for the user in Settings."
+    return notes
+
+
 def _format_results(found: dict[str, Any]) -> str:
     if not found["results"]:
         lines = [f"Nothing found for {', '.join(found['terms'])}."]
@@ -625,8 +653,11 @@ def _format_results(found: dict[str, Any]) -> str:
                      "imports. Explain the options to the user and ask which they prefer.")
         return "\n".join(lines)
     out = []
+    history = _history()
     for c in found["results"]:
         lines = [f"- id: {c['id']}  ({c['title']}; {c['publisher']})"]
+        if c["id"] in history:
+            lines.append(f"  On this PC: {history[c['id']]}")
         if c["summary"]:
             lines.append(f"  {c['summary']}")
         if c["unsupported"]:

@@ -308,20 +308,26 @@ class Toolbox:
         words = [w for w in re.findall(r"[a-z0-9]+", str(args.get("query") or "").lower()) if len(w) > 1]
         if not words:
             return "Error: say what the tool should do, e.g. \"render\" or the app's name."
-        scored: list[tuple[int, str]] = []
-        for name in self.deferred | {n for n in self.entries if n not in self.deferred and n.startswith("mcp__")}:
-            entry = self.entries.get(name)
-            text = f"{name.replace('_', ' ')} {getattr(entry, 'description', '')}".lower()
-            score = sum(3 if w in name.lower() else 1 for w in words if w in text)
-            if score:
-                scored.append((score, name))
+        from agent import semantic
+
+        pool = sorted(self.deferred | {n for n in self.entries if n not in self.deferred and n.startswith("mcp__")})
+        texts = [f"{name.split('__')[-1].replace('_', ' ')}: {getattr(self.entries.get(name), 'description', '')}"
+                 for name in pool]
+        # By meaning too, when the local embedding model is installed: "make the video brighter"
+        # finds a tool called adjust_lumetri. Keywords alone otherwise (agent/semantic.py).
+        meaning = semantic.similarities(str(args.get("query") or ""), texts) or [0.0] * len(pool)
+        scored: list[tuple[float, str]] = []
+        for name, text, similarity in zip(pool, texts, meaning):
+            keyword = sum(3 if w in name.lower() else 1 for w in words if w in text.lower())
+            if keyword or similarity >= 0.35:
+                scored.append((keyword + 10 * max(0.0, similarity), name))
         scored.sort(key=lambda row: (-row[0], row[1]))
         found = [name for _, name in scored[:8]]
         if not found:
             return f"No connected-app tool matches \"{args.get('query')}\". Use find_integrations to connect a new app."
         self.deferred.difference_update(found)
         self.schema_version += 1
-        lines =[f"- {name}: {_compact_description(getattr(self.entries[name], 'description', ''), 160)}" for name in found]
+        lines = [f"- {name}: {_compact_description(getattr(self.entries[name], 'description', ''), 160)}" for name in found]
         return "Loaded these tools; call them from your next step:\n" + "\n".join(lines)
 
     @property
