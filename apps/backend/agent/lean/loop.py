@@ -219,6 +219,9 @@ class LeanTurn:
 
     def announce(self) -> None:
         """Open this agent's message. Parallel runs call it first, in order."""
+        if self.meta.get("model_route"):
+            # Smart model choice explains itself under the reply (agent/learning/routing.py).
+            self.timeline.append({"kind": "note", "step": 0, "text": str(self.meta["model_route"]), "at": time.time()})
         self._start_message(**self.meta)
 
     def run(self, user_message: str, *, announce: bool = True) -> TurnResult:

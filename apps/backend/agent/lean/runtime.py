@@ -154,6 +154,11 @@ class LeanSession:
         # For learning (agent/learning): which lessons each agent read, and which model it ran on.
         self._lessons_used: dict[str, list[str]] = {}
         self._endpoints: dict[str, tuple[str, str]] = {}
+        # Smart model choice (agent/learning/routing.py): decisions per agent for this request, the
+        # models auto mode switched to, and who picked each agent's model (for learning's records).
+        self._routes: dict[str, Any] = {}
+        self._route_overrides: dict[str, tuple[str, str]] = {}
+        self._lead_id = ""
         # Parallel agents share these.
         self._emit_lock = threading.Lock()
         self._state_lock = threading.Lock()
@@ -220,6 +225,7 @@ class LeanSession:
         if default_persona is None:
             members = self._members()
             default_persona = members[0] if members else self.personas.default()
+        self._lead_id = default_persona.id
         endpoint = self._endpoint_for(default_persona)
         execution = store.create_execution(
             request_id=self.request_id,
@@ -354,6 +360,8 @@ class LeanSession:
             lessons_used={k: list(v) for k, v in self._lessons_used.items()},
             team=self._job_needs_closing(),
             cancelled=cancelled,
+            lead=self._lead_id,
+            routed={agent_id: "router" for agent_id in self._route_overrides},
         )
 
     # ── completion: when is the job done? ───────────────────────────────
@@ -891,6 +899,9 @@ class LeanSession:
         # Recall from what is actually being asked (the user's request, plus the task this
         # agent was given), never from a "[System]: ..." brief full of boilerplate words.
         goal = self._goal(message, task)
+        route_note = "" if guest else self._route_model(persona, goal)
+        if route_note:
+            meta["model_route"] = route_note
         memories = [] if guest else self._recall(goal)
         from agent.project_context import context_for_session
         project_brief, project_evidence = ("", "") if guest else context_for_session(self.session_id)
@@ -1340,7 +1351,42 @@ class LeanSession:
         persona = self.personas.get(agent_id)
         return persona.name if persona else agent_id
 
+    def _configured_model(self, persona: AgentPersona) -> tuple[str, str]:
+        """The (provider, model) the user set for this agent, or the chat's model."""
+        provider = persona.model.provider or str(getattr(getattr(self.agent, "llm_provider", None), "value", "") or "lmstudio")
+        model_id = persona.model.model_id if persona.model.provider or persona.model.model_id else ""
+        if not model_id:
+            runtime = getattr(self.agent, "model_runtime", None)
+            model_id = str(getattr(runtime, "model_id", "") or "")
+        return provider, model_id
+
+    def _route_model(self, persona: AgentPersona, goal: str) -> str:
+        """Smart model choice for this agent and request (off by default). Returns the note to show.
+
+        Only the owner's requests, never voice (its live audio model is chosen on purpose).
+        Auto mode switches only agents the user opted in, only to models they listed.
+        """
+        if persona.id in self._routes or self.source == "voice":
+            return ""
+        try:
+            from agent.learning import routing
+
+            if routing.mode() == "off":
+                return ""
+            decision = routing.decide(persona.id, self._configured_model(persona), goal)
+        except Exception:
+            logger.debug("Smart model choice failed; keeping the agent's model", exc_info=True)
+            return ""
+        self._routes[persona.id] = decision
+        if decision is None:
+            return ""
+        if decision.applied:
+            self._route_overrides[persona.id] = decision.chosen
+        return decision.note()
+
     def _endpoint_for(self, persona: AgentPersona):
+        if persona.id in self._route_overrides:  # auto mode picked another listed model for this request
+            return resolve_endpoint(*self._route_overrides[persona.id])
         provider = persona.model.provider or str(getattr(getattr(self.agent, "llm_provider", None), "value", "") or "lmstudio")
         model_id = persona.model.model_id if persona.model.provider or persona.model.model_id else ""
         if not model_id:

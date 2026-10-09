@@ -115,7 +115,8 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
       const msg: LeanMessageData = {
         messageId: id,
         agent: { id: String(agent.id || ""), name: String(agent.name || ""), title: agent.title, initials: agent.initials },
-        segments: [],
+        // Smart model choice says which model it used and why (backend: agent/learning/routing.py).
+        segments: evt.model_route ? [{ kind: "note" as const, step: 0, text: String(evt.model_route) }] : [],
         status: "streaming",
         text: "",
         startedAt: at,
