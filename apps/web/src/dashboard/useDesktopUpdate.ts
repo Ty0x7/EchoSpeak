@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { checkForDesktopUpdate, type DesktopUpdateInfo } from "../desktop/bridge";
+import { updatesAllowed } from "../desktop/privacyGate";
 
 export const UPDATE_CHECKED = "echospeak.update.checked";
 let latest: DesktopUpdateInfo | null = null;
@@ -17,7 +18,10 @@ export function useDesktopUpdate(enabled: boolean) {
     const check = async () => {
       if (checking || Date.now() - checkedAt < 60 * 60 * 1000) return;
       checking = true; checkedAt = Date.now();
-      try { const result = await checkForDesktopUpdate(); if (alive) announceUpdate(result); }
+      try {
+        if (!(await updatesAllowed())) return;  // Offline mode, or update checks switched off
+        const result = await checkForDesktopUpdate(); if (alive) announceUpdate(result);
+      }
       catch { /* An offline update check never blocks startup or claims an update exists. */ }
       finally { checking = false; }
     };

@@ -26,6 +26,17 @@ describe("lean live reducer", () => {
     expect(msg.status).toBe("done");
   });
 
+  it("shows which model smart model choice picked, and why, under the reply", () => {
+    const note = "Model: qwen3.6 (ollama) instead of gemma-4 (lmstudio). qwen3.6: 9 of 10 coding tasks done with proof here.";
+    const state = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" }, model_route: note },
+      { type: "agent_token", ...base, step: 1, data: "Fixed." },
+    ]);
+    const msg = state.messages.m1;
+    expect(msg.segments.map((s) => s.kind)).toEqual(["note", "text"]);
+    expect((msg.segments[0] as { text: string }).text).toBe(note);
+  });
+
   it("separates replies from different agents in one turn", () => {
     const state = run([
       { type: "agent_start", ...base, agent: { id: "scout", name: "Scout" } },

@@ -14,6 +14,9 @@ import { ChoiceCards, Group, ListEditor, Row, SecretField, Segmented, Select, St
 import { useSettings, type SettingsMap } from "./useSettings";
 import { AdvancedSection, type AdvancedPage } from "./AdvancedSection";
 import { SystemCheckSection } from "./SystemCheck";
+import { PrivacySection } from "./PrivacySection";
+import { SmartModelChoice } from "./SmartModelChoice";
+import { UPDATES_OFF_MESSAGE, updatesAllowed } from "../desktop/privacyGate";
 import { AgentSkillsSection } from "./AgentSkillsSection";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
@@ -33,6 +36,7 @@ type SectionId =
   | "automations"
   | "channels"
   | "advanced"
+  | "privacy"
   | "system"
   | "about";
 
@@ -68,6 +72,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
     group: "",
     items: [
       { id: "advanced", label: "Advanced", icon: "wrench" },
+      { id: "privacy", label: "Privacy", icon: "shield" },
       { id: "system", label: "System check", icon: "shield" },
       { id: "about", label: "About", icon: "info" },
     ],
@@ -77,7 +82,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
 /** What each section holds, so searching for a setting finds the section it lives in. */
 const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
   general: "appearance theme light dark mode white black colours colors name setup approvals approval mode step budget iterations learning lessons reviews reflections experience feedback",
-  models: "provider model api key openai gemini claude anthropic grok xai lm studio ollama localai vllm local cloud context temperature creativity custom model id",
+  models: "provider model api key openai gemini claude anthropic grok xai lm studio ollama localai vllm local cloud context temperature creativity custom model id smart model choice routing router suggest auto pick best model",
   agents: "persona jarvis glados toolsets",
   personality: "soul personality tone",
   permissions: "permissions files desktop applications system actions",
@@ -91,6 +96,7 @@ const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
   about: "version update diagnostics logs",
   skills: "skills skill.md agent skills import review approve instructions lessons",
   system: "system check health doctor broken not working search status diagnose fix problems",
+  privacy: "privacy private offline off-grid local only internet network egress connections searxng trusted hosts telemetry cloud data leaves",
 };
 
 type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "mic" | "globe" | "brain" | "clock" | "send" | "info" | "wrench";
@@ -279,7 +285,12 @@ function SectionBody({
     case "general":
       return <GeneralSection s={s} save={save} />;
     case "models":
-      return <ModelsSection s={s} save={save} apiBase={props.apiBase} />;
+      return (
+        <>
+          <ModelsSection s={s} save={save} apiBase={props.apiBase} />
+          <SmartModelChoice s={s} save={save} apiBase={props.apiBase} agents={props.agents} />
+        </>
+      );
     case "agents":
       return <AgentsSection agents={props.agents} onEdit={props.onEditAgent} />;
     case "personality":
@@ -313,6 +324,8 @@ function SectionBody({
       );
     case "skills":
       return <AgentSkillsSection apiBase={props.apiBase} />;
+    case "privacy":
+      return <PrivacySection s={s} save={save} apiBase={props.apiBase} />;
     case "system":
       return <SystemCheckSection apiBase={props.apiBase} />;
     case "about":
@@ -1463,6 +1476,7 @@ function UpdateRow() {
     setBusy("checking");
     setError("");
     try {
+      if (!(await updatesAllowed())) throw new Error(UPDATES_OFF_MESSAGE);
       const result = await checkForDesktopUpdate();
       setInfo(result); announceUpdate(result);
     } catch (err) {

@@ -256,6 +256,14 @@ def _request_pinned_public_url(
     """
     import urllib3
 
+    from agent import privacy
+
+    try:
+        # Every hop, redirects included: Offline mode keeps page reading to your own network.
+        privacy.require("web_pages", url)
+    except privacy.PrivacyBlocked as exc:
+        raise SafeWebRetrievalError(str(exc), code="privacy") from None
+
     parts = urlsplit(url)
     hostname = str(parts.hostname or "")
     port = parts.port or (443 if parts.scheme == "https" else 80)

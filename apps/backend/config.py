@@ -178,6 +178,18 @@ def _read_json_dict(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _json_env(name: str, default: Any) -> Any:
+    """A JSON value from the environment, or ``default`` when unset or malformed."""
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return default
+    return value if isinstance(value, type(default)) else default
+
+
 def _write_json_dict(path: Path, payload: dict[str, Any], *, chmod_owner_only: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -933,6 +945,21 @@ class Config:
         self.learning_reflection_daily_cap = int(os.getenv("LEARNING_REFLECTION_DAILY_CAP", "30") or 30)
         # Lessons an agent reads before a task. Few and relevant beats many (ReasoningBank uses one).
         self.learning_playbook_size = int(os.getenv("LEARNING_PLAYBOOK_SIZE", "3") or 3)
+        # Privacy (agent/privacy.py): standard | private | offline, enforced by gates and a backstop.
+        self.privacy_mode = os.getenv("PRIVACY_MODE", "standard").strip().lower() or "standard"
+        # Per component: {"channels": "allow"} lets one thing through Private mode; "block" switches one off.
+        self.privacy_overrides = _json_env("PRIVACY_OVERRIDES", {})
+        # Hosts that count as yours (your SearXNG on a VPS, a model server over a VPN).
+        self.privacy_trusted_hosts = [h.strip() for h in os.getenv("PRIVACY_TRUSTED_HOSTS", "").split(",") if h.strip()]
+        # Experience-driven model choice (agent/learning/routing.py): off (default) | suggest | auto.
+        self.routing_mode = os.getenv("MODEL_ROUTING_MODE", "off").strip().lower() or "off"
+        # Models the router may choose from, as "provider:model" (the user's own list; nothing else is ever used).
+        self.routing_pool = [m.strip() for m in os.getenv("MODEL_ROUTING_POOL", "").split(",") if m.strip()]
+        # Agents whose model the router may change in auto mode (ids). Everyone else keeps their own.
+        self.routing_auto_agents = [a.strip() for a in os.getenv("MODEL_ROUTING_AGENTS", "").split(",") if a.strip()]
+        # Paid cloud models in auto mode: off unless allowed, and then within this many tokens a day (0 = no cap).
+        self.routing_allow_cloud = os.getenv("MODEL_ROUTING_ALLOW_CLOUD", "false").strip().lower() in {"1", "true", "yes", "on"}
+        self.routing_daily_cloud_tokens = int(os.getenv("MODEL_ROUTING_DAILY_CLOUD_TOKENS", "0") or 0)
         # on (default) | off | control. "control" is for evaluation: learns nothing and shows
         # same-size unrelated notes instead of lessons, so gains can't come from prompt length.
         self.learning_mode = os.getenv("LEARNING_MODE", "on").strip().lower() or "on"
@@ -1432,6 +1459,14 @@ class Config:
             "learning_reflection_daily_cap",
             "learning_playbook_size",
             "learning_mode",
+            "privacy_mode",
+            "privacy_overrides",
+            "privacy_trusted_hosts",
+            "routing_mode",
+            "routing_pool",
+            "routing_auto_agents",
+            "routing_allow_cloud",
+            "routing_daily_cloud_tokens",
             "user_display_name",
             "allow_voice_actions",
             "allow_generation_actions",

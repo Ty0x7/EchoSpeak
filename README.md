@@ -6,6 +6,13 @@ EchoSpeak connects a language model to the context, tools and execution controls
 
 Use **LM Studio, Ollama or a compatible local model server**, or connect **OpenAI, Google Gemini, Anthropic Claude or xAI Grok**. EchoSpeak manages the workspace and agent workflow; the selected model supplies reasoning and responses.
 
+## Who Echo is for
+
+- **Anyone who wants a capable helper on their own PC.** An installer, guided setup, and plain-language approval cards for anything risky. You don't need to be a developer.
+- **Builders.** Coding agents that run tests before saying "done", git awareness, a sandboxed terminal, app connections (MCP), Agent Skills and teams of agents that keep working until the job is done.
+- **Privacy-minded people.** Run everything on local models with your own search server, and switch on Private or Offline mode, which EchoSpeak enforces and can check for you.
+- **People who mix local and cloud.** Use local models day to day and a cloud model where it helps. Optional smart model choice learns which of your models does each kind of task best on your PC.
+
 ## The harness behind Echo
 
 An agent needs more than a model connection. EchoSpeak provides the surrounding system that prepares each request, runs permitted tools, returns their results to the model and preserves the work.
@@ -81,11 +88,11 @@ Cloud settings retrieve the provider's model catalog and separately check the se
 
 ## Current development
 
-The source version is **11.6.0**: Echo finds, suggests and checks connections to apps it couldn't use before (21 setup guides plus the official MCP registry, every connection approved by you in Settings), and group work runs until it's done. 11.5.1 was a security release from a full code audit. 11.5.0 brought: agents ask instead of giving up, a system check, Stop everything, limits on outgoing messages, MCP servers that wait for your OK, Agent Skills, memory clean-up while idle, and a check before calling code done. 11.4.1 fixed web search in the installed app. 11.4.0 brought live steps in the chat (a progress line under each step, past-tense summaries, grouped steps and a status line between them), and agents that read the top pages before comparing things. 11.3.0 brought a one-card composer with a clearer context meter, a friendlier setup, a visual Settings › Advanced and git-aware agents. 11.2.0 brought memory that keeps only lasting facts, an artifact library and viewer, pages as rows, a chart-first Learning page and better-shaped answers. 11.1.2 slimmed the sidebar and brought a livelier Echo in voice. 11.1.1 fixed starting after an update. 11.1.0 added a light theme (now the default) with the classic dark theme a click away, and setup in its own window. 11.0.0 added learning from verified experience, described in the development preview below; whether it improves results is still being measured. 10.5.0 improved provider selection, settings organization and expandable lists. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
+The source version is **11.7.0**: Private and Offline modes that EchoSpeak enforces and can check, and optional smart model choice that learns which of your models does each kind of task best. 11.6.0 brought Echo Connections (it finds, suggests and checks connections to apps it couldn't use before, each approved by you in Settings) and group work that runs until it's done. 11.5.1 was a security release from a full code audit. 11.5.0 brought: agents ask instead of giving up, a system check, Stop everything, limits on outgoing messages, MCP servers that wait for your OK, Agent Skills, memory clean-up while idle, and a check before calling code done. 11.4.1 fixed web search in the installed app. 11.4.0 brought live steps in the chat (a progress line under each step, past-tense summaries, grouped steps and a status line between them), and agents that read the top pages before comparing things. 11.3.0 brought a one-card composer with a clearer context meter, a friendlier setup, a visual Settings › Advanced and git-aware agents. 11.2.0 brought memory that keeps only lasting facts, an artifact library and viewer, pages as rows, a chart-first Learning page and better-shaped answers. 11.1.2 slimmed the sidebar and brought a livelier Echo in voice. 11.1.1 fixed starting after an update. 11.1.0 added a light theme (now the default) with the classic dark theme a click away, and setup in its own window. 11.0.0 added learning from verified experience, described in the development preview below; whether it improves results is still being measured. 10.5.0 improved provider selection, settings organization and expandable lists. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
 
 The release badge follows the latest **published installer**, which may differ from source development.
 
-[11.6.0 notes](docs/releases/v11.6.0.md) · [11.5.1 notes](docs/releases/v11.5.1.md) · [11.5.0 notes](docs/releases/v11.5.0.md) · [11.4.1 notes](docs/releases/v11.4.1.md) · [11.4.0 notes](docs/releases/v11.4.0.md) · [11.3.0 notes](docs/releases/v11.3.0.md) · [11.2.0 notes](docs/releases/v11.2.0.md) · [11.1.2 notes](docs/releases/v11.1.2.md) · [11.1.1 notes](docs/releases/v11.1.1.md) · [11.1.0 notes](docs/releases/v11.1.0.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
+[11.7.0 notes](docs/releases/v11.7.0.md) · [11.6.0 notes](docs/releases/v11.6.0.md) · [11.5.1 notes](docs/releases/v11.5.1.md) · [11.5.0 notes](docs/releases/v11.5.0.md) · [11.4.1 notes](docs/releases/v11.4.1.md) · [11.4.0 notes](docs/releases/v11.4.0.md) · [11.3.0 notes](docs/releases/v11.3.0.md) · [11.2.0 notes](docs/releases/v11.2.0.md) · [11.1.2 notes](docs/releases/v11.1.2.md) · [11.1.1 notes](docs/releases/v11.1.1.md) · [11.1.0 notes](docs/releases/v11.1.0.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
 
 <details>
 <summary><strong>Development preview: learning from verified experience</strong></summary>
@@ -99,6 +106,17 @@ Relevant lessons can inform later tasks. Checked outcomes determine promotion or
 Reflection runs while chats are quiet, within a daily limit, using the agent's selected model. Cloud reflection can send task context to that provider and incur API charges. Learning can be paused per agent. Its records are separate from personal memory, and performance improvements have not yet been established through completed evaluation.
 
 </details>
+
+## Run it fully private
+
+1. **A local model.** Install [LM Studio](https://lmstudio.ai) or [Ollama](https://ollama.com), load a model that supports tool calling, and pick it in Settings › Models.
+2. **Your own search (optional).** Run [SearXNG](https://docs.searxng.org) on this PC or a home server, enable its `json` format, and enter its address in Settings › Web search. If it lives on a server outside your network, add it under Settings › Privacy › Hosts you trust.
+3. **Choose a mode** in Settings › Privacy:
+   - **Private:** your messages, files, memories and searches never go to a service outside your machines. Local models and your SearXNG keep working. Opening a web page (the site sees only its address), model downloads and the update check stay on, and each can be switched off.
+   - **Offline:** only this PC and your own network. Nothing reaches the internet.
+4. **Run the check.** It confirms your model answers and your SearXNG returns results, and lists anything that would still leave your machines.
+
+Private and Offline are enforced, not just settings. Each part of EchoSpeak asks before it connects, and a backstop in the backend refuses any internet connection nothing approved. The Privacy page shows each connection since startup (host names only, kept in memory). It also lists what a mode can't control: programs EchoSpeak starts, such as terminal commands on this PC and local MCP servers, and other apps on your PC.
 
 ## Data and control
 

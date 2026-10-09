@@ -563,6 +563,20 @@ def _provider_registry(config: Any) -> Dict[str, Any]:
     }
 
 
+_PROVIDER_ADDRESSES = {
+    "duckduckgo": "https://duckduckgo.com",
+    "brave": "https://api.search.brave.com",
+    "tavily": "https://api.tavily.com",
+}
+
+
+def _provider_address(name: str, config: Any) -> str:
+    """Where a search provider sends the query (SearXNG: your own server)."""
+    if name == "searxng":
+        return str(getattr(config, "searxng_base_url", "") or "")
+    return _PROVIDER_ADDRESSES.get(name, f"https://{name}.invalid")
+
+
 def run_web_search(
     query: str,
     *,
@@ -602,11 +616,20 @@ def run_web_search(
     queries_used: List[str] = []
     used_provider = ""
 
+    from agent import privacy
+
     for pname in order:
         prov = providers.get(pname)
         if prov is None:
             continue
         if pname in {"brave", "searxng", "tavily"} and not getattr(prov, "available", False):
+            continue
+        try:
+            # Private/Offline mode: only search services on your own machines (SearXNG) are used.
+            privacy.require("search", _provider_address(pname, config))
+        except privacy.PrivacyBlocked as exc:
+            if str(exc) not in all_errors:
+                all_errors.append(str(exc))
             continue
         answered = False
         for vq in variants:
@@ -631,7 +654,7 @@ def run_web_search(
     hits = _dedupe_hits(all_hits)[:max_hits]
 
     # Thin-snippet extract upgrade (paid Firecrawl equivalent on free path)
-    if enrich_extract and hits:
+    if enrich_extract and hits and privacy.decide("web_pages").allowed:
         ddg = providers["duckduckgo"]
         enriched = 0
         for h in hits[:4]:
@@ -669,6 +692,11 @@ def describe_search_failure(errors: Sequence[str]) -> str:
     joined = " ".join(errs).lower()
     if "too vague" in joined:
         return errs[0]
+    if "private mode is on" in joined or "offline mode is on" in joined:
+        return (f"{SEARCH_FAILED} {next(e for e in errs if 'mode is on' in e.lower())}\n"
+                "This is the user's privacy setting working as intended, not a fault. Don't retry other search "
+                "tools and don't try to get around it. Answer from what you know or the user's files, say that "
+                "web search is off in this mode, and mention that their own SearXNG server would work.")
     if "not installed" in joined:
         cause = ("This copy of EchoSpeak is missing its built-in search. Nothing can be installed from the chat to fix it: "
                  "updating EchoSpeak fixes it, or the user can add a Brave or Tavily search key in Settings › Web search.")
