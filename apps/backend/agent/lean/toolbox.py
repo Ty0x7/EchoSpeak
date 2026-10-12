@@ -40,11 +40,11 @@ TOOLSETS: dict[str, list[str]] = {
         "stock_history", "product_search", "video_search", "image_search",
     ],
     "terminal": ["terminal", "process_output", "process_stop"],
-    "vision": ["take_screenshot", "analyze_screen", "vision_qa"],
+    "vision": ["take_screenshot", "analyze_screen", "vision_qa", "read_image"],
     "desktop": [
         "open_application", "open_chrome", "notepad_write",
         "desktop_list_windows", "desktop_find_control", "desktop_activate_window",
-        "desktop_click", "desktop_type_text", "desktop_send_hotkey",
+        "desktop_click", "desktop_type_text", "desktop_send_hotkey", "computer_action",
     ],
     "comms": [
         "email_read_inbox", "email_search", "email_get_thread", "email_send", "email_reply",
@@ -75,6 +75,8 @@ TOOL_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
     **{name: ("terminal", {}) for name in ("bash", "shell", "run_command", "run_shell_command", "exec_command",
                                            "execute_command", "run_terminal_cmd", "powershell", "terminal_run")},
     "process_start": ("terminal", {"background": True}),
+    "view_image": ("read_image", {}),
+    "open_image": ("read_image", {}),
     **{name: ("file_read", {}) for name in ("read_file", "view_file", "read", "cat")},
     **{name: ("file_write", {}) for name in ("write_file", "create_file", "write")},
     **{name: ("file_edit", {}) for name in ("edit_file", "edit", "str_replace", "replace_in_file", "apply_edit")},
@@ -166,6 +168,8 @@ class ToolResult:
     widgets: list[dict[str, Any]] = field(default_factory=list)
     # Facts for the step's summary line (agent/lean/steps.py), e.g. results and pages read.
     meta: dict[str, Any] = field(default_factory=dict)
+    # Scoped IDs only. The provider loads actual pixels immediately before inference.
+    observations: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -175,7 +179,7 @@ class NativeTool:
     name: str
     description: str
     parameters: dict[str, Any]
-    func: Callable[[dict[str, Any]], str]
+    func: Callable[[dict[str, Any]], str | ToolResult]
     parallel_safe: bool = False
     # Set for tools that hand the conversation to another agent. Called before
     # the tool runs: returns an "Error: ..." for bad arguments, otherwise the
@@ -250,6 +254,7 @@ class Toolbox:
         for name in toolsets or DEFAULT_TOOLSETS:
             if name == "all":
                 wanted.extend(ToolRegistry.get_names())
+                wanted.extend(self.native)
                 include_external = True
                 continue
             for tool in TOOLSETS.get(name, [name]):
@@ -471,16 +476,23 @@ class Toolbox:
         if name in self.native:
             from agent.tools import _tool_execution_context
 
-            def invoke_native() -> str:
+            def invoke_native():
                 token = _tool_execution_context.set(self.tool_context())
                 try:
-                    return str(self.native[name].func(args) or "")
+                    return self.native[name].func(args)
                 finally:
                     _tool_execution_context.reset(token)
 
             widgets: list[dict[str, Any]] = []
             try:
-                output, widgets = contextvars.copy_context().run(collect_widgets, invoke_native)
+                raw, widgets = contextvars.copy_context().run(collect_widgets, invoke_native)
+                if isinstance(raw, ToolResult):
+                    raw.duration_ms = int((time.perf_counter() - started) * 1000)
+                    raw.output = redact_secrets(raw.output)
+                    from agent.lean.widgets import normalize
+                    raw.widgets = redact_payload([clean for w in raw.widgets if (clean := normalize(w)) is not None])
+                    return raw
+                output = str(raw or "")
                 ok = not output.lower().startswith(_FAILURE_PREFIXES)
             except Exception as exc:
                 logger.warning("Lean native tool {} failed: {}", name, exc)
@@ -557,10 +569,16 @@ class Toolbox:
                 _tool_execution_context.reset(token)
 
         widgets: list[dict[str, Any]] = []
+        visual: list[dict[str, str]] = []
         try:
             raw, widgets = contextvars.copy_context().run(collect_widgets, invoke)
+            if str(getattr(entry, "origin", "")) == "mcp":
+                from agent.lean import observations
+                raw, images = observations.mcp_images(raw, self.session_id, name)
+                widgets.extend({"type": "observation", "data": observations.public(item)} for item in images)
+                visual = [observations.reference(item) for item in images]
             output = raw if isinstance(raw, str) else json.dumps(raw, default=str, ensure_ascii=False)
-            ok = not output.strip().lower().startswith(_FAILURE_PREFIXES)
+            ok = not output.strip().lower().startswith(_FAILURE_PREFIXES) and not (isinstance(raw, dict) and raw.get("isError"))
         except Exception as exc:
             message = str(exc)
             if "validation error" in message.lower():
@@ -583,7 +601,7 @@ class Toolbox:
             except Exception:
                 pass
         return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000),
-                          redact_payload(widgets) if ok else [])
+                          redact_payload(widgets) if ok else [], observations=visual if ok else [])
 
 
 def describe_call(name: str, args: dict[str, Any]) -> str:

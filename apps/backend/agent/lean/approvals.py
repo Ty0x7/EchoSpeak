@@ -33,7 +33,7 @@ IDENTITY_TOOLS = {"soul_update"}
 
 # Tools that act on the desktop as if they were the user.
 DESKTOP_CONTROL_TOOLS = {
-    "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write",
+    "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
 }
 
 # Hermes-style dangerous command detection for terminal_run.
@@ -70,6 +70,8 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
         return False, ""
     if name in IDENTITY_TOOLS:
         return True, "this changes how the agent behaves in every future chat"
+    if name in DESKTOP_CONTROL_TOOLS:
+        return True, "this controls your desktop"
     if mode == "always":
         return bool(getattr(entry, "is_action", False)), "action tool"
     if name in {"terminal_run", "terminal", "process_start"}:
@@ -80,8 +82,6 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
         return approval_for(args)
     if name in EXTERNAL_TOOLS or str(getattr(entry, "category", "")) in {"discord", "email", "communications"} and getattr(entry, "is_action", False):
         return True, "this sends something outside your machine"
-    if name in DESKTOP_CONTROL_TOOLS:
-        return True, "this controls your desktop"
     if str(getattr(entry, "risk_level", "")) == "destructive":
         return True, "this can delete or overwrite work"
     if str(getattr(entry, "origin", "")) == "mcp" and getattr(entry, "is_action", False):

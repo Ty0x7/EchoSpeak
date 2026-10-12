@@ -1,5 +1,15 @@
 # Changes
 
+## v11.7.1 — 2026-10-12
+
+User-facing notes: [EchoSpeak 11.7.1](docs/releases/v11.7.1.md).
+
+* Visual observations shared between model inputs and chat previews; authenticated, chat-scoped image access, bounded context, original downloads and temporary retention.
+* Monitor/window capture, reopening allowed images, crop inspection and MCP image-block forwarding through the existing lean tool loop and provider adapters.
+* Bounded desktop action batches using capture coordinates, stale-geometry checks, fresh result captures, cancellation and input release. Existing permissions, approvals, privacy and untrusted-input policy remain active.
+* Screenshots join the existing artifact/activity/research panel. System check reports computer-tool dependencies. Visual turns keep the configured model rather than using unverified vision routing.
+* Release metadata updated to 11.7.1. Details and validation limits are in the release notes.
+
 ## v11.7.0 — 2026-10-09
 
 User-facing notes: [EchoSpeak 11.7.0](docs/releases/v11.7.0.md).

@@ -244,6 +244,12 @@ def gemini_live_turn(client, messages, tools, on_reasoning, on_content, cancel, 
             completed = getattr(client, "_live_completed_calls", set())
             completed.update(pending)
             client._live_completed_calls = completed
+            # The pending tool batch can include screenshots. Deliver the actual
+            # image before completing the tool responses that resume generation.
+            if messages and messages[-1].get("role") == "user" and isinstance(messages[-1].get("content"), list):
+                parts = _content_parts(messages[-1]["content"], google=True)
+                if any("inlineData" in part for part in parts):
+                    client._live.send(json.dumps({"clientContent": {"turns": [{"role": "user", "parts": parts}], "turnComplete": False}}))
             client._live.send(json.dumps({"toolResponse": {"functionResponses": responses}}))
         while True:
             packet = receive()

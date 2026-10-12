@@ -431,6 +431,13 @@ class ChatClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> ModelTurn:
+        from agent.lean.observations import hydrate
+        has_visual = any(message.get("observations") for message in messages)
+        metadata = dict(getattr(config, "model_capability_profiles", {}) or {})
+        profile = metadata.get(f"{self.endpoint.provider}:{self.endpoint.model}") or metadata.get(self.endpoint.model) or {}
+        if has_visual and profile.get("vision") is False:
+            raise ProviderError(400, "This model is marked as text-only. Select a vision-capable model in Settings → Models to inspect screenshots.", self.endpoint.provider)
+        messages = hydrate(messages)
         prefetched = getattr(self, "_prefetched_turn", None)
         if prefetched is not None:
             self._prefetched_turn = None

@@ -2,6 +2,8 @@ import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } f
 import type { LeanMessageData, LeanSegment } from "../lean/types";
 import { ArtifactPanel } from "./ArtifactPanel";
 import { ResearchPanel } from "./ResearchPanel";
+import { ObservationView } from "./ObservationCard";
+import type { ObservationRef } from "./types";
 
 /** One tool run shown in the Activity tab. */
 export type ActivityItem = {
@@ -120,7 +122,7 @@ export function clampPanelWidth(width: number, room: number): number {
   return Math.round(Math.min(max, Math.max(RIGHT_PANEL_MIN, width)));
 }
 
-export type RightTab = "artifact" | "activity" | "research";
+export type RightTab = "artifact" | "activity" | "research" | "screen";
 
 /**
  * One right sidebar for artifacts, research and activity. Its views share
@@ -132,6 +134,7 @@ export function RightPanel({
   tab,
   onTab,
   artifact,
+  observation,
   activity,
   onEditArtifact,
   width,
@@ -145,6 +148,7 @@ export function RightPanel({
   tab: RightTab;
   onTab(tab: RightTab): void;
   artifact: { id: string; version?: number } | null;
+  observation?: ObservationRef | null;
   activity: ActivityItem[];
   onEditArtifact?(id: string, version: number, passage?: string): void;
   width: number;
@@ -159,7 +163,7 @@ export function RightPanel({
   const [visitedArtifactId, setVisitedArtifactId] = useState("");
   const panelId = useId();
   const startRef = useRef({ x: 0, width });
-  const active: RightTab = tab === "artifact" && !artifact ? "activity" : tab;
+  const active: RightTab = (tab === "artifact" && !artifact) || (tab === "screen" && !observation) ? "activity" : tab;
   const running = activity.filter((a) => a.status === "running").length;
   useEffect(() => {
     if (active === "artifact" && artifact) setVisitedArtifactId(artifact.id);
@@ -178,7 +182,7 @@ export function RightPanel({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [expanded, overlay, onClose]);
-  const tabs: RightTab[] = artifact ? ["artifact", "activity", "research"] : ["activity", "research"];
+  const tabs: RightTab[] = [...(artifact ? ["artifact" as const] : []), "activity", "research", ...(observation ? ["screen" as const] : [])];
   return (
     <aside className={`rp${overlay ? " is-overlay" : ""}${expanded ? " is-expanded" : ""}`} aria-label="Side panel" data-dragging={dragging ? "true" : undefined}>
       {!overlay && !expanded ? (
@@ -219,7 +223,7 @@ export function RightPanel({
           <span aria-hidden />
         </div>
       ) : null}
-      <div className="rp-tabs" role="tablist" aria-label="Side panel" onKeyDown={event => {
+      <div className="rp-tabs" data-has-observation={Boolean(observation)} role="tablist" aria-label="Side panel" onKeyDown={event => {
         const current = (event.target as HTMLElement).closest<HTMLButtonElement>("[role=tab]");
         if (!current) return;
         const index = tabs.indexOf(current.dataset.tab as RightTab);
@@ -241,6 +245,7 @@ export function RightPanel({
           {running ? <span className="rp-live" aria-label={`${running} running`} /> : activity.length ? <small>{activity.length}</small> : null}
         </button>
         <button type="button" role="tab" data-tab="research" id={`${panelId}-research-tab`} aria-controls={`${panelId}-research`} tabIndex={active === "research" ? 0 : -1} aria-selected={active === "research"} className={active === "research" ? "is-on" : ""} onClick={() => onTab("research")}>Research</button>
+        {observation && <button type="button" role="tab" data-tab="screen" id={`${panelId}-screen-tab`} aria-controls={`${panelId}-screen`} tabIndex={active === "screen" ? 0 : -1} aria-selected={active === "screen"} className={active === "screen" ? "is-on" : ""} onClick={() => onTab("screen")}>Screenshot</button>}
         <span className="rp-spacer" />
         {!overlay && <button type="button" className="rp-close" onClick={() => setExpanded(value => !value)} aria-label={expanded ? "Restore side panel" : "Expand side panel"} aria-pressed={expanded} title={expanded ? "Restore panel width" : "Expand panel"}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{expanded ? <path d="M8 3v5H3M16 3v5h5M8 21v-5H3M16 21v-5h5" /> : <path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5" />}</svg>
@@ -250,6 +255,9 @@ export function RightPanel({
         </button>
       </div>
       <div className="rp-body">
+        {observation && <div className="rp-tab-panel rp-observation" role="tabpanel" id={`${panelId}-screen`} aria-labelledby={`${panelId}-screen-tab`} hidden={active !== "screen"}>
+          {active === "screen" && <ObservationView key={observation.id} data={observation} apiBase={apiBase} expanded />}
+        </div>}
         {artifact && <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-artifact`} aria-labelledby={`${panelId}-artifact-tab`} hidden={active !== "artifact"}>
           {(active === "artifact" || visitedArtifactId === artifact.id) && <ArtifactPanel key={artifact.id} embedded apiBase={apiBase} artifactId={artifact.id} version={artifact.version} onClose={onClose} onEdit={onEditArtifact} />}
         </div>}

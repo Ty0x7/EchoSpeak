@@ -32,6 +32,7 @@ import { LiveStatusPill } from "./lean/LiveStatus";
 import { leanApi } from "./lean/api";
 import { AgentRows, CollapsedRoster } from "./lean/Roster";
 import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
+import type { ObservationRef } from "./widgets/types";
 import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
 import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
@@ -100,6 +101,7 @@ export const Dashboard: React.FC<{
   const [mainPage, setMainPage] = useState<SidebarPage>("chat");
   /** The artifact shown in the side panel. */
   const [openArtifact, setOpenArtifact] = useState<{ id: string; version?: number } | null>(null);
+  const [openObservation, setOpenObservation] = useState<ObservationRef | null>(null);
   /** Shared right side panel: selected tab, open state and remembered width. */
   const [rightTab, setRightTab] = useState<RightTab>("artifact");
   const [activityOpen, setActivityOpen] = useState(false);
@@ -1516,7 +1518,8 @@ export const Dashboard: React.FC<{
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, [desktopMode, studioOpen]);
 
-  const rightOpen = mainPage === "chat" && !voiceConversationMode && Boolean(openArtifact || activityOpen);
+  const currentObservation = openObservation?.session_id === activeThreadId ? openObservation : null;
+  const rightOpen = mainPage === "chat" && !voiceConversationMode && Boolean(openArtifact || activityOpen || currentObservation);
   const rightDocked = rightOpen && !narrowLayout;
   const shellColumns = [
     desktopMode
@@ -1578,7 +1581,10 @@ export const Dashboard: React.FC<{
     }
   }, [lean.live]); // eslint-disable-line react-hooks/exhaustive-deps
   const widgetEnv = useMemo<WidgetEnv>(
-    () => ({ apiBase, openArtifact: (id, version) => { setOpenArtifact({ id, version }); setRightTab("artifact"); }, openResearch: async url => {
+    () => ({ apiBase, openArtifact: (id, version) => { setOpenArtifact({ id, version }); setRightTab("artifact"); }, openObservation: data => {
+      if (data.session_id !== activeThreadIdRef.current) return;
+      setOpenObservation(data); setRightTab("screen");
+    }, openResearch: async url => {
       const session = activeThreadIdRef.current;
       if (!session) return false;
       const response = await fetch(`${apiBase}/sessions/${encodeURIComponent(session)}/research`);
@@ -1798,6 +1804,7 @@ export const Dashboard: React.FC<{
             tab={rightTab}
             onTab={setRightTab}
             artifact={openArtifact}
+            observation={currentObservation}
             activity={activityItems}
             onEditArtifact={(id, version, passage) => {
               setMainPage("chat");
@@ -1810,6 +1817,7 @@ export const Dashboard: React.FC<{
             overlay={narrowLayout}
             onClose={() => {
               setOpenArtifact(null);
+              setOpenObservation(null);
               setActivityOpen(false);
             }}
           />

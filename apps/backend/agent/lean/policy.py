@@ -34,7 +34,7 @@ UNTRUSTED_SOURCES = {
     "web_search", "safe_web_fetch", "browse_task", "youtube_transcript", "daily_briefing",
     "email_read_inbox", "email_search", "email_get_thread",
     "discord_read_channel", "discord_web_read_recent", "discord_contacts_discover",
-    "analyze_screen", "vision_qa",
+    "analyze_screen", "vision_qa", "take_screenshot", "read_image", "computer_action",
     # Titles, prices and pages from the web.
     "stock_history", "product_search", "video_search", "image_search",
     # Uploaded documents can come from anywhere (a downloaded PDF, a forwarded email).
@@ -53,7 +53,7 @@ EXTERNAL_ACTIONS = {
     "telegram_send", "whatsapp_send", "slack_send", "twitter_post", "tweet_post",
     "calendar_create", "calendar_delete", "github_create_issue", "github_comment",
     "notion_create_page", "spotify_control",
-    "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write",
+    "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
     # Saved memories and the soul are re-read in every future chat: writing one
     # from untrusted content would plant a persistent injection.
     "memory_save", "soul_update",

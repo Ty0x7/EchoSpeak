@@ -97,7 +97,20 @@ def memory_search() -> dict[str, Any]:
                   UPDATE_FIX)
 
 
-CHECKS: list[Callable[[], dict[str, Any]]] = [web_search, page_reading, model, voice, memory_search]
+def computer() -> dict[str, Any]:
+    from config import config
+    missing = _imports("PIL.Image", "mss")
+    if missing:
+        return _check("computer", "Screen and computer tools", "warn", f"Screen capture is missing {missing}.", UPDATE_FIX)
+    if not (getattr(config, "enable_system_actions", False) and getattr(config, "allow_desktop_automation", False)):
+        return _check("computer", "Screen and computer tools", "ok", "Screen capture is available. Desktop control is off (optional). A vision-capable model is needed to read images.", "Enable system actions and desktop automation in Settings, then enable the agent's Desktop toolset if you want computer control.")
+    missing = _imports("pyautogui", "pywinauto")
+    if missing:
+        return _check("computer", "Screen and computer tools", "warn", f"Desktop control is missing {missing}.", UPDATE_FIX)
+    return _check("computer", "Screen and computer tools", "ok", "Capture and input dependencies are available. Desktop actions need the agent's Desktop toolset and approval; model vision and individual apps still need a real check.")
+
+
+CHECKS: list[Callable[[], dict[str, Any]]] = [web_search, page_reading, model, voice, memory_search, computer]
 
 
 def check_all(force: bool = False) -> list[dict[str, Any]]:

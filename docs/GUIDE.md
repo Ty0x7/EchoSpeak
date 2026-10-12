@@ -151,6 +151,16 @@ Dangerous commands ask first in every mode.
 - People who reach Echo through Discord, Telegram, Twitch or Twitter get look-up tools only:
   no files, terminal, memory or past chats.
 
+### Screenshots and computer use
+
+Ask Echo to capture a monitor or a visible window. The screenshot appears in the conversation, and a vision-capable chat model receives the actual image. Click it to open the original in the same right panel used for artifacts, research and activity, or save it. Echo can reopen a screenshot by its observation ID and crop it to inspect details. Text-only models cannot interpret pixels; OCR remains a separate fallback and requires Tesseract.
+
+For input, enable **Allow actions on this computer** and **Control the desktop** in Settings › Permissions, and enable the agent's **Desktop** toolset. Echo can click, right-click, double-click, move, drag, scroll, type, press shortcuts and briefly hold keys. Each action batch uses coordinates from a recent screenshot and returns a new capture so Echo can check the result. Changed window or monitor geometry requires another capture. Desktop approvals still apply; after untrusted screen content, actions require approval even when ordinary approvals are off.
+
+Use **Stop everything** to cancel work. Held keys and mouse buttons are released when a new computer-action batch ends, fails or is cancelled. Other apps can still change the screen while Echo works; check its results, particularly around destructive controls. Some games reject simulated input, and these short, model-driven batches are suited to slower interactions rather than real-time gameplay.
+
+Images stay in this chat's temporary observation store, separate from personal memory and Creations, for up to seven days or until its 512 MB limit evicts older captures. Chat references remain afterward and show an unavailable message. At most three recent observations are included in model context. With a cloud model, those images are sent to that provider under your existing model privacy settings; Private and Offline modes retain their restrictions.
+
 ## 5. Voice
 
 - **Settings › Voice**: **Download** a local Whisper model (tiny, base or small) for

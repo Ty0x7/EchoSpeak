@@ -7,6 +7,7 @@ import { useWidgetEnv } from "./env";
 import type { ArtifactRef, Widget } from "./types";
 import { validateWidget } from "./validate";
 import { WeatherCard } from "./Weather";
+import { ObservationView } from "./ObservationCard";
 import "./widgets.css";
 
 /** One broken widget never takes the message down: it falls back to its plain-text fallback. */
@@ -87,6 +88,8 @@ export function WidgetView({ widget }: { widget: unknown }) {
         return <MapCard data={checked.data} />;
       case "creation":
         return <CreationCard id={checked.data.id} apiBase={apiBase} />;
+      case "observation":
+        return <ObservationView data={checked.data} apiBase={apiBase} />;
       case "artifact":
         return <ArtifactCard data={checked.data} />;
       default:
