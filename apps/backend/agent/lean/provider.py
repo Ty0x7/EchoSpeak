@@ -450,6 +450,15 @@ class ChatClient:
                 self._live.close()
                 self._live = None
             return prefetched
+        from agent import privacy
+
+        try:
+            # Private/Offline mode: a model outside your machines would receive the whole conversation.
+            privacy.require("models", self.endpoint.base_url)
+        except privacy.PrivacyBlocked as exc:
+            blocked = ProviderError(403, str(exc), self.endpoint.provider)
+            blocked.args = (str(exc),)  # the privacy reason as it is, not dressed as an HTTP error
+            raise blocked from None
         if not self.endpoint.local and not self.endpoint.api_key.strip():
             raise ProviderError(401, "No API key saved. Add it in Settings → Models.", self.endpoint.provider)
         if not self.endpoint.local and self.endpoint.model in ("", "default"):

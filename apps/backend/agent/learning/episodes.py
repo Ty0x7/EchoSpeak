@@ -279,6 +279,35 @@ def _first_sentence(text: str, limit: int = 200) -> str:
     return (match.group(1) if match else body)[:limit]
 
 
+_ERROR_KINDS: list[tuple[str, re.Pattern[str]]] = [
+    ("context", re.compile(r"(?i)context (length|window)|n_ctx|too many tokens|maximum context")),
+    ("rate_limit", re.compile(r"(?i)\b429\b|rate limit")),
+    ("config", re.compile(r"(?i)\b(401|403|404)\b|api key|no api key|not found|select an api model|permission|"
+                          r"billing|quota|credits|private mode|offline mode")),
+    ("outage", re.compile(r"(?i)\b(500|502|503|504|529)\b|overloaded|unavailable|timed? ?out|timeout|connect|"
+                          r"refused|unreachable|reset by peer|server disconnected|network")),
+]
+
+
+def classify_error(text: str) -> str:
+    """Why a model call failed: outage | config | rate_limit | context | other.
+
+    None of these are the model's doing at the task, so they never count as a loss.
+    "context" is the one that does say something about fit: the task outgrew the model's window.
+    """
+    for kind, pattern in _ERROR_KINDS:
+        if pattern.search(text or ""):
+            return kind
+    return "other" if text else ""
+
+
+def _duration(results: list[Any]) -> float:
+    stamps = [float(item.get("at") or 0) for r in results for item in (r.timeline or []) if item.get("at")]
+    ends = [float(item.get("ended_at") or 0) for r in results for item in (r.timeline or []) if item.get("ended_at")]
+    stamps = [s for s in stamps + ends if s > 0]
+    return round(max(stamps) - min(stamps), 2) if len(stamps) >= 2 else 0.0
+
+
 def build_episodes(
     *,
     goal: str,
@@ -292,6 +321,8 @@ def build_episodes(
     endpoints: dict[str, tuple[str, str]],
     lessons_used: dict[str, list[str]],
     team: bool,
+    lead: str = "",
+    routed: Optional[dict[str, str]] = None,
 ) -> list[Episode]:
     """One episode per agent that spoke in this request (TurnResults in order)."""
     goal = redact_secrets(" ".join(str(goal or "").split()))[:2000]
@@ -351,5 +382,10 @@ def build_episodes(
             taint=sorted(set(taint)),
             tamper=tamper,
             lessons_used=list(dict.fromkeys(lessons_used.get(agent_id, []))),
+            error_kind=classify_error(errors[0]) if errors else "",
+            duration_s=_duration(mine),
+            tokens=sum(int((r.usage or {}).get("fresh", (r.usage or {}).get("total", 0)) or 0) for r in mine),
+            role="solo" if not team else ("lead" if agent_id == lead else "worker"),
+            routed=(routed or {}).get(agent_id, "user"),
         ))
     return episodes

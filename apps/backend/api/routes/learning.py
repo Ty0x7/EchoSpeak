@@ -164,3 +164,25 @@ def learning_reflect_now() -> dict[str, Any]:
     """Reflect on queued episodes now (in the background, within the daily cap)."""
     threading.Thread(target=learning.worker_tick, name="learning-reflect", daemon=True).start()
     return {"ok": True, "pending": learning.status()["reflections_pending"]}
+
+
+@router.get("/routing")
+def routing_overview() -> dict[str, Any]:
+    """Smart model choice (agent/learning/routing.py): the mode, the models you listed and whether
+    each can be used right now, every model's record, and suggestions per agent."""
+    from agent.learning import routing
+
+    pool = []
+    for ref in routing.pool():
+        ok, why = routing.availability(ref)
+        auto_ok, auto_why = routing.auto_allowed(ref)
+        pool.append({"provider": ref[0], "model": ref[1], "cloud": routing.is_cloud(ref[0]),
+                     "available": ok, "why": why, "auto_allowed": auto_ok, "auto_why": auto_why})
+    return {
+        "mode": routing.mode(),
+        "pool": pool,
+        "models": routing.model_table(),
+        "recommendations": routing.recommendations(),
+        "cloud_tokens_today": routing.cloud_tokens_today(),
+        "min_evidence": routing.MIN_EVIDENCE,
+    }

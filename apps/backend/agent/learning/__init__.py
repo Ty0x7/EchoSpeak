@@ -121,6 +121,8 @@ def record_request(
     lessons_used: dict[str, list[str]],
     team: bool,
     cancelled: bool,
+    lead: str = "",
+    routed: Optional[dict[str, str]] = None,
 ) -> list[Episode]:
     """Grade and keep a finished request. Only the owner's, never a cancelled one."""
     try:
@@ -134,7 +136,8 @@ def record_request(
         kept: list[Episode] = []
         for episode in build_episodes(goal=goal, results=results, job=job, taint=taint, session_id=session_id,
                                       execution_id=execution_id, source=source, names=names, endpoints=endpoints,
-                                      lessons_used=lessons_used, team=team):
+                                      lessons_used=lessons_used, team=team,
+                                      lead=lead, routed=routed):
             if episode.agent_id in paused:
                 continue
             playbook.attribute(episode)
@@ -144,6 +147,8 @@ def record_request(
                 store.queue_reflection(episode.id, episode.agent_id)
             kept.append(episode)
         profiles.forget_cache()
+        from agent.learning import routing
+        routing.forget_profiles()
         return kept
     except Exception:
         logger.warning("Learning: could not record the request", exc_info=True)
@@ -170,6 +175,8 @@ def record_feedback(execution_id: str, value: int, note: str = "", agent_id: str
             store.queue_reflection(episode.id, episode.agent_id)
         changed.append(episode)
     profiles.forget_cache()
+    from agent.learning import routing
+    routing.forget_profiles()
     return changed
 
 

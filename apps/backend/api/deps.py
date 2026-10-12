@@ -223,8 +223,12 @@ async def _reconcile_discord_bot_runtime() -> None:
         logger.warning(f"Discord bot module unavailable: {exc}")
         return
 
+    from agent import privacy
+
     desired_token = str(getattr(config, "discord_bot_token", "") or "").strip()
-    desired_enabled = bool(getattr(config, "allow_discord_bot", False) and desired_token)
+    # Private/Offline mode: the bot relays your messages through Discord, so it stays off unless allowed.
+    desired_enabled = bool(getattr(config, "allow_discord_bot", False) and desired_token
+                           and privacy.decide("channels").allowed)
 
     bot = get_bot()
     running = bool(bot and bot.is_running())
@@ -263,6 +267,41 @@ async def _reconcile_discord_bot_runtime() -> None:
 
 
 _heartbeat_runtime_lock = threading.Lock()
+
+
+def privacy_snapshot() -> tuple:
+    """What a privacy setting change compares (agent/privacy.py)."""
+    from agent import privacy
+
+    return (privacy.mode(), tuple(sorted(privacy._overrides().items())), tuple(privacy.trusted_hosts()))
+
+
+async def _reconcile_privacy_runtime() -> None:
+    """After the privacy settings change: stop channels the mode no longer allows, and restart
+    MCP servers so hosted ones disconnect (or reconnect) under the new mode."""
+    from agent import privacy
+
+    if not privacy.decide("channels").allowed:
+        for module, getter in (("telegram_bot", "get_telegram_bot"), ("twitch_bot", "get_twitch_bot"),
+                               ("twitter_bot", "get_twitter_bot")):
+            try:
+                bot = getattr(__import__(module), getter)()
+                if not bot:
+                    continue
+                stopped = bot.stop()
+                if asyncio.iscoroutine(stopped):
+                    await stopped
+                logger.info("Privacy mode: stopped {}", module)
+            except Exception as exc:
+                logger.debug("Privacy mode: could not stop {}: {}", module, exc)
+    try:
+        from agent.mcp_client import get_mcp_manager
+
+        servers = dict(getattr(config, "mcp_servers", None) or {})
+        if servers:
+            await asyncio.to_thread(get_mcp_manager().initialize_servers, servers)
+    except Exception as exc:
+        logger.warning(f"MCP restart after a privacy change failed: {exc}")
 
 
 async def _reconcile_heartbeat_runtime() -> None:

@@ -219,6 +219,16 @@ def test_check_reports_waiting_running_and_broken_connections(offline):
     assert "find_integrations" in integrations.check("nothing", status={"servers": []})
 
 
+def test_earlier_setups_are_remembered_next_time(offline):
+    obs = integrations.propose("guide:obs")
+    integrations.mark(obs["id"], "approved", connected_at=1_790_000_000, tool_count=12)
+    blender = integrations.propose("guide:blender")
+    integrations.mark(blender["id"], "dismissed")
+    text = integrations._format_results(integrations.search("obs streaming"))
+    assert "already set up as \"obs\" and connected" in text and "12 tools" in text
+    assert "dismissed this suggestion" in integrations._format_results(integrations.search("blender"))
+
+
 def test_registry_text_counts_as_outside_content():
     assert policy.is_untrusted_source("find_integrations") and policy.is_untrusted_source("check_integration")
     assert not policy.is_external_action("propose_integration")  # it only queues a suggestion for the user

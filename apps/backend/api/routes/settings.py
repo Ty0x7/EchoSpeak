@@ -39,7 +39,9 @@ from api.deps import (
     _read_runtime_settings,
     _reconcile_discord_bot_runtime,
     _reconcile_heartbeat_runtime,
+    _reconcile_privacy_runtime,
     _require_automation_project_scope,
+    privacy_snapshot,
 )
 
 from agent.cloud_providers import CLOUD_PROVIDERS, CLOUD_LABELS, cloud_config, list_cloud_models
@@ -727,10 +729,17 @@ async def put_settings(req: Request):
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}")
 
     patch = _sanitize_incoming_settings(patch if isinstance(patch, dict) else {})
+    privacy_before = privacy_snapshot()
     try:
         _apply_settings_patch(patch)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Failed to write settings: {exc}")
+
+    if privacy_snapshot() != privacy_before:
+        try:
+            await _reconcile_privacy_runtime()
+        except Exception as exc:
+            logger.warning(f"Privacy reconcile after settings save failed: {exc}")
 
     try:
         await _reconcile_discord_bot_runtime()

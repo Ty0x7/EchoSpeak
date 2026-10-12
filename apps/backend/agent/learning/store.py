@@ -62,6 +62,13 @@ class Episode:
     # What this episode counted for, for the lessons it used: win | loss | ''.
     # Kept so the owner's feedback can correct it later without double counting.
     attribution: str = ""
+    # For model profiles (agent/learning/routing.py). error_kind says why a model call failed
+    # (outage | config | rate_limit | context | other), so an outage never counts against a model.
+    error_kind: str = ""
+    duration_s: float = 0.0
+    tokens: int = 0  # new tokens: input added plus replies (agent/lean/loop.py "fresh")
+    role: str = "solo"  # solo | lead | worker
+    routed: str = "user"  # who picked the model: the user's setting, or the router (auto mode)
 
     @property
     def verified_success(self) -> bool:

@@ -189,8 +189,15 @@ class MCPSession:
             return False
         try:
             self._validate_configuration()
+            if self.state.transport != "stdio":
+                from agent import privacy
+
+                # A hosted server receives every tool call's arguments; Private mode keeps it to your machines.
+                privacy.require("remote_connections", self.state.url)
         except Exception as exc:
-            self.state.last_error = _safe_error(exc)
+            from agent.privacy import PrivacyBlocked
+
+            self.state.last_error = str(exc) if isinstance(exc, PrivacyBlocked) else _safe_error(exc)
             return False
         self._closed = False
         self._ready.clear()
