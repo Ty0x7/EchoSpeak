@@ -37,8 +37,8 @@ const TOOLSET_INFO: Record<string, string> = {
   live: "Weather, sports, stocks, shopping, video and image cards",
   research: "Web search and live data",
   terminal: "Run commands",
-  vision: "Screenshots and vision",
-  desktop: "Open apps, control the desktop",
+  vision: "Read screenshots and images",
+  desktop: "Mouse, keyboard and app control",
   comms: "Email and Discord",
   memory: "Remember things",
   skills: "Installed skills and MCP",
@@ -149,12 +149,19 @@ export function AgentEditor({
                 aria-pressed={on}
                 onClick={() => setSets((prev) => (on ? prev.filter((s) => s !== set) : [...prev, set]))}
               >
-                <strong>{set}</strong>
+                <strong>{set === "desktop" ? "Desktop control" : set === "vision" ? "Screen & images" : set}</strong>
                 <small>{TOOLSET_INFO[set] || ""}</small>
               </button>
             );
           })}
         </div>
+        {sets.includes("desktop") || sets.includes("vision") ? (
+          <small>
+            {sets.includes("desktop")
+              ? `Desktop control also needs Allow actions on this computer and Control the desktop in Settings › Permissions.${sets.includes("vision") ? "" : " Enable Screen & images too so the agent can see before acting."}`
+              : "Screen & images lets this agent see screenshots. Enable Desktop control here to let it use the mouse and keyboard; computer permissions and approvals still apply."}
+          </small>
+        ) : null}
       </div>
       <label className="es-field">
         <span>Model override (optional)</span>

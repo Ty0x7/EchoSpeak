@@ -190,10 +190,12 @@ def desktop(monkeypatch):
         def __exit__(self, *args): pass
     monkeypatch.setitem(sys.modules, "mss", SimpleNamespace(mss=Capture))
     events = []
-    gui = SimpleNamespace(KEYBOARD_KEYS=["ctrl", "w"], FAILSAFE=True)
-    for name in ("keyDown", "keyUp", "mouseDown", "mouseUp", "moveTo", "click", "scroll", "write"):
+    gui = SimpleNamespace(KEYBOARD_KEYS=["ctrl", "shift", "w"], FAILSAFE=True)
+    for name in ("keyDown", "keyUp", "mouseDown", "mouseUp", "moveTo", "click", "scroll", "write", "failSafeCheck"):
         setattr(gui, name, lambda *args, _name=name, **kwargs: events.append((_name, args)))
     monkeypatch.setitem(sys.modules, "pyautogui", gui)
+    # Every test must be incapable of injecting real relative desktop input.
+    monkeypatch.setattr(computer, "_move_relative", lambda *delta: events.append(("relative", delta)))
     return capture(screen={**bounds, "monitor": 1}), gui, events
 
 
@@ -206,7 +208,7 @@ def test_cancel_releases_held_keys_and_restores_failsafe(desktop):
     gui.keyDown = down
     with pytest.raises(ValueError, match="cancelled"):
         computer.act("t", {"observation_id": item["id"], "actions": [{"action": "hold", "text": "ctrl+w", "duration": 2}]}, cancel)
-    assert ("keyUp", ("ctrl",)) in events and ("keyUp", ("w",)) in events
+    assert ("keyUp", ("ctrl",)) in events and ("keyDown", ("w",)) not in events
     assert gui.FAILSAFE and not computer._desktop_lock.locked()
 
 
@@ -235,6 +237,118 @@ def test_successful_input_captures_result_and_invalid_or_stale_input_never_runs(
     with pytest.raises(ValueError, match="fresh"):
         computer.act("t", {"observation_id": item["id"], "actions": [{"action": "key", "text": "w"}]})
     assert events == []
+
+
+@pytest.mark.parametrize("duration", [float("nan"), float("inf"), -float("inf"), True, "1", 3, 10 ** 500])
+@pytest.mark.parametrize("kind", ["key", "hold", "wait", "drag"])
+def test_all_timed_actions_validate_before_any_input(desktop, duration, kind):
+    item, _, events = desktop
+    action = {"action": kind, "text": "w", "duration": duration,
+              "coordinate": [20, 20], "start_coordinate": [10, 10]}
+    with pytest.raises(ValueError, match="finite number"):
+        computer.act("t", {"observation_id": item["id"], "actions": [
+            {"action": "click", "coordinate": [10, 10]}, action]})
+    assert events == []
+
+
+@pytest.mark.parametrize("action", [
+    {"action": "move_relative", "delta": [1001, 0]},
+    {"action": "move_relative", "delta": [0, -1001]},
+    {"action": "move_relative", "delta": [True, 0]},
+    {"action": "move_relative", "delta": [0.5, 0]},
+    {"action": "move_relative", "delta": [0]},
+    {"action": "hold", "button": "wheel"},
+    {"action": "hold", "button": {"name": "left"}},
+    {"action": "hold"},
+    {"action": "hold", "text": "w+w"},
+])
+def test_relative_motion_and_mouse_hold_reject_invalid_batches(desktop, action):
+    item, _, events = desktop
+    with pytest.raises(ValueError):
+        computer.act("t", {"observation_id": item["id"], "actions": [
+            {"action": "key", "text": "w"}, action]})
+    assert events == []
+
+
+def test_combined_mouse_keyboard_hold_releases_before_recapture(desktop, monkeypatch):
+    item, gui, events = desktop
+    gui.mouseDown = lambda **kw: events.append(("mouseDown", kw["button"]))
+    gui.mouseUp = lambda **kw: events.append(("mouseUp", kw["button"]))
+    waits = []
+    cancel = SimpleNamespace(is_set=lambda: False, wait=lambda seconds: waits.append(seconds) or False)
+    def grab(*args):
+        assert events == [("keyDown", ("shift",)), ("keyDown", ("w",)),
+                          ("mouseDown", "left"), ("mouseUp", "left"),
+                          ("keyUp", ("w",)), ("keyUp", ("shift",))]
+        return capture(screen=item["screen"])
+    monkeypatch.setattr(computer, "_grab", grab)
+    result = computer.act("t", {"observation_id": item["id"], "actions": [
+        {"action": "hold", "text": "shift+w", "button": "left", "duration": 0.75,
+         "point": [99999, 99999]}]}, cancel)
+    assert result.ok and waits == [0.75, 0.1]
+    assert gui.FAILSAFE and not computer._desktop_lock.locked()
+
+
+def test_cancelling_mouse_hold_releases_mouse_and_keys(desktop):
+    item, gui, events = desktop
+    cancel = threading.Event()
+    def down(**kwargs):
+        events.append(("mouseDown", kwargs["button"]))
+        cancel.set()
+    gui.mouseDown = down
+    gui.mouseUp = lambda **kw: events.append(("mouseUp", kw["button"]))
+    with pytest.raises(ValueError, match="cancelled"):
+        computer.act("t", {"observation_id": item["id"], "actions": [
+            {"action": "hold", "text": "w", "button": "right", "duration": 2}]}, cancel)
+    assert ("mouseUp", "right") in events and ("keyUp", ("w",)) in events
+    assert gui.FAILSAFE and not computer._desktop_lock.locked()
+
+
+def test_mouse_release_failure_is_retried_during_cleanup(desktop):
+    item, gui, events = desktop
+    def up(**kwargs):
+        events.append(("mouseUp", kwargs["button"]))
+        if events.count(("mouseUp", "middle")) == 1:
+            raise RuntimeError("release failed")
+    gui.mouseUp = up
+    with pytest.raises(RuntimeError, match="release failed"):
+        computer.act("t", {"observation_id": item["id"], "actions": [
+            {"action": "hold", "text": "w", "button": "middle", "duration": 0}]})
+    assert events.count(("mouseUp", "middle")) == 2
+    assert ("keyUp", ("w",)) in events and gui.FAILSAFE and not computer._desktop_lock.locked()
+
+
+def test_relative_motion_keeps_signed_deltas_and_honors_failsafe(desktop, monkeypatch):
+    item, gui, events = desktop
+    monkeypatch.setattr(computer, "_grab", lambda *args: capture(screen=item["screen"]))
+    result = computer.act("t", {"observation_id": item["id"], "actions": [
+        {"action": "move_relative", "delta": [-40, 25]}]})
+    assert result.ok and events == [("failSafeCheck", ()), ("relative", (-40, 25))]
+    events.clear()
+    def fail(): raise RuntimeError("failsafe")
+    gui.failSafeCheck = fail
+    with pytest.raises(RuntimeError, match="failsafe"):
+        computer.act("t", {"observation_id": item["id"], "actions": [
+            {"action": "move_relative", "delta": [40, -25]}]})
+    assert events == [] and gui.FAILSAFE and not computer._desktop_lock.locked()
+
+
+def test_win32_relative_motion_uses_correct_sendinput_layout_without_injecting(monkeypatch):
+    import ctypes
+    seen = []
+    def send(count, pointer, size):
+        event = pointer._obj
+        seen.append((count, size, event.type, event.mi.dx, event.mi.dy,
+                     event.mi.dwFlags, event.mi.mouseData, event.mi.dwExtraInfo))
+        return 1
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kw: SimpleNamespace(SendInput=send), raising=False)
+    computer._move_relative(-123, 456)
+    expected_size = 40 if ctypes.sizeof(ctypes.c_void_p) == 8 else 28
+    assert seen == [(1, expected_size, 0, -123, 456, 1, 0, 0)]
+    send.argtypes  # The native call declares its pointer/width ABI.
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *args, **kw: SimpleNamespace(SendInput=lambda *a: 0), raising=False)
+    with pytest.raises(OSError, match="rejected relative mouse input"):
+        computer._move_relative(1, 2)
 
 
 def test_desktop_actions_still_need_permission_and_approval(monkeypatch):

@@ -925,6 +925,7 @@ class LeanSession:
             project_root=self.project_root,
             notes=list(toolbox.notes) + learned.notes,
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
+            computer_note="" if guest else toolbox.computer_context(),
             git_note=repo_note,
             git_rules="terminal" in toolbox.names and git_context.wants_rules(goal, repo_note),
             project_overview=project_overview(self.project_root) if self.project_root else "",

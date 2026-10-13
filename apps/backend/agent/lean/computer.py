@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import math
 import threading
 import time
 from typing import Any
@@ -110,30 +111,82 @@ def _point(action: dict, name: str, item: dict) -> tuple[int, int]:
             s["top"] + int(y * s["height"] / item["model_height"]))
 
 
+def _move_relative(dx: int, dy: int) -> None:
+    """Send relative motion, preserving pointer-lock camera input without warping.
+
+    Win32 MOUSEINPUT uses MOUSEEVENTF_MOVE without MOUSEEVENTF_ABSOLUTE.
+    Windows pointer acceleration and the target's sensitivity still apply.
+    https://learn.microsoft.com/windows/win32/api/winuser/ns-winuser-mouseinput
+    """
+    import ctypes
+
+    # Fixed-width Win32 fields, with a pointer-sized ULONG_PTR, work on x86/x64.
+    class MouseInput(ctypes.Structure):
+        _fields_ = [("dx", ctypes.c_int32), ("dy", ctypes.c_int32),
+                    ("mouseData", ctypes.c_uint32), ("dwFlags", ctypes.c_uint32),
+                    ("time", ctypes.c_uint32), ("dwExtraInfo", ctypes.c_size_t)]
+
+    class InputUnion(ctypes.Union):
+        # MOUSEINPUT is the largest member of Win32's INPUT union.
+        _fields_ = [("mi", MouseInput)]
+
+    class Input(ctypes.Structure):
+        _anonymous_ = ("data",)
+        _fields_ = [("type", ctypes.c_uint32), ("data", InputUnion)]
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    send = user32.SendInput
+    send.argtypes = (ctypes.c_uint32, ctypes.POINTER(Input), ctypes.c_int)
+    send.restype = ctypes.c_uint32
+    event = Input(type=0, data=InputUnion(mi=MouseInput(dx=dx, dy=dy, dwFlags=0x0001)))
+    if send(1, ctypes.byref(event), ctypes.sizeof(Input)) != 1:
+        # UIPI can block injection without setting a meaningful GetLastError.
+        raise OSError("Windows rejected relative mouse input. Check the target's permissions and input support.")
+
+
 def _validate(actions: Any, item: dict, keyboard_keys: list[str]) -> list[dict]:
     if not isinstance(actions, list) or not 1 <= len(actions) <= 12:
         raise ValueError("Provide 1–12 actions; observe again between batches")
     prepared, seconds = [], 0.0
-    allowed = {"click", "double_click", "right_click", "move", "drag", "scroll", "type", "key", "hold", "wait"}
+    allowed = {"click", "double_click", "right_click", "move", "move_relative", "drag", "scroll", "type", "key", "hold", "wait"}
     for raw in actions:
         if not isinstance(raw, dict) or raw.get("action") not in allowed:
             raise ValueError("Unknown computer action")
-        a = dict(raw)
+        # Never trust caller-supplied internal/prepared coordinates or keys.
+        a = {key: value for key, value in raw.items() if key not in {"point", "start", "keys"}}
         kind = a["action"]
         if kind in {"click", "double_click", "right_click", "move", "drag", "scroll"}:
             a["point"] = _point(a, "coordinate", item)
         if kind == "drag":
             a["start"] = _point(a, "start_coordinate", item)
-        if kind in {"hold", "wait", "drag"}:
-            duration = float(a.get("duration", 0.3))
-            if not 0 <= duration <= 2:
-                raise ValueError("Each duration must be between 0 and 2 seconds")
+        if kind == "move_relative":
+            delta = a.get("delta")
+            if not isinstance(delta, list) or len(delta) != 2 or not all(type(v) is int and -1000 <= v <= 1000 for v in delta):
+                raise ValueError("delta must be [dx, dy] with integers between -1000 and 1000")
+        if kind in {"click", "double_click", "right_click", "drag"} or (kind == "hold" and "button" in a):
+            button = a.get("button", "right" if kind == "right_click" else "left")
+            if button not in ("left", "right", "middle") or (kind == "right_click" and button != "right"):
+                raise ValueError("button must be left, right or middle; right_click uses right")
+            a["button"] = button
+        if kind == "hold" and "coordinate" in a:
+            a["point"] = _point(a, "coordinate", item)
+        if kind in {"hold", "wait", "drag", "key"}:
+            duration = a.get("duration", 0.05 if kind == "key" else 0.3)
+            if type(duration) not in (float, int) or not 0 <= duration <= 2 or not math.isfinite(duration):
+                raise ValueError("Each duration must be a finite number between 0 and 2 seconds")
             seconds += duration
             a["duration"] = duration
         if kind in {"key", "hold"}:
-            keys = str(a.get("text") or "").lower().split("+")
+            text = a.get("text", "")
+            if not isinstance(text, str):
+                raise ValueError("Key text must be a string such as w or shift+w")
+            keys = [k.strip() for k in text.lower().split("+")] if text else []
             if len(keys) > 5 or any(k not in keyboard_keys for k in keys):
                 raise ValueError("Unknown key; use names such as ctrl+s, enter, space, w or shift+w")
+            if not keys and (kind == "key" or "button" not in a):
+                raise ValueError("Provide key text or, for hold, a mouse button")
+            if len(set(keys)) != len(keys):
+                raise ValueError("Do not repeat a held key")
             a["keys"] = keys
         if kind == "type":
             text = str(a.get("text") or "")
@@ -162,7 +215,7 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
     cancel = cancel or threading.Event()
     if not _desktop_lock.acquire(timeout=2):
         raise ValueError("Desktop is busy with another action")
-    held, mouse = set(), False
+    held, mouse = set(), set()
     try:
         screen = item["screen"]
         if cancel.is_set():
@@ -186,32 +239,50 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
             kind = a["action"]
             if kind in {"click", "double_click", "right_click"}:
                 gui.click(*a["point"], clicks=2 if kind == "double_click" else 1,
-                          button="right" if kind == "right_click" else "left", interval=0.1)
+                          button=a["button"], interval=0.1)
             elif kind == "move":
                 gui.moveTo(*a["point"])
+            elif kind == "move_relative":
+                gui.failSafeCheck()
+                _move_relative(*a["delta"])
             elif kind == "scroll":
                 gui.moveTo(*a["point"])
                 gui.scroll(a.get("amount", 0))
             elif kind == "drag":
                 gui.moveTo(*a["start"])
-                mouse = True
-                gui.mouseDown()
+                mouse.add(a["button"])
+                gui.mouseDown(button=a["button"])
                 gui.moveTo(*a["point"], duration=a["duration"])
-                gui.mouseUp()
-                mouse = False
+                gui.mouseUp(button=a["button"])
+                mouse.discard(a["button"])
             elif kind == "type":
                 gui.write(a["text"])
             elif kind in {"key", "hold"}:
+                if "point" in a:
+                    gui.moveTo(*a["point"])
                 for key in a["keys"]:
+                    if cancel.is_set():
+                        raise ValueError("Computer action cancelled")
                     held.add(key)
                     gui.keyDown(key)
-                if cancel.wait(a.get("duration", 0.05)):
+                if cancel.is_set():
                     raise ValueError("Computer action cancelled")
+                if kind == "hold" and "button" in a:
+                    mouse.add(a["button"])
+                    gui.mouseDown(button=a["button"])
+                if cancel.wait(a["duration"]):
+                    raise ValueError("Computer action cancelled")
+                if kind == "hold" and "button" in a:
+                    gui.mouseUp(button=a["button"])
+                    mouse.discard(a["button"])
                 for key in reversed(a["keys"]):
                     gui.keyUp(key)
                     held.discard(key)
             elif cancel.wait(a["duration"]):
                 raise ValueError("Computer action cancelled")
+        # Give the target a render tick after immediate SendInput before observing.
+        if cancel.wait(0.1):
+            raise ValueError("Computer action cancelled")
         # Always observe the actual result, including games and non-accessible canvas UIs.
         next_args = {"monitor": screen.get("monitor", 1)}
         if screen.get("window"):
@@ -227,8 +298,11 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
                     gui.keyUp(key)
                 except Exception:
                     pass
-            if mouse:
-                gui.mouseUp()
+            for button in mouse:
+                try:
+                    gui.mouseUp(button=button)
+                except Exception:
+                    pass
         finally:
             gui.FAILSAFE = previous
             _desktop_lock.release()
@@ -240,14 +314,21 @@ def tools(session: str, cancel: threading.Event):
         "monitor": {"type": "integer", "description": "Monitor number, starting at 1."},
         "window_title": {"type": "string", "description": "Capture one visible window by its unique title."}}}
     action_schema = {"type": "object", "properties": {
-        "action": {"type": "string", "enum": ["click", "double_click", "right_click", "move", "drag", "scroll", "type", "key", "hold", "wait"]},
-        "coordinate": {"type": "array", "items": {"type": "integer"}},
-        "start_coordinate": {"type": "array", "items": {"type": "integer"}},
-        "text": {"type": "string"}, "duration": {"type": "number"}, "amount": {"type": "integer"}}, "required": ["action"]}
+        "action": {"type": "string", "enum": ["click", "double_click", "right_click", "move", "move_relative", "drag", "scroll", "type", "key", "hold", "wait"]},
+        "coordinate": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
+                       "description": "[x,y] in the attached screenshot's model coordinate space. Optional for hold; omit to keep the current pointer."},
+        "start_coordinate": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
+        "delta": {"type": "array", "items": {"type": "integer", "minimum": -1000, "maximum": 1000}, "minItems": 2, "maxItems": 2,
+                  "description": "move_relative only: [dx,dy] Windows relative motion, useful for pointer-locked game cameras. Sensitivity/acceleration apply."},
+        "button": {"type": "string", "enum": ["left", "right", "middle"],
+                   "description": "Mouse button for click/drag/hold. hold can combine a button with text keys, e.g. left plus w."},
+        "text": {"type": "string", "description": "Text for type, or up to five keys joined with + for key/hold, e.g. shift+w."},
+        "duration": {"type": "number", "minimum": 0, "maximum": 2},
+        "amount": {"type": "integer", "minimum": -20, "maximum": 20}}, "required": ["action"]}
     return [NativeTool("take_screenshot", "Capture a monitor or visible window. Returns the actual image to you and chat, plus its observation ID and coordinate size.", capture_schema, lambda a: screenshot(session, a)),
             NativeTool("vision_qa", "Capture the screen so YOU can answer the question visually using your current model. The result includes the image, not OCR.",
                        {**capture_schema, "properties": {**capture_schema["properties"], "question": {"type": "string"}}}, lambda a: screenshot(session, a)),
             NativeTool("read_image", "View an existing screenshot by observation_id or an allowed project image by path. Optional crop [left,top,right,bottom] uses ORIGINAL pixels; crops cannot control the screen.",
                        {"type": "object", "properties": {"observation_id": {"type": "string"}, "path": {"type": "string"}, "crop": {"type": "array", "items": {"type": "integer"}}}}, lambda a: read_image(session, a)),
-            NativeTool("computer_action", "Control the desktop using a FRESH screenshot ID. Coordinates use its model image size. Run 1–12 bounded actions, then inspect the returned screenshot. hold uses text like shift+w and duration seconds. Requires desktop permission and owner approval.",
-                       {"type": "object", "properties": {"observation_id": {"type": "string"}, "actions": {"type": "array", "items": action_schema}}, "required": ["observation_id", "actions"]}, lambda a: act(session, a, cancel))]
+            NativeTool("computer_action", "Control the desktop using a FRESH screenshot ID. Coordinates use its model image size. Run 1–12 bounded actions, at most five seconds of total requested durations, then inspect the returned screenshot. hold accepts text keys, a mouse button, or both for up to two seconds; inputs release before the next action. move_relative uses delta for pointer-locked cameras. Requires desktop permission and owner approval.",
+                       {"type": "object", "properties": {"observation_id": {"type": "string"}, "actions": {"type": "array", "items": action_schema, "minItems": 1, "maxItems": 12}}, "required": ["observation_id", "actions"]}, lambda a: act(session, a, cancel))]
