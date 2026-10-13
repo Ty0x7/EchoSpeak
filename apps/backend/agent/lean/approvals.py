@@ -107,6 +107,8 @@ class PendingApproval:
     options: list[str] = field(default_factory=list)
     allow_other: bool = False
     answer: str = ""
+    # False when "For this chat" cannot cover it (Rule of Two outside screen control).
+    grantable: bool = True
 
     def public(self) -> dict[str, Any]:
         return {
@@ -124,6 +126,7 @@ class PendingApproval:
             "options": list(self.options),
             "allow_other": self.allow_other,
             "answer": self.answer,
+            "grantable": self.grantable,
         }
 
 
@@ -138,7 +141,8 @@ class ApprovalBroker:
         with self._lock:
             return tool in self._session_grants.get(session_id, set())
 
-    def open(self, *, session_id: str, request_id: str, tool: str, summary: str, args: dict[str, Any], reason: str) -> PendingApproval:
+    def open(self, *, session_id: str, request_id: str, tool: str, summary: str, args: dict[str, Any], reason: str,
+             grantable: bool = True) -> PendingApproval:
         approval = PendingApproval(
             id=f"apr_{uuid.uuid4().hex[:12]}",
             session_id=session_id,
@@ -147,6 +151,7 @@ class ApprovalBroker:
             summary=summary,
             args=args,
             reason=reason,
+            grantable=grantable,
         )
         with self._lock:
             self._pending[approval.id] = approval
@@ -206,7 +211,7 @@ class ApprovalBroker:
             approval = self._pending.get(approval_id)
             if approval is None:
                 return None
-            if decision == "always":
+            if decision == "always" and approval.grantable:
                 self._session_grants.setdefault(approval.session_id, set()).add(approval.tool)
             approval.decision = "allow" if decision == "always" else decision
         approval.event.set()

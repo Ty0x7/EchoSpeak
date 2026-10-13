@@ -340,6 +340,13 @@ class Toolbox:
     def names(self) -> list[str]:
         return list(self.entries) + list(self.native)
 
+    def computer_ready(self) -> bool:
+        """Screen capture and desktop input are both usable this turn."""
+        names = set(self.names)
+        return ({"take_screenshot", "computer_action"} <= names and platform.system() == "Windows"
+                and bool(getattr(config, "enable_system_actions", False))
+                and bool(getattr(config, "allow_desktop_automation", False)))
+
     def computer_context(self) -> str:
         """Describe this turn's actual screen/control tools without granting any."""
         names = set(self.names)
@@ -528,7 +535,8 @@ class Toolbox:
                 raw, widgets = contextvars.copy_context().run(collect_widgets, invoke_native)
                 if isinstance(raw, ToolResult):
                     raw.duration_ms = int((time.perf_counter() - started) * 1000)
-                    if raw.ok and raw.observations and (note := self.computer_context()):
+                    # The system prompt already explains ready controls; repeat only what is missing.
+                    if raw.ok and raw.observations and not self.computer_ready() and (note := self.computer_context()):
                         raw.output += "\n\n" + note
                     raw.output = redact_secrets(raw.output)
                     from agent.lean.widgets import normalize

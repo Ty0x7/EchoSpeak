@@ -59,7 +59,7 @@ def test_hydration_keeps_tool_results_together_and_bounds_images():
     images = [p for p in hydrated[-1]["content"] if p["type"] == "image_url"]
     assert len(images) == 3 and all("observations" not in m for m in hydrated)
     pixels = base64.b64decode(images[0]["image_url"]["url"].split(",", 1)[1])
-    assert Image.open(io.BytesIO(pixels)).size == (1440, 810)
+    assert Image.open(io.BytesIO(pixels)).size == (1280, 720)
     assert "data:image" not in json.dumps(messages)
 
 
@@ -172,9 +172,9 @@ def test_mcp_images_are_decoded_and_bytes_removed_from_timeline():
 
 def test_coordinates_and_invalid_batches_are_checked_before_input():
     item = capture(screen={"left": -1920, "top": 100, "width": 1920, "height": 1080})
-    actions = computer._validate([{"action": "click", "coordinate": [720, 405]}], item, ["w"])
+    actions = computer._validate([{"action": "click", "coordinate": [640, 360]}], item, ["w"])
     assert actions[0]["point"] == (-960, 640)
-    for batch in ([{"action": "click", "coordinate": [1440, 0]}], [{"action": "hold", "text": "w", "duration": 10}], [{"action": "hold", "text": "fake"}], [{"action": "wait", "duration": 2}] * 3, [{"action": "wait"}] * 13):
+    for batch in ([{"action": "click", "coordinate": [1280, 0]}], [{"action": "hold", "text": "w", "duration": 10}], [{"action": "hold", "text": "fake"}], [{"action": "wait", "duration": 2}] * 3, [{"action": "wait"}] * 13):
         with pytest.raises(ValueError):
             computer._validate(batch, item, ["w"])
 
@@ -226,7 +226,7 @@ def test_drag_failure_releases_mouse(desktop):
 def test_successful_input_captures_result_and_invalid_or_stale_input_never_runs(desktop, monkeypatch):
     item, gui, events = desktop
     monkeypatch.setattr(computer, "_grab", lambda session, args: capture(screen=item["screen"]))
-    result = computer.act("t", {"observation_id": item["id"], "actions": [{"action": "click", "coordinate": [720, 405]}]})
+    result = computer.act("t", {"observation_id": item["id"], "actions": [{"action": "click", "coordinate": [640, 360]}]})
     assert result.ok and result.observations[0]["id"] != item["id"]
     assert events == [("click", (960, 540))]
     events.clear()
@@ -434,3 +434,68 @@ def test_gemini_live_continuation_receives_pixels_before_tool_completion(monkeyp
         assert socket.sent[-1]["toolResponse"]["functionResponses"][0]["id"] == "c"
     finally:
         client.close()
+
+
+def test_history_images_join_the_next_user_message_for_strict_templates():
+    # Gemma-style chat templates reject two user messages in a row.
+    item = capture()
+    out = observations.hydrate([
+        {"role": "user", "content": "look"},
+        {"role": "assistant", "content": "Saw it", "observations": [observations.reference(item)]},
+        {"role": "user", "content": "now click"}])
+    assert [m["role"] for m in out] == ["user", "assistant", "user"]
+    assert out[-1]["content"][1]["type"] == "image_url"
+    assert out[-1]["content"][-1] == {"type": "text", "text": "now click"}
+
+
+def test_model_that_rejects_images_gets_text_notes_instead_of_a_failed_turn(monkeypatch):
+    monkeypatch.setattr(config, "model_capability_profiles", {})
+    from agent import privacy
+    monkeypatch.setattr(privacy, "require", lambda *a: None)
+    seen = []
+    def handle(request):
+        seen.append(json.loads(request.content))
+        if len(seen) == 1:
+            return httpx.Response(400, json={"error": "Model does not support images. Please use a model that does."})
+        return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"I cannot see it"},"finish_reason":"stop"}]}\n\n')
+    client = ChatClient(Endpoint("http://127.0.0.1:1234/v1", "", "text-model", "lmstudio", True))
+    client._http.close()
+    client._http = httpx.Client(base_url=client.endpoint.base_url, transport=httpx.MockTransport(handle))
+    turn = [{"role": "tool", "tool_call_id": "c", "content": "Captured", "observations": [observations.reference(capture())]}]
+    try:
+        assert client.stream_turn(turn).content == "I cannot see it"
+        assert len(seen) == 2 and "image_url" not in json.dumps(seen[1])
+        assert "does not accept images" in json.dumps(seen[1])
+        client.stream_turn(turn)  # later steps skip the request that will fail
+        assert len(seen) == 3 and "image_url" not in json.dumps(seen[2])
+    finally:
+        client.close()
+
+
+def test_screenshots_fit_what_providers_show_the_model():
+    # Neither Claude (~1.15 MP) nor OpenAI (768 px short side) rescales again,
+    # so the model's coordinates are the ones computer_action maps to the screen.
+    for size in [(1920, 1080), (2560, 1600), (3440, 1440), (1600, 1200)]:
+        item = observations.save(Image.new("RGB", size, "red"), "t", "Screen")
+        w, h = item["model_width"], item["model_height"]
+        assert w * h <= 1_150_000 and min(w, h) <= 768 and max(w, h) <= 1568
+
+
+def test_game_keys_carry_scan_codes(monkeypatch):
+    sent = []
+    class User32:
+        def MapVirtualKeyW(self, code, kind): return {0x57: 0x11, 0x26: 0x48}[code]
+        def keybd_event(self, vk, scan, flags, extra): sent.append((vk, scan, flags))
+    import ctypes
+    monkeypatch.setattr(ctypes, "WinDLL", lambda *a, **kw: User32(), raising=False)
+    monkeypatch.setattr(computer.os, "name", "nt")
+    fallback = []
+    gui = SimpleNamespace(platformModule=SimpleNamespace(keyboardMapping={"w": 0x57, "up": 0x26, "!": 0x131}),
+                          isShiftCharacter=lambda key: key == "!",
+                          keyDown=lambda key: fallback.append(("down", key)), keyUp=lambda key: fallback.append(("up", key)))
+    computer._key(gui, "w", True)
+    computer._key(gui, "w", False)
+    computer._key(gui, "up", True)
+    computer._key(gui, "!", True)
+    assert sent == [(0x57, 0x11, 0), (0x57, 0x11, 2), (0x26, 0x48, 1)]
+    assert fallback == [("down", "!")]

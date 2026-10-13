@@ -1,5 +1,4 @@
 """Screen tools must accurately explain the control permissions of this turn."""
-
 import threading
 from types import SimpleNamespace
 
@@ -74,18 +73,22 @@ def test_non_windows_control_readiness_is_explicit(monkeypatch):
     assert "requires Windows" in box("vision", "desktop").computer_context()
 
 
-@pytest.mark.parametrize("toolsets, expected", [
-    (["vision"], "not available to this agent"),
-    (["vision", "desktop"], "enabled for this agent"),
-])
-def test_screenshot_result_carries_actual_control_availability(monkeypatch, toolsets, expected):
+def test_screenshot_result_explains_missing_control(monkeypatch):
     item = observations.save(Image.new("RGB", (100, 80), "red"), "t", "Test screen")
     monkeypatch.setattr(computer, "_grab", lambda *_: item)
-    tools = box(*toolsets)
-    result = tools.run("take_screenshot", {})
+    result = box("vision").run("take_screenshot", {})
     assert result.ok and result.observations == [observations.reference(item)]
-    assert expected in result.output
-    assert "terminal" in result.output
+    assert "not available to this agent" in result.output and "terminal" in result.output
+
+
+def test_ready_control_is_not_repeated_in_every_screenshot(monkeypatch):
+    # The system prompt carries it; a game run takes dozens of screenshots.
+    item = observations.save(Image.new("RGB", (100, 80), "red"), "t", "Test screen")
+    monkeypatch.setattr(computer, "_grab", lambda *_: item)
+    tools = box("vision", "desktop")
+    assert tools.computer_ready() and "enabled for this agent" in tools.computer_context()
+    result = tools.run("take_screenshot", {})
+    assert result.ok and "enabled for this agent" not in result.output
 
 
 def test_no_desktop_details_leak_into_lookup_only_or_planning_toolboxes():

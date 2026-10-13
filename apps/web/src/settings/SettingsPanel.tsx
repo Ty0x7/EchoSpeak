@@ -877,7 +877,7 @@ function PermissionsSection({ s, save }: { s: SettingsMap; save: Save }) {
         ))}
       </Group>
       <Group title="Apps agents may open" description="Open apps must be enabled above. This list is separate from terminal command restrictions.">
-        <Row label="Allowed apps" help="Add an exact Start-menu name, such as Minecraft Launcher, or an executable path. Short names such as notepad also work." stack>
+        <Row label="Allowed apps" help="Add an exact Start-menu name (Minecraft Launcher), a desktop shortcut's name (26.2), or an executable path. Short names such as notepad also work." stack>
           <ListEditor items={asList(s.open_application_allowlist)} onChange={(items) => save({ open_application_allowlist: items })} placeholder="e.g. Minecraft Launcher" />
           {asList(s.open_application_allowlist).length === 0 ? <div className="st-muted" role="status">No apps allowed yet. Turning on Open apps does not add any automatically.</div> : null}
         </Row>

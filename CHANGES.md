@@ -8,6 +8,9 @@ User-facing notes: [EchoSpeak 11.7.1](docs/releases/v11.7.1.md).
 * Monitor/window capture, reopening allowed images, crop inspection and MCP image-block forwarding through the existing lean tool loop and provider adapters.
 * Bounded desktop action batches using capture coordinates, stale-geometry checks, fresh result captures, cancellation and input release. Existing permissions, approvals, privacy and untrusted-input policy remain active.
 * Screenshots join the existing artifact/activity/research panel. System check reports computer-tool dependencies. Visual turns keep the configured model rather than using unverified vision routing.
+* Screen-guided desktop control (`computer_action`, desktop click/type/hotkey) asks under a new `screen_control` rule when the screen is the only outside content; a "For this chat" grant covers later batches and is audited. Any other outside content keeps Rule of Two, and those approval cards no longer offer a grant that would be ignored.
+* Model images fit 1280×768 so provider rescaling never shifts coordinates; image parts merge into the next user message; a model that rejects images gets text notes and the turn continues.
+* Desktop shortcuts by exact name launch through Explorer with a clean environment; command hosts on the app list never receive arguments; keys carry scan codes; the control note is no longer appended to every screenshot once control is ready.
 * Release metadata updated to 11.7.1. Details and validation limits are in the release notes.
 
 ## v11.7.0 — 2026-10-09

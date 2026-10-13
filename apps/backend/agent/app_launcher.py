@@ -1,4 +1,4 @@
-"""Resolve Windows Start-menu names after the caller checks launch permissions."""
+"""Resolve Windows Start-menu names and desktop shortcuts after the caller checks launch permissions."""
 
 from __future__ import annotations
 
@@ -40,3 +40,52 @@ def installed_app_id(name: str) -> str | None:
     if len(matches) > 1:
         raise ValueError("Multiple installed apps have that exact name. Use the exact executable path instead.")
     return next(iter(matches), None)
+
+
+SHORTCUT_SUFFIXES = (".lnk", ".url")
+# Programs that run whatever their arguments say. Commands belong in the terminal
+# tool, where terminal permissions and approvals apply.
+COMMAND_HOSTS = {
+    "cmd", "powershell", "pwsh", "wt", "bash", "wsl", "wscript", "cscript", "mshta", "rundll32",
+    "regsvr32", "msiexec", "python", "pythonw", "py", "node", "reg", "schtasks", "conhost",
+}
+
+
+def desktop_dirs() -> list[Path]:
+    home = Path(os.environ.get("USERPROFILE") or Path.home())
+    dirs = [home / "Desktop"]
+    if os.environ.get("OneDrive"):
+        dirs.append(Path(os.environ["OneDrive"]) / "Desktop")
+    if os.environ.get("PUBLIC"):
+        dirs.append(Path(os.environ["PUBLIC"]) / "Desktop")
+    return dirs
+
+
+def shortcut_path(app: str) -> Path | None:
+    """A desktop shortcut by its exact name ("26.2"), or a full .lnk/.url path."""
+    text = str(app or "").strip().strip('"')
+    if not text:
+        return None
+    if "\\" in text or "/" in text:
+        path = Path(os.path.expandvars(text))
+        return path if path.suffix.lower() in SHORTCUT_SUFFIXES and path.is_file() else None
+    if text in {".", ".."}:
+        return None
+    for folder in desktop_dirs():
+        for name in ([text] if text.lower().endswith(SHORTCUT_SUFFIXES) else [text + s for s in SHORTCUT_SUFFIXES]):
+            candidate = folder / name
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def launch_shortcut(path: Path) -> None:
+    """Explorer opens it, so the app never inherits EchoSpeak's environment (keys, tokens)."""
+    windows = Path(os.environ.get("SystemRoot", r"C:\Windows"))
+    subprocess.Popen([str(windows / "explorer.exe"), str(path)], env=child_env(),
+                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+
+
+def runs_commands(command: list[str]) -> bool:
+    name = Path(str(command[0] if command else "")).name.lower()
+    return name.removesuffix(".exe") in COMMAND_HOSTS

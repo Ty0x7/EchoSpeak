@@ -198,6 +198,7 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
             args: evt.args && typeof evt.args === "object" ? (evt.args as Record<string, unknown>) : undefined,
             reason: String(evt.reason || ""),
             decision: "",
+            ...(evt.grantable === false ? { grantable: false } : {}),
             ...questionFields(evt),
           },
         ],

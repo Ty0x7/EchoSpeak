@@ -106,6 +106,7 @@ class LeanTurn:
         # agent working on it). Drives the Rule-of-Two policy in agent/lean/policy.py.
         self.taint: list[str] = taint if taint is not None else []
         self._policy_reasons: dict[str, str] = {}
+        self._policy_rules: dict[str, str] = {}
         self.interactive = interactive
         # Re-prompt an agent whose reply only promises work (see agent/lean/job.py).
         self.promise_guard = promise_guard
@@ -521,6 +522,7 @@ class LeanTurn:
                     problem = "policy"
                 elif decision.action == "ask":
                     self._policy_reasons[call.id] = decision.reason
+                    self._policy_rules[call.id] = decision.rule
             prepared.append((call, name, args, problem))
 
         results: dict[str, tuple[bool, str]] = {}
@@ -645,6 +647,12 @@ class LeanTurn:
         needs, reason = tool_needs_approval(entry, name, args)
         broker = get_approval_broker()
         policy_reason = self._policy_reasons.get(call.id, "")
+        # Only screen-guided desktop control can be allowed for a whole chat; other outside content asks every time.
+        grantable = not policy_reason or self._policy_rules.get(call.id) == "screen_control"
+        if policy_reason and grantable and broker.granted(self.session_id, name):
+            policy.audit(policy.Decision("allow", policy_reason, "screen_control"), name=name, args=args,
+                         session_id=self.session_id, agent=self.persona.id, outcome="allowed for this chat")
+            return True, ""
         if policy_reason:
             # Rule of Two: always ask, even with "always allow" grants or approvals off.
             needs, reason = True, policy_reason
@@ -667,6 +675,7 @@ class LeanTurn:
             # The card shows these in full: a summary can hide "; iwr … | iex" after padding.
             args=args,
             reason=reason,
+            grantable=grantable,
         )
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})

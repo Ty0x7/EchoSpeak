@@ -52,7 +52,7 @@ def test_screenshot_bad_terminal_call_and_desktop_recovery(monkeypatch, tmp_path
                 return ModelTurn(tool_calls=[ToolCall("s", "take_screenshot", "{}")])
             if self.count == 2:
                 assert messages[-1]["observations"] == [observations.reference(before)]
-                assert "enabled for this agent" in messages[-1]["content"]
+                assert box.computer_ready()  # explained once in the system prompt, not per screenshot
                 return ModelTurn(tool_calls=[ToolCall("bad", "terminal", json.dumps({"command": 'where="host" click 26.2'}))])
             if self.count == 3:
                 assert "separate JSON arguments" in messages[-1]["content"]
@@ -69,7 +69,7 @@ def test_screenshot_bad_terminal_call_and_desktop_recovery(monkeypatch, tmp_path
                       history=[], toolbox=box, session_id="t", request_id="r", execution_id="e", emit=events.append,
                       cancel=threading.Event(), persist_tool_runs=False).run("Open the desktop shortcut")
     assert result.success and len(actions) == 1
-    assert any(name == "computer_action" and "outside content" in reason for name, reason in approved)
+    assert any(name == "computer_action" and "on screen" in reason for name, reason in approved)
     cards = [w for event in events for w in event.get("widgets", []) if w["type"] == "observation"]
     assert [w["data"]["id"] for w in cards] == [before["id"], after["id"]]
     assert "data:image" not in json.dumps(events)

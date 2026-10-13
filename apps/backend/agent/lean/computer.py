@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import math
+import os
 import threading
 import time
 from typing import Any
@@ -144,6 +145,27 @@ def _move_relative(dx: int, dy: int) -> None:
         raise OSError("Windows rejected relative mouse input. Check the target's permissions and input support.")
 
 
+# Navigation keys, Windows keys, numpad divide, Num Lock and the right-hand Ctrl/Alt.
+_EXTENDED_VK = {0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5B, 0x5C, 0x5D, 0x6F, 0x90, 0xA3, 0xA5}
+
+
+def _key(gui, key: str, down: bool) -> None:
+    """Press or release a key with its hardware scan code as well as its virtual key.
+
+    pyautogui sends scan code 0, which games reading scan codes (DirectInput and
+    many raw-input engines) ignore. Characters that need Shift keep pyautogui's path.
+    """
+    code = getattr(getattr(gui, "platformModule", None), "keyboardMapping", {}).get(key) if os.name == "nt" else None
+    if not code or code >= 0x100 or gui.isShiftCharacter(key):
+        (gui.keyDown if down else gui.keyUp)(key)
+        return
+    import ctypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    scan = user32.MapVirtualKeyW(code, 0)  # MAPVK_VK_TO_VSC
+    flags = (0x0001 if code in _EXTENDED_VK else 0) | (0 if down else 0x0002)  # EXTENDEDKEY, KEYUP
+    user32.keybd_event(code, scan, flags, 0)
+
+
 def _validate(actions: Any, item: dict, keyboard_keys: list[str]) -> list[dict]:
     if not isinstance(actions, list) or not 1 <= len(actions) <= 12:
         raise ValueError("Provide 1–12 actions; observe again between batches")
@@ -264,7 +286,7 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
                     if cancel.is_set():
                         raise ValueError("Computer action cancelled")
                     held.add(key)
-                    gui.keyDown(key)
+                    _key(gui, key, True)
                 if cancel.is_set():
                     raise ValueError("Computer action cancelled")
                 if kind == "hold" and "button" in a:
@@ -276,7 +298,7 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
                     gui.mouseUp(button=a["button"])
                     mouse.discard(a["button"])
                 for key in reversed(a["keys"]):
-                    gui.keyUp(key)
+                    _key(gui, key, False)
                     held.discard(key)
             elif cancel.wait(a["duration"]):
                 raise ValueError("Computer action cancelled")
@@ -295,7 +317,7 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
         try:
             for key in held:
                 try:
-                    gui.keyUp(key)
+                    _key(gui, key, False)
                 except Exception:
                     pass
             for button in mouse:

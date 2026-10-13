@@ -686,7 +686,7 @@ class OpenApplicationArgs(BaseModel):
     app: str = Field(
         ...,
         validation_alias=AliasChoices("app", "application", "name", "program"),
-        description="Exact installed app name or executable path from Settings > Permissions > Allowed apps.",
+        description="Exact installed app name, desktop shortcut name, or executable path from Settings > Permissions > Allowed apps.",
     )
     args: Optional[str] = Field(
         default=None,
@@ -1460,7 +1460,7 @@ def _resolve_app_command(app: str, args: Optional[str]) -> Optional[list[str]]:
     return [*cmd, *extra]
 
 
-@tool(args_schema=OpenApplicationArgs, description="Launch a permitted Windows app by executable or exact Start-menu name. The owner manages Allowed apps in Settings > Permissions.")
+@tool(args_schema=OpenApplicationArgs, description="Launch a permitted Windows app by executable, exact Start-menu name, or desktop shortcut name. The owner manages Allowed apps in Settings > Permissions.")
 def open_application(app: str, args: Optional[str] = None) -> str:
     if not getattr(config, "enable_system_actions", False) or not getattr(config, "allow_open_application", False):
         return "Error: Application launching is disabled. The owner must enable Allow actions on this computer and Open apps in Settings > Permissions."
@@ -1481,18 +1481,30 @@ def open_application(app: str, args: Optional[str] = None) -> str:
         return (f"Error: Application not allowlisted: {app}. The owner can add this exact installed app name or executable path "
                 "in Settings > Permissions > Allowed apps. Do not bypass this restriction with another tool.")
 
+    from agent import app_launcher
+
+    try:
+        shortcut = app_launcher.shortcut_path(app)
+        if shortcut is not None:
+            if str(args or "").strip():
+                return "Error: Shortcuts open exactly as saved and do not take extra arguments."
+            app_launcher.launch_shortcut(shortcut)
+            return "Shortcut launch requested. Check desktop_list_windows or take_screenshot before interacting."
+    except OSError as e:
+        return f"Error: Failed to open the shortcut: {e}"
     cmd = _resolve_app_command(app, args)
     if not cmd:
-        return "Failed to resolve application command."
+        return "Error: Failed to resolve application command."
+    if str(args or "").strip() and app_launcher.runs_commands(cmd):
+        return (f"Error: {app} runs commands, so open_application does not pass it arguments. "
+                "Use the terminal tool, where terminal permissions and approvals apply.")
     try:
         from agent.child_env import child_env
 
         try:
             subprocess.Popen(cmd, env=child_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except FileNotFoundError:
-            from agent.app_launcher import installed_app_id
-
-            app_id = installed_app_id(app)
+            app_id = app_launcher.installed_app_id(app)
             if not app_id:
                 return (f"Error: Allowed application was not found: {app}. Use its exact Start-menu name or executable path. "
                         "The application may need to be installed first.")
@@ -1501,7 +1513,7 @@ def open_application(app: str, args: Optional[str] = None) -> str:
             os.startfile(f"shell:AppsFolder\\{app_id}")
         return "Application launch requested. Check desktop_list_windows or take_screenshot before interacting."
     except Exception as e:
-        return f"Failed to open application: {str(e)}"
+        return f"Error: Failed to open application: {str(e)}"
 
 
 @tool(args_schema=NotepadWriteArgs, description="Open Notepad, type text, and save a copy to the artifacts folder (opt-in system action).")

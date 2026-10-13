@@ -22,6 +22,15 @@ def launch_settings(monkeypatch):
     monkeypatch.setattr(config, "allow_file_write", True)
 
 
+@pytest.fixture(autouse=True)
+def desktop(tmp_path, monkeypatch):
+    # Never read or open the real desktop's shortcuts.
+    folder = tmp_path / "Desktop"
+    folder.mkdir()
+    monkeypatch.setattr(app_launcher, "desktop_dirs", lambda: [folder])
+    return folder
+
+
 def test_blocked_app_never_resolves_or_launches(monkeypatch):
     monkeypatch.setattr(tools.subprocess, "Popen", lambda *a, **kw: pytest.fail("Unexpected launch"))
     monkeypatch.setattr(app_launcher, "installed_app_id", lambda *a: pytest.fail("Unexpected discovery"))
@@ -148,4 +157,34 @@ def test_store_lookup_failure_becomes_a_failed_tool(monkeypatch):
         raise subprocess.TimeoutExpired("powershell", 10)
     monkeypatch.setattr(app_launcher, "installed_app_id", timeout)
     result = tools.open_application.invoke({"app": "Minecraft Launcher"})
-    assert result.startswith("Failed to open application")
+    assert result.startswith("Error: Failed to open application")
+
+
+def test_desktop_shortcut_opens_by_exact_name_through_explorer(monkeypatch, desktop):
+    (desktop / "26.2.lnk").write_bytes(b"shortcut")
+    monkeypatch.setattr(config, "open_application_allowlist", ["26.2"])
+    monkeypatch.setenv("API_AUTH_KEY", "test-private-key")
+    monkeypatch.setattr(app_launcher, "installed_app_id", lambda *a: pytest.fail("Unexpected discovery"))
+    launches = []
+    monkeypatch.setattr(app_launcher.subprocess, "Popen", lambda *a, **kw: launches.append((a, kw)))
+    result = tools.open_application.invoke({"app": "26.2"})
+    assert result.startswith("Shortcut launch requested")
+    command = launches[0][0][0]
+    assert command[0].lower().endswith("explorer.exe") and command[1] == str(desktop / "26.2.lnk")
+    assert "API_AUTH_KEY" not in launches[0][1]["env"]
+
+
+def test_shortcuts_take_no_extra_arguments(monkeypatch, desktop):
+    (desktop / "Counter-Strike 2.url").write_text("[InternetShortcut]")
+    monkeypatch.setattr(config, "open_application_allowlist", ["counter-strike 2"])
+    monkeypatch.setattr(app_launcher.subprocess, "Popen", lambda *a, **kw: pytest.fail("Unexpected launch"))
+    assert tools.open_application.invoke({"app": "Counter-Strike 2", "args": "-console"}).startswith("Error: Shortcuts")
+
+
+@pytest.mark.parametrize("app", ["powershell", "cmd", "C:/Windows/System32/cmd.exe", "python"])
+def test_allowed_command_hosts_never_receive_arguments(monkeypatch, app):
+    # Arguments to a shell are commands; those go through the terminal's approvals.
+    monkeypatch.setattr(config, "open_application_allowlist", [app])
+    monkeypatch.setattr(tools.subprocess, "Popen", lambda *a, **kw: pytest.fail("Unexpected launch"))
+    result = tools.open_application.invoke({"app": app, "args": "-c whoami"})
+    assert result.startswith("Error:") and "terminal tool" in result

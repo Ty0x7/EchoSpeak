@@ -83,7 +83,7 @@ def test_chat_summary_covers_older_turns_and_history_skips_them(monkeypatch, tmp
     assert not summaries.update("chat-1", ScriptedClient([]))
 
     session = lean_runtime.LeanSession.__new__(lean_runtime.LeanSession)
-    session.session_id, session.room = "chat-1", None
+    session.session_id, session.room, session.caller_role = "chat-1", None, "owner"
     session.personas = lean_runtime.get_persona_store()
     history = session._history()
     text = " ".join(row["content"] for row in history)
