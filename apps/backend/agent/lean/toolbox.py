@@ -346,6 +346,18 @@ class Toolbox:
         if not names.intersection({"take_screenshot", "read_image", "vision_qa", "computer_action"}):
             return ""
         guidance = " Use computer_action for mouse/keyboard input, never a made-up terminal click command."
+        if "open_application" in names:
+            allowed = list(getattr(config, "open_application_allowlist", None) or [])
+            if not getattr(config, "allow_open_application", False):
+                guidance += " App launching is disabled in Settings > Permissions > Open apps."
+            elif not allowed:
+                guidance += (" App launching is separately restricted: Allowed apps is empty, so open_application cannot "
+                             "launch anything. The owner must add the exact Start-menu name or executable path in "
+                             "Settings > Permissions > Allowed apps. Do not bypass this restriction with other tools.")
+            else:
+                guidance += (" open_application may launch only entries in Settings > Permissions > Allowed apps: "
+                             + json.dumps(allowed[:12], ensure_ascii=False)[:600]
+                             + ". A missing app needs the owner's permission-setting change, not a terminal workaround.")
         if "computer_action" not in names:
             return ("Computer control is not available to this agent. Screen/image tools only inspect; "
                     "they do not click or type. To enable control, the owner must find this agent under Agents "

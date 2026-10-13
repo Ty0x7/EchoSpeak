@@ -85,14 +85,14 @@ const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
   models: "provider model api key openai gemini claude anthropic grok xai lm studio ollama localai vllm local cloud context temperature creativity custom model id smart model choice routing router suggest auto pick best model",
   agents: "persona jarvis glados toolsets",
   personality: "soul personality tone",
-  permissions: "permissions files desktop applications system actions",
+  permissions: "permissions files desktop applications system actions apps allowlist allowed apps launch minecraft",
   terminal: "terminal shell commands powershell allowlist",
   voice: "voice whisper speech to text microphone wake word read aloud piper windows speech cloud voice openai audio tts stt",
   search: "web search brave tavily searxng duckduckgo timeout results blocked sites sports odds live data",
   memory: "memory documents embeddings recall",
   automations: "routines heartbeat schedule check-in prompt",
   channels: "discord telegram twitter x whatsapp email imap smtp tls port trusted users roles changelog",
-  advanced: "lm studio only embeddings memory search apps allowlist webhooks a2a agent-to-agent folders skills workspaces artifacts companion avatar connections mcp obsidian documents rerank upload",
+  advanced: "lm studio only embeddings memory search webhooks a2a agent-to-agent folders skills workspaces artifacts companion avatar connections mcp obsidian documents rerank upload",
   about: "version update diagnostics logs",
   skills: "skills skill.md agent skills import review approve instructions lessons",
   system: "system check health doctor broken not working search status diagnose fix problems",
@@ -853,7 +853,7 @@ const PERMS: { key: string; label: string; help: string }[] = [
   { key: "allow_file_write", label: "Create and edit files", help: "Inside the folders below. Every overwrite is checkpointed so it can be undone." },
   { key: "allow_terminal_commands", label: "Run terminal commands", help: "Uses the Terminal settings. Dangerous commands still ask first." },
   { key: "allow_playwright", label: "Browse the web in a real browser", help: "For pages that need clicking or logging in." },
-  { key: "allow_open_application", label: "Open apps", help: "Launch programs on this PC." },
+  { key: "allow_open_application", label: "Open apps", help: "Launch only the programs in Allowed apps below. An empty list allows none." },
   { key: "allow_open_chrome", label: "Open Chrome", help: "Open links in your browser." },
   { key: "allow_desktop_automation", label: "Control the desktop", help: "Click, type, and switch windows. Always asks first." },
   { key: "allow_email", label: "Email", help: "Read and send email with the account in Channels." },
@@ -875,6 +875,12 @@ function PermissionsSection({ s, save }: { s: SettingsMap; save: Save }) {
             <Toggle checked={asBool(s[p.key])} disabled={!master} onChange={(v) => save({ [p.key]: v })} label={p.label} />
           </Row>
         ))}
+      </Group>
+      <Group title="Apps agents may open" description="Open apps must be enabled above. This list is separate from terminal command restrictions.">
+        <Row label="Allowed apps" help="Add an exact Start-menu name, such as Minecraft Launcher, or an executable path. Short names such as notepad also work." stack>
+          <ListEditor items={asList(s.open_application_allowlist)} onChange={(items) => save({ open_application_allowlist: items })} placeholder="e.g. Minecraft Launcher" />
+          {asList(s.open_application_allowlist).length === 0 ? <div className="st-muted" role="status">No apps allowed yet. Turning on Open apps does not add any automatically.</div> : null}
+        </Row>
       </Group>
       <Group title="Folders agents can use" description="Agents read and write only inside these. A project folder attached to a chat is added automatically.">
         <Row label="Main workspace" help="Relative paths and new projects go here." stack>

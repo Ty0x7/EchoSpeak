@@ -686,7 +686,7 @@ class OpenApplicationArgs(BaseModel):
     app: str = Field(
         ...,
         validation_alias=AliasChoices("app", "application", "name", "program"),
-        description="Application name or executable (must be allowlisted).",
+        description="Exact installed app name or executable path from Settings > Permissions > Allowed apps.",
     )
     args: Optional[str] = Field(
         default=None,
@@ -1460,12 +1460,12 @@ def _resolve_app_command(app: str, args: Optional[str]) -> Optional[list[str]]:
     return [*cmd, *extra]
 
 
-@tool(args_schema=OpenApplicationArgs, description="Open/launch an application on Windows (allowlisted; opt-in system action).")
+@tool(args_schema=OpenApplicationArgs, description="Launch a permitted Windows app by executable or exact Start-menu name. The owner manages Allowed apps in Settings > Permissions.")
 def open_application(app: str, args: Optional[str] = None) -> str:
     if not getattr(config, "enable_system_actions", False) or not getattr(config, "allow_open_application", False):
-        return "System actions are disabled. To enable: set ENABLE_SYSTEM_ACTIONS=true and ALLOW_OPEN_APPLICATION=true, then restart the API."
+        return "Error: Application launching is disabled. The owner must enable Allow actions on this computer and Open apps in Settings > Permissions."
     if os.name != "nt":
-        return "open_application is only supported on Windows."
+        return "Error: open_application is only supported on Windows."
 
     allow = [
         _normalize_app_token(x)
@@ -1474,16 +1474,32 @@ def open_application(app: str, args: Optional[str] = None) -> str:
     ]
     token = _normalize_app_token(app)
     if not allow:
-        return "No applications are allowlisted. Set OPEN_APPLICATION_ALLOWLIST and restart the API."
+        return ("Error: No applications are allowed to launch. Open apps is enabled, but Allowed apps is empty. "
+                "The owner must add an exact installed app name or executable path in Settings > Permissions > Allowed apps. "
+                "This is separate from terminal command restrictions. Do not bypass this restriction with another tool.")
     if token not in set(allow):
-        return f"Application not allowlisted: {app}"
+        return (f"Error: Application not allowlisted: {app}. The owner can add this exact installed app name or executable path "
+                "in Settings > Permissions > Allowed apps. Do not bypass this restriction with another tool.")
 
     cmd = _resolve_app_command(app, args)
     if not cmd:
         return "Failed to resolve application command."
     try:
-        subprocess.Popen(cmd)
-        return "Opened application."
+        from agent.child_env import child_env
+
+        try:
+            subprocess.Popen(cmd, env=child_env(), creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except FileNotFoundError:
+            from agent.app_launcher import installed_app_id
+
+            app_id = installed_app_id(app)
+            if not app_id:
+                return (f"Error: Allowed application was not found: {app}. Use its exact Start-menu name or executable path. "
+                        "The application may need to be installed first.")
+            if str(args or "").strip():
+                return "Error: Start-menu app launches do not support extra arguments. Use an allowed executable path for arguments."
+            os.startfile(f"shell:AppsFolder\\{app_id}")
+        return "Application launch requested. Check desktop_list_windows or take_screenshot before interacting."
     except Exception as e:
         return f"Failed to open application: {str(e)}"
 
@@ -1508,8 +1524,8 @@ def notepad_write(content: str, filename: Optional[str] = None) -> str:
         for x in (getattr(config, "open_application_allowlist", None) or [])
         if str(x).strip()
     }
-    if allow and ("notepad" not in allow and "notepad.exe" not in allow):
-        return "Notepad is not allowlisted. Add 'notepad' to OPEN_APPLICATION_ALLOWLIST and restart the API."
+    if "notepad" not in allow and "notepad.exe" not in allow:
+        return "Error: Notepad is not allowlisted. The owner must add 'notepad' in Settings > Permissions > Allowed apps."
 
     data = str(content or "")
     if data == "":

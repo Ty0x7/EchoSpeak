@@ -1,6 +1,7 @@
 """Screen tools must accurately explain the control permissions of this turn."""
 
 import threading
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -93,3 +94,18 @@ def test_no_desktop_details_leak_into_lookup_only_or_planning_toolboxes():
     tools.restrict_to_read_only()
     assert "computer_action" not in tools.names
     assert tools.computer_context() == ""
+
+
+def test_launch_readiness_distinguishes_empty_allowlist_from_desktop_control(monkeypatch):
+    monkeypatch.setattr(config, "allow_open_application", True)
+    monkeypatch.setattr(config, "open_application_allowlist", [])
+    tools = box("vision", "desktop")
+    tools.entries["open_application"] = SimpleNamespace()
+    note = tools.computer_context()
+    assert "Computer control is enabled" in note
+    assert "Allowed apps is empty" in note
+    assert "Settings > Permissions > Allowed apps" in note
+    assert "Do not bypass" in note
+    monkeypatch.setattr(config, "open_application_allowlist", ["minecraft launcher"])
+    note = tools.computer_context()
+    assert '"minecraft launcher"' in note and "Allowed apps is empty" not in note
