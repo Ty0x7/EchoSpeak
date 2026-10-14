@@ -1,8 +1,10 @@
 # Changes
 
-## Unreleased (11.8.0 draft)
+## v11.8.0 — 2026-10-14
 
-Notes: [EchoSpeak 11.8.0 draft](docs/releases/v11.8.0.md).
+User-facing notes: [EchoSpeak 11.8.0](docs/releases/v11.8.0.md). Includes the unreleased 11.7.1 below.
+
+* ElevenLabs read-aloud voice (agent/elevenlabs.py): 22 kHz PCM wrapped as WAV, voice picker from /v2/voices, Play sample, privacy component Cloud voice, provider errors shown in plain words; the inert OpenAI audio setting is removed.
 
 * Claude's computer toolset (computer_toolset_20260801) mapped onto the checked executor; one chat grant covers all its actions; a failed action stops its batch; images inside tool results for Claude.
 * Desktop control offered where the permission is turned on; 5 s holds, 10 s batches, triple click, horizontal scroll.
@@ -13,7 +15,7 @@ Notes: [EchoSpeak 11.8.0 draft](docs/releases/v11.8.0.md).
 * LangChain removed (agent/tool_decorator.py, agent/vector_store.py); 11.7 indexes convert once without re-embedding.
 * Removed: the 9.x approval routes and card, the shadowed legacy screen tools.
 
-## v11.7.1 — 2026-10-12
+## v11.7.1 — not released on its own (shipped in 11.8.0)
 
 User-facing notes: [EchoSpeak 11.7.1](docs/releases/v11.7.1.md).
 
