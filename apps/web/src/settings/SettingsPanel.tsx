@@ -18,6 +18,7 @@ import { PrivacySection } from "./PrivacySection";
 import { SmartModelChoice } from "./SmartModelChoice";
 import { UPDATES_OFF_MESSAGE, updatesAllowed } from "../desktop/privacyGate";
 import { AgentSkillsSection } from "./AgentSkillsSection";
+import { DesktopControlOffer } from "./DesktopControlOffer";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
 import { requestSetup } from "../setup/openSetup";
@@ -296,7 +297,7 @@ function SectionBody({
     case "personality":
       return <PersonalitySection apiBase={props.apiBase} />;
     case "permissions":
-      return <PermissionsSection s={s} save={save} />;
+      return <PermissionsSection s={s} save={save} apiBase={props.apiBase} />;
     case "terminal":
       return <TerminalSection s={s} save={save} apiBase={props.apiBase} />;
     case "voice":
@@ -860,7 +861,7 @@ const PERMS: { key: string; label: string; help: string }[] = [
   { key: "allow_self_modification", label: "Edit EchoSpeak itself", help: "Let agents change EchoSpeak's own code. For development only." },
 ];
 
-function PermissionsSection({ s, save }: { s: SettingsMap; save: Save }) {
+function PermissionsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBase: string }) {
   const master = asBool(s.enable_system_actions);
   return (
     <>
@@ -875,6 +876,7 @@ function PermissionsSection({ s, save }: { s: SettingsMap; save: Save }) {
             <Toggle checked={asBool(s[p.key])} disabled={!master} onChange={(v) => save({ [p.key]: v })} label={p.label} />
           </Row>
         ))}
+        {master && asBool(s.allow_desktop_automation) ? <DesktopControlOffer apiBase={apiBase} /> : null}
       </Group>
       <Group title="Apps agents may open" description="Open apps must be enabled above. This list is separate from terminal command restrictions.">
         <Row label="Allowed apps" help="Add an exact Start-menu name (Minecraft Launcher), a desktop shortcut's name (26.2), or an executable path. Short names such as notepad also work." stack>

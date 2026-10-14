@@ -32,6 +32,7 @@ import { LiveStatusPill } from "./lean/LiveStatus";
 import { leanApi } from "./lean/api";
 import { AgentRows, CollapsedRoster } from "./lean/Roster";
 import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
+import { AGENTS_CHANGED } from "./settings/DesktopControlOffer";
 import type { ObservationRef } from "./widgets/types";
 import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
 import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
@@ -164,6 +165,11 @@ export const Dashboard: React.FC<{
       // Older backends without the lean runtime simply show no roster.
     }
   }, [leanClient]);
+  useEffect(() => {
+    const onAgentsChanged = () => void refreshRoster();
+    window.addEventListener(AGENTS_CHANGED, onAgentsChanged);
+    return () => window.removeEventListener(AGENTS_CHANGED, onAgentsChanged);
+  }, [refreshRoster]);
   useEffect(() => {
     void refreshRoster();
     leanClient.toolsets().then((sets) => setToolsetIds(sets.map((s) => s.id))).catch(() => undefined);
