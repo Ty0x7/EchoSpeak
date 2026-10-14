@@ -439,7 +439,8 @@ class ChatClient:
             raise ProviderError(400, "This model is marked as text-only. Select a vision-capable model in Settings → Models to inspect screenshots.", self.endpoint.provider)
         raw_messages = messages
         # A model that already refused an image in this chat gets text notes instead.
-        messages = hydrate(messages, images=not getattr(self, "_text_only", False))
+        messages = hydrate(messages, images=not getattr(self, "_text_only", False),
+                           inline_tool=self.endpoint.provider == "anthropic")
         prefetched = getattr(self, "_prefetched_turn", None)
         if prefetched is not None:
             self._prefetched_turn = None

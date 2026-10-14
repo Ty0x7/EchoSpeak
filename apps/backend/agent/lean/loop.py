@@ -523,6 +523,8 @@ class LeanTurn:
     # ── tools ───────────────────────────────────────────────────────────
     def _run_tools(self, calls: list[Any], messages: list[dict[str, Any]], step: int, call_counts: dict[str, int]) -> None:
         prepared: list[tuple[Any, str, dict[str, Any], str]] = []
+        # Screens change, so the same screenshot or key press can rightly repeat.
+        computer_names = policy.NATIVE_COMPUTER_ACT | policy.NATIVE_COMPUTER_LOOK
         for call in calls:
             args, arg_error = call.parsed_arguments()
             try:
@@ -531,7 +533,7 @@ class LeanTurn:
                 name, arg_error = call.name, f"Invalid tool arguments: {exc}"
             signature = self._sig(name, args)
             call_counts[signature] = call_counts.get(signature, 0) + 1
-            problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} else "repeat")
+            problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} | computer_names else "repeat")
             if not problem:
                 # Checked for every call, parallel read-only ones included.
                 decision = policy.evaluate(name, args, entry=self.toolbox.entry(name), tainted_by=self.taint,
@@ -567,11 +569,22 @@ class LeanTurn:
         else:
             sequential = prepared
 
+        computer = {"computer_action"} | policy.NATIVE_COMPUTER_ACT | policy.NATIVE_COMPUTER_LOOK
+        computer_calls: list[str] = []
         for call, name, args, problem in sequential:
             if call.id in results:
                 continue
             if self.cancel.is_set():
                 results[call.id] = (False, "Cancelled by the user before this tool ran.")
+                continue
+            failed_before = any(not results.get(cid, (True, ""))[0] for cid in computer_calls)
+            if name in computer:
+                computer_calls.append(call.id)
+            if failed_before and name in computer:
+                # The rest of a batch planned against a screen that didn't behave as expected.
+                output = "Not executed: an earlier computer action in this turn failed."
+                results[call.id] = (False, output)
+                self._tool_finished(call, name, args, step, False, output, 0)
                 continue
             self._tool_started(call, name, args, step)
             if problem == "policy":
@@ -710,14 +723,14 @@ class LeanTurn:
         policy_reason = self._policy_reasons.get(call.id, "")
         # Only screen-guided desktop control can be allowed for a whole chat; other outside content asks every time.
         grantable = not policy_reason or self._policy_rules.get(call.id) == "screen_control"
-        if policy_reason and grantable and broker.granted(self.session_id, name):
+        if policy_reason and grantable and broker.granted(self.session_id, policy.grant_name(name)):
             policy.audit(policy.Decision("allow", policy_reason, "screen_control"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome="allowed for this chat")
             return True, ""
         if policy_reason:
             # Rule of Two: always ask, even with "always allow" grants or approvals off.
             needs, reason = True, policy_reason
-        elif not needs or broker.granted(self.session_id, name):
+        elif not needs or broker.granted(self.session_id, policy.grant_name(name)):
             return True, ""
         if not self.interactive:
             return False, (
@@ -731,7 +744,7 @@ class LeanTurn:
         approval = broker.open(
             session_id=self.session_id,
             request_id=self.request_id,
-            tool=name,
+            tool=policy.grant_name(name),  # one grant covers every computer action
             summary=describe_call(name, args),
             # The card shows these in full: a summary can hide "; iwr … | iex" after padding.
             args=args,

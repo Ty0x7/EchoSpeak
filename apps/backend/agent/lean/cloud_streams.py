@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any
 from agent.lean import settings
@@ -31,6 +32,7 @@ def _content_parts(content: Any, *, google: bool = False) -> list[dict]:
 
 def anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
     system, turns = [], []
+    toolset_calls: dict[str, str] = {}  # tool_use id -> toolset name, for the matching results
     for message in messages:
         role = message.get("role")
         if role in ("system", "developer"):
@@ -38,10 +40,17 @@ def anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
             continue
         if role == "tool":
             role = "user"
-            parts = [{"type": "tool_result", "tool_use_id": message["tool_call_id"], "content": str(message.get("content") or "")}]
+            content = message.get("content")
+            result = {"type": "tool_result", "tool_use_id": message["tool_call_id"],
+                      # A screenshot rides inside its own result (observations.hydrate inline_tool).
+                      "content": _content_parts(content) if isinstance(content, list) else str(content or "")}
+            if message["tool_call_id"] in toolset_calls:
+                result["toolset_name"] = toolset_calls[message["tool_call_id"]]
+            parts = [result]
         else:
             role = "assistant" if role == "assistant" else "user"
             parts = message.get("provider_blocks") or _content_parts(message.get("content"))
+            toolset_calls.update({b["id"]: b["toolset_name"] for b in parts if b.get("type") == "tool_use" and b.get("toolset_name")})
             if not message.get("provider_blocks"):
                 for call in message.get("tool_calls") or []:
                     function = call["function"]
@@ -55,13 +64,38 @@ def anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
     return "\n\n".join(system), turns
 
 
+# Models that take Claude's native computer toolset (Claude docs, computer use tool).
+_NATIVE_COMPUTER_MODELS = re.compile(r"claude-(?:(?:fable|mythos|opus|sonnet|haiku)-5|opus-4-8)", re.I)
+COMPUTER_TOOLSET = {"type": "computer_toolset_20260801",
+                    # Raw button down/up would leave a button pressed between steps; left_click_drag covers it.
+                    "configs": {"left_mouse_down": {"enabled": False}, "left_mouse_up": {"enabled": False}}}
+
+
+def native_computer(model: str, names: set[str]) -> bool:
+    """Claude gets its own computer toolset instead of computer_action, when it supports one."""
+    from config import config
+    return ("computer_action" in names and bool(_NATIVE_COMPUTER_MODELS.search(model or ""))
+            and bool(getattr(config, "computer_native_tools", True)))
+
+
+def anthropic_tools(model: str, tools: list[dict]) -> list[dict]:
+    names = {t["function"]["name"] for t in tools}
+    native = native_computer(model, names)
+    # The toolset's own screenshot replaces take_screenshot and vision_qa; read_image stays for files.
+    skip = {"computer_action", "take_screenshot", "vision_qa"} if native else set()
+    rendered = [{"name": t["function"]["name"], "description": t["function"].get("description", ""),
+                 "input_schema": t["function"].get("parameters", {"type": "object"})}
+                for t in tools if t["function"]["name"] not in skip]
+    return rendered + ([COMPUTER_TOOLSET] if native else [])
+
+
 def anthropic_turn(client, messages, tools, on_reasoning, on_content, cancel, max_tokens):
     system, turns = anthropic_messages(messages)
     body = {"model": client.endpoint.model, "messages": turns, "stream": True, "max_tokens": int(max_tokens or settings.max_output_tokens())}
     if system:
         body["system"] = system
     if tools:
-        body["tools"] = [{"name": t["function"]["name"], "description": t["function"].get("description", ""), "input_schema": t["function"].get("parameters", {"type": "object"})} for t in tools]
+        body["tools"] = anthropic_tools(client.endpoint.model, tools)
     turn = ModelTurn()
     blocks: dict[int, dict] = {}
     arguments: dict[int, str] = {}

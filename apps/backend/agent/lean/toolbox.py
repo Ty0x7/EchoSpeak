@@ -189,6 +189,11 @@ class NativeTool:
     # Coordination tools (handoff, task board, completion) the runtime offers only
     # when they apply: kept whatever toolsets the persona has.
     always: bool = False
+    # Callable by name but never sent as a schema: Claude's computer toolset members,
+    # which the Anthropic adapter declares as one native toolset instead.
+    hidden: bool = False
+    # Offered whenever this tool is: the toolset members come with computer_action.
+    rides_with: str = ""
 
 
 def _alias_key(name: str) -> str:
@@ -278,7 +283,8 @@ class Toolbox:
             self.entries[name] = entry
         # Native tools only appear when one of their toolsets was requested.
         requested = set(wanted)
-        self.native = {name: tool for name, tool in self.native.items() if name in requested or tool.always}
+        self.native = {name: tool for name, tool in self.native.items()
+                       if name in requested or tool.always or (tool.rides_with and tool.rides_with in requested)}
         # Connected apps can bring dozens of tools each (one Photoshop server has 128). Past a
         # few, their schemas wait until find_tools asks for them (Anthropic's Tool Search,
         # "deferred loading"): every schema is sent on every request, and small models
@@ -345,12 +351,17 @@ class Toolbox:
                 and bool(getattr(config, "enable_system_actions", False))
                 and bool(getattr(config, "allow_desktop_automation", False)))
 
-    def computer_context(self) -> str:
-        """Describe this turn's actual screen/control tools without granting any."""
+    def computer_context(self, native: bool = False) -> str:
+        """Describe this turn's actual screen/control tools without granting any.
+
+        native: the model gets Claude's own computer toolset instead of computer_action
+        (agent/lean/cloud_streams.py), so the note names its actions instead.
+        """
         names = set(self.names)
         if not names.intersection({"take_screenshot", "read_image", "vision_qa", "computer_action"}):
             return ""
-        guidance = " Use computer_action for mouse/keyboard input, never a made-up terminal click command."
+        guidance = (" Use your built-in computer tool for mouse and keyboard input, never a made-up terminal click command."
+                    if native else " Use computer_action for mouse/keyboard input, never a made-up terminal click command.")
         if "open_application" in names:
             allowed = list(getattr(config, "open_application_allowlist", None) or [])
             if not getattr(config, "allow_open_application", False):
@@ -380,6 +391,11 @@ class Toolbox:
             return ("computer_action is enabled for this agent, but take_screenshot is not in its toolbox. "
                     "The owner should also enable Screen & images (Vision) when editing this agent, "
                     "so it can get the fresh observation ID required for input." + guidance)
+        if native and self.computer_ready():
+            return ("Computer control is enabled for this agent through your built-in computer tool. Take a screenshot "
+                    "first, act in its coordinates, then take another screenshot to check before continuing. Holds and waits "
+                    "last at most 5 seconds here, and pressing and releasing a mouse button in separate steps is off "
+                    "(use left_click_drag). Desktop approvals still apply." + guidance)
         return ("Computer control is enabled for this agent through computer_action. Capture with take_screenshot, "
                 "then pass its observation_id and a small actions array to computer_action; inspect the returned "
                 "image before continuing. Fresh captures and existing desktop approvals are still required." + guidance)
@@ -426,6 +442,8 @@ class Toolbox:
                 },
             })
         for tool in self.native.values():
+            if tool.hidden:
+                continue
             rendered.append({
                 "type": "function",
                 "function": {

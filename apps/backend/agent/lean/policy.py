@@ -59,11 +59,24 @@ EXTERNAL_ACTIONS = {
     "memory_save", "soul_update",
 }
 
+# Claude's native computer toolset (agent/lean/computer.py native()): members that
+# look at the screen, and members that act on it like computer_action.
+NATIVE_COMPUTER_LOOK = {"screenshot", "zoom", "cursor_position", "wait"}
+NATIVE_COMPUTER_ACT = {"left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag",
+                       "mouse_move", "scroll", "type", "key", "hold_key", "left_mouse_down", "left_mouse_up"}
+UNTRUSTED_SOURCES |= NATIVE_COMPUTER_LOOK
+EXTERNAL_ACTIONS |= NATIVE_COMPUTER_ACT
+
 # Computer use looks at the screen before every action, so screen taint alone
 # would ask on every batch. When nothing else outside was read, the owner can
 # allow on-screen control for one chat (agent/lean/loop.py _approve).
-SCREEN_SOURCES = {"analyze_screen", "vision_qa", "take_screenshot", "read_image", "computer_action"}
-SCREEN_CONTROL = {"computer_action", "desktop_click", "desktop_type_text", "desktop_send_hotkey"}
+SCREEN_SOURCES = {"analyze_screen", "vision_qa", "take_screenshot", "read_image", "computer_action"} | NATIVE_COMPUTER_LOOK
+SCREEN_CONTROL = {"computer_action", "desktop_click", "desktop_type_text", "desktop_send_hotkey"} | NATIVE_COMPUTER_ACT
+
+
+def grant_name(name: str) -> str:
+    """One "For this chat" grant covers computer_action and every native computer action."""
+    return "computer_action" if name in NATIVE_COMPUTER_ACT else name
 
 
 def screen_only(tainted_by: Optional[list[str]]) -> bool:

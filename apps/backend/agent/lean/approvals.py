@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from agent.lean import settings
+from agent.lean.policy import NATIVE_COMPUTER_ACT
 
 # Outward-facing actions: they leave the machine or speak for the user.
 EXTERNAL_TOOLS = {
@@ -34,7 +35,7 @@ IDENTITY_TOOLS = {"soul_update"}
 # Tools that act on the desktop as if they were the user.
 DESKTOP_CONTROL_TOOLS = {
     "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
-}
+} | NATIVE_COMPUTER_ACT  # Claude's native computer actions run through computer_action's executor
 
 # Hermes-style dangerous command detection for terminal_run.
 _DANGEROUS_COMMAND = re.compile(

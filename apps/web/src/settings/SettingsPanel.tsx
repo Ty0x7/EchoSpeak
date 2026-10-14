@@ -888,6 +888,11 @@ function PermissionsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; 
           </Row>
         ))}
         {master && asBool(s.allow_desktop_automation) ? <DesktopControlOffer apiBase={apiBase} /> : null}
+        {master && asBool(s.allow_desktop_automation) ? (
+          <Row label="Claude's own computer tool" help="With a Claude 5 model, use the computer tool Claude was trained on instead of Echo's general one. Same permissions and approvals. Turn off to compare.">
+            <Toggle checked={s.computer_native_tools === undefined ? true : asBool(s.computer_native_tools)} onChange={(v) => save({ computer_native_tools: v })} label="Claude's own computer tool" />
+          </Row>
+        ) : null}
       </Group>
       <Group title="Apps agents may open" description="Open apps must be enabled above. This list is separate from terminal command restrictions.">
         <Row label="Allowed apps" help="Add an exact Start-menu name (Minecraft Launcher), a desktop shortcut's name (26.2), or an executable path. Short names such as notepad also work." stack>

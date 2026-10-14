@@ -944,6 +944,8 @@ class Config:
         # OpenTelemetry collector for per-turn traces (agent/lean/tracing.py), OTLP/HTTP JSON,
         # e.g. http://localhost:4318/v1/traces. Empty: traces stay on this PC only.
         self.trace_export_url = os.getenv("TRACE_EXPORT_URL", "").strip()
+        # Claude models get their own computer toolset instead of computer_action (agent/lean/cloud_streams.py).
+        self.computer_native_tools = os.getenv("COMPUTER_NATIVE_TOOLS", "true").strip().lower() not in {"0", "false", "no", "off"}
         # Learning from verified experience (agent/learning). It writes advisory lessons and
         # statistics only: never permissions, approvals, toolsets, policy, checks or code.
         self.learning_enabled = os.getenv("LEARNING_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
@@ -1462,6 +1464,7 @@ class Config:
             "lean_max_iterations",
             "lean_quarantine_reader",
             "trace_export_url",
+            "computer_native_tools",
             "lean_context_tokens",
             "learning_enabled",
             "learning_reflection_daily_cap",

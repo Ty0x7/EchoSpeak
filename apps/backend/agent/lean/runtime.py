@@ -927,7 +927,7 @@ class LeanSession:
             project_root=self.project_root,
             notes=list(toolbox.notes) + learned.notes,
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
-            computer_note="" if guest else toolbox.computer_context(),
+            computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox)),
             git_note=repo_note,
             git_rules="terminal" in toolbox.names and git_context.wants_rules(goal, repo_note),
             project_overview=project_overview(self.project_root) if self.project_root else "",
@@ -1392,6 +1392,15 @@ class LeanSession:
         if decision.applied:
             self._route_overrides[persona.id] = decision.chosen
         return decision.note()
+
+    def _native_computer(self, persona: AgentPersona, toolbox: Toolbox) -> bool:
+        """This agent's model gets Claude's own computer toolset (agent/lean/cloud_streams.py)."""
+        from agent.lean.cloud_streams import native_computer
+        try:
+            endpoint = self._endpoint_for(persona)
+        except Exception:
+            return False
+        return endpoint.provider == "anthropic" and native_computer(endpoint.model, set(toolbox.names))
 
     def _endpoint_for(self, persona: AgentPersona):
         if persona.id in self._route_overrides:  # auto mode picked another listed model for this request
