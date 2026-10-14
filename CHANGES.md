@@ -1,5 +1,18 @@
 # Changes
 
+## Unreleased (11.8.0 draft)
+
+Notes: [EchoSpeak 11.8.0 draft](docs/releases/v11.8.0.md).
+
+* Claude's computer toolset (computer_toolset_20260801) mapped onto the checked executor; one chat grant covers all its actions; a failed action stops its batch; images inside tool results for Claude.
+* Desktop control offered where the permission is turned on; 5 s holds, 10 s batches, triple click, horizontal scroll.
+* MCP: OAuth sign-in through the SDK's provider with DPAPI token storage and a loopback callback; MCP Apps (io.modelcontextprotocol/ui) in sandboxed frames under declared CSPs; the Tasks extension with polling, progress and cancellation.
+* Quarantined reader (agent/lean/quarantine.py), per-turn traces with OTLP export (agent/lean/tracing.py), saved long outputs with read_output (agent/lean/tool_outputs.py).
+* Outbound A2A to pinned agents with signed Agent Cards (agent/a2a_trust.py); EchoSpeak's card is signed and /a2a is reachable with only its own key.
+* scripts/echo_bench.py: release tasks scored per model and version.
+* LangChain removed (agent/tool_decorator.py, agent/vector_store.py); 11.7 indexes convert once without re-embedding.
+* Removed: the 9.x approval routes and card, the shadowed legacy screen tools.
+
 ## v11.7.1 — 2026-10-12
 
 User-facing notes: [EchoSpeak 11.7.1](docs/releases/v11.7.1.md).
