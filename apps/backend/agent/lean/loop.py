@@ -28,6 +28,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from agent.lean import policy, settings
+from agent.lean import tool_outputs
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, outbound
 from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, is_promise_without_action,
@@ -612,12 +613,37 @@ class LeanTurn:
         limit = 14000
         for call, name, _args, _ in prepared:
             ok, output = results.get(call.id, (False, "No result."))
-            text = output if len(output) <= limit else output[:limit] + f"\n…[{len(output) - limit} more characters trimmed]"
-            if ok and policy.is_untrusted_source(name, self.toolbox.entry(name), _args):
+            untrusted = ok and policy.is_untrusted_source(name, self.toolbox.entry(name), _args)
+            text = self._shorten(name, output, limit, untrusted)
+            if untrusted:
                 text = policy.wrap_untrusted(name, text)  # data, not instructions
             messages.append({"role": "tool", "tool_call_id": call.id, "name": name, "content": text or "(empty result)"})
             if visual_results.get(call.id):
                 messages[-1]["observations"] = visual_results[call.id]
+
+    def _shorten(self, name: str, output: str, limit: int, untrusted: bool) -> str:
+        """Fit one result into the context. A longer one is saved whole behind an out-… handle."""
+        if len(output) <= limit:
+            return output
+        if "read_output" in self.toolbox.names:
+            try:
+                ref = tool_outputs.save(self.session_id, name, output, untrusted=untrusted)
+                return tool_outputs.preview(output, ref, limit)
+            except OSError:
+                logger.warning("Could not save a long tool output; trimming it instead")
+        return output[:limit] + f"\n…[{len(output) - limit} more characters trimmed]"
+
+    def _clear_note(self, message: dict[str, Any], keep: int, note: str) -> str:
+        """Cut an old result to its head; when it can be saved, say how to reopen it."""
+        content = str(message.get("content") or "")
+        if "read_output" in self.toolbox.names and "is saved as out-" not in content:
+            try:
+                ref = tool_outputs.save(self.session_id, str(message.get("name") or "tool"), content,
+                                        untrusted="<untrusted-content" in content)
+                return content[:keep] + f"\n…[{note}; the full result is saved as {ref}, read it with read_output]"
+            except OSError:
+                pass
+        return content[:keep] + f"\n…[{note}]"
 
     def _param_hint(self, name: str) -> str:
         """' (required: a, b; optional: c)' so a bad call can be fixed in one try."""
@@ -820,7 +846,7 @@ class LeanTurn:
             for index in tool_indexes[:-6]:
                 content = str(messages[index].get("content") or "")
                 if len(content) > 2000:
-                    messages[index]["content"] = content[:1500] + "\n…[older tool output cleared; run the tool again if you need it]"
+                    messages[index]["content"] = self._clear_note(messages[index], 1500, "older tool output cleared")
         if _estimate_tokens(messages, tools) <= budget:
             return
         # 1. Shrink older tool results, keeping the most recent ones intact.
@@ -829,7 +855,7 @@ class LeanTurn:
         for index in tool_indexes[:-keep_recent] if len(tool_indexes) > keep_recent else []:
             content = str(messages[index].get("content") or "")
             if len(content) > 600:
-                messages[index]["content"] = content[:500] + "\n…[older tool output trimmed to save context]"
+                messages[index]["content"] = self._clear_note(messages[index], 500, "older tool output trimmed to save context")
             if _estimate_tokens(messages, tools) <= budget:
                 return
         # 2. Drop the oldest history messages (plain text, never this turn's work).

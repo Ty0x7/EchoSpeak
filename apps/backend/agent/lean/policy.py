@@ -86,6 +86,9 @@ class Decision:
 def is_untrusted_source(name: str, entry: Any = None, args: Optional[dict[str, Any]] = None) -> bool:
     if name in UNTRUSTED_SOURCES:
         return True
+    if name == "read_output":
+        from agent.lean.tool_outputs import is_untrusted
+        return is_untrusted((args or {}).get("id"))  # reopened web or email text is still outside content
     origin = str(getattr(entry, "origin", "") or "")
     if origin in {"mcp", "connection"} and not getattr(entry, "is_action", False):
         return True  # third-party servers return third-party content

@@ -242,6 +242,11 @@ async def lifespan(app: FastAPI):
                 await asyncio.to_thread(cleanup_observations)
             except Exception:
                 logger.warning("Screenshot retention cleanup failed; will retry")
+            try:
+                from agent.lean.tool_outputs import cleanup as cleanup_outputs
+                await asyncio.to_thread(cleanup_outputs)
+            except Exception:
+                logger.warning("Saved tool output cleanup failed; will retry")
             await asyncio.sleep(3600)
 
     async def learning_worker():
