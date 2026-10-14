@@ -28,7 +28,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from agent.lean import policy, settings
-from agent.lean import quarantine, tool_outputs
+from agent.lean import quarantine, tool_outputs, tracing
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, outbound
 from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, is_promise_without_action,
@@ -230,6 +230,18 @@ class LeanTurn:
         self._start_message(**self.meta)
 
     def run(self, user_message: str, *, announce: bool = True) -> TurnResult:
+        """One agent turn, traced end to end (agent/lean/tracing.py)."""
+        self.trace = tracing.Trace(self.session_id, self.persona.id, self.request_id)
+        result: Optional[TurnResult] = None
+        try:
+            result = self._run(user_message, announce=announce)
+            return result
+        finally:
+            self.trace.finish(self.message_id, ok=bool(result and result.success),
+                              stop=str(getattr(result, "stop_reason", "") or ("error" if result is None else "")),
+                              prompt_tokens=int(self.usage.get("prompt", 0)), completion_tokens=int(self.usage.get("completion", 0)))
+
+    def _run(self, user_message: str, *, announce: bool = True) -> TurnResult:
         if announce:
             self.announce()
         tools = self.toolbox.schemas()
@@ -451,14 +463,20 @@ class LeanTurn:
             self._append_text("text", step, text)
             self.emit({"type": "agent_token", "step": step, "data": text})
 
-        turn = self.client.stream_turn(
-            messages,
-            tools=tools or None,
-            on_reasoning=on_reasoning,
-            on_content=on_content,
-            cancel=self.cancel,
-            temperature=self.temperature,
-        )
+        endpoint = getattr(self.client, "endpoint", None)
+        with self._span("model.call", step=step, model=str(getattr(endpoint, "model", "") or ""),
+                        provider=str(getattr(endpoint, "provider", "") or ""), tools=len(tools or [])) as span:
+            turn = self.client.stream_turn(
+                messages,
+                tools=tools or None,
+                on_reasoning=on_reasoning,
+                on_content=on_content,
+                cancel=self.cancel,
+                temperature=self.temperature,
+            )
+            span.set(tool_calls=len(turn.tool_calls), finish=str(turn.finish_reason or ""),
+                     prompt_tokens=int((turn.usage or {}).get("prompt") or 0),
+                     completion_tokens=int((turn.usage or {}).get("completion") or 0))
         if turn.usage:
             self._account_usage(turn.usage)
             self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens()})
@@ -518,6 +536,8 @@ class LeanTurn:
                 # Checked for every call, parallel read-only ones included.
                 decision = policy.evaluate(name, args, entry=self.toolbox.entry(name), tainted_by=self.taint,
                                            interactive=self.interactive)
+                if decision.action != "allow" and getattr(self, "trace", None) is not None:
+                    self.trace.event("policy.decision", step=step, tool=name, action=decision.action, rule=decision.rule)
                 if decision.action == "deny":
                     policy.audit(decision, name=name, args=args, session_id=self.session_id, agent=self.persona.id, outcome="blocked")
                     self._policy_reasons[call.id] = decision.reason
@@ -618,7 +638,9 @@ class LeanTurn:
             untrusted = ok and policy.is_untrusted_source(name, self.toolbox.entry(name), _args)
             if untrusted and quarantine.applies(name, self.toolbox.entry(name), reader):
                 # The acting agent gets a tool-less reader's digest, not the raw text. Still outside content.
-                read = quarantine.read(self.client, getattr(self, "_goal", ""), name, output, self.cancel)
+                with self._span("reader", step=step, tool=name, input_chars=len(output)) as span:
+                    read = quarantine.read(self.client, getattr(self, "_goal", ""), name, output, self.cancel)
+                    span.set(used=bool(read), instructions_found=bool(read and read[1]))
                 if read:
                     output = quarantine.digest_text(name, read[0], read[1], len(output))
                     if read[1]:
@@ -719,7 +741,9 @@ class LeanTurn:
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})
         self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **approval.public()})
-        decision = broker.wait(approval, self.cancel)
+        with self._span("approval.wait", step=step, tool=name, rule=self._policy_rules.get(call.id, "") or "approval") as span:
+            decision = broker.wait(approval, self.cancel)
+            span.set(decision=decision)
         if policy_reason:
             policy.audit(policy.Decision("ask", policy_reason, "rule_of_two"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome=decision)
@@ -774,8 +798,17 @@ class LeanTurn:
                     item["detail"] = text
             self.emit({"type": "tool_progress", "step": step, "id": call.id, "text": text})
 
-        with progress.reporting(emit):
-            return self.toolbox.run(name, args)
+        with self._span("tool.run", step=step, tool=name) as span, progress.reporting(emit):
+            result = self.toolbox.run(name, args)
+            span.set(ok=bool(result.ok), output_chars=len(result.output or ""))
+            if not result.ok:
+                span.status = "error"
+            return result
+
+    def _span(self, name: str, **attrs: Any):
+        """A trace span when this turn is traced (run() sets one up); a no-op otherwise."""
+        trace = getattr(self, "trace", None)
+        return trace.span(name, **attrs) if trace is not None else tracing.null_span()
 
     def _tool_started(self, call: Any, name: str, args: dict[str, Any], step: int) -> None:
         self._close_thinking()
@@ -924,7 +957,8 @@ class LeanTurn:
             "left to do. At most 200 words, plain sentences.\n\n" + body
         )
         try:
-            turn = self.client.stream_turn([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=700, cancel=self.cancel)
+            with self._span("context.compact", steps=len(steps) - keep_steps, input_chars=len(body)):
+                turn = self.client.stream_turn([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=700, cancel=self.cancel)
             summary = str(turn.content or "").strip()
         except Exception:
             logger.debug("Lean turn compaction failed", exc_info=True)

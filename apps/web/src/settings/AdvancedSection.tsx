@@ -98,6 +98,12 @@ function AdvancedSettings({ s, save }: { s: SettingsMap; save: Save }) {
         ) : null}
       </Group>
 
+      <Group title="Traces" description="Every reply records where its time went (thinking, tools, waiting for you). See it under Activity › Timing. Traces hold timings, tool names and token counts, never message text.">
+        <Row label="Send to an OpenTelemetry collector" help="Optional. An OTLP/HTTP address such as http://localhost:4318/v1/traces (Jaeger, Grafana, Arize Phoenix). Leave empty to keep traces on this PC." stack>
+          <TextField wide mono value={s.trace_export_url || ""} placeholder="http://localhost:4318/v1/traces" onCommit={(v) => save({ trace_export_url: v.trim() })} />
+        </Row>
+      </Group>
+
       <Group title="Webhooks" description="Let other apps start a routine with a signed POST to /webhooks/<path>.">
         <Row label="Enable webhooks" help="Requests must be signed with the secret below.">
           <Toggle checked={asBool(s.webhook_enabled)} onChange={(v) => save({ webhook_enabled: v })} label="Webhooks" />

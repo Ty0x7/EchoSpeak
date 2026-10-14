@@ -247,6 +247,11 @@ async def lifespan(app: FastAPI):
                 await asyncio.to_thread(cleanup_outputs)
             except Exception:
                 logger.warning("Saved tool output cleanup failed; will retry")
+            try:
+                from agent.lean.tracing import cleanup as cleanup_traces
+                await asyncio.to_thread(cleanup_traces)
+            except Exception:
+                logger.warning("Trace cleanup failed; will retry")
             await asyncio.sleep(3600)
 
     async def learning_worker():

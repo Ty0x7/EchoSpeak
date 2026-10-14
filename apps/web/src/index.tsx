@@ -34,7 +34,7 @@ import { AgentRows, CollapsedRoster } from "./lean/Roster";
 import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
 import { AGENTS_CHANGED } from "./settings/DesktopControlOffer";
 import type { ObservationRef } from "./widgets/types";
-import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
+import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, lastReplyId, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
 import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { AgentEditor, RoomDialog } from "./lean/Dialogs";
@@ -1562,6 +1562,7 @@ export const Dashboard: React.FC<{
     const live = lean.live ? lean.live.order.map((id) => lean.live!.messages[id]) : [];
     return collectActivity([...messages.map((m) => m.lean), ...live]);
   }, [messages, lean.live]);
+  const replyId = useMemo(() => lastReplyId(messages.map((m) => m.lean)), [messages]);
   const seenTerminalRef = useRef<Set<string>>(new Set());
   const seenArtifactsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
@@ -1812,6 +1813,7 @@ export const Dashboard: React.FC<{
             artifact={openArtifact}
             observation={currentObservation}
             activity={activityItems}
+            replyId={replyId}
             onEditArtifact={(id, version, passage) => {
               setMainPage("chat");
               setInput(`Read artifact ${id} at version ${version}, then revise it and save a new version. Preserve the original version.${passage ? `\nSelected passage:\n${passage}\n` : "\n"}Changes I'd like: `);

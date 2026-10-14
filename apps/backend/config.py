@@ -941,6 +941,9 @@ class Config:
         # connected apps) or "all" (also web pages and documents). One extra model call per result.
         self.lean_quarantine_reader = os.getenv("LEAN_QUARANTINE_READER", "messages").strip().lower() or "messages"
         self.lean_context_tokens = int(os.getenv("LEAN_CONTEXT_TOKENS", "0") or 0)
+        # OpenTelemetry collector for per-turn traces (agent/lean/tracing.py), OTLP/HTTP JSON,
+        # e.g. http://localhost:4318/v1/traces. Empty: traces stay on this PC only.
+        self.trace_export_url = os.getenv("TRACE_EXPORT_URL", "").strip()
         # Learning from verified experience (agent/learning). It writes advisory lessons and
         # statistics only: never permissions, approvals, toolsets, policy, checks or code.
         self.learning_enabled = os.getenv("LEARNING_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
@@ -1458,6 +1461,7 @@ class Config:
             "lean_approval_mode",
             "lean_max_iterations",
             "lean_quarantine_reader",
+            "trace_export_url",
             "lean_context_tokens",
             "learning_enabled",
             "learning_reflection_daily_cap",

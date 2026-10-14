@@ -263,6 +263,18 @@ def list_toolsets() -> dict[str, Any]:
     }
 
 
+@router.get("/traces/{message_id}")
+def message_trace(message_id: str, session_id: str = Query(...)) -> dict[str, Any]:
+    """Timings for one reply (agent/lean/tracing.py): names, durations and counts, no message text."""
+    from agent.lean import tracing
+    try:
+        return tracing.load(session_id, message_id)
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(404, detail="No trace for that reply; traces are kept for seven days") from exc
+
+
 @router.get("/approvals")
 def list_approvals(session_id: str = Query(default="")) -> dict[str, Any]:
     return {"items": get_approval_broker().pending_for(session_id)}
