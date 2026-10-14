@@ -58,7 +58,7 @@ export function AdvancedSection(props: {
       </div>
       {props.page === "settings" ? <AdvancedSettings s={props.s} save={props.save} /> : null}
       {props.page === "memory" ? <MemoryPage s={props.s} save={props.save} apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
-      {props.page === "connections" ? <ConnectionsPage apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
+      {props.page === "connections" ? <ConnectionsPage s={props.s} save={props.save} apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
       {props.page === "companion" ? (
         <Group title="Echo companion" description="Echo’s shared appearance in voice conversations and the floating companion window.">
           <div className="st-embed">
@@ -542,6 +542,65 @@ function McpApprovals({ apiBase }: { apiBase: string }) {
   );
 }
 
+type McpSignIn = { name: string; running: boolean; state: "needed" | "signing_in" | "signed_in" | "failed"; url?: string; error?: string };
+
+/** Hosted MCP servers that need you to sign in (backend: agent/mcp_oauth.py). Tokens stay encrypted on this PC. */
+function McpSignIns({ apiBase }: { apiBase: string }) {
+  const [items, setItems] = useState<McpSignIn[]>([]);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/lean/mcp/signin`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setItems(Array.isArray(data?.items) ? data.items : []);
+    } catch {
+      setItems([]);
+    }
+  }, [apiBase]);
+  useEffect(() => { void load(); }, [load]);
+  // While a browser sign-in is open, check back every two seconds.
+  const waiting = items.some((item) => item.state === "signing_in");
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setInterval(() => void load(), 2000);
+    return () => window.clearInterval(timer);
+  }, [waiting, load]);
+  const post = async (name: string, verb: "signin" | "signout") => {
+    setError("");
+    try {
+      const res = await fetch(`${apiBase}/lean/mcp/${encodeURIComponent(name)}/${verb}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.detail || `Request failed (${res.status})`));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  if (!items.length && !error) return null;
+  const help: Record<McpSignIn["state"], string> = {
+    needed: "This server needs you to sign in before Echo can use it.",
+    signing_in: "Finish signing in in your browser. This page updates when you're done.",
+    signed_in: "Signed in. Echo refreshes the sign-in by itself.",
+    failed: "Sign-in didn't finish.",
+  };
+  return (
+    <>
+      {items.map((item) => (
+        <Row key={item.name} label={<span><b>{item.name}</b> · {item.state === "signed_in" ? "Signed in" : item.state === "signing_in" ? "Signing in…" : "Sign-in needed"}</span>}
+          help={item.state === "failed" && item.error ? `${help.failed} ${item.error}` : help[item.state]}>
+          <div className="st-inline-actions">
+            {item.state === "signing_in" && item.url ? <a className="es-btn es-btn-sm" href={item.url} target="_blank" rel="noreferrer">Open sign-in page</a> : null}
+            {item.state === "signed_in"
+              ? <button type="button" className="es-btn es-btn-sm" onClick={() => void post(item.name, "signout")}>Sign out</button>
+              : item.state !== "signing_in" ? <button type="button" className="es-btn es-btn-sm es-btn-primary" onClick={() => void post(item.name, "signin")}>Sign in</button> : null}
+          </div>
+        </Row>
+      ))}
+      {error ? <Row label={<span className="st-muted">{error}</span>} /> : null}
+    </>
+  );
+}
+
 type SuggestionSetting = { name: string; secret?: boolean; required?: boolean; default?: string; about?: string };
 type Suggestion = {
   id: string; title: string; summary: string; publisher: string; version: string; server_name: string;
@@ -644,7 +703,7 @@ function ConnectionSuggestions({ apiBase }: { apiBase: string }) {
   );
 }
 
-function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; sessionId: string; projectId: string }) {
+function ConnectionsPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap; save: Save; apiBase: string; sessionId: string; projectId: string }) {
   const [cards, setCards] = useState<any[] | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -796,6 +855,10 @@ function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; s
       <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide. A new or changed server waits for your approval before it runs, and so does any connection Echo suggests.">
         <ConnectionSuggestions apiBase={apiBase} />
         <McpApprovals apiBase={apiBase} />
+        <McpSignIns apiBase={apiBase} />
+        <Row label="Sign-in client document" help="Optional. The HTTPS address where you host docs/oauth/echospeak-client.json (its client_id must be that same address). Servers that support it then skip registering EchoSpeak. Leave empty to register automatically." stack>
+          <TextField wide mono value={s.mcp_oauth_client_metadata_url || ""} placeholder="https://example.com/oauth/echospeak-client.json" onCommit={(v) => save({ mcp_oauth_client_metadata_url: v.trim() })} />
+        </Row>
         {cards !== null && !byCategory("mcp").length ? <Row label={<span className="st-muted">No MCP servers configured.</span>} /> : null}
         {byCategory("mcp").map((card) => (
           <Row key={card.id} label={nameOf(card)} help={card.issue || card.detail} />

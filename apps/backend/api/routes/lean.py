@@ -336,6 +336,54 @@ def approve_mcp_server(name: str) -> dict[str, Any]:
     return {"ok": True, "status": status}
 
 
+def _hosted_server(name: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    from config import config
+
+    raw_servers = dict(getattr(config, "mcp_servers", None) or {})
+    raw = raw_servers.get(name)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=404, detail="No MCP server with that name in settings")
+    if not str(raw.get("url") or raw.get("endpoint") or "").strip():
+        raise HTTPException(status_code=400, detail="Only hosted (HTTP) servers sign in; this one runs on this PC")
+    return raw_servers, raw
+
+
+@router.get("/mcp/signin")
+def mcp_sign_ins() -> dict[str, Any]:
+    """Hosted servers that sign in, and where each one stands (agent/mcp_oauth.py)."""
+    from agent.mcp_client import get_mcp_manager
+
+    rows = get_mcp_manager().status()["servers"]
+    return {"items": [{"name": row["name"], "running": row["running"], **row["auth"]}
+                      for row in rows if row.get("auth", {}).get("state")]}
+
+
+@router.post("/mcp/{name}/signin")
+def sign_in_mcp_server(name: str) -> dict[str, Any]:
+    """Open the server's sign-in page in the browser; tokens are saved with DPAPI (agent/mcp_oauth.py)."""
+    from agent import mcp_oauth, privacy
+    from agent.mcp_client import get_mcp_manager
+
+    raw_servers, raw = _hosted_server(name)
+    url = str(raw.get("url") or raw.get("endpoint")).strip()
+    try:
+        flow = mcp_oauth.start_sign_in(name, url, on_done=lambda: get_mcp_manager().initialize_servers(raw_servers))
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"ok": True, "auth": flow}
+
+
+@router.post("/mcp/{name}/signout")
+def sign_out_mcp_server(name: str) -> dict[str, Any]:
+    from agent import mcp_oauth
+    from agent.mcp_client import get_mcp_manager
+
+    raw_servers, raw = _hosted_server(name)
+    removed = mcp_oauth.sign_out(str(raw.get("url") or raw.get("endpoint")).strip())
+    get_mcp_manager().initialize_servers(raw_servers)
+    return {"ok": True, "removed": removed}
+
+
 class ProposalApproveRequest(BaseModel):
     values: dict[str, str] = Field(default_factory=dict, description="The settings the user typed, by name")
 

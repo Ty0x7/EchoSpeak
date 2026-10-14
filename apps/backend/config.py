@@ -946,6 +946,9 @@ class Config:
         self.trace_export_url = os.getenv("TRACE_EXPORT_URL", "").strip()
         # Claude models get their own computer toolset instead of computer_action (agent/lean/cloud_streams.py).
         self.computer_native_tools = os.getenv("COMPUTER_NATIVE_TOOLS", "true").strip().lower() not in {"0", "false", "no", "off"}
+        # HTTPS address of EchoSpeak's OAuth client metadata document (MCP spec 2026-07-28 CIMD).
+        # Empty: hosted MCP servers that sign in register EchoSpeak dynamically instead.
+        self.mcp_oauth_client_metadata_url = os.getenv("MCP_OAUTH_CLIENT_METADATA_URL", "").strip()
         # Learning from verified experience (agent/learning). It writes advisory lessons and
         # statistics only: never permissions, approvals, toolsets, policy, checks or code.
         self.learning_enabled = os.getenv("LEARNING_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
@@ -1465,6 +1468,7 @@ class Config:
             "lean_quarantine_reader",
             "trace_export_url",
             "computer_native_tools",
+            "mcp_oauth_client_metadata_url",
             "lean_context_tokens",
             "learning_enabled",
             "learning_reflection_daily_cap",

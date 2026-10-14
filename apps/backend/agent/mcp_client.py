@@ -133,6 +133,16 @@ _SHELL_COMMANDS = {
 }
 
 
+def _auth_status(state: "MCPServerState") -> dict[str, Any]:
+    if state.transport == "stdio" or not state.url:
+        return {"state": ""}
+    try:
+        from agent import mcp_oauth
+        return mcp_oauth.status(state.name, state.url, state.last_error)
+    except Exception:
+        return {"state": ""}
+
+
 @dataclass
 class MCPServerState:
     name: str
@@ -289,11 +299,17 @@ class MCPSession:
                 )
                 read_stream, write_stream = await stack.enter_async_context(stdio_client(parameters))
             else:
+                from agent import mcp_oauth
+
+                # Saved sign-in (agent/mcp_oauth.py): tokens refresh here; a browser only opens from Sign in.
+                signed_in = (self.state.transport == "streamable_http" and mcp_oauth.signed_in(self.state.url)
+                             and not any(k.lower() == "authorization" for k in self.state.headers))
                 client = await stack.enter_async_context(
                     _http.AsyncClient(
                         headers=dict(self.state.headers),
                         timeout=_http.Timeout(self.state.timeout_s),
                         follow_redirects=True,
+                        auth=mcp_oauth.provider(self.state.url) if signed_in else None,
                     )
                 )
                 if self.state.transport == "streamable_http":
@@ -505,6 +521,8 @@ class MCPManager:
                 "inventory_changed": state.inventory_changed,
                 "last_progress": dict(state.last_progress),
                 "approval": state.approval,
+                # Hosted servers that use sign-in: "", needed, signing_in, signed_in or failed.
+                "auth": _auth_status(state),
             }
             for name, state in self.servers.items()
         ]
