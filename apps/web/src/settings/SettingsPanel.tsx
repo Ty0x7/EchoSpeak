@@ -475,6 +475,17 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
             ]}
           />
         </Row>
+        <Row label="Separate reader for outside content" help="A web page, email or app result goes first to a reader with no tools, and the agent sees only the facts it found. Lowers the chance hidden instructions work, and tells you when content tried. Costs one extra model call per result.">
+          <Segmented
+            value={String(s.lean_quarantine_reader || "messages")}
+            onChange={(v) => save({ lean_quarantine_reader: v })}
+            options={[
+              { value: "off", label: "Off" },
+              { value: "messages", label: "Email and apps", hint: "Recommended" },
+              { value: "all", label: "Also web pages" },
+            ]}
+          />
+        </Row>
         <Row label="Step budget" help="Most model steps an agent may take on one message before it wraps up. Higher lets it finish bigger jobs.">
           <Select
             value={String(s.lean_max_iterations || 60)}

@@ -23,6 +23,7 @@ export const LEAN_EVENT_TYPES = new Set([
   "job_continue",
   "task_board",
   "claim_unverified",
+  "security_note",
 ]);
 
 /** Only numeric facts (results, pages, products) are kept from a step's meta. */
@@ -133,6 +134,12 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
       return patchMessage(state, id, (m) => ({
         ...m,
         segments: m.segments.map((s) => (s.kind === "text" && s.step === Number(evt.step) ? { ...s, text: String(evt.text || "") } : s)),
+      }));
+    case "security_note":
+      // The quarantined reader found instructions aimed at an AI in outside content.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [...m.segments, { kind: "note", step: Number(evt.step || 0), text: String(evt.note || "Outside content contained instructions; they were left out."), at }],
       }));
     case "claim_unverified":
       // The agent kept claiming something no tool did: say so under its message.

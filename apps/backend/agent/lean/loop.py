@@ -28,7 +28,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from agent.lean import policy, settings
-from agent.lean import tool_outputs
+from agent.lean import quarantine, tool_outputs
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, outbound
 from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, is_promise_without_action,
@@ -238,6 +238,7 @@ class LeanTurn:
         messages.extend(self.history)
         self._history_in_messages = len(self.history)
         messages.append({"role": "user", "content": user_message})
+        self._goal = user_message  # what the quarantined reader extracts facts for
 
         max_steps = settings.max_iterations()
         call_counts: dict[str, int] = {}
@@ -611,9 +612,21 @@ class LeanTurn:
             self._note_source(name, args, result.ok)
 
         limit = 14000
+        reader = quarantine.mode()
         for call, name, _args, _ in prepared:
             ok, output = results.get(call.id, (False, "No result."))
             untrusted = ok and policy.is_untrusted_source(name, self.toolbox.entry(name), _args)
+            if untrusted and quarantine.applies(name, self.toolbox.entry(name), reader):
+                # The acting agent gets a tool-less reader's digest, not the raw text. Still outside content.
+                read = quarantine.read(self.client, getattr(self, "_goal", ""), name, output, self.cancel)
+                if read:
+                    output = quarantine.digest_text(name, read[0], read[1], len(output))
+                    if read[1]:
+                        note = f"{name} contained instructions aimed at an AI. Echo's reader left them out."
+                        self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
+                        self.emit({"type": "security_note", "step": step, "tool": name, "note": note})
+                        policy.audit(policy.Decision("allow", note, "quarantine_flag"), name=name, args=_args,
+                                     session_id=self.session_id, agent=self.persona.id, outcome="instructions withheld")
             text = self._shorten(name, output, limit, untrusted)
             if untrusted:
                 text = policy.wrap_untrusted(name, text)  # data, not instructions

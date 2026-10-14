@@ -937,6 +937,9 @@ class Config:
         # Lean runtime controls (Settings > Agent).
         self.lean_approval_mode = os.getenv("LEAN_APPROVAL_MODE", "smart").strip().lower() or "smart"
         self.lean_max_iterations = int(os.getenv("LEAN_MAX_ITERATIONS", "60") or 60)
+        # Quarantined reader (agent/lean/quarantine.py): "off", "messages" (email, Discord,
+        # connected apps) or "all" (also web pages and documents). One extra model call per result.
+        self.lean_quarantine_reader = os.getenv("LEAN_QUARANTINE_READER", "messages").strip().lower() or "messages"
         self.lean_context_tokens = int(os.getenv("LEAN_CONTEXT_TOKENS", "0") or 0)
         # Learning from verified experience (agent/learning). It writes advisory lessons and
         # statistics only: never permissions, approvals, toolsets, policy, checks or code.
@@ -1454,6 +1457,7 @@ class Config:
             "terminal_docker_network",
             "lean_approval_mode",
             "lean_max_iterations",
+            "lean_quarantine_reader",
             "lean_context_tokens",
             "learning_enabled",
             "learning_reflection_daily_cap",
