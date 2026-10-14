@@ -10,7 +10,7 @@ describe("MCP Apps host", () => {
     expect(validateWidget({ type: "mcp_app", data: { ...ref, id: "../../settings" } })).toBeNull();
     expect(validateWidget({ type: "mcp_app", data: { ...ref, session_id: "" } })).toBeNull();
     const withHtml = validateWidget({ type: "mcp_app", data: { ...ref, html: "<script>steal()</script>" } });
-    expect(JSON.stringify(withHtml)).not.toContain("steal");
+    expect(JSON.stringify(withHtml).includes("steal")).toBe(false);
   });
 
   it("answers ui/initialize with what EchoSpeak actually supports", () => {

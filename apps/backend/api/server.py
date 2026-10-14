@@ -425,8 +425,6 @@ RATE_LIMIT_WINDOW = float(os.getenv("ECHOSPEAK_RATE_LIMIT_WINDOW", "60") or 60.0
 # Mutations and expensive model routes still count.
 _RATE_LIMIT_SAFE_GET_PREFIXES = (
     "/threads",
-    "/pending-action",
-    "/approvals",
     "/executions",
     "/traces",
     "/provider",
@@ -443,7 +441,7 @@ def _rate_limit_exempt(path: str, method: str) -> bool:
 
     Never exempt:
     - POST/PUT/PATCH/DELETE (mutations, model calls, workers)
-    - /query, /approvals/*/confirm
+    - /query
     - rebuild/compact endpoints
     """
     p = str(path or "")

@@ -1,11 +1,10 @@
 import React from "react";
 import { AnimatePresence } from "framer-motion";
-import { OperationalStateCard } from "../features/operations/OperationalStateCard";
 import { LeanMessage } from "../lean/LeanMessage";
 import { RoomHeader } from "../lean/Dialogs";
 import type { LeanLiveState, LeanPersona, LeanRoom } from "../lean/types";
 import { ActivityCard, ChatBubble } from "../app/chatComponents";
-import type { PendingActionEnvelope, ProviderInfo, ThreadSessionState, TimelineItem } from "../app/types";
+import type { ProviderInfo, TimelineItem } from "../app/types";
 import { stopTts } from "../app/runtime";
 import type { MessageActionProps } from "./MessageActions";
 
@@ -25,10 +24,6 @@ type ChatThreadProps = {
   live: LeanLiveState | null;
   providerInfo: ProviderInfo | null;
   onQuickReply(text: string): void;
-  pendingApproval: PendingActionEnvelope | null;
-  threadState: ThreadSessionState | null;
-  approvalDecisionBusy: boolean;
-  onApprovalDecision(id: string, decision: "confirm" | "cancel"): void;
   onLeanApproval(id: string, decision: string): void;
   actions?: MessageActionProps;
   voiceStage?: React.ReactNode;
@@ -38,7 +33,7 @@ type ChatThreadProps = {
 export function ChatThread({
   activeThreadId, streaming, scrollRef, onScroll, onWheel, onKeyDown, onTouchStart, onTouchEnd,
   activeRoom, agents, onEditRoom, timeline, live, providerInfo, onQuickReply,
-  pendingApproval, threadState, approvalDecisionBusy, onApprovalDecision, onLeanApproval,
+  onLeanApproval,
   actions, voiceStage,
 }: ChatThreadProps) {
   return (
@@ -67,19 +62,6 @@ export function ChatThread({
           <ActivityCard key={`act-${item.id}`} item={item.item} primarySpinner={!streaming} />
         ))}
       </AnimatePresence>
-      {pendingApproval?.has_pending && pendingApproval.action ? (
-        <div style={{ width: "100%", padding: "2px 4px 4px", position: "relative", zIndex: 20 }}
-          data-testid="chat-pending-approval"
-          data-approval-id={String(pendingApproval.approval_id || pendingApproval.action.id || "")}>
-          <OperationalStateCard state={threadState} approval={{
-            ...pendingApproval.action,
-            id: String(pendingApproval.approval_id || pendingApproval.action.id || ""),
-            status: String(pendingApproval.action.status || "pending"),
-            policy_flags: pendingApproval.policy_flags || pendingApproval.action.policy_flags,
-            session_permissions: pendingApproval.session_permissions || pendingApproval.action.session_permissions,
-          }} busy={approvalDecisionBusy} onDecision={onApprovalDecision} compact />
-        </div>
-      ) : null}
       {live ? (
         <div data-testid="lean-live-turn">
           {live.routing && !live.order.length ? <div className="lm-routing" aria-hidden><span className="lm-dots"><i /><i /><i /></span></div> : null}

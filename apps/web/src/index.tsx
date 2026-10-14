@@ -45,7 +45,7 @@ import {
   type DesktopWorkspaceSurface,
 } from "./desktop/workspaceState";
 import { isStreamThreadCurrent } from "./agentActivity";
-import { type ActivityItem, type AgentStreamEvent, type ApprovalDecisionEnvelope, type Message, type PendingActionEnvelope, type Role, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse } from "./app/types";
+import { type ActivityItem, type AgentStreamEvent, type Message, type Role, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse } from "./app/types";
 import { buildMessageUsage } from "./app/toolDisplay";
 import { colors, fetchWithTimeout, isEmptySessionDraft, normalizeTimestampMs, stopTts, useAppStore } from "./app/runtime";
 import { ComposerToolbar, type ReasoningEffort } from "./dashboard/ComposerToolbar";
@@ -134,8 +134,6 @@ export const Dashboard: React.FC<{
   // welcome messages, and activity rows from flashing and then disappearing.
   const [initialHydrationComplete, setInitialHydrationComplete] = useState(false);
   const [threadState, setThreadState] = useState<ThreadSessionState | null>(() => (desktopBootstrap?.thread_state || null) as ThreadSessionState | null);
-  const [pendingApproval, setPendingApproval] = useState<PendingActionEnvelope | null>(null);
-  const [approvalDecisionBusy, setApprovalDecisionBusy] = useState<boolean>(false);
 
   const [threads, setThreads] = useState<{ id: string; name: string; at: number; projectId?: string; messageCount?: number }[]>(() =>
     (desktopBootstrap?.threads || []).map((item: any) => ({
@@ -322,7 +320,6 @@ export const Dashboard: React.FC<{
       localStorage.setItem("echospeak.thread_id", activeThreadId);
       loadHistory(activeThreadId);
       refreshThreadState(activeThreadId);
-      refreshPendingApproval(activeThreadId);
     }
   }, [activeThreadId, initialHydrationComplete]);
 
@@ -479,84 +476,6 @@ export const Dashboard: React.FC<{
     }
   };
 
-  const refreshPendingApproval = async (threadId: string = activeThreadId) => {
-    if (!threadId) return null;
-    try {
-      const resp = await fetchWithTimeout(`${apiBase}/pending-action?thread_id=${encodeURIComponent(threadId)}`, undefined, 5000);
-      if (!resp.ok) throw new Error(`Pending action failed (${resp.status})`);
-      const data = (await resp.json()) as PendingActionEnvelope;
-      if (activeThreadIdRef.current !== threadId) return data;
-      setPendingApproval(data);
-      return data;
-    } catch (e) {
-      console.error("Failed to refresh pending approval:", e);
-      return null;
-    }
-  };
-
-  const decideApproval = async (approvalId: string, decision: "confirm" | "cancel") => {
-    if (!approvalId || approvalDecisionBusy) return;
-    const expectedSessionId = String(activeThreadIdRef.current || "").trim();
-    if (!expectedSessionId) return;
-    // Disable immediately so duplicate rapid clicks cannot fire a second mutation.
-    setApprovalDecisionBusy(true);
-    try {
-      const resp = await fetchWithTimeout(
-        `${apiBase}/approvals/${encodeURIComponent(approvalId)}/${decision}?expected_session_id=${encodeURIComponent(expectedSessionId)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        },
-        30000,
-        // Mutations must never auto-replay on 429.
-        { retrySafeGetOn429: false },
-      );
-      if (!resp.ok) {
-        const detail = await resp.text().catch(() => "");
-        if (resp.status === 409) {
-          throw new Error("That approval is stale or already consumed; nothing was re-executed.");
-        }
-        if (resp.status === 429) {
-          // Do not retry mutation. Surface rate limit honestly.
-          throw new Error("Rate limited while confirming. The approval was not re-sent automatically.");
-        }
-        throw new Error(`Approval failed (${resp.status}): ${detail}`);
-      }
-      const data = (await resp.json()) as ApprovalDecisionEnvelope;
-      if (activeThreadIdRef.current !== expectedSessionId) return;
-      if (data.thread_state) {
-        setThreadState(data.thread_state);
-      }
-      // Terminal projection: clear pending only after successful HTTP response.
-      setPendingApproval(null);
-      if (data.response) {
-        addMessage({
-          id: crypto.randomUUID(),
-          role: "assistant",
-          text: data.response,
-          at: Date.now(),
-          skipTypewriter: true,
-          operation: data.thread_state ? {
-            state: data.thread_state,
-            success: Boolean(data.success),
-            executionId: data.execution_id || undefined,
-          } : undefined,
-        });
-      }
-    } catch (error) {
-      if (activeThreadIdRef.current !== expectedSessionId) return;
-      const message = error instanceof Error ? error.message : String(error);
-      addMessage({ id: crypto.randomUUID(), role: "assistant", text: message, at: Date.now(), skipTypewriter: true });
-    } finally {
-      setApprovalDecisionBusy(false);
-      if (activeThreadIdRef.current === expectedSessionId) {
-        // Hydration failures must not look like mutation failure (safe GET may retry once).
-        await refreshThreadState(expectedSessionId);
-        await refreshPendingApproval(expectedSessionId);
-      }
-    }
-  };
-
   const refreshProjects = async () => {
     try {
       const res = await fetch(`${apiBase}/projects`);
@@ -616,7 +535,6 @@ export const Dashboard: React.FC<{
         useAppStore.setState({ messages: [] });
         setActivities([]);
         clearResearchRuns();
-        setPendingApproval(null);
         setStreaming(false);
         return nextThread.id;
       } catch (e) {
@@ -655,7 +573,6 @@ export const Dashboard: React.FC<{
     useAppStore.setState({ messages: cachedProjection?.messages || [] });
     setActivities(cachedProjection?.activities || []);
     clearResearchRuns();
-    setPendingApproval(null);
   };
 
   const deleteThread = async (id: string) => {
@@ -675,7 +592,6 @@ export const Dashboard: React.FC<{
         setActiveThreadId("");
         useAppStore.setState({ messages: [] });
         setActivities([]);
-        setPendingApproval(null);
         setThreadState(null);
         setActiveProjectId("");
       }
@@ -886,7 +802,6 @@ export const Dashboard: React.FC<{
     activityLen,
     streaming,
     speaking,
-    pendingApproval?.has_pending,
     scrollChatToBottom,
   ]);
 
@@ -1253,7 +1168,6 @@ export const Dashboard: React.FC<{
       }
       if (!finalHandled && streamThreadId && !aborted && sameThread) {
         void refreshThreadState(streamThreadId);
-        void refreshPendingApproval(streamThreadId);
       }
       if (finalHandled && !aborted && sameThread) {
         window.setTimeout(async () => {
@@ -2003,8 +1917,6 @@ export const Dashboard: React.FC<{
                     onEditRoom={(room) => setRoomDialog({ open: true, room })}
                     timeline={timeline} live={lean.live} providerInfo={providerInfo}
                     onQuickReply={(text) => void sendText(text)}
-                    pendingApproval={pendingApproval} threadState={threadState}
-                    approvalDecisionBusy={approvalDecisionBusy} onApprovalDecision={decideApproval}
                     onLeanApproval={decideLeanApproval}
                     actions={{ onRevise: reviseMessage, onRead: readMessage, onFeedback: (message, value, note) => leanClient.feedback(message.executionId || "", value, note || "", message.lean?.agent?.id || ""), readingId: speaking ? readingId : "", actionBusy: messageActionBusy }}
                     voiceStage={voiceConversationMode ? <VoiceStage apiBase={apiBase} phase={voicePhase} notice={voiceNotice} listening={listening} speaking={speaking} streaming={streaming} native={nativeLiveVoice} level={voiceInputLevel} tool={activityItems.find(item => item.status === "running")?.label || ""} online={Boolean(backendOnline)} onListen={() => { if (streaming) stopActiveTurn(); void start(); }} onPause={pauseVoice} onEnd={toggleVoiceMode} onSettings={openVoiceSettings} /> : undefined}
