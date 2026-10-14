@@ -145,10 +145,8 @@ TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
         "description": "Current weather and today's forecast for a place, from a weather API. "
         "Use this rather than web_search for weather.",
     },
-    "take_screenshot": {"description": "Save a screenshot of the screen to an image file. "
-                        "To read what's on screen use analyze_screen; to ask about it use vision_qa."},
-    "analyze_screen": {"description": "Read the text currently on screen (OCR)."},
-    "vision_qa": {"description": "Answer a question about what is currently on screen, using a vision model."},
+    "analyze_screen": {"description": "Read the text on screen with OCR. Only for models that cannot see images; "
+                       "otherwise use take_screenshot, which shows you the actual screen."},
 }
 
 

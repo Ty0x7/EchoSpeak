@@ -734,7 +734,6 @@ class TestIntegration:
             analyze_screen,
             get_system_time,
             calculate,
-            take_screenshot,
             get_available_tools
         )
 
