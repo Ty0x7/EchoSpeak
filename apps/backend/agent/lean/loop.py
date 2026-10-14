@@ -811,7 +811,7 @@ class LeanTurn:
                     item["detail"] = text
             self.emit({"type": "tool_progress", "step": step, "id": call.id, "text": text})
 
-        with self._span("tool.run", step=step, tool=name) as span, progress.reporting(emit):
+        with self._span("tool.run", step=step, tool=name) as span, progress.reporting(emit, cancel=self.cancel):
             result = self.toolbox.run(name, args)
             span.set(ok=bool(result.ok), output_chars=len(result.output or ""))
             if not result.ok:

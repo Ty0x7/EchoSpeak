@@ -9,12 +9,15 @@ anyone is listening. Reports are throttled so a chatty tool can't flood the stre
 
 from __future__ import annotations
 
+import threading
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Callable, Iterator, Optional
 
 _sink: ContextVar[Optional[Callable[[str], None]]] = ContextVar("echospeak_tool_progress", default=None)
+# The running turn's Stop, for tools that wait a long time (MCP tasks, agent/mcp_tasks.py).
+_cancel: ContextVar[Optional[threading.Event]] = ContextVar("echospeak_tool_cancel", default=None)
 
 # At most this many updates a second per tool; the latest one always wins at the end.
 _MIN_GAP = 0.25
@@ -30,9 +33,15 @@ def report(text: str) -> None:
         sink(line)
 
 
+def stop_requested() -> bool:
+    """The user stopped the turn this tool is running for."""
+    event = _cancel.get()
+    return bool(event is not None and event.is_set())
+
+
 @contextmanager
-def reporting(emit: Callable[[str], None]) -> Iterator[None]:
-    """Route ``report`` calls made in this context to ``emit``, throttled."""
+def reporting(emit: Callable[[str], None], cancel: Optional[threading.Event] = None) -> Iterator[None]:
+    """Route ``report`` calls made in this context to ``emit``, throttled; expose the turn's Stop."""
     state = {"at": 0.0, "last": ""}
 
     def throttled(line: str) -> None:
@@ -44,11 +53,12 @@ def reporting(emit: Callable[[str], None]) -> Iterator[None]:
         state.pop("pending", None)
         emit(line)
 
-    token = _sink.set(throttled)
+    token, stop = _sink.set(throttled), _cancel.set(cancel)
     try:
         yield
     finally:
         _sink.reset(token)
+        _cancel.reset(stop)
         pending = state.get("pending")
         if pending and pending != state["last"]:
             emit(str(pending))

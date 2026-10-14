@@ -9,6 +9,7 @@ authority unless a reviewed configuration explicitly accepts them.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import json
 import re
@@ -192,6 +193,16 @@ class MCPSession:
         self._stop_event: Optional[asyncio.Event] = None
         self._ready = threading.Event()
         self._closed = False
+        # Set when the user stops a turn waiting on a long task; the task is then cancelled on the server.
+        self._stop_tasks = threading.Event()
+
+    def _task_status(self, text: str) -> None:
+        self.state.last_progress = {"message": str(text)[:300], "at": time.time()}
+
+    @property
+    def runs_tasks(self) -> bool:
+        from agent import mcp_tasks
+        return mcp_tasks.server_supports(self.state.server_capabilities)
 
     def start(self) -> bool:
         if not _SDK_AVAILABLE:
@@ -327,6 +338,14 @@ class MCPSession:
                             sse_read_timeout=max(60.0, self.state.timeout_s),
                         )
                     )
+            from agent import mcp_tasks
+
+            # Long tool calls (agent/mcp_tasks.py): declare the Tasks extension and poll handles to the end.
+            tasks = (
+                {"extensions": {mcp_tasks.EXTENSION: {}},
+                 "result_claims": mcp_tasks.claims(self._task_status, self._stop_tasks.is_set)}
+                if _SDK_MAJOR >= 2 and mcp_tasks.supported() else {}
+            )
             session = await stack.enter_async_context(
                 ClientSession(
                     read_stream,
@@ -335,6 +354,7 @@ class MCPSession:
                         timedelta(seconds=self.state.timeout_s) if _SDK_MAJOR == 1 else float(self.state.timeout_s)
                     ),
                     message_handler=self._message_handler,
+                    **tasks,
                 )
             )
             if _negotiate_auto is not None:
@@ -427,12 +447,36 @@ class MCPSession:
         )
         return _model_dump(result)
 
+    def _wait_for_call(self, coroutine: Any) -> Any:
+        """Wait for one tool call. A server that runs tasks may take up to TASK_SECONDS:
+        its status shows on the tool's progress line, and Stop cancels the task on the server."""
+        from agent import mcp_tasks
+        from agent.lean import progress
+
+        if not self.runs_tasks:
+            return self._submit(coroutine, timeout=self.state.timeout_s + 2.0)
+        if not self.state.running or self._loop is None or self._session is None:
+            raise RuntimeError(self.state.last_error or "MCP session is not running")
+        self._stop_tasks.clear()
+        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        deadline, shown = time.monotonic() + mcp_tasks.TASK_SECONDS + 60, None
+        while True:
+            try:
+                return future.result(timeout=0.5)
+            except concurrent.futures.TimeoutError:
+                message = self.state.last_progress.get("message")
+                if message and message != shown:
+                    progress.report(message)
+                    shown = message
+                if progress.stop_requested():
+                    self._stop_tasks.set()  # the claim cancels the task and returns at its next poll
+                if time.monotonic() > deadline:
+                    future.cancel()
+                    raise TimeoutError("The MCP task did not finish in time")
+
     def call_tool(self, name: str, arguments: Optional[dict] = None) -> str:
         try:
-            result = self._submit(
-                self._call_tool(str(name), dict(arguments or {})),
-                timeout=self.state.timeout_s + 2.0,
-            )
+            result = self._wait_for_call(self._call_tool(str(name), dict(arguments or {})))
             # Preserve structuredContent, rich content, resource links and
             # error state. The governed ToolOutcome boundary owns semantics.
             return json.dumps(_drop_duplicate_text(result), ensure_ascii=False, separators=(",", ":"))
