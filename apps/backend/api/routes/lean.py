@@ -439,6 +439,53 @@ def mcp_app_context(app_id: str, request: AppContext, session_id: str = Query(..
     return {}
 
 
+class RemoteAgentRequest(BaseModel):
+    url: str
+    fingerprint: str = ""
+    token: str = ""
+
+
+@router.get("/a2a/agents")
+def remote_agents() -> dict[str, Any]:
+    """Other agents you pinned for ask_remote_agent (agent/a2a_trust.py). Tokens never leave the broker."""
+    from agent import a2a_trust
+    return {"items": [{k: v for k, v in a.items() if k != "token_ref"} | {"has_token": bool(a.get("token_ref"))}
+                      for a in a2a_trust.trusted_agents()]}
+
+
+@router.post("/a2a/agents/inspect")
+def inspect_remote_agent(request: RemoteAgentRequest) -> dict[str, Any]:
+    """Fetch and verify an agent's signed card, and show the fingerprint to confirm."""
+    from agent import a2a_trust, privacy
+    try:
+        return a2a_trust.inspect_agent(request.url)
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(400, detail=str(exc)[:300]) from exc
+
+
+@router.post("/a2a/agents")
+def trust_remote_agent(request: RemoteAgentRequest) -> dict[str, Any]:
+    """Pin an agent, only if its card is still signed by the key whose fingerprint you confirmed."""
+    from agent import a2a_trust, privacy
+    try:
+        info = a2a_trust.inspect_agent(request.url)
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(400, detail=str(exc)[:300]) from exc
+    if not request.fingerprint or request.fingerprint != info["fingerprint"]:
+        raise HTTPException(409, detail="The agent's key changed since you looked. Check it again before trusting it.")
+    return a2a_trust.trust(info, request.token.strip())
+
+
+@router.delete("/a2a/agents")
+def forget_remote_agent(url: str = Query(...)) -> dict[str, Any]:
+    from agent import a2a_trust
+    return {"removed": a2a_trust.forget(url)}
+
+
 @router.get("/mcp/signin")
 def mcp_sign_ins() -> dict[str, Any]:
     """Hosted servers that sign in, and where each one stands (agent/mcp_oauth.py)."""

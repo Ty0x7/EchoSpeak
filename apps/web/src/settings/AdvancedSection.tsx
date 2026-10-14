@@ -601,6 +601,67 @@ function McpSignIns({ apiBase }: { apiBase: string }) {
   );
 }
 
+type RemoteAgent = { name: string; url: string; fingerprint: string; has_token?: boolean; skills?: string[]; description?: string };
+
+/** Other agents Echo may ask (backend: agent/a2a_trust.py). Only agents whose signed card you confirmed. */
+function RemoteAgents({ apiBase }: { apiBase: string }) {
+  const [items, setItems] = useState<RemoteAgent[]>([]);
+  const [url, setUrl] = useState("");
+  const [token, setToken] = useState("");
+  const [checked, setChecked] = useState<RemoteAgent | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/lean/a2a/agents`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setItems(Array.isArray(data?.items) ? data.items : []);
+    } catch {
+      setItems([]);
+    }
+  }, [apiBase]);
+  useEffect(() => { void load(); }, [load]);
+  const call = async (path: string, init: RequestInit) => {
+    const res = await fetch(`${apiBase}/lean/a2a/agents${path}`, init);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(String(data?.detail || `Request failed (${res.status})`));
+    return data;
+  };
+  const run = async (step: () => Promise<void>) => {
+    setBusy(true);
+    setError("");
+    try { await step(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  const json = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return (
+    <>
+      {items.map((agent) => (
+        <Row key={agent.url} label={<span><b>{agent.name}</b> · <span className="st-muted">{agent.url}</span></span>}
+          help={`Key fingerprint ${agent.fingerprint.slice(0, 16)}…${agent.has_token ? " · token saved" : ""}. Echo asks you before every message it sends.`}>
+          <button type="button" className="es-btn es-btn-sm" disabled={busy}
+            onClick={() => void run(async () => { await call(`?url=${encodeURIComponent(agent.url)}`, { method: "DELETE" }); await load(); })}>Remove</button>
+        </Row>
+      ))}
+      <Row label="Add an agent" help="Its address. Echo checks that its card is signed by a key it publishes, then shows you that key's fingerprint to confirm." stack>
+        <TextField wide mono value={url} placeholder="https://agent.example.com" onCommit={(v) => { setUrl(v.trim()); setChecked(null); }} />
+        <SecretField isSet={Boolean(token)} onCommit={(v) => setToken(v)} />
+        <div className="st-inline-actions">
+          <button type="button" className="es-btn es-btn-sm" disabled={busy || !url}
+            onClick={() => void run(async () => setChecked(await call("/inspect", json({ url }))))}>Check</button>
+        </div>
+      </Row>
+      {checked ? (
+        <Row label={<span><b>{checked.name}</b> wants to be trusted</span>}
+          help={`Key fingerprint: ${checked.fingerprint}. Compare it with what the agent's owner gave you.${checked.skills?.length ? ` Skills: ${checked.skills.join(", ")}.` : ""}`}>
+          <button type="button" className="es-btn es-btn-sm es-btn-primary" disabled={busy}
+            onClick={() => void run(async () => { await call("", json({ url, fingerprint: checked.fingerprint, token })); setChecked(null); setUrl(""); setToken(""); await load(); })}>Trust</button>
+        </Row>
+      ) : null}
+      {error ? <Row label={<span className="st-muted">{error}</span>} /> : null}
+    </>
+  );
+}
+
 type SuggestionSetting = { name: string; secret?: boolean; required?: boolean; default?: string; about?: string };
 type Suggestion = {
   id: string; title: string; summary: string; publisher: string; version: string; server_name: string;
@@ -851,6 +912,9 @@ function ConnectionsPage({ s, save, apiBase, sessionId, projectId }: { s: Settin
         {byCategory("skills").map((card) => (
           <Row key={card.id} label={nameOf(card)} help={card.issue || `${card.capabilities?.length || 0} tools`} />
         ))}
+      </Group>
+      <Group title="Other agents (A2A)" description="AI agents Echo may ask for help, such as another EchoSpeak. Only agents whose signed card you confirm here; their answers count as outside content.">
+        <RemoteAgents apiBase={apiBase} />
       </Group>
       <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide. A new or changed server waits for your approval before it runs, and so does any connection Echo suggests.">
         <ConnectionSuggestions apiBase={apiBase} />

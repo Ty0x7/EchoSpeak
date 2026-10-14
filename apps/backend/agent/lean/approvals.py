@@ -23,7 +23,7 @@ EXTERNAL_TOOLS = {
     "email_send", "email_reply",
     "discord_send_channel", "discord_web_send", "discord_contacts_add",
     "telegram_send", "whatsapp_send", "slack_send", "twitter_post", "tweet_post",
-    "calendar_create", "calendar_delete", "github_create_issue", "github_comment",
+    "calendar_create", "calendar_delete", "github_create_issue", "github_comment", "ask_remote_agent",
     "notion_create_page", "spotify_control",
 }
 

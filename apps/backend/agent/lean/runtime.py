@@ -24,7 +24,7 @@ from agent.lean.coding import coding_tools, project_overview
 from agent.integrations import integration_tools
 from agent.lean.computer import tools as computer_tools
 from agent.lean import tool_outputs
-from agent import mcp_apps
+from agent import a2a_trust, mcp_apps
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
@@ -894,7 +894,8 @@ class LeanSession:
                 + terminal.tools()
                 + integration_tools(self.session_id)
                 + computer_tools(self.session_id, self.cancel)
-                + [tool_outputs.tool(self.session_id)],
+                + [tool_outputs.tool(self.session_id)]
+                + a2a_trust.tool(),
                 session_id=self.session_id,
                 project_root=self.project_root,
             )

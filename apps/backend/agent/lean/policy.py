@@ -41,6 +41,8 @@ UNTRUSTED_SOURCES = {
     "document_search", "research_notebook",
     # MCP registry listings and third-party servers' error text (agent/integrations.py).
     "find_integrations", "check_integration",
+    # Replies from other agents (agent/a2a_trust.py).
+    "ask_remote_agent",
 }
 
 # (C) Actions that leave the machine, speak for the user, or persist something
@@ -52,7 +54,7 @@ EXTERNAL_ACTIONS = {
     "discord_send_channel", "discord_web_send", "discord_contacts_add",
     "telegram_send", "whatsapp_send", "slack_send", "twitter_post", "tweet_post",
     "calendar_create", "calendar_delete", "github_create_issue", "github_comment",
-    "notion_create_page", "spotify_control",
+    "notion_create_page", "spotify_control", "ask_remote_agent",
     "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
     # Saved memories and the soul are re-read in every future chat: writing one
     # from untrusted content would plant a persistent injection.

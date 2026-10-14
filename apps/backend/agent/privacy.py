@@ -109,6 +109,7 @@ TOOL_COMPONENTS: dict[str, str] = {
     "email_get_thread": "channels", "discord_send_channel": "channels", "discord_read_channel": "channels",
     "discord_web_send": "channels", "discord_web_read_recent": "channels", "discord_contacts_discover": "channels",
     "telegram_send": "channels", "twitter_post": "channels", "tweet_post": "channels",
+    "ask_remote_agent": "a2a",
 }
 
 NOT_ENFORCED = (

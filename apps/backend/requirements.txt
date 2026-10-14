@@ -45,6 +45,8 @@ python-multipart>=0.0.6
 # Configuration and environment
 python-dotenv>=1.0.0
 pydantic>=2.5.0
+# Signs and checks A2A Agent Cards (agent/a2a_trust.py); MCP sign-in uses it too.
+cryptography>=42
 
 # Logging
 loguru>=0.7.0

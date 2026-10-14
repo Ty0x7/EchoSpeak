@@ -56,7 +56,7 @@ TOOLSETS: dict[str, list[str]] = {
     "memory": ["memory_save", "memory_search", "chat_search", "document_search", "soul_update"],
     # Skill, MCP, and Connection tools that registered at runtime, plus finding,
     # proposing and checking new connections (agent/integrations.py).
-    "skills": ["@external", "find_tools", "find_integrations", "propose_integration", "check_integration"],
+    "skills": ["@external", "find_tools", "find_integrations", "propose_integration", "check_integration", "ask_remote_agent"],
 }
 
 # External tools sent with every request before the rest wait for find_tools.
