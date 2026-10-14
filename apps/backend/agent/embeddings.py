@@ -20,10 +20,14 @@ from typing import Any, Optional
 
 from loguru import logger
 
-try:
-    from langchain_core.embeddings import Embeddings
-except ImportError:  # pragma: no cover - langchain is a hard dependency today
-    Embeddings = object  # type: ignore[misc,assignment]
+class Embeddings:
+    """What every embedding backend provides (agent/vector_store.py searches with it)."""
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        raise NotImplementedError
+
+    def embed_query(self, text: str) -> list[float]:
+        raise NotImplementedError
 
 from config import DATA_DIR
 

@@ -149,7 +149,7 @@ async def lifespan(app: FastAPI):
                     ensure_selected_model_ready,
                     ModelProvider.LM_STUDIO.value,
                     model_id,
-                    llm=prewarmed_agent.model_runtime.llm,
+                    base_url=prewarmed_agent.model_runtime.base_url,
                     profile=profile,
                     timeout=float(
                         getattr(config, "turn_understanding_cold_start_timeout_seconds", 120.0)

@@ -773,7 +773,7 @@ class MCPManager:
             return  # app-only: its view may call it, the agent never sees it
         if resource_uri:
             self.ui_tools[registered_name] = {"server": server_name, "tool": raw_name, "resource_uri": resource_uri}
-        tool = self._make_langchain_tool(
+        tool = self._make_tool(
             registered_name,
             description,
             session,
@@ -805,7 +805,7 @@ class MCPManager:
         self._registered_names.append(registered_name)
 
     @staticmethod
-    def _make_langchain_tool(
+    def _make_tool(
         registered_name: str,
         description: str,
         session: MCPSession,
@@ -821,7 +821,7 @@ class MCPManager:
             )
 
         try:
-            from langchain_core.tools import StructuredTool
+            from agent.tool_decorator import Tool
             from pydantic import Field, create_model
             from typing import Any as TypingAny
             from typing import Optional as TypingOptional
@@ -840,14 +840,9 @@ class MCPManager:
                 f"MCPArgs_{re_sub_safe(registered_name)}"[:80],
                 **fields,
             )
-            return StructuredTool.from_function(
-                func=invoke,
-                name=registered_name,
-                description=description,
-                args_schema=args_model,
-            )
+            return Tool(invoke, name=registered_name, description=description, args_schema=args_model)
         except Exception as exc:
-            logger.debug("MCP StructuredTool build failed for {}: {}", registered_name, exc)
+            logger.debug("MCP tool schema build failed for {}: {}", registered_name, exc)
 
             class MCPToolShim:
                 name = registered_name

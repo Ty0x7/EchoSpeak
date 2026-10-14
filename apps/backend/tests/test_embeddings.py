@@ -109,7 +109,7 @@ def test_uploaded_documents_count_as_outside_content():
 
 def test_document_index_rebuilds_from_canonical_text_after_embedding_size_change(tmp_path):
     from agent.document_store import DocumentStore
-    from langchain_core.embeddings import Embeddings
+    from agent.embeddings import Embeddings
 
     class FixedEmbeddings(Embeddings):
         def __init__(self, dim):

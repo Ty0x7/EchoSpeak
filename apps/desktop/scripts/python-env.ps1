@@ -8,7 +8,7 @@
 # Packages the installed app can't work without. PyInstaller is listed so a
 # Python that can't build at all fails here with the same clear message.
 $EchoBundleModules = @(
-    "PyInstaller", "langchain_core", "langchain_community", "faster_whisper", "onnxruntime", "tokenizers",
+    "PyInstaller", "numpy", "faiss", "faster_whisper", "onnxruntime", "tokenizers",
     "ddgs", "primp", "lxml", "trafilatura"
 )
 

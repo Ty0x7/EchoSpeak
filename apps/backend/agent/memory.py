@@ -18,18 +18,7 @@ from typing import List, Optional, Dict, Any, Iterable, Tuple
 from datetime import datetime
 from loguru import logger
 
-try:
-    from langchain_core.documents import Document
-except ImportError:
-    try:
-        from langchain.schema import Document
-    except ImportError:
-        from langchain.docstore.document import Document
-try:
-    from langchain_openai import OpenAIEmbeddings
-except ImportError:
-    OpenAIEmbeddings = None
-from langchain_community.vectorstores import FAISS
+from agent.vector_store import Document, OpenAICompatibleEmbeddings, VectorStore, has_index
 
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -113,7 +102,7 @@ class AgentMemory:
         self.file_memory_log_conversations = bool(getattr(config, "file_memory_log_conversations", True))
         self.file_memory_max_chars = int(getattr(config, "file_memory_max_chars", 2000) or 2000)
         self.partition_enabled = bool(getattr(config, "memory_partition_enabled", False))
-        self._vector_stores: Dict[str, FAISS] = {}
+        self._vector_stores: Dict[str, VectorStore] = {}
         self.embedding_health: Dict[str, Any] = {
             "available": False,
             "provider": "none",
@@ -129,9 +118,7 @@ class AgentMemory:
         self._embedding_dim = 0
         self._index_needs_rebuild = False
         if embedding_provider in {ModelProvider.OPENAI, ModelProvider.LM_STUDIO}:
-            if OpenAIEmbeddings is None:
-                logger.warning("langchain-openai not installed; falling back to local embeddings")
-            elif embedding_provider == ModelProvider.OPENAI and not api_key:
+            if embedding_provider == ModelProvider.OPENAI and not api_key:
                 # A missing credential is a readiness state, not a failed
                 # provider attempt. Never construct or call the OpenAI client.
                 logger.info("OpenAI embeddings skipped: OPENAI_API_KEY is not configured")
@@ -144,22 +131,15 @@ class AgentMemory:
             else:
                 try:
                     if embedding_provider == ModelProvider.OPENAI:
-                        self.embeddings = OpenAIEmbeddings(model=embedding_model, api_key=api_key)
+                        self.embeddings = OpenAICompatibleEmbeddings(embedding_model, "https://api.openai.com/v1", api_key)
                         self.embedding_health = {"available": True, "provider": "openai", "model": embedding_model, "detail": "Ready"}
                     else:
                         base_url = getattr(getattr(config, "local", None), "base_url", "http://localhost:1234")
                         base_url = str(base_url or "").rstrip("/")
                         if not base_url.endswith("/v1"):
                             base_url = base_url + "/v1"
-                        self.embeddings = OpenAIEmbeddings(
-                            model=embedding_model,
-                            api_key=api_key or "lm-studio",
-                            base_url=base_url,
-                            # Some OpenAI-compatible servers (LM Studio, llama.cpp server, etc.)
-                            # reject token-id inputs and require strings. Disabling tiktoken
-                            # ensures we send strings rather than token arrays.
-                            tiktoken_enabled=False,
-                        )
+                        # Strings, never token arrays: LM Studio and llama.cpp reject token ids.
+                        self.embeddings = OpenAICompatibleEmbeddings(embedding_model, base_url, api_key or "lm-studio")
                         logger.info(f"Using LM Studio embeddings at {base_url}")
                         self.embedding_health = {"available": True, "provider": "lm_studio", "model": embedding_model, "detail": "Ready"}
                 except Exception as e:
@@ -928,20 +908,16 @@ class AgentMemory:
     def _has_index_files(self, path: Path) -> bool:
         if not path.exists() or not path.is_dir():
             return False
-        return any((path / name).exists() for name in ["index.faiss", "index.pkl"])
+        return has_index(path)
 
-    def _load_or_create_vectorstore(self, path: Path, create_if_missing: bool = True) -> Optional[FAISS]:
+    def _load_or_create_vectorstore(self, path: Path, create_if_missing: bool = True) -> Optional[VectorStore]:
         if self.use_faiss and self._has_index_files(path):
             try:
                 from agent.index_integrity import check as _check_index
 
                 _check_index(path)  # a pickle changed outside EchoSpeak is never loaded
-                vector_store = FAISS.load_local(
-                    str(path),
-                    self.embeddings,
-                    allow_dangerous_deserialization=True,
-                )
-                stored_dim = int(getattr(getattr(vector_store, "index", None), "d", 0) or 0)
+                vector_store = VectorStore.load_local(path, self.embeddings)
+                stored_dim = vector_store.dim
                 if self._embedding_dim and stored_dim and stored_dim != self._embedding_dim:
                     # A different embedding model: the old vectors can't be searched
                     # with the new one. records.json is the source of truth, so rebuild.
@@ -966,9 +942,9 @@ class AgentMemory:
         if not create_if_missing:
             return None
         path.mkdir(parents=True, exist_ok=True)
-        return FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+        return VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
 
-    def _get_vector_store(self, mode: str, thread_id: str, create_if_missing: bool) -> Optional[FAISS]:
+    def _get_vector_store(self, mode: str, thread_id: str, create_if_missing: bool) -> Optional[VectorStore]:
         if not self.use_faiss or self.embeddings is None:
             return None
         if not self.partition_enabled:
@@ -1014,7 +990,7 @@ class AgentMemory:
                 if thread_dir.is_dir():
                     yield thread_dir, mode_dir.name, thread_dir.name
 
-    def _iter_vector_stores(self, mode: Optional[str], thread_id: Optional[str]) -> Iterable[Tuple[Path, FAISS]]:
+    def _iter_vector_stores(self, mode: Optional[str], thread_id: Optional[str]) -> Iterable[Tuple[Path, VectorStore]]:
         if not self.partition_enabled:
             if self.vector_store is not None:
                 yield self.memory_root, self.vector_store
@@ -1031,7 +1007,7 @@ class AgentMemory:
             self._vector_stores[cache_key] = store
             yield path, store
 
-    def _iter_store_records(self, store: FAISS) -> Iterable[Tuple[str, str, Dict[str, Any]]]:
+    def _iter_store_records(self, store: VectorStore) -> Iterable[Tuple[str, str, Dict[str, Any]]]:
         store_obj = getattr(store, "docstore", None)
         d = getattr(store_obj, "_dict", None) if store_obj is not None else None
         if isinstance(d, dict):
@@ -1052,7 +1028,7 @@ class AgentMemory:
                 continue
             yield str(ids[i]), docs[i] or "", meta if isinstance(meta, dict) else {}
 
-    def _save_vector_store(self, store: FAISS, path: Path) -> bool:
+    def _save_vector_store(self, store: VectorStore, path: Path) -> bool:
         if store is None:
             return False
         try:
@@ -1067,7 +1043,7 @@ class AgentMemory:
             logger.error(f"Failed to save memory: {e}")
             return False
 
-    def _search_store(self, store: FAISS, query: str, k: int) -> List[Tuple[Document, Optional[float]]]:
+    def _search_store(self, store: VectorStore, query: str, k: int) -> List[Tuple[Document, Optional[float]]]:
         if store is None:
             return []
         if hasattr(store, "similarity_search_with_score"):
@@ -1373,10 +1349,10 @@ class AgentMemory:
 
     def _rebuild_store_with_optional_upsert(
         self,
-        store: FAISS,
+        store: VectorStore,
         exclude_ids: set[str],
         upsert: Optional[Tuple[str, str, Dict[str, Any]]],
-    ) -> FAISS:
+    ) -> VectorStore:
         kept_ids: List[str] = []
         kept_texts: List[str] = []
         kept_metas: List[Dict[str, Any]] = []
@@ -1391,7 +1367,7 @@ class AgentMemory:
             kept_ids.append(str(uid))
             kept_texts.append(str(utext or ""))
             kept_metas.append(umeta if isinstance(umeta, dict) else {})
-        new_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+        new_store = VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
         if kept_texts:
             try:
                 new_store.add_texts(kept_texts, metadatas=kept_metas, ids=kept_ids)
@@ -1896,7 +1872,7 @@ class AgentMemory:
                 if deleted <= 0:
                     continue
                 deleted_total += deleted
-                new_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+                new_store = VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
                 if kept_texts:
                     try:
                         new_store.add_texts(kept_texts, metadatas=kept_metas, ids=kept_ids)
@@ -1948,7 +1924,7 @@ class AgentMemory:
         if deleted <= 0:
             return 0
 
-        self.vector_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+        self.vector_store = VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
         if kept_texts:
             try:
                 self.vector_store.add_texts(kept_texts, metadatas=kept_metas, ids=kept_ids)
@@ -2148,7 +2124,7 @@ class AgentMemory:
             self._save_records()
             return {"ok": True, "indexed": 0, "active_records": len(active), "faiss": False}
         try:
-            self.vector_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+            self.vector_store = VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
             if texts:
                 try:
                     self.vector_store.add_texts(texts, metadatas=metas, ids=ids)
@@ -2323,11 +2299,11 @@ class AgentMemory:
         if self.use_faiss:
             if self.partition_enabled:
                 for path, _store in list(self._iter_vector_stores(None, None)):
-                    new_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+                    new_store = VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
                     self._save_vector_store(new_store, path)
                     self._vector_stores[str(path)] = new_store
             else:
-                self.vector_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+                self.vector_store = VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
                 self._save_to_disk()
         else:
             self.simple_memory = []
