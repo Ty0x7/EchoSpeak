@@ -33,6 +33,7 @@ import { leanApi } from "./lean/api";
 import { AgentRows, CollapsedRoster } from "./lean/Roster";
 import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
 import { AGENTS_CHANGED } from "./settings/DesktopControlOffer";
+import { COMPOSE_EVENT } from "./widgets/McpAppView";
 import type { ObservationRef } from "./widgets/types";
 import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, lastReplyId, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
 import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
@@ -165,6 +166,17 @@ export const Dashboard: React.FC<{
       // Older backends without the lean runtime simply show no roster.
     }
   }, [leanClient]);
+  useEffect(() => {
+    // An MCP App view asked to say something (ui/message): it waits in the composer for you to send.
+    const onCompose = (event: Event) => {
+      const text = String((event as CustomEvent).detail || "");
+      if (!text) return;
+      setInput(text);
+      window.setTimeout(() => textareaRef.current?.focus(), 0);
+    };
+    window.addEventListener(COMPOSE_EVENT, onCompose);
+    return () => window.removeEventListener(COMPOSE_EVENT, onCompose);
+  }, []);
   useEffect(() => {
     const onAgentsChanged = () => void refreshRoster();
     window.addEventListener(AGENTS_CHANGED, onAgentsChanged);

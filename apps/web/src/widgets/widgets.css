@@ -469,3 +469,12 @@ body.rp-resizing iframe { pointer-events: none; }
 .rp-trace-row[data-kind="wait"] .rp-trace-track i { background: var(--es-warn); }
 .rp-trace-row[data-failed] .rp-trace-track i { background: var(--es-err); }
 .rp-trace-ms { color: var(--wg-faint); font: 500 11px var(--wg-mono); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* MCP Apps (McpAppView): a server's own view, framed by the chat's card style. */
+.es-mcp-app { display: grid; gap: 6px; margin: 6px 0; min-width: 0; }
+.es-mcp-app figcaption { display: flex; align-items: baseline; gap: 8px; color: var(--wg-dim); font: 500 12px var(--wg-font); }
+.es-mcp-app figcaption strong { color: var(--wg-text); font-weight: 600; }
+.es-mcp-app figcaption small { color: var(--wg-faint); font: 500 11px var(--wg-mono); }
+.es-mcp-app iframe { display: block; width: 100%; max-width: 100%; border: 0; border-radius: 10px; background: var(--es-surface-1); }
+.es-mcp-app.has-border iframe { border: 1px solid var(--wg-line); }
+.es-mcp-app-note { margin: 0; padding: 14px; border: 1px dashed var(--wg-line); border-radius: 10px; color: var(--wg-dim); font: 500 12.5px var(--wg-font); }

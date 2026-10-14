@@ -341,8 +341,11 @@ class MCPSession:
             from agent import mcp_tasks
 
             # Long tool calls (agent/mcp_tasks.py): declare the Tasks extension and poll handles to the end.
+            from agent import mcp_apps
+
+            # MCP Apps (agent/mcp_apps.py): EchoSpeak can show a tool's interactive view.
             tasks = (
-                {"extensions": {mcp_tasks.EXTENSION: {}},
+                {"extensions": {mcp_tasks.EXTENSION: {}, mcp_apps.EXTENSION: {"mimeTypes": [mcp_apps.MIME]}},
                  "result_claims": mcp_tasks.claims(self._task_status, self._stop_tasks.is_set)}
                 if _SDK_MAJOR >= 2 and mcp_tasks.supported() else {}
             )
@@ -530,6 +533,9 @@ class MCPManager:
         self.initialized = False
         self.last_error = ""
         self._registered_names: List[str] = []
+        # MCP Apps (agent/mcp_apps.py): registered tool -> its view; (server, tool) -> what apps may call.
+        self.ui_tools: Dict[str, Dict[str, str]] = {}
+        self.app_tools: Dict[tuple, Dict[str, Any]] = {}
         self._lock = threading.RLock()
 
     @property
@@ -759,6 +765,14 @@ class MCPManager:
             else {}
         )
         risk, is_action = self._capability_risk(session.state, definition)
+        from agent import mcp_apps
+
+        resource_uri, visibility = mcp_apps.ui_meta(definition)
+        self.app_tools[(server_name, raw_name)] = {"visibility": visibility, "is_action": bool(is_action)}
+        if "model" not in visibility:
+            return  # app-only: its view may call it, the agent never sees it
+        if resource_uri:
+            self.ui_tools[registered_name] = {"server": server_name, "tool": raw_name, "resource_uri": resource_uri}
         tool = self._make_langchain_tool(
             registered_name,
             description,
@@ -1084,9 +1098,18 @@ class MCPManager:
         except Exception:
             pass
         self._registered_names = []
+        self.ui_tools = {}
+        self.app_tools = {}
         self.sessions = {}
         self.servers = {}
         self.initialized = False
+
+    def call_app_tool(self, server: str, name: str, arguments: Optional[dict] = None) -> str:
+        """A tool call made by an MCP App view (agent/mcp_apps.py checks it is allowed first)."""
+        session = self.sessions.get(server)
+        if session is None or not session.state.running:
+            raise RuntimeError(f"{server} is not running")
+        return session.call_tool(name, dict(arguments or {}))
 
     def call(self, registered_name: str, arguments: Optional[dict] = None) -> str:
         parts = str(registered_name or "").split("__", 2)

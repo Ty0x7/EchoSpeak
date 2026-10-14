@@ -24,6 +24,7 @@ from agent.lean.coding import coding_tools, project_overview
 from agent.integrations import integration_tools
 from agent.lean.computer import tools as computer_tools
 from agent.lean import tool_outputs
+from agent import mcp_apps
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
@@ -925,7 +926,7 @@ class LeanSession:
             persona=persona,
             soul_text=self._soul() if persona.id == "echo" else "",
             project_root=self.project_root,
-            notes=list(toolbox.notes) + learned.notes,
+            notes=list(toolbox.notes) + learned.notes + ([] if guest else [n for n in [mcp_apps.context_note(self.session_id)] if n]),
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
             computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox)),
             git_note=repo_note,

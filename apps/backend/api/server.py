@@ -394,6 +394,13 @@ async def api_auth_middleware(request: Request, call_next):
 
             if frame_token_ok(frame.group(1), request.query_params.get("t", "")):
                 return await call_next(request)
+        # MCP App views (agent/mcp_apps.py) load the same way.
+        app_frame = re.fullmatch(r"/lean/mcp-apps/(app-[a-f0-9]{24})/frame", request.url.path)
+        if app_frame:
+            from agent.mcp_apps import token_ok
+
+            if token_ok(app_frame.group(1), request.query_params.get("t", "")):
+                return await call_next(request)
     client_ip = _get_client_ip(request)
     if not _api_auth_ok(request.headers, client_ip):
         return Response(

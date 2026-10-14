@@ -645,6 +645,11 @@ class Toolbox:
                 visual = [observations.reference(item) for item in images]
             output = raw if isinstance(raw, str) else json.dumps(raw, default=str, ensure_ascii=False)
             ok = not output.strip().lower().startswith(_FAILURE_PREFIXES) and not (isinstance(raw, dict) and raw.get("isError"))
+            if ok and str(getattr(entry, "origin", "")) == "mcp":
+                from agent import mcp_apps
+                view = mcp_apps.for_result(self.session_id, name, args, raw)  # the server's interactive view, if any
+                if view is not None:
+                    widgets.append(view)
         except Exception as exc:
             message = str(exc)
             if "validation error" in message.lower():
