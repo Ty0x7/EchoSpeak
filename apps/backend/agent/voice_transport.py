@@ -26,6 +26,7 @@ from agent.state import get_state_store
 from agent.threads import get_thread_manager
 from agent.voice_runtime import (
     VoiceJob,
+    VoiceRuntimeError,
     default_voice_provider,
     get_voice_job_store,
     synthesize_voice_audio,
@@ -105,10 +106,13 @@ def _bounded_failure(operation: str, error: Exception) -> tuple[str, str]:
         f"{operation}:{type(error).__name__}:{error}".encode("utf-8", errors="ignore")
     ).hexdigest()[:12]
     logger.exception("Voice transport {} failed diagnostic_id={}", operation, diagnostic_id)
+    if isinstance(error, VoiceRuntimeError) and str(error).strip():
+        # Our own provider messages ("ElevenLabs refused the API key…") say what to fix; no secrets in them.
+        return diagnostic_id, str(error)[:300]
     message = (
         "Local transcription could not finish. Check Voice & Speech in Settings."
         if operation == "transcription"
-        else "Local speech playback could not be prepared. Check Voice & Speech in Settings."
+        else "Speech could not be prepared. Check Settings › Voice."
     )
     return diagnostic_id, message
 

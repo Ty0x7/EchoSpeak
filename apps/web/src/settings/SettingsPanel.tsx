@@ -19,6 +19,7 @@ import { SmartModelChoice } from "./SmartModelChoice";
 import { UPDATES_OFF_MESSAGE, updatesAllowed } from "../desktop/privacyGate";
 import { AgentSkillsSection } from "./AgentSkillsSection";
 import { DesktopControlOffer } from "./DesktopControlOffer";
+import { ElevenLabsSettings, TestVoice } from "./VoiceOutput";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
 import { requestSetup } from "../setup/openSetup";
@@ -431,21 +432,13 @@ export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMa
             options={[
               { value: "windows-sapi", label: "Windows voices" },
               { value: "piper-local", label: "Piper" },
+              { value: "elevenlabs", label: "ElevenLabs (cloud)" },
             ]}
           />
         </Row>
-        <Row label="Cloud voice" help="Off keeps all audio on this PC.">
-          <Select
-            value={String(s.voice_cloud_provider || "")}
-            onChange={(v) => save({ voice_cloud_provider: v })}
-            options={[
-              { value: "", label: "Off" },
-              { value: "openai-audio", label: "OpenAI audio" },
-            ]}
-          />
-        </Row>
+        <TestVoice apiBase={apiBase} provider={String(s.voice_local_tts_provider || "windows-sapi")} />
       </Group>
-
+      <ElevenLabsSettings s={s} save={save} apiBase={apiBase} />
     </>
   );
 }

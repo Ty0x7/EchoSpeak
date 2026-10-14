@@ -213,8 +213,13 @@ Echo sees its beginning and end and reads the rest by searching it, instead of l
 - **Settings › Advanced › Companion** previews the new Echo avatar's listening,
   thinking, speaking and working states. Appearance changes apply to voice and the
   floating desktop companion, including the voice avatar size.
-- Speech output uses Windows voices, Piper, or OpenAI audio if you add a key. Choose
-  engines in **Settings › Voice › Engines**.
+- **Hear a reply**: the speaker button next to **Copy** under each of Echo's replies reads it
+  aloud; press it again to stop. Automatic read-aloud and voice conversations use the same voice.
+- Speech output uses Windows voices, Piper, or **ElevenLabs** (cloud). Choose one under
+  **Settings › Voice › Engines › Read aloud** and press **Play sample** to hear it. For ElevenLabs,
+  add your API key in the ElevenLabs group, then pick a voice, model and speed. Each reply read
+  aloud sends its text to ElevenLabs and uses characters on your plan; Private and Offline modes
+  turn it off. Gemini Live conversations keep their own native voice.
 
 ## 6. Memory
 

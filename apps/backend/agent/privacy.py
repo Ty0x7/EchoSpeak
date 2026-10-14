@@ -95,6 +95,8 @@ COMPONENTS: tuple[Component, ...] = (
     Component("creation", "Cloud image and video generation", "Your prompt and any images you attach", True,
               ("api.dev.runwayml.com", "api.runwayml.com")),
     Component("a2a", "Other agents (A2A)", "The task you send to another agent", True),
+    Component("voice", "Cloud voice", "The text Echo reads aloud", True, ("api.elevenlabs.io",),
+              "Windows voices and Piper read aloud on this PC and always work."),
     Component("traces", "Trace export", "Timings, tool names and token counts of each reply, never message text", False,
               note="Only when you set a trace collector in Settings › Advanced; a collector on this PC always works."),
 )
