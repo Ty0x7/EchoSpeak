@@ -58,7 +58,7 @@ EXTERNAL_ACTIONS = {
     "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
     # Saved memories and the soul are re-read in every future chat: writing one
     # from untrusted content would plant a persistent injection.
-    "memory_save", "soul_update", "save_project_report",
+    "memory_save", "soul_update", "save_project_image",
 }
 
 # Claude's native computer toolset (agent/lean/computer.py native()): members that

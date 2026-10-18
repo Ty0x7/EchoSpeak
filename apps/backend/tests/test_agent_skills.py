@@ -105,3 +105,18 @@ def test_only_proven_lessons_become_skills():
 def test_read_skill_tool_is_read_only_and_parallel_safe():
     tool = agent_skills.read_skill_tool()
     assert tool.name == "read_skill" and tool.parallel_safe and tool.parameters["required"] == ["name"]
+
+
+def test_bundled_documentation_skill_is_optional_reviewed_and_never_overwritten(skills_home):
+    skill = agent_skills.import_documentation_skill()
+    assert skill.name == "project-documentation" and skill.status == "needs_review"
+    assert "assets/report.html" in skill.files
+    assert agent_skills.prompt_section() == ""
+    agent_skills.approve(skill.name, skill.digest[:12])
+    assert "project-documentation" in agent_skills.prompt_section()
+    source = skill.folder / "SKILL.md"
+    source.write_text(source.read_text(encoding="utf-8") + "\nUser modifications", encoding="utf-8")
+    with pytest.raises(ValueError, match="already installed"):
+        agent_skills.import_documentation_skill()
+    assert "User modifications" in source.read_text(encoding="utf-8")
+    assert agent_skills.get(skill.name).status == "changed"

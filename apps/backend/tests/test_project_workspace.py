@@ -1,5 +1,4 @@
-"""Project collaboration contracts against real stores; no model or external agent calls."""
-import importlib.util
+"""Project file discovery contracts against real stores; no model or external agent calls."""
 import io
 import json
 from pathlib import Path
@@ -44,237 +43,205 @@ def env(tmp_path, monkeypatch):
     return item, manager, root, store
 
 
-def manifest(item, **patch):
-    return {"schema_version": 1, "project_id": item.id, "id": "city-roads", "revision": 1,
-            "title": "City Roads — Layout Improvements", "summary": "Connected the road junctions.", "agent": "claude-code",
-            "session_id": "external-session", "status": "completed", "report": "reports/roads.md",
-            "media": [{"path": "reports/before.png", "caption": "Before"}], "files_changed": ["roads.gd"],
-            "verification": [{"label": "Game scene", "result": "not_run", "evidence": "User will run Godot."}],
-            "remaining": ["Check collisions in Godot"], **patch}
+def client_for(item):
+    from api.routes.project_workspace import router
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app), f"/projects/{item.id}/workspace"
 
 
-def test_import_persistence_idempotency_and_metadata_preservation(env):
-    item, manager, root, _ = env
-    value = manifest(item)
-    first = workspace.import_handoff(item.id, value)
-    assert first["changed"] and first["record"]["verification_basis"] == "agent_reported"
-    assert workspace.import_handoff(item.id, value)["changed"] is False
-    assert len(artifacts.list_all()) == 1
-    loaded = projects.ProjectManager(manager.projects_dir).get_project(item.id)
-    assert loaded.workspace_records[0]["id"] == "city-roads"
-    assert loaded.metadata == {"brief": "Road-system project", "unrelated": 42}
-    assert not (root / ".echospeak").exists()  # manual import never configures another agent
+def paired_files(root):
+    (root / "docs").mkdir(exist_ok=True)
+    (root / "artifacts/media").mkdir(parents=True, exist_ok=True)
+    (root / "docs/roads.md").write_text("# Roads\n\nTechnical decisions", encoding="utf-8")
+    (root / "artifacts/media/after.png").write_bytes((root / "reports/before.png").read_bytes())
+    (root / "artifacts/roads.html").write_text('<html><head><title>Roads &amp; junctions</title></head><body><img src="media/after.png"><p>Actual result</p></body></html>', encoding="utf-8")
 
 
-def test_catalog_refresh_reuses_lightweight_summaries_and_updates_after_edits(env, monkeypatch):
-    item, _, _, _ = env
-    row = workspace.import_handoff(item.id, manifest(item))["record"]
-    artifacts.list_all()
-    original = Path.read_text
-    reads = []
-    def read(path, *args, **kwargs):
-        reads.append(path.name)
-        return original(path, *args, **kwargs)
-    monkeypatch.setattr(Path, "read_text", read)
-    artifacts.list_all()
-    assert row["artifact_id"] + ".json" not in reads
-    artifacts.update(row["artifact_id"], content="# Revised", title="Revised report")
-    assert artifacts.list_all()[0]["title"] == "Revised report"
-
-
-def test_revisions_preserve_documents_and_reject_conflicting_claims(env):
+def test_discovery_pairs_actual_files_without_writes_or_artifact_copies(env, monkeypatch):
     item, _, root, _ = env
-    first = workspace.import_handoff(item.id, manifest(item))["record"]
-    (root / "reports/roads.md").write_text("# New layout", encoding="utf-8")
-    second = workspace.import_handoff(item.id, manifest(item, revision=2, status="blocked"))["record"]
-    doc = artifacts.get(first["artifact_id"])
-    assert len(doc["versions"]) == 2
-    assert "Changed the layout" in artifacts.version(doc, first["artifact_version"])["content"]
-    assert second["history"][0]["status"] == "completed"
-    assert workspace.import_handoff(item.id, manifest(item, report="gone.md"))["stale"]
-    with pytest.raises(ValueError, match="increase revision"):
-        workspace.import_handoff(item.id, manifest(item, revision=2, title="Conflicting title"))
+    paired_files(root)
+    before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    monkeypatch.setattr(config, "allow_file_write", False)
+    data = workspace.overview(item.id)
+    row = next(row for row in data["documents"] if row["path"] == "artifacts/roads.html")
+    assert row["title"] == "Roads & junctions" and row["markdown"] == "docs/roads.md"
+    assert row["thumbnail"] == "artifacts/media/after.png"
+    assert "docs/roads.md" not in {r["path"] for r in data["documents"]}
+    assert not data["artifacts"] and not data["records"]
+    assert before == {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+    assert not (root / ".echospeak").exists()
 
 
-def test_interrupted_index_write_reuses_artifact_version(env, monkeypatch):
-    item, manager, _, _ = env
-    save = manager.save_workspace
-    monkeypatch.setattr(manager, "save_workspace", lambda *a, **kw: (_ for _ in ()).throw(OSError("Interrupted")))
-    with pytest.raises(OSError):
-        workspace.import_handoff(item.id, manifest(item))
-    monkeypatch.setattr(manager, "save_workspace", save)
-    workspace.import_handoff(item.id, manifest(item))
-    assert len(artifacts.list_all()) == 1
-    assert artifacts.list_all()[0]["versions"] == 1
-
-
-@pytest.mark.parametrize("path", ["../outside.md", "/etc/passwd", "C:\\private.txt", "\\\\host\\share", "reports/../../outside.txt", ".git/config", ".env", ".env.production", ".ssh/id_rsa", "reports/private.pem", "reports/settings.secrets.json", "reports/x:y.md"])
-def test_preview_and_import_reject_private_or_out_of_scope_paths(env, path):
+def test_refresh_detects_edits_additions_deletions_and_media_changes(env):
     item, _, root, _ = env
+    paired_files(root)
+    first = workspace.discover(item)
+    (root / "artifacts/roads.html").write_text("<title>Updated roads</title>", encoding="utf-8")
+    updated = workspace.discover(item)
+    assert first["file_revision"] != updated["file_revision"]
+    assert next(r for r in updated["documents"] if r["path"] == "artifacts/roads.html")["title"] == "Updated roads"
+    (root / "artifacts/media/after.png").write_bytes(b"updated image")
+    media = workspace.discover(item)
+    assert media["file_revision"] != updated["file_revision"]
+    (root / "artifacts/roads.html").unlink()
+    final = workspace.discover(item)
+    assert final["file_revision"] != media["file_revision"]
+    assert "docs/roads.md" in {r["path"] for r in final["documents"]}
+
+
+@pytest.mark.parametrize("path", ["../outside.md", "/etc/passwd", "C:\\private.txt", "\\\\host\\share", "reports/../../outside.txt", ".git/config", ".env", ".env.production", ".ssh/id_rsa", "reports/private.pem", "reports/settings.secrets.json", "reports/x:y.md", ".agents/skills/foo/SKILL.md"])
+def test_preview_rejects_private_or_out_of_scope_paths(env, path):
+    _, _, root, _ = env
     with pytest.raises((ValueError, OSError)):
         workspace.safe_path(root, path, exists=False)
-    with pytest.raises((ValueError, OSError)):
-        workspace.import_handoff(item.id, manifest(item, files_changed=[path]))
-    assert workspace.project(item.id).workspace_records == []
+
+
+def test_discovery_ignores_generated_private_and_agent_configuration(env):
+    item, _, root, _ = env
+    for folder in [".git", ".claude", ".agents", ".echospeak", ".test-state", "node_modules", "target", "build"]:
+        (root / folder).mkdir()
+        (root / folder / "private.html").write_text("secret", encoding="utf-8")
+    (root / ".env.md").write_text("secret", encoding="utf-8")
+    assert [r["path"] for r in workspace.discover(item)["documents"]] == ["reports/roads.md"]
+
+
+@pytest.mark.parametrize("path", [".git./secret.md", ".git /secret.md", "reports/CON.md", ".azure/token.md", "reports/file.md "])
+def test_windows_aliases_cannot_bypass_private_path_rules(env, path):
+    _, _, root, _ = env
+    with pytest.raises(ValueError): workspace.safe_path(root, path, exists=False)
 
 
 def test_symlink_escape_rejected_even_when_target_is_inside(env):
     item, _, root, _ = env
-    try:
-        (root / "alias.md").symlink_to(root / "reports/roads.md")
-    except OSError:
-        pytest.skip("Symlink creation needs Windows developer mode")
+    try: (root / "alias.md").symlink_to(root / "reports/roads.md")
+    except OSError: pytest.skip("Symlink creation needs Windows developer mode")
     with pytest.raises(ValueError, match="Linked"):
         workspace.read_file(item, "alias.md")
+    assert "alias.md" not in {r["path"] for r in workspace.discover(item)["documents"]}
 
 
-def test_project_identity_and_associations_are_checked(env):
-    item, _, _, _ = env
-    with pytest.raises(ValueError, match="different project"):
-        workspace.import_handoff(item.id, manifest(item, project_id="foreign"))
-    with pytest.raises(ValueError, match="session"):
-        workspace.import_handoff(item.id, manifest(item, echo_session_id="foreign"))
-    foreign = artifacts.create(title="Foreign", kind="markdown", content="private", session_id="foreign")
-    with pytest.raises(ValueError, match="artifact"):
-        workspace.import_handoff(item.id, manifest(item, artifact_ids=[foreign["id"]]))
-    assert foreign["id"] not in {a["id"] for a in workspace.overview(item.id)["artifacts"]}
-
-
-def test_sync_keeps_last_good_report_when_another_file_is_partial(env):
+def test_scan_is_bounded_and_files_remain_browsable(env, monkeypatch):
     item, _, root, _ = env
-    assert workspace.sync(item.id)["enabled"] is False
-    workspace.prepare_sharing(item.id)
-    (root / ".echospeak/handoffs/roads.json").write_text(json.dumps(manifest(item)), encoding="utf-8")
-    (root / ".echospeak/handoffs/partial.json").write_text('{"id":', encoding="utf-8")
-    result = workspace.sync(item.id)
-    assert result["imported"] == 1 and len(result["errors"]) == 1
-    assert workspace.sync(item.id)["imported"] == 0
-    assert len(workspace.project(item.id).workspace_records) == 1
+    for i in range(10): (root / f"page-{i}.html").write_text("<p>Work</p>", encoding="utf-8")
+    monkeypatch.setattr(workspace, "SCAN_ENTRIES", 4)
+    result = workspace.discover(item)
+    assert result["scan_limited"] and len(result["documents"]) <= 4
+    assert len(workspace.files(item)) > 4
 
 
-def test_sharing_does_not_overwrite_a_foreign_binding(env):
-    item, _, root, _ = env
-    (root / ".echospeak").mkdir()
-    binding = root / ".echospeak/project.json"
-    binding.write_text('{"project_id":"foreign"}', encoding="utf-8")
-    with pytest.raises(ValueError, match="different project"):
-        workspace.prepare_sharing(item.id)
-    assert "foreign" in binding.read_text()
-
-
-def test_export_respects_write_permission_and_preserves_independent_agents(env, monkeypatch):
-    item, _, root, _ = env
-    monkeypatch.setattr(config, "allow_file_write", False)
-    with pytest.raises(PermissionError):
-        workspace.export_context(item.id)
-    assert not (root / ".echospeak").exists()
-    monkeypatch.setattr(config, "allow_file_write", True)
-    workspace.import_handoff(item.id, manifest(item))
-    result = workspace.export_context(item.id)
-    exported = json.loads((root / result["path"]).read_text(encoding="utf-8"))
-    assert workspace.project(item.id).workspace_sharing_enabled is False
-    assert exported["records"][0]["verification_basis"] == "agent_reported"
-    assert "workspace_root" not in exported["project"]
-    assert "Changed the layout" in exported["documents"][0]["content"]
-    assert not (root / "AGENTS.md").exists() and not (root / ".claude").exists()
-
-
-def test_html_stays_sandboxed_and_only_inlines_allowed_images(env):
-    item, _, root, _ = env
-    (root / "reports/roads.html").write_text('<h1>Roads</h1><img src="before.png"><img src="../../private.png"><script>fetch("https://example.com")</script>', encoding="utf-8")
-    row = workspace.import_handoff(item.id, manifest(item, report="reports/roads.html"))["record"]
-    page = artifacts.frame_html(artifacts.get(row["artifact_id"]))
-    assert "data:image/png;base64," in page
-    assert "connect-src 'none'" in page and "frame-src 'none'" in page
-    assert "allow-same-origin" not in artifacts.FRAME_CSP
-    assert workspace.read_file(item, "reports/before.png", media=True)[1] == "image/png"
-
-
-def test_project_tool_is_scoped_and_participates_in_existing_trust_rules(env):
-    item, _, root, _ = env
-    workspace.import_handoff(item.id, manifest(item))
-    box = Toolbox(toolsets=["core"], extra_tools=workspace.tools(), session_id="chat-a", project_root=str(root))
-    result = box.run("project_workspace", {"record_id": "city-roads"})
-    assert result.ok and "Check collisions" in result.output
-    assert policy.is_untrusted_source("project_workspace")
-    assert policy.evaluate("memory_save", {"text": "claim"}, tainted_by=["project_workspace"], secrets=[]).action == "ask"
-    other = Toolbox(toolsets=["core"], extra_tools=workspace.tools(), session_id="foreign", project_root=str(root))
-    assert not other.run("project_workspace", {}).ok
-    assert "project_workspace" not in Toolbox(toolsets=["web"], extra_tools=workspace.tools()).names
-
-
-def test_reported_checks_do_not_become_independent_learning_evidence():
-    from agent.learning.episodes import tool_rows, grade
-    rows = tool_rows([{"kind": "tool", "name": name, "status": "done", "output": '{"verification": [{"result": "passed"}]}' }
-                      for name in ["project_workspace", "save_project_report"]])
-    assert rows == []
-    level, _, _ = grade("Check the roads", rows, outcome="success", claim_failed=False)
-    assert level == 0
-
-
-def test_echo_can_save_a_named_report_without_exporting_or_starting_agents(env):
-    item, _, root, _ = env
-    box = Toolbox(toolsets=["core"], extra_tools=workspace.tools(), session_id="chat-a", project_root=str(root))
-    result = box.run("save_project_report", {"id": "echo-review", "title": "Road Review", "summary": "Review completed", "status": "completed", "remaining": ["User testing"]})
-    assert result.ok
-    row = workspace.project(item.id).workspace_records[0]
-    assert row["agent"] == "echo" and row["echo_session_id"] == "chat-a"
-    assert row["verification"] == []
-    assert not (root / ".echospeak").exists()
-
-
-def test_project_tool_reads_long_reports_without_silent_truncation(env):
-    item, _, root, _ = env
-    (root / "reports/roads.md").write_text("a" * 24000 + "The unresolved collision check", encoding="utf-8")
-    workspace.import_handoff(item.id, manifest(item))
-    box = Toolbox(toolsets=["core"], extra_tools=workspace.tools(), session_id="chat-a", project_root=str(root))
-    first = json.loads(box.run("project_workspace", {"record_id": "city-roads"}).output)
-    assert first["next_offset"] == 24000
-    next_page = json.loads(box.run("project_workspace", {"record_id": "city-roads", "offset": first["next_offset"]}).output)
-    assert next_page["document"] == "The unresolved collision check" and next_page["next_offset"] is None
-
-
-def test_existing_artifacts_and_activity_use_real_project_associations(env):
-    item, _, _, store = env
-    old = artifacts.create(title="Legacy document", kind="markdown", content="Existing", session_id="chat-a")
-    store.create_execution(thread_id="chat-a", session_id="chat-a", query="Review roads", project_id=item.id, active_project_id=item.id)
+def test_missing_or_unattached_root_preserves_native_resources(env):
+    item, manager, root, _ = env
+    native = artifacts.create(title="Native", kind="markdown", content="Kept", session_id="chat-a")
+    root.rename(root.with_name("moved-project"))
     data = workspace.overview(item.id)
-    assert old["id"] in {a["id"] for a in data["artifacts"]}
-    assert data["activity"][0]["objective"] == "Review roads"
+    assert data["scan_error"] and not data["documents"]
+    assert native["id"] in {a["id"] for a in data["artifacts"]}
 
 
-def test_echo_report_can_preserve_its_own_screenshot_but_not_another_chat(env, monkeypatch):
-    from agent.lean import observations
+@pytest.mark.parametrize("link,expected", [("media/a.png", "artifacts/media/a.png"), ("../docs/a.md", "docs/a.md"), ("../../secret.png", None), ("%2e%2e/%2e%2e/secret.png", None), ("file:///secret", None), ("https://example.com/a.png", None), ("//host/share", None), ("C:/private", None)])
+def test_local_urls_are_project_relative(link, expected):
+    assert workspace.local_reference(link, "artifacts/roads.html") == expected
+
+
+def test_html_reuses_existing_csp_with_bounded_local_media(env, monkeypatch):
     item, _, root, _ = env
-    monkeypatch.setattr(observations, "root", lambda: root.parent / "observations")
-    own = observations.save(Image.new("RGB", (10, 10), "white"), "chat-a", "Road screenshot")
-    foreign = observations.save(Image.new("RGB", (10, 10), "black"), "foreign", "Private screenshot")
-    box = Toolbox(toolsets=["core"], extra_tools=workspace.tools(), session_id="chat-a", project_root=str(root))
-    args = {"id": "screen-review", "title": "Road screenshot review", "summary": "Screenshot preserved for user review", "observation_ids": [foreign["id"]]}
-    assert not box.run("save_project_report", args).ok
-    assert not (root / ".echospeak").exists()
-    assert box.run("save_project_report", {**args, "observation_ids": [own["id"]]}).ok
-    record = workspace.project(item.id).workspace_records[0]
-    assert (root / record["media"][0]["path"]).read_bytes() == observations.load(own["id"], "chat-a")[1]
+    paired_files(root)
+    page = workspace.document_html(item, "artifacts/roads.html", '<img src="media/after.png" srcset="https://bad/x 2x"><img src="../../private.png"><video controls poster="media/after.png"><source src="media/movie.webm"></video><script>fetch("https://example.com")</script>')
+    assert "data:image/png;base64," in page and "srcset=" not in page
+    assert "connect-src 'none'" in page and "frame-src 'none'" in page
+    assert "allow-same-origin" not in artifacts.FRAME_CSP and "file://" not in page
+    monkeypatch.setattr(workspace, "INLINE_BUDGET", 1)
+    page = workspace.document_html(item, "artifacts/roads.html", '<img src="media/after.png">')
+    assert "data:image" not in page and 'src=""' in page
 
 
-def test_routes_validate_imports_and_media_ranges(env):
-    from api.routes.project_workspace import router
-    app = FastAPI()
-    app.include_router(router)
+def test_project_reports_cannot_navigate_to_external_pages(env):
     item, _, _, _ = env
-    client = TestClient(app)
-    base = f"/projects/{item.id}/workspace"
-    assert client.post(base + "/imports", json=manifest(item)).status_code == 200
-    assert client.post(base + "/imports", json=manifest(item, command="execute this")).status_code == 422
+    page = workspace.document_html(item, "reports/roads.html", '<meta http-equiv="refresh" content="0;url=https://bad"><a href="https://bad">Link</a><a href="#evidence">Evidence</a>')
+    assert 'http-equiv="refresh"' not in page
+    assert 'href="https://bad"' not in page
+    assert 'href="#evidence"' in page
+
+
+def test_read_file_and_routes_keep_ranges_validation_and_no_write_protocol(env):
+    item, _, root, _ = env
+    paired_files(root)
+    client, base = client_for(item)
+    assert client.get(base).json()["documents"]
     assert client.get(base + "/file", params={"path": "../private.md"}).status_code == 400
+    assert "data:image/png" in client.get(base + "/file", params={"path": "artifacts/roads.html"}).json()["html_preview"]
+    for route in ["imports", "sync", "sharing", "export"]:
+        assert client.post(base + "/" + route, json={}).status_code == 404
     response = client.get(base + "/media", params={"path": "reports/before.png"}, headers={"Range": "bytes=0-7"})
     assert response.status_code == 206 and response.content == b"\x89PNG\r\n\x1a\n"
     assert response.headers["x-content-type-options"] == "nosniff"
     assert client.get(base + "/media", params={"path": "reports/before.png"}, headers={"Range": "bytes=999999-"}).status_code == 416
 
 
-def test_project_routes_keep_the_existing_api_auth_boundary(env, monkeypatch):
+def test_legacy_records_versions_and_media_are_preserved_without_duplicate_cards(env):
+    item, manager, root, _ = env
+    doc = artifacts.create(title="Earlier roads", kind="html", content='<h1>Earlier</h1><img src="before.png">', project_id=item.id, workspace_record_id="old-roads")
+    doc["workspace_bases"] = {"1": "reports/roads.html"}
+    artifacts._save(doc)
+    row = {"id": "old-roads", "title": "Earlier roads", "artifact_id": doc["id"], "artifact_version": 1, "imported_at": 1, "history": []}
+    manager.save_workspace(item.id, [row], sharing=True)
+    data = workspace.overview(item.id)
+    assert data["records"][0]["id"] == "old-roads"
+    assert doc["id"] not in {a["id"] for a in data["artifacts"]}
+    assert manager.get_project(item.id).workspace_sharing_enabled is True
+    assert manager.get_project(item.id).metadata["unrelated"] == 42
+    assert "data:image/png" in artifacts.frame_html(artifacts.get(doc["id"]))
+    client, base = client_for(item)
+    assert client.get(base + "/records/old-roads").status_code == 200
+    loaded = projects.ProjectManager(manager.projects_dir).get_project(item.id)
+    assert loaded.workspace_records == [row]
+
+
+def test_project_tool_reads_current_technical_docs_with_scope_trust_and_pagination(env):
+    item, _, root, _ = env
+    (root / "reports/roads.md").write_text("a" * 24000 + "The unresolved collision check", encoding="utf-8")
+    box = Toolbox(toolsets=["core"], extra_tools=workspace.tools(), session_id="chat-a", project_root=str(root))
+    result = box.run("project_workspace", {})
+    assert result.ok and "reports/roads.md" in result.output
+    first = json.loads(box.run("project_workspace", {"path": "reports/roads.md"}).output)
+    assert first["next_offset"] == 24000
+    final = json.loads(box.run("project_workspace", {"path": "reports/roads.md", "offset": 24000}).output)
+    assert final["document"] == "The unresolved collision check" and final["next_offset"] is None
+    assert policy.is_untrusted_source("project_workspace")
+    assert policy.evaluate("memory_save", {"text": "claim"}, tainted_by=["project_workspace"], secrets=[]).action == "ask"
+    other = Toolbox(toolsets=["core"], extra_tools=workspace.tools(), session_id="other", project_root=str(root))
+    assert not other.run("project_workspace", {}).ok
+    assert "save_project_report" not in box.names
+    assert "project_workspace" not in Toolbox(toolsets=["web"], extra_tools=workspace.tools()).names
+
+
+def test_screenshot_export_preserves_own_original_only_with_write_permission(env, monkeypatch):
+    from agent.lean import observations
+    _, _, root, _ = env
+    monkeypatch.setattr(observations, "root", lambda: root.parent / "observations")
+    own = observations.save(Image.new("RGB", (10, 10), "white"), "chat-a", "Road screenshot")
+    foreign = observations.save(Image.new("RGB", (10, 10), "black"), "foreign", "Private screenshot")
+    box = Toolbox(toolsets=["core"], extra_tools=workspace.tools(), session_id="chat-a", project_root=str(root))
+    assert not box.run("save_project_image", {"observation_id": foreign["id"]}).ok
+    assert not (root / "artifacts").exists()
+    monkeypatch.setattr(config, "allow_file_write", False)
+    assert not box.run("save_project_image", {"observation_id": own["id"]}).ok
+    monkeypatch.setattr(config, "allow_file_write", True)
+    result = box.run("save_project_image", {"observation_id": own["id"]})
+    assert result.ok
+    path = root / json.loads(result.output)["path"]
+    assert path.read_bytes() == observations.load(own["id"], "chat-a")[1]
+    assert not (root / ".echospeak").exists()
+
+
+def test_existing_activity_uses_real_project_associations(env):
+    item, _, _, store = env
+    store.create_execution(thread_id="chat-a", session_id="chat-a", query="Review roads", project_id=item.id, active_project_id=item.id)
+    assert workspace.overview(item.id)["activity"][0]["objective"] == "Review roads"
+
+
+def test_project_routes_keep_existing_api_auth_boundary(env, monkeypatch):
     from api.server import app
     item, _, _, _ = env
     monkeypatch.setattr(config, "api_auth_enabled", True)
@@ -284,41 +251,3 @@ def test_project_routes_keep_the_existing_api_auth_boundary(env, monkeypatch):
     url = f"/projects/{item.id}/workspace"
     assert client.get(url).status_code == 401
     assert client.get(url, headers={"x-echospeak-key": "workspace-test-key"}).status_code == 200
-
-
-def hook_module():
-    path = Path(__file__).resolve().parents[3] / "scripts/project_handoff.py"
-    spec = importlib.util.spec_from_file_location("project_handoff", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_hook_is_a_receipt_not_a_completion_claim(env, monkeypatch):
-    item, _, root, _ = env
-    workspace.prepare_sharing(item.id)
-    module = hook_module()
-    event = {"hook_event_name": "Stop", "session_id": "claude-session", "turn_id": "turn-a", "cwd": str(root), "last_assistant_message": "SECRET", "transcript_path": "private"}
-    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(event)))
-    assert module.main(["--project", str(root), "--agent", "claude-code", "--hook"]) == 0
-    paths = list((root / ".echospeak/events").glob("*.json"))
-    receipt = json.loads(paths[0].read_text())
-    assert receipt["status"] == "needs_review" and "SECRET" not in paths[0].read_text()
-    assert not list((root / ".echospeak/handoffs").glob("*.json"))
-    assert workspace.project(item.id).workspace_records == []
-
-
-def test_publisher_and_importer_work_together_without_a_model(env):
-    item, _, root, _ = env
-    workspace.prepare_sharing(item.id)
-    source = root / "reports/manifest.json"
-    source.write_text(json.dumps(manifest(item)), encoding="utf-8")
-    module = hook_module()
-    argv = ["--project", str(root), "--manifest", "reports/manifest.json"]
-    assert module.main(argv) == 0 and module.main(argv) == 0
-    assert len(list((root / ".echospeak/handoffs").glob("*.json"))) == 1
-    assert workspace.sync(item.id)["imported"] == 1
-    source.write_text(json.dumps(manifest(item, revision=2, status="interrupted")), encoding="utf-8")
-    assert module.main(argv) == 0
-    assert workspace.sync(item.id)["imported"] == 1
-    assert workspace.project(item.id).workspace_records[0]["status"] == "interrupted"

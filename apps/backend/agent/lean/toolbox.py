@@ -30,7 +30,7 @@ TOOLSETS: dict[str, list[str]] = {
         "calculate", "system_info",
         "file_list", "file_read", "file_find", "file_search", "file_edit", "file_write",
         "file_copy", "file_move", "file_delete", "checkpoint_undo",
-        "project_status", "project_workspace", "save_project_report", "create_artifact", "update_artifact",
+        "project_status", "project_workspace", "save_project_image", "create_artifact", "update_artifact",
         "create_media", "creation_status",
     ],
     # Looking things up on the web.

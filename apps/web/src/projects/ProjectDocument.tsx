@@ -5,7 +5,7 @@ import { ExternalLink } from "../widgets/env";
 import { CodeBlock } from "../widgets/CodeBlock";
 import { localReference, request } from "./model";
 
-export function ProjectMedia({ base, path, caption = "", assetId, mediaKind }: { base: string; path: string; caption?: string; assetId?: string; mediaKind?: string }) {
+export function ProjectMedia({ base, path, caption = "", assetId, mediaKind, revision = "" }: { base: string; path: string; caption?: string; assetId?: string; mediaKind?: string; revision?: string }) {
   const holder = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
   const [url, setUrl] = useState("");
@@ -31,7 +31,7 @@ export function ProjectMedia({ base, path, caption = "", assetId, mediaKind }: {
       .then(blob => { if (!controller.signal.aborted) { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); } })
       .catch(err => { if (!controller.signal.aborted) setError(err.message); });
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [base, path, visible, assetId]);
+  }, [base, path, visible, assetId, revision]);
   useEffect(() => {
     if (!expanded) return;
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") setExpanded(false); };
@@ -51,28 +51,30 @@ export function ProjectMedia({ base, path, caption = "", assetId, mediaKind }: {
   </span>;
 }
 
-export function ProjectMarkdown({ text, path, base, onFile }: { text: string; path: string; base: string; onFile(path: string): void }) {
+export function ProjectMarkdown({ text, path, base, onFile, revision = "" }: { text: string; path: string; base: string; onFile(path: string): void; revision?: string }) {
   return <RichMarkdown text={text}
-    renderImage={(src, alt) => { const local = localReference(src, path); return local ? <ProjectMedia key={local} base={base} path={local} caption={alt} /> : <SafeImage src={src} alt={alt} />; }}
+    renderImage={(src, alt) => { const local = localReference(src, path); return local ? <ProjectMedia key={local} base={base} path={local} caption={alt} revision={revision} /> : <SafeImage src={src} alt={alt} />; }}
     renderLink={(href, children) => { const local = localReference(href, path); return local ? <button type="button" className="pw-text-link" onClick={() => onFile(local)}>{children}</button> : <ExternalLink href={href}>{children}</ExternalLink>; }} />;
 }
 
-export function ProjectFile({ base, path, onFile, onClose }: { base: string; path: string; onFile(path: string): void; onClose(): void }) {
+export function ProjectFile({ base, path, onFile, onClose, revision = "", technical = "" }: { base: string; path: string; onFile(path: string): void; onClose(): void; revision?: string; technical?: string }) {
   const [data, setData] = useState<{ text: string; html_preview?: string } | null>(null);
   const [error, setError] = useState("");
+  const [source, setSource] = useState(false);
   useEffect(() => {
-    let live = true; setData(null); setError("");
+    let live = true; setError("");
     if (!/\.(png|jpe?g|webp|gif|avif|mp4|webm|mp3|wav|ogg)$/i.test(path)) {
       request<{ text: string; html_preview?: string }>(`${base}/file?path=${encodeURIComponent(path)}`).then(value => { if (live) setData(value); }).catch(err => { if (live) setError(err.message); });
     }
     return () => { live = false; };
-  }, [base, path]);
+  }, [base, path, revision]);
   const media = /\.(png|jpe?g|webp|gif|avif|mp4|webm|mp3|wav|ogg)$/i.test(path);
   return <section className="pw-document" aria-label="Project file preview">
-    <header className="pw-document-head"><strong>{path}</strong><button type="button" className="es-btn es-btn-sm" onClick={onClose}>Close file</button></header>
-    {error ? <p role="alert">{error}</p> : media ? <ProjectMedia key={path} base={base} path={path} /> : !data ? <p role="status">Opening file…</p>
-      : /\.(md|txt)$/i.test(path) ? <ProjectMarkdown text={data.text} path={path} base={base} onFile={onFile} />
-      : data.html_preview ? <iframe className="pw-html" title={path} sandbox="allow-scripts" referrerPolicy="no-referrer" srcDoc={data.html_preview} />
+    <header className="pw-document-head"><strong>{path}</strong><div className="pw-actions">{technical ? <button className="es-btn es-btn-sm" onClick={() => onFile(technical)}>Technical notes</button> : null}{data?.html_preview ? <button className="es-btn es-btn-sm" onClick={() => setSource(value => !value)}>{source ? "Preview" : "Source"}</button> : null}<button type="button" className="es-btn es-btn-sm" onClick={onClose}>Close file</button></div></header>
+    {error ? <p role="alert">{error}</p> : media ? <ProjectMedia key={path} base={base} path={path} revision={revision} /> : !data ? <p role="status">Opening file…</p>
+      : source ? <CodeBlock code={data.text} lang="html" />
+      : /\.(md|txt)$/i.test(path) ? <ProjectMarkdown text={data.text} path={path} base={base} onFile={onFile} revision={revision} />
+      : data.html_preview ? <iframe className="pw-html" title={path} sandbox="" referrerPolicy="no-referrer" srcDoc={data.html_preview} />
       : <CodeBlock code={data.text} lang={path.split(".").pop() || "text"} />}
   </section>;
 }

@@ -63,6 +63,10 @@ export function AgentSkillsSection({ apiBase }: { apiBase: string }) {
         Agents see a skill's name and description, and read the rest only when a task needs it. Nothing is used until you approve it.
       </p>
       {notice ? <p className="st-skills-notice" role="status">{notice}</p> : null}
+      {skills && !skills.some(skill => skill.name === "project-documentation") ? <div className="st-skills-import">
+        <b>Project documentation</b><p>Keep technical notes in Markdown and present the results with visual HTML. Project files appear in the workspace automatically.</p>
+        <button className="es-btn es-btn-sm" disabled={busy} onClick={() => void run(async () => { const skill = await api.importDocumentationSkill(); setOpen(skill.name); }, "Added for review. Approve the instructions below before Echo can use them.")}>Add for review</button>
+      </div> : null}
 
       <div className="st-skills-list">
         {skills === null ? <p className="st-empty">Loading…</p> : null}

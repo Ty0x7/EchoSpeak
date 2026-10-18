@@ -684,6 +684,16 @@ def agent_skill_from_lesson(request: SkillFromLessonRequest) -> dict[str, Any]:
     return {"ok": True, "skill": skill.public(with_body=True)}
 
 
+@router.post("/agent-skills/documentation/import")
+def import_documentation_skill() -> dict[str, Any]:
+    from agent.lean import agent_skills
+    try:
+        skill = agent_skills.import_documentation_skill()
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "skill": skill.public(with_body=True)}
+
+
 @router.post("/agent-skills/{name}/approve")
 def approve_agent_skill(name: str, request: SkillApproveRequest) -> dict[str, Any]:
     from agent.lean import agent_skills

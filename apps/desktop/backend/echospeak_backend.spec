@@ -28,6 +28,7 @@ for filename in ("SOUL.md",):
 datas += data_tree(backend_root / "skills", "skills")
 datas += data_tree(backend_root / "workspaces", "workspaces")
 datas += data_tree(backend_root / "resources", "resources")
+datas += data_tree(repo_root / ".agents" / "skills" / "project-documentation", "resources/agent-skills/project-documentation")
 
 # Local speech (faster-whisper): its VAD model files and CTranslate2's native DLLs.
 datas += collect_data_files("faster_whisper")
