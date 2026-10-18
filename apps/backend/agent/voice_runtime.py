@@ -22,7 +22,7 @@ import wave
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from langchain_core.tools import tool
+from agent.tool_decorator import tool
 from pydantic import BaseModel, Field
 
 from agent.media_library import MediaLibraryAsset, get_media_library_store
@@ -300,6 +300,7 @@ def voice_provider_statuses() -> list[VoiceProviderStatus]:
                 else "PersonaPlex is disabled and is not part of the canonical Voice transport."
             ),
         ),
+        _elevenlabs_status(),
         VoiceProviderStatus(
             id="openai-audio",
             locality="cloud",
@@ -319,6 +320,28 @@ def voice_provider_statuses() -> list[VoiceProviderStatus]:
             detail="Credentials are present, but cloud audio remains disabled until explicit upload/cost approval is implemented." if openai_key else "OPENAI_API_KEY is not configured.",
         ),
     ]
+
+
+def _elevenlabs_status() -> VoiceProviderStatus:
+    """Cloud read-aloud (agent/elevenlabs.py): ready with a key, unless Private or Offline mode keeps text home."""
+    from agent import elevenlabs, privacy
+
+    has_key = elevenlabs.configured()
+    allowed = privacy.decide("voice", elevenlabs.API)
+    ready = has_key and allowed.allowed
+    return VoiceProviderStatus(
+        id="elevenlabs",
+        locality="cloud",
+        operations=["text_to_speech"],
+        operation_readiness={"text_to_speech": ready},
+        detected=has_key,
+        configured=has_key,
+        execution_ready=ready,
+        supports_cancel=True,
+        detail=("ElevenLabs is ready. Each reply read aloud uses characters on your ElevenLabs plan."
+                if ready else allowed.reason if has_key
+                else "Add your ElevenLabs API key in Settings › Voice."),
+    )
 
 
 def _existing_file(value: Any) -> Optional[Path]:
@@ -544,14 +567,14 @@ def synthesize_voice_audio(
     provider_id: str = "",
     settings: Optional[dict[str, Any]] = None,
 ) -> str:
-    """Synthesize one bounded local speech chunk to a WAV file."""
+    """Synthesize one bounded speech chunk to a WAV file (Windows voices, Piper, or ElevenLabs)."""
 
     selected = str(provider_id or default_voice_provider("text_to_speech")).strip()
     provider = _provider(selected)
-    if provider.locality != "local":
+    if provider.locality != "local" and selected != "elevenlabs":
         raise VoiceRuntimeError("Cloud speech output requires an explicit connected cloud-voice adapter")
     if not provider.operation_readiness.get("text_to_speech", False):
-        raise VoiceRuntimeError(provider.detail or "The selected local speech provider is not ready")
+        raise VoiceRuntimeError(provider.detail or "The selected speech provider is not ready")
     value = str(text or "").strip()
     if not value or len(value) > 1200:
         raise VoiceRuntimeError("Each speech chunk must contain 1 to 1200 characters")
@@ -577,6 +600,13 @@ def synthesize_voice_audio(
         )
         if completed.returncode != 0:
             raise VoiceRuntimeError("Piper could not synthesize this speech chunk")
+    elif selected == "elevenlabs":
+        from agent import elevenlabs, privacy
+
+        try:
+            elevenlabs.synthesize(value, output, options)
+        except (elevenlabs.ElevenLabsError, privacy.PrivacyBlocked) as exc:
+            raise VoiceRuntimeError(str(exc)) from exc
     else:
         raise VoiceRuntimeError("The selected local speech provider has no synthesis adapter")
     if not output.is_file() or output.stat().st_size <= 44:

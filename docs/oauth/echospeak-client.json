@@ -1,0 +1,10 @@
+{
+  "client_id": "https://YOUR-HOST/oauth/echospeak-client.json",
+  "client_name": "EchoSpeak",
+  "client_uri": "https://github.com/Ty0x7/EchoSpeak",
+  "redirect_uris": ["http://127.0.0.1:33418/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "application_type": "native"
+}

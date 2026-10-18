@@ -150,6 +150,18 @@ class A2ATask:
             "metadata": self.metadata,
         }
 
+    def to_v1(self) -> dict:
+        """The A2A 1.0 Task (protobuf JSON: camelCase fields, TASK_STATE_* and ROLE_* enums, plain text parts)."""
+        def parts(items: list) -> list[dict]:
+            return [{"text": p.text} for p in items if isinstance(p, TextPart) and p.text]
+        last = next((m for m in reversed(self.messages) if m.role == "agent"), None)
+        status: dict[str, Any] = {"state": "TASK_STATE_" + self.status.value.upper().replace("-", "_")}
+        if last is not None:
+            status["message"] = {"messageId": f"{self.id}-reply", "role": "ROLE_AGENT", "parts": parts(last.parts)}
+        return {"id": self.id, "contextId": self.id, "status": status,
+                "artifacts": [{"artifactId": f"{self.id}-{i}", "name": a.name, "parts": parts(a.parts)}
+                              for i, a in enumerate(self.artifacts)]}
+
 
 @dataclass
 class AgentSkill:
@@ -191,6 +203,19 @@ class AgentCard:
         if self.authentication:
             d["authentication"] = self.authentication
         return d
+
+    def to_v1(self) -> dict:
+        """The A2A 1.0 card (agent/a2a_trust.py signs it): where to reach Echo, and how."""
+        from version import APP_VERSION
+        endpoint = self.url.rstrip("/") + "/a2a" if self.url else "/a2a"
+        # Callers need the bearer key you gave them (A2A_AUTH_KEY); EchoSpeak always requires it.
+        return {
+            "name": self.name, "description": self.description, "version": APP_VERSION,
+            "supportedInterfaces": [{"url": endpoint, "protocolBinding": "JSONRPC", "protocolVersion": "1.0"}],
+            "capabilities": {"streaming": False, "pushNotifications": False},
+            "defaultInputModes": ["text/plain"], "defaultOutputModes": ["text/plain"],
+            "skills": [s.to_dict() for s in self.skills],
+        }
 
 
 # ═══════════════════════════════════════════════════════════════════

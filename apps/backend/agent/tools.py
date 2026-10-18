@@ -22,7 +22,7 @@ from pathlib import Path
 from loguru import logger
 from pydantic import BaseModel, Field, AliasChoices
 
-from langchain_core.tools import tool
+from agent.tool_decorator import tool
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -584,20 +584,6 @@ class AnalyzeScreenArgs(BaseModel):
         default="",
         validation_alias=AliasChoices("context", "query", "prompt", "question"),
         description="Optional context about what to look for on screen.",
-    )
-
-
-class VisionQaArgs(BaseModel):
-    question: str = Field(
-        ..., validation_alias=AliasChoices("question", "query", "prompt"), description="Question about the screen."
-    )
-
-
-class TakeScreenshotArgs(BaseModel):
-    path: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("path", "file", "filepath"),
-        description="Optional file path to save the screenshot.",
     )
 
 
@@ -2451,221 +2437,6 @@ def analyze_screen(context: str = "") -> str:
         return f"Screen analysis failed: {str(e)}"
 
 
-@tool(args_schema=VisionQaArgs, description="Answer questions about the current screen using a vision model.")
-def vision_qa(question: str) -> str:
-    """Answer a question about what's currently visible on the screen using a vision-language model (Ollama)."""
-    if not VISION_AVAILABLE or not CV2_AVAILABLE:
-        return "Vision Q&A is not available. Please ensure OpenCV and Pillow are installed."
-
-    if getattr(config, "local", None) is None or getattr(config.local, "provider", None) != ModelProvider.OLLAMA:
-        return "Vision Q&A is only supported for local provider=ollama."
-
-    try:
-        import requests
-
-        screen_image = capture_screen()
-        if screen_image is None:
-            return "Failed to capture screen."
-
-        # Desktop screenshots can be very large; downscale to improve VLM reliability.
-        screen_image = _resize_for_vision(screen_image, max_dim=1024)
-
-        img_b64 = _encode_image_b64(screen_image)
-        if not img_b64:
-            return "Failed to encode screenshot."
-
-        base = (getattr(config.local, "base_url", "") or "").rstrip("/")
-        if not base:
-            base = "http://localhost:11434"
-
-        model = getattr(config.local, "model_name", "") or ""
-        if not model:
-            return "No LOCAL_MODEL_NAME configured for Ollama."
-
-        q_raw = (question or "").strip()
-        q, ctx = _split_live_desktop_context(q_raw)
-        q = q.strip() or "Describe what is on the screen."
-
-        # Some VLM chat templates require an explicit image token.
-        if "<image>" not in q.lower():
-            q_for_model = f"<image>\n{q}"
-        else:
-            q_for_model = q
-
-        # If monitor OCR was appended, keep only a tiny excerpt as optional aid.
-        ctx_excerpt = ""
-        if ctx:
-            ctx_excerpt = re.sub(r"\s+", " ", ctx).strip()
-            if len(ctx_excerpt) > 400:
-                ctx_excerpt = ctx_excerpt[:400].rstrip() + "…"
-
-        system_prompt = (
-            "You are a vision assistant looking at the user's desktop screenshot. "
-            "Respond like a human: give a short summary focused on the main active window and what's important. "
-            "Do NOT enumerate every icon or UI element. "
-            "Keep it under 2 short sentences, and optionally up to 3 bullets for key details. "
-            "No headings, no section numbers. "
-            "Always respond with at least one sentence."
-        )
-
-        num_predict = 250
-        try:
-            max_tokens = int(getattr(config.local, "max_tokens", 0) or 0)
-            if max_tokens > 0:
-                num_predict = min(max_tokens, 350)
-        except Exception:
-            pass
-
-        payload = {
-            "model": model,
-            "stream": False,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                *(
-                    [
-                        {
-                            "role": "user",
-                            "content": f"OCR excerpt (may be incomplete): {ctx_excerpt}",
-                        }
-                    ]
-                    if ctx_excerpt
-                    else []
-                ),
-                {
-                    "role": "user",
-                    "content": q_for_model,
-                    "images": [img_b64],
-                }
-            ],
-            "options": {
-                "temperature": float(getattr(config.local, "temperature", 0.2) or 0.2),
-                "num_predict": num_predict,
-            },
-        }
-
-        resp = requests.post(f"{base}/api/chat", json=payload, timeout=120)
-        resp.raise_for_status()
-        data = resp.json() or {}
-        if isinstance(data, dict) and data.get("error"):
-            return f"Vision Q&A failed: {str(data.get('error'))}"
-
-        out_raw = ((data.get("message") or {}).get("content") or data.get("response") or "").strip()
-        out = _clamp_vision_summary(out_raw, max_chars=700)
-        if out:
-            return out
-
-        logger.warning(
-            "Vision model returned empty content (first attempt). Keys={} ",
-            list(data.keys()) if isinstance(data, dict) else str(type(data)),
-        )
-        try:
-            dump = ""
-            if isinstance(data, dict):
-                dump = json.dumps(data, ensure_ascii=False)[:1200]
-            else:
-                dump = str(data)[:1200]
-            if dump:
-                logger.warning("Ollama /api/chat empty response payload (truncated): {}", dump)
-        except Exception:
-            pass
-
-        # Retry once with a simpler prompt and without OCR context.
-        retry_payload = {
-            "model": model,
-            "stream": False,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": "<image>\nIn one short sentence, describe the main active window and what is happening on the screen.",
-                    "images": [img_b64],
-                },
-            ],
-            "options": {
-                "temperature": float(getattr(config.local, "temperature", 0.2) or 0.2),
-                "num_predict": num_predict,
-            },
-        }
-
-        resp2 = requests.post(f"{base}/api/chat", json=retry_payload, timeout=120)
-        resp2.raise_for_status()
-        data2 = resp2.json() or {}
-        if isinstance(data2, dict) and data2.get("error"):
-            return f"Vision Q&A failed: {str(data2.get('error'))}"
-
-        out2_raw = ((data2.get("message") or {}).get("content") or data2.get("response") or "").strip()
-        out2 = _clamp_vision_summary(out2_raw, max_chars=700)
-        if out2:
-            return out2
-
-        logger.warning(
-            "Vision model returned empty content (second attempt). Keys={} ",
-            list(data2.keys()) if isinstance(data2, dict) else str(type(data2)),
-        )
-        try:
-            dump2 = ""
-            if isinstance(data2, dict):
-                dump2 = json.dumps(data2, ensure_ascii=False)[:1200]
-            else:
-                dump2 = str(data2)[:1200]
-            if dump2:
-                logger.warning("Ollama /api/chat empty response payload (truncated): {}", dump2)
-        except Exception:
-            pass
-
-        # Compatibility fallback: some models respond better to /api/generate for multimodal.
-        try:
-            gen_prompt = f"<image>\n{q}"
-            gen_payload = {
-                "model": model,
-                "prompt": gen_prompt,
-                "images": [img_b64],
-                "stream": False,
-                "options": {
-                    "temperature": float(getattr(config.local, "temperature", 0.2) or 0.2),
-                    "num_predict": num_predict,
-                },
-            }
-            gen_resp = requests.post(f"{base}/api/generate", json=gen_payload, timeout=120)
-            gen_resp.raise_for_status()
-            gen_data = gen_resp.json() or {}
-            if isinstance(gen_data, dict) and gen_data.get("error"):
-                return f"Vision Q&A failed: {str(gen_data.get('error'))}"
-            gen_text = (gen_data.get("response") or gen_data.get("message") or "").strip()
-            gen_out = _clamp_vision_summary(gen_text, max_chars=700)
-            if gen_out:
-                return gen_out
-            if gen_text:
-                return gen_text[:700].strip() or "(no response)"
-        except Exception as e:
-            logger.warning("Vision /api/generate fallback failed: {}", str(e))
-
-        # Last-resort fallback: use OCR so the user doesn't get an empty response.
-        try:
-            ocr = perform_ocr(screen_image)
-            ocr = re.sub(r"\s+", " ", (ocr or "")).strip()
-            if ocr:
-                if len(ocr) > 500:
-                    ocr = ocr[:500].rstrip() + "…"
-                return f"I couldn't get a vision-model response, but OCR sees: {ocr}"
-        except Exception:
-            pass
-        if out_raw:
-            return out_raw[:700].strip() or "(no response)"
-        if out2_raw:
-            return out2_raw[:700].strip() or "(no response)"
-        return "Vision model returned an empty response. Try asking again."
-    except Exception as e:
-        logger.error(f"Vision Q&A failed: {e}")
-        return f"Vision Q&A failed: {str(e)}"
-
-
 @tool
 def get_system_time() -> str:
     """
@@ -4055,47 +3826,6 @@ def discord_web_send(url: str = "", recipient: Optional[str] = None, message: st
         return f"Discord web send failed: {str(e)}"
 
 
-@tool(args_schema=TakeScreenshotArgs, description="Take a screenshot and save it to disk.")
-def take_screenshot(path: Optional[str] = None) -> str:
-    """
-    Take a screenshot and save it to disk.
-
-    Args:
-        path: Optional path to save the screenshot. Defaults to data/screenshot.png.
-
-    Returns:
-        Path to the saved screenshot or error message.
-    """
-    if not CV2_AVAILABLE or not VISION_AVAILABLE:
-        return "Screenshot functionality is not available."
-
-    try:
-        from pathlib import Path
-        import numpy as np
-
-        if path is None:
-            data_dir = Path(DATA_DIR)
-            data_dir.mkdir(exist_ok=True)
-            path = str(data_dir / "screenshot.png")
-
-        screen_image = capture_screen()
-        if screen_image is None:
-            return "Failed to capture screen."
-
-        if isinstance(screen_image, np.ndarray):
-            ok = cv2.imwrite(path, screen_image)
-            if not ok:
-                return "Failed to save screenshot."
-        else:
-            return "Failed to save screenshot."
-        logger.info(f"Screenshot saved to: {path}")
-        return f"Screenshot saved to: {path}"
-
-    except Exception as e:
-        logger.error(f"Screenshot failed: {e}")
-        return f"Screenshot failed: {str(e)}"
-
-
 def _find_chrome_exe() -> Optional[str]:
     candidates = []
     pf = os.environ.get("ProgramFiles", "")
@@ -4545,8 +4275,6 @@ TOOL_METADATA: Dict[str, Dict[str, Any]] = {
     "system_info": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
     "project_status": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
     "analyze_screen": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
-     "vision_qa": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
-     "take_screenshot": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": []},
      "discord_read_channel": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": ["ALLOW_DISCORD_BOT"]},
      "discord_send_channel": {"risk_level": "moderate", "requires_confirmation": True, "policy_flags": ["ALLOW_DISCORD_BOT"]},
      "discord_web_read_recent": {"risk_level": "safe", "requires_confirmation": False, "policy_flags": ["ENABLE_SYSTEM_ACTIONS", "ALLOW_PLAYWRIGHT"]},
@@ -5274,7 +5002,7 @@ def get_available_tools() -> list:
     tools.append(open_application)
 
     if VISION_AVAILABLE and CV2_AVAILABLE:
-        tools.extend([analyze_screen, vision_qa, take_screenshot])
+        tools.append(analyze_screen)  # OCR fallback; screenshots and vision are native lean tools
 
     return tools
 

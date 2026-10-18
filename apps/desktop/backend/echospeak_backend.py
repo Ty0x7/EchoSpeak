@@ -139,9 +139,8 @@ def _self_check() -> int:
     backend_root = Path(__file__).resolve().parents[2] / "backend"
     if backend_root.exists() and str(backend_root) not in sys.path:
         sys.path.insert(0, str(backend_root))
-    from langchain_core.runnables import Runnable  # noqa: F401
-    from langchain_core.tools import StructuredTool, tool  # noqa: F401
-    from langchain_community.vectorstores import FAISS  # noqa: F401
+    from agent.vector_store import VectorStore  # noqa: F401  (memory and document search)
+    import faiss  # noqa: F401  (converts indexes from 11.7 and earlier; fails the build if missing)
     import api.server  # noqa: F401
     import agent.lean.runtime  # noqa: F401
     import faster_whisper  # noqa: F401  (local speech; fails the build if not bundled)

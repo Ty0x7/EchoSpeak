@@ -41,6 +41,8 @@ UNTRUSTED_SOURCES = {
     "document_search", "research_notebook", "project_workspace",
     # MCP registry listings and third-party servers' error text (agent/integrations.py).
     "find_integrations", "check_integration",
+    # Replies from other agents (agent/a2a_trust.py).
+    "ask_remote_agent", "a2a_delegate", "a2a_discover",
 }
 
 # (C) Actions that leave the machine, speak for the user, or persist something
@@ -52,18 +54,31 @@ EXTERNAL_ACTIONS = {
     "discord_send_channel", "discord_web_send", "discord_contacts_add",
     "telegram_send", "whatsapp_send", "slack_send", "twitter_post", "tweet_post",
     "calendar_create", "calendar_delete", "github_create_issue", "github_comment",
-    "notion_create_page", "spotify_control",
+    "notion_create_page", "spotify_control", "ask_remote_agent", "a2a_delegate",
     "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
     # Saved memories and the soul are re-read in every future chat: writing one
     # from untrusted content would plant a persistent injection.
     "memory_save", "soul_update", "save_project_report",
 }
 
+# Claude's native computer toolset (agent/lean/computer.py native()): members that
+# look at the screen, and members that act on it like computer_action.
+NATIVE_COMPUTER_LOOK = {"screenshot", "zoom", "cursor_position", "wait"}
+NATIVE_COMPUTER_ACT = {"left_click", "right_click", "middle_click", "double_click", "triple_click", "left_click_drag",
+                       "mouse_move", "scroll", "type", "key", "hold_key", "left_mouse_down", "left_mouse_up"}
+UNTRUSTED_SOURCES |= NATIVE_COMPUTER_LOOK
+EXTERNAL_ACTIONS |= NATIVE_COMPUTER_ACT
+
 # Computer use looks at the screen before every action, so screen taint alone
 # would ask on every batch. When nothing else outside was read, the owner can
 # allow on-screen control for one chat (agent/lean/loop.py _approve).
-SCREEN_SOURCES = {"analyze_screen", "vision_qa", "take_screenshot", "read_image", "computer_action"}
-SCREEN_CONTROL = {"computer_action", "desktop_click", "desktop_type_text", "desktop_send_hotkey"}
+SCREEN_SOURCES = {"analyze_screen", "vision_qa", "take_screenshot", "read_image", "computer_action"} | NATIVE_COMPUTER_LOOK
+SCREEN_CONTROL = {"computer_action", "desktop_click", "desktop_type_text", "desktop_send_hotkey"} | NATIVE_COMPUTER_ACT
+
+
+def grant_name(name: str) -> str:
+    """One "For this chat" grant covers computer_action and every native computer action."""
+    return "computer_action" if name in NATIVE_COMPUTER_ACT else name
 
 
 def screen_only(tainted_by: Optional[list[str]]) -> bool:
@@ -86,6 +101,9 @@ class Decision:
 def is_untrusted_source(name: str, entry: Any = None, args: Optional[dict[str, Any]] = None) -> bool:
     if name in UNTRUSTED_SOURCES:
         return True
+    if name == "read_output":
+        from agent.lean.tool_outputs import is_untrusted
+        return is_untrusted((args or {}).get("id"))  # reopened web or email text is still outside content
     origin = str(getattr(entry, "origin", "") or "")
     if origin in {"mcp", "connection"} and not getattr(entry, "is_action", False):
         return True  # third-party servers return third-party content

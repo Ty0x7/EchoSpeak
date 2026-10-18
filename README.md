@@ -44,6 +44,22 @@ The harness combines a **React workspace, Python backend and Rust desktop host**
 
 Active work requires the backend to remain running. Restarting it interrupts chat runs; saved output remains available, and interrupted tool actions are not automatically repeated. Scheduled routines also require a running backend.
 
+### Where each feature stands
+
+"Tested offline" means automated tests with simulated models or input; "needs a real run" means nobody has checked it end to end with a real model on a real PC yet. `scripts/echo_bench.py` turns these into pass rates per model.
+
+| Feature | Status |
+|---|---|
+| Chat, tools, groups, web research, artifacts | In daily use |
+| Voice, Gemini Live, Creations | Shipped in installers |
+| Private and Offline modes | Tested offline; run the privacy check with your setup |
+| Smart model choice | Off by default; needs a few graded tasks per model |
+| Learning from experience | Needs a real run (`scripts/eval_learning.py`) |
+| Screenshots and computer control | Needs a real run on your desktop and games |
+| Echo Connections, search by meaning | Needs a real run with real apps |
+| MCP sign-in, MCP Apps, long MCP tasks | Tested against simulated servers |
+| Asking other agents (A2A) | Tested between two simulated EchoSpeaks |
+
 ## Interface previews
 
 <details>
@@ -88,11 +104,11 @@ Cloud settings retrieve the provider's model catalog and separately check the se
 
 ## Current development
 
-The source version is **11.7.1**: screenshots that both Echo and you can see, image inspection and bounded computer controls through the existing harness. 11.7.0 added Private and Offline modes that EchoSpeak enforces and can check, and optional smart model choice that learns which of your models does each kind of task best. 11.6.0 brought Echo Connections (it finds, suggests and checks connections to apps it couldn't use before, each approved by you in Settings) and group work that runs until it's done. 11.5.1 was a security release from a full code audit. 11.5.0 brought: agents ask instead of giving up, a system check, Stop everything, limits on outgoing messages, MCP servers that wait for your OK, Agent Skills, memory clean-up while idle, and a check before calling code done. 11.4.1 fixed web search in the installed app. 11.4.0 brought live steps in the chat (a progress line under each step, past-tense summaries, grouped steps and a status line between them), and agents that read the top pages before comparing things. 11.3.0 brought a one-card composer with a clearer context meter, a friendlier setup, a visual Settings › Advanced and git-aware agents. 11.2.0 brought memory that keeps only lasting facts, an artifact library and viewer, pages as rows, a chart-first Learning page and better-shaped answers. 11.1.2 slimmed the sidebar and brought a livelier Echo in voice. 11.1.1 fixed starting after an update. 11.1.0 added a light theme (now the default) with the classic dark theme a click away, and setup in its own window. 11.0.0 added learning from verified experience, described in the development preview below; whether it improves results is still being measured. 10.5.0 improved provider selection, settings organization and expandable lists. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
+The source version is **11.9.0**: visual project workspaces, revisioned reports and optional project handoffs between independent agents. It also includes the 11.8 harness improvements: Claude's own computer tool, sign-in for hosted MCP servers, MCP Apps and long MCP tasks, a reader that keeps raw web and email text away from the acting agent, per-reply timing traces, long tool results kept whole, asking other agents you pinned, the Echo bench, ElevenLabs read-aloud and no LangChain, plus 11.7.1's screenshots Echo can see and bounded computer control. 11.7.0 added Private and Offline modes that EchoSpeak enforces and can check, and optional smart model choice that learns which of your models does each kind of task best. 11.6.0 brought Echo Connections (it finds, suggests and checks connections to apps it couldn't use before, each approved by you in Settings) and group work that runs until it's done. 11.5.1 was a security release from a full code audit. 11.5.0 brought: agents ask instead of giving up, a system check, Stop everything, limits on outgoing messages, MCP servers that wait for your OK, Agent Skills, memory clean-up while idle, and a check before calling code done. 11.4.1 fixed web search in the installed app. 11.4.0 brought live steps in the chat (a progress line under each step, past-tense summaries, grouped steps and a status line between them), and agents that read the top pages before comparing things. 11.3.0 brought a one-card composer with a clearer context meter, a friendlier setup, a visual Settings › Advanced and git-aware agents. 11.2.0 brought memory that keeps only lasting facts, an artifact library and viewer, pages as rows, a chart-first Learning page and better-shaped answers. 11.1.2 slimmed the sidebar and brought a livelier Echo in voice. 11.1.1 fixed starting after an update. 11.1.0 added a light theme (now the default) with the classic dark theme a click away, and setup in its own window. 11.0.0 added learning from verified experience, described in the development preview below; whether it improves results is still being measured. 10.5.0 improved provider selection, settings organization and expandable lists. Earlier releases added recoverable chat streams, research citations, image editing, message actions, full voice conversations and an installer with Echo branding.
 
 The release badge follows the latest **published installer**, which may differ from source development.
 
-[11.7.1 notes](docs/releases/v11.7.1.md) · [11.7.0 notes](docs/releases/v11.7.0.md) · [11.6.0 notes](docs/releases/v11.6.0.md) · [11.5.1 notes](docs/releases/v11.5.1.md) · [11.5.0 notes](docs/releases/v11.5.0.md) · [11.4.1 notes](docs/releases/v11.4.1.md) · [11.4.0 notes](docs/releases/v11.4.0.md) · [11.3.0 notes](docs/releases/v11.3.0.md) · [11.2.0 notes](docs/releases/v11.2.0.md) · [11.1.2 notes](docs/releases/v11.1.2.md) · [11.1.1 notes](docs/releases/v11.1.1.md) · [11.1.0 notes](docs/releases/v11.1.0.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
+[11.9.0 notes](docs/releases/v11.9.0.md) · [11.8.0 notes](docs/releases/v11.8.0.md) · [11.7.1 notes](docs/releases/v11.7.1.md) · [11.7.0 notes](docs/releases/v11.7.0.md) · [11.6.0 notes](docs/releases/v11.6.0.md) · [11.5.1 notes](docs/releases/v11.5.1.md) · [11.5.0 notes](docs/releases/v11.5.0.md) · [11.4.1 notes](docs/releases/v11.4.1.md) · [11.4.0 notes](docs/releases/v11.4.0.md) · [11.3.0 notes](docs/releases/v11.3.0.md) · [11.2.0 notes](docs/releases/v11.2.0.md) · [11.1.2 notes](docs/releases/v11.1.2.md) · [11.1.1 notes](docs/releases/v11.1.1.md) · [11.1.0 notes](docs/releases/v11.1.0.md) · [Release history](docs/releases/) · [Changelog](CHANGES.md)
 
 <details>
 <summary><strong>Development preview: learning from verified experience</strong></summary>

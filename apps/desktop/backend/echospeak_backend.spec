@@ -38,10 +38,6 @@ binaries_extra = collect_dynamic_libs("ctranslate2")
 binaries_extra += collect_dynamic_libs("onnxruntime")
 
 for distribution in (
-    "langchain",
-    "langchain-core",
-    "langchain-community",
-    "langchain-openai",
     "mcp",
 ):
     try:
@@ -55,14 +51,9 @@ hiddenimports = (
     # MCP's optional CLI exits during import without its CLI extras installed.
     # EchoSpeak uses the SDK, so avoid scanning or bundling the CLI package.
     + collect_submodules("mcp", filter=lambda name: name != "mcp.cli" and not name.startswith("mcp.cli."))
-    # LangChain uses lazy __getattr__ exports; Analysis cannot discover Runnable.
-    + collect_submodules("langchain_core")
-    + collect_submodules("langchain_openai")
-    + collect_submodules("langchain_google_genai")
-    + collect_submodules("langchain_ollama")
     + collect_submodules("ddgs.engines")
     + collect_submodules("py7zr")
-    + ["onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp", "websockets.sync.client"]
+    + ["faiss", "onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp", "websockets.sync.client"]
 )
 
 a = Analysis(
@@ -76,7 +67,9 @@ a = Analysis(
     runtime_hooks=[],
     # PyTorch is not used: embeddings run on onnxruntime. Excluding it keeps a dev
     # venv that happens to have torch installed from adding ~1 GB to the bundle.
-    excludes=["pytest", "mcp.cli", "torch", "torchvision", "torchaudio", "transformers", "sentence_transformers"],
+    excludes=["pytest", "mcp.cli", "torch", "torchvision", "torchaudio", "transformers", "sentence_transformers",
+              "langchain", "langchain_core", "langchain_community", "langchain_openai",
+              "langchain_google_genai", "langchain_ollama", "langchain_text_splitters"],
     noarchive=False,
     optimize=1,
 )

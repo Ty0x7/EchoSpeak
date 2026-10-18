@@ -1,10 +1,6 @@
-# Core LangChain dependencies
-langchain>=0.3,<0.4
-langchain-community>=0.3,<0.4
-langchain-core>=0.3,<0.4
-langchain-openai>=0.3,<0.4
-langchain-google-genai>=2.0,<3.0
-# Vector store for memory
+# Vector search for memory and documents is NumPy (agent/vector_store.py). faiss only
+# converts indexes saved by EchoSpeak 11.7 and earlier, once, on first load.
+numpy>=1.26
 faiss-cpu>=1.7.4
 
 # Local embeddings without PyTorch: all-MiniLM-L6-v2 as ONNX (agent/embeddings.py),
@@ -31,7 +27,7 @@ trafilatura>=2.0,<3
 py7zr>=1.0,<2
 ddgs>=9,<10
 
-# Official Model Context Protocol client (stable 1.x SDK boundary).
+# Official Model Context Protocol client (stateless 2026-07-28 and legacy servers).
 mcp>=2.3,<3
 
 youtube-transcript-api>=0.6.2
@@ -49,12 +45,12 @@ python-multipart>=0.0.6
 # Configuration and environment
 python-dotenv>=1.0.0
 pydantic>=2.5.0
+# Signs and checks A2A Agent Cards (agent/a2a_trust.py); MCP sign-in uses it too.
+cryptography>=42
 
 # Logging
 loguru>=0.7.0
 
-# Optional: Local LLM support (llama.cpp is reached over its HTTP server)
-langchain-ollama>=0.3,<0.4
 
 # Utilities
 python-dateutil>=2.8.2

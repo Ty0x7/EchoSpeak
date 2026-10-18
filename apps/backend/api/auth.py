@@ -31,6 +31,10 @@ _PUBLIC_AUTH_PATHS = {
     "/metrics",
     "/favicon.ico",
     "/.well-known/agent.json",
+    "/.well-known/agent-card.json",  # A2A 1.0 discovery: the signed card and its public key
+    "/.well-known/jwks.json",
+    # Other agents can't hold EchoSpeak's API key; the route requires its own A2A key (api/routes/channels.py).
+    "/a2a",
 }
 
 

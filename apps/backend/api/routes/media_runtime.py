@@ -153,6 +153,47 @@ def voice_wake_check(request: VoiceWakeRequest):
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+class VoicePreviewRequest(BaseModel):
+    text: str = Field(default="Hi, I'm Echo. This is how I'll sound when I read replies aloud.", max_length=300)
+    provider_id: str = Field(default="", max_length=100)
+    voice_id: str = Field(default="", max_length=100)
+
+
+@router.post("/voice/preview")
+def preview_voice(request: VoicePreviewRequest):
+    """One short sample from the chosen read-aloud voice, for Settings › Voice › Test."""
+    import tempfile
+    from pathlib import Path
+
+    from fastapi.responses import Response
+
+    from agent.voice_runtime import VoiceRuntimeError, synthesize_voice_audio
+
+    with tempfile.TemporaryDirectory(prefix="echospeak-voice-") as folder:
+        output = Path(folder) / "preview.wav"
+        try:
+            synthesize_voice_audio(request.text, output, provider_id=request.provider_id,
+                                   settings={"voice_id": request.voice_id} if request.voice_id else {})
+        except VoiceRuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(output.read_bytes(), media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/voice/elevenlabs/voices")
+def elevenlabs_voices():
+    """Voices on the saved ElevenLabs account, for the picker in Settings › Voice."""
+    from agent import elevenlabs, privacy
+
+    try:
+        return {"items": elevenlabs.voices()}
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except elevenlabs.ElevenLabsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Couldn't reach ElevenLabs ({type(exc).__name__})") from exc
+
+
 @router.post("/voice/synthesize")
 def synthesize_voice_output(request: VoiceSynthesisRequest):
     try:

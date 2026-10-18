@@ -4,14 +4,31 @@
 
 User-facing notes: [EchoSpeak 11.9.0](docs/releases/v11.9.0.md).
 
+* Integrates the sixteen harness commits prepared for 11.8.0, preserving ElevenLabs, native Claude computer controls, MCP OAuth/Apps/Tasks, quarantined reading, timing traces, full tool-output handles, signed outbound A2A, the Echo bench and removal of LangChain/legacy approvals.
 * Projects open a visual workspace for reports, files, conversations, saved research, artifacts, media, routines and activity. Browsing a project preserves the active chat's context.
 * Named Markdown and HTML reports use existing artifact versions, with related files, original images, source-agent details, reported checks and remaining work. Echo can read workspace context and save reports through project-scoped tools.
 * Opt-in project sharing uses a validated, versioned file handoff for independent Echo, Codex and Claude Code work. Explicit context export and optional lifecycle receipts do not launch agents, copy transcripts or certify reported results.
 * Existing authentication, permissions, untrusted-content policy and artifact sandbox remain active. Imports validate project identity, paths, associations and revision order; private paths and out-of-project references are rejected.
 * Carries forward the 11.7.1 screenshot-to-model/chat flow, bounded desktop controls, app-launch permission fixes and chat-wide screen-control approvals.
 * Backend, web, desktop, Cargo and Tauri release metadata aligned to 11.9.0. Focused source/UI checks passed; packaged Windows, real-provider and independent-agent workflows still require manual evaluation.
+* Release integration fixes: bundled skills use EchoSpeak's native decorator; remote submissions require approval in all modes and legacy replies parse correctly; report bookkeeping cannot verify implementation work; packaging retains workspace resources and excludes retired dependencies.
 
-## v11.7.1 — 2026-10-12
+## v11.8.0 — 2026-10-14
+
+Prepared harness notes: [EchoSpeak 11.8.0](docs/releases/v11.8.0.md). Incorporated into 11.9.0, including the unreleased 11.7.1 below.
+
+* ElevenLabs read-aloud voice (agent/elevenlabs.py): 22 kHz PCM wrapped as WAV, voice picker from /v2/voices, Play sample, privacy component Cloud voice, provider errors shown in plain words; the inert OpenAI audio setting is removed.
+
+* Claude's computer toolset (computer_toolset_20260801) mapped onto the checked executor; one chat grant covers all its actions; a failed action stops its batch; images inside tool results for Claude.
+* Desktop control offered where the permission is turned on; 5 s holds, 10 s batches, triple click, horizontal scroll.
+* MCP: OAuth sign-in through the SDK's provider with DPAPI token storage and a loopback callback; MCP Apps (io.modelcontextprotocol/ui) in sandboxed frames under declared CSPs; the Tasks extension with polling, progress and cancellation.
+* Quarantined reader (agent/lean/quarantine.py), per-turn traces with OTLP export (agent/lean/tracing.py), saved long outputs with read_output (agent/lean/tool_outputs.py).
+* Outbound A2A to pinned agents with signed Agent Cards (agent/a2a_trust.py); EchoSpeak's card is signed and /a2a is reachable with only its own key.
+* scripts/echo_bench.py: release tasks scored per model and version.
+* LangChain removed (agent/tool_decorator.py, agent/vector_store.py); 11.7 indexes convert once without re-embedding.
+* Removed: the 9.x approval routes and card, the shadowed legacy screen tools.
+
+## v11.7.1 — not released on its own (included in 11.9.0)
 
 User-facing notes: [EchoSpeak 11.7.1](docs/releases/v11.7.1.md).
 

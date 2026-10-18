@@ -150,6 +150,10 @@ Dangerous commands ask first in every mode.
   and MCP actions. An approval shows in the chat with **Allow once**, **For this chat** and **Decline**.
 - After an agent reads a web page or email, anything that would send data out asks first, even
   with approvals off. A tool call that contains one of your API keys is always refused.
+- **Separate reader for outside content** (Settings › Agent; **Email and apps** by default): an email,
+  Discord or connected-app result goes first to a reader with no tools, and the agent sees only the
+  facts it found. If the content tried to instruct an AI, the chat says so. Choose **Also web pages**
+  to cover pages and documents too, at the cost of one extra model call per result.
 - People who reach Echo through Discord, Telegram, Twitch or Twitter get look-up tools only:
   no files, terminal, memory or past chats.
 
@@ -157,17 +161,42 @@ Dangerous commands ask first in every mode.
 
 Ask Echo to capture a monitor or a visible window. The screenshot appears in the conversation, and a vision-capable chat model receives the actual image. Click it to open the original in the same right panel used for artifacts, research and activity, or save it. Echo can reopen a screenshot by its observation ID and crop it to inspect details. Text-only models cannot interpret pixels; OCR remains a separate fallback and requires Tesseract.
 
-For input, enable **Allow actions on this computer** and **Control the desktop** in Settings › Permissions. Under **Agents** in the left sidebar, click the agent's **Edit** button and enable **Desktop control**. **Screen & images** (Vision) provides screenshots; **Desktop control** provides input. Echo reports which is available instead of treating a screenshot as permission to click. Desktop control is optional and is not enabled on agents automatically.
+For input, enable **Allow actions on this computer** and **Control the desktop** in Settings › Permissions. Right below, **Add to Echo** gives Echo (or another agent) Desktop control and screenshots in one click; you can also do it under **Agents** in the left sidebar with the agent's **Edit** button. **Screen & images** (Vision) provides screenshots; **Desktop control** provides input. Echo reports which is available instead of treating a screenshot as permission to click. Desktop control is optional and is not enabled on agents automatically.
 
 To launch an app, also enable **Open apps** and add its exact Start-menu name (for example, **Minecraft Launcher**), the name of a shortcut on your desktop (for example, **26.2** for `26.2.lnk`, or a Steam game's `.url` shortcut) or an executable path under **Allowed apps** in Settings › Permissions. Shortcuts open exactly as saved. An empty list allows no app launches. Shells and script hosts such as PowerShell, cmd or Python can be opened but never receive arguments from Echo; commands go through the terminal and its approvals. This is separate from terminal command restrictions. Windows Store apps are resolved through their installed Windows registration, without needing their protected executable path. Echo checks the window or a screenshot after requesting a launch; launching does not prove the app is ready or that game input will work.
 
-Echo can click, right-click, double-click, move, drag, scroll, type, press shortcuts and briefly hold keys or a mouse button, including together. Relative mouse movement lets it attempt camera movement in games that capture the pointer. Holds last at most two seconds, with up to five seconds of requested hold, wait and drag time per batch. Each batch uses a recent screenshot and returns a new capture so Echo can check the result. Changed window or monitor geometry requires another capture. Desktop control always asks first, even when ordinary approvals are off. Choose **For this chat** to let Echo keep acting on what it sees for the rest of that chat, so a game or a long task doesn't stop at every step. If the same request also read web pages, email or other outside content, every action asks again and **For this chat** isn't offered. Keys are sent with hardware scan codes, which more games accept.
+Echo can click, right-click, double-, triple- and middle-click, move, drag, scroll up, down and sideways, type, press shortcuts and hold keys or a mouse button, including together. Relative mouse movement lets it attempt camera movement in games that capture the pointer. Holds and waits last at most five seconds, with up to ten seconds per batch. With a Claude 5 model, Echo uses **Claude's own computer tool** (the one Claude was trained on, including zoom), through the same checks; turn it off in Settings › Permissions to compare with Echo's general tool. Each batch uses a recent screenshot and returns a new capture so Echo can check the result. Changed window or monitor geometry requires another capture. Desktop control always asks first, even when ordinary approvals are off. Choose **For this chat** to let Echo keep acting on what it sees for the rest of that chat, so a game or a long task doesn't stop at every step. If the same request also read web pages, email or other outside content, every action asks again and **For this chat** isn't offered. Keys are sent with hardware scan codes, which more games accept.
 
 If Echo can capture the screen but cannot click, check the agent's **Desktop control** toolset and both permissions above. Desktop controls use the computer-action tool. Shell text such as `where="host" click ...` is not a desktop command, and installing a package or enabling sandbox networking will not turn it into one. Echo now receives a specific correction for these misplaced terminal options.
 
 Use **Stop everything** to cancel work. Held keys and mouse buttons are released when a new computer-action batch ends, fails or is cancelled. Other apps can still change the screen while Echo works; check its results, particularly around destructive controls. Some games reject simulated input, and these short, model-driven batches are suited to slower interactions rather than real-time gameplay.
 
 Images stay in this chat's temporary observation store, separate from personal memory and Creations, for up to seven days or until its 512 MB limit evicts older captures. Chat references remain afterward and show an unavailable message. At most three recent observations are included in model context. With a cloud model, those images are sent to that provider under your existing model privacy settings; Private and Offline modes retain their restrictions.
+
+### Connected apps, other agents and timing
+
+Settings › Advanced › Connections & skills:
+
+- **Sign in.** Hosted MCP servers that need an account (Notion, Linear, Atlassian and others) show
+  **Sign-in needed**. **Sign in** opens their page in your browser; the reply comes back to EchoSpeak on
+  this PC, and tokens stay encrypted for your Windows account and refresh by themselves. **Sign out** forgets them.
+- **App views.** When a connected tool ships its own interactive view (a chart, a form, a viewer), it
+  appears in the chat after the tool runs. It can reach only the addresses its server declared, and none
+  in Private or Offline mode. A view can run its server's read-only tools; anything that changes things
+  goes through Echo with its usual approvals. If a view offers to say something, the text waits in your composer.
+- **Long tasks.** Renders and exports from connected apps can run for minutes; their progress shows under
+  the step, and **Stop** cancels them on the app's side.
+- **Other agents (A2A).** Add another AI agent, such as a friend's EchoSpeak, by its address. Echo checks
+  that its card is signed by a key it publishes and shows that key's fingerprint; compare it with what
+  the agent's owner gave you, then **Trust**. Echo asks you before every message it sends, refuses to
+  send anything if the agent's key changes, and treats replies as outside content.
+
+**Activity › Timing** shows where the last reply's time went: each model step, each tool, and time
+spent waiting for you. To keep traces in your own tools, set an OpenTelemetry collector address in
+Settings › Advanced › Traces. Traces never contain message text.
+
+A tool result too long for the conversation (a big log, a long page) is kept whole for seven days;
+Echo sees its beginning and end and reads the rest by searching it, instead of losing the middle.
 
 ## 5. Voice
 
@@ -186,8 +215,13 @@ Images stay in this chat's temporary observation store, separate from personal m
 - **Settings › Advanced › Companion** previews the new Echo avatar's listening,
   thinking, speaking and working states. Appearance changes apply to voice and the
   floating desktop companion, including the voice avatar size.
-- Speech output uses Windows voices, Piper, or OpenAI audio if you add a key. Choose
-  engines in **Settings › Voice › Engines**.
+- **Hear a reply**: the speaker button next to **Copy** under each of Echo's replies reads it
+  aloud; press it again to stop. Automatic read-aloud and voice conversations use the same voice.
+- Speech output uses Windows voices, Piper, or **ElevenLabs** (cloud). Choose one under
+  **Settings › Voice › Engines › Read aloud** and press **Play sample** to hear it. For ElevenLabs,
+  add your API key in the ElevenLabs group, then pick a voice, model and speed. Each reply read
+  aloud sends its text to ElevenLabs and uses characters on your plan; Private and Offline modes
+  turn it off. Gemini Live conversations keep their own native voice.
 
 ## 6. Memory
 

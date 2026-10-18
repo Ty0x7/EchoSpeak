@@ -24,6 +24,8 @@ from agent.lean.coding import coding_tools, project_overview
 from agent.integrations import integration_tools
 from agent.lean.computer import tools as computer_tools
 from agent.project_workspace import tools as workspace_tools
+from agent.lean import tool_outputs
+from agent import a2a_trust, mcp_apps
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
@@ -40,7 +42,7 @@ MAX_HANDOFFS_PER_MESSAGE = 6
 MAX_DISCUSS_TURNS = 3
 DEFAULT_WORK_TURNS = 30
 # Bookkeeping tools: calling them is not evidence that work got done.
-_BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent"}
+_BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "project_workspace", "save_project_report"}
 # Sources with a live UI that can show an approval card.
 INTERACTIVE_SOURCES = {"web", "desktop", "voice", "chat", "api"}
 
@@ -893,7 +895,9 @@ class LeanSession:
                 + workspace_tools()
                 + terminal.tools()
                 + integration_tools(self.session_id)
-                + computer_tools(self.session_id, self.cancel),
+                + computer_tools(self.session_id, self.cancel)
+                + [tool_outputs.tool(self.session_id)]
+                + a2a_trust.tool(),
                 session_id=self.session_id,
                 project_root=self.project_root,
             )
@@ -925,9 +929,9 @@ class LeanSession:
             persona=persona,
             soul_text=self._soul() if persona.id == "echo" else "",
             project_root=self.project_root,
-            notes=list(toolbox.notes) + learned.notes,
+            notes=list(toolbox.notes) + learned.notes + ([] if guest else [n for n in [mcp_apps.context_note(self.session_id)] if n]),
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
-            computer_note="" if guest else toolbox.computer_context(),
+            computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox)),
             git_note=repo_note,
             git_rules="terminal" in toolbox.names and git_context.wants_rules(goal, repo_note),
             project_overview=project_overview(self.project_root) if self.project_root else "",
@@ -1392,6 +1396,15 @@ class LeanSession:
         if decision.applied:
             self._route_overrides[persona.id] = decision.chosen
         return decision.note()
+
+    def _native_computer(self, persona: AgentPersona, toolbox: Toolbox) -> bool:
+        """This agent's model gets Claude's own computer toolset (agent/lean/cloud_streams.py)."""
+        from agent.lean.cloud_streams import native_computer
+        try:
+            endpoint = self._endpoint_for(persona)
+        except Exception:
+            return False
+        return endpoint.provider == "anthropic" and native_computer(endpoint.model, set(toolbox.names))
 
     def _endpoint_for(self, persona: AgentPersona):
         if persona.id in self._route_overrides:  # auto mode picked another listed model for this request

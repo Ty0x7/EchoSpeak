@@ -82,6 +82,7 @@ SECRET_TOP_LEVEL_SETTINGS = {
     "twitter_access_token_secret",
     "twitter_bearer_token",
     "runway_api_key",
+    "elevenlabs_api_key",
 }
 
 SECRET_NESTED_SETTINGS = {
@@ -937,7 +938,18 @@ class Config:
         # Lean runtime controls (Settings > Agent).
         self.lean_approval_mode = os.getenv("LEAN_APPROVAL_MODE", "smart").strip().lower() or "smart"
         self.lean_max_iterations = int(os.getenv("LEAN_MAX_ITERATIONS", "60") or 60)
+        # Quarantined reader (agent/lean/quarantine.py): "off", "messages" (email, Discord,
+        # connected apps) or "all" (also web pages and documents). One extra model call per result.
+        self.lean_quarantine_reader = os.getenv("LEAN_QUARANTINE_READER", "messages").strip().lower() or "messages"
         self.lean_context_tokens = int(os.getenv("LEAN_CONTEXT_TOKENS", "0") or 0)
+        # OpenTelemetry collector for per-turn traces (agent/lean/tracing.py), OTLP/HTTP JSON,
+        # e.g. http://localhost:4318/v1/traces. Empty: traces stay on this PC only.
+        self.trace_export_url = os.getenv("TRACE_EXPORT_URL", "").strip()
+        # Claude models get their own computer toolset instead of computer_action (agent/lean/cloud_streams.py).
+        self.computer_native_tools = os.getenv("COMPUTER_NATIVE_TOOLS", "true").strip().lower() not in {"0", "false", "no", "off"}
+        # HTTPS address of EchoSpeak's OAuth client metadata document (MCP spec 2026-07-28 CIMD).
+        # Empty: hosted MCP servers that sign in register EchoSpeak dynamically instead.
+        self.mcp_oauth_client_metadata_url = os.getenv("MCP_OAUTH_CLIENT_METADATA_URL", "").strip()
         # Learning from verified experience (agent/learning). It writes advisory lessons and
         # statistics only: never permissions, approvals, toolsets, policy, checks or code.
         self.learning_enabled = os.getenv("LEARNING_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
@@ -972,6 +984,11 @@ class Config:
         self.voice_local_stt_provider = os.getenv("VOICE_LOCAL_STT_PROVIDER", "windows-sapi").strip() or "windows-sapi"
         self.voice_local_tts_provider = os.getenv("VOICE_LOCAL_TTS_PROVIDER", self.voice_local_provider).strip() or "windows-sapi"
         self.voice_cloud_provider = os.getenv("VOICE_CLOUD_PROVIDER", "").strip()
+        # ElevenLabs read-aloud voice (agent/elevenlabs.py), chosen as the "Read aloud" provider.
+        self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+        self.elevenlabs_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+        self.elevenlabs_model = os.getenv("ELEVENLABS_MODEL", "eleven_flash_v2_5").strip() or "eleven_flash_v2_5"
+        self.elevenlabs_speed = float(os.getenv("ELEVENLABS_SPEED", "1.0") or 1.0)
         self.voice_faster_whisper_model_path = os.getenv("VOICE_FASTER_WHISPER_MODEL_PATH", "").strip()
         # Word that starts a voice turn when Wake is on ("Hey Echo").
         self.voice_wake_word = os.getenv("VOICE_WAKE_WORD", "echo").strip().lower() or "echo"
@@ -1454,6 +1471,10 @@ class Config:
             "terminal_docker_network",
             "lean_approval_mode",
             "lean_max_iterations",
+            "lean_quarantine_reader",
+            "trace_export_url",
+            "computer_native_tools",
+            "mcp_oauth_client_metadata_url",
             "lean_context_tokens",
             "learning_enabled",
             "learning_reflection_daily_cap",
@@ -1474,6 +1495,10 @@ class Config:
             "voice_local_stt_provider",
             "voice_local_tts_provider",
             "voice_cloud_provider",
+            "elevenlabs_api_key",
+            "elevenlabs_voice_id",
+            "elevenlabs_model",
+            "elevenlabs_speed",
             "voice_faster_whisper_model_path",
             "voice_whisper_cpp_model_path",
             "voice_piper_model_path",

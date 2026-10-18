@@ -453,3 +453,28 @@ body.rp-resizing iframe { pointer-events: none; }
 .ap-page blockquote { margin: 0 0 1em; padding: 2px 0 2px 14px; border-left: 3px solid var(--es-accent); color: var(--wg-dim); }
 .rp .ap-doc { padding: 16px 12px 32px; }
 .rp .ap-page { padding: 22px 24px; font-size: 14px; }
+
+/* Timing (per-reply trace, agent/lean/tracing.py): one time scale, the whole reply = full track width. */
+.rp-trace { display: grid; gap: 6px; padding: 4px 2px; }
+.rp-trace-sum { margin: 2px 6px 6px; color: var(--wg-dim); font: 500 12px var(--wg-font); }
+.rp-trace-sum strong { color: var(--wg-text); font-variant-numeric: tabular-nums; }
+.rp-trace ol { display: grid; gap: 1px; margin: 0; padding: 0; list-style: none; }
+.rp-trace-row { display: grid; grid-template-columns: minmax(0, 38%) minmax(0, 1fr) 56px; align-items: center; gap: 8px; min-height: 28px; padding: 2px 6px; border-radius: 6px; font: 500 12px var(--wg-font); color: var(--wg-text); }
+.rp-trace-row:hover { background: rgba(var(--es-wash-rgb), calc(0.04 * var(--es-wash-k))); }
+.rp-trace-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-trace-name small { margin-left: 6px; color: var(--wg-faint); font-size: 10.5px; }
+.rp-trace-track { position: relative; height: 8px; border-radius: 4px; background: rgba(var(--es-wash-rgb), calc(0.05 * var(--es-wash-k))); }
+.rp-trace-track i { position: absolute; top: 0; bottom: 0; border-radius: 4px; background: var(--wg-dim); }
+.rp-trace-row[data-kind="model"] .rp-trace-track i { background: var(--es-accent); }
+.rp-trace-row[data-kind="wait"] .rp-trace-track i { background: var(--es-warn); }
+.rp-trace-row[data-failed] .rp-trace-track i { background: var(--es-err); }
+.rp-trace-ms { color: var(--wg-faint); font: 500 11px var(--wg-mono); text-align: right; font-variant-numeric: tabular-nums; }
+
+/* MCP Apps (McpAppView): a server's own view, framed by the chat's card style. */
+.es-mcp-app { display: grid; gap: 6px; margin: 6px 0; min-width: 0; }
+.es-mcp-app figcaption { display: flex; align-items: baseline; gap: 8px; color: var(--wg-dim); font: 500 12px var(--wg-font); }
+.es-mcp-app figcaption strong { color: var(--wg-text); font-weight: 600; }
+.es-mcp-app figcaption small { color: var(--wg-faint); font: 500 11px var(--wg-mono); }
+.es-mcp-app iframe { display: block; width: 100%; max-width: 100%; border: 0; border-radius: 10px; background: var(--es-surface-1); }
+.es-mcp-app.has-border iframe { border: 1px solid var(--wg-line); }
+.es-mcp-app-note { margin: 0; padding: 14px; border: 1px dashed var(--wg-line); border-radius: 10px; color: var(--wg-dim); font: 500 12.5px var(--wg-font); }

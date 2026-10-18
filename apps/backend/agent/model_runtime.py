@@ -26,46 +26,6 @@ from loguru import logger
 
 from config import DATA_DIR, ModelProvider, config
 
-try:
-    from langchain_openai import ChatOpenAI
-
-    class ReasoningChatOpenAI(ChatOpenAI):
-        """Preserve documented reasoning metadata without exposing it as content."""
-
-        def _convert_delta_to_message_chunk(self, value: dict, default_class: Any) -> Any:
-            chunk = super()._convert_delta_to_message_chunk(value, default_class)
-            reasoning = (value.get("delta") or {}).get("reasoning_content")
-            if reasoning is not None:
-                chunk.additional_kwargs["reasoning_content"] = reasoning
-            return chunk
-
-        def _convert_dict_to_message(self, value: dict) -> Any:
-            message = super()._convert_dict_to_message(value)
-            reasoning = (value.get("message") or {}).get("reasoning_content")
-            if reasoning is not None:
-                message.additional_kwargs["reasoning_content"] = reasoning
-            return message
-except ImportError:
-    ChatOpenAI = None
-    ReasoningChatOpenAI = None
-
-try:
-    from langchain_ollama import ChatOllama
-except ImportError:
-    ChatOllama = None
-
-try:
-    from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
-except ImportError:
-    ChatGoogleGenerativeAI = None
-
-try:
-    from langchain_community.llms import LlamaCpp, VLLM
-except ImportError:
-    LlamaCpp = None
-    VLLM = None
-
-
 # Full functional defaults shared by every model (local or hosted).
 _FULL_PLAN_DEPTH = 12
 _FULL_AUTONOMOUS_STEPS = 64
@@ -193,39 +153,39 @@ _PROVIDER_CATALOG: tuple[dict[str, Any], ...] = (
 _PROVIDER_REQUIREMENTS: dict[ModelProvider, dict[str, Any]] = {
     ModelProvider.OPENAI: {
         "env_vars": ["OPENAI_API_KEY"],
-        "pip_packages": ["langchain-openai"],
+        "pip_packages": [],
         "description": "Requires an OpenAI API key",
     },
     ModelProvider.GEMINI: {
         "env_vars": ["GEMINI_API_KEY"],
-        "pip_packages": ["langchain-google-genai"],
+        "pip_packages": [],
         "description": "Requires a Google AI Studio API key",
     },
     ModelProvider.ANTHROPIC: {"env_vars": ["ANTHROPIC_API_KEY"], "pip_packages": [], "description": "Requires an Anthropic API key"},
     ModelProvider.XAI: {"env_vars": ["XAI_API_KEY"], "pip_packages": [], "description": "Requires an xAI API key"},
     ModelProvider.OLLAMA: {
         "env_vars": ["LOCAL_MODEL_URL", "LOCAL_MODEL_NAME"],
-        "pip_packages": ["langchain-ollama"],
+        "pip_packages": [],
         "description": "Requires Ollama with the selected model available",
     },
     ModelProvider.LM_STUDIO: {
         "env_vars": ["LOCAL_MODEL_URL", "LOCAL_MODEL_NAME"],
-        "pip_packages": ["langchain-openai"],
+        "pip_packages": [],
         "description": "Requires the LM Studio server and exact selected model",
     },
     ModelProvider.LOCALAI: {
         "env_vars": ["LOCAL_MODEL_URL", "LOCAL_MODEL_NAME"],
-        "pip_packages": ["langchain-openai"],
+        "pip_packages": [],
         "description": "Requires a LocalAI server",
     },
     ModelProvider.LLAMA_CPP: {
         "env_vars": ["LOCAL_MODEL_NAME"],
-        "pip_packages": ["langchain-community", "llama-cpp-python"],
+        "pip_packages": ["llama-cpp-python"],
         "description": "Requires llama.cpp bindings and a configured GGUF path",
     },
     ModelProvider.VLLM: {
         "env_vars": ["LOCAL_MODEL_URL", "LOCAL_MODEL_NAME"],
-        "pip_packages": ["langchain-community", "vllm"],
+        "pip_packages": [],
         "description": "Requires a vLLM server",
     },
 }
@@ -398,7 +358,7 @@ class ModelRuntimeClient:
         self.model_id = str(model_id or self._configured_model_id()).strip()
         if not self.model_id:
             raise ValueError(f"No model is configured for provider {self.provider.value}")
-        self.llm = self._create_llm()
+        self.base_url = self._base_url()
 
     def _configured_model_id(self) -> str:
         from agent.cloud_providers import CLOUD_PROVIDERS, cloud_config
@@ -406,316 +366,18 @@ class ModelRuntimeClient:
             return str(cloud_config(self.provider).model or "")
         return str(config.local.model_name or "")
 
-    def _create_llm(self) -> Any:
-        if self.provider in (ModelProvider.ANTHROPIC, ModelProvider.XAI) or (self.provider == ModelProvider.GEMINI and any(x in self.model_id.lower() for x in ("live", "native-audio"))):
-            from agent.cloud_providers import BASE_URLS, cloud_config
-            c = cloud_config(self.provider)
-            # Legacy helper calls use the provider's SDK-compatible API. Canonical
-            # chat uses the native Claude / Gemini Live adapters in lean.provider.
-            return ReasoningChatOpenAI(model=self.model_id, api_key=c.api_key or "not-needed", base_url=BASE_URLS[self.provider.value], max_tokens=c.max_tokens, max_retries=0, streaming=True)
-        if self.provider == ModelProvider.OPENAI:
-            if ReasoningChatOpenAI is None:
-                raise ImportError("langchain-openai is required for provider=openai")
-            return ReasoningChatOpenAI(
-                model=self.model_id,
-                temperature=config.openai.temperature,
-                api_key=config.openai.api_key or "not-needed",
-                max_tokens=config.openai.max_tokens,
-                request_timeout=_openai_compatible_request_timeout(
-                    local_stream=False
-                ),
-                max_retries=0,
-                streaming=True,
-            )
-
-        if self.provider == ModelProvider.GEMINI:
-            if ChatGoogleGenerativeAI is None:
-                raise ImportError("langchain-google-genai is required for provider=gemini")
-            model_key = self.model_id.casefold()
-            thinking = "pro" in model_key or "2.5" in model_key
-            return ChatGoogleGenerativeAI(
-                model=self.model_id,
-                temperature=config.gemini.temperature,
-                max_tokens=config.gemini.max_tokens,
-                google_api_key=config.gemini.api_key or "not-needed",
-                include_thoughts=thinking,
-                thinking_budget=8192 if thinking else 0,
-                streaming=True,
-            )
-
-        local = config.local
-        local_base_url = resolve_local_provider_base_url(self.provider, local.base_url)
-        if self.provider == ModelProvider.OLLAMA:
-            if ChatOllama is None:
-                raise ImportError("langchain-ollama is required for provider=ollama")
-            return ChatOllama(
-                model=self.model_id,
-                base_url=local_base_url,
-                temperature=local.temperature,
-                num_predict=local.max_tokens,
-            )
-
-        if self.provider in {ModelProvider.LM_STUDIO, ModelProvider.LOCALAI}:
-            if ReasoningChatOpenAI is None:
-                raise ImportError("langchain-openai is required for the selected OpenAI-compatible provider")
-            base = local_base_url
-            if base and not base.endswith("/v1"):
-                base = f"{base}/v1"
-            max_tokens = max(int(local.max_tokens or 0), 8192) if any(
-                family in self.model_id.casefold() for family in ("gemma", "qwen", "glm")
-            ) else int(local.max_tokens or 4096)
-            return ReasoningChatOpenAI(
-                model=self.model_id,
-                temperature=local.temperature,
-                base_url=base or None,
-                api_key="not-needed",
-                max_tokens=max_tokens,
-                request_timeout=_openai_compatible_request_timeout(
-                    local_stream=True
-                ),
-                max_retries=0,
-                streaming=True,
-            )
-
-        if self.provider == ModelProvider.LLAMA_CPP:
-            if LlamaCpp is None:
-                raise ImportError("langchain-community and llama-cpp-python are required for provider=llama_cpp")
-            return LlamaCpp(
-                model_path=self.model_id,
-                temperature=local.temperature,
-                max_tokens=local.max_tokens,
-                n_ctx=local.context_length,
-                n_gpu_layers=local.gpu_layers,
-                use_mmap=local.use_mmap,
-                use_mlock=local.use_mlock,
-                n_threads=local.threads,
-                verbose=True,
-            )
-
-        if self.provider == ModelProvider.VLLM:
-            if VLLM is None:
-                raise ImportError("langchain-community and vllm are required for provider=vllm")
-            return VLLM(
-                model=self.model_id,
-                tensor_parallel_size=1,
-                trust_remote_code=True,
-                base_url=local_base_url,
-            )
-        raise ValueError(f"Unsupported model provider: {self.provider.value}")
-
-    @staticmethod
-    def coerce_content_to_text(content: Any) -> str:
-        if content is None:
-            return ""
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, str):
-                    parts.append(item)
-                elif isinstance(item, dict):
-                    if str(item.get("type") or "").casefold() in {"thinking", "thought", "reasoning"}:
-                        continue
-                    if "text" in item:
-                        parts.append(str(item.get("text") or ""))
-                elif item is not None and str(getattr(item, "type", "")).casefold() not in {
-                    "thinking", "thought", "reasoning"
-                }:
-                    parts.append(str(item))
-            return " ".join(part for part in parts if part.strip()).strip()
-        if isinstance(content, dict):
-            if str(content.get("type") or "").casefold() in {"thinking", "thought", "reasoning"}:
-                return ""
-            if "text" in content:
-                return str(content.get("text") or "")
-        return str(content)
-
-    @staticmethod
-    def extract_reasoning_text(value: Any) -> str:
-        parts: list[str] = []
-        seen: set[int] = set()
-
-        def walk(item: Any) -> None:
-            if item is None:
-                return
-            if isinstance(item, str):
-                parts.extend(
-                    match.group(1).strip()
-                    for match in re.finditer(r"<think>(.*?)</think>", item, re.IGNORECASE | re.DOTALL)
-                    if match.group(1).strip()
-                )
-                return
-            if isinstance(item, (dict, list, tuple, set)) or hasattr(item, "__dict__"):
-                identity = id(item)
-                if identity in seen:
-                    return
-                seen.add(identity)
-            if isinstance(item, dict):
-                reasoning = item.get("reasoning_content")
-                if reasoning:
-                    parts.append(str(reasoning).strip())
-                for key in ("thinking", "thought", "reasoning", "content", "message", "messages", "additional_kwargs"):
-                    if key in item:
-                        walk(item.get(key))
-                return
-            if isinstance(item, (list, tuple, set)):
-                for child in item:
-                    walk(child)
-                return
-            for attribute in ("content", "message", "messages", "additional_kwargs", "response_metadata"):
-                if hasattr(item, attribute):
-                    walk(getattr(item, attribute))
-
-        walk(value)
-        return "\n\n".join(dict.fromkeys(part for part in parts if part)).strip()
-
-    def resolve_turn_reasoning_control(
-        self,
-        *,
-        thinking_enabled: bool = True,
-        reasoning_effort: str = "medium",
-    ) -> dict[str, Any]:
-        """Resolve one turn-scoped, provider-honest reasoning control."""
-
-        from agent.model_adapters import resolve_reasoning_effort
-
-        resolved = resolve_reasoning_effort(
-            reasoning_effort,
-            self.provider.value,
-            self.model_id,
-        )
-        bind_parameters: dict[str, Any] = {}
-        applied = False
-        control_kind = str(resolved.get("control_kind") or "none")
-        if control_kind == "openai_reasoning_effort":
-            if thinking_enabled:
-                bind_parameters["reasoning_effort"] = resolved["reasoning_effort"]
-                applied = True
-            elif bool(resolved.get("supports_disable")):
-                bind_parameters["reasoning_effort"] = "none"
-                applied = True
-        elif control_kind == "gemini_thinking":
-            model_low = self.model_id.casefold()
-            if "gemini-3" in model_low:
-                if thinking_enabled:
-                    level = str(resolved.get("effort_level") or "medium")
-                    bind_parameters["thinking_level"] = (
-                        "low" if level in {"minimal", "low"}
-                        else "high" if level in {"high", "extra_high", "max", "ultra"}
-                        else "medium"
-                    )
-                    applied = True
-            elif thinking_enabled:
-                bind_parameters["thinking_budget"] = int(resolved["budget_tokens"])
-                applied = True
-            elif bool(resolved.get("supports_disable")):
-                bind_parameters["thinking_budget"] = 0
-                bind_parameters["include_thoughts"] = False
-                applied = True
-        elif thinking_enabled:
-            # Local hosts generally do not implement a portable native
-            # reasoning-effort field.  Still honor the user's effort choice by
-            # changing the bounded generation budget through the parameter the
-            # selected provider actually supports.  This is an output budget,
-            # not private-thought exposure or a hidden model fallback.
-            output_parameter = str(resolved.get("output_parameter") or "")
-            if output_parameter:
-                try:
-                    context_limit = int(
-                        getattr(getattr(config, "local", None), "context_length", 0)
-                        or 32768
-                    )
-                except (TypeError, ValueError):
-                    context_limit = 32768
-                budget = max(1024, int(resolved.get("budget_tokens") or 4096))
-                # Keep enough room for the prompt and tools on local models.
-                budget = min(budget, max(4096, context_limit // 2), 65536)
-                bind_parameters[output_parameter] = budget
-                resolved["effective_output_budget"] = budget
-                resolved["control_kind"] = "bounded_output_budget"
-                applied = True
-        note = str(resolved.get("note") or "")
-        if not thinking_enabled and not applied:
-            note = (
-                "The selected model/provider cannot disable reasoning on this endpoint; "
-                "no unsupported off parameter was sent."
-            )
-        return {
-            **resolved,
-            "thinking_enabled": bool(thinking_enabled),
-            "applied": applied,
-            "bind_parameters": bind_parameters,
-            "note": note,
-        }
-
-    def invoke_with_reasoning(
-        self,
-        prompt: str,
-        *,
-        thinking_enabled: bool = True,
-        reasoning_effort: str = "medium",
-        callbacks: Optional[list[Any]] = None,
-    ) -> tuple[str, str]:
-        control = self.resolve_turn_reasoning_control(
-            thinking_enabled=thinking_enabled,
-            reasoning_effort=reasoning_effort,
-        )
-        runnable = self.llm
-        bind_parameters = dict(control.get("bind_parameters") or {})
-        if bind_parameters:
-            runnable = runnable.bind(**bind_parameters)
-        if callbacks:
-            response = runnable.invoke(prompt, config={"callbacks": list(callbacks)})
-        else:
-            response = runnable.invoke(prompt)
-        return (
-            self.coerce_content_to_text(getattr(response, "content", response)),
-            self.extract_reasoning_text(response),
-        )
-
-    def invoke_conversation_with_reasoning(
-        self,
-        prompt: str,
-        *,
-        thinking_enabled: bool = True,
-        reasoning_effort: str = "medium",
-        callbacks: Optional[list[Any]] = None,
-    ) -> tuple[str, str]:
-        """Invoke the same exact Session model without an agent/tool envelope."""
-
-        return self.invoke_with_reasoning(
-            prompt,
-            thinking_enabled=thinking_enabled,
-            reasoning_effort=reasoning_effort,
-            callbacks=callbacks,
-        )
-
-    def invoke(self, prompt: str) -> str:
-        return self.invoke_with_reasoning(prompt)[0]
-
-    def invoke_fast(self, prompt: str, max_tokens: int = 256) -> str:
+    def _base_url(self) -> str:
+        """Where this model is served. Chat itself goes through agent/lean/provider.py over plain HTTP."""
+        from agent.lean.provider import resolve_endpoint
         try:
-            response = self.llm.bind(max_tokens=max_tokens).invoke(prompt)
-            return self.coerce_content_to_text(getattr(response, "content", response))
-        except Exception as exc:
-            logger.debug("Fast model binding unavailable; using normal invocation: {}", exc)
-            return self.invoke(prompt)
+            return resolve_endpoint(self.provider.value, self.model_id).base_url
+        except Exception:
+            return ""
 
 
-def _llm_base_url(llm: Any, profile: Optional[ModelCapabilityProfile]) -> str:
+def _llm_base_url(base_url: str, profile: Optional[ModelCapabilityProfile]) -> str:
     metadata = dict(getattr(profile, "metadata", {}) or {})
-    candidates = [
-        metadata.get("base_url"),
-        metadata.get("endpoint"),
-        getattr(llm, "openai_api_base", None),
-        getattr(llm, "base_url", None),
-    ]
-    client = getattr(llm, "client", None)
-    candidates.extend([
-        getattr(client, "base_url", None),
-        getattr(getattr(client, "_client", None), "base_url", None),
-    ])
+    candidates = [metadata.get("base_url"), metadata.get("endpoint"), base_url]
     for value in candidates:
         text = str(value or "").strip().rstrip("/")
         if text:
@@ -747,7 +409,7 @@ def ensure_selected_model_ready(
     provider: str,
     model_id: str,
     *,
-    llm: Any,
+    base_url: str,
     profile: Optional[ModelCapabilityProfile] = None,
     timeout: float = 120.0,
 ) -> SelectedModelReadiness:
@@ -772,7 +434,7 @@ def ensure_selected_model_ready(
             code="selected_model_id_missing",
         )
 
-    endpoint = _llm_base_url(llm, profile)
+    endpoint = _llm_base_url(base_url, profile)
     root = _lmstudio_rest_root(endpoint)
     if not root:
         raise SelectedModelReadinessError(

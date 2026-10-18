@@ -95,6 +95,10 @@ COMPONENTS: tuple[Component, ...] = (
     Component("creation", "Cloud image and video generation", "Your prompt and any images you attach", True,
               ("api.dev.runwayml.com", "api.runwayml.com")),
     Component("a2a", "Other agents (A2A)", "The task you send to another agent", True),
+    Component("voice", "Cloud voice", "The text Echo reads aloud", True, ("api.elevenlabs.io",),
+              "Windows voices and Piper read aloud on this PC and always work."),
+    Component("traces", "Trace export", "Timings, tool names and token counts of each reply, never message text", False,
+              note="Only when you set a trace collector in Settings › Advanced; a collector on this PC always works."),
 )
 _BY_ID = {c.id: c for c in COMPONENTS}
 
@@ -107,6 +111,7 @@ TOOL_COMPONENTS: dict[str, str] = {
     "email_get_thread": "channels", "discord_send_channel": "channels", "discord_read_channel": "channels",
     "discord_web_send": "channels", "discord_web_read_recent": "channels", "discord_contacts_discover": "channels",
     "telegram_send": "channels", "twitter_post": "channels", "tweet_post": "channels",
+    "ask_remote_agent": "a2a",
 }
 
 NOT_ENFORCED = (

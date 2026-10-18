@@ -13,7 +13,7 @@ from typing import Optional
 import requests
 from loguru import logger
 from pydantic import BaseModel, Field
-from langchain_core.tools import tool
+from agent.tool_decorator import tool
 
 from agent.tool_registry import ToolRegistry
 

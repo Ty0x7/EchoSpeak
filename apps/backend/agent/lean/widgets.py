@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import contextvars
 import math
+import re
 import time
 from typing import Any, Callable, Optional, TypeVar
 from urllib.parse import urlparse
@@ -231,6 +232,11 @@ _NORMALIZERS: dict[str, Callable[[dict[str, Any]], Optional[dict[str, Any]]]] = 
     "observation": lambda data: {k: data[k] for k in ("id", "session_id", "source", "at", "width", "height", "model_width", "model_height")}
         if str(data.get("id", "")).startswith("obs-") else None,
     "creation": lambda data: {"id": _s(data.get("id"), 80)} if str(data.get("id", "")).startswith("generation-") else None,
+    # MCP Apps (agent/mcp_apps.py): a reference to a stored view, never its HTML.
+    "mcp_app": lambda data: {"id": _s(data.get("id"), 40), "session_id": _s(data.get("session_id"), 200),
+                             "server": _s(data.get("server"), 80), "tool": _s(data.get("tool"), 120),
+                             "prefers_border": bool(data.get("prefers_border", True))}
+        if re.fullmatch(r"app-[a-f0-9]{24}", str(data.get("id", ""))) else None,
     "weather": _weather,
     "chart": _chart,
     "product_carousel": _products,

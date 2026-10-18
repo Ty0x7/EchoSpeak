@@ -201,6 +201,11 @@ export function validateWidget(raw: unknown): Widget | null {
       const id = str(data.id, 80);
       return /^generation-[a-zA-Z0-9_-]+$/.test(id) ? { type, data: { id } } : null;
     }
+    case "mcp_app": {
+      const id = str(data.id, 40), session_id = str(data.session_id, 200);
+      if (!/^app-[a-f0-9]{24}$/.test(id) || !session_id) return null;
+      return { type, data: { id, session_id, server: str(data.server, 80), tool: str(data.tool, 120), prefers_border: data.prefers_border !== false } };
+    }
     case "observation": {
       const id = str(data.id, 40), session_id = str(data.session_id, 200);
       const dimensions = [data.width, data.height, data.model_width, data.model_height].map(num);
