@@ -23,20 +23,7 @@ from loguru import logger
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import config
 
-try:
-    from langchain_core.documents import Document
-except ImportError:
-    try:
-        from langchain.schema import Document
-    except ImportError:
-        from langchain.docstore.document import Document
-
-try:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-except Exception:
-    RecursiveCharacterTextSplitter = None
-
-from langchain_community.vectorstores import FAISS
+from agent.vector_store import Document, VectorStore, split_text
 
 try:
     from rank_bm25 import BM25Okapi
@@ -416,18 +403,14 @@ class DocumentStore:
             temp.unlink(missing_ok=True)
             raise RuntimeError(f"Failed to atomically persist document metadata: {exc}") from exc
 
-    def _load_or_create_vectorstore(self) -> FAISS:
+    def _load_or_create_vectorstore(self) -> VectorStore:
         if self.index_dir.exists() and any(self.index_dir.iterdir()):
             try:
                 from agent.index_integrity import check as _check_index
 
                 _check_index(self.index_dir)  # a pickle changed outside EchoSpeak is never loaded
-                vs = FAISS.load_local(
-                    str(self.index_dir),
-                    self.embeddings,
-                    allow_dangerous_deserialization=True,
-                )
-                stored_dim = int(getattr(getattr(vs, "index", None), "d", 0) or 0)
+                vs = VectorStore.load_local(self.index_dir, self.embeddings)
+                stored_dim = vs.dim
                 current_dim = len(self.embeddings.embed_query("EchoSpeak document index healthcheck"))
                 if stored_dim and current_dim != stored_dim:
                     raise ValueError(f"index has {stored_dim}-d vectors but the embedder returns {current_dim}-d vectors")
@@ -446,7 +429,7 @@ class DocumentStore:
                 self.index_detail = f"Index is corrupt and canonical text is incomplete: {exc}"
         self.index_health = "healthy" if not self._docs else "degraded"
         self.index_detail = "Empty index ready" if not self._docs else "Canonical text required to rebuild index"
-        return FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+        return VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
 
     def _canonical_content_path(self, doc_id: str) -> Path:
         return self.content_dir / f"{str(doc_id)}.txt"
@@ -465,7 +448,7 @@ class DocumentStore:
             temp.unlink(missing_ok=True)
             raise
 
-    def _build_vectorstore_from_canonical(self) -> Optional[FAISS]:
+    def _build_vectorstore_from_canonical(self) -> Optional[VectorStore]:
         texts = ["bootstrap"]
         metadatas: list[dict[str, Any]] = [{"bootstrap": True}]
         for doc_id, meta in self._docs.items():
@@ -477,7 +460,7 @@ class DocumentStore:
             for index, chunk in enumerate(chunks):
                 texts.append(chunk)
                 metadatas.append({**dict(meta), "doc_id": doc_id, "chunk": index})
-        rebuilt = FAISS.from_texts(texts, self.embeddings, metadatas=metadatas)
+        rebuilt = VectorStore.from_texts(texts, self.embeddings, metadatas=metadatas)
         rebuilt.save_local(str(self.index_dir))
         _pin_saved_index(self.index_dir)
         return rebuilt
@@ -525,20 +508,7 @@ class DocumentStore:
         clean = (text or "").strip()
         if not clean:
             return []
-        if RecursiveCharacterTextSplitter is not None:
-            splitter = RecursiveCharacterTextSplitter(chunk_size=950, chunk_overlap=160)
-            return [c.strip() for c in splitter.split_text(clean) if c.strip()]
-        # Fallback: simple chunking
-        chunks = []
-        size = 900
-        overlap = 140
-        i = 0
-        while i < len(clean):
-            chunk = clean[i : i + size]
-            if chunk.strip():
-                chunks.append(chunk.strip())
-            i += max(1, size - overlap)
-        return chunks
+        return split_text(clean, chunk_size=950, chunk_overlap=160)
 
     def add_document(
         self,
@@ -696,9 +666,9 @@ class DocumentStore:
         if kept_texts:
             texts = ["bootstrap"] + kept_texts
             metas = [{"bootstrap": True}] + kept_metas
-            self.vector_store = FAISS.from_texts(texts, self.embeddings, metadatas=metas)
+            self.vector_store = VectorStore.from_texts(texts, self.embeddings, metadatas=metas)
         else:
-            self.vector_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+            self.vector_store = VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
         self.vector_store.save_local(str(self.index_dir))
         _pin_saved_index(self.index_dir)
 
@@ -714,7 +684,7 @@ class DocumentStore:
     def clear(self) -> None:
         if not self.enabled or self.vector_store is None:
             return
-        self.vector_store = FAISS.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
+        self.vector_store = VectorStore.from_texts(["bootstrap"], self.embeddings, metadatas=[{"bootstrap": True}])
         self.vector_store.save_local(str(self.index_dir))
         _pin_saved_index(self.index_dir)
         ids = list(self._docs)

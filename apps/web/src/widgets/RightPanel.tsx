@@ -3,6 +3,7 @@ import type { LeanMessageData, LeanSegment } from "../lean/types";
 import { ArtifactPanel } from "./ArtifactPanel";
 import { ResearchPanel } from "./ResearchPanel";
 import { ObservationView } from "./ObservationCard";
+import { TraceView } from "./TraceView";
 import type { ObservationRef } from "./types";
 
 /** One tool run shown in the Activity tab. */
@@ -22,9 +23,18 @@ const TERMINAL = TERMINAL_TOOLS;
 const FILES = /^(file_|artifact_|checkpoint_undo|project_)/;
 const WEB = new Set(["web_search", "safe_web_fetch", "browse_task", "youtube_transcript", "weather_live", "sports_live", "stock_history", "product_search", "video_search", "image_search"]);
 
-export type ActivityFilter = "all" | "terminal" | "files" | "web";
+export type ActivityFilter = "all" | "terminal" | "files" | "web" | "timing";
 export const activityKind = (name: string): Exclude<ActivityFilter, "all"> | "other" =>
   TERMINAL.has(name) ? "terminal" : FILES.test(name) ? "files" : WEB.has(name) ? "web" : "other";
+
+/** The newest finished reply in a chat: the one the Timing view explains. */
+export function lastReplyId(messages: (LeanMessageData | undefined)[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message && message.status !== "streaming" && /^msg_[a-f0-9]{12}$/.test(message.messageId)) return message.messageId;
+  }
+  return "";
+}
 
 /** Tool runs from a chat's messages (history + the live reply), oldest first. */
 export function collectActivity(messages: (LeanMessageData | undefined)[]): ActivityItem[] {
@@ -60,10 +70,10 @@ function ActivityRow({ item, defaultOpen }: { item: ActivityItem; defaultOpen: b
   );
 }
 
-export function ActivityView({ items, active = true }: { items: ActivityItem[]; active?: boolean }) {
+export function ActivityView({ items, active = true, apiBase = "", sessionId = "", replyId = "" }: { items: ActivityItem[]; active?: boolean; apiBase?: string; sessionId?: string; replyId?: string }) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const listRef = useRef<HTMLDivElement>(null);
-  const shown = useMemo(() => (filter === "all" ? items : items.filter((i) => activityKind(i.name) === filter)), [items, filter]);
+  const shown = useMemo(() => (filter === "all" || filter === "timing" ? items : items.filter((i) => activityKind(i.name) === filter)), [items, filter]);
   const running = items.some((i) => i.status === "running");
   useLayoutEffect(() => {
     const el = listRef.current;
@@ -79,9 +89,12 @@ export function ActivityView({ items, active = true }: { items: ActivityItem[]; 
             <small>{count(f)}</small>
           </button>
         ))}
+        {apiBase ? <button type="button" role="radio" aria-checked={filter === "timing"} className={filter === "timing" ? "is-on" : ""} onClick={() => setFilter("timing")}>Timing</button> : null}
       </div>
       <div className="rp-act-list" ref={listRef}>
-        {shown.length === 0 ? (
+        {filter === "timing" ? (
+          <TraceView apiBase={apiBase} sessionId={sessionId} messageId={replyId} />
+        ) : shown.length === 0 ? (
           <div className="ap-empty">{items.length ? "Nothing of this kind in this chat." : "When agents run commands, edit files or search, each step shows up here."}</div>
         ) : (
           <ol>
@@ -136,6 +149,7 @@ export function RightPanel({
   artifact,
   observation,
   activity,
+  replyId = "",
   onEditArtifact,
   width,
   onWidth,
@@ -151,6 +165,8 @@ export function RightPanel({
   artifact: { id: string; version?: number } | null;
   observation?: ObservationRef | null;
   activity: ActivityItem[];
+  /** Newest finished reply, for the Timing view. */
+  replyId?: string;
   onEditArtifact?(id: string, version: number, passage?: string): void;
   width: number;
   onWidth(width: number): void;
@@ -268,7 +284,7 @@ export function RightPanel({
           <ResearchPanel key={sessionId} apiBase={apiBase} sessionId={sessionId} active={active === "research"} />
         </div>
         <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-activity`} aria-labelledby={`${panelId}-activity-tab`} hidden={active !== "activity"}>
-          <ActivityView key={sessionId} items={activity} active={active === "activity"} />
+          <ActivityView key={sessionId} items={activity} active={active === "activity"} apiBase={apiBase} sessionId={sessionId} replyId={replyId} />
         </div></>}
       </div>
     </aside>

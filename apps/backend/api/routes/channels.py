@@ -263,6 +263,27 @@ async def agent_card():
     return card.to_dict()
 
 
+@router.get("/.well-known/agent-card.json")
+async def agent_card_v1():
+    """EchoSpeak's A2A 1.0 Agent Card, signed (agent/a2a_trust.py) so callers can pin who they talk to."""
+    if not getattr(config, "a2a_enabled", False):
+        raise HTTPException(status_code=404, detail="A2A protocol is disabled")
+    from agent import a2a_trust
+    from agent.a2a import build_agent_card
+    base_url = str(getattr(config, "api", None) and getattr(config.api, "base_url", "") or "")
+    jku = base_url.rstrip("/") + a2a_trust.JWKS_PATH if base_url else a2a_trust.JWKS_PATH
+    return a2a_trust.sign_card(build_agent_card(base_url).to_v1(), jku=jku)
+
+
+@router.get("/.well-known/jwks.json")
+async def agent_card_keys():
+    """The public key that signs EchoSpeak's Agent Card."""
+    if not getattr(config, "a2a_enabled", False):
+        raise HTTPException(status_code=404, detail="A2A protocol is disabled")
+    from agent import a2a_trust
+    return {"keys": [a2a_trust.public_jwk()]}
+
+
 @router.post("/a2a")
 async def a2a_rpc(request: Request):
     """JSON-RPC 2.0 endpoint for A2A task operations.
@@ -287,6 +308,16 @@ async def a2a_rpc(request: Request):
     params = body.get("params", {})
 
     tm = get_task_manager()
+
+    # ── SendMessage (A2A 1.0) ───────────────────────────
+    if method == "SendMessage":
+        msg_data = params.get("message", {}) if isinstance(params, dict) else {}
+        text = " ".join(str(p.get("text") or "") for p in msg_data.get("parts", []) if isinstance(p, dict)).strip()
+        if not text:
+            return {"jsonrpc": "2.0", "error": {"code": -32602, "message": "No text content in message"}, "id": rpc_id}
+        task = tm.create_task(A2AMessage(role="user", parts=[TextPart(text=text)]), metadata=params.get("metadata"))
+        task = tm.process_task(task)
+        return {"jsonrpc": "2.0", "result": {"task": task.to_v1()}, "id": rpc_id}
 
     # ── tasks/send ──────────────────────────────────────
     if method == "tasks/send":

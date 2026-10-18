@@ -58,7 +58,7 @@ export function AdvancedSection(props: {
       </div>
       {props.page === "settings" ? <AdvancedSettings s={props.s} save={props.save} /> : null}
       {props.page === "memory" ? <MemoryPage s={props.s} save={props.save} apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
-      {props.page === "connections" ? <ConnectionsPage apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
+      {props.page === "connections" ? <ConnectionsPage s={props.s} save={props.save} apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
       {props.page === "companion" ? (
         <Group title="Echo companion" description="Echo’s shared appearance in voice conversations and the floating companion window.">
           <div className="st-embed">
@@ -96,6 +96,12 @@ function AdvancedSettings({ s, save }: { s: SettingsMap; save: Save }) {
             <TextField mono value={embedding.model || ""} placeholder={embeddingProvider === "openai" ? "text-embedding-3-small" : "text-embedding-nomic-embed-text-v1.5"} onCommit={(v) => save({ embedding: { model: v } })} />
           </Row>
         ) : null}
+      </Group>
+
+      <Group title="Traces" description="Every reply records where its time went (thinking, tools, waiting for you). See it under Activity › Timing. Traces hold timings, tool names and token counts, never message text.">
+        <Row label="Send to an OpenTelemetry collector" help="Optional. An OTLP/HTTP address such as http://localhost:4318/v1/traces (Jaeger, Grafana, Arize Phoenix). Leave empty to keep traces on this PC." stack>
+          <TextField wide mono value={s.trace_export_url || ""} placeholder="http://localhost:4318/v1/traces" onCommit={(v) => save({ trace_export_url: v.trim() })} />
+        </Row>
       </Group>
 
       <Group title="Webhooks" description="Let other apps start a routine with a signed POST to /webhooks/<path>.">
@@ -536,6 +542,126 @@ function McpApprovals({ apiBase }: { apiBase: string }) {
   );
 }
 
+type McpSignIn = { name: string; running: boolean; state: "needed" | "signing_in" | "signed_in" | "failed"; url?: string; error?: string };
+
+/** Hosted MCP servers that need you to sign in (backend: agent/mcp_oauth.py). Tokens stay encrypted on this PC. */
+function McpSignIns({ apiBase }: { apiBase: string }) {
+  const [items, setItems] = useState<McpSignIn[]>([]);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/lean/mcp/signin`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setItems(Array.isArray(data?.items) ? data.items : []);
+    } catch {
+      setItems([]);
+    }
+  }, [apiBase]);
+  useEffect(() => { void load(); }, [load]);
+  // While a browser sign-in is open, check back every two seconds.
+  const waiting = items.some((item) => item.state === "signing_in");
+  useEffect(() => {
+    if (!waiting) return;
+    const timer = window.setInterval(() => void load(), 2000);
+    return () => window.clearInterval(timer);
+  }, [waiting, load]);
+  const post = async (name: string, verb: "signin" | "signout") => {
+    setError("");
+    try {
+      const res = await fetch(`${apiBase}/lean/mcp/${encodeURIComponent(name)}/${verb}`, { method: "POST" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(String(data?.detail || `Request failed (${res.status})`));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+  if (!items.length && !error) return null;
+  const help: Record<McpSignIn["state"], string> = {
+    needed: "This server needs you to sign in before Echo can use it.",
+    signing_in: "Finish signing in in your browser. This page updates when you're done.",
+    signed_in: "Signed in. Echo refreshes the sign-in by itself.",
+    failed: "Sign-in didn't finish.",
+  };
+  return (
+    <>
+      {items.map((item) => (
+        <Row key={item.name} label={<span><b>{item.name}</b> · {item.state === "signed_in" ? "Signed in" : item.state === "signing_in" ? "Signing in…" : "Sign-in needed"}</span>}
+          help={item.state === "failed" && item.error ? `${help.failed} ${item.error}` : help[item.state]}>
+          <div className="st-inline-actions">
+            {item.state === "signing_in" && item.url ? <a className="es-btn es-btn-sm" href={item.url} target="_blank" rel="noreferrer">Open sign-in page</a> : null}
+            {item.state === "signed_in"
+              ? <button type="button" className="es-btn es-btn-sm" onClick={() => void post(item.name, "signout")}>Sign out</button>
+              : item.state !== "signing_in" ? <button type="button" className="es-btn es-btn-sm es-btn-primary" onClick={() => void post(item.name, "signin")}>Sign in</button> : null}
+          </div>
+        </Row>
+      ))}
+      {error ? <Row label={<span className="st-muted">{error}</span>} /> : null}
+    </>
+  );
+}
+
+type RemoteAgent = { name: string; url: string; fingerprint: string; has_token?: boolean; skills?: string[]; description?: string };
+
+/** Other agents Echo may ask (backend: agent/a2a_trust.py). Only agents whose signed card you confirmed. */
+function RemoteAgents({ apiBase }: { apiBase: string }) {
+  const [items, setItems] = useState<RemoteAgent[]>([]);
+  const [url, setUrl] = useState("");
+  const [token, setToken] = useState("");
+  const [checked, setChecked] = useState<RemoteAgent | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`${apiBase}/lean/a2a/agents`, { cache: "no-store" });
+      const data = await res.json().catch(() => ({}));
+      setItems(Array.isArray(data?.items) ? data.items : []);
+    } catch {
+      setItems([]);
+    }
+  }, [apiBase]);
+  useEffect(() => { void load(); }, [load]);
+  const call = async (path: string, init: RequestInit) => {
+    const res = await fetch(`${apiBase}/lean/a2a/agents${path}`, init);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(String(data?.detail || `Request failed (${res.status})`));
+    return data;
+  };
+  const run = async (step: () => Promise<void>) => {
+    setBusy(true);
+    setError("");
+    try { await step(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
+  };
+  const json = (body: unknown): RequestInit => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return (
+    <>
+      {items.map((agent) => (
+        <Row key={agent.url} label={<span><b>{agent.name}</b> · <span className="st-muted">{agent.url}</span></span>}
+          help={`Key fingerprint ${agent.fingerprint.slice(0, 16)}…${agent.has_token ? " · token saved" : ""}. Echo asks you before every message it sends.`}>
+          <button type="button" className="es-btn es-btn-sm" disabled={busy}
+            onClick={() => void run(async () => { await call(`?url=${encodeURIComponent(agent.url)}`, { method: "DELETE" }); await load(); })}>Remove</button>
+        </Row>
+      ))}
+      <Row label="Add an agent" help="Its address. Echo checks that its card is signed by a key it publishes, then shows you that key's fingerprint to confirm." stack>
+        <TextField wide mono value={url} placeholder="https://agent.example.com" onCommit={(v) => { setUrl(v.trim()); setChecked(null); }} />
+        <SecretField isSet={Boolean(token)} onCommit={(v) => setToken(v)} />
+        <div className="st-inline-actions">
+          <button type="button" className="es-btn es-btn-sm" disabled={busy || !url}
+            onClick={() => void run(async () => setChecked(await call("/inspect", json({ url }))))}>Check</button>
+        </div>
+      </Row>
+      {checked ? (
+        <Row label={<span><b>{checked.name}</b> wants to be trusted</span>}
+          help={`Key fingerprint: ${checked.fingerprint}. Compare it with what the agent's owner gave you.${checked.skills?.length ? ` Skills: ${checked.skills.join(", ")}.` : ""}`}>
+          <button type="button" className="es-btn es-btn-sm es-btn-primary" disabled={busy}
+            onClick={() => void run(async () => { await call("", json({ url, fingerprint: checked.fingerprint, token })); setChecked(null); setUrl(""); setToken(""); await load(); })}>Trust</button>
+        </Row>
+      ) : null}
+      {error ? <Row label={<span className="st-muted">{error}</span>} /> : null}
+    </>
+  );
+}
+
 type SuggestionSetting = { name: string; secret?: boolean; required?: boolean; default?: string; about?: string };
 type Suggestion = {
   id: string; title: string; summary: string; publisher: string; version: string; server_name: string;
@@ -638,7 +764,7 @@ function ConnectionSuggestions({ apiBase }: { apiBase: string }) {
   );
 }
 
-function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; sessionId: string; projectId: string }) {
+function ConnectionsPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap; save: Save; apiBase: string; sessionId: string; projectId: string }) {
   const [cards, setCards] = useState<any[] | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -787,9 +913,16 @@ function ConnectionsPage({ apiBase, sessionId, projectId }: { apiBase: string; s
           <Row key={card.id} label={nameOf(card)} help={card.issue || `${card.capabilities?.length || 0} tools`} />
         ))}
       </Group>
+      <Group title="Other agents (A2A)" description="AI agents Echo may ask for help, such as another EchoSpeak. Only agents whose signed card you confirm here; their answers count as outside content.">
+        <RemoteAgents apiBase={apiBase} />
+      </Group>
       <Group title="MCP servers" description="Servers listed in settings.json under mcp_servers, and the tools they provide. A new or changed server waits for your approval before it runs, and so does any connection Echo suggests.">
         <ConnectionSuggestions apiBase={apiBase} />
         <McpApprovals apiBase={apiBase} />
+        <McpSignIns apiBase={apiBase} />
+        <Row label="Sign-in client document" help="Optional. The HTTPS address where you host docs/oauth/echospeak-client.json (its client_id must be that same address). Servers that support it then skip registering EchoSpeak. Leave empty to register automatically." stack>
+          <TextField wide mono value={s.mcp_oauth_client_metadata_url || ""} placeholder="https://example.com/oauth/echospeak-client.json" onCommit={(v) => save({ mcp_oauth_client_metadata_url: v.trim() })} />
+        </Row>
         {cards !== null && !byCategory("mcp").length ? <Row label={<span className="st-muted">No MCP servers configured.</span>} /> : null}
         {byCategory("mcp").map((card) => (
           <Row key={card.id} label={nameOf(card)} help={card.issue || card.detail} />

@@ -14,7 +14,7 @@ from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from langchain_core.tools import tool
+from agent.tool_decorator import tool
 from pydantic import BaseModel, Field, model_validator
 
 from agent.media_library import MediaLibraryAsset, get_media_library_store

@@ -18,6 +18,8 @@ import { PrivacySection } from "./PrivacySection";
 import { SmartModelChoice } from "./SmartModelChoice";
 import { UPDATES_OFF_MESSAGE, updatesAllowed } from "../desktop/privacyGate";
 import { AgentSkillsSection } from "./AgentSkillsSection";
+import { DesktopControlOffer } from "./DesktopControlOffer";
+import { ElevenLabsSettings, TestVoice } from "./VoiceOutput";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
 import { requestSetup } from "../setup/openSetup";
@@ -296,7 +298,7 @@ function SectionBody({
     case "personality":
       return <PersonalitySection apiBase={props.apiBase} />;
     case "permissions":
-      return <PermissionsSection s={s} save={save} />;
+      return <PermissionsSection s={s} save={save} apiBase={props.apiBase} />;
     case "terminal":
       return <TerminalSection s={s} save={save} apiBase={props.apiBase} />;
     case "voice":
@@ -430,21 +432,13 @@ export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMa
             options={[
               { value: "windows-sapi", label: "Windows voices" },
               { value: "piper-local", label: "Piper" },
+              { value: "elevenlabs", label: "ElevenLabs (cloud)" },
             ]}
           />
         </Row>
-        <Row label="Cloud voice" help="Off keeps all audio on this PC.">
-          <Select
-            value={String(s.voice_cloud_provider || "")}
-            onChange={(v) => save({ voice_cloud_provider: v })}
-            options={[
-              { value: "", label: "Off" },
-              { value: "openai-audio", label: "OpenAI audio" },
-            ]}
-          />
-        </Row>
+        <TestVoice apiBase={apiBase} provider={String(s.voice_local_tts_provider || "windows-sapi")} />
       </Group>
-
+      <ElevenLabsSettings s={s} save={save} apiBase={apiBase} />
     </>
   );
 }
@@ -471,6 +465,17 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
               { value: "smart", label: "Risky only", hint: "Recommended" },
               { value: "always", label: "Every action" },
               { value: "never", label: "Never" },
+            ]}
+          />
+        </Row>
+        <Row label="Separate reader for outside content" help="A web page, email or app result goes first to a reader with no tools, and the agent sees only the facts it found. Lowers the chance hidden instructions work, and tells you when content tried. Costs one extra model call per result.">
+          <Segmented
+            value={String(s.lean_quarantine_reader || "messages")}
+            onChange={(v) => save({ lean_quarantine_reader: v })}
+            options={[
+              { value: "off", label: "Off" },
+              { value: "messages", label: "Email and apps", hint: "Recommended" },
+              { value: "all", label: "Also web pages" },
             ]}
           />
         </Row>
@@ -860,7 +865,7 @@ const PERMS: { key: string; label: string; help: string }[] = [
   { key: "allow_self_modification", label: "Edit EchoSpeak itself", help: "Let agents change EchoSpeak's own code. For development only." },
 ];
 
-function PermissionsSection({ s, save }: { s: SettingsMap; save: Save }) {
+function PermissionsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBase: string }) {
   const master = asBool(s.enable_system_actions);
   return (
     <>
@@ -875,6 +880,12 @@ function PermissionsSection({ s, save }: { s: SettingsMap; save: Save }) {
             <Toggle checked={asBool(s[p.key])} disabled={!master} onChange={(v) => save({ [p.key]: v })} label={p.label} />
           </Row>
         ))}
+        {master && asBool(s.allow_desktop_automation) ? <DesktopControlOffer apiBase={apiBase} /> : null}
+        {master && asBool(s.allow_desktop_automation) ? (
+          <Row label="Claude's own computer tool" help="With a Claude 5 model, use the computer tool Claude was trained on instead of Echo's general one. Same permissions and approvals. Turn off to compare.">
+            <Toggle checked={s.computer_native_tools === undefined ? true : asBool(s.computer_native_tools)} onChange={(v) => save({ computer_native_tools: v })} label="Claude's own computer tool" />
+          </Row>
+        ) : null}
       </Group>
       <Group title="Apps agents may open" description="Open apps must be enabled above. This list is separate from terminal command restrictions.">
         <Row label="Allowed apps" help="Add an exact Start-menu name (Minecraft Launcher), a desktop shortcut's name (26.2), or an executable path. Short names such as notepad also work." stack>

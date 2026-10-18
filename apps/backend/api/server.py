@@ -149,7 +149,7 @@ async def lifespan(app: FastAPI):
                     ensure_selected_model_ready,
                     ModelProvider.LM_STUDIO.value,
                     model_id,
-                    llm=prewarmed_agent.model_runtime.llm,
+                    base_url=prewarmed_agent.model_runtime.base_url,
                     profile=profile,
                     timeout=float(
                         getattr(config, "turn_understanding_cold_start_timeout_seconds", 120.0)
@@ -242,6 +242,16 @@ async def lifespan(app: FastAPI):
                 await asyncio.to_thread(cleanup_observations)
             except Exception:
                 logger.warning("Screenshot retention cleanup failed; will retry")
+            try:
+                from agent.lean.tool_outputs import cleanup as cleanup_outputs
+                await asyncio.to_thread(cleanup_outputs)
+            except Exception:
+                logger.warning("Saved tool output cleanup failed; will retry")
+            try:
+                from agent.lean.tracing import cleanup as cleanup_traces
+                await asyncio.to_thread(cleanup_traces)
+            except Exception:
+                logger.warning("Trace cleanup failed; will retry")
             await asyncio.sleep(3600)
 
     async def learning_worker():
@@ -384,6 +394,13 @@ async def api_auth_middleware(request: Request, call_next):
 
             if frame_token_ok(frame.group(1), request.query_params.get("t", "")):
                 return await call_next(request)
+        # MCP App views (agent/mcp_apps.py) load the same way.
+        app_frame = re.fullmatch(r"/lean/mcp-apps/(app-[a-f0-9]{24})/frame", request.url.path)
+        if app_frame:
+            from agent.mcp_apps import token_ok
+
+            if token_ok(app_frame.group(1), request.query_params.get("t", "")):
+                return await call_next(request)
     client_ip = _get_client_ip(request)
     if not _api_auth_ok(request.headers, client_ip):
         return Response(
@@ -408,8 +425,6 @@ RATE_LIMIT_WINDOW = float(os.getenv("ECHOSPEAK_RATE_LIMIT_WINDOW", "60") or 60.0
 # Mutations and expensive model routes still count.
 _RATE_LIMIT_SAFE_GET_PREFIXES = (
     "/threads",
-    "/pending-action",
-    "/approvals",
     "/executions",
     "/traces",
     "/provider",
@@ -426,7 +441,7 @@ def _rate_limit_exempt(path: str, method: str) -> bool:
 
     Never exempt:
     - POST/PUT/PATCH/DELETE (mutations, model calls, workers)
-    - /query, /approvals/*/confirm
+    - /query
     - rebuild/compact endpoints
     """
     p = str(path or "")

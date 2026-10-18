@@ -79,6 +79,7 @@ export type ComparisonData = { title?: string; items: { name: string; url?: stri
 export type StatData = { title?: string; items: { label: string; value: string; unit?: string; change?: string; note?: string }[]; source?: string };
 export type MapData = { title?: string; places: { name: string; lat: number; lon: number; address?: string; note?: string }[] };
 export type ArtifactRef = { id: string; title: string; kind: string; version: number; language?: string };
+export type McpAppRef = { id: string; session_id: string; server: string; tool: string; prefers_border: boolean };
 export type ObservationRef = { id: string; session_id: string; source: string; at: number; width: number; height: number; model_width: number; model_height: number };
 
 export type Widget =
@@ -94,6 +95,7 @@ export type Widget =
   | { type: "map"; data: MapData }
   | { type: "creation"; data: { id: string } }
   | { type: "observation"; data: ObservationRef }
+  | { type: "mcp_app"; data: McpAppRef }
   | { type: "artifact"; data: ArtifactRef };
 
 export type WidgetType = Widget["type"];

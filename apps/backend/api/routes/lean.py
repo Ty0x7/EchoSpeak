@@ -263,6 +263,18 @@ def list_toolsets() -> dict[str, Any]:
     }
 
 
+@router.get("/traces/{message_id}")
+def message_trace(message_id: str, session_id: str = Query(...)) -> dict[str, Any]:
+    """Timings for one reply (agent/lean/tracing.py): names, durations and counts, no message text."""
+    from agent.lean import tracing
+    try:
+        return tracing.load(session_id, message_id)
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(404, detail="No trace for that reply; traces are kept for seven days") from exc
+
+
 @router.get("/approvals")
 def list_approvals(session_id: str = Query(default="")) -> dict[str, Any]:
     return {"items": get_approval_broker().pending_for(session_id)}
@@ -322,6 +334,192 @@ def approve_mcp_server(name: str) -> dict[str, Any]:
     mcp_trust.approve(name, raw)
     status = get_mcp_manager().initialize_servers(raw_servers)
     return {"ok": True, "status": status}
+
+
+def _hosted_server(name: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    from config import config
+
+    raw_servers = dict(getattr(config, "mcp_servers", None) or {})
+    raw = raw_servers.get(name)
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=404, detail="No MCP server with that name in settings")
+    if not str(raw.get("url") or raw.get("endpoint") or "").strip():
+        raise HTTPException(status_code=400, detail="Only hosted (HTTP) servers sign in; this one runs on this PC")
+    return raw_servers, raw
+
+
+class AppToolCall(BaseModel):
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
+
+
+class AppResourceRead(BaseModel):
+    uri: str
+
+
+class AppContext(BaseModel):
+    content: Optional[list[Any]] = None
+    structuredContent: Optional[Any] = None
+
+
+def _app_view(app_id: str, session_id: str) -> dict[str, Any]:
+    from agent import mcp_apps
+    try:
+        return mcp_apps.load(app_id, session_id)
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(404, detail="That app view is no longer available") from exc
+
+
+@router.get("/mcp-apps/{app_id}")
+def mcp_app(app_id: str, session_id: str = Query(...)) -> dict[str, Any]:
+    """An MCP App view's tool input and result, for the host bridge (apps/web/src/widgets/McpAppView.tsx)."""
+    from agent import mcp_apps
+    record = _app_view(app_id, session_id)
+    return {**mcp_apps.public(record), "input": record["input"], "result": record["result"]}
+
+
+@router.post("/mcp-apps/{app_id}/frame-token")
+def mcp_app_frame_token(app_id: str, session_id: str = Query(...)) -> dict[str, Any]:
+    from agent import mcp_apps
+    _app_view(app_id, session_id)
+    return {"token": mcp_apps.issue_token(app_id, session_id), "ttl": mcp_apps.TOKEN_TTL}
+
+
+@router.get("/mcp-apps/{app_id}/frame")
+def mcp_app_frame(app_id: str):
+    """The view's page, from the backend's origin, under the CSP its server declared. Loaded only in a sandboxed iframe."""
+    import json as _json
+
+    from fastapi.responses import HTMLResponse
+
+    from agent import mcp_apps
+    try:
+        record = _json.loads(mcp_apps._path(app_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise HTTPException(404, detail="That app view is no longer available") from exc
+    return HTMLResponse(record["html"], headers={
+        "Content-Security-Policy": mcp_apps.csp(record.get("ui") or {}, offline=mcp_apps.offline()),
+        "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Cache-Control": "no-store",
+        "Cross-Origin-Resource-Policy": "same-origin",
+    })
+
+
+@router.post("/mcp-apps/{app_id}/call")
+def mcp_app_call(app_id: str, request: AppToolCall, session_id: str = Query(...)) -> dict[str, Any]:
+    """tools/call from a view: read-only, app-visible tools of its own server only."""
+    import json as _json
+
+    from agent import mcp_apps
+    from agent.mcp_client import get_mcp_manager
+    record = _app_view(app_id, session_id)
+    refused = mcp_apps.app_call_allowed(record, request.name)
+    if refused:
+        raise HTTPException(403, detail=refused)
+    raw = get_mcp_manager().call_app_tool(record["server"], request.name, request.arguments)
+    try:
+        return _json.loads(raw)
+    except ValueError:
+        return {"content": [{"type": "text", "text": str(raw)}]}
+
+
+@router.post("/mcp-apps/{app_id}/read")
+def mcp_app_read(app_id: str, request: AppResourceRead, session_id: str = Query(...)) -> dict[str, Any]:
+    from agent.mcp_client import get_mcp_manager
+    record = _app_view(app_id, session_id)
+    return get_mcp_manager().read_resource(record["server"], request.uri)
+
+
+@router.post("/mcp-apps/{app_id}/context")
+def mcp_app_context(app_id: str, request: AppContext, session_id: str = Query(...)) -> dict[str, Any]:
+    from agent import mcp_apps
+    _app_view(app_id, session_id)
+    mcp_apps.update_context(app_id, session_id, request.model_dump())
+    return {}
+
+
+class RemoteAgentRequest(BaseModel):
+    url: str
+    fingerprint: str = ""
+    token: str = ""
+
+
+@router.get("/a2a/agents")
+def remote_agents() -> dict[str, Any]:
+    """Other agents you pinned for ask_remote_agent (agent/a2a_trust.py). Tokens never leave the broker."""
+    from agent import a2a_trust
+    return {"items": [{k: v for k, v in a.items() if k != "token_ref"} | {"has_token": bool(a.get("token_ref"))}
+                      for a in a2a_trust.trusted_agents()]}
+
+
+@router.post("/a2a/agents/inspect")
+def inspect_remote_agent(request: RemoteAgentRequest) -> dict[str, Any]:
+    """Fetch and verify an agent's signed card, and show the fingerprint to confirm."""
+    from agent import a2a_trust, privacy
+    try:
+        return a2a_trust.inspect_agent(request.url)
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(400, detail=str(exc)[:300]) from exc
+
+
+@router.post("/a2a/agents")
+def trust_remote_agent(request: RemoteAgentRequest) -> dict[str, Any]:
+    """Pin an agent, only if its card is still signed by the key whose fingerprint you confirmed."""
+    from agent import a2a_trust, privacy
+    try:
+        info = a2a_trust.inspect_agent(request.url)
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(400, detail=str(exc)[:300]) from exc
+    if not request.fingerprint or request.fingerprint != info["fingerprint"]:
+        raise HTTPException(409, detail="The agent's key changed since you looked. Check it again before trusting it.")
+    return a2a_trust.trust(info, request.token.strip())
+
+
+@router.delete("/a2a/agents")
+def forget_remote_agent(url: str = Query(...)) -> dict[str, Any]:
+    from agent import a2a_trust
+    return {"removed": a2a_trust.forget(url)}
+
+
+@router.get("/mcp/signin")
+def mcp_sign_ins() -> dict[str, Any]:
+    """Hosted servers that sign in, and where each one stands (agent/mcp_oauth.py)."""
+    from agent.mcp_client import get_mcp_manager
+
+    rows = get_mcp_manager().status()["servers"]
+    return {"items": [{"name": row["name"], "running": row["running"], **row["auth"]}
+                      for row in rows if row.get("auth", {}).get("state")]}
+
+
+@router.post("/mcp/{name}/signin")
+def sign_in_mcp_server(name: str) -> dict[str, Any]:
+    """Open the server's sign-in page in the browser; tokens are saved with DPAPI (agent/mcp_oauth.py)."""
+    from agent import mcp_oauth, privacy
+    from agent.mcp_client import get_mcp_manager
+
+    raw_servers, raw = _hosted_server(name)
+    url = str(raw.get("url") or raw.get("endpoint")).strip()
+    try:
+        flow = mcp_oauth.start_sign_in(name, url, on_done=lambda: get_mcp_manager().initialize_servers(raw_servers))
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    return {"ok": True, "auth": flow}
+
+
+@router.post("/mcp/{name}/signout")
+def sign_out_mcp_server(name: str) -> dict[str, Any]:
+    from agent import mcp_oauth
+    from agent.mcp_client import get_mcp_manager
+
+    raw_servers, raw = _hosted_server(name)
+    removed = mcp_oauth.sign_out(str(raw.get("url") or raw.get("endpoint")).strip())
+    get_mcp_manager().initialize_servers(raw_servers)
+    return {"ok": True, "removed": removed}
 
 
 class ProposalApproveRequest(BaseModel):

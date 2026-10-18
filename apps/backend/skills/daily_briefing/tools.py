@@ -11,7 +11,7 @@ The tool uses existing `web_search` and `get_system_time` tools internally.
 from datetime import datetime
 from typing import Optional
 
-from langchain.tools import tool
+from agent.tool_decorator import tool
 from pydantic import BaseModel, Field
 
 from agent.tool_registry import ToolRegistry

@@ -28,6 +28,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from agent.lean import policy, settings
+from agent.lean import quarantine, tool_outputs, tracing
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, outbound
 from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, is_promise_without_action,
@@ -229,6 +230,18 @@ class LeanTurn:
         self._start_message(**self.meta)
 
     def run(self, user_message: str, *, announce: bool = True) -> TurnResult:
+        """One agent turn, traced end to end (agent/lean/tracing.py)."""
+        self.trace = tracing.Trace(self.session_id, self.persona.id, self.request_id)
+        result: Optional[TurnResult] = None
+        try:
+            result = self._run(user_message, announce=announce)
+            return result
+        finally:
+            self.trace.finish(self.message_id, ok=bool(result and result.success),
+                              stop=str(getattr(result, "stop_reason", "") or ("error" if result is None else "")),
+                              prompt_tokens=int(self.usage.get("prompt", 0)), completion_tokens=int(self.usage.get("completion", 0)))
+
+    def _run(self, user_message: str, *, announce: bool = True) -> TurnResult:
         if announce:
             self.announce()
         tools = self.toolbox.schemas()
@@ -237,6 +250,7 @@ class LeanTurn:
         messages.extend(self.history)
         self._history_in_messages = len(self.history)
         messages.append({"role": "user", "content": user_message})
+        self._goal = user_message  # what the quarantined reader extracts facts for
 
         max_steps = settings.max_iterations()
         call_counts: dict[str, int] = {}
@@ -449,14 +463,20 @@ class LeanTurn:
             self._append_text("text", step, text)
             self.emit({"type": "agent_token", "step": step, "data": text})
 
-        turn = self.client.stream_turn(
-            messages,
-            tools=tools or None,
-            on_reasoning=on_reasoning,
-            on_content=on_content,
-            cancel=self.cancel,
-            temperature=self.temperature,
-        )
+        endpoint = getattr(self.client, "endpoint", None)
+        with self._span("model.call", step=step, model=str(getattr(endpoint, "model", "") or ""),
+                        provider=str(getattr(endpoint, "provider", "") or ""), tools=len(tools or [])) as span:
+            turn = self.client.stream_turn(
+                messages,
+                tools=tools or None,
+                on_reasoning=on_reasoning,
+                on_content=on_content,
+                cancel=self.cancel,
+                temperature=self.temperature,
+            )
+            span.set(tool_calls=len(turn.tool_calls), finish=str(turn.finish_reason or ""),
+                     prompt_tokens=int((turn.usage or {}).get("prompt") or 0),
+                     completion_tokens=int((turn.usage or {}).get("completion") or 0))
         if turn.usage:
             self._account_usage(turn.usage)
             self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens()})
@@ -503,6 +523,8 @@ class LeanTurn:
     # ── tools ───────────────────────────────────────────────────────────
     def _run_tools(self, calls: list[Any], messages: list[dict[str, Any]], step: int, call_counts: dict[str, int]) -> None:
         prepared: list[tuple[Any, str, dict[str, Any], str]] = []
+        # Screens change, so the same screenshot or key press can rightly repeat.
+        computer_names = policy.NATIVE_COMPUTER_ACT | policy.NATIVE_COMPUTER_LOOK
         for call in calls:
             args, arg_error = call.parsed_arguments()
             try:
@@ -511,11 +533,13 @@ class LeanTurn:
                 name, arg_error = call.name, f"Invalid tool arguments: {exc}"
             signature = self._sig(name, args)
             call_counts[signature] = call_counts.get(signature, 0) + 1
-            problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} else "repeat")
+            problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} | computer_names else "repeat")
             if not problem:
                 # Checked for every call, parallel read-only ones included.
                 decision = policy.evaluate(name, args, entry=self.toolbox.entry(name), tainted_by=self.taint,
                                            interactive=self.interactive)
+                if decision.action != "allow" and getattr(self, "trace", None) is not None:
+                    self.trace.event("policy.decision", step=step, tool=name, action=decision.action, rule=decision.rule)
                 if decision.action == "deny":
                     policy.audit(decision, name=name, args=args, session_id=self.session_id, agent=self.persona.id, outcome="blocked")
                     self._policy_reasons[call.id] = decision.reason
@@ -545,11 +569,22 @@ class LeanTurn:
         else:
             sequential = prepared
 
+        computer = {"computer_action"} | policy.NATIVE_COMPUTER_ACT | policy.NATIVE_COMPUTER_LOOK
+        computer_calls: list[str] = []
         for call, name, args, problem in sequential:
             if call.id in results:
                 continue
             if self.cancel.is_set():
                 results[call.id] = (False, "Cancelled by the user before this tool ran.")
+                continue
+            failed_before = any(not results.get(cid, (True, ""))[0] for cid in computer_calls)
+            if name in computer:
+                computer_calls.append(call.id)
+            if failed_before and name in computer:
+                # The rest of a batch planned against a screen that didn't behave as expected.
+                output = "Not executed: an earlier computer action in this turn failed."
+                results[call.id] = (False, output)
+                self._tool_finished(call, name, args, step, False, output, 0)
                 continue
             self._tool_started(call, name, args, step)
             if problem == "policy":
@@ -610,14 +645,53 @@ class LeanTurn:
             self._note_source(name, args, result.ok)
 
         limit = 14000
+        reader = quarantine.mode()
         for call, name, _args, _ in prepared:
             ok, output = results.get(call.id, (False, "No result."))
-            text = output if len(output) <= limit else output[:limit] + f"\n…[{len(output) - limit} more characters trimmed]"
-            if ok and policy.is_untrusted_source(name, self.toolbox.entry(name), _args):
+            untrusted = ok and policy.is_untrusted_source(name, self.toolbox.entry(name), _args)
+            if untrusted and quarantine.applies(name, self.toolbox.entry(name), reader):
+                # The acting agent gets a tool-less reader's digest, not the raw text. Still outside content.
+                with self._span("reader", step=step, tool=name, input_chars=len(output)) as span:
+                    read = quarantine.read(self.client, getattr(self, "_goal", ""), name, output, self.cancel)
+                    span.set(used=bool(read), instructions_found=bool(read and read[1]))
+                if read:
+                    output = quarantine.digest_text(name, read[0], read[1], len(output))
+                    if read[1]:
+                        note = f"{name} contained instructions aimed at an AI. Echo's reader left them out."
+                        self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
+                        self.emit({"type": "security_note", "step": step, "tool": name, "note": note})
+                        policy.audit(policy.Decision("allow", note, "quarantine_flag"), name=name, args=_args,
+                                     session_id=self.session_id, agent=self.persona.id, outcome="instructions withheld")
+            text = self._shorten(name, output, limit, untrusted)
+            if untrusted:
                 text = policy.wrap_untrusted(name, text)  # data, not instructions
             messages.append({"role": "tool", "tool_call_id": call.id, "name": name, "content": text or "(empty result)"})
             if visual_results.get(call.id):
                 messages[-1]["observations"] = visual_results[call.id]
+
+    def _shorten(self, name: str, output: str, limit: int, untrusted: bool) -> str:
+        """Fit one result into the context. A longer one is saved whole behind an out-… handle."""
+        if len(output) <= limit:
+            return output
+        if "read_output" in self.toolbox.names:
+            try:
+                ref = tool_outputs.save(self.session_id, name, output, untrusted=untrusted)
+                return tool_outputs.preview(output, ref, limit)
+            except OSError:
+                logger.warning("Could not save a long tool output; trimming it instead")
+        return output[:limit] + f"\n…[{len(output) - limit} more characters trimmed]"
+
+    def _clear_note(self, message: dict[str, Any], keep: int, note: str) -> str:
+        """Cut an old result to its head; when it can be saved, say how to reopen it."""
+        content = str(message.get("content") or "")
+        if "read_output" in self.toolbox.names and "is saved as out-" not in content:
+            try:
+                ref = tool_outputs.save(self.session_id, str(message.get("name") or "tool"), content,
+                                        untrusted="<untrusted-content" in content)
+                return content[:keep] + f"\n…[{note}; the full result is saved as {ref}, read it with read_output]"
+            except OSError:
+                pass
+        return content[:keep] + f"\n…[{note}]"
 
     def _param_hint(self, name: str) -> str:
         """' (required: a, b; optional: c)' so a bad call can be fixed in one try."""
@@ -649,14 +723,14 @@ class LeanTurn:
         policy_reason = self._policy_reasons.get(call.id, "")
         # Only screen-guided desktop control can be allowed for a whole chat; other outside content asks every time.
         grantable = not policy_reason or self._policy_rules.get(call.id) == "screen_control"
-        if policy_reason and grantable and broker.granted(self.session_id, name):
+        if policy_reason and grantable and broker.granted(self.session_id, policy.grant_name(name)):
             policy.audit(policy.Decision("allow", policy_reason, "screen_control"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome="allowed for this chat")
             return True, ""
         if policy_reason:
             # Rule of Two: always ask, even with "always allow" grants or approvals off.
             needs, reason = True, policy_reason
-        elif not needs or broker.granted(self.session_id, name):
+        elif not needs or broker.granted(self.session_id, policy.grant_name(name)):
             return True, ""
         if not self.interactive:
             return False, (
@@ -670,7 +744,7 @@ class LeanTurn:
         approval = broker.open(
             session_id=self.session_id,
             request_id=self.request_id,
-            tool=name,
+            tool=policy.grant_name(name),  # one grant covers every computer action
             summary=describe_call(name, args),
             # The card shows these in full: a summary can hide "; iwr … | iex" after padding.
             args=args,
@@ -680,7 +754,9 @@ class LeanTurn:
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})
         self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **approval.public()})
-        decision = broker.wait(approval, self.cancel)
+        with self._span("approval.wait", step=step, tool=name, rule=self._policy_rules.get(call.id, "") or "approval") as span:
+            decision = broker.wait(approval, self.cancel)
+            span.set(decision=decision)
         if policy_reason:
             policy.audit(policy.Decision("ask", policy_reason, "rule_of_two"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome=decision)
@@ -735,8 +811,17 @@ class LeanTurn:
                     item["detail"] = text
             self.emit({"type": "tool_progress", "step": step, "id": call.id, "text": text})
 
-        with progress.reporting(emit):
-            return self.toolbox.run(name, args)
+        with self._span("tool.run", step=step, tool=name) as span, progress.reporting(emit, cancel=self.cancel):
+            result = self.toolbox.run(name, args)
+            span.set(ok=bool(result.ok), output_chars=len(result.output or ""))
+            if not result.ok:
+                span.status = "error"
+            return result
+
+    def _span(self, name: str, **attrs: Any):
+        """A trace span when this turn is traced (run() sets one up); a no-op otherwise."""
+        trace = getattr(self, "trace", None)
+        return trace.span(name, **attrs) if trace is not None else tracing.null_span()
 
     def _tool_started(self, call: Any, name: str, args: dict[str, Any], step: int) -> None:
         self._close_thinking()
@@ -820,7 +905,7 @@ class LeanTurn:
             for index in tool_indexes[:-6]:
                 content = str(messages[index].get("content") or "")
                 if len(content) > 2000:
-                    messages[index]["content"] = content[:1500] + "\n…[older tool output cleared; run the tool again if you need it]"
+                    messages[index]["content"] = self._clear_note(messages[index], 1500, "older tool output cleared")
         if _estimate_tokens(messages, tools) <= budget:
             return
         # 1. Shrink older tool results, keeping the most recent ones intact.
@@ -829,7 +914,7 @@ class LeanTurn:
         for index in tool_indexes[:-keep_recent] if len(tool_indexes) > keep_recent else []:
             content = str(messages[index].get("content") or "")
             if len(content) > 600:
-                messages[index]["content"] = content[:500] + "\n…[older tool output trimmed to save context]"
+                messages[index]["content"] = self._clear_note(messages[index], 500, "older tool output trimmed to save context")
             if _estimate_tokens(messages, tools) <= budget:
                 return
         # 2. Drop the oldest history messages (plain text, never this turn's work).
@@ -885,7 +970,8 @@ class LeanTurn:
             "left to do. At most 200 words, plain sentences.\n\n" + body
         )
         try:
-            turn = self.client.stream_turn([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=700, cancel=self.cancel)
+            with self._span("context.compact", steps=len(steps) - keep_steps, input_chars=len(body)):
+                turn = self.client.stream_turn([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=700, cancel=self.cancel)
             summary = str(turn.content or "").strip()
         except Exception:
             logger.debug("Lean turn compaction failed", exc_info=True)

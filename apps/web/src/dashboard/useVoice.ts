@@ -88,7 +88,7 @@ export function useVoice({
     } catch (error) {
       if ((error as any)?.name === "AbortError") return false;
       setVoicePhase("error");
-      setVoiceNotice(error instanceof Error ? error.message : "Local speech playback is unavailable.");
+      setVoiceNotice(error instanceof Error ? error.message : "Read aloud is unavailable. Check Settings › Voice.");
       useAppStore.getState().setSpeaking(false);
       return false;
     }

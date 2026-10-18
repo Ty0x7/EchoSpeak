@@ -82,35 +82,19 @@ class TestModelProvider:
 
 
 class TestModelRuntimeClient:
-    """Tests for the canonical provider communication client."""
+    """The provider descriptor: exact model and where it is served (chat runs in agent/lean/provider.py)."""
 
-    @pytest.fixture
-    def mock_openai(self):
-        """Mock OpenAI dependencies."""
-        with patch('agent.model_runtime.ReasoningChatOpenAI') as mock:
-            mock_instance = MagicMock()
-            mock.return_value = mock_instance
-            yield mock_instance
-
-    @pytest.fixture
-    def mock_ollama(self):
-        """Mock Ollama dependencies."""
-        with patch('agent.model_runtime.ChatOllama') as mock:
-            mock_instance = MagicMock()
-            mock.return_value = mock_instance
-            yield mock_instance
-
-    def test_openai_runtime_creation(self, mock_openai):
-        """Test OpenAI provider client creation with an exact model."""
+    def test_openai_runtime_creation(self):
         from agent.model_runtime import ModelRuntimeClient
         from config import ModelProvider
 
         runtime = ModelRuntimeClient(ModelProvider.OPENAI, "gpt-4o-mini")
         assert runtime.provider == ModelProvider.OPENAI
         assert runtime.model_id == "gpt-4o-mini"
+        assert runtime.base_url.startswith("https://")
+        assert not hasattr(runtime, "llm")  # no LangChain model object any more
 
-    def test_ollama_runtime_creation(self, mock_ollama):
-        """Test Ollama provider client creation with an exact model."""
+    def test_ollama_runtime_creation(self):
         from agent.model_runtime import ModelRuntimeClient
         from config import ModelProvider
 
@@ -125,8 +109,8 @@ class TestAgentMemory:
     @pytest.fixture
     def mock_dependencies(self):
         """Mock external dependencies."""
-        with patch('agent.memory.OpenAIEmbeddings') as mock_embed:
-            with patch('agent.memory.FAISS') as mock_faiss:
+        with patch('agent.memory.OpenAICompatibleEmbeddings') as mock_embed:
+            with patch('agent.memory.VectorStore') as mock_faiss:
                 mock_store = MagicMock()
                 mock_faiss.from_texts.return_value = mock_store
                 mock_faiss.load_local.return_value = mock_store
@@ -517,7 +501,7 @@ class TestToolAllowlistMerge:
 
 
 class TestEmbeddingsConfig:
-    def test_lm_studio_embeddings_disable_tiktoken(self, monkeypatch, tmp_path):
+    def test_lm_studio_embeddings_use_its_v1_endpoint_with_strings(self, monkeypatch, tmp_path):
         from config import config, ModelProvider
 
         # Force LM Studio embeddings config.
@@ -528,8 +512,8 @@ class TestEmbeddingsConfig:
         captured_kwargs = {}
 
         class StubEmbeddings:
-            def __init__(self, **kwargs):
-                captured_kwargs.update(kwargs)
+            def __init__(self, model, base_url, api_key=""):
+                captured_kwargs.update(model=model, base_url=base_url, api_key=api_key)
 
             def embed_query(self, _text: str):
                 return [0.0]
@@ -549,13 +533,14 @@ class TestEmbeddingsConfig:
 
         import agent.memory as memory_mod
 
-        monkeypatch.setattr(memory_mod, "OpenAIEmbeddings", StubEmbeddings, raising=True)
-        monkeypatch.setattr(memory_mod, "FAISS", StubFAISS, raising=True)
+        monkeypatch.setattr(memory_mod, "OpenAICompatibleEmbeddings", StubEmbeddings, raising=True)
+        monkeypatch.setattr(memory_mod, "VectorStore", StubFAISS, raising=True)
 
         from agent.memory import AgentMemory
 
         AgentMemory(memory_path=str(tmp_path))
-        assert captured_kwargs.get("tiktoken_enabled") is False
+        assert captured_kwargs["base_url"] == "http://localhost:1234/v1"
+        assert captured_kwargs["model"] == "text-embedding-nomic-embed-text-v1.5"
 
 
 class TestVoiceIO:
@@ -734,7 +719,6 @@ class TestIntegration:
             analyze_screen,
             get_system_time,
             calculate,
-            take_screenshot,
             get_available_tools
         )
 

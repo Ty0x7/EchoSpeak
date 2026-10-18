@@ -400,7 +400,7 @@ export class LocalVoicePlayback {
     this.lastApiBase = scope.apiBase;
     this.activeSessionId = scope.sessionId;
     this.activeClientTurnId = scope.clientTurnId;
-    callbacks.onPhase?.("speaking", "Preparing local speech");
+    callbacks.onPhase?.("speaking", "Preparing speech");
     for (let index = 0; index < chunks.length; index += 1) {
       if (controller.signal.aborted || ownSequence !== this.sequence) return;
       const sequenceKey = `${scope.sessionId}:${scope.clientTurnId}`;
@@ -420,15 +420,15 @@ export class LocalVoicePlayback {
           settings: {},
         }),
       });
-      if (!response.ok) throw await apiError(response, "Local speech playback could not be prepared.");
+      if (!response.ok) throw await apiError(response, "Speech could not be prepared.");
       this.nextChunkSequence.set(sequenceKey, chunkSequence + 1);
       const payload = await response.json();
       const turnId = String(payload?.turn?.id || "");
       const relativeUrl = String(payload?.audio_url || "");
-      if (!turnId || !relativeUrl) throw new Error("Local speech playback returned an invalid clip.");
+      if (!turnId || !relativeUrl) throw new Error("Speech came back as an invalid clip.");
       this.activeTurnId = turnId;
       const clipResponse = await fetch(new URL(relativeUrl, scope.apiBase).toString(), { signal: controller.signal });
-      if (!clipResponse.ok) throw await apiError(clipResponse, "Local speech clip is unavailable.");
+      if (!clipResponse.ok) throw await apiError(clipResponse, "The speech clip is unavailable.");
       const blob = await clipResponse.blob();
       if (controller.signal.aborted || ownSequence !== this.sequence) return;
       const objectUrl = URL.createObjectURL(blob);
@@ -438,10 +438,10 @@ export class LocalVoicePlayback {
           this.finishClip = resolve;
           const audio = new Audio(objectUrl);
           this.audio = audio;
-          audio.onplay = () => callbacks.onPhase?.("speaking", "Speaking locally");
+          audio.onplay = () => callbacks.onPhase?.("speaking", "Speaking");
           audio.ontimeupdate = () => callbacks.onLevel?.(0.35 + Math.min(0.65, Math.abs(Math.sin(audio.currentTime * 7))));
           audio.onended = () => resolve();
-          audio.onerror = () => reject(new Error("Local speech clip could not be played."));
+          audio.onerror = () => reject(new Error("The speech clip could not be played."));
           void audio.play().catch(reject);
         });
       } finally {

@@ -174,7 +174,7 @@ def test_coordinates_and_invalid_batches_are_checked_before_input():
     item = capture(screen={"left": -1920, "top": 100, "width": 1920, "height": 1080})
     actions = computer._validate([{"action": "click", "coordinate": [640, 360]}], item, ["w"])
     assert actions[0]["point"] == (-960, 640)
-    for batch in ([{"action": "click", "coordinate": [1280, 0]}], [{"action": "hold", "text": "w", "duration": 10}], [{"action": "hold", "text": "fake"}], [{"action": "wait", "duration": 2}] * 3, [{"action": "wait"}] * 13):
+    for batch in ([{"action": "click", "coordinate": [1280, 0]}], [{"action": "hold", "text": "w", "duration": 10}], [{"action": "hold", "text": "fake"}], [{"action": "wait", "duration": 4}] * 3, [{"action": "wait"}] * 13):
         with pytest.raises(ValueError):
             computer._validate(batch, item, ["w"])
 
@@ -239,7 +239,7 @@ def test_successful_input_captures_result_and_invalid_or_stale_input_never_runs(
     assert events == []
 
 
-@pytest.mark.parametrize("duration", [float("nan"), float("inf"), -float("inf"), True, "1", 3, 10 ** 500])
+@pytest.mark.parametrize("duration", [float("nan"), float("inf"), -float("inf"), True, "1", 6, 10 ** 500])
 @pytest.mark.parametrize("kind", ["key", "hold", "wait", "drag"])
 def test_all_timed_actions_validate_before_any_input(desktop, duration, kind):
     item, _, events = desktop

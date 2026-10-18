@@ -16,13 +16,14 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from agent.lean import settings
+from agent.lean.policy import NATIVE_COMPUTER_ACT
 
 # Outward-facing actions: they leave the machine or speak for the user.
 EXTERNAL_TOOLS = {
     "email_send", "email_reply",
     "discord_send_channel", "discord_web_send", "discord_contacts_add",
     "telegram_send", "whatsapp_send", "slack_send", "twitter_post", "tweet_post",
-    "calendar_create", "calendar_delete", "github_create_issue", "github_comment",
+    "calendar_create", "calendar_delete", "github_create_issue", "github_comment", "ask_remote_agent",
     "notion_create_page", "spotify_control",
 }
 
@@ -34,7 +35,7 @@ IDENTITY_TOOLS = {"soul_update"}
 # Tools that act on the desktop as if they were the user.
 DESKTOP_CONTROL_TOOLS = {
     "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
-}
+} | NATIVE_COMPUTER_ACT  # Claude's native computer actions run through computer_action's executor
 
 # Hermes-style dangerous command detection for terminal_run.
 _DANGEROUS_COMMAND = re.compile(
@@ -65,6 +66,10 @@ def dangerous_command(command: str) -> bool:
 
 def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bool, str]:
     """Return (needs_approval, reason)."""
+    # An independent agent may execute the request on another machine. The
+    # explicit approval promised by this integration applies in every mode.
+    if name in {"ask_remote_agent", "a2a_delegate"}:
+        return True, "this sends a task to an independent agent"
     mode = settings.approval_mode()
     if mode == "never":
         return False, ""

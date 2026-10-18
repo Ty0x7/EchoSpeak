@@ -20,6 +20,9 @@ os.environ["ECHOSPEAK_ALLOW_MULTI_WRITER"] = "1"
 # Learning (agent/learning) would carry lessons and track records from one test's
 # chats into the next one's prompts. Learning tests turn it on with a fresh store.
 os.environ.setdefault("LEARNING_ENABLED", "0")
+# The quarantined reader adds a model call per email or app result; scripted test
+# models would answer it. Its own tests (test_quarantine_reader.py) turn it on.
+os.environ.setdefault("LEAN_QUARANTINE_READER", "off")
 
 
 def pytest_sessionfinish(session, exitstatus):  # type: ignore[no-untyped-def]

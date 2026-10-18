@@ -9,6 +9,7 @@ authority unless a reviewed configuration explicitly accepts them.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import hashlib
 import json
 import re
@@ -133,6 +134,16 @@ _SHELL_COMMANDS = {
 }
 
 
+def _auth_status(state: "MCPServerState") -> dict[str, Any]:
+    if state.transport == "stdio" or not state.url:
+        return {"state": ""}
+    try:
+        from agent import mcp_oauth
+        return mcp_oauth.status(state.name, state.url, state.last_error)
+    except Exception:
+        return {"state": ""}
+
+
 @dataclass
 class MCPServerState:
     name: str
@@ -182,6 +193,16 @@ class MCPSession:
         self._stop_event: Optional[asyncio.Event] = None
         self._ready = threading.Event()
         self._closed = False
+        # Set when the user stops a turn waiting on a long task; the task is then cancelled on the server.
+        self._stop_tasks = threading.Event()
+
+    def _task_status(self, text: str) -> None:
+        self.state.last_progress = {"message": str(text)[:300], "at": time.time()}
+
+    @property
+    def runs_tasks(self) -> bool:
+        from agent import mcp_tasks
+        return mcp_tasks.server_supports(self.state.server_capabilities)
 
     def start(self) -> bool:
         if not _SDK_AVAILABLE:
@@ -289,11 +310,17 @@ class MCPSession:
                 )
                 read_stream, write_stream = await stack.enter_async_context(stdio_client(parameters))
             else:
+                from agent import mcp_oauth
+
+                # Saved sign-in (agent/mcp_oauth.py): tokens refresh here; a browser only opens from Sign in.
+                signed_in = (self.state.transport == "streamable_http" and mcp_oauth.signed_in(self.state.url)
+                             and not any(k.lower() == "authorization" for k in self.state.headers))
                 client = await stack.enter_async_context(
                     _http.AsyncClient(
                         headers=dict(self.state.headers),
                         timeout=_http.Timeout(self.state.timeout_s),
                         follow_redirects=True,
+                        auth=mcp_oauth.provider(self.state.url) if signed_in else None,
                     )
                 )
                 if self.state.transport == "streamable_http":
@@ -311,6 +338,17 @@ class MCPSession:
                             sse_read_timeout=max(60.0, self.state.timeout_s),
                         )
                     )
+            from agent import mcp_tasks
+
+            # Long tool calls (agent/mcp_tasks.py): declare the Tasks extension and poll handles to the end.
+            from agent import mcp_apps
+
+            # MCP Apps (agent/mcp_apps.py): EchoSpeak can show a tool's interactive view.
+            tasks = (
+                {"extensions": {mcp_tasks.EXTENSION: {}, mcp_apps.EXTENSION: {"mimeTypes": [mcp_apps.MIME]}},
+                 "result_claims": mcp_tasks.claims(self._task_status, self._stop_tasks.is_set)}
+                if _SDK_MAJOR >= 2 and mcp_tasks.supported() else {}
+            )
             session = await stack.enter_async_context(
                 ClientSession(
                     read_stream,
@@ -319,6 +357,7 @@ class MCPSession:
                         timedelta(seconds=self.state.timeout_s) if _SDK_MAJOR == 1 else float(self.state.timeout_s)
                     ),
                     message_handler=self._message_handler,
+                    **tasks,
                 )
             )
             if _negotiate_auto is not None:
@@ -411,12 +450,36 @@ class MCPSession:
         )
         return _model_dump(result)
 
+    def _wait_for_call(self, coroutine: Any) -> Any:
+        """Wait for one tool call. A server that runs tasks may take up to TASK_SECONDS:
+        its status shows on the tool's progress line, and Stop cancels the task on the server."""
+        from agent import mcp_tasks
+        from agent.lean import progress
+
+        if not self.runs_tasks:
+            return self._submit(coroutine, timeout=self.state.timeout_s + 2.0)
+        if not self.state.running or self._loop is None or self._session is None:
+            raise RuntimeError(self.state.last_error or "MCP session is not running")
+        self._stop_tasks.clear()
+        future = asyncio.run_coroutine_threadsafe(coroutine, self._loop)
+        deadline, shown = time.monotonic() + mcp_tasks.TASK_SECONDS + 60, None
+        while True:
+            try:
+                return future.result(timeout=0.5)
+            except concurrent.futures.TimeoutError:
+                message = self.state.last_progress.get("message")
+                if message and message != shown:
+                    progress.report(message)
+                    shown = message
+                if progress.stop_requested():
+                    self._stop_tasks.set()  # the claim cancels the task and returns at its next poll
+                if time.monotonic() > deadline:
+                    future.cancel()
+                    raise TimeoutError("The MCP task did not finish in time")
+
     def call_tool(self, name: str, arguments: Optional[dict] = None) -> str:
         try:
-            result = self._submit(
-                self._call_tool(str(name), dict(arguments or {})),
-                timeout=self.state.timeout_s + 2.0,
-            )
+            result = self._wait_for_call(self._call_tool(str(name), dict(arguments or {})))
             # Preserve structuredContent, rich content, resource links and
             # error state. The governed ToolOutcome boundary owns semantics.
             return json.dumps(_drop_duplicate_text(result), ensure_ascii=False, separators=(",", ":"))
@@ -470,6 +533,9 @@ class MCPManager:
         self.initialized = False
         self.last_error = ""
         self._registered_names: List[str] = []
+        # MCP Apps (agent/mcp_apps.py): registered tool -> its view; (server, tool) -> what apps may call.
+        self.ui_tools: Dict[str, Dict[str, str]] = {}
+        self.app_tools: Dict[tuple, Dict[str, Any]] = {}
         self._lock = threading.RLock()
 
     @property
@@ -505,6 +571,8 @@ class MCPManager:
                 "inventory_changed": state.inventory_changed,
                 "last_progress": dict(state.last_progress),
                 "approval": state.approval,
+                # Hosted servers that use sign-in: "", needed, signing_in, signed_in or failed.
+                "auth": _auth_status(state),
             }
             for name, state in self.servers.items()
         ]
@@ -697,7 +765,15 @@ class MCPManager:
             else {}
         )
         risk, is_action = self._capability_risk(session.state, definition)
-        tool = self._make_langchain_tool(
+        from agent import mcp_apps
+
+        resource_uri, visibility = mcp_apps.ui_meta(definition)
+        self.app_tools[(server_name, raw_name)] = {"visibility": visibility, "is_action": bool(is_action)}
+        if "model" not in visibility:
+            return  # app-only: its view may call it, the agent never sees it
+        if resource_uri:
+            self.ui_tools[registered_name] = {"server": server_name, "tool": raw_name, "resource_uri": resource_uri}
+        tool = self._make_tool(
             registered_name,
             description,
             session,
@@ -729,7 +805,7 @@ class MCPManager:
         self._registered_names.append(registered_name)
 
     @staticmethod
-    def _make_langchain_tool(
+    def _make_tool(
         registered_name: str,
         description: str,
         session: MCPSession,
@@ -745,7 +821,7 @@ class MCPManager:
             )
 
         try:
-            from langchain_core.tools import StructuredTool
+            from agent.tool_decorator import Tool
             from pydantic import Field, create_model
             from typing import Any as TypingAny
             from typing import Optional as TypingOptional
@@ -764,14 +840,9 @@ class MCPManager:
                 f"MCPArgs_{re_sub_safe(registered_name)}"[:80],
                 **fields,
             )
-            return StructuredTool.from_function(
-                func=invoke,
-                name=registered_name,
-                description=description,
-                args_schema=args_model,
-            )
+            return Tool(invoke, name=registered_name, description=description, args_schema=args_model)
         except Exception as exc:
-            logger.debug("MCP StructuredTool build failed for {}: {}", registered_name, exc)
+            logger.debug("MCP tool schema build failed for {}: {}", registered_name, exc)
 
             class MCPToolShim:
                 name = registered_name
@@ -1022,9 +1093,18 @@ class MCPManager:
         except Exception:
             pass
         self._registered_names = []
+        self.ui_tools = {}
+        self.app_tools = {}
         self.sessions = {}
         self.servers = {}
         self.initialized = False
+
+    def call_app_tool(self, server: str, name: str, arguments: Optional[dict] = None) -> str:
+        """A tool call made by an MCP App view (agent/mcp_apps.py checks it is allowed first)."""
+        session = self.sessions.get(server)
+        if session is None or not session.state.running:
+            raise RuntimeError(f"{server} is not running")
+        return session.call_tool(name, dict(arguments or {}))
 
     def call(self, registered_name: str, arguments: Optional[dict] = None) -> str:
         parts = str(registered_name or "").split("__", 2)

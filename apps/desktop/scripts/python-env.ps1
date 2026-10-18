@@ -8,7 +8,7 @@
 # Packages the installed app can't work without. PyInstaller is listed so a
 # Python that can't build at all fails here with the same clear message.
 $EchoBundleModules = @(
-    "PyInstaller", "langchain_core", "langchain_community", "faster_whisper", "onnxruntime", "tokenizers",
+    "PyInstaller", "numpy", "faiss", "cryptography", "faster_whisper", "onnxruntime", "tokenizers",
     "ddgs", "primp", "lxml", "trafilatura"
 )
 
@@ -49,7 +49,8 @@ Or build with a Python that has them: -PythonExecutable <path>, or set ECHOSPEAK
     }
     # MCP: the app must ship SDK 2.3+ so it can talk to servers on the stateless 2026-07-28 spec.
     $mcpVersion = ([string](& $PythonExecutable -c "import importlib.metadata as m; print(m.version('mcp'))" 2>$null)).Trim()
-    if (-not $mcpVersion -or [int]($mcpVersion.Split('.')[0]) -lt 2) {
+    & $PythonExecutable -c "import sys; from packaging.version import Version; sys.exit(0 if Version('2.3') <= Version(sys.argv[1]) < Version('3') else 1)" $mcpVersion
+    if ($LASTEXITCODE -ne 0) {
         $requirements = (Resolve-Path (Join-Path $PSScriptRoot "..\..\backend\requirements.txt")).Path
         throw @"
 The Python at $where has MCP SDK $mcpVersion; the app needs 2.3 or newer (MCP 2026-07-28 spec).

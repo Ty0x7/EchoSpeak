@@ -867,7 +867,8 @@ class Terminal:
             return self._background(launch, wait, label, cwd, server=server)
         elapsed = time.perf_counter() - started
         status = "ok" if launch.code == 0 else f"exit code {launch.code}"
-        body = _clip(launch.out.strip()) or ("(no output)" if not launch.err.strip() else "")
+        # The loop saves long output whole behind a read_output handle (agent/lean/tool_outputs.py).
+        body = _clip(launch.out.strip(), 400_000) or ("(no output)" if not launch.err.strip() else "")
         if launch.err.strip():
             body = (body + "\n" if body else "") + "[stderr]\n" + _clip(launch.err.strip(), 6000)
         hint = failure_hint(launch.code, launch.out + "\n" + launch.err, where, command) if launch.code != 0 else ""

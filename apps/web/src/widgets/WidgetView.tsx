@@ -8,6 +8,7 @@ import type { ArtifactRef, Widget } from "./types";
 import { validateWidget } from "./validate";
 import { WeatherCard } from "./Weather";
 import { ObservationView } from "./ObservationCard";
+import { McpAppView } from "./McpAppView";
 import "./widgets.css";
 
 /** One broken widget never takes the message down: it falls back to its plain-text fallback. */
@@ -90,6 +91,8 @@ export function WidgetView({ widget }: { widget: unknown }) {
         return <CreationCard id={checked.data.id} apiBase={apiBase} />;
       case "observation":
         return <ObservationView data={checked.data} apiBase={apiBase} />;
+      case "mcp_app":
+        return <McpAppView data={checked.data} apiBase={apiBase} />;
       case "artifact":
         return <ArtifactCard data={checked.data} />;
       default:
