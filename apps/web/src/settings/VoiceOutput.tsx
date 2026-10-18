@@ -14,39 +14,58 @@ export const ELEVENLABS_MODELS = [
 ];
 
 /** Plays a short sample from the chosen read-aloud voice (POST /media-runtime/voice/preview). */
-export function TestVoice({ apiBase, provider, voiceId = "" }: { apiBase: string; provider: string; voiceId?: string }) {
+export function TestVoice({ apiBase, provider, voiceId = "", disabled = false }: { apiBase: string; provider: string; voiceId?: string; disabled?: boolean }) {
   const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
   const [error, setError] = useState("");
   const audio = useRef<HTMLAudioElement | null>(null);
-  useEffect(() => () => { audio.current?.pause(); }, []);
+  const request = useRef<{ id: string; controller: AbortController } | null>(null);
+  const objectUrl = useRef("");
+  const release = () => {
+    audio.current?.pause();
+    audio.current = null;
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = "";
+    const current = request.current;
+    request.current = null;
+    current?.controller.abort();
+    if (current) void fetch(`${apiBase}/media-runtime/voice/preview/${current.id}/cancel`, { method: "POST" }).catch(() => undefined);
+  };
+  useEffect(() => { setState("idle"); setError(""); return () => { release(); }; }, [apiBase, provider, voiceId]);
   const play = async () => {
-    if (state === "playing") { audio.current?.pause(); setState("idle"); return; }
+    if (state !== "idle") { release(); setState("idle"); return; }
     setState("loading");
     setError("");
+    const current = { id: crypto.randomUUID(), controller: new AbortController() };
+    request.current = current;
     try {
       const res = await fetch(`${apiBase}/media-runtime/voice/preview`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider_id: provider, voice_id: voiceId }),
+        signal: current.controller.signal,
+        body: JSON.stringify({ provider_id: provider, voice_id: voiceId, request_id: current.id }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(String(data?.detail || `The voice couldn't speak (${res.status}).`));
       }
       const url = URL.createObjectURL(await res.blob());
+      if (request.current !== current) { URL.revokeObjectURL(url); return; }
+      objectUrl.current = url;
       const clip = new Audio(url);
       audio.current = clip;
-      clip.onended = () => { setState("idle"); URL.revokeObjectURL(url); };
+      clip.onended = () => { if (request.current === current) { request.current = null; release(); setState("idle"); } };
       await clip.play();
-      setState("playing");
+      if (request.current === current) setState("playing");
     } catch (e) {
+      if (request.current !== current) return;
+      release();
       setState("idle");
       setError(e instanceof Error ? e.message : "The voice couldn't speak.");
     }
   };
   return (
     <Row label="Test the voice" help={error || "Plays one sentence with the voice above. It's what the speaker button under each reply uses."}>
-      <button type="button" className="es-btn es-btn-sm" disabled={state === "loading"} onClick={() => void play()}>
-        {state === "loading" ? "Preparing…" : state === "playing" ? "Stop" : "Play sample"}
+      <button type="button" className="es-btn es-btn-sm" disabled={disabled && state === "idle"} onClick={() => void play()}>
+        {state === "loading" ? "Cancel sample" : state === "playing" ? "Stop" : "Play sample"}
       </button>
     </Row>
   );
@@ -73,6 +92,7 @@ export function ElevenLabsSettings({ s, save, apiBase }: { s: SettingsMap; save:
 
   const selected = String(s.elevenlabs_voice_id || "");
   const voiceOptions = [
+    { value: "", label: "Default · George" },
     ...(voices || []).map((v) => ({ value: v.voice_id, label: v.description ? `${v.name} · ${v.description}` : v.name })),
     ...(selected && voices && !voices.some((v) => v.voice_id === selected) ? [{ value: selected, label: `Voice ${selected}` }] : []),
   ];
@@ -82,8 +102,8 @@ export function ElevenLabsSettings({ s, save, apiBase }: { s: SettingsMap; save:
         <SecretField isSet={hasKey} onCommit={(v) => save({ elevenlabs_api_key: v.trim() })} />
       </Row>
       <Row label="Voice" help={error || (hasKey ? (voices ? "Voices on your ElevenLabs account." : "Loading your voices…") : "Add your API key to see your voices.")}>
-        {voiceOptions.length ? (
-          <Select value={selected || voiceOptions[0].value} onChange={(v) => save({ elevenlabs_voice_id: v })} options={voiceOptions} />
+        {hasKey ? (
+          <Select value={selected} onChange={(v) => save({ elevenlabs_voice_id: v })} options={voiceOptions} />
         ) : <span className="st-muted">{hasKey ? "—" : "No key yet"}</span>}
       </Row>
       <Row label="Model">

@@ -543,17 +543,26 @@ def synthesize_voice_chunk(
         if job.status in {"queued", "running"}:
             raise VoiceTransportError("Voice playback is already being prepared")
         raise VoiceTransportError("The previous Voice playback attempt did not produce a clip")
+    # Register before inference, so Stop can cancel a still-loading native worker.
+    if job.id not in turn.output_job_ids:
+        turn.output_job_ids.append(job.id)
+    store.save_turn(turn)
     clip_id = f"voice-clip-{uuid.uuid4().hex}"
     relative_path = f"{clip_id}.wav"
     output = (store.clips_root / relative_path).resolve()
     output.relative_to(store.clips_root)
     try:
+        cancel_options = {"cancelled": lambda: bool((store.get_turn(turn.id) or turn).playback_cancelled)} if selected == "drama3-local" else {}
         used_provider = synthesize_voice_audio(
             job.text,
             output,
             provider_id=selected,
             settings=job.settings,
+            **cancel_options,
         )
+        turn = store.get_turn(turn.id) or turn
+        if turn.playback_cancelled:
+            raise VoiceTransportError("Voice playback was cancelled")
         digest = hashlib.sha256(output.read_bytes()).hexdigest()
         clip = store.save_clip(
             VoiceTransportClip(
@@ -578,6 +587,13 @@ def synthesize_voice_chunk(
         turn.status = "speaking"
         return store.save_turn(turn), job, clip
     except Exception as exc:
+        turn = store.get_turn(turn.id) or turn
+        if turn.playback_cancelled:
+            job.status = "cancelled"
+            job.cancellation_requested = True
+            get_voice_job_store().save(job)
+            output.unlink(missing_ok=True)
+            raise VoiceTransportError("Voice playback was cancelled") from exc
         diagnostic_id, message = _bounded_failure("synthesis", exc)
         job.status = "failed"
         job.error_code = "synthesis_failed"

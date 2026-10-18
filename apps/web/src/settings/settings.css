@@ -1,6 +1,14 @@
 /* Settings: sidebar navigation + grouped rows, saved instantly.
    Same monochrome palette as the app. */
 
+.st-voice-details { margin: 0; padding: 12px 16px; border-top: 1px solid var(--es-line); }
+.st-voice-details summary { cursor: pointer; color: var(--es-dim); font: 500 12px/1.5 var(--es-font); }
+.st-voice-details summary:focus-visible { outline: 2px solid var(--es-line-3); outline-offset: 5px; border-radius: 4px; }
+.st-voice-details[open] summary { margin-bottom: 8px; color: var(--es-text); }
+.st-voice-details .st-row { padding-inline: 0; }
+.st-voice-license { display: flex; align-items: flex-start; gap: 8px; max-width: 250px; color: var(--es-dim); font: 12px/1.5 var(--es-font); }
+.st-voice-license input { accent-color: var(--es-text); margin-top: 3px; }
+
 .st-root {
   /* Settings reads a touch brighter than the chat; everything else comes from theme/tokens.css. */
   --es-dim: rgba(var(--es-ink-rgb), 0.64);

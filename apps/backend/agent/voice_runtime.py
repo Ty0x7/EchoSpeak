@@ -20,12 +20,13 @@ import time
 import uuid
 import wave
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Callable, Literal, Optional
 
 from agent.tool_decorator import tool
 from pydantic import BaseModel, Field
 
 from agent.media_library import MediaLibraryAsset, get_media_library_store
+from agent.child_env import child_env
 from agent.projects import get_project_manager
 from agent.state import get_state_store
 from agent.threads import get_thread_manager
@@ -301,6 +302,7 @@ def voice_provider_statuses() -> list[VoiceProviderStatus]:
             ),
         ),
         _elevenlabs_status(),
+        _drama_status(),
         VoiceProviderStatus(
             id="openai-audio",
             locality="cloud",
@@ -320,6 +322,15 @@ def voice_provider_statuses() -> list[VoiceProviderStatus]:
             detail="Credentials are present, but cloud audio remains disabled until explicit upload/cost approval is implemented." if openai_key else "OPENAI_API_KEY is not configured.",
         ),
     ]
+
+
+def _drama_status() -> VoiceProviderStatus:
+    from agent.drama_voice import readiness
+    status = readiness()
+    return VoiceProviderStatus(id="drama3-local", locality="local", operations=["text_to_speech"],
+                               operation_readiness={"text_to_speech": status["ready"]}, detected=status["detected"],
+                               configured=status["configured"], execution_ready=status["ready"], supports_cancel=True,
+                               detail=status["detail"])
 
 
 def _elevenlabs_status() -> VoiceProviderStatus:
@@ -448,7 +459,7 @@ $engine.Dispose()
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 @{ text = ($parts -join ' ').Trim(); language = $selected.Culture.Name } | ConvertTo-Json -Compress
 """
-    env = os.environ.copy()
+    env = child_env()
     env["ECHOSPEAK_VOICE_AUDIO"] = str(audio_path)
     env["ECHOSPEAK_VOICE_LANGUAGE"] = str(language or "").strip()
     completed = subprocess.run(
@@ -507,6 +518,7 @@ def _whisper_cpp_transcribe(audio_path: Path, language: str = "") -> tuple[str, 
             errors="replace",
             timeout=120,
             check=False,
+            env=child_env(),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if completed.returncode != 0:
@@ -566,8 +578,9 @@ def synthesize_voice_audio(
     *,
     provider_id: str = "",
     settings: Optional[dict[str, Any]] = None,
+    cancelled: Optional[Callable[[], bool]] = None,
 ) -> str:
-    """Synthesize one bounded speech chunk to a WAV file (Windows voices, Piper, or ElevenLabs)."""
+    """Synthesize one bounded speech chunk with the selected voice provider."""
 
     selected = str(provider_id or default_voice_provider("text_to_speech")).strip()
     provider = _provider(selected)
@@ -581,6 +594,7 @@ def synthesize_voice_audio(
     output.parent.mkdir(parents=True, exist_ok=True)
     options = dict(settings or {})
     if selected == "windows-sapi":
+        options.setdefault("voice_id", getattr(config, "voice_windows_voice", ""))
         _sapi_synthesize(value, output, options)
     elif selected == "piper-local":
         executable = shutil.which("piper")
@@ -596,10 +610,17 @@ def synthesize_voice_audio(
             errors="replace",
             timeout=90,
             check=False,
+            env=child_env(),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if completed.returncode != 0:
             raise VoiceRuntimeError("Piper could not synthesize this speech chunk")
+    elif selected == "drama3-local":
+        from agent import drama_voice
+        try:
+            drama_voice.synthesize(value, output, cancelled=cancelled)
+        except (drama_voice.DramaError, InterruptedError) as exc:
+            raise VoiceRuntimeError(str(exc)) from exc
     elif selected == "elevenlabs":
         from agent import elevenlabs, privacy
 
@@ -661,11 +682,12 @@ def _sapi_synthesize(text: str, output: Path, settings: dict[str, Any]) -> None:
     powershell = shutil.which("powershell.exe")
     if not powershell:
         raise VoiceRuntimeError("Windows speech synthesis is unavailable")
-    env = os.environ.copy()
+    env = child_env()
     env["ECHOSPEAK_VOICE_TEXT"] = text
     env["ECHOSPEAK_VOICE_OUTPUT"] = str(output)
     env["ECHOSPEAK_VOICE_RATE"] = str(max(-10, min(10, int(settings.get("rate", 0) or 0))))
     env["ECHOSPEAK_VOICE_VOLUME"] = str(max(0, min(100, int(settings.get("volume", 100) or 100))))
+    env["ECHOSPEAK_VOICE_NAME"] = str(settings.get("voice_id", getattr(config, "voice_windows_voice", "")) or "")
     script = r"""
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Speech
@@ -673,6 +695,7 @@ $speaker = New-Object System.Speech.Synthesis.SpeechSynthesizer
 try {
   $speaker.Rate = [int]$env:ECHOSPEAK_VOICE_RATE
   $speaker.Volume = [int]$env:ECHOSPEAK_VOICE_VOLUME
+  if ($env:ECHOSPEAK_VOICE_NAME) { $speaker.SelectVoice($env:ECHOSPEAK_VOICE_NAME) }
   $speaker.SetOutputToWaveFile($env:ECHOSPEAK_VOICE_OUTPUT)
   $speaker.Speak($env:ECHOSPEAK_VOICE_TEXT)
 } finally {
@@ -722,7 +745,7 @@ def submit_voice_job(request: VoiceJob, *, store: Optional[VoiceJobStore] = None
     if not provider.execution_ready:
         request.status, request.error_code, request.error = "blocked", "provider_unavailable", provider.detail
         return store.save(request)
-    if request.operation != "text_to_speech" or request.provider_id != "windows-sapi":
+    if request.operation != "text_to_speech" or request.provider_id not in {"windows-sapi", "piper-local", "elevenlabs", "drama3-local"}:
         request.status, request.error_code, request.error = "blocked", "adapter_not_implemented", "Selected provider has no governed execution adapter"
         return store.save(request)
     text_value = request.text.strip()
@@ -737,9 +760,17 @@ def submit_voice_job(request: VoiceJob, *, store: Optional[VoiceJobStore] = None
     request.status, request.progress = "running", 0.1
     store.save(request)
     try:
-        _sapi_synthesize(text_value, output, request.settings)
+        if request.provider_id == "windows-sapi":
+            _sapi_synthesize(text_value, output, request.settings)
+        else:
+            cancel_options = {"cancelled": lambda: bool((store.get(request.id) or request).cancellation_requested)} if request.provider_id == "drama3-local" else {}
+            synthesize_voice_audio(text_value, output, provider_id=request.provider_id, settings=request.settings, **cancel_options)
+        if (store.get(request.id) or request).cancellation_requested:
+            output.unlink(missing_ok=True)
+            request.status, request.cancellation_requested = "cancelled", True
+            return store.save(request)
         if not output.is_file() or output.stat().st_size <= 44:
-            raise VoiceRuntimeError("SAPI did not produce a valid non-empty WAV artifact")
+            raise VoiceRuntimeError("The speech provider did not produce a valid non-empty WAV artifact")
         digest = hashlib.sha256(output.read_bytes()).hexdigest()
         asset_id = f"asset-{request.id}"
         get_media_library_store().register(
@@ -762,6 +793,10 @@ def submit_voice_job(request: VoiceJob, *, store: Optional[VoiceJobStore] = None
         request.status, request.progress, request.output_asset_id = "completed", 1.0, asset_id
         return store.save(request)
     except Exception as exc:
+        if (store.get(request.id) or request).cancellation_requested:
+            output.unlink(missing_ok=True)
+            request.status, request.cancellation_requested = "cancelled", True
+            return store.save(request)
         request.status, request.error_code, request.error = "failed", "synthesis_failed", str(exc)
         return store.save(request)
 
@@ -782,7 +817,7 @@ class VoiceSynthesisArgs(BaseModel):
     project_id: str
     text: str = Field(min_length=1, max_length=5000)
     idempotency_key: str = Field(min_length=1, max_length=200)
-    provider_id: str = "windows-sapi"
+    provider_id: str = ""
     model: str = ""
     settings: dict[str, Any] = Field(default_factory=dict)
 
@@ -802,7 +837,7 @@ def voice_synthesize_speech(
     project_id: str,
     text: str,
     idempotency_key: str,
-    provider_id: str = "windows-sapi",
+    provider_id: str = "",
     model: str = "",
     settings: Optional[dict[str, Any]] = None,
 ) -> str:
@@ -812,7 +847,7 @@ def voice_synthesize_speech(
                 session_id=session_id,
                 project_id=project_id,
                 operation="text_to_speech",
-                provider_id=provider_id,
+                provider_id=provider_id or default_voice_provider("text_to_speech"),
                 model=model,
                 text=text,
                 settings=dict(settings or {}),

@@ -62,3 +62,9 @@
 .setup-theme { width:100%; display:grid; gap:10px; margin:22px 0 6px; text-align:left; }
 .setup-theme h4 { margin:0; font-size:14px; font-weight:600; color:var(--es-text); }
 .setup-theme small { font-size:12px; color:var(--es-faint); }
+
+.setup-voice-summary { display:flex; align-items:center; gap:16px; margin-top:20px; padding:16px; width:100%; box-sizing:border-box; text-align:left; border:1px solid var(--es-line); border-radius:12px; background:var(--es-surface-1); }
+.setup-voice-summary>div { flex:1; min-width:0; }
+.setup-voice-summary strong { font-size:12px; font-weight:600; }
+.setup-voice-summary p { margin:5px 0 0; font-size:12px; color:var(--es-dim); line-height:1.5; }
+@media(max-width:600px) { .setup-voice-summary { align-items:flex-start; flex-direction:column; } }

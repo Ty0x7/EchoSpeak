@@ -17,6 +17,7 @@ describe("ElevenLabs read-aloud settings", () => {
     const html = renderToStaticMarkup(<ElevenLabsSettings s={{ elevenlabs_api_key: "***", elevenlabs_model: "eleven_v3" }} save={save} apiBase="http://api" />);
     expect(html.includes("Loading your voices")).toBe(true);
     expect(html.includes("Play sample")).toBe(true);
+    expect(html.includes("Default · George")).toBe(true); // matches the backend fallback, never an unsaved first account voice
     expect(ELEVENLABS_MODELS.map((m) => m.value)).toEqual(["eleven_flash_v2_5", "eleven_turbo_v2_5", "eleven_multilingual_v2", "eleven_v3"]);
   });
 });

@@ -19,7 +19,7 @@ import { SmartModelChoice } from "./SmartModelChoice";
 import { UPDATES_OFF_MESSAGE, updatesAllowed } from "../desktop/privacyGate";
 import { AgentSkillsSection } from "./AgentSkillsSection";
 import { DesktopControlOffer } from "./DesktopControlOffer";
-import { ElevenLabsSettings, TestVoice } from "./VoiceOutput";
+import { VoiceProviders } from "./VoiceProviders";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
 import { requestSetup } from "../setup/openSetup";
@@ -89,7 +89,7 @@ const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
   personality: "soul personality tone",
   permissions: "permissions files desktop applications system actions apps allowlist allowed apps launch minecraft",
   terminal: "terminal shell commands powershell allowlist",
-  voice: "voice whisper speech to text microphone wake word read aloud piper windows speech cloud voice openai audio tts stt",
+  voice: "voice whisper speech to text microphone wake word read aloud piper windows speech elevenlabs drama gguf audio.cpp local download tts stt",
   search: "web search brave tavily searxng duckduckgo timeout results blocked sites sports odds live data",
   memory: "memory documents embeddings recall",
   automations: "routines heartbeat schedule check-in prompt",
@@ -345,11 +345,15 @@ type VoiceSetupInfo = {
 
 export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMap; save: Save; apiBase: string; openAdvanced(page: AdvancedPage): void }) {
   const [info, setInfo] = useState<VoiceSetupInfo | null>(null);
+  const [setupError, setSetupError] = useState("");
   const refresh = useCallback(async () => {
     try {
-      setInfo(await (await fetch(`${apiBase}/media-runtime/voice/setup`)).json());
-    } catch {
-      setInfo(null);
+      const response = await fetch(`${apiBase}/media-runtime/voice/setup`);
+      if (!response.ok) throw new Error("Listening status is unavailable. Try opening Voice again.");
+      setInfo(await response.json());
+      setSetupError("");
+    } catch (e) {
+      setSetupError(e instanceof Error ? e.message : String(e));
     }
   }, [apiBase]);
   useEffect(() => {
@@ -359,12 +363,17 @@ export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMa
   }, [refresh, info?.download?.running]);
 
   const install = async (size: string) => {
+    try {
     const response = await fetch(`${apiBase}/media-runtime/voice/setup`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ size }),
     });
-    if (response.ok) setInfo(await response.json());
+    const data = await response.json();
+    if (!response.ok) throw new Error(String(data.detail || "The listening model could not be installed."));
+    setInfo(data);
+    window.dispatchEvent(new Event("echospeak.voice-settings-changed"));
+    } catch (e) { setSetupError(e instanceof Error ? e.message : String(e)); }
   };
 
   const active = info?.models.find((m) => m.active);
@@ -389,8 +398,9 @@ export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMa
 
   return (
     <>
+      <VoiceProviders s={s} save={save} apiBase={apiBase} />
       <Group title="Speech to text" description="Pick a Whisper model to download. It runs on this PC, so what you say never leaves it.">
-        <Row label={<Status tone={tone}>{statusText}</Status>} help={info?.download.error || undefined} />
+        <Row label={<Status tone={setupError ? "err" : tone}>{setupError || statusText}</Status>} help={info?.download.error || undefined} />
         {info?.models.map((m) => (
           <Row key={m.size} label={`${m.label} · ${m.mb} MB`} help={m.note}>
             {m.active ? (
@@ -413,7 +423,7 @@ export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMa
           <TextField value={String(s.voice_wake_word || "echo")} onCommit={(v: string) => save({ voice_wake_word: v.trim().toLowerCase() || "echo" })} />
         </Row>
       </Group>
-      <Group title="Engines" description="Downloading a Whisper model above sets speech to text for you.">
+      <Group title="Listening engine" description="Microphone input is separate from the voice that reads replies. Downloading a Whisper model above configures listening for you.">
         <Row label="Speech to text">
           <Select
             value={String(s.voice_local_stt_provider || "windows-sapi")}
@@ -425,20 +435,7 @@ export function VoiceSection({ s, save, apiBase, openAdvanced }: { s: SettingsMa
             ]}
           />
         </Row>
-        <Row label="Read aloud">
-          <Select
-            value={String(s.voice_local_tts_provider || "windows-sapi")}
-            onChange={(v) => save({ voice_local_tts_provider: v })}
-            options={[
-              { value: "windows-sapi", label: "Windows voices" },
-              { value: "piper-local", label: "Piper" },
-              { value: "elevenlabs", label: "ElevenLabs (cloud)" },
-            ]}
-          />
-        </Row>
-        <TestVoice apiBase={apiBase} provider={String(s.voice_local_tts_provider || "windows-sapi")} />
       </Group>
-      <ElevenLabsSettings s={s} save={save} apiBase={apiBase} />
     </>
   );
 }
