@@ -106,8 +106,8 @@ export function ProjectWorkspace({ apiBase, projectId, onBack, onNewChat, onChat
   const documents = (data?.documents || []).filter(row => match(`${row.title} ${row.path}`));
   const current = data?.documents.find(row => row.path === file);
   return <section className="pw-workspace" aria-label="Project workspace">
-    <header className="pw-header"><button className="pw-text-link" type="button" onClick={onBack}>← All projects</button>
-      <div className="pw-title"><div><h1>{data?.project.name || "Opening project…"}</h1>{data?.project.description ? <p>{data.project.description}</p> : null}</div><button type="button" className="es-btn es-btn-primary" onClick={onNewChat}>New project chat</button></div>
+    <header className="pw-header"><button className="pw-text-link pw-back" type="button" onClick={onBack} aria-label="All projects" title="All projects">←</button>
+      <div className="pw-title"><h1 title={data?.project.description}>{data?.project.name || "Opening project…"}</h1><button type="button" className="es-btn es-btn-primary" onClick={onNewChat}>New chat</button></div>
     </header>
     <nav className="pw-nav" aria-label="Project sections">{SECTIONS.map(name => <button type="button" key={name} aria-current={section === name ? "page" : undefined} onClick={() => { setSection(name); setSelected(null); setFile(""); setQuery(""); }}>{name}</button>)}</nav>
     {error ? <p className="pw-notice is-error" role="alert">{error}</p> : null}

@@ -195,3 +195,22 @@ also passed. There are no automated live-agent or paid-provider calls.
 Real agent authoring, large real projects and the installed/packaged Windows app
 still need user evaluation. Active app sessions were not restarted. Source
 version remains 11.9.2; this workflow change does not publish a new installer.
+
+## EchoSpeak documentation self-test
+
+On 2026-10-18, the project-documentation skill was used on EchoSpeak itself.
+The existing technical record and HTML report were updated in place, with
+architecture diagrams leading and current workspace screenshots kept secondary.
+
+Actual repository discovery paired `artifacts/PROJECT_WORKSPACE.html` with
+`docs/PROJECT_WORKSPACE.md` as one entry. An isolated instance of the real workspace
+component opened the diagram report and its Technical notes. The compact project
+header measured 55 pixels at 1280, 960 and 390 pixels, with no page overflow.
+Workspace requests were GET-only; no browser exceptions or external requests
+were observed. Captures are in `artifacts/media/echospeak-workspace-compact.png`
+and `artifacts/media/echospeak-documentation-preview.png`.
+
+This exercises Codex authoring and EchoSpeak's real file discovery/rendering
+against this repository. It does not claim a live Echo conversation, another
+agent's skill invocation or installed Windows application was tested. Existing
+sessions and user data were not modified.
