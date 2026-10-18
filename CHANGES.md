@@ -1,5 +1,16 @@
 # Changes
 
+## v11.9.0 — 2026-10-18
+
+User-facing notes: [EchoSpeak 11.9.0](docs/releases/v11.9.0.md).
+
+* Projects open a visual workspace for reports, files, conversations, saved research, artifacts, media, routines and activity. Browsing a project preserves the active chat's context.
+* Named Markdown and HTML reports use existing artifact versions, with related files, original images, source-agent details, reported checks and remaining work. Echo can read workspace context and save reports through project-scoped tools.
+* Opt-in project sharing uses a validated, versioned file handoff for independent Echo, Codex and Claude Code work. Explicit context export and optional lifecycle receipts do not launch agents, copy transcripts or certify reported results.
+* Existing authentication, permissions, untrusted-content policy and artifact sandbox remain active. Imports validate project identity, paths, associations and revision order; private paths and out-of-project references are rejected.
+* Carries forward the 11.7.1 screenshot-to-model/chat flow, bounded desktop controls, app-launch permission fixes and chat-wide screen-control approvals.
+* Backend, web, desktop, Cargo and Tauri release metadata aligned to 11.9.0. Focused source/UI checks passed; packaged Windows, real-provider and independent-agent workflows still require manual evaluation.
+
 ## v11.7.1 — 2026-10-12
 
 User-facing notes: [EchoSpeak 11.7.1](docs/releases/v11.7.1.md).
