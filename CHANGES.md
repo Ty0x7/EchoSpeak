@@ -1,5 +1,15 @@
 # Changes
 
+## v11.9.2 — 2026-10-18
+
+User-facing notes: [EchoSpeak 11.9.2](docs/releases/v11.9.2.md).
+
+* Refines Voice Settings with one read-aloud provider selection, configuration status and focused Windows/Piper/ElevenLabs/Drama setup using existing controls and themes.
+* Adds optional Drama-3 native speech with verified audio.cpp loader support, pinned model downloads and resumable verification, existing-file imports, guided source builds, CPU/CUDA offload and local reference WAVs.
+* Reuses speech jobs, chat playback and governed project audio. Cancellation covers pending workers and late results; native process trees are owned and app keys are stripped.
+* Keeps first-run voice and creations optional and collapsed; shows the chosen voice at completion without loading weights on startup or blocking chat. All 11.9.0 harness/workspace improvements carry forward; A2A architecture work remains reserved for 11.9.3.
+* Includes Fish Audio attribution, separate model terms, a technical audit and architecture diagrams. No live inference or GPU performance claims.
+
 ## v11.9.0 — 2026-10-18
 
 User-facing notes: [EchoSpeak 11.9.0](docs/releases/v11.9.0.md).

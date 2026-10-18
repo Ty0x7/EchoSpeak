@@ -26,6 +26,11 @@ export function useSettings(apiBase: string) {
 
   useEffect(() => {
     void load();
+    // Optional voice setup jobs update paths after the settings request finishes.
+    // Wait for pending edits before refreshing so their newer values win.
+    const voiceChanged = () => { void saveQueue.current.then(load); };
+    window.addEventListener("echospeak.voice-settings-changed", voiceChanged);
+    return () => window.removeEventListener("echospeak.voice-settings-changed", voiceChanged);
   }, [load]);
 
   const save = useCallback(

@@ -117,12 +117,22 @@ def status():
         "detail": "Managed setup supports Windows NVIDIA GPUs. Other hardware can connect an existing ComfyUI server. Models are optional large downloads; generation speed depends on your GPU."}
 
 
-def download(url: str, target: Path, digest: str, size: int):
+def download(url: str, target: Path, digest: str, size: int, *, state=None, cancel=None):
+    """Pinned, resumable download shared by optional local-model installers."""
+    state = _STATE if state is None else state
+    cancel = _CANCEL if cancel is None else cancel
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and target.stat().st_size == size:
+        state.update(message="Verifying " + target.name, downloaded=0, total=size)
+        hasher = hashlib.sha256()
         with target.open("rb") as handle:
-            if hashlib.file_digest(handle, "sha256").hexdigest() == digest:
-                return
+            while chunk := handle.read(1024 * 1024):
+                if cancel.is_set():
+                    raise InterruptedError("Verification cancelled; the existing file was retained.")
+                hasher.update(chunk)
+                state["downloaded"] += len(chunk)
+        if hasher.hexdigest() == digest:
+            return
     temp = target.with_suffix(target.suffix + ".part")
     meta = target.with_suffix(target.suffix + ".part.json")
     identity = {"url": url, "sha256": digest, "size": size}
@@ -138,7 +148,7 @@ def download(url: str, target: Path, digest: str, size: int):
     if count:
         with temp.open("rb") as handle:
             while chunk := handle.read(1024 * 1024):
-                if _CANCEL.is_set():
+                if cancel.is_set():
                     raise InterruptedError("Installation cancelled; partial downloads are retained for retry.")
                 hasher.update(chunk)
     if count == size and hasher.hexdigest() == digest:
@@ -153,7 +163,7 @@ def download(url: str, target: Path, digest: str, size: int):
         headers["Range"] = f"bytes={count}-"
         if stored.get("etag"):
             headers["If-Range"] = stored["etag"]
-    _STATE.update(message=("Resuming " if count else "Downloading ") + target.name, downloaded=count, total=size)
+    state.update(message=("Resuming " if count else "Downloading ") + target.name, downloaded=count, total=size)
     try:
         # URLs are fixed in the shipped manifest, never model/user supplied. No credentials.
         with httpx.Client(timeout=90, follow_redirects=True, trust_env=False) as client:
@@ -170,14 +180,14 @@ def download(url: str, target: Path, digest: str, size: int):
                 meta.write_text(json.dumps({**identity, "etag": response.headers.get("ETag", "")}))
                 with temp.open("ab" if count else "wb") as handle:
                     for chunk in response.iter_bytes(1024 * 1024):
-                        if _CANCEL.is_set():
+                        if cancel.is_set():
                             raise InterruptedError("Installation cancelled; partial downloads are retained for retry.")
                         count += len(chunk)
                         if count > size:
                             raise ValueError("Download exceeds the pinned manifest size")
                         hasher.update(chunk)
                         handle.write(chunk)
-                        _STATE["downloaded"] = count
+                        state["downloaded"] = count
         if count < size:
             raise RuntimeError("Download incomplete; retry setup to resume the retained partial file.")
         if count != size or hasher.hexdigest() != digest:

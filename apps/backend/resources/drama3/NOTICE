@@ -1,0 +1,15 @@
+These Fish Audio Materials are licensed under the Fish Audio Community License, Version 1.0. Copyright © 39 AI, INC. All Rights Reserved.
+
+Built with Fish Audio.
+
+Modifications in these independent conversions:
+- Reconstructed the original scaled FP8 expert tensors and packed their projections into GGUF expert banks.
+- Created mixed Q2_K, Q3_K and Q4_K expert packages with Q8_0 backbone matrices.
+- Created a Q4_K expert/backbone package with a Q4_0 text embedding.
+- Retained FP16 audio tower and codec weights, folded codec weight normalization and embedded tokenizer/configuration/model-contract resources for native audio.cpp inference.
+- Added Q4_K expert/Q8_0 backbone profiles with original routers and shared-expert gates stored as FP32.
+- Added a profile that also restores original BF16 text embeddings and the complete BF16 output head.
+- Retained the original full-size output-head layout for compatibility with upstream audio.cpp.
+- Added audio.cpp resource metadata without changing the trained model architecture.
+
+Conversion and runtime preparation were assisted by Codex (OpenAI).

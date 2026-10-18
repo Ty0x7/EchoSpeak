@@ -217,11 +217,22 @@ Echo sees its beginning and end and reads the rest by searching it, instead of l
   floating desktop companion, including the voice avatar size.
 - **Hear a reply**: the speaker button next to **Copy** under each of Echo's replies reads it
   aloud; press it again to stop. Automatic read-aloud and voice conversations use the same voice.
-- Speech output uses Windows voices, Piper, or **ElevenLabs** (cloud). Choose one under
-  **Settings › Voice › Engines › Read aloud** and press **Play sample** to hear it. For ElevenLabs,
+- Speech output uses Windows voices, Piper, **ElevenLabs** (cloud), or optional **Drama-3** (local). Choose one under
+  **Settings › Voice › Read aloud** and press **Play sample** to hear it. For ElevenLabs,
   add your API key in the ElevenLabs group, then pick a voice, model and speed. Each reply read
   aloud sends its text to ElevenLabs and uses characters on your plan; Private and Offline modes
   turn it off. Gemini Live conversations keep their own native voice.
+
+### Optional Drama-3 speech
+
+In **Settings › Voice**, choose **Drama-3** for read-aloud. Your existing local or cloud AI model still handles the conversation. **Built with Fish Audio.** Read the linked Fish Audio Community License before importing or downloading a model; these model terms differ from EchoSpeak's MIT license.
+
+1. Choose a trusted `audiocpp_cli.exe` with its DLLs and press **Verify runtime**. It must include the `fish_drama3` speech loader. If you already have the Windows C++ toolchain, the optional build action prepares a pinned compatible runtime for you. Regular GGUF chat runtimes and older audio.cpp binaries do not work here.
+2. Accept the model license and explicitly download a quantization, or **Link model** to use a compatible GGUF already on your PC. Downloads are about 16–24 GiB, show progress and can be cancelled/resumed. Linking does not copy your file.
+3. Choose CPU or NVIDIA CUDA and press **Play sample**. This is the actual speech check; a verified runtime alone does not prove the model fits your hardware. More CPU expert layers can reduce GPU demand but need RAM and can be slower. Your local chat model shares those resources.
+4. Optionally add a short local PCM reference WAV and its exact transcript under **Memory and voice reference**. Use only a voice you have the right to use. Leaving it blank uses the model's default voice.
+
+The speaker button, automatic read-aloud and standard voice conversations use this selection. Native Gemini Live uses its own audio. Drama models load only when speech is requested and unload afterward; long replies use bounded clips and may pause between them. **Cancel sample** or the existing playback Stop cancels a pending Drama worker. Missing voice files never prevent normal chat or force setup to run again.
 
 ## 6. Memory
 

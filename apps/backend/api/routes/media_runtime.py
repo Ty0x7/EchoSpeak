@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+import threading
+import time
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
@@ -157,6 +159,31 @@ class VoicePreviewRequest(BaseModel):
     text: str = Field(default="Hi, I'm Echo. This is how I'll sound when I read replies aloud.", max_length=300)
     provider_id: str = Field(default="", max_length=100)
     voice_id: str = Field(default="", max_length=100)
+    request_id: str = Field(default="", max_length=100, pattern=r"^[A-Za-z0-9-]*$")
+
+
+_PREVIEWS: dict[str, tuple[float, threading.Event]] = {}
+_PREVIEW_LOCK = threading.Lock()
+
+
+def _preview_cancel(request_id: str) -> threading.Event:
+    with _PREVIEW_LOCK:
+        now = time.monotonic()
+        for key, (stamp, _) in list(_PREVIEWS.items()):
+            if now - stamp > 1200:
+                _PREVIEWS.pop(key, None)
+        if len(_PREVIEWS) >= 512 and request_id not in _PREVIEWS:
+            raise HTTPException(429, "Too many preview requests; try again later.")
+        return _PREVIEWS.setdefault(request_id, (now, threading.Event()))[1]
+
+
+@router.post("/voice/preview/{request_id}/cancel")
+def cancel_voice_preview(request_id: str):
+    import re
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,100}", request_id):
+        raise HTTPException(400, "Invalid preview request id.")
+    _preview_cancel(request_id).set()
+    return {"cancelled": True}
 
 
 @router.post("/voice/preview")
@@ -172,11 +199,51 @@ def preview_voice(request: VoicePreviewRequest):
     with tempfile.TemporaryDirectory(prefix="echospeak-voice-") as folder:
         output = Path(folder) / "preview.wav"
         try:
+            options = {"cancelled": _preview_cancel(request.request_id).is_set} if request.provider_id == "drama3-local" and request.request_id else {}
             synthesize_voice_audio(request.text, output, provider_id=request.provider_id,
-                                   settings={"voice_id": request.voice_id} if request.voice_id else {})
+                                   settings={"voice_id": request.voice_id} if request.voice_id else {}, **options)
         except VoiceRuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         return Response(output.read_bytes(), media_type="audio/wav", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/voice/providers")
+def voice_providers():
+    from agent.voice_runtime import voice_provider_statuses
+    return {"items": [provider.model_dump(mode="json") for provider in voice_provider_statuses()]}
+
+
+class DramaAction(BaseModel):
+    action: str = Field(pattern=r"^(verify|import|download|build|cancel)$")
+    path: str = Field(default="", max_length=4096)
+    model: str = Field(default="q2", max_length=30)
+    backend: str = Field(default="cpu", pattern=r"^(cpu|cuda)$")
+    accept_license: bool = False
+
+
+@router.get("/voice/drama3")
+def drama_status():
+    from agent.drama_voice import status
+    return status()
+
+
+@router.post("/voice/drama3")
+def drama_action(request: DramaAction):
+    from agent import drama_voice, privacy
+    try:
+        if request.action == "verify":
+            return drama_voice.verify_runtime(request.path)
+        if request.action == "import":
+            return drama_voice.import_model(request.path, request.accept_license)
+        if request.action == "download":
+            return drama_voice.download_model(request.model, request.accept_license)
+        if request.action == "build":
+            return drama_voice.build_runtime(request.backend)
+        return drama_voice.cancel_setup()
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except (drama_voice.DramaError, OSError, ValueError) as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 
 @router.get("/voice/elevenlabs/voices")

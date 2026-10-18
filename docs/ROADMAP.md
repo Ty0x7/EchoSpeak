@@ -6,6 +6,8 @@ What's next, in order. Sizes: **S** under a day, **M** a few days, **L** a week 
 
 11.9.0 combines the 11.7.1 screenshot and computer-control work, all harness improvements prepared for 11.8, and the visual project workspace with optional report sharing. The harness includes Claude's native computer tool, MCP sign-in, MCP Apps and Tasks, a quarantined reader for outside content, per-reply traces, full-output handles, outbound A2A with signed Agent Cards, the Echo bench, and native replacements for LangChain. See the [11.9.0 release notes](releases/v11.9.0.md), the incorporated [11.8 notes](releases/v11.8.0.md), and the status table in the [README](../README.md#where-each-feature-stands). Real-provider and installed-app validation remain separate from the automated source checks.
 
+11.9.2 adds optional Drama-3 speech and refines shared Voice Settings and first-run setup. Native compilation, real speech quality and hardware fit remain owner validation; warm-model streaming is not implemented. See the [11.9.2 notes](releases/v11.9.2.md). A2A architecture research is reserved for 11.9.3.
+
 ## 1. Prove what exists
 
 1. **Real runs before release.** Minecraft or another game with Claude's computer tool and with a local vision model; `scripts/echo_bench.py --desktop` on each model you ship for. **S**

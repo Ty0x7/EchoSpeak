@@ -994,6 +994,14 @@ class Config:
         self.voice_wake_word = os.getenv("VOICE_WAKE_WORD", "echo").strip().lower() or "echo"
         self.voice_whisper_cpp_model_path = os.getenv("VOICE_WHISPER_CPP_MODEL_PATH", "").strip()
         self.voice_piper_model_path = os.getenv("VOICE_PIPER_MODEL_PATH", "").strip()
+        self.voice_windows_voice = ""
+        self.voice_drama_runtime_path = ""
+        self.voice_drama_model_path = ""
+        self.voice_drama_backend = "cpu"
+        self.voice_drama_cpu_layers = 8
+        self.voice_drama_device = 0
+        self.voice_drama_reference_path = ""
+        self.voice_drama_reference_text = ""
         self.voice_stt_language = os.getenv("VOICE_STT_LANGUAGE", "").strip()
         self.voice_max_audio_bytes = max(262_144, int(os.getenv("VOICE_MAX_AUDIO_BYTES", "16777216") or 16_777_216))
         self.generation_cloud_provider = os.getenv("GENERATION_CLOUD_PROVIDER", "").strip()
@@ -1502,6 +1510,14 @@ class Config:
             "voice_faster_whisper_model_path",
             "voice_whisper_cpp_model_path",
             "voice_piper_model_path",
+            "voice_windows_voice",
+            "voice_drama_runtime_path",
+            "voice_drama_model_path",
+            "voice_drama_backend",
+            "voice_drama_cpu_layers",
+            "voice_drama_device",
+            "voice_drama_reference_path",
+            "voice_drama_reference_text",
             "voice_stt_language",
             "voice_wake_word",
             "voice_max_audio_bytes",
