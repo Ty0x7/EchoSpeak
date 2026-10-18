@@ -1,6 +1,5 @@
 """Owner-facing project workspace, subject to the existing local API auth guard."""
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from pydantic import BaseModel, Field
 
 from agent import project_workspace as workspace
 
@@ -32,35 +31,6 @@ def record(project_id: str, record_id: str):
     return result
 
 
-@router.post("/imports")
-def import_record(project_id: str, payload: workspace.Handoff):
-    return call(workspace.import_handoff, project_id, payload.model_dump())
-
-
-@router.post("/sync")
-def sync(project_id: str):
-    return call(workspace.sync, project_id)
-
-
-class Sharing(BaseModel):
-    enabled: bool = True
-
-
-@router.post("/sharing")
-def sharing(project_id: str, payload: Sharing):
-    if payload.enabled:
-        return call(workspace.prepare_sharing, project_id)
-    from agent.projects import get_project_manager
-    item = call(workspace.project, project_id)
-    get_project_manager().save_workspace(project_id, item.workspace_records, sharing=False)
-    return {"enabled": False}
-
-
-@router.post("/export")
-def export(project_id: str):
-    return call(workspace.export_context, project_id)
-
-
 @router.get("/files")
 def files(project_id: str, path: str = Query(default="", max_length=500)):
     return {"items": call(workspace.files, call(workspace.project, project_id), path)}
@@ -77,8 +47,7 @@ def file(project_id: str, path: str = Query(max_length=500)):
     text = redact_secrets(text)
     result = {"path": path, "text": text}
     if path.lower().endswith((".html", ".htm")):
-        from agent.lean.artifacts import frame_html
-        result["html_preview"] = frame_html({"kind": "html", "versions": [{"n": 1, "content": text}]})
+        result["html_preview"] = call(workspace.document_html, call(workspace.project, project_id), path, text)
     return result
 
 

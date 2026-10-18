@@ -213,10 +213,12 @@ def remove(name: str) -> bool:
 
 # ── adding skills ────────────────────────────────────────────────────
 
-def _install(name: str, writer) -> AgentSkill:
+def _install(name: str, writer, *, overwrite: bool = True) -> AgentSkill:
     """Write a skill into a staging folder, then swap it in. It always needs review."""
     with _lock:
         root = skills_dir()
+        if not overwrite and (root / name).exists():
+            raise ValueError("This skill is already installed. Your existing files were kept.")
         staging = root / f".incoming-{name}"
         if staging.exists():
             shutil.rmtree(staging)
@@ -242,7 +244,17 @@ def import_text(skill_md: str) -> AgentSkill:
     return _install(name, lambda folder: (folder / "SKILL.md").write_text(skill_md.replace("\r\n", "\n"), encoding="utf-8"))
 
 
-def import_folder(source: str) -> AgentSkill:
+def import_documentation_skill() -> AgentSkill:
+    """Explicit owner action; never replace a user's existing skill or approve it."""
+    name = "project-documentation"
+    if get(name) is not None:
+        raise ValueError("This skill is already installed. Your existing files were kept.")
+    bundled = Path(__file__).resolve().parents[2] / "resources/agent-skills" / name
+    source = Path(__file__).resolve().parents[4] / ".agents/skills" / name
+    return import_folder(str(bundled if bundled.is_dir() else source), overwrite=False)
+
+
+def import_folder(source: str, *, overwrite: bool = True) -> AgentSkill:
     src = Path(str(source or "")).expanduser()
     if not src.is_dir():
         raise ValueError("That folder doesn't exist.")
@@ -262,7 +274,7 @@ def import_folder(source: str) -> AgentSkill:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, dest)
 
-    return _install(str(meta["name"]), copy)
+    return _install(str(meta["name"]), copy, overwrite=overwrite)
 
 
 def skill_from_lesson(lesson: Any, name: str = "") -> AgentSkill:

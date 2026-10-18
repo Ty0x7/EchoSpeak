@@ -108,6 +108,10 @@ export const leanApi = (apiBase: string) => ({
   async agentSkills(): Promise<AgentSkillInfo[]> {
     return (await json<{ items: AgentSkillInfo[] }>(await fetch(`${apiBase}/lean/agent-skills`, { cache: "no-store" }))).items || [];
   },
+  async importDocumentationSkill(): Promise<AgentSkillInfo> {
+    const data = await json<{ skill: AgentSkillInfo }>(await fetch(`${apiBase}/lean/agent-skills/documentation/import`, { method: "POST" }));
+    return data.skill;
+  },
   async importAgentSkill(input: { path?: string; text?: string }): Promise<AgentSkillInfo> {
     const data = await json<{ skill: AgentSkillInfo }>(await fetch(`${apiBase}/lean/agent-skills/import`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input) }));
     return data.skill;

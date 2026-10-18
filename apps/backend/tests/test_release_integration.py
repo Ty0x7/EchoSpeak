@@ -40,7 +40,7 @@ def test_legacy_remote_reply_preserves_text_and_nonterminal_status():
     assert "working" in a2a_trust._reply_text({"id": "old-task", "status": "working"})
 
 
-@pytest.mark.parametrize("name", ["project_workspace", "save_project_report"])
+@pytest.mark.parametrize("name", ["project_workspace", "save_project_image", "save_project_report"])
 def test_project_report_bookkeeping_cannot_verify_an_implementation_task(name):
     session = LeanSession.__new__(LeanSession)
     session.results = []

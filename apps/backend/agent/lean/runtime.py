@@ -42,7 +42,7 @@ MAX_HANDOFFS_PER_MESSAGE = 6
 MAX_DISCUSS_TURNS = 3
 DEFAULT_WORK_TURNS = 30
 # Bookkeeping tools: calling them is not evidence that work got done.
-_BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "project_workspace", "save_project_report"}
+_BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "project_workspace", "save_project_image", "save_project_report"}  # Preserve historical report-write classification too.
 # Sources with a live UI that can show an approval card.
 INTERACTIVE_SOURCES = {"web", "desktop", "voice", "chat", "api"}
 

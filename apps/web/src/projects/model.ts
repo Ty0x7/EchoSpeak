@@ -5,6 +5,7 @@ export type WorkRecord = {
   verification: { label: string; result: string; evidence: string }[]; remaining: string[]; imported_at: number; history?: WorkRecord[];
 };
 export type WorkspaceData = {
+  documents: ProjectDocument[]; file_revision: string; scan_limited: boolean; scan_error: string;
   project: { id: string; name: string; description: string; workspace_root: string; sharing_enabled: boolean; brief: string };
   records: WorkRecord[]; artifacts: { id: string; title: string; kind: string; versions: number; excerpt: string }[];
   sessions: { id: string; title: string; at: number }[];
@@ -13,7 +14,8 @@ export type WorkspaceData = {
   media: { id: string; name: string; media_kind: string; session_id: string }[];
   activity: { id: string; status: string; objective: string; session_id: string }[];
 };
-export const SECTIONS = ["Reports", "Files", "Conversations", "Research", "Artifacts", "Media", "Routines", "Activity"] as const;
+export type ProjectDocument = { path: string; title: string; kind: "html" | "markdown"; markdown: string; thumbnail: string; size: number; modified_at: number };
+export const SECTIONS = ["Work", "Files", "Conversations", "Research", "Routines", "Activity"] as const;
 export type Section = typeof SECTIONS[number];
 
 /** Local links never become filesystem URLs or arbitrary API requests. */

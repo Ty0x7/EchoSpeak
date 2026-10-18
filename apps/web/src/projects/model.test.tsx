@@ -24,7 +24,7 @@ describe("project report references", () => {
     expect(html.includes("<script>")).toBe(false);
   });
   it("keeps project resources in explicit navigable sections", () => {
-    expect(SECTIONS).toEqual(["Reports", "Files", "Conversations", "Research", "Artifacts", "Media", "Routines", "Activity"]);
+    expect(SECTIONS).toEqual(["Work", "Files", "Conversations", "Research", "Routines", "Activity"]);
   });
   it("reuses the right panel without showing an unrelated chat context", () => {
     const html = renderToStaticMarkup(<RightPanel apiBase="http://api" sessionId="unrelated-chat" tab="research" onTab={() => {}} artifact={{ id: "report" }} activity={[]} width={460} onWidth={() => {}} measureRoom={() => ({ room: 1200, scale: 1 })} overlay={false} onClose={() => {}} resourceOnly />);
