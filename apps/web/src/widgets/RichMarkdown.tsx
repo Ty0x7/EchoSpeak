@@ -21,15 +21,19 @@ import { WidgetView } from "./WidgetView";
  * - tables -> sortable, copyable DataTable
  * - links open in the system browser
  */
-export const RichMarkdown = React.memo(function RichMarkdown({ text, streaming = false }: { text: string; streaming?: boolean }) {
+export const RichMarkdown = React.memo(function RichMarkdown({ text, streaming = false, renderImage, renderLink }: {
+  text: string; streaming?: boolean;
+  renderImage?(src: string, alt: string): React.ReactNode;
+  renderLink?(href: string, children: React.ReactNode): React.ReactNode;
+}) {
   return (
     <div className="chat-markdown lm-text">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]}
         rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: "ignore", output: "html" }]]}
         components={{
-          a: ({ node: _node, href, children }) => <ResearchLink href={String(href || "")}>{children}</ResearchLink>,
-          img: ({ node: _node, src, alt }) => <SafeImage src={typeof src === "string" ? src : undefined} alt={alt} />,
+          a: ({ node: _node, href, children }) => renderLink ? renderLink(String(href || ""), children) : <ResearchLink href={String(href || "")}>{children}</ResearchLink>,
+          img: ({ node: _node, src, alt }) => renderImage ? renderImage(String(src || ""), String(alt || "")) : <SafeImage src={typeof src === "string" ? src : undefined} alt={alt} />,
           table: ({ node: _node, children }) => <DataTable>{children}</DataTable>,
           pre: ({ node: _node, children }) => <>{children}</>,
           code: ({ node, className, children }) => {

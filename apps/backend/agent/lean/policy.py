@@ -38,7 +38,7 @@ UNTRUSTED_SOURCES = {
     # Titles, prices and pages from the web.
     "stock_history", "product_search", "video_search", "image_search",
     # Uploaded documents can come from anywhere (a downloaded PDF, a forwarded email).
-    "document_search", "research_notebook",
+    "document_search", "research_notebook", "project_workspace",
     # MCP registry listings and third-party servers' error text (agent/integrations.py).
     "find_integrations", "check_integration",
 }
@@ -56,7 +56,7 @@ EXTERNAL_ACTIONS = {
     "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
     # Saved memories and the soul are re-read in every future chat: writing one
     # from untrusted content would plant a persistent injection.
-    "memory_save", "soul_update",
+    "memory_save", "soul_update", "save_project_report",
 }
 
 # Computer use looks at the screen before every action, so screen taint alone

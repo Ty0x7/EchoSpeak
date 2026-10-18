@@ -27,6 +27,8 @@ class ProjectResponse(BaseModel):
     context_prompt: Optional[str] = ""
     tags: List[str] = []
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    workspace_records: List[Dict[str, Any]] = Field(default_factory=list)
+    workspace_sharing_enabled: bool = False
     workspace_root: str = ""
     trust_state: str = "untrusted"
     git_root: str = ""

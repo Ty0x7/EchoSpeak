@@ -30,7 +30,7 @@ TOOLSETS: dict[str, list[str]] = {
         "calculate", "system_info",
         "file_list", "file_read", "file_find", "file_search", "file_edit", "file_write",
         "file_copy", "file_move", "file_delete", "checkpoint_undo",
-        "project_status", "create_artifact", "update_artifact",
+        "project_status", "project_workspace", "save_project_report", "create_artifact", "update_artifact",
         "create_media", "creation_status",
     ],
     # Looking things up on the web.
@@ -108,7 +108,7 @@ ARG_ALIASES: dict[str, dict[str, str]] = {
 PARALLEL_SAFE = {
     "get_system_time", "calculate", "system_info", "file_list", "file_read", "file_find", "file_search",
     "web_search", "safe_web_fetch", "youtube_transcript", "weather_live",
-    "sports_live", "project_status", "memory_search", "chat_search", "email_read_inbox",
+    "sports_live", "project_status", "project_workspace", "memory_search", "chat_search", "email_read_inbox",
     "email_search", "email_get_thread", "discord_read_channel", "self_list",
     "self_read", "self_grep", "self_git_status", "desktop_list_windows",
 }

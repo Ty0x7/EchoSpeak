@@ -88,7 +88,7 @@ PERSIST_TOOLS = {"memory_save", "soul_update"}
 # Tools that only read: a successful call doesn't back a claim that something changed.
 READ_ONLY_TOOLS = {
     "get_system_time", "calculate", "system_info", "file_list", "file_read", "file_find", "file_search",
-    "web_search", "safe_web_fetch", "youtube_transcript", "weather_live", "sports_live", "project_status",
+    "web_search", "safe_web_fetch", "youtube_transcript", "weather_live", "sports_live", "project_status", "project_workspace",
     "memory_search", "chat_search", "email_read_inbox", "email_search", "email_get_thread", "discord_read_channel",
     "self_list", "self_read", "self_grep", "self_git_status", "desktop_list_windows", "process_output",
     "stock_history", "product_search", "video_search", "image_search", "take_screenshot", "analyze_screen", "vision_qa",

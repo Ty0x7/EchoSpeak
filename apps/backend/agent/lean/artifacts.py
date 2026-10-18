@@ -36,7 +36,8 @@ FRAME_CSP = (
     "form-action 'none'; base-uri 'none'; frame-src 'none'; worker-src blob:"
 )
 
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
+_SUMMARY_CACHE: dict[str, tuple[tuple[int, int], dict[str, Any]]] = {}
 
 
 def _dir() -> Path:
@@ -68,6 +69,7 @@ def _save(record: dict[str, Any]) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
+    _SUMMARY_CACHE.pop(str(path), None)
 
 
 def excerpt(kind: str, content: str, title: str = "", limit: int = 160) -> str:
@@ -104,6 +106,7 @@ def summary(record: dict[str, Any]) -> dict[str, Any]:
         "versions": len(record["versions"]),
         "session_id": record.get("session_id", ""),
         "agent_id": record.get("agent_id", ""),
+        "project_id": record.get("project_id", ""),
         "created_at": record.get("created_at", 0),
         "updated_at": record.get("updated_at", 0),
         "excerpt": excerpt(record["kind"], content, title),
@@ -115,12 +118,24 @@ def list_all(session_id: str = "") -> list[dict[str, Any]]:
     items = []
     for path in _dir().glob("*.json"):
         try:
-            record = json.loads(path.read_text(encoding="utf-8"))
+            stamp = path.stat()
+            key = (stamp.st_mtime_ns, stamp.st_size)
+            cached = _SUMMARY_CACHE.get(str(path))
+            if cached and cached[0] == key:
+                item = cached[1]
+            else:
+                record = json.loads(path.read_text(encoding="utf-8"))
+                item = summary(record)
+                if len(_SUMMARY_CACHE) >= 2000:
+                    _SUMMARY_CACHE.clear()
+                after = path.stat()
+                if key == (after.st_mtime_ns, after.st_size):
+                    _SUMMARY_CACHE[str(path)] = (key, item)
         except Exception:
             continue
-        if session_id and record.get("session_id") != session_id:
+        if session_id and item.get("session_id") != session_id:
             continue
-        items.append(summary(record))
+        items.append(dict(item))
     items.sort(key=lambda r: r.get("updated_at") or 0, reverse=True)
     return items
 
@@ -150,7 +165,7 @@ def _strip_fence(content: str) -> str:
     return match.group(1) if match else content
 
 
-def create(*, title: str, kind: str, content: str, language: str = "", session_id: str = "", agent_id: str = "") -> dict[str, Any]:
+def create(*, title: str, kind: str, content: str, language: str = "", session_id: str = "", agent_id: str = "", project_id: str = "", artifact_id: str = "", workspace_record_id: str = "") -> dict[str, Any]:
     content = _strip_fence(str(content or ""))
     if not content.strip():
         raise ValueError("content is empty")
@@ -158,17 +173,21 @@ def create(*, title: str, kind: str, content: str, language: str = "", session_i
         raise ValueError(f"content is larger than {MAX_CONTENT // 1000} KB")
     now = time.time()
     record = {
-        "id": uuid.uuid4().hex[:12],
+        "id": artifact_id or uuid.uuid4().hex[:12],
         "title": (title or "Untitled").strip()[:120],
         "kind": _clean_kind(kind, content),
         "language": str(language or "").strip().lower()[:24],
         "session_id": session_id,
         "agent_id": agent_id,
+        "project_id": project_id,
+        "workspace_record_id": workspace_record_id,
         "created_at": now,
         "updated_at": now,
         "versions": [{"n": 1, "title": (title or "Untitled").strip()[:120], "content": content, "at": now, "note": "Created"}],
     }
     with _LOCK:
+        if artifact_id and get(artifact_id) is not None:
+            raise ValueError("artifact already exists")
         _save(record)
     return record
 
@@ -234,6 +253,9 @@ def frame_html(record: dict[str, Any], n: Optional[int] = None) -> str:
     """The document served inside the sandboxed iframe (HTML and SVG kinds)."""
     item = version(record, n)
     content = item["content"]
+    if record.get("workspace_record_id") and record.get("project_id"):
+        from agent.project_workspace import inline_report_images
+        content = inline_report_images(record, content, n)
     meta = f'<meta http-equiv="Content-Security-Policy" content="{FRAME_CSP.split("; ", 1)[1]}">'
     if record["kind"] == "svg":
         return (
@@ -269,6 +291,8 @@ def _announce(record: dict[str, Any]) -> None:
 
 def create_artifact_tool(args: dict[str, Any]) -> str:
     ctx = _context()
+    from agent.state import get_state_store
+    project_id = get_state_store().get_thread_state(str(ctx.get("session_id") or "")).active_project_id
     try:
         record = create(
             title=str(args.get("title") or ""),
@@ -277,6 +301,7 @@ def create_artifact_tool(args: dict[str, Any]) -> str:
             language=str(args.get("language") or ""),
             session_id=str(ctx.get("session_id") or ""),
             agent_id=str(ctx.get("agent_id") or ""),
+            project_id=project_id,
         )
     except ValueError as exc:
         return f"Error: {exc}."

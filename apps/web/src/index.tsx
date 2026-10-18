@@ -36,6 +36,7 @@ import type { ObservationRef } from "./widgets/types";
 import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
 import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
+import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { AgentEditor, RoomDialog } from "./lean/Dialogs";
 import type { LeanEvent, LeanPersona, LeanRoom } from "./lean/types";
 import {
@@ -125,6 +126,8 @@ export const Dashboard: React.FC<{
     workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any>;
   }[]>(() => (desktopBootstrap?.projects || []) as any[]);
   const [activeProjectId, setActiveProjectId] = useState<string>(() => desktopBootstrap?.active_project_id || "");
+  // Browsing another project must not rebind or interrupt the active chat.
+  const [workspaceProjectId, setWorkspaceProjectId] = useState("");
   const activeProjectIdRef = useRef<string>(desktopBootstrap?.active_project_id || "");
   // Bootstrap data is only a startup hint.  Do not paint it as authoritative
   // chat history: the first scoped /threads read reconciles the durable list.
@@ -1519,7 +1522,7 @@ export const Dashboard: React.FC<{
   }, [desktopMode, studioOpen]);
 
   const currentObservation = openObservation?.session_id === activeThreadId ? openObservation : null;
-  const rightOpen = mainPage === "chat" && !voiceConversationMode && Boolean(openArtifact || activityOpen || currentObservation);
+  const rightOpen = !voiceConversationMode && (mainPage === "chat" ? Boolean(openArtifact || activityOpen || currentObservation) : mainPage === "projects" && Boolean(workspaceProjectId && openArtifact));
   const rightDocked = rightOpen && !narrowLayout;
   const shellColumns = [
     desktopMode
@@ -1751,7 +1754,7 @@ export const Dashboard: React.FC<{
           } : undefined}
           collapsedRoster={agents.length ? <CollapsedRoster agents={agents} onOpenAgent={(agent) => void openAgentChat(agent)} /> : undefined}
           page={mainPage}
-          onPage={setMainPage}
+          onPage={(page) => { if (page === "projects") setWorkspaceProjectId(""); setMainPage(page); }}
           pageCounts={{ groups: rooms.filter((r) => r.kind === "group").length, projects: projects.filter((p) => !p.archived).length }}
           activeProjectId={activeProjectId}
           activeSessionId={activeThreadId}
@@ -1802,11 +1805,13 @@ export const Dashboard: React.FC<{
             apiBase={apiBase}
             sessionId={activeThreadId}
             tab={rightTab}
+            resourceOnly={mainPage === "projects"}
             onTab={setRightTab}
             artifact={openArtifact}
             observation={currentObservation}
             activity={activityItems}
-            onEditArtifact={(id, version, passage) => {
+            onEditArtifact={async (id, version, passage) => {
+              if (mainPage === "projects" && workspaceProjectId) await createNewThread(workspaceProjectId);
               setMainPage("chat");
               setInput(`Read artifact ${id} at version ${version}, then revise it and save a new version. Preserve the original version.${passage ? `\nSelected passage:\n${passage}\n` : "\n"}Changes I'd like: `);
               window.setTimeout(() => textareaRef.current?.focus(), 0);
@@ -1843,6 +1848,14 @@ export const Dashboard: React.FC<{
                 }}
               />
             ) : mainPage === "projects" ? (
+              workspaceProjectId ? <ProjectWorkspace key={workspaceProjectId} apiBase={apiBase} projectId={workspaceProjectId}
+                onBack={() => setWorkspaceProjectId("")}
+                onNewChat={() => { setMainPage("chat"); void createNewThread(workspaceProjectId); }}
+                onChat={id => { setMainPage("chat"); switchThread(id); }}
+                onArtifact={id => { setOpenArtifact({ id }); setRightTab("artifact"); }}
+                onCreations={() => setMainPage("creations")}
+                onRoutines={() => setMainPage("routines")}
+              /> :
               <ProjectsPage
                 projects={projects}
                 activeProjectId={activeProjectId}
@@ -1857,10 +1870,7 @@ export const Dashboard: React.FC<{
                 }}
                 onDelete={(project) => void deleteProject(project.id)}
                 onOpen={(project) => {
-                  setMainPage("chat");
-                  const recent = threads.find((t) => t.projectId === project.id);
-                  if (recent) switchThread(recent.id);
-                  else void createNewThread(project.id);
+                  setWorkspaceProjectId(project.id);
                 }}
               />
             ) : mainPage === "creations" ? (

@@ -158,7 +158,7 @@ export function ProjectsPage({
   return (
     <PageShell
       title="Projects"
-      lead="Local folders your agents can read, edit and run code in."
+      lead="Project workspaces for reports, files, research and conversations."
       action={<button type="button" className="es-btn es-btn-primary" onClick={onAdd}>Add folder</button>}
     >
       {shown.length === 0 ? (

@@ -142,6 +142,7 @@ export function RightPanel({
   measureRoom,
   overlay,
   onClose,
+  resourceOnly = false,
 }: {
   apiBase: string;
   sessionId: string;
@@ -157,13 +158,15 @@ export function RightPanel({
   measureRoom(): { room: number; scale: number };
   overlay: boolean;
   onClose(): void;
+  /** Project browsing must not show an unrelated active chat's private context. */
+  resourceOnly?: boolean;
 }) {
   const [dragging, setDragging] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [visitedArtifactId, setVisitedArtifactId] = useState("");
   const panelId = useId();
   const startRef = useRef({ x: 0, width });
-  const active: RightTab = (tab === "artifact" && !artifact) || (tab === "screen" && !observation) ? "activity" : tab;
+  const active: RightTab = resourceOnly && artifact ? "artifact" : (tab === "artifact" && !artifact) || (tab === "screen" && !observation) ? "activity" : tab;
   const running = activity.filter((a) => a.status === "running").length;
   useEffect(() => {
     if (active === "artifact" && artifact) setVisitedArtifactId(artifact.id);
@@ -182,7 +185,7 @@ export function RightPanel({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [expanded, overlay, onClose]);
-  const tabs: RightTab[] = [...(artifact ? ["artifact" as const] : []), "activity", "research", ...(observation ? ["screen" as const] : [])];
+  const tabs: RightTab[] = [...(artifact ? ["artifact" as const] : []), ...(!resourceOnly ? ["activity" as const, "research" as const] : []), ...(observation && !resourceOnly ? ["screen" as const] : [])];
   return (
     <aside className={`rp${overlay ? " is-overlay" : ""}${expanded ? " is-expanded" : ""}`} aria-label="Side panel" data-dragging={dragging ? "true" : undefined}>
       {!overlay && !expanded ? (
@@ -240,12 +243,12 @@ export function RightPanel({
             Artifact
           </button>
         ) : null}
-        <button type="button" role="tab" data-tab="activity" id={`${panelId}-activity-tab`} aria-controls={`${panelId}-activity`} tabIndex={active === "activity" ? 0 : -1} aria-selected={active === "activity"} className={active === "activity" ? "is-on" : ""} onClick={() => onTab("activity")}>
+        {!resourceOnly && <><button type="button" role="tab" data-tab="activity" id={`${panelId}-activity-tab`} aria-controls={`${panelId}-activity`} tabIndex={active === "activity" ? 0 : -1} aria-selected={active === "activity"} className={active === "activity" ? "is-on" : ""} onClick={() => onTab("activity")}>
           Activity
           {running ? <span className="rp-live" aria-label={`${running} running`} /> : activity.length ? <small>{activity.length}</small> : null}
         </button>
         <button type="button" role="tab" data-tab="research" id={`${panelId}-research-tab`} aria-controls={`${panelId}-research`} tabIndex={active === "research" ? 0 : -1} aria-selected={active === "research"} className={active === "research" ? "is-on" : ""} onClick={() => onTab("research")}>Research</button>
-        {observation && <button type="button" role="tab" data-tab="screen" id={`${panelId}-screen-tab`} aria-controls={`${panelId}-screen`} tabIndex={active === "screen" ? 0 : -1} aria-selected={active === "screen"} className={active === "screen" ? "is-on" : ""} onClick={() => onTab("screen")}>Screenshot</button>}
+        {observation && <button type="button" role="tab" data-tab="screen" id={`${panelId}-screen-tab`} aria-controls={`${panelId}-screen`} tabIndex={active === "screen" ? 0 : -1} aria-selected={active === "screen"} className={active === "screen" ? "is-on" : ""} onClick={() => onTab("screen")}>Screenshot</button>}</>}
         <span className="rp-spacer" />
         {!overlay && <button type="button" className="rp-close" onClick={() => setExpanded(value => !value)} aria-label={expanded ? "Restore side panel" : "Expand side panel"} aria-pressed={expanded} title={expanded ? "Restore panel width" : "Expand panel"}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{expanded ? <path d="M8 3v5H3M16 3v5h5M8 21v-5H3M16 21v-5h5" /> : <path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5" />}</svg>
@@ -255,18 +258,18 @@ export function RightPanel({
         </button>
       </div>
       <div className="rp-body">
-        {observation && <div className="rp-tab-panel rp-observation" role="tabpanel" id={`${panelId}-screen`} aria-labelledby={`${panelId}-screen-tab`} hidden={active !== "screen"}>
+        {observation && !resourceOnly && <div className="rp-tab-panel rp-observation" role="tabpanel" id={`${panelId}-screen`} aria-labelledby={`${panelId}-screen-tab`} hidden={active !== "screen"}>
           {active === "screen" && <ObservationView key={observation.id} data={observation} apiBase={apiBase} expanded />}
         </div>}
         {artifact && <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-artifact`} aria-labelledby={`${panelId}-artifact-tab`} hidden={active !== "artifact"}>
           {(active === "artifact" || visitedArtifactId === artifact.id) && <ArtifactPanel key={artifact.id} embedded apiBase={apiBase} artifactId={artifact.id} version={artifact.version} onClose={onClose} onEdit={onEditArtifact} />}
         </div>}
-        <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-research`} aria-labelledby={`${panelId}-research-tab`} hidden={active !== "research"}>
+        {!resourceOnly && <><div className="rp-tab-panel" role="tabpanel" id={`${panelId}-research`} aria-labelledby={`${panelId}-research-tab`} hidden={active !== "research"}>
           <ResearchPanel key={sessionId} apiBase={apiBase} sessionId={sessionId} active={active === "research"} />
         </div>
         <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-activity`} aria-labelledby={`${panelId}-activity-tab`} hidden={active !== "activity"}>
           <ActivityView key={sessionId} items={activity} active={active === "activity"} />
-        </div>
+        </div></>}
       </div>
     </aside>
   );

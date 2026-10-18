@@ -122,6 +122,8 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
 
 ### Projects and coding
 
+- Selecting a project opens its visual workspace: reports, files, conversations, research, artifacts, media, routines and activity. Opening a conversation restores that existing chat; browsing a project does not change the active chat's scope or stop its background work.
+- Named work reports can come from Echo, Claude Code or Codex. **Import report** accepts a project-scoped manifest. **Sharing** prepares an optional shared folder and exports selected project context when you request it. Imported checks remain agent-reported. See [Project workspaces and agent handoffs](PROJECT_WORKSPACE.md) for setup, the manifest format and manual evaluation.
 - Drop a folder on the composer (or **Projects › Attach folder**) to work inside it. File tools
   only reach the attached folder.
 - Every file overwrite is checkpointed and can be undone.

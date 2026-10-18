@@ -23,6 +23,7 @@ from agent.lean.rooms import Room, get_room_store, mentioned_agents
 from agent.lean.coding import coding_tools, project_overview
 from agent.integrations import integration_tools
 from agent.lean.computer import tools as computer_tools
+from agent.project_workspace import tools as workspace_tools
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
@@ -889,6 +890,7 @@ class LeanSession:
                 + coding_tools()
                 + rich_tools()
                 + artifact_tools()
+                + workspace_tools()
                 + terminal.tools()
                 + integration_tools(self.session_id)
                 + computer_tools(self.session_id, self.cancel),

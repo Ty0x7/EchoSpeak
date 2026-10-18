@@ -28,7 +28,7 @@ from agent.lean.job import READ_ONLY_TOOLS, Job
 from agent.lean.policy import redact_secrets
 from agent.learning.store import Episode
 
-BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent"}
+BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "project_workspace", "save_project_report"}
 
 # Results the loop wrote itself because the tool never ran (refused, denied,
 # repeated, bad arguments). They say nothing about the tool or the task.
