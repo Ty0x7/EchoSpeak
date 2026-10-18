@@ -11,6 +11,7 @@ import shutil
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 from pathlib import Path
+from threading import RLock
 from pydantic import BaseModel, Field
 from loguru import logger
 
@@ -63,6 +64,8 @@ class Project(BaseModel):
     context_prompt: Optional[str] = ""  # Injected into agent context when active
     tags: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    workspace_records: List[Dict[str, Any]] = Field(default_factory=list)
+    workspace_sharing_enabled: bool = False
     workspace_root: str = ""
     trust_state: str = "untrusted"
     git_root: str = ""
@@ -77,6 +80,7 @@ class ProjectManager:
     """Manages project storage and retrieval."""
     
     def __init__(self, projects_dir: Optional[Path] = None):
+        self._lock = RLock()
         self.projects_dir = projects_dir or _default_projects_dir()
         self.projects_dir.mkdir(parents=True, exist_ok=True)
         self._cache: Dict[str, Project] = {}
@@ -221,7 +225,23 @@ class ProjectManager:
         self._save_project(project)
         return project
     
-    def update_project(
+    def update_project(self, *args, **kwargs) -> Optional[Project]:
+        with self._lock:
+            return self._update_project(*args, **kwargs)
+
+    def save_workspace(self, project_id: str, records: List[Dict[str, Any]], sharing: Optional[bool] = None) -> Project:
+        """Update the workspace index without replacing unrelated project metadata."""
+        with self._lock:
+            project = self._cache[project_id].model_copy(deep=True)
+            project.workspace_records = records
+            if sharing is not None:
+                project.workspace_sharing_enabled = sharing
+            project.updated_at = datetime.now(timezone.utc).isoformat()
+            self._save_project(project)
+            self._cache[project_id] = project
+            return project
+
+    def _update_project(
         self,
         project_id: str,
         name: Optional[str] = None,

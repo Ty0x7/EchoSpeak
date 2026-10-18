@@ -1,0 +1,18 @@
+.es-observation { margin: 12px 0; overflow: hidden; border: 1px solid var(--wg-line); border-radius: 14px; background: var(--wg-surface); }
+.es-observation figcaption { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; }
+.es-observation figcaption > span { display: grid; gap: 4px; min-width: 0; }
+.es-observation strong { font-size: 13px; overflow-wrap: anywhere; }
+.es-observation small { font-size: 11px; color: var(--wg-dim); }
+.es-observation a { color: inherit; font-size: 12px; text-decoration: none; border: 1px solid var(--wg-line); border-radius: 8px; padding: 6px 10px; }
+.es-observation-preview { position: relative; display: block; width: 100%; padding: 0; border: 0; background: #080808; color: #bbb; text-align: center; }
+button.es-observation-preview { cursor: zoom-in; }
+.es-observation-preview img { display: block; width: 100%; height: auto; max-height: 320px; object-fit: contain; }
+.es-observation-preview > span { position: absolute; right: 12px; bottom: 12px; padding: 5px 9px; background: #161616e8; color: #fff; border-radius: 7px; font-size: 11px; }
+.es-observation-preview p { margin: 0; padding: 32px 16px; font-size: 12px; }
+.es-observation a:focus-visible, button.es-observation-preview:focus-visible { outline: 2px solid currentColor; outline-offset: -3px; }
+.es-observation.is-expanded { margin: 14px; }
+.es-observation.is-expanded img { max-height: none; }
+.rp-tabs[data-has-observation="true"] { flex-wrap: wrap; }
+.rp-tabs[data-has-observation="true"] [role="tab"] { padding-inline: 7px; letter-spacing: 0.04em; }
+.rp-tab-panel.rp-observation { display: block; overflow: auto; overscroll-behavior: contain; }
+.rp-tab-panel.rp-observation[hidden] { display: none; }

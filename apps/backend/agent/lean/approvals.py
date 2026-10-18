@@ -33,7 +33,7 @@ IDENTITY_TOOLS = {"soul_update"}
 
 # Tools that act on the desktop as if they were the user.
 DESKTOP_CONTROL_TOOLS = {
-    "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write",
+    "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
 }
 
 # Hermes-style dangerous command detection for terminal_run.
@@ -70,6 +70,8 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
         return False, ""
     if name in IDENTITY_TOOLS:
         return True, "this changes how the agent behaves in every future chat"
+    if name in DESKTOP_CONTROL_TOOLS:
+        return True, "this controls your desktop"
     if mode == "always":
         return bool(getattr(entry, "is_action", False)), "action tool"
     if name in {"terminal_run", "terminal", "process_start"}:
@@ -80,8 +82,6 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
         return approval_for(args)
     if name in EXTERNAL_TOOLS or str(getattr(entry, "category", "")) in {"discord", "email", "communications"} and getattr(entry, "is_action", False):
         return True, "this sends something outside your machine"
-    if name in DESKTOP_CONTROL_TOOLS:
-        return True, "this controls your desktop"
     if str(getattr(entry, "risk_level", "")) == "destructive":
         return True, "this can delete or overwrite work"
     if str(getattr(entry, "origin", "")) == "mcp" and getattr(entry, "is_action", False):
@@ -107,6 +107,8 @@ class PendingApproval:
     options: list[str] = field(default_factory=list)
     allow_other: bool = False
     answer: str = ""
+    # False when "For this chat" cannot cover it (Rule of Two outside screen control).
+    grantable: bool = True
 
     def public(self) -> dict[str, Any]:
         return {
@@ -124,6 +126,7 @@ class PendingApproval:
             "options": list(self.options),
             "allow_other": self.allow_other,
             "answer": self.answer,
+            "grantable": self.grantable,
         }
 
 
@@ -138,7 +141,8 @@ class ApprovalBroker:
         with self._lock:
             return tool in self._session_grants.get(session_id, set())
 
-    def open(self, *, session_id: str, request_id: str, tool: str, summary: str, args: dict[str, Any], reason: str) -> PendingApproval:
+    def open(self, *, session_id: str, request_id: str, tool: str, summary: str, args: dict[str, Any], reason: str,
+             grantable: bool = True) -> PendingApproval:
         approval = PendingApproval(
             id=f"apr_{uuid.uuid4().hex[:12]}",
             session_id=session_id,
@@ -147,6 +151,7 @@ class ApprovalBroker:
             summary=summary,
             args=args,
             reason=reason,
+            grantable=grantable,
         )
         with self._lock:
             self._pending[approval.id] = approval
@@ -206,7 +211,7 @@ class ApprovalBroker:
             approval = self._pending.get(approval_id)
             if approval is None:
                 return None
-            if decision == "always":
+            if decision == "always" and approval.grantable:
                 self._session_grants.setdefault(approval.session_id, set()).add(approval.tool)
             approval.decision = "allow" if decision == "always" else decision
         approval.event.set()

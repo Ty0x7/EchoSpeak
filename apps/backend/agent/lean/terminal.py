@@ -211,10 +211,37 @@ def is_long_running(command: str) -> bool:
     return bool(_LONG_RUNNING.search(command or ""))
 
 
-def failure_hint(code: int, text: str, where: str) -> str:
+_INLINE_ROUTING = re.compile(
+    r'''(?ix)^\s*(where|network)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s;]+))(?=\s|;|$)'''
+)
+_GUI_SHELL_VERB = re.compile(r"(?i)^\s*(?:click|double_click|right_click|mouse_move|press_key|key_down|key_up)(?:\s|$)")
+
+
+def routing_argument_problem(command: str) -> str:
+    """Catch a tool option mistaken for a shell prefix, without changing routing."""
+    match = _INLINE_ROUTING.match(command or "")
+    if not match:
+        return ""
+    name = match.group(1).lower()
+    value = next((part for part in match.groups()[1:] if part is not None), "").lower()
+    options = {"where": {"host", "sandbox", "docker"}, "network": {"true", "false", "1", "0"}}
+    if value not in options[name]:
+        return ""  # Leave unrelated shell environment assignments alone.
+    example = ('{"command": "Get-Process", "where": "host"}' if name == "where"
+               else '{"command": "npm install", "network": true}')
+    return (f"Error: {name}= belongs in terminal's separate JSON arguments, not inside command. Nothing was run. "
+            f"For example: {example}. Use computer_action for mouse/keyboard input; enable this agent's Desktop "
+            "tools if computer_action is unavailable.")
+
+
+def failure_hint(code: int, text: str, where: str, command: str = "") -> str:
     """One line on the usual cause of a failure small models get stuck on."""
     low = (text or "").lower()
     if code == 127 or "command not found" in low or "is not recognized as" in low:
+        if _GUI_SHELL_VERB.match(command):
+            return ("Hint: use computer_action with a recent screenshot for mouse/keyboard input, or desktop_click "
+                    "for a named Windows control. Enable this agent's Desktop tools if those tools are unavailable. "
+                    "A shell command such as click does not control the desktop.")
         place = "in the sandbox (install it with network=true, or" if where == "docker" else "on this PC (install it, or"
         return f"Hint: that program isn't installed {place} check the name)."
     if "'&&' is not a valid statement separator" in low or "token '&&' is not a valid" in low:
@@ -771,6 +798,9 @@ class Terminal:
 
     def _start(self, command: str, args: dict[str, Any], wait: int) -> tuple[Optional[Launch], str, Path, str]:
         """Shared checks and launch. Returns (launch, error, cwd, where)."""
+        problem = routing_argument_problem(command)
+        if problem:
+            return None, problem, Path("."), ""
         if _NEVER.search(command):
             return None, "Refused: that command can damage the system (disk, boot, or OS-level destruction) and is never run.", Path("."), ""
         problem = interactive_problem(command)
@@ -840,7 +870,7 @@ class Terminal:
         body = _clip(launch.out.strip()) or ("(no output)" if not launch.err.strip() else "")
         if launch.err.strip():
             body = (body + "\n" if body else "") + "[stderr]\n" + _clip(launch.err.strip(), 6000)
-        hint = failure_hint(launch.code, launch.out + "\n" + launch.err, where) if launch.code != 0 else ""
+        hint = failure_hint(launch.code, launch.out + "\n" + launch.err, where, command) if launch.code != 0 else ""
         return f"[{status} · {elapsed:.1f}s · {label} · {cwd}]\n{body}" + (f"\n{hint}" if hint else "")
 
     def process_start(self, args: dict[str, Any]) -> str:
@@ -887,6 +917,8 @@ class Terminal:
                 name="terminal",
                 description=(
                     "Run a program: builds, tests, git, package managers, scripts, CLIs. "
+                    "For GUI clicks, typing and games use computer_action from the Desktop toolset. "
+                    "Put where/network in separate JSON arguments, never inside command. "
                     f"{self.describe()} Default folder is the project folder. For files, use the file tools instead: "
                     "file_read to read, file_find / file_search to find, file_write / file_edit to change (scoped to "
                     "the project and undoable). Commands get no keyboard input, so use non-interactive forms "
@@ -896,13 +928,13 @@ class Terminal:
                     "and output before saying it worked."
                 ),
                 parameters={"type": "object", "properties": {
-                    "command": {"type": "string"},
+                    "command": {"type": "string", "description": "Shell command only, e.g. npm test. Put where/network in their own arguments; use computer_action for desktop input."},
                     "cwd": {"type": "string", "description": "Folder to run in (default: project folder)."},
                     "timeout": {"type": "integer", "description": "Seconds to wait before it moves to the background, up to 900 (default 120)."},
                     "background": {"type": "boolean", "description": "Start it in the background right away and return its first output."},
                     **({
-                        "network": {"type": "boolean", "description": "True if the command needs the internet (installs, git clone)."},
-                        "where": {"type": "string", "enum": ["sandbox", "host"], "description": "Leave as sandbox unless this PC is truly needed."},
+                        "network": {"type": "boolean", "description": "Separate tool argument: true if the command needs internet (installs, git clone). Never put network=true inside command."},
+                        "where": {"type": "string", "enum": ["sandbox", "host"], "description": "Separate tool argument, never a shell prefix. Use host for installed Windows apps/tools when this PC is needed; default sandbox."},
                     } if self.mode == "docker" else {}),
                 }, "required": ["command"]},
                 func=self.run,

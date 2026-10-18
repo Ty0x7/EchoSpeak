@@ -269,7 +269,7 @@ function ApprovalCard({
       {!decided ? (
         <div className="lm-approval-actions">
           <button type="button" className="es-btn es-btn-primary" disabled={busy} onClick={() => void decide("allow")}>{busy ? "Applying…" : "Allow once"}</button>
-          <button type="button" className="es-btn" disabled={busy} onClick={() => void decide("always")} title={`Allow ${seg.tool} for the rest of this session`}>For this chat</button>
+          {seg.grantable !== false ? <button type="button" className="es-btn" disabled={busy} onClick={() => void decide("always")} title={`Allow ${seg.tool} for the rest of this chat`}>For this chat</button> : null}
           <button type="button" className="es-btn es-btn-quiet" disabled={busy} onClick={() => void decide("deny")}>Decline</button>
         </div>
       ) : null}

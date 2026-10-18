@@ -17,6 +17,20 @@ from agent.lean.toolbox import DEFAULT_TOOLSETS, TOOLSET_ALIASES, TOOLSETS
 router = APIRouter(prefix="/lean", tags=["lean"])
 
 
+@router.get("/observations/{observation_id}/image")
+def observation_image(observation_id: str, session_id: str = Query(...)):
+    """Authenticated, chat-scoped content; never an arbitrary filesystem endpoint."""
+    from fastapi.responses import Response
+    from agent.lean.observations import load
+    try:
+        _, data = load(observation_id, session_id)
+    except PermissionError as exc:
+        raise HTTPException(403, detail=str(exc)) from exc
+    except (OSError, ValueError, KeyError) as exc:
+        raise HTTPException(404, detail="Screenshot unavailable or expired") from exc
+    return Response(data, media_type="image/png", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+
+
 class ApprovalDecisionRequest(BaseModel):
     decision: str = Field(description="allow | deny | always, or the answer to an ask_user question")
 

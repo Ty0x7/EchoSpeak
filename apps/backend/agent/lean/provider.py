@@ -431,6 +431,15 @@ class ChatClient:
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
     ) -> ModelTurn:
+        from agent.lean.observations import hydrate
+        has_visual = any(message.get("observations") for message in messages)
+        metadata = dict(getattr(config, "model_capability_profiles", {}) or {})
+        profile = metadata.get(f"{self.endpoint.provider}:{self.endpoint.model}") or metadata.get(self.endpoint.model) or {}
+        if has_visual and profile.get("vision") is False:
+            raise ProviderError(400, "This model is marked as text-only. Select a vision-capable model in Settings → Models to inspect screenshots.", self.endpoint.provider)
+        raw_messages = messages
+        # A model that already refused an image in this chat gets text notes instead.
+        messages = hydrate(messages, images=not getattr(self, "_text_only", False))
         prefetched = getattr(self, "_prefetched_turn", None)
         if prefetched is not None:
             self._prefetched_turn = None
@@ -491,6 +500,14 @@ class ChatClient:
         try:
             return self._stream(body, on_reasoning, on_content, cancel)
         except ProviderError as exc:
+            if has_visual and not getattr(self, "_text_only", False) and _rejects_images(exc):
+                # Text-only local models (and some APIs) refuse image parts. Keep the turn
+                # going with a note so the agent says it can't see, instead of failing.
+                logger.info("Model rejected image input; retrying with text notes")
+                self._text_only = True
+                body["messages"] = [{k: v for k, v in m.items() if k != "provider_blocks"}
+                                    for m in hydrate(raw_messages, images=False)]
+                return self._stream(body, on_reasoning, on_content, cancel)
             if self.reasoning_effort and exc.status == 400 and "reason" in exc.detail.lower():
                 logger.info("Provider rejected reasoning_effort; retrying without it")
                 self.reasoning_effort = ""
@@ -616,6 +633,12 @@ class ChatClient:
             [call.name for call in turn.tool_calls],
         )
         return turn
+
+
+def _rejects_images(exc: "ProviderError") -> bool:
+    """The provider refused image input (not a general failure)."""
+    text = exc.detail.lower()
+    return exc.status in {400, 415, 422, 500} and any(word in text for word in ("image", "vision", "multimodal", "mmproj"))
 
 
 class ProviderError(RuntimeError):

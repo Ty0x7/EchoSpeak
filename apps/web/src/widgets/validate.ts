@@ -201,6 +201,12 @@ export function validateWidget(raw: unknown): Widget | null {
       const id = str(data.id, 80);
       return /^generation-[a-zA-Z0-9_-]+$/.test(id) ? { type, data: { id } } : null;
     }
+    case "observation": {
+      const id = str(data.id, 40), session_id = str(data.session_id, 200);
+      const dimensions = [data.width, data.height, data.model_width, data.model_height].map(num);
+      if (!/^obs-[a-f0-9]{24}$/.test(id) || !session_id || dimensions.some(n => n === null || !Number.isInteger(n) || n <= 0 || n > 32000) || num(data.at) === null) return null;
+      return { type, data: { id, session_id, source: str(data.source, 160), at: num(data.at)!, width: dimensions[0]!, height: dimensions[1]!, model_width: dimensions[2]!, model_height: dimensions[3]! } };
+    }
     case "artifact": {
       const id = str(data.id, 64);
       return id ? { type, data: { id, title: str(data.title, 120) || "Artifact", kind: str(data.kind, 16), version: num(data.version) ?? 1, language: str(data.language, 24) } } : null;

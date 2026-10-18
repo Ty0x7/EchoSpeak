@@ -148,7 +148,7 @@ stateDiagram-v2
   Done --> [*]: agent_done + saved as one message
 ```
 
-- **Personas** (`lean/personas.py`): Echo (personal agent, all toolsets), Jarvis (research and memory) and Glados (core, terminal, research and memory) are built in. Their ids are still `scout` and `forge` (they were renamed in store format 2, so old chats, rooms and `@scout` mentions keep working). Custom agents are saved in `lean/agents.json`, each with its own instructions ("soul"), toolsets and optional provider and model.
+- **Personas** (`lean/personas.py`): Echo (personal agent with core, web, live, terminal, vision, memory and skills), Jarvis (research and memory) and Glados (core, terminal, research and memory) are built in. Desktop control is a separate, optional toolset; Vision alone grants capture, not input. Their ids are still `scout` and `forge` (they were renamed in store format 2, so old chats, rooms and `@scout` mentions keep working). Custom agents are saved in `lean/agents.json`, each with its own instructions ("soul"), toolsets and optional provider and model.
 - **Toolsets** (`lean/toolbox.py`) pick which registered tools an agent sees. Some tools are native to the lean runtime:
   - `memory_save`, `memory_search` and `chat_search` (full-text search over every past chat).
   - `delegate_to_agent`.

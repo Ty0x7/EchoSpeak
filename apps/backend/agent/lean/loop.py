@@ -70,7 +70,8 @@ def _estimate_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]]
         size += len(str(message.get("content") or "")) + 16
         for call in message.get("tool_calls") or []:
             size += len(str(call.get("function", {}).get("arguments") or "")) + 32
-    return int(size / 3.4)
+    visual = sum(len(m.get("observations", [])) for m in messages)
+    return int(size / 3.4) + min(visual, 3) * 1800
 
 
 class LeanTurn:
@@ -105,6 +106,7 @@ class LeanTurn:
         # agent working on it). Drives the Rule-of-Two policy in agent/lean/policy.py.
         self.taint: list[str] = taint if taint is not None else []
         self._policy_reasons: dict[str, str] = {}
+        self._policy_rules: dict[str, str] = {}
         self.interactive = interactive
         # Re-prompt an agent whose reply only promises work (see agent/lean/job.py).
         self.promise_guard = promise_guard
@@ -122,6 +124,8 @@ class LeanTurn:
         self.persona = persona
         self.system_prompt = system_prompt
         self.history = history
+        if any(row.get("observations") for row in history) and "read_image" not in self.taint:
+            self.taint.append("read_image")
         self.toolbox = toolbox
         self.session_id = session_id
         self.request_id = request_id
@@ -507,7 +511,7 @@ class LeanTurn:
                 name, arg_error = call.name, f"Invalid tool arguments: {exc}"
             signature = self._sig(name, args)
             call_counts[signature] = call_counts.get(signature, 0) + 1
-            problem = arg_error or ("" if call_counts[signature] < 3 or name == "creation_status" else "repeat")
+            problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} else "repeat")
             if not problem:
                 # Checked for every call, parallel read-only ones included.
                 decision = policy.evaluate(name, args, entry=self.toolbox.entry(name), tainted_by=self.taint,
@@ -518,9 +522,11 @@ class LeanTurn:
                     problem = "policy"
                 elif decision.action == "ask":
                     self._policy_reasons[call.id] = decision.reason
+                    self._policy_rules[call.id] = decision.rule
             prepared.append((call, name, args, problem))
 
         results: dict[str, tuple[bool, str]] = {}
+        visual_results: dict[str, list[dict]] = {}
         parallel = [item for item in prepared if not item[3] and self.toolbox.is_parallel_safe(item[1])]
         sequential = [item for item in prepared if item not in parallel]
 
@@ -532,6 +538,7 @@ class LeanTurn:
                 for call, name, args, _ in parallel:
                     result = futures[call.id].result()
                     results[call.id] = (result.ok, result.output)
+                    visual_results[call.id] = result.observations if result.ok else []
                     self._note_source(name, args, result.ok)
                     self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets,
                                         meta=result.meta)
@@ -597,6 +604,7 @@ class LeanTurn:
                     continue
             result = self._run_tool(call, name, args, step)
             results[call.id] = (result.ok, result.output)
+            visual_results[call.id] = result.observations if result.ok else []
             self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets,
                                 meta=result.meta)
             self._note_source(name, args, result.ok)
@@ -608,6 +616,8 @@ class LeanTurn:
             if ok and policy.is_untrusted_source(name, self.toolbox.entry(name), _args):
                 text = policy.wrap_untrusted(name, text)  # data, not instructions
             messages.append({"role": "tool", "tool_call_id": call.id, "name": name, "content": text or "(empty result)"})
+            if visual_results.get(call.id):
+                messages[-1]["observations"] = visual_results[call.id]
 
     def _param_hint(self, name: str) -> str:
         """' (required: a, b; optional: c)' so a bad call can be fixed in one try."""
@@ -637,6 +647,12 @@ class LeanTurn:
         needs, reason = tool_needs_approval(entry, name, args)
         broker = get_approval_broker()
         policy_reason = self._policy_reasons.get(call.id, "")
+        # Only screen-guided desktop control can be allowed for a whole chat; other outside content asks every time.
+        grantable = not policy_reason or self._policy_rules.get(call.id) == "screen_control"
+        if policy_reason and grantable and broker.granted(self.session_id, name):
+            policy.audit(policy.Decision("allow", policy_reason, "screen_control"), name=name, args=args,
+                         session_id=self.session_id, agent=self.persona.id, outcome="allowed for this chat")
+            return True, ""
         if policy_reason:
             # Rule of Two: always ask, even with "always allow" grants or approvals off.
             needs, reason = True, policy_reason
@@ -659,6 +675,7 @@ class LeanTurn:
             # The card shows these in full: a summary can hide "; iwr … | iex" after padding.
             args=args,
             reason=reason,
+            grantable=grantable,
         )
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})

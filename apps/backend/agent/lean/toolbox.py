@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextvars
 import json
+import platform
 import re
 import time
 from dataclasses import dataclass, field
@@ -29,7 +30,7 @@ TOOLSETS: dict[str, list[str]] = {
         "calculate", "system_info",
         "file_list", "file_read", "file_find", "file_search", "file_edit", "file_write",
         "file_copy", "file_move", "file_delete", "checkpoint_undo",
-        "project_status", "create_artifact", "update_artifact",
+        "project_status", "project_workspace", "save_project_report", "create_artifact", "update_artifact",
         "create_media", "creation_status",
     ],
     # Looking things up on the web.
@@ -40,11 +41,11 @@ TOOLSETS: dict[str, list[str]] = {
         "stock_history", "product_search", "video_search", "image_search",
     ],
     "terminal": ["terminal", "process_output", "process_stop"],
-    "vision": ["take_screenshot", "analyze_screen", "vision_qa"],
+    "vision": ["take_screenshot", "analyze_screen", "vision_qa", "read_image"],
     "desktop": [
         "open_application", "open_chrome", "notepad_write",
         "desktop_list_windows", "desktop_find_control", "desktop_activate_window",
-        "desktop_click", "desktop_type_text", "desktop_send_hotkey",
+        "desktop_click", "desktop_type_text", "desktop_send_hotkey", "computer_action",
     ],
     "comms": [
         "email_read_inbox", "email_search", "email_get_thread", "email_send", "email_reply",
@@ -75,6 +76,8 @@ TOOL_ALIASES: dict[str, tuple[str, dict[str, Any]]] = {
     **{name: ("terminal", {}) for name in ("bash", "shell", "run_command", "run_shell_command", "exec_command",
                                            "execute_command", "run_terminal_cmd", "powershell", "terminal_run")},
     "process_start": ("terminal", {"background": True}),
+    "view_image": ("read_image", {}),
+    "open_image": ("read_image", {}),
     **{name: ("file_read", {}) for name in ("read_file", "view_file", "read", "cat")},
     **{name: ("file_write", {}) for name in ("write_file", "create_file", "write")},
     **{name: ("file_edit", {}) for name in ("edit_file", "edit", "str_replace", "replace_in_file", "apply_edit")},
@@ -105,7 +108,7 @@ ARG_ALIASES: dict[str, dict[str, str]] = {
 PARALLEL_SAFE = {
     "get_system_time", "calculate", "system_info", "file_list", "file_read", "file_find", "file_search",
     "web_search", "safe_web_fetch", "youtube_transcript", "weather_live",
-    "sports_live", "project_status", "memory_search", "chat_search", "email_read_inbox",
+    "sports_live", "project_status", "project_workspace", "memory_search", "chat_search", "email_read_inbox",
     "email_search", "email_get_thread", "discord_read_channel", "self_list",
     "self_read", "self_grep", "self_git_status", "desktop_list_windows",
 }
@@ -166,6 +169,8 @@ class ToolResult:
     widgets: list[dict[str, Any]] = field(default_factory=list)
     # Facts for the step's summary line (agent/lean/steps.py), e.g. results and pages read.
     meta: dict[str, Any] = field(default_factory=dict)
+    # Scoped IDs only. The provider loads actual pixels immediately before inference.
+    observations: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -175,7 +180,7 @@ class NativeTool:
     name: str
     description: str
     parameters: dict[str, Any]
-    func: Callable[[dict[str, Any]], str]
+    func: Callable[[dict[str, Any]], str | ToolResult]
     parallel_safe: bool = False
     # Set for tools that hand the conversation to another agent. Called before
     # the tool runs: returns an "Error: ..." for bad arguments, otherwise the
@@ -250,6 +255,7 @@ class Toolbox:
         for name in toolsets or DEFAULT_TOOLSETS:
             if name == "all":
                 wanted.extend(ToolRegistry.get_names())
+                wanted.extend(self.native)
                 include_external = True
                 continue
             for tool in TOOLSETS.get(name, [name]):
@@ -333,6 +339,52 @@ class Toolbox:
     @property
     def names(self) -> list[str]:
         return list(self.entries) + list(self.native)
+
+    def computer_ready(self) -> bool:
+        """Screen capture and desktop input are both usable this turn."""
+        names = set(self.names)
+        return ({"take_screenshot", "computer_action"} <= names and platform.system() == "Windows"
+                and bool(getattr(config, "enable_system_actions", False))
+                and bool(getattr(config, "allow_desktop_automation", False)))
+
+    def computer_context(self) -> str:
+        """Describe this turn's actual screen/control tools without granting any."""
+        names = set(self.names)
+        if not names.intersection({"take_screenshot", "read_image", "vision_qa", "computer_action"}):
+            return ""
+        guidance = " Use computer_action for mouse/keyboard input, never a made-up terminal click command."
+        if "open_application" in names:
+            allowed = list(getattr(config, "open_application_allowlist", None) or [])
+            if not getattr(config, "allow_open_application", False):
+                guidance += " App launching is disabled in Settings > Permissions > Open apps."
+            elif not allowed:
+                guidance += (" App launching is separately restricted: Allowed apps is empty, so open_application cannot "
+                             "launch anything. The owner must add the exact Start-menu name or executable path in "
+                             "Settings > Permissions > Allowed apps. Do not bypass this restriction with other tools.")
+            else:
+                guidance += (" open_application may launch only entries in Settings > Permissions > Allowed apps: "
+                             + json.dumps(allowed[:12], ensure_ascii=False)[:600]
+                             + ". A missing app needs the owner's permission-setting change, not a terminal workaround.")
+        if "computer_action" not in names:
+            return ("Computer control is not available to this agent. Screen/image tools only inspect; "
+                    "they do not click or type. To enable control, the owner must find this agent under Agents "
+                    "in the left sidebar, click its Edit button and enable Desktop control, then enable "
+                    "Allow actions on this computer and Control the desktop in Settings > Permissions. "
+                    "Do not substitute terminal scripts "
+                    "for a missing or denied desktop permission.")
+        if platform.system() != "Windows":
+            return "Computer control is unavailable on this operating system; desktop input currently requires Windows."
+        if not (getattr(config, "enable_system_actions", False) and getattr(config, "allow_desktop_automation", False)):
+            return ("computer_action is offered by this agent's Desktop toolset, but desktop control is disabled. "
+                    "The owner must enable Allow actions on this computer and Control the desktop in "
+                    "Settings > Permissions before it can act. Do not bypass those settings with terminal commands.")
+        if "take_screenshot" not in names:
+            return ("computer_action is enabled for this agent, but take_screenshot is not in its toolbox. "
+                    "The owner should also enable Screen & images (Vision) when editing this agent, "
+                    "so it can get the fresh observation ID required for input." + guidance)
+        return ("Computer control is enabled for this agent through computer_action. Capture with take_screenshot, "
+                "then pass its observation_id and a small actions array to computer_action; inspect the returned "
+                "image before continuing. Fresh captures and existing desktop approvals are still required." + guidance)
 
     def restrict_to_read_only(self) -> None:
         """Keep only tools that look things up: for turns that plan, not act."""
@@ -471,16 +523,26 @@ class Toolbox:
         if name in self.native:
             from agent.tools import _tool_execution_context
 
-            def invoke_native() -> str:
+            def invoke_native():
                 token = _tool_execution_context.set(self.tool_context())
                 try:
-                    return str(self.native[name].func(args) or "")
+                    return self.native[name].func(args)
                 finally:
                     _tool_execution_context.reset(token)
 
             widgets: list[dict[str, Any]] = []
             try:
-                output, widgets = contextvars.copy_context().run(collect_widgets, invoke_native)
+                raw, widgets = contextvars.copy_context().run(collect_widgets, invoke_native)
+                if isinstance(raw, ToolResult):
+                    raw.duration_ms = int((time.perf_counter() - started) * 1000)
+                    # The system prompt already explains ready controls; repeat only what is missing.
+                    if raw.ok and raw.observations and not self.computer_ready() and (note := self.computer_context()):
+                        raw.output += "\n\n" + note
+                    raw.output = redact_secrets(raw.output)
+                    from agent.lean.widgets import normalize
+                    raw.widgets = redact_payload([clean for w in raw.widgets if (clean := normalize(w)) is not None])
+                    return raw
+                output = str(raw or "")
                 ok = not output.lower().startswith(_FAILURE_PREFIXES)
             except Exception as exc:
                 logger.warning("Lean native tool {} failed: {}", name, exc)
@@ -557,10 +619,16 @@ class Toolbox:
                 _tool_execution_context.reset(token)
 
         widgets: list[dict[str, Any]] = []
+        visual: list[dict[str, str]] = []
         try:
             raw, widgets = contextvars.copy_context().run(collect_widgets, invoke)
+            if str(getattr(entry, "origin", "")) == "mcp":
+                from agent.lean import observations
+                raw, images = observations.mcp_images(raw, self.session_id, name)
+                widgets.extend({"type": "observation", "data": observations.public(item)} for item in images)
+                visual = [observations.reference(item) for item in images]
             output = raw if isinstance(raw, str) else json.dumps(raw, default=str, ensure_ascii=False)
-            ok = not output.strip().lower().startswith(_FAILURE_PREFIXES)
+            ok = not output.strip().lower().startswith(_FAILURE_PREFIXES) and not (isinstance(raw, dict) and raw.get("isError"))
         except Exception as exc:
             message = str(exc)
             if "validation error" in message.lower():
@@ -583,7 +651,7 @@ class Toolbox:
             except Exception:
                 pass
         return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000),
-                          redact_payload(widgets) if ok else [])
+                          redact_payload(widgets) if ok else [], observations=visual if ok else [])
 
 
 def describe_call(name: str, args: dict[str, Any]) -> str:

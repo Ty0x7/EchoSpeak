@@ -98,12 +98,6 @@ function AdvancedSettings({ s, save }: { s: SettingsMap; save: Save }) {
         ) : null}
       </Group>
 
-      <Group title="Apps agents may open" description="Exact app names Echo is allowed to launch (Permissions › open applications must be on).">
-        <Row label="Allowed apps" stack>
-          <ListEditor items={asList(s.open_application_allowlist)} onChange={(items) => save({ open_application_allowlist: items })} placeholder="e.g. notepad" />
-        </Row>
-      </Group>
-
       <Group title="Webhooks" description="Let other apps start a routine with a signed POST to /webhooks/<path>.">
         <Row label="Enable webhooks" help="Requests must be signed with the secret below.">
           <Toggle checked={asBool(s.webhook_enabled)} onChange={(v) => save({ webhook_enabled: v })} label="Webhooks" />

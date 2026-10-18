@@ -22,6 +22,8 @@ from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoi
 from agent.lean.rooms import Room, get_room_store, mentioned_agents
 from agent.lean.coding import coding_tools, project_overview
 from agent.integrations import integration_tools
+from agent.lean.computer import tools as computer_tools
+from agent.project_workspace import tools as workspace_tools
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
@@ -888,8 +890,10 @@ class LeanSession:
                 + coding_tools()
                 + rich_tools()
                 + artifact_tools()
+                + workspace_tools()
                 + terminal.tools()
-                + integration_tools(self.session_id),
+                + integration_tools(self.session_id)
+                + computer_tools(self.session_id, self.cancel),
                 session_id=self.session_id,
                 project_root=self.project_root,
             )
@@ -899,7 +903,11 @@ class LeanSession:
         # Recall from what is actually being asked (the user's request, plus the task this
         # agent was given), never from a "[System]: ..." brief full of boilerplate words.
         goal = self._goal(message, task)
-        route_note = "" if guest else self._route_model(persona, goal)
+        # The learned router has no verified vision ranking. Retain the user's
+        # selected model for visual work rather than silently choosing a text model.
+        visual = any(row.get("observations") for row in history) or bool(re.search(
+            r"\b(screen|screenshot|desktop|computer|window|image|photo|picture|vision|game|games|play)\b", goal, re.I))
+        route_note = "" if guest or visual else self._route_model(persona, goal)
         if route_note:
             meta["model_route"] = route_note
         memories = [] if guest else self._recall(goal)
@@ -919,6 +927,7 @@ class LeanSession:
             project_root=self.project_root,
             notes=list(toolbox.notes) + learned.notes,
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
+            computer_note="" if guest else toolbox.computer_context(),
             git_note=repo_note,
             git_rules="terminal" in toolbox.names and git_context.wants_rules(goal, repo_note),
             project_overview=project_overview(self.project_root) if self.project_root else "",
@@ -1514,7 +1523,13 @@ class LeanSession:
                 continue
             for msg in turn.get("messages") or []:
                 text = str(msg.get("text") or "").strip()
-                if not text:
+                refs = [{"id": w["data"]["id"], "session_id": self.session_id}
+                        for segment in msg.get("timeline") or [] for w in segment.get("widgets") or []
+                        if w.get("type") == "observation" and isinstance(w.get("data"), dict)
+                        and w["data"].get("session_id") == self.session_id and w["data"].get("id")]
+                if self.caller_role != "owner":
+                    refs = []
+                if not text and not refs:
                     continue
                 if msg.get("role") == "user":
                     rows.append({"role": "user", "content": f"[User]: {text}" if group else text})
@@ -1522,11 +1537,16 @@ class LeanSession:
                     # Current name, so renamed agents read correctly in old history.
                     name = self._name_of(str(msg.get("agent_id"))) if msg.get("agent_id") else str(msg.get("agent_name") or "")
                     rows.append({"role": "assistant", "content": f"[{name}]: {text}" if group and name else text})
+                    if refs:
+                        rows[-1]["observations"] = refs[-3:]
+                        rows[-1]["content"] += "\nSaved visual observations: " + ", ".join(ref["id"] for ref in refs[-3:])
         # Merge consecutive same-role messages: chat templates expect alternation.
         merged: list[dict[str, Any]] = []
         for row in rows[-_HISTORY_MESSAGES:]:
             if merged and merged[-1]["role"] == row["role"]:
                 merged[-1]["content"] += "\n\n" + row["content"]
+                if row.get("observations"):
+                    merged[-1]["observations"] = (merged[-1].get("observations", []) + row["observations"])[-3:]
             else:
                 merged.append(dict(row))
         while merged and merged[0]["role"] != "user":

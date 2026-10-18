@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { isDesktopRuntime, openDesktopExternalUrl } from "../desktop/bridge";
 import { safeUrl } from "./validate";
+import type { ObservationRef } from "./types";
 
 export type WidgetEnv = {
   apiBase: string;
   /** Open an artifact in the side panel. */
   openArtifact?(id: string, version?: number): void;
+  openObservation?(data: ObservationRef): void;
   openResearch?(url: string): Promise<boolean>;
 };
 

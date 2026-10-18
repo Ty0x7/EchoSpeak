@@ -228,6 +228,8 @@ def _artifact(data: dict[str, Any]) -> Optional[dict[str, Any]]:
 
 
 _NORMALIZERS: dict[str, Callable[[dict[str, Any]], Optional[dict[str, Any]]]] = {
+    "observation": lambda data: {k: data[k] for k in ("id", "session_id", "source", "at", "width", "height", "model_width", "model_height")}
+        if str(data.get("id", "")).startswith("obs-") else None,
     "creation": lambda data: {"id": _s(data.get("id"), 80)} if str(data.get("id", "")).startswith("generation-") else None,
     "weather": _weather,
     "chart": _chart,

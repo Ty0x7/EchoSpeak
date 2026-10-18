@@ -100,6 +100,16 @@ describe("lean live reducer", () => {
     expect([seg.kind, seg.decision]).toEqual(["approval", "allow"]);
   });
 
+  it("keeps whether For this chat can apply to an approval", () => {
+    const state = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "approval_request", ...base, id: "a1", tool: "computer_action", summary: "Click", reason: "web", grantable: false },
+      { type: "approval_request", ...base, id: "a2", tool: "computer_action", summary: "Click", reason: "screen", grantable: true },
+    ]);
+    const [first, second] = state.messages.m1.segments as { grantable?: boolean }[];
+    expect([first.grantable, second.grantable]).toEqual([false, undefined]);
+  });
+
   it("only claims lean events", () => {
     expect(isLeanEvent({ type: "agent_token", data: "x" })).toBe(false);
     expect(isLeanEvent({ type: "agent_token", message_id: "m", data: "x" })).toBe(true);

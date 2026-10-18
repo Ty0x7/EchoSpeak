@@ -122,6 +122,8 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
 
 ### Projects and coding
 
+- Selecting a project opens its visual workspace: reports, files, conversations, research, artifacts, media, routines and activity. Opening a conversation restores that existing chat; browsing a project does not change the active chat's scope or stop its background work.
+- Named work reports can come from Echo, Claude Code or Codex. **Import report** accepts a project-scoped manifest. **Sharing** prepares an optional shared folder and exports selected project context when you request it. Imported checks remain agent-reported. See [Project workspaces and agent handoffs](PROJECT_WORKSPACE.md) for setup, the manifest format and manual evaluation.
 - Drop a folder on the composer (or **Projects › Attach folder**) to work inside it. File tools
   only reach the attached folder.
 - Every file overwrite is checkpointed and can be undone.
@@ -145,11 +147,27 @@ Dangerous commands ask first in every mode.
   a real browser, opening apps, desktop control, email, and editing EchoSpeak itself.
 - **Approvals** decide what asks first: **Risky only** (recommended), **Every action**, or **Never**.
   Risky means deleting files, dangerous commands, messages that leave the PC, desktop control,
-  and MCP actions. An approval shows in the chat with **Allow** and **Deny**.
+  and MCP actions. An approval shows in the chat with **Allow once**, **For this chat** and **Decline**.
 - After an agent reads a web page or email, anything that would send data out asks first, even
   with approvals off. A tool call that contains one of your API keys is always refused.
 - People who reach Echo through Discord, Telegram, Twitch or Twitter get look-up tools only:
   no files, terminal, memory or past chats.
+
+### Screenshots and computer use
+
+Ask Echo to capture a monitor or a visible window. The screenshot appears in the conversation, and a vision-capable chat model receives the actual image. Click it to open the original in the same right panel used for artifacts, research and activity, or save it. Echo can reopen a screenshot by its observation ID and crop it to inspect details. Text-only models cannot interpret pixels; OCR remains a separate fallback and requires Tesseract.
+
+For input, enable **Allow actions on this computer** and **Control the desktop** in Settings › Permissions. Under **Agents** in the left sidebar, click the agent's **Edit** button and enable **Desktop control**. **Screen & images** (Vision) provides screenshots; **Desktop control** provides input. Echo reports which is available instead of treating a screenshot as permission to click. Desktop control is optional and is not enabled on agents automatically.
+
+To launch an app, also enable **Open apps** and add its exact Start-menu name (for example, **Minecraft Launcher**), the name of a shortcut on your desktop (for example, **26.2** for `26.2.lnk`, or a Steam game's `.url` shortcut) or an executable path under **Allowed apps** in Settings › Permissions. Shortcuts open exactly as saved. An empty list allows no app launches. Shells and script hosts such as PowerShell, cmd or Python can be opened but never receive arguments from Echo; commands go through the terminal and its approvals. This is separate from terminal command restrictions. Windows Store apps are resolved through their installed Windows registration, without needing their protected executable path. Echo checks the window or a screenshot after requesting a launch; launching does not prove the app is ready or that game input will work.
+
+Echo can click, right-click, double-click, move, drag, scroll, type, press shortcuts and briefly hold keys or a mouse button, including together. Relative mouse movement lets it attempt camera movement in games that capture the pointer. Holds last at most two seconds, with up to five seconds of requested hold, wait and drag time per batch. Each batch uses a recent screenshot and returns a new capture so Echo can check the result. Changed window or monitor geometry requires another capture. Desktop control always asks first, even when ordinary approvals are off. Choose **For this chat** to let Echo keep acting on what it sees for the rest of that chat, so a game or a long task doesn't stop at every step. If the same request also read web pages, email or other outside content, every action asks again and **For this chat** isn't offered. Keys are sent with hardware scan codes, which more games accept.
+
+If Echo can capture the screen but cannot click, check the agent's **Desktop control** toolset and both permissions above. Desktop controls use the computer-action tool. Shell text such as `where="host" click ...` is not a desktop command, and installing a package or enabling sandbox networking will not turn it into one. Echo now receives a specific correction for these misplaced terminal options.
+
+Use **Stop everything** to cancel work. Held keys and mouse buttons are released when a new computer-action batch ends, fails or is cancelled. Other apps can still change the screen while Echo works; check its results, particularly around destructive controls. Some games reject simulated input, and these short, model-driven batches are suited to slower interactions rather than real-time gameplay.
+
+Images stay in this chat's temporary observation store, separate from personal memory and Creations, for up to seven days or until its 512 MB limit evicts older captures. Chat references remain afterward and show an unavailable message. At most three recent observations are included in model context. With a cloud model, those images are sent to that provider under your existing model privacy settings; Private and Offline modes retain their restrictions.
 
 ## 5. Voice
 

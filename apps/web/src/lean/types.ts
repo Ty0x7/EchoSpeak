@@ -43,6 +43,8 @@ export type LeanSegment =
       args?: Record<string, unknown>;
       reason: string;
       decision: "" | "allow" | "deny" | "timeout" | "cancelled" | "answered";
+      /** False when "For this chat" cannot apply (outside content read this turn). */
+      grantable?: boolean;
       /** ask_user: a question with choices instead of a permission request. */
       question?: string;
       options?: string[];

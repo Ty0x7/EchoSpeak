@@ -60,7 +60,9 @@ def _no_real_secrets(monkeypatch):
 
 # ── the decision table ──────────────────────────────────────────────────
 
-def test_rule_of_two_decisions():
+def test_rule_of_two_decisions(monkeypatch):
+    from agent.lean import terminal
+    monkeypatch.setattr(terminal, "resolved_mode", lambda: "docker")  # the table assumes the sandbox, Docker or not
     web = ["web_search"]
     assert policy.evaluate("email_send", {"to": "a@b.c"}).action == "allow"  # clean turn: normal approvals apply
     assert policy.evaluate("email_send", {"to": "a@b.c"}, tainted_by=web).action == "ask"
