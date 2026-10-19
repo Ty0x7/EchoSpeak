@@ -6,6 +6,7 @@ import hashlib
 import html
 import json
 import mimetypes
+import os
 from pathlib import Path, PureWindowsPath
 import re
 import time
@@ -37,6 +38,14 @@ def root_for(item) -> Path:
     return root
 
 
+def _private_name(name: str) -> bool:
+    low = name.lower()
+    return bool(name.endswith((".", " ")) or (low.startswith(".") and low != ".echospeak")
+                or re.match(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", low)
+                or low in HIDDEN or low.startswith(".env") or low in {"credentials", "settings.secrets.json", "id_rsa", "id_ed25519"}
+                or Path(low).suffix in {".pem", ".key", ".pfx", ".p12"})
+
+
 def safe_path(root: Path, relative: str, *, exists: bool = True) -> Path:
     raw = str(relative).replace("\\", "/")
     parts = raw.split("/")
@@ -44,11 +53,7 @@ def safe_path(root: Path, relative: str, *, exists: bool = True) -> Path:
             or any(p in {"..", ""} for p in parts) or any(ord(c) < 32 for c in raw)):
         raise ValueError("Use a relative path inside this project")
     for name in parts:
-        low = name.lower()
-        if (name.endswith((".", " ")) or (low.startswith(".") and low != ".echospeak")
-                or re.match(r"^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)", low)
-                or low in HIDDEN or low.startswith(".env") or low in {"credentials", "settings.secrets.json", "id_rsa", "id_ed25519"}
-                or Path(low).suffix in {".pem", ".key", ".pfx", ".p12"}):
+        if _private_name(name):
             raise ValueError("Private or generated path is not available in the workspace")
     candidate = root.joinpath(*parts)
     current = root
@@ -169,36 +174,49 @@ def discover(item) -> dict:
     queue = [(root, 0)]
     while queue:
         folder, depth = queue.pop(0)
+        if folder != root:
+            try:
+                folder = safe_path(root, folder.relative_to(root).as_posix())
+            except (OSError, ValueError):
+                continue
         children = []
         try:
-            for child in folder.iterdir():
-                count += 1
-                if count > SCAN_ENTRIES or time.monotonic() - started > SCAN_SECONDS:
-                    limited = True
-                    break
-                if child.name.startswith(".") or child.name.lower() in HIDDEN:
-                    continue
-                rel = child.relative_to(root).as_posix()
-                try:
-                    path = safe_path(root, rel)
-                    stat = path.stat()
-                    if path.is_dir():
-                        if depth < SCAN_DEPTH: children.append((path, depth + 1))
-                        else: limited = True
+            # DirEntry caches metadata from enumeration on Windows. Avoid
+            # repeatedly resolving every ancestor just to index a filename.
+            with os.scandir(folder) as listing:
+                for child in listing:
+                    count += 1
+                    if count > SCAN_ENTRIES or time.monotonic() - started > SCAN_SECONDS:
+                        limited = True
+                        break
+                    if child.name.startswith(".") or _private_name(child.name):
                         continue
-                    suffix = path.suffix.lower()
-                    if suffix not in TEXT | MEDIA: continue
-                    fingerprints.append(f"{rel}:{stat.st_mtime_ns}:{stat.st_size}")
-                    if suffix in {".html", ".htm", ".md"}:
-                        if len(candidates) < SCAN_DOCUMENTS:
-                            candidates.append((rel, suffix, stat))
-                        else: limited = True
-                except (OSError, ValueError):
-                    continue
+                    path = Path(child.path)
+                    rel = path.relative_to(root).as_posix()
+                    try:
+                        stat = child.stat(follow_symlinks=False)
+                        # Includes Windows junctions and other reparse points.
+                        # Actual file reads still pass through safe_path/read_file.
+                        if child.is_symlink() or getattr(stat, "st_file_attributes", 0) & 0x400:
+                            continue
+                        if child.is_dir(follow_symlinks=False):
+                            if depth < SCAN_DEPTH: children.append((path, depth + 1))
+                            else: limited = True
+                            continue
+                        suffix = path.suffix.lower()
+                        if suffix not in TEXT | MEDIA: continue
+                        fingerprints.append(f"{rel}:{stat.st_mtime_ns}:{stat.st_size}")
+                        if suffix in {".html", ".htm", ".md"}:
+                            if len(candidates) < SCAN_DOCUMENTS:
+                                candidates.append((rel, suffix, stat))
+                            else: limited = True
+                    except (OSError, ValueError):
+                        continue
         except OSError:
             continue
         children.sort(key=lambda row: (row[0].name.lower() not in {"docs", "artifacts", "reports"}, row[0].name.casefold()))
-        queue.extend(children)
+        # Finish the prioritized document trees before walking source folders.
+        queue[0:0] = children
         if count > SCAN_ENTRIES or time.monotonic() - started > SCAN_SECONDS:
             break
     revision = hashlib.sha256("\n".join(sorted(fingerprints)).encode()).hexdigest()[:20]

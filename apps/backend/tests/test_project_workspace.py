@@ -130,6 +130,44 @@ def test_scan_is_bounded_and_files_remain_browsable(env, monkeypatch):
     assert len(workspace.files(item)) > 4
 
 
+def test_nested_reports_and_notes_are_prioritized_before_large_source_trees(env, monkeypatch):
+    item, _, root, _ = env
+    for folder in ("aaa-source", "artifacts/releases", "docs/releases"):
+        (root / folder).mkdir(parents=True, exist_ok=True)
+    for i in range(60):
+        (root / f"aaa-source/file-{i}.md").write_text("source docs", encoding="utf-8")
+    for i in range(3):
+        (root / f"artifacts/releases/v1.0.{i}.html").write_text("<title>Version</title>", encoding="utf-8")
+        (root / f"docs/releases/v1.0.{i}.md").write_text("# Version", encoding="utf-8")
+    monkeypatch.setattr(workspace, "SCAN_ENTRIES", 30)
+    monkeypatch.setattr(workspace, "SCAN_SECONDS", 10)
+    result = workspace.discover(item)
+    rows = {row["path"]: row for row in result["documents"]}
+    assert result["scan_limited"]
+    for i in range(3):
+        assert rows[f"artifacts/releases/v1.0.{i}.html"]["markdown"] == f"docs/releases/v1.0.{i}.md"
+
+
+def test_metadata_scan_does_not_follow_windows_reparse_points(env, monkeypatch):
+    from types import SimpleNamespace
+    item, _, root, _ = env
+    (root / "linked").mkdir()
+    (root / "linked/private.html").write_text("must not be discovered", encoding="utf-8")
+    original = workspace.os.scandir
+    class Entry:
+        def __init__(self, entry): self.entry = entry
+        def __getattr__(self, name): return getattr(self.entry, name)
+        def stat(self, **kwargs):
+            if self.entry.name == "linked": return SimpleNamespace(st_file_attributes=0x400)
+            return self.entry.stat(**kwargs)
+    class Listing:
+        def __init__(self, folder): self.listing = original(folder)
+        def __enter__(self): return (Entry(entry) for entry in self.listing)
+        def __exit__(self, *args): self.listing.close()
+    monkeypatch.setattr(workspace.os, "scandir", lambda folder: Listing(folder))
+    assert not any(row["path"].startswith("linked/") for row in workspace.discover(item)["documents"])
+
+
 def test_missing_or_unattached_root_preserves_native_resources(env):
     item, manager, root, _ = env
     native = artifacts.create(title="Native", kind="markdown", content="Kept", session_id="chat-a")
