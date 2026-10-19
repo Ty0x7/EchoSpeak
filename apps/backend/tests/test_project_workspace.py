@@ -273,10 +273,70 @@ def test_screenshot_export_preserves_own_original_only_with_write_permission(env
     assert not (root / ".echospeak").exists()
 
 
-def test_existing_activity_uses_real_project_associations(env):
+def test_workspace_does_not_query_activity_or_delete_execution_history(env, monkeypatch):
     item, _, _, store = env
     store.create_execution(thread_id="chat-a", session_id="chat-a", query="Review roads", project_id=item.id, active_project_id=item.id)
-    assert workspace.overview(item.id)["activity"][0]["objective"] == "Review roads"
+    history = store.list_executions("chat-a", limit=8)
+    monkeypatch.setattr(store, "list_executions", lambda *a, **k: pytest.fail("Workspace must not query activity"))
+    assert "activity" not in workspace.overview(item.id)
+    assert history[0].query == "Review roads"
+
+
+def test_report_revision_changes_only_with_its_html_or_local_media(env):
+    item, _, root, _ = env
+    paired_files(root)
+    def report():
+        return next(r for r in workspace.discover(item)["documents"] if r["path"] == "artifacts/roads.html")
+    first = report()["revision"]
+    (root / "unrelated.py").write_text("# Unrelated", encoding="utf-8")
+    (root / "docs/roads.md").write_text("Updated technical notes", encoding="utf-8")
+    assert report()["revision"] == first
+    (root / "artifacts/media/after.png").write_bytes(b"Changed image")
+    second = report()["revision"]
+    assert second != first
+    (root / "artifacts/roads.html").write_text("<title>Changed report</title>", encoding="utf-8")
+    assert report()["revision"] != second
+
+
+def test_project_identity_update_keeps_files_metadata_and_survives_reload(env):
+    item, manager, root, _ = env
+    from api.routes.projects import router
+    import base64
+    app = FastAPI(); app.include_router(router)
+    client = TestClient(app)
+    original = (root / "reports/before.png").read_bytes()
+    logo = "data:image/png;base64," + base64.b64encode(original).decode("ascii")
+    response = client.put(f"/projects/{item.id}", json={"name": "  Road studio  ", "logo_data_url": logo})
+    assert response.status_code == 200
+    saved = response.json()
+    assert saved["name"] == "Road studio" and saved["logo_data_url"].startswith("data:image/png;base64,")
+    assert saved["workspace_root"] == item.workspace_root
+    assert saved["metadata"]["unrelated"] == 42
+    assert manager.get_project(item.id).name == "Road studio"
+    reloaded = projects.ProjectManager(manager.projects_dir).get_project(item.id)
+    assert reloaded.logo_data_url == saved["logo_data_url"]
+    assert (root / "reports/before.png").read_bytes() == original
+    assert client.put(f"/projects/{item.id}", json={"logo_data_url": ""}).json()["logo_data_url"] == ""
+    assert manager.get_project(item.id).name == "Road studio"
+
+
+@pytest.mark.parametrize("patch", [
+    {"name": "   "}, {"name": "x" * 121}, {"name": "bad\nname"},
+    {"logo_data_url": "https://example.com/logo.png"},
+    {"logo_data_url": "data:image/svg+xml;base64,PHN2Zy8+"},
+    {"logo_data_url": "data:image/png;base64,bm90IGFuIGltYWdl"},
+    {"logo_data_url": "data:image/png;base64,%%%"},
+    {"logo_data_url": "data:image/png;base64," + "A" * 2_800_000},
+])
+def test_invalid_project_identity_never_partially_changes_saved_project(env, patch):
+    item, manager, _, _ = env
+    from api.routes.projects import router
+    app = FastAPI(); app.include_router(router)
+    before = manager.get_project(item.id).model_dump()
+    response = TestClient(app).put(f"/projects/{item.id}", json={"name": "Should not persist", **patch})
+    assert response.status_code in {400, 422}
+    assert manager.get_project(item.id).model_dump() == before
+    assert projects.ProjectManager(manager.projects_dir).get_project(item.id).model_dump() == before
 
 
 def test_project_routes_keep_existing_api_auth_boundary(env, monkeypatch):

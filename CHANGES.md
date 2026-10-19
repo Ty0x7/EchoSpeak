@@ -1,5 +1,16 @@
 # Changes
 
+## v11.9.3 — 2026-10-19
+
+User-facing notes: [EchoSpeak 11.9.3](docs/releases/v11.9.3.md).
+
+* Work shows HTML only, with persistent Widgets/List controls beside search. Markdown, original media and earlier imported reports remain in Files; non-HTML native artifacts and creations remain in their libraries.
+* Per-report revisions and retained media prevent unrelated polling updates from clearing previews. Full-width image framing preserves aspect ratios; HTML thumbnails scale to their actual cards.
+* Removes project Activity UI and repeated execution queries while retaining chat activity and execution history.
+* Adds project display-name and validated local logo editing beside New chat, preserving attached folders and unrelated project metadata.
+* Documentation skills and the optional starter follow the attached project's visual identity. Updates remain explicit and reviewed; existing imported custom skills are preserved.
+* Updates the current workspace report, guide and release atlas; aligns all release metadata to 11.9.3. The previously planned A2A expansion is not part of this UI release.
+
 ## v11.9.2 — 2026-10-18
 
 User-facing notes: [EchoSpeak 11.9.2](docs/releases/v11.9.2.md).

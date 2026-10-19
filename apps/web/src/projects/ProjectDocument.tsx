@@ -4,15 +4,16 @@ import { SafeImage } from "../widgets/SafeImage";
 import { ExternalLink } from "../widgets/env";
 import { CodeBlock } from "../widgets/CodeBlock";
 import { localReference, request } from "./model";
+import { useProjectBlob } from "./useProjectBlob";
 
 export function ProjectMedia({ base, path, caption = "", assetId, mediaKind, revision = "" }: { base: string; path: string; caption?: string; assetId?: string; mediaKind?: string; revision?: string }) {
   const holder = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
-  const [url, setUrl] = useState("");
-  const [error, setError] = useState("");
   const [expanded, setExpanded] = useState(false);
   const video = mediaKind === "video" || /\.(mp4|webm)$/i.test(path);
   const audio = mediaKind === "audio" || /\.(mp3|wav|ogg)$/i.test(path);
+  const mediaSource = assetId ? `${base.slice(0, base.indexOf("/projects/"))}/creations/${encodeURIComponent(assetId)}/content` : `${base}/media?path=${encodeURIComponent(path)}`;
+  const { url, error } = useProjectBlob(mediaSource, revision, visible, !video && !audio);
   useEffect(() => {
     if (!holder.current) return;
     if (!window.IntersectionObserver) { setVisible(true); return; }
@@ -21,25 +22,13 @@ export function ProjectMedia({ base, path, caption = "", assetId, mediaKind, rev
     return () => observer.disconnect();
   }, [base, path]);
   useEffect(() => {
-    if (!visible) return;
-    const controller = new AbortController();
-    let objectUrl = "";
-    setUrl(""); setError("");
-    const source = assetId ? `${base.slice(0, base.indexOf("/projects/"))}/creations/${encodeURIComponent(assetId)}/content` : `${base}/media?path=${encodeURIComponent(path)}`;
-    fetch(source, { signal: controller.signal })
-      .then(async response => { if (!response.ok) throw new Error(`Media unavailable (${response.status})`); return response.blob(); })
-      .then(blob => { if (!controller.signal.aborted) { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl); } })
-      .catch(err => { if (!controller.signal.aborted) setError(err.message); });
-    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
-  }, [base, path, visible, assetId, revision]);
-  useEffect(() => {
     if (!expanded) return;
     const close = (event: KeyboardEvent) => { if (event.key === "Escape") setExpanded(false); };
     window.addEventListener("keydown", close);
     return () => window.removeEventListener("keydown", close);
   }, [expanded]);
   return <span ref={holder} className="pw-media">
-    {error ? <span role="status">{error}</span> : !url ? <span className="st-muted">Loading media…</span>
+    {error && !url ? <span role="status">{error}</span> : !url ? <span className="st-muted">Loading media…</span>
       : video ? <video src={url} controls preload="metadata" aria-label={caption || path} />
       : audio ? <audio src={url} controls preload="metadata" aria-label={caption || path} />
       : <button type="button" className="pw-image" onClick={() => setExpanded(true)} title="View original"><img src={url} alt={caption || path} loading="lazy" /></button>}

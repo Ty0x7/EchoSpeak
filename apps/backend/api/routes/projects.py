@@ -20,6 +20,7 @@ router = APIRouter()
 class ProjectResponse(BaseModel):
     id: str
     name: str
+    logo_data_url: str = ""
     description: Optional[str] = ""
     created_at: str
     updated_at: str
@@ -62,7 +63,8 @@ class ProjectAttachFolderRequest(BaseModel):
 
 
 class ProjectUpdateRequest(BaseModel):
-    name: Optional[str] = None
+    name: Optional[str] = Field(default=None, max_length=120)
+    logo_data_url: Optional[str] = Field(default=None, max_length=2_800_000)
     description: Optional[str] = None
     context_prompt: Optional[str] = None
     tags: Optional[List[str]] = None
@@ -153,14 +155,18 @@ async def update_project(project_id: str, request: ProjectUpdateRequest):
     """Update an existing project."""
     from agent.projects import get_project_manager
     manager = get_project_manager()
-    project = manager.update_project(
-        project_id=project_id,
-        name=request.name,
-        description=request.description,
-        context_prompt=request.context_prompt,
-        tags=request.tags,
-        metadata=request.metadata,
-    )
+    try:
+        project = manager.update_project(
+            project_id=project_id,
+            name=request.name,
+            logo_data_url=request.logo_data_url,
+            description=request.description,
+            context_prompt=request.context_prompt,
+            tags=request.tags,
+            metadata=request.metadata,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
     return ProjectResponse(**project.model_dump())

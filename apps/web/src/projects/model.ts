@@ -12,10 +12,9 @@ export type WorkspaceData = {
   research: { notes?: string; sources?: { title: string; url: string; text?: string; excerpt?: string }[]; session_id?: string }[];
   routines: { id: string; name: string; enabled: boolean; last_result_status: string }[];
   media: { id: string; name: string; media_kind: string; session_id: string }[];
-  activity: { id: string; status: string; objective: string; session_id: string }[];
 };
-export type ProjectDocument = { path: string; title: string; kind: "html" | "markdown"; markdown: string; thumbnail: string; size: number; modified_at: number };
-export const SECTIONS = ["Work", "Files", "Conversations", "Research", "Routines", "Activity"] as const;
+export type ProjectDocument = { path: string; title: string; kind: "html" | "markdown"; markdown: string; thumbnail: string; size: number; modified_at: number; revision?: string };
+export const SECTIONS = ["Work", "Files", "Conversations", "Research", "Routines"] as const;
 export type Section = typeof SECTIONS[number];
 
 /** Local links never become filesystem URLs or arbitrary API requests. */

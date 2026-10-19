@@ -37,14 +37,24 @@ permission and does not create a report by itself.
 
 ## Authoring
 
-Start from `assets/report.html` when helpful; adapt it to the project, rather
-than duplicating its placeholder text. Use semantic HTML, polished system
-typography, restrained monochrome surfaces, consistent spacing and responsive
-layout. Honor light/dark preferences. Preserve the actual colors of media.
-Use concise headings only where they help, meaningful image alt text, native
-video/audio controls and horizontally scrollable wide tables/code. Keep the
-primary content readable on small screens. Avoid dashboard statistics,
-decorative filler, long prose and unnecessary buttons.
+Before styling a report, inspect the **current attached project's** visual system:
+its existing reports, UI, stylesheets, tokens, typography, spacing, colors and
+relevant assets. Match that project, even when EchoSpeak is the viewer or Echo,
+Codex or Claude is the author. The host app does not define another project's
+identity. Never copy EchoSpeak's logo, monochrome palette, artifact cards or
+layout into an unrelated project by default. Preserve project-specific styling
+that the user has already refined. For a project without an established visual
+system, use a restrained neutral layout and state that choice.
+
+`assets/report.html` is an optional structural starter, not a theme contract.
+Replace its sample styling with the project's actual design language. Keep the
+header compact; lead with diagrams, comparisons or real evidence rather than a
+large title block. Use semantic HTML, readable typography, consistent spacing
+and responsive layout. Support the project's existing theme behavior rather
+than introducing a new theme. Preserve the actual colors and aspect ratios of
+media; avoid cropped screenshots. Use concise headings only where they help,
+meaningful alt text, native video/audio controls and scrollable wide tables or
+code. Avoid dashboard statistics, decorative filler and unnecessary buttons.
 
 Reports must be self-contained: inline CSS and SVG/CSS diagrams,
 relative project-local raster images or media, no CDN, remote fonts, remote
@@ -66,6 +76,7 @@ any missing visual/device verification. Prefer safe atomic replacement for
 files you own; never overwrite concurrent user work blindly.
 
 No manifest, handoff, hook, notification or model call is needed for discovery.
-The attached project's visible workspace refreshes automatically. Do not save
+The attached project's visible workspace refreshes automatically. Work displays
+HTML reports; Markdown remains available in Files and paired Technical notes. Do not save
 reports into personal memory, silently install skills/configurations, start
 other agents or generate a new report merely because the conversation ended.

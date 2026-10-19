@@ -64,7 +64,7 @@ export function AgentSkillsSection({ apiBase }: { apiBase: string }) {
       </p>
       {notice ? <p className="st-skills-notice" role="status">{notice}</p> : null}
       {skills && !skills.some(skill => skill.name === "project-documentation") ? <div className="st-skills-import">
-        <b>Project documentation</b><p>Keep technical notes in Markdown and present the results with visual HTML. Project files appear in the workspace automatically.</p>
+        <b>Project documentation</b><p>Keep technical notes in Markdown and present results with HTML styled for the attached project. HTML reports appear in Work automatically.</p>
         <button className="es-btn es-btn-sm" disabled={busy} onClick={() => void run(async () => { const skill = await api.importDocumentationSkill(); setOpen(skill.name); }, "Added for review. Approve the instructions below before Echo can use them.")}>Add for review</button>
       </div> : null}
 
@@ -106,6 +106,7 @@ export function AgentSkillsSection({ apiBase }: { apiBase: string }) {
         ))}
       </div>
 
+      {skills?.some(skill => skill.name === "project-documentation") ? <p className="st-skills-intro">The bundled documentation skill now follows each attached project's own style. Existing imported copies and your edits are kept. To update one, import the revised skill folder below and review the changed instructions before approving it again.</p> : null}
       <div className="st-skills-import">
         <div className="st-skills-tabs" role="group" aria-label="Import from">
           <button type="button" aria-pressed={mode === "folder"} className={mode === "folder" ? "is-on" : ""} onClick={() => setMode("folder")}>From a folder</button>

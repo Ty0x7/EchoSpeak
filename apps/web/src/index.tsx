@@ -124,7 +124,7 @@ export const Dashboard: React.FC<{
   const [monitorText, setMonitorText] = useState<string>("");
   const desktopBootstrap = typeof window !== "undefined" ? window.__ECHOSPEAK_DESKTOP_BOOTSTRAP__ : undefined;
   const [projects, setProjects] = useState<{
-    id: string; name: string; description?: string; context_prompt?: string; tags?: string[];
+    id: string; name: string; logo_data_url?: string; description?: string; context_prompt?: string; tags?: string[];
     workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any>;
   }[]>(() => (desktopBootstrap?.projects || []) as any[]);
   const [activeProjectId, setActiveProjectId] = useState<string>(() => desktopBootstrap?.active_project_id || "");
@@ -1791,6 +1791,12 @@ export const Dashboard: React.FC<{
                 onRoutines={() => setMainPage("routines")}
               /> :
               <ProjectsPage
+                onUpdate={async (project, value) => {
+                  const response = await fetch(`${apiBase}/projects/${encodeURIComponent(project.id)}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) });
+                  const result = await response.json();
+                  if (!response.ok) throw new Error(typeof result.detail === "string" ? result.detail : `Could not update project (${response.status})`);
+                  setProjects(previous => previous.map(row => row.id === result.id ? result : row));
+                }}
                 projects={projects}
                 activeProjectId={activeProjectId}
                 chatCounts={threads.reduce<Record<string, number>>((acc, t) => {
