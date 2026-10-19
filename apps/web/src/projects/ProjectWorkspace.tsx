@@ -66,6 +66,13 @@ export function ProjectWorkspace({ apiBase, projectId, onBack, onNewChat, onChat
   const [folder, setFolder] = useState("");
   const [entries, setEntries] = useState<{ name: string; path: string; directory: boolean }[]>([]);
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<"widgets" | "list">(() => {
+    try { return localStorage.getItem("echospeak.projectWork.view") === "list" ? "list" : "widgets"; } catch { return "widgets"; }
+  });
+  const changeView = (next: "widgets" | "list") => {
+    setView(next);
+    try { localStorage.setItem("echospeak.projectWork.view", next); } catch { /* Session-only preference when storage is unavailable. */ }
+  };
   const [error, setError] = useState("");
   // One polling loop per open project. No writes, sync protocol or agent/model calls.
   useEffect(() => {
@@ -103,7 +110,8 @@ export function ProjectWorkspace({ apiBase, projectId, onBack, onNewChat, onChat
     catch (err) { if (activeBase.current === base) setError(String(err)); }
   };
   const match = (text: string) => text.toLowerCase().includes(query.toLowerCase());
-  const documents = (data?.documents || []).filter(row => match(`${row.title} ${row.path}`));
+  const documents = (data?.documents || []).filter(row => row.kind === "html" && match(`${row.title} ${row.path}`));
+  const htmlArtifacts = (data?.artifacts || []).filter(row => row.kind === "html" && match(row.title));
   const current = data?.documents.find(row => row.path === file);
   return <section className="pw-workspace" aria-label="Project workspace">
     <header className="pw-header"><button className="pw-text-link pw-back" type="button" onClick={onBack} aria-label="All projects" title="All projects">←</button>
@@ -111,27 +119,28 @@ export function ProjectWorkspace({ apiBase, projectId, onBack, onNewChat, onChat
     </header>
     <nav className="pw-nav" aria-label="Project sections">{SECTIONS.map(name => <button type="button" key={name} aria-current={section === name ? "page" : undefined} onClick={() => { setSection(name); setSelected(null); setFile(""); setQuery(""); }}>{name}</button>)}</nav>
     {error ? <p className="pw-notice is-error" role="alert">{error}</p> : null}
-    <div className="pw-content">{!data ? <p role="status">Loading project resources…</p> : file ? <ProjectFile key={`${base}:${file}`} base={base} path={file} onFile={setFile} onClose={() => setFile("")} revision={data.file_revision} technical={current?.markdown} />
+    <div className="pw-content">{!data ? <p role="status">Loading project resources…</p> : file ? <ProjectFile key={`${base}:${file}`} base={base} path={file} onFile={setFile} onClose={() => setFile("")} revision={current?.revision || data.file_revision} technical={current?.markdown} />
       : selected ? <><button type="button" className="pw-text-link" onClick={() => setSelected(null)}>← Project work</button><Report key={`${selected.id}-${selected.revision}`} record={selected} base={base} onFile={setFile} onRecord={id => void openRecord(id)} onChat={onChat} onArtifact={onArtifact} /></>
       : section === "Work" ? <>
-        <div className="pw-section-head"><input className="st-input" aria-label="Find project work" placeholder="Find project work…" value={query} onChange={event => setQuery(event.target.value)} /></div>
+        <div className="pw-section-head pw-work-toolbar"><input className="st-input" aria-label="Find project work" placeholder="Find project work…" value={query} onChange={event => setQuery(event.target.value)} />
+          <div className="pw-view-switch" role="group" aria-label="Project work view">{(["widgets", "list"] as const).map(mode => <button key={mode} type="button" aria-pressed={view === mode} onClick={() => changeView(mode)} title={mode === "widgets" ? "Widget view" : "List view"}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">{mode === "widgets" ? <><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></> : <><path d="M8 5h13M8 12h13M8 19h13M3 5h1M3 12h1M3 19h1"/></>}</svg>{mode === "widgets" ? "Widgets" : "List"}
+          </button>)}</div></div>
         {data.scan_error ? <p className="pw-notice" role="status">{data.scan_error}</p> : null}
         {data.scan_limited ? <p className="st-muted">Showing a bounded selection. Browse Files for other folders.</p> : null}
-        <div className="pw-cards">{documents.map(row => <button type="button" key={row.path} className="pw-work-card" onClick={() => setFile(row.path)}>
-          <ProjectThumbnail base={base} document={row} revision={data.file_revision} /><span className="pw-work-label"><strong>{row.title}</strong><small>{row.path}{row.markdown ? " · Technical notes" : ""}</small></span>
+        <div className={`pw-cards${view === "list" ? " is-list" : ""}`}>{documents.map(row => <button type="button" key={row.path} className="pw-work-card" onClick={() => setFile(row.path)}>
+          <ProjectThumbnail base={base} document={row} revision={row.revision || `${row.modified_at}:${row.size}`} /><span className="pw-work-label"><strong>{row.title}</strong><small>{row.path}{row.markdown ? " · Technical notes" : ""}</small></span>
         </button>)}
-        {data.artifacts.filter(row => match(row.title)).map(row => <button type="button" key={`artifact:${row.id}`} className="pw-work-card" onClick={() => onArtifact(row.id)}><span className="pw-thumbnail"><span className="pw-file-mark">{row.kind}</span></span><span className="pw-work-label"><strong>{row.title}</strong><small>Echo artifact · {row.versions} version(s)</small></span></button>)}
+        {htmlArtifacts.map(row => <button type="button" key={`artifact:${row.id}`} className="pw-work-card" onClick={() => onArtifact(row.id)}><span className="pw-thumbnail"><span className="pw-file-mark">{row.kind}</span></span><span className="pw-work-label"><strong>{row.title}</strong><small>Echo artifact · {row.versions} version(s)</small></span></button>)}
         </div>
-        {data.media.filter(row => match(row.name)).length ? <section className="pw-creations"><div className="pw-section-head"><h2>Creations</h2><button className="pw-text-link" onClick={onCreations}>Open library</button></div><div className="pw-gallery">{data.media.filter(row => match(row.name)).map(row => <ProjectMedia key={row.id} base={base} path={row.name} caption={row.name} assetId={row.id} mediaKind={row.media_kind} />)}</div></section> : null}
-        {!data.documents.length && !data.artifacts.length && !data.media.length ? <div className="pw-empty"><h3>Your project, in view</h3><p>HTML reports and Markdown in your attached folder appear here automatically. Keep visuals in artifacts/ and technical notes in docs/.</p><button className="pw-text-link" onClick={() => setSection("Files")}>Browse project files</button></div> : null}
-        {query && !documents.length && !data.artifacts.some(row => match(row.title)) && !data.media.some(row => match(row.name)) ? <p>No work matches that search.</p> : null}
-        {data.records.length ? <details className="pw-earlier"><summary>Earlier imported reports</summary><div className="pw-list">{data.records.map(row => <button type="button" key={row.id} onClick={() => void openRecord(row.id)}><strong>{row.title}</strong><small>Revision {row.revision}</small></button>)}</div></details> : null}
+        {!documents.length && !htmlArtifacts.length ? <div className="pw-empty"><h3>{query ? "No matching HTML reports" : "Your project, in view"}</h3><p>{query ? "Try a different title or path." : "HTML reports from your attached folder appear here automatically. Markdown and other files stay in Files; paired reports include Technical notes."}</p><button className="pw-text-link" onClick={() => setSection("Files")}>Browse project files</button></div> : null}
+
       </>
-      : section === "Files" ? <><div className="pw-section-head"><span className="pw-path">{folder || "Project root"}</span><button className="es-btn es-btn-sm" disabled={!folder} onClick={() => setFolder(folder.split("/").slice(0, -1).join("/"))}>Up a folder</button></div><div className="pw-list">{entries.map(row => <button type="button" key={row.path} onClick={() => row.directory ? setFolder(row.path) : setFile(row.path)}><span>{row.directory ? "▸" : "·"} {row.name}</span><small>{row.directory ? "Folder" : row.path.split(".").pop()}</small></button>)}</div>{!entries.length ? <p>No previewable files in this folder.</p> : null}</>
+      : section === "Files" ? <><div className="pw-section-head"><span className="pw-path">{folder || "Project root"}</span><button className="es-btn es-btn-sm" disabled={!folder} onClick={() => setFolder(folder.split("/").slice(0, -1).join("/"))}>Up a folder</button></div><div className="pw-list">{entries.map(row => <button type="button" key={row.path} onClick={() => row.directory ? setFolder(row.path) : setFile(row.path)}><span>{row.directory ? "▸" : "·"} {row.name}</span><small>{row.directory ? "Folder" : row.path.split(".").pop()}</small></button>)}</div>{!entries.length ? <p>No previewable files in this folder.</p> : null}        {data.records.length ? <details className="pw-earlier"><summary>Earlier imported reports</summary><div className="pw-list">{data.records.map(row => <button type="button" key={row.id} onClick={() => void openRecord(row.id)}><strong>{row.title}</strong><small>Revision {row.revision}</small></button>)}</div></details> : null}</>
       : section === "Conversations" ? <><div className="pw-list">{data.sessions.map(row => <button type="button" key={row.id} onClick={() => onChat(row.id)}><strong>{row.title || "Untitled conversation"}</strong><small>{new Date(row.at * 1000).toLocaleDateString()}</small></button>)}</div>{!data.sessions.length ? <p>No conversations yet. Start a project chat above.</p> : null}</>
       : section === "Research" ? <>{data.research.map((finding, i) => <article key={i} className="pw-evidence"><ProjectMarkdown text={finding.notes || "Saved sources"} base={base} path="" onFile={setFile} />{finding.sources?.map((source, n) => <div key={n}><ExternalLink href={source.url}>{source.title || source.url}</ExternalLink><p>{source.text || source.excerpt}</p></div>)}</article>)}<div className="pw-list">{data.sessions.map(row => <button type="button" key={row.id} onClick={() => onChat(row.id)}><span>Research in {row.title || "conversation"}</span><small>Chat notebook</small></button>)}</div>{!data.research.length && !data.sessions.length ? <p>No saved research yet.</p> : null}</>
       : section === "Routines" ? <><div className="pw-list">{data.routines.map(row => <button type="button" key={row.id} onClick={onRoutines}><strong>{row.name}</strong><small>{row.enabled ? "Enabled" : "Paused"} · {row.last_result_status || "No recorded result"}</small></button>)}</div>{!data.routines.length ? <p>No routines associated with this project.</p> : null}</>
-      : <><div className="pw-list">{data.activity.map(row => <button type="button" key={row.id} onClick={() => onChat(row.session_id)}><span>{row.objective || row.id}</span><small>{row.status}</small></button>)}</div>{!data.activity.length ? <p>No recorded activity for this project.</p> : null}</>}
+      : null}
     </div>
   </section>;
 }

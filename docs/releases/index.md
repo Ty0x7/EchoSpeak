@@ -2,7 +2,8 @@
 
 This collection presents every existing versioned note in `docs/releases/v*.md`
 as a complementary HTML report in `artifacts/releases/`. It currently covers
-30 documented updates from 10.0.0 through 11.9.2. No release notes were altered.
+31 documented updates from 10.0.0 through 11.9.3. Earlier release notes remain
+unchanged; the new 11.9.3 note records the current project UI work.
 The atlas is a source-history presentation, not evidence of installer publication.
 
 Each page includes a curated visual narrative, a conceptual diagram, concise
@@ -18,7 +19,7 @@ The HTML complements the Markdown instead of reproducing the full technical note
   at 11.9.2 replaced it with direct file discovery and a reviewed documentation
   skill; existing imported records remain available.
 * The Windows build workflow introduced in 10.4.0 was subsequently removed.
-* No report is invented for absent 11.9.1 or planned 11.9.3 release notes.
+* No report is invented for the absent 11.9.1 note. 11.9.3 is the current project UI release; the A2A expansion previously associated with that number remains future work.
 * README voice/artifact references originate from source commit c8d62b1 on
   2026-10-06; they are not verified exact-version installer captures.
 * Current workspace screenshots show the isolated real-repository self-test
@@ -67,6 +68,7 @@ and atlas navigation. No manifest, notification or model call is required.
 | 11.8.0 | A stronger native harness | [11.8.0](v11.8.0.md) | [Report](../../artifacts/releases/v11.8.0.html) | `55ff0fc` |
 | 11.9.0 | Visual project work and integrated 11.8 | [11.9.0](v11.9.0.md) | [Report](../../artifacts/releases/v11.9.0.html) | `55ff0fc` |
 | 11.9.2 | Optional local speech and consistent setup | [11.9.2](v11.9.2.md) | [Report](../../artifacts/releases/v11.9.2.html) | `210fe72` |
+| 11.9.3 | Your project work, clearly presented | [11.9.3](v11.9.3.md) | [Report](../../artifacts/releases/v11.9.3.html) | Current source |
 
 ## Verification scope
 
@@ -97,3 +99,18 @@ the overview, softens diagram surfaces and removes unnecessary boxes around
 change lists. Historical context folds by default. The same 62 responsive
 previews passed again after this styling-only refinement; no new product
 screenshots or application behavior changes were needed.
+
+## 11.9.3 continuation
+
+The current workspace report and a new [11.9.3 visual report](../../artifacts/releases/v11.9.3.html)
+cover HTML-only browsing, widget/list mode, stable preview revisions, project
+identity editing and project-specific documentation styling. All historical HTML
+pages were reviewed for local links/media, sandbox compatibility and responsive
+layout. Prior version narratives remain historical; their features are not
+silently re-described as the current design. 11.9.2 links forward to 11.9.3.
+
+11.9.3 validation: all 31 version reports plus the atlas passed 64 responsive
+renders at 1280 dark and 390 light, with no overflow, browser exceptions or
+external requests. File pairs, local media and links resolved. Original older
+version-note hashes remain unchanged. The current workspace report also opened
+with Technical notes through actual repository discovery in the isolated UI.

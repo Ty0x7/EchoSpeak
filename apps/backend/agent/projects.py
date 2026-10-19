@@ -57,6 +57,7 @@ class Project(BaseModel):
     """Project schema for structured memory and context."""
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
+    logo_data_url: str = ""
     description: Optional[str] = ""
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -249,14 +250,20 @@ class ProjectManager:
         context_prompt: Optional[str] = None,
         tags: Optional[List[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        logo_data_url: Optional[str] = None,
     ) -> Optional[Project]:
         """Update an existing project."""
         project = self._cache.get(project_id)
         if not project:
             return None
+        project = project.model_copy(deep=True)
         
         if name is not None:
-            project.name = name.strip()
+            from agent.project_identity import display_name
+            project.name = display_name(name)
+        if logo_data_url is not None:
+            from agent.project_identity import logo_data_url as normalize_logo
+            project.logo_data_url = normalize_logo(logo_data_url)
         if description is not None:
             project.description = description
         if context_prompt is not None:
@@ -268,6 +275,7 @@ class ProjectManager:
         
         project.updated_at = datetime.now(timezone.utc).isoformat()
         self._save_project(project)
+        self._cache[project_id] = project
         logger.info(f"Updated project: {project.name} ({project.id})")
         return project
     

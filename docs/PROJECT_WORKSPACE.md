@@ -18,7 +18,8 @@ WATCHLIST/
 
 Use stable topic names and update existing documents. Matching nested paths
 such as `docs/world/roads.md` and `artifacts/world/roads.html` also pair. Markdown
-beside HTML is another supported pairing. Unpaired Markdown stays visible.
+beside HTML is another supported pairing. Work shows HTML only. Unpaired
+Markdown remains available in Files, not as a Work card.
 Source files and original media remain accessible through Files.
 
 Markdown records implementation details, decisions, architecture, source links,
@@ -65,21 +66,52 @@ and conflicting existing files. Other agents use their existing authorized tools
 
 ## Workspace experience and refreshing
 
-Work is a single gallery of HTML/Markdown and native Echo artifacts. Matching
-technical Markdown opens through Technical notes beside the HTML preview, rather
-than a duplicate card. Project creations remain below with their existing library
-link. Files, Conversations, Research, Routines and Activity preserve existing
-project associations. Earlier imported reports are available in a collapsed list.
+Work displays HTML reports from the attached folder and native HTML artifacts.
+The Widgets and List buttons beside Find project work switch between image-led
+cards and compact rows. The preference persists on this device. Other artifact
+kinds stay in the Artifacts library; project creations stay in Creations.
+Matching Markdown opens through Technical notes. Earlier imported reports and
+all supported source/media files remain accessible through Files.
 
-HTML opens in a large sandboxed preview with Source access. Thumbnails use actual
-local images or static HTML with scripts disabled. Original images can be viewed
-and saved through Files. The app's existing theme tokens style the workspace.
+Project sections are Work, Files, Conversations, Research and Routines. The
+project Activity tab and its repeated execution queries were removed; chat
+activity, timing and execution history are retained. Browsing a project does
+not interrupt or rebind its active chat.
 
-The visible workspace refreshes every five seconds and when focus/visibility
-returns. Failed requests retain the last good state and show the error. Metadata
-revisions detect additions, edits, deletion and media changes; open documents
-refresh on a changed revision. Closing the workspace stops its timer. No OS
-watcher, persistent scan database, personal-memory write or model call is involved.
+HTML opens in a large sandboxed preview with Source access. Thumbnails use
+actual local images or static HTML with scripts disabled. Images preserve their
+aspect ratio and are contained inside a full-width preview; HTML thumbnails fit
+the actual card dimensions rather than using a fixed scale. Original images
+remain viewable and downloadable through Files.
+
+The visible workspace polls every five seconds and on focus/visibility return.
+Each report has a revision derived from its own file metadata and bounded local
+media dependencies. Unrelated file changes do not refetch its thumbnail or
+reload its open HTML. Media stays displayed until its replacement has decoded;
+failed refreshes retain the previous usable preview. A changed HTML report does
+reload its own sandboxed document, so its internal scroll can reset. Closing the
+workspace stops polling. No watcher, model call or personal-memory write is used.
+
+The app's theme tokens style the workspace. Report content follows the attached
+project's own visual identity: typography, color, spacing and relevant assets.
+EchoSpeak's visual theme is appropriate for EchoSpeak reports, not an automatic
+template for every project. The optional starter provides structure, not a
+mandatory theme. Imported user-edited skills remain untouched; import revised
+instructions explicitly and approve their changed hash before Echo uses them.
+
+## Project name and logo
+
+On the Projects page, the pencil beside each project's New chat button opens
+Edit project. Change the display name and choose a PNG, JPEG or WebP up to 2 MB,
+or restore the folder icon. This changes EchoSpeak metadata only: the attached
+folder and files are not renamed or moved. Existing records, research, trust,
+model preferences and unrelated metadata are preserved.
+
+The API validates the name and decodes the raster image, rejects oversized or
+invalid images and re-encodes a static thumbnail up to 256 pixels. It accepts no
+remote URLs, SVG or filesystem paths. Logos are stored in the existing local
+project JSON, not uploaded to a media service. Invalid updates leave the prior
+saved project unchanged.
 
 ## Architecture
 
@@ -194,7 +226,7 @@ also passed. There are no automated live-agent or paid-provider calls.
 
 Real agent authoring, large real projects and the installed/packaged Windows app
 still need user evaluation. Active app sessions were not restarted. Source
-version remains 11.9.2; this workflow change does not publish a new installer.
+version is 11.9.3. Source changes do not build or publish a Windows installer.
 
 ## EchoSpeak documentation self-test
 
@@ -214,3 +246,15 @@ This exercises Codex authoring and EchoSpeak's real file discovery/rendering
 against this repository. It does not claim a live Echo conversation, another
 agent's skill invocation or installed Windows application was tested. Existing
 sessions and user data were not modified.
+
+## 11.9.3 verification
+
+Updated 2026-10-19. Focused offline workspace, project-identity, skill and release
+integration checks passed 72 tests; one Windows symlink test was skipped. The
+existing frontend suite passed 153 tests. Type checking, the production build, both skill validators and isolated
+UI checks passed. The UI checks covered HTML filtering, persistent view choice,
+image/HTML framing, unchanged preview/scroll retention, project identity editing
+and modal Escape behavior at desktop, square and phone sizes. All 31 release
+reports and their atlas passed 64 responsive renders with local links/media and
+correct pairing. Full results and limits are in the 11.9.3 release notes. No installed-app session,
+paid model, global agent configuration or publisher certificate was changed.

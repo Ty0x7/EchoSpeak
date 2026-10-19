@@ -136,14 +136,21 @@ def local_reference(url: str, document: str) -> str | None:
     return None if result == ".." or result.startswith(("../", "/")) else result
 
 
-def _html_details(content: str, document: str) -> tuple[str, str]:
+def _html_details(content: str, document: str) -> tuple[str, str, set[str]]:
     from html.parser import HTMLParser
     class Details(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.media = set()
         title = ""
         thumbnail = ""
         in_title = False
         def handle_starttag(self, tag, attrs):
             self.in_title = tag == "title" or self.in_title
+            if tag in {"img", "video", "audio", "source"}:
+                for attr in ("src", "poster"):
+                    local = local_reference(dict(attrs).get(attr) or "", document)
+                    if local and len(self.media) < 100: self.media.add(local)
             if tag == "img" and not self.thumbnail:
                 self.thumbnail = local_reference(dict(attrs).get("src") or "", document) or ""
         def handle_endtag(self, tag):
@@ -152,7 +159,7 @@ def _html_details(content: str, document: str) -> tuple[str, str]:
             if self.in_title: self.title += data
     parser = Details()
     parser.feed(content)
-    return " ".join(parser.title.split())[:120], parser.thumbnail
+    return " ".join(parser.title.split())[:120], parser.thumbnail, parser.media
 
 
 def discover(item) -> dict:
@@ -231,23 +238,36 @@ def discover(item) -> dict:
         mirrored = Path("docs", *path.parts[1:]).with_suffix(".md").as_posix() if path.parts[0] in {"artifacts", "reports"} else ""
         technical = next((p for p in (mirrored, sibling) if p in markdown), "")
         title, thumbnail = "", ""
+        dependencies = set()
         if stat.st_size <= MAX_DOCUMENT:
             try:
                 text, _ = read_file(item, rel)
-                title, thumbnail = _html_details(text[:32000].decode("utf-8-sig", errors="replace"), rel)
+                title, thumbnail, dependencies = _html_details(text.decode("utf-8-sig", errors="replace"), rel)
                 if thumbnail:
                     image = safe_path(root, thumbnail)
                     if image.suffix.lower() not in IMAGES or not image.is_file() or image.stat().st_size > MAX_MEDIA:
                         thumbnail = ""
             except (OSError, ValueError): thumbnail = ""
+        stamps = [f"{rel}:{stat.st_mtime_ns}:{stat.st_size}"]
+        for dependency in sorted(dependencies):
+            try:
+                target = safe_path(root, dependency)
+                if target.suffix.lower() not in MEDIA: continue
+                info = target.stat()
+                stamps.append(f"{dependency}:{info.st_mtime_ns}:{info.st_size}")
+            except (OSError, ValueError):
+                stamps.append(f"{dependency}:unavailable")
+        document_revision = hashlib.sha256("\n".join(stamps).encode()).hexdigest()[:20]
         documents.append({"path": rel, "title": redact_secrets(title) if title else path.stem.replace("-", " ").replace("_", " "),
                           "kind": "html", "markdown": technical, "thumbnail": thumbnail,
+                          "revision": document_revision,
                           "size": stat.st_size, "modified_at": stat.st_mtime})
         if technical: paired.add(technical)
     for rel, suffix, stat in sorted(candidates):
         if suffix == ".md" and rel not in paired:
             documents.append({"path": rel, "title": Path(rel).stem.replace("-", " ").replace("_", " "),
                               "kind": "markdown", "markdown": "", "thumbnail": "",
+                              "revision": f"{stat.st_mtime_ns}:{stat.st_size}",
                               "size": stat.st_size, "modified_at": stat.st_mtime})
     return {"documents": documents, "file_revision": revision, "scan_limited": limited, "scan_error": ""}
 
@@ -307,18 +327,12 @@ def document_html(item, document: str, content: str) -> str:
 def overview(project_id: str) -> dict:
     from agent.lean import artifacts
     from agent.threads import get_thread_manager
-    from agent.state import get_state_store
     from agent.routines import get_routine_manager
     from agent.media_library import get_media_library_store
     item = project(project_id)
     ids = session_ids(project_id)
     earlier_ids = {row.get("artifact_id") for row in item.workspace_records}
     threads = [{"id": t.thread_id, "title": t.title, "at": t.last_active_at} for t in get_thread_manager().list_threads(limit=2000) if t.thread_id in ids]
-    activity = []
-    for session_id in list(ids)[:40]:
-        for run in get_state_store().list_executions(session_id, limit=8):
-            activity.append({"id": run.id if hasattr(run, "id") else run.execution_id, "session_id": session_id,
-                             "status": str(run.status), "objective": str(run.query)[:200]})
     return {"project": {"id": item.id, "name": item.name, "description": item.description, "workspace_root": item.workspace_root,
                         "sharing_enabled": item.workspace_sharing_enabled, "brief": str(item.metadata.get("brief") or "")},
             **discover(item),
@@ -327,8 +341,7 @@ def overview(project_id: str) -> dict:
             "sessions": threads, "research": item.metadata.get("research_findings", []),
             "routines": [{"id": r.id, "name": r.name, "enabled": r.enabled, "session_id": r.session_id, "last_result_status": r.last_result_status} for r in get_routine_manager().list_routines() if r.project_id == project_id or r.session_id in ids],
             "media": [a.model_dump(mode="json") for a in get_media_library_store().list(project_id=project_id, limit=100)
-                      if a.source_kind == "generated" and a.media_kind in {"image", "video"} and not a.archived],
-            "activity": activity[:100]}
+                      if a.source_kind == "generated" and a.media_kind in {"image", "video"} and not a.archived]}
 
 
 def inline_report_images(record: dict, content: str, version: int | None = None) -> str:

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from "react";
 import { RoutinesGroup } from "../settings/SettingsPanel";
 import { ArtifactKindIcon, ARTIFACT_KIND_LABEL } from "../widgets/ArtifactPanel";
 import { AvatarStack } from "./Roster";
+import { ProjectEditor } from "../projects/ProjectEditor";
 import { ShowMore, useShowMore } from "./ShowMore";
 import type { LeanPersona, LeanRoom } from "./types";
 
@@ -23,7 +24,7 @@ export type ArtifactSummary = {
   lines?: number;
 };
 
-type Project = { id: string; name: string; workspace_root?: string; archived?: boolean };
+type Project = { id: string; name: string; workspace_root?: string; archived?: boolean; logo_data_url?: string };
 
 /** Closes the open page and brings the chat back. Provided by the app shell. */
 export const PageCloseContext = createContext<(() => void) | null>(null);
@@ -137,6 +138,7 @@ export function GroupChatsPage({
 const TRASH = <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M5.5 7.5h13M9 7.5V5.7h6v1.8M7.5 7.5l.7 11h7.6l.7-11" /></svg>;
 
 export function ProjectsPage({
+  onUpdate,
   projects,
   chatCounts,
   activeProjectId,
@@ -145,6 +147,7 @@ export function ProjectsPage({
   onNewChat,
   onDelete,
 }: {
+  onUpdate(project: Project, value: { name: string; logo_data_url: string }): Promise<void>;
   projects: Project[];
   chatCounts: Record<string, number>;
   activeProjectId: string;
@@ -153,6 +156,7 @@ export function ProjectsPage({
   onNewChat(project: Project): void;
   onDelete(project: Project): void;
 }) {
+  const [editing, setEditing] = useState<Project | null>(null);
   const shown = projects.filter((p) => !p.archived);
   const more = useShowMore(shown, shown.findIndex((project) => project.id === activeProjectId));
   return (
@@ -161,6 +165,7 @@ export function ProjectsPage({
       lead="Project workspaces for reports, files, research and conversations."
       action={<button type="button" className="es-btn es-btn-primary" onClick={onAdd}>Add folder</button>}
     >
+      {editing ? <ProjectEditor key={editing.id} project={editing} onClose={() => setEditing(null)} onSave={value => onUpdate(editing, value)} /> : null}
       {shown.length === 0 ? (
         <button type="button" className="es-page-empty" onClick={onAdd}>
           <strong>No projects yet</strong>
@@ -175,7 +180,7 @@ export function ProjectsPage({
               <div key={project.id} className={`es-page-row${project.id === activeProjectId ? " is-active" : ""}`}>
                 <button type="button" className="es-page-row-main" onClick={() => onOpen(project)}>
                   <span className="es-row-tile is-folder" aria-hidden>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2h8.8A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /></svg>
+                    {project.logo_data_url ? <img src={project.logo_data_url} alt="" /> : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4.2l2 2h8.8A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z" /></svg>}
                   </span>
                   <span className="es-page-row-text">
                     <strong>{project.name}</strong>
@@ -186,6 +191,7 @@ export function ProjectsPage({
                 <button type="button" className="es-icon-btn" title="New chat in this project" aria-label={`New chat in ${project.name}`} onClick={() => onNewChat(project)}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
                 </button>
+                <button type="button" className="es-icon-btn" title="Edit project" aria-label={`Edit ${project.name}`} onClick={() => setEditing(project)}><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="m15 4 5 5M4 20l5-1L20 8a2 2 0 0 0-5-5L4 14z"/></svg></button>
                 <button type="button" className="es-icon-btn" title="Remove project" aria-label={`Remove ${project.name}`} onClick={() => {
                   if (window.confirm(`Remove the project “${project.name}”? Its chats are kept, and the folder on disk is not touched.`)) onDelete(project);
                 }}>{TRASH}</button>

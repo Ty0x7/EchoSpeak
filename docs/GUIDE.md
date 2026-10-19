@@ -122,8 +122,8 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
 
 ### Projects and coding
 
-- Selecting a project opens its visual workspace: one Work gallery, Files, Conversations, Research, Routines and Activity. Opening a conversation restores that existing chat; browsing a project does not change the active chat's scope or stop its background work.
-- Project workspaces discover HTML reports and technical Markdown directly from the attached folder, pair related documents and refresh while visible. Earlier imported reports remain available. Settings → Skills offers project-documentation for review and approval. See [Project documentation and visual workspace](PROJECT_WORKSPACE.md) for conventions and supported agent setup.
+- Selecting a project opens its visual workspace: HTML-only Work with Widgets/List views, Files, Conversations, Research and Routines. Opening a conversation restores that existing chat; browsing a project does not change the active chat's scope or stop its background work.
+- Project workspaces discover HTML reports directly from the attached folder, pair their technical Markdown and refresh while visible without reloading unchanged previews. Other Markdown and earlier imported reports stay in Files. The pencil beside a project's new-chat button edits its display name and logo without moving its folder. Settings → Skills offers project-documentation for review and approval. See [Project documentation and visual workspace](PROJECT_WORKSPACE.md) for conventions and supported agent setup.
 - Drop a folder on the composer (or **Projects › Attach folder**) to work inside it. File tools
   only reach the attached folder.
 - Every file overwrite is checkpointed and can be undone.
