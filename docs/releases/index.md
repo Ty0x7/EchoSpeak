@@ -91,3 +91,9 @@ present, and 62 dark-desktop/light-mobile renders passed without overflow,
 browser exceptions or external requests. The focused workspace suite passed
 41 tests with one Windows symlink test skipped. Installed-app and real-provider
 behavior were not exercised by this documentation check.
+
+The final visual pass keeps compact headings, uses editorial release rows in
+the overview, softens diagram surfaces and removes unnecessary boxes around
+change lists. Historical context folds by default. The same 62 responsive
+previews passed again after this styling-only refinement; no new product
+screenshots or application behavior changes were needed.
