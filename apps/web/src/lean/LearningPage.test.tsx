@@ -35,10 +35,10 @@ const overview = (data: Parameters<typeof Overview>[0]["data"]) =>
 describe("Learning overview", () => {
   it("is honest and helpful with no data", () => {
     const html = overview({ status: status(0), profiles, lessons: [], recent: [] });
-    expect(html).toContain("Nothing to judge yet");
-    expect(html).toContain("No lessons yet");
-    expect(html).toContain("Nothing recorded yet");
-    expect(html).not.toContain("Needs your feedback");
+    expect(html.includes("Nothing to judge yet")).toBe(true);
+    expect(html.includes("No lessons yet")).toBe(true);
+    expect(html.includes("Nothing recorded yet")).toBe(true);
+    expect(html.includes("Needs your feedback")).toBe(false);
   });
 
   it("shows at most three items per section, with View all", () => {
@@ -47,8 +47,8 @@ describe("Learning overview", () => {
     const html = overview({ status: status(300, { probation: 120 }), profiles, lessons, recent });
     expect(count(html, "es-lx-card is-probation")).toBe(3);
     expect(count(html, "Task ")).toBe(3);
-    expect(html).toContain("View all 120");
-    expect(html).toContain("View all 300");
+    expect(html.includes("View all 120")).toBe(true);
+    expect(html.includes("View all 300")).toBe(true);
   });
 
   it("puts lessons waiting for review first in Needs your feedback", () => {
@@ -56,20 +56,20 @@ describe("Learning overview", () => {
     const recent = [episode(1, { verified_success: false, level: 1, outcome: "answered" })];
     const html = overview({ status: status(1, { pending_review: 1, probation: 1 }), profiles, lessons, recent });
     const feedback = html.slice(html.indexOf("Needs your feedback"), html.indexOf("What Echo learned"));
-    expect(feedback.indexOf("Check prices twice")).toBeLessThan(feedback.indexOf("Did this work?"));
+    expect(feedback.indexOf("Check prices twice") < feedback.indexOf("Did this work?")).toBe(true);
   });
 
   it("says when there isn't enough evidence yet instead of claiming improvement", () => {
     const tested = lesson(1, { uses: 4, wins: 3, losses: 1, held_wins: 1, held_losses: 1 });
     const html = overview({ status: status(5, { probation: 1 }), profiles, lessons: [tested], recent: [episode(1)] });
-    expect(html).toContain("Too early to tell");
-    expect(_learningText.lessonLine(tested)).toContain("Not enough evidence yet");
+    expect(html.includes("Too early to tell")).toBe(true);
+    expect(_learningText.lessonLine(tested).includes("Not enough evidence yet")).toBe(true);
   });
 
   it("reports the control comparison once there is enough of it", () => {
     const better = lesson(1, { uses: 5, wins: 4, losses: 1, held_wins: 1, held_losses: 2, status: "established" });
     const html = overview({ status: status(8, { established: 1 }), profiles, lessons: [better], recent: [episode(1)] });
-    expect(html).toContain("1 of 1 tested lessons help");
+    expect(html.includes("1 of 1 tested lessons help")).toBe(true);
     expect(_learningText.lessonLine(better)).toBe("Helps: 4 of 5 checked tasks worked with it, 1 of 3 without it.");
   });
 });
@@ -79,36 +79,36 @@ describe("Learning records", () => {
     const worker = episode(1, { role: "worker", source: "swarm", verified_success: false, level: 1 });
     expect(_learningText.wantsFeedback(worker)).toBe(false);
     const html = renderToStaticMarkup(<ExperienceDetail episode={worker} lessonById={new Map()} api={api} act={act} go={go} back={go} />);
-    expect(html).toContain("research worker");
-    expect(html).not.toContain("Did this work?");
+    expect(html.includes("research worker")).toBe(true);
+    expect(html.includes("Did this work?")).toBe(false);
   });
 
   it("explains what was checked in plain words, and offers feedback on an unchecked reply", () => {
     const unchecked = episode(2, { verified_success: false, level: 1, outcome: "answered" });
     expect(_learningText.outcomeOf(unchecked).label).toBe("Done, but not checked");
     const html = renderToStaticMarkup(<ExperienceDetail episode={unchecked} lessonById={new Map()} api={api} act={act} go={go} back={go} />);
-    expect(html).toContain("Tools ran and worked, but nothing checked the result afterwards.");
-    expect(html).toContain("Did this work?");
+    expect(html.includes("Tools ran and worked, but nothing checked the result afterwards.")).toBe(true);
+    expect(html.includes("Did this work?")).toBe(true);
   });
 
   it("pages long lesson lists instead of rendering them all", () => {
     const lessons = Array.from({ length: 45 }, (_, i) => lesson(i, { uses: 1 }));
     const html = renderToStaticMarkup(<LessonList data={{ status: status(0), profiles, lessons, recent: [] }} names={names} go={go} back={go} />);
     expect(count(html, "es-lx-card ")).toBe(20);
-    expect(html).toContain("Page 1 of 3");
+    expect(html.includes("Page 1 of 3")).toBe(true);
   });
 
   it("review list shows everything waiting, and says when nothing is", () => {
     const empty = renderToStaticMarkup(<ReviewList data={{ status: status(0), profiles, lessons: [], recent: [] }} go={go} back={go} />);
-    expect(empty).toContain("All caught up");
+    expect(empty.includes("All caught up")).toBe(true);
   });
 
   it("guide links to real records and marks its example as an example", () => {
     const html = renderToStaticMarkup(<Guide data={{ status: status(1), profiles, lessons: [lesson(1)], recent: [episode(1)] }}
       lessonById={new Map()} go={go} back={go} />);
-    expect(html).toContain("Task 1");
-    expect(html).toContain("Lesson 1");
-    expect(html).toContain("Example, not your data");
-    expect(html).toContain("Learning is different from memory");
+    expect(html.includes("Task 1")).toBe(true);
+    expect(html.includes("Lesson 1")).toBe(true);
+    expect(html.includes("Example, not your data")).toBe(true);
+    expect(html.includes("Learning is different from memory")).toBe(true);
   });
 });
