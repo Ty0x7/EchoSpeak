@@ -176,6 +176,12 @@ class LeanSession:
             try:
                 return self._run_locked(message, persona_id=persona_id)
             finally:
+                try:
+                    # Instructions sent too late for this turn (or before Stop) become queued follow-ups.
+                    from agent.lean import steering
+                    steering.to_queue(self.session_id)
+                except Exception:
+                    logger.warning("Could not move unread steering to the queue", exc_info=True)
                 with _LOCKS_GUARD:
                     _ACTIVITY["running"] -= 1
                     _ACTIVITY["last_end"] = time.time()

@@ -27,6 +27,7 @@ export const LEAN_EVENT_TYPES = new Set([
   "approval_held",
   "auto_approved",
   "fail_streak",
+  "steer_applied",
 ]);
 
 /** Only numeric facts (results, pages, products) are kept from a step's meta. */
@@ -232,6 +233,12 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
           },
         ],
       }));
+    case "steer_applied":
+      // The user's words, joined to this run at a safe checkpoint.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [...closeThinking(m.segments, at), { kind: "note", step: Number(evt.step || 0), text: `You added: ${String(evt.text || "")}`, at }],
+      }));
     case "auto_approved":
       return patchMessage(state, id, (m) => ({
         ...m,
@@ -295,6 +302,7 @@ export function messageFromTimeline(args: {
     }
     else if (row?.kind === "text") segments.push({ kind: "text", step, text: String(row.text || "") });
     else if (row?.kind === "note") segments.push({ kind: "note", step, text: String(row.text || "") });
+    else if (row?.kind === "steer") segments.push({ kind: "note", step, text: `You added: ${String(row.text || "")}` });
     else if (row?.kind === "tool")
       segments.push({
         kind: "tool",

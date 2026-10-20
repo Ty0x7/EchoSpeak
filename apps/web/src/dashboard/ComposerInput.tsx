@@ -28,14 +28,21 @@ type ComposerInputProps = {
   providerInfo: ProviderInfo | null;
   /** Thinking, dictation, voice and options: the row under the text box, inside the card. */
   toolbar?: React.ReactNode;
+  /** An agent is working in this chat: Enter queues a follow-up, Steer (Ctrl+Enter) joins the running turn. */
+  busy?: boolean;
+  onSteer?(): void;
+  /** Shown above the text box: queued follow-ups. */
+  queue?: React.ReactNode;
 };
 
 export function ComposerInput({ threads, projects, activeThreadId, activeProjectId, threadState,
   providerError, folderPathFromDrop, attachFolder, onRemoveFolder, textareaRef, input, onInput, onSend,
-  activeRoom, roomMembers, mention, setMention, messages, providerInfo, toolbar }: ComposerInputProps) {
+  activeRoom, roomMembers, mention, setMention, messages, providerInfo, toolbar, busy, onSteer, queue }: ComposerInputProps) {
   const [folderDropActive, setFolderDropActive] = useState(false);
+  const agentName = activeRoom?.kind === "group" ? "The team" : roomMembers[0]?.name || "Echo";
   return (
                     <div className="input-row">
+                      {queue}
                       <div className="composer-input-stack composer-card">
                         <div
                           className={"session-folder-strip" + (folderDropActive ? " is-drop-active" : "")}
@@ -140,13 +147,16 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                             }
                             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                               e.preventDefault();
-                              void onSend();
+                              if (busy && onSteer && (e.ctrlKey || e.metaKey)) void onSteer();
+                              else void onSend();
                             }
                           }}
                           onBlur={() => window.setTimeout(() => setMention(null), 120)}
                           placeholder={
                             !activeThreadId
                               ? "Create a Session with + to chat"
+                              : busy
+                              ? `${agentName} is working · Enter queues a follow-up · Ctrl+Enter steers it now`
                               : activeRoom?.kind === "group"
                               ? `Message ${activeRoom.name}  ·  @ to pick who answers`
                               : activeRoom
@@ -174,13 +184,25 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                         <span className="composer-spacer" />
                       <div className="composer-trailing">
                         <ContextMeter messages={messages} contextWindow={providerInfo?.context_window || 0} model={providerInfo?.model} />
+                        {busy && onSteer ? (
+                          <button
+                            type="button"
+                            className="composer-steer"
+                            onClick={() => void onSteer()}
+                            disabled={!input.trim()}
+                            title={`Steer (Ctrl+Enter): ${agentName} reads this at its next step and keeps the work done so far`}
+                          >
+                            Steer
+                          </button>
+                        ) : null}
                         <button
                           className="send-button"
                           onClick={() => void onSend()}
                           type="button"
                           disabled={!activeThreadId || !input.trim()}
-                          title="Send"
-                          aria-label="Send message"
+                          title={busy ? "Queue: runs after this reply (Enter)" : "Send"}
+                          aria-label={busy ? "Queue follow-up" : "Send message"}
+                          data-mode={busy ? "queue" : "send"}
                         >
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
                             <path d="M5 12L19 12M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />

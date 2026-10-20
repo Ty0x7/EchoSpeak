@@ -91,6 +91,16 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
 - **Think** and effort controls follow the selected model and adapter. Unsupported
   thinking controls are disabled. Models that always think cannot turn thinking off.
 
+### Talking to an agent while it works
+
+- The box stays usable while an agent works. **Enter queues a follow-up**: it waits above the box
+  and runs as its own message when the current reply ends. Edit or remove it before then.
+- **Steer** (the button, or **Ctrl+Enter**) adds to the work in progress. The agent reads it at its
+  next step (never in the middle of a command or search), keeps what it has already done, and the
+  message shows "You added: …". If it had already finished, the steer is queued instead.
+- **Stop** stops the reply and pauses the queue: queued messages wait for **Run next** or your next
+  message instead of starting by themselves.
+
 ### Agents and group chats
 
 - Built-in agents: **Echo** (everything), **Jarvis** (research and memory) and **Glados**

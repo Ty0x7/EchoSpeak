@@ -29,7 +29,7 @@ from loguru import logger
 
 from agent.lean import policy, settings
 from agent.lean import quarantine, tool_outputs, tracing
-from agent.lean import approvals
+from agent.lean import approvals, steering
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, outbound
 from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, is_promise_without_action,
@@ -281,6 +281,8 @@ class LeanTurn:
                 success = False
                 break
             step += 1
+            # Safe checkpoint: tool results are in, the next model call hasn't started.
+            self._absorb_steering(messages, step)
             if getattr(self.toolbox, "schema_version", 0) != tools_version:
                 # find_tools loaded connected-app tools in the last step.
                 tools_version = self.toolbox.schema_version
@@ -357,6 +359,10 @@ class LeanTurn:
                         check_nudges += 1
                         messages.append({"role": "user", "content": check_nudge(list(self._unchecked))})
                         self.emit({"type": "check_nudge", "step": step, "files": list(self._unchecked)[:5]})
+                        self._retract_text(step)
+                        continue
+                    if self._absorb_steering(messages, step):
+                        # The user added something while this answer was written: keep going with it.
                         self._retract_text(step)
                         continue
                     final_text = content.strip()
@@ -749,6 +755,25 @@ class LeanTurn:
     def _note_source(self, name: str, args: dict[str, Any], ok: bool) -> None:
         if ok and policy.is_untrusted_source(name, self.toolbox.entry(name), args) and name not in self.taint:
             self.taint.append(name)
+
+    def _absorb_steering(self, messages: list[dict[str, Any]], step: int) -> bool:
+        """Add instructions the user sent during this run (agent/lean/steering.py). True when any arrived."""
+        rows = steering.take(self.session_id)
+        if not rows:
+            return False
+        text = steering.as_user_text(rows)
+        last = messages[-1] if messages else {}
+        if last.get("role") in {"tool", "user"}:
+            # Appended, not a new message: some chat templates (Gemma) need strict alternation.
+            last["content"] = f"{last.get('content') or ''}\n\n{text}"
+        else:
+            messages.append({"role": "user", "content": text})
+        for row in rows:
+            self.timeline.append({"kind": "steer", "step": step, "text": row["text"], "at": time.time()})
+            self.emit({"type": "steer_applied", "step": step, "id": row["id"], "text": row["text"][:2000]})
+        if self.goal:
+            self.goal = f"{self.goal}\n(The user added: {' / '.join(r['text'] for r in rows)[:600]})"
+        return True
 
     def _auto_note(self, step: int, text: str) -> None:
         """A visible line in the message for an approval that didn't need the owner this time."""

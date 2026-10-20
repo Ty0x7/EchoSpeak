@@ -1663,6 +1663,34 @@ class StateStore:
             )
             return [dict(item) for item in list(state.queued_turns or [])]
 
+    def update_queued_turn(self, thread_id: Optional[str], client_request_id: str, *, message: Optional[str] = None,
+                           remove: bool = False) -> Optional[dict[str, Any]]:
+        """Edit or remove a follow-up that hasn't started. None when it's gone (already claimed)."""
+        key = str(thread_id or "default").strip() or "default"
+        with self._lock:
+            state = self._thread_state.get(key)
+            if state is None:
+                return None
+            pending = [dict(item) for item in list(state.queued_turns or [])]
+            index = next((i for i, item in enumerate(pending)
+                          if str(item.get("client_request_id") or "") == str(client_request_id or "")), None)
+            if index is None:
+                return None
+            item = pending[index]
+            if remove:
+                pending.pop(index)
+            else:
+                text = str(message or "").strip()
+                if not text:
+                    raise ValueError("A queued message can't be empty; remove it instead.")
+                item["message"] = text[:50000]
+                pending[index] = item
+            state.queued_turns = pending
+            state.updated_at = time.time()
+            self._thread_state[key] = state
+            self._persist_thread_state()
+            return item
+
     def claim_queued_turn(self, thread_id: Optional[str]) -> Optional[dict[str, Any]]:
         """Atomically remove and return the oldest queued follow-up."""
         key = str(thread_id or "default").strip() or "default"

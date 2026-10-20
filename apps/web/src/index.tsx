@@ -28,6 +28,7 @@ import { LeanMessage } from "./lean/LeanMessage";
 import { ChatFollower } from "./app/chatFollow";
 import { isLeanEvent } from "./lean/liveReducer";
 import { useLeanLive } from "./lean/useLeanLive";
+import { FollowUpQueue, useFollowUps } from "./lean/FollowUps";
 import { LiveStatusPill } from "./lean/LiveStatus";
 import { leanApi } from "./lean/api";
 import { AgentRows, CollapsedRoster } from "./lean/Roster";
@@ -150,6 +151,8 @@ export const Dashboard: React.FC<{
   const [activeThreadId, setActiveThreadId] = useState<string>(() => desktopBootstrap?.active_session_id || "");
   // ── Lean runtime: live turn, agent roster, rooms ──
   const lean = useLeanLive(activeThreadId);
+  // Queued follow-ups and steering while an agent works (lean/FollowUps.tsx).
+  const followUps = useFollowUps(apiBase, activeThreadId);
   const leanClient = useMemo(() => leanApi(apiBase), [apiBase]);
   const searchChats = useCallback((query: string) => leanClient.searchChats(query), [leanClient]);
   const [agents, setAgents] = useState<LeanPersona[]>([]);
@@ -855,6 +858,8 @@ export const Dashboard: React.FC<{
     // invent a Session.
     const streamThreadId = String(recovery?.session || activeThreadIdRef.current || activeThreadId || "").trim();
     if (!streamThreadId) return;
+    // A new message after Stop un-pauses that chat's queue.
+    if (!recovery) followUps.resume(streamThreadId);
     const appendTurnMessage = (message: Message) => {
       const visible = activeThreadIdRef.current === streamThreadId;
       const cached = sessionProjectionRef.current.get(streamThreadId);
@@ -1174,6 +1179,9 @@ export const Dashboard: React.FC<{
       }
       if (finalHandled && !aborted && sameThread) {
         window.setTimeout(async () => {
+          // Steers that arrived too late were queued by the backend; show them either way.
+          void followUps.refresh(streamThreadId);
+          if (followUps.isPaused(streamThreadId)) return;
           try {
             const response = await fetch(
               `${apiBase}/query/queue/claim?thread_id=${encodeURIComponent(streamThreadId)}`,
@@ -1222,7 +1230,35 @@ export const Dashboard: React.FC<{
   const stopActiveTurn = () => {
     stopTts();
     setVoicePhase("idle");
-    cancelSessionTurn(activeThreadIdRef.current || activeThreadId, true);
+    const session = activeThreadIdRef.current || activeThreadId;
+    // Stop means stop: queued follow-ups wait until you run them, instead of starting by themselves.
+    followUps.pause(session);
+    cancelSessionTurn(session, true);
+    window.setTimeout(() => void followUps.refresh(session), 800);
+  };
+
+  /** Enter while an agent works: the message waits for this turn to end instead of cancelling it. */
+  const queueFromComposer = async () => {
+    const session = activeThreadIdRef.current || activeThreadId;
+    if (await followUps.queue(input, session)) setInput("");
+  };
+  /** Steer: the running turn reads it at its next step and keeps what it has done. */
+  const steerFromComposer = async () => {
+    const session = activeThreadIdRef.current || activeThreadId;
+    if ((await followUps.steer(input, session)) !== "failed") setInput("");
+  };
+  const runNextQueued = async () => {
+    const session = activeThreadIdRef.current || activeThreadId;
+    followUps.resume(session);
+    try {
+      const response = await fetch(`${apiBase}/query/queue/claim?thread_id=${encodeURIComponent(session)}`, { method: "POST" });
+      if (!response.ok) return;
+      const payload = await response.json();
+      const message = String(payload?.item?.message || "").trim();
+      if (payload?.claimed && message && activeThreadIdRef.current === session) void sendText(message);
+    } finally {
+      void followUps.refresh(session);
+    }
   };
   // Esc stops the running turn unless a menu or picker is using it.
   useEffect(() => {
@@ -1241,6 +1277,8 @@ export const Dashboard: React.FC<{
     if (!sessionId || streaming || streamControllersRef.current.has(sessionId)) return;
     let cancelled = false;
     const resumeQueued = async () => {
+      void followUps.refresh(sessionId);
+      if (followUps.isPaused(sessionId)) return;
       try {
         const response = await fetch(
           `${apiBase}/query/queue/claim?thread_id=${encodeURIComponent(sessionId)}`,
@@ -1951,7 +1989,12 @@ export const Dashboard: React.FC<{
                         setActiveProjectId(""); setThreadState(data.thread_state || null);
                         setThreads(items => items.map(item => item.id === activeThreadId ? { ...item, projectId: "" } : item));
                       }}
-                      textareaRef={textareaRef} input={input} onInput={updateComposerInput} onSend={() => void sendText()}
+                      textareaRef={textareaRef} input={input} onInput={updateComposerInput}
+                      onSend={() => void (streaming ? queueFromComposer() : sendText())}
+                      busy={streaming} onSteer={() => void steerFromComposer()}
+                      queue={<FollowUpQueue items={followUps.items} paused={followUps.paused} notice={followUps.notice} busy={streaming}
+                        onEdit={(id, message) => void followUps.edit(id, message)} onRemove={(id) => void followUps.remove(id)}
+                        onResume={() => void runNextQueued()} />}
                       activeRoom={activeRoom} roomMembers={roomMembers} mention={mention} setMention={setMention}
                       messages={messages} providerInfo={providerInfo}
                       toolbar={

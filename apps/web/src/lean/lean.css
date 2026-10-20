@@ -664,6 +664,40 @@
 .echo-root.echo-root .send-button:hover:not(:disabled) { background: var(--es-emph); transform: translateY(-0.5px); }
 .echo-root.echo-root .send-button:active:not(:disabled) { transform: scale(0.96); }
 .echo-root.echo-root .send-button:disabled { background: var(--es-surface-3); color: var(--es-faint); box-shadow: var(--es-sheen); opacity: 1; }
+/* While an agent works: Send queues (quieter), Steer is a text button beside it. */
+.echo-root.echo-root .send-button[data-mode="queue"]:not(:disabled) { background: var(--es-surface-3); color: var(--es-text); }
+.echo-root.echo-root .composer-steer {
+  height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--es-emph);
+  font: 600 12px var(--es-font);
+  cursor: pointer;
+}
+.echo-root.echo-root .composer-steer:hover:not(:disabled) { background: rgba(var(--es-wash-rgb), calc(0.06 * var(--es-wash-k))); }
+.echo-root.echo-root .composer-steer:disabled { color: var(--es-faint); cursor: default; }
+
+/* Queued follow-ups, above the composer card. */
+.lm-queue { display: grid; gap: 4px; margin: 0 auto 8px; width: 100%; max-width: 760px; font: 500 12px/1.4 var(--es-font); }
+.lm-queue-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--es-faint); font: 650 9.5px/1 var(--es-font); letter-spacing: 0.1em; text-transform: uppercase; padding: 0 4px; }
+.lm-queue-note { color: var(--es-dim); padding: 0 4px; }
+.lm-queue-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--es-line);
+  border-radius: 10px;
+  background: rgba(var(--es-surface-rgb), 0.9);
+  color: var(--es-text);
+}
+.lm-queue-index { flex: 0 0 auto; width: 18px; color: var(--es-faint); font: 500 11px var(--es-mono); text-align: center; }
+.lm-queue-text { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lm-queue-edit { display: flex; flex: 1 1 auto; gap: 6px; min-width: 0; }
+.lm-queue-edit input { flex: 1 1 auto; min-width: 0; padding: 4px 8px; border: 1px solid var(--es-line-2); border-radius: 8px; background: var(--es-surface-2); color: var(--es-text); font: inherit; }
 .echo-root.echo-root .mic-button,
 .echo-root.echo-root .composer-square {
   border-radius: 10px;

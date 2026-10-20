@@ -26,6 +26,28 @@ describe("lean live reducer", () => {
     expect(msg.status).toBe("done");
   });
 
+  it("shows steering, autonomous approvals and held actions inside the running message", () => {
+    const state = run([
+      { type: "run_start", request_id: "r1", execution_id: "e1", autonomous: true },
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "auto_approved", ...base, step: 1, note: "Allowed automatically (autonomous mode): Control the mouse and keyboard" },
+      { type: "approval_held", ...base, step: 2, tool_call_id: "c9", tool: "file_delete", summary: "Delete notes.txt", reason: "this can delete or overwrite work" },
+      { type: "steer_applied", ...base, step: 3, id: "s1", text: "only under $1000" },
+    ]);
+    expect(state.autonomous).toBe(true);
+    const segs = state.messages.m1.segments;
+    expect(segs.map((s) => s.kind)).toEqual(["note", "approval", "note"]);
+    expect((segs[1] as { decision: string }).decision).toBe("held");
+    expect((segs[2] as { text: string }).text).toBe("You added: only under $1000");
+    // Reloaded from the saved timeline, a steer reads the same.
+    const saved = messageFromTimeline({ messageId: "m1", agentId: "echo", agentName: "Echo", text: "Done", at: 1, timeline: [
+      { kind: "steer", step: 3, text: "only under $1000" },
+      { kind: "approval", step: 2, id: "held_1", tool: "file_delete", summary: "Delete notes.txt", reason: "x", decision: "held" },
+    ] });
+    expect(saved.segments.some((s) => s.kind === "note" && (s as { text: string }).text === "You added: only under $1000")).toBe(true);
+    expect(saved.segments.some((s) => s.kind === "approval" && (s as { decision: string }).decision === "held")).toBe(true);
+  });
+
   it("shows which model smart model choice picked, and why, under the reply", () => {
     const note = "Model: qwen3.6 (ollama) instead of gemma-4 (lmstudio). qwen3.6: 9 of 10 coding tasks done with proof here.";
     const state = run([
