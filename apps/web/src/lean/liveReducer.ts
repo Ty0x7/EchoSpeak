@@ -1,4 +1,4 @@
-import type { LeanEvent, LeanLiveState, LeanMessageData, LeanSegment } from "./types";
+import type { LeanEvent, LeanLiveState, LeanMessageData, LeanSegment, WorkersState } from "./types";
 
 /** Event types produced by the lean runtime. Anything else is legacy. */
 export const LEAN_EVENT_TYPES = new Set([
@@ -28,6 +28,7 @@ export const LEAN_EVENT_TYPES = new Set([
   "auto_approved",
   "fail_streak",
   "steer_applied",
+  "tool_state",
 ]);
 
 /** Only numeric facts (results, pages, products) are kept from a step's meta. */
@@ -167,6 +168,14 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
             startedAt: at,
           },
         ],
+      }));
+    case "tool_state":
+      // Structured live state under a tool's row (research workers); kept after the tool ends.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: m.segments.map((s) =>
+          s.kind === "tool" && s.id === evt.id && evt.state && typeof evt.state === "object" ? { ...s, state: evt.state as WorkersState } : s
+        ),
       }));
     case "tool_progress":
       return patchMessage(state, id, (m) => ({
@@ -318,6 +327,7 @@ export function messageFromTimeline(args: {
         doneLabel: row.done_label ? String(row.done_label) : undefined,
         summary: row.summary ? String(row.summary) : undefined,
         meta: numericMeta(row.meta),
+        ...(row.state && typeof row.state === "object" && row.state.kind === "workers" ? { state: row.state as WorkersState } : {}),
       });
     else if (row?.kind === "approval")
       segments.push({

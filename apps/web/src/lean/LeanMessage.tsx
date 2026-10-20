@@ -4,6 +4,7 @@ import { safeMarkdownComponents } from "../widgets/SafeImage";
 import remarkGfm from "remark-gfm";
 import { RichMarkdown } from "../widgets/RichMarkdown";
 import { WidgetView } from "../widgets/WidgetView";
+import { WorkersCard } from "./WorkersCard";
 import { groupSteps, phaseOf, stepsSummary, type ToolSeg } from "./steps";
 import type { LeanMessageData, LeanSegment } from "./types";
 
@@ -352,6 +353,7 @@ export function LeanMessage({
               <React.Fragment key={item.key}>
                 {item.tools.length > 1 ? <StepGroup tools={item.tools} /> : <ToolRow seg={item.tools[0]} />}
                 {cards.map((widget, k) => <WidgetView key={k} widget={widget} />)}
+                {item.tools.map((tool) => (tool.state?.kind === "workers" ? <WorkersCard key={`w${tool.id}`} state={tool.state} /> : null))}
               </React.Fragment>
             );
           }

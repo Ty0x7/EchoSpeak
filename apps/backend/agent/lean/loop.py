@@ -262,7 +262,8 @@ class LeanTurn:
         messages.append({"role": "user", "content": user_message})
         self._goal = user_message  # what the quarantined reader extracts facts for
 
-        max_steps = settings.max_iterations()
+        # A research worker gets its own, smaller step budget (agent/lean/swarm.py).
+        max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
         call_counts: dict[str, int] = {}
         stop_reason = ""
         nudges = 0
@@ -902,7 +903,15 @@ class LeanTurn:
                     item["detail"] = text
             self.emit({"type": "tool_progress", "step": step, "id": call.id, "text": text})
 
-        with self._span("tool.run", step=step, tool=name) as span, progress.reporting(emit, cancel=self.cancel):
+        def emit_state(state: dict) -> None:
+            # A live card under the tool's row (research workers); kept in the timeline for reloads.
+            for item in self.timeline:
+                if item.get("kind") == "tool" and item.get("id") == call.id:
+                    item["state"] = state
+            self.emit({"type": "tool_state", "step": step, "id": call.id, "state": state})
+
+        with self._span("tool.run", step=step, tool=name) as span, \
+                progress.reporting(emit, cancel=self.cancel, emit_state=emit_state, spans=self._span):
             result = self.toolbox.run(name, args)
             span.set(ok=bool(result.ok), output_chars=len(result.output or ""))
             if not result.ok:

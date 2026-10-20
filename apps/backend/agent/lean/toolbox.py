@@ -34,7 +34,7 @@ TOOLSETS: dict[str, list[str]] = {
         "create_media", "creation_status",
     ],
     # Looking things up on the web.
-    "web": ["web_search", "safe_web_fetch", "youtube_transcript", "research_notebook"],
+    "web": ["web_search", "safe_web_fetch", "youtube_transcript", "research_notebook", "spawn_workers"],
     # Live data and media shown as cards.
     "live": [
         "weather_live", "sports_live", "browse_task",

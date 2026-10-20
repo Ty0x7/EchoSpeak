@@ -914,6 +914,9 @@ class LeanSession:
         if read_only:
             # Planning turns: look things up, but nothing that changes state.
             toolbox.restrict_to_read_only()
+        if "spawn_workers" in toolbox.native:
+            # Workers get a subset of exactly this toolbox: never more than their lead.
+            toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]
         # Recall from what is actually being asked (the user's request, plus the task this
         # agent was given), never from a "[System]: ..." brief full of boilerplate words.
         goal = self._goal(message, task)
@@ -1047,6 +1050,11 @@ class LeanSession:
         tools.extend(research_tools(self.session_id))
         from agent.generation_service import generation_tools
         tools.extend(generation_tools(self.session_id, self.execution_id))
+        # Research swarm (agent/lean/swarm.py): only the agent answering the user leads workers;
+        # workers and teammates never spawn more. Off unless Settings › Agent › Research workers is on.
+        if depth == 0 and settings.research_swarm() and self.caller_role == "owner":
+            from agent.lean import swarm
+            tools.append(swarm.tool(self, persona))
 
         # Work-together groups: the lead turns a decision into owned tasks on the shared board.
         if allow_assign and self.job is not None:

@@ -474,6 +474,9 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
             and lists them for you at the end. Permissions, Blocked apps, Private mode and Stop still apply.
           </div>
         ) : null}
+        <Row label="Research workers" help="For broad research, the agent can send up to 6 read-only workers to look things up at the same time, then writes the answer itself. Uses more tokens; on a local model they run one or two at a time. Off until you've seen it help with your models (Echo bench: --swarm).">
+          <Toggle checked={asBool(s.lean_research_swarm)} onChange={(v) => save({ lean_research_swarm: v })} label="Research workers" />
+        </Row>
         <Row label="Separate reader for outside content" help="A web page, email or app result goes first to a reader with no tools, and the agent sees only the facts it found. Lowers the chance hidden instructions work, and tells you when content tried. Costs one extra model call per result.">
           <Segmented
             value={String(s.lean_quarantine_reader || "messages")}

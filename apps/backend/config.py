@@ -1005,6 +1005,11 @@ class Config:
         # Lean runtime controls (Settings > Agent).
         self.lean_approval_mode = os.getenv("LEAN_APPROVAL_MODE", "smart").strip().lower() or "smart"
         self.lean_max_iterations = int(os.getenv("LEAN_MAX_ITERATIONS", "60") or 60)
+        # Research swarm (agent/lean/swarm.py): off until measured to help with your models.
+        self.lean_research_swarm = os.getenv("LEAN_RESEARCH_SWARM", "false").strip().lower() in {"1", "true", "yes", "on"}
+        self.lean_swarm_token_budget = int(os.getenv("LEAN_SWARM_TOKEN_BUDGET", "120000") or 120000)
+        self.lean_swarm_local_parallel = int(os.getenv("LEAN_SWARM_LOCAL_PARALLEL", "1") or 1)
+        self.lean_swarm_cloud_parallel = int(os.getenv("LEAN_SWARM_CLOUD_PARALLEL", "4") or 4)
         # Quarantined reader (agent/lean/quarantine.py): "off", "messages" (email, Discord,
         # connected apps) or "all" (also web pages and documents). One extra model call per result.
         self.lean_quarantine_reader = os.getenv("LEAN_QUARANTINE_READER", "messages").strip().lower() or "messages"
@@ -1554,6 +1559,10 @@ class Config:
             "terminal_docker_network",
             "lean_approval_mode",
             "lean_max_iterations",
+            "lean_research_swarm",
+            "lean_swarm_token_budget",
+            "lean_swarm_local_parallel",
+            "lean_swarm_cloud_parallel",
             "lean_quarantine_reader",
             "trace_export_url",
             "computer_native_tools",

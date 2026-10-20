@@ -90,6 +90,32 @@ def group_merge() -> bool:
     return _as_bool(_setting("lean_group_merge", True))
 
 
+def research_swarm() -> bool:
+    """Offer spawn_workers (agent/lean/swarm.py). Off until the bench shows a gain for your models."""
+    return _as_bool(_setting("lean_research_swarm", False))
+
+
+def _int(name: str, default: int, low: int, high: int) -> int:
+    try:
+        return max(low, min(high, int(_setting(name, default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def swarm_token_budget() -> int:
+    """New tokens all of one request's workers may use together (their prompts plus replies)."""
+    return _int("lean_swarm_token_budget", 120_000, 10_000, 2_000_000)
+
+
+def swarm_worker_steps() -> int:
+    return _int("lean_swarm_worker_steps", 12, 3, 40)
+
+
+def swarm_parallel(local: bool) -> int:
+    """Workers at once: a local server has one GPU's worth of slots; a cloud API has more."""
+    return _int("lean_swarm_local_parallel", 1, 1, 4) if local else _int("lean_swarm_cloud_parallel", 4, 1, 6)
+
+
 def group_max_rounds() -> int:
     """Backstop: rounds of work per message in a group chat or handed-off job."""
     try:

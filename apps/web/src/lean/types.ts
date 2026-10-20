@@ -32,6 +32,8 @@ export type LeanSegment =
       summary?: string;
       /** Counts behind the summary (results, pages, products). */
       meta?: Record<string, number>;
+      /** Live structured state from the tool (tool_state), e.g. research workers. */
+      state?: WorkersState;
     }
   | {
       kind: "approval";
@@ -74,6 +76,25 @@ export type LeanMessageData = {
 };
 
 export type LeanOutcome = { status: "done" | "stopped"; summary?: string; reason?: string };
+
+/** Research workers under a lead's spawn_workers call (agent/lean/swarm.py Worker.public). */
+export type WorkerRow = {
+  id: string;
+  index: number;
+  goal: string;
+  status: "queued" | "running" | "done" | "partial" | "failed" | "skipped" | "cancelled";
+  steps: number;
+  tools: number;
+  tokens: number;
+  elapsed_s: number;
+  confidence: string;
+  answer: string;
+  note: string;
+  activity: string;
+  sources: { url: string; title: string; opened: boolean }[];
+  open_questions: string[];
+};
+export type WorkersState = { kind: "workers"; budget: number; used: number; stop_reason: string; workers: WorkerRow[] };
 
 export type LeanLiveState = {
   requestId: string;
