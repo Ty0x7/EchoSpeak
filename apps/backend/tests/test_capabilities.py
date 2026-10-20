@@ -88,6 +88,26 @@ def test_a_made_up_tool_is_still_reported_as_unknown(tmp_path, switches):
     assert output.startswith("Error: unknown tool 'teleport'")
 
 
+def test_sandbox_paths_given_to_file_tools_map_back_to_this_pc(tmp_path, switches, monkeypatch):
+    # A 4B model ran `mkdir -p /work/Desktop/Game` in the sandbox terminal, then called
+    # file_write("/work/Desktop/Game/index.html"), which the Windows file tools refused.
+    from agent.lean import terminal as term
+
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    monkeypatch.setattr(term, "workspace_roots", lambda project_root="": [desktop])
+    assert term.to_host_path("/work/Desktop/Game/index.html") == str(desktop / "Game" / "index.html")
+    assert term.to_host_path("/work/Desktop") == str(desktop)
+    assert term.to_host_path("/work/Elsewhere/x") is None          # not a mounted folder: unchanged
+    assert term.to_host_path("C:/Users/me/x.txt") is None
+    switches(master=True, files=True)
+    box = _box(tmp_path)
+    name, args = box.normalize_call("file_write", {"path": "/work/Desktop/Game/index.html", "content": "<h1>DAWN</h1>"})
+    assert args["path"] == str(desktop / "Game" / "index.html")
+    assert "give file_read, file_write and the other file tools the Windows paths" in Terminal(str(tmp_path)).describe() \
+        or Terminal(str(tmp_path)).mode == "host"
+
+
 # ── the report the agent reads ──────────────────────────────────────────
 
 def test_report_lists_ready_and_off_abilities_with_reasons(tmp_path, switches):

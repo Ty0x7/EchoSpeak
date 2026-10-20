@@ -30,6 +30,12 @@ export function useFollowUps(apiBase: string, threadId: string) {
   }, [apiBase, threadId]);
 
   useEffect(() => { setItems([]); setNotice(""); void refresh(threadId); }, [threadId, refresh]);
+  // Confirmations are brief: they fade instead of sitting above the composer.
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 6000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
 
   const queue = useCallback(async (text: string, session: string = threadId) => {
     const message = text.trim();

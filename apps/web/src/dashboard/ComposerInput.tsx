@@ -41,8 +41,10 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
   const [folderDropActive, setFolderDropActive] = useState(false);
   const agentName = activeRoom?.kind === "group" ? "The team" : roomMembers[0]?.name || "Echo";
   return (
+                    <>
+                    {/* Above the row, never inside it: .input-row is a no-wrap flex row and would squeeze the card. */}
+                    {queue}
                     <div className="input-row">
-                      {queue}
                       <div className="composer-input-stack composer-card">
                         <div
                           className={"session-folder-strip" + (folderDropActive ? " is-drop-active" : "")}
@@ -212,5 +214,6 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                       </div>
                       </div>
                     </div>
+                    </>
   );
 }

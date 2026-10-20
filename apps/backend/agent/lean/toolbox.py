@@ -115,6 +115,10 @@ ARG_ALIASES: dict[str, dict[str, str]] = {
     "web_search": {"q": "query"},
 }
 
+# Tools that take paths on this PC (sandbox /work/... paths are mapped back for them).
+FILE_PATH_TOOLS = {"file_read", "file_write", "file_edit", "file_list", "file_find", "file_search", "file_copy",
+                   "file_move", "file_delete", "file_mkdir", "read_image"}
+
 # Read-only tools can run in parallel when the model asks for several at once.
 PARALLEL_SAFE = {
     "get_system_time", "calculate", "system_info", "file_list", "file_read", "file_find", "file_search",
@@ -529,6 +533,13 @@ class Toolbox:
         for old, new in ARG_ALIASES.get(resolved, {}).items():
             if old in args and new not in args:
                 args[new] = args.pop(old)
+        if resolved in FILE_PATH_TOOLS:
+            # A sandbox path from the terminal (/work/Desktop/...) means the same folder on this PC.
+            from agent.lean.terminal import to_host_path
+
+            for key in ("path", "src", "dst", "source", "destination"):
+                if isinstance(args.get(key), str) and (host := to_host_path(args[key], self.project_root)):
+                    args[key] = host
         if resolved == "terminal" and resolved in self.native:
             terminal = getattr(self.native[resolved].func, "__self__", None)
             if terminal is not None and hasattr(terminal, "effective_where"):
