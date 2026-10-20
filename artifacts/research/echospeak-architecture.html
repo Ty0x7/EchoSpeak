@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>EchoSpeak architecture</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--soft:#f0f0f0;--accent:#2f6fde;--ok:#1f7a3f;--warn:#a86a00;--bad:#b42318}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--soft:#222;--accent:#8fb4ff;--ok:#5cc983;--warn:#d6a955;--bad:#ff8a7a}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(18px,4vw,48px) 40px}header{padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 4px}header p{margin:0;font-size:13px;color:var(--muted)}nav{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;margin:0 0 8px}nav a{color:var(--muted);text-decoration:none}nav a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 6px}section{margin:34px 0;scroll-margin-top:12px}.lead{font-size:13.5px;color:var(--muted);margin:0 0 14px;max-width:820px}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:13px system-ui,sans-serif}svg .m{fill:var(--muted);font-size:11.5px}svg .b{fill:var(--panel);stroke:var(--line)}svg .s{fill:var(--soft);stroke:var(--line)}svg .a{fill:none;stroke:var(--accent);stroke-width:1.6}svg .l{stroke:var(--muted);fill:none;stroke-width:1.4}svg .acc{fill:var(--accent)}svg .ok{fill:var(--ok)}svg .warn{fill:var(--warn)}svg .bad{fill:var(--bad)}svg .hl{fill:var(--panel);stroke:var(--accent);stroke-width:1.6}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:14px 16px;min-width:0}.node h3{font-size:14px;margin:0 0 4px}.node p,.node li{font-size:13px;color:var(--muted);margin:0}.node ul{margin:6px 0 0;padding-left:18px}code{font:12px ui-monospace,monospace}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:0 8px;margin-right:6px}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}.note{font-size:12.5px;color:var(--muted);margin:10px 0 0}footer{font-size:12px;color:var(--muted);margin-top:30px;border-top:1px solid var(--line);padding-top:12px}a{color:inherit;text-underline-offset:3px}@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}}
+</style></head><body><main>
+<header><h1>EchoSpeak architecture</h1><p>As built on branch claude/autonomy-swarm (on 11.9.3 plus the harness audit) · diagrams drawn from the code, no screenshots · technical record: docs/research/echospeak-architecture.md</p></header>
+<nav aria-label="Sections"><a href="#map">Harness map</a><a href="#message">One message</a><a href="#tools">Tools &amp; permission</a><a href="#workers">Research workers</a><a href="#steer">Queue &amp; steer</a><a href="#learning">Learning</a><a href="#docs">Docs &amp; artifacts</a><a href="#next">Now vs next</a></nav>
+
+<section id="map" aria-label="Harness map"><h2>The harness at a glance</h2>
+<p class="lead">Everything outside the model is code that decides what the model sees, what it may do, and what is kept. The model chooses the next step; the harness checks and executes it.</p>
+<svg viewBox="0 0 1000 380" role="img" aria-label="You and the web UI send to the API and LeanSession; the LeanTurn loop calls the model and the toolbox; around them sit context, permissions, privacy, approvals, memory, learning, projects and artifacts.">
+<rect class="s" x="20" y="150" width="130" height="80" rx="10"/><text x="36" y="180">You</text><text class="m" x="36" y="200">composer, voice,</text><text class="m" x="36" y="216">Discord, routines</text>
+<path class="l" d="M150 190 H200"/>
+<rect class="b" x="200" y="150" width="150" height="80" rx="10"/><text x="216" y="180">API + session</text><text class="m" x="216" y="200">one turn per chat</text><text class="m" x="216" y="216">queue · steer · stop</text>
+<path class="l" d="M350 190 H400"/>
+<rect class="hl" x="400" y="120" width="200" height="140" rx="12"/><text x="420" y="150" style="font-weight:600">LeanTurn loop</text><text class="m" x="420" y="172">model call → tool calls →</text><text class="m" x="420" y="190">checks → results → repeat</text><text class="m" x="420" y="214">guards: promises, claims,</text><text class="m" x="420" y="230">repeats, refusals, streaks</text>
+<path class="l" d="M600 160 H650"/><path class="l" d="M600 220 H650"/>
+<rect class="b" x="650" y="120" width="150" height="70" rx="10"/><text x="666" y="148">Model</text><text class="m" x="666" y="168">local or cloud</text>
+<rect class="b" x="650" y="200" width="150" height="70" rx="10"/><text x="666" y="228">Toolbox</text><text class="m" x="666" y="248">files, web, terminal, apps…</text>
+<path class="l" d="M800 235 H840"/>
+<rect class="s" x="840" y="200" width="140" height="70" rx="10"/><text x="856" y="228">Workers</text><text class="m" x="856" y="248">read-only, parallel</text>
+<g><rect class="s" x="200" y="20" width="180" height="70" rx="10"/><text x="216" y="48">Context</text><text class="m" x="216" y="68">identity · capabilities · memory</text>
+<rect class="s" x="400" y="20" width="200" height="70" rx="10"/><text x="416" y="48">Permission &amp; safety</text><text class="m" x="416" y="68">switches · Blocked apps · privacy · policy</text>
+<rect class="s" x="620" y="20" width="180" height="70" rx="10"/><text x="636" y="48">Approvals</text><text class="m" x="636" y="68">modes · Always allow · autonomy</text>
+<path class="l" d="M290 90 C290 120 420 110 430 120"/><path class="l" d="M500 90 V120"/><path class="l" d="M710 90 C710 115 600 110 580 120"/></g>
+<g><rect class="s" x="200" y="290" width="180" height="70" rx="10"/><text x="216" y="318">Memory</text><text class="m" x="216" y="338">facts about you</text>
+<rect class="s" x="400" y="290" width="200" height="70" rx="10"/><text x="416" y="318">Learning</text><text class="m" x="416" y="338">graded episodes · tested lessons</text>
+<rect class="s" x="620" y="290" width="180" height="70" rx="10"/><text x="636" y="318">Projects &amp; artifacts</text><text class="m" x="636" y="338">docs/*.md · artifacts/*.html</text>
+<path class="l" d="M290 290 C290 270 430 270 440 260"/><path class="l" d="M500 290 V260"/><path class="l" d="M710 290 C710 270 600 270 580 260"/></g>
+</svg></section>
+
+<section id="message" aria-label="One message"><h2>How one message becomes multi-step work</h2>
+<p class="lead">A turn is a loop, not a single answer. Each step's results go back to the model; the turn ends only when it answers without tools, you press Stop, or the step budget runs out.</p>
+<svg viewBox="0 0 1000 300" role="img" aria-label="Seven steps: send, session, build turn, loop, guards, persist, learn.">
+<g>
+<rect class="b" x="10" y="40" width="120" height="96" rx="10"/><text x="24" y="66">1 · Send</text><text class="m" x="24" y="86">/query/stream</text><text class="m" x="24" y="102">busy? Enter queues,</text><text class="m" x="24" y="118">Steer joins</text>
+<rect class="b" x="148" y="40" width="130" height="96" rx="10"/><text x="162" y="66">2 · Session</text><text class="m" x="162" y="86">chat lock</text><text class="m" x="162" y="102">pick agent(s)</text><text class="m" x="162" y="118">Execution record</text>
+<rect class="b" x="296" y="40" width="150" height="96" rx="10"/><text x="310" y="66">3 · Build turn</text><text class="m" x="310" y="86">toolbox from toolsets</text><text class="m" x="310" y="102">prompt: identity,</text><text class="m" x="310" y="118">capabilities, memory</text>
+<rect class="hl" x="464" y="40" width="190" height="96" rx="10"/><text x="478" y="66">4 · Loop step</text><text class="m" x="478" y="86">read steering → model call</text><text class="m" x="478" y="102">→ policy · approvals · run</text><text class="m" x="478" y="118">→ results back to the model</text>
+<rect class="b" x="672" y="40" width="150" height="96" rx="10"/><text x="686" y="66">5 · Persist</text><text class="m" x="686" y="86">message + timeline</text><text class="m" x="686" y="102">trace (Timing)</text><text class="m" x="686" y="118">unread steers → queue</text>
+<rect class="b" x="840" y="40" width="150" height="96" rx="10"/><text x="854" y="66">6 · Learn</text><text class="m" x="854" y="86">grade from records</text><text class="m" x="854" y="102">lesson counts</text><text class="m" x="854" y="118">(owner turns only)</text>
+<path class="l" d="M130 88 H148 M278 88 H296 M446 88 H464 M654 88 H672 M822 88 H840"/>
+<path class="a" d="M600 136 C600 190 520 190 520 136"/><text class="m" x="520" y="200">repeat until an answer, Stop or the budget</text>
+</g>
+<rect class="s" x="296" y="226" width="526" height="56" rx="10"/><text x="312" y="250">Guards inside every step</text><text class="m" x="312" y="270">promise without action · claim without a tool · check after code edits · exact repeats · denied calls not retried · 3 failures in a row</text>
+</svg></section>
+
+<section id="tools" aria-label="Tools and permission"><h2>How a tool call is selected, authorised and run</h2>
+<p class="lead">Each gate is code with a fixed answer for the same inputs. Later gates can only ask or refuse; none can grant what an earlier gate removed.</p>
+<svg viewBox="0 0 1000 250" role="img" aria-label="Gates left to right: toolsets and switches, Blocked apps, privacy, policy, approvals, run.">
+<g>
+<rect class="b" x="10" y="30" width="150" height="110" rx="10"/><text x="24" y="56">Toolsets + switches</text><text class="m" x="24" y="76">a tool that's off isn't</text><text class="m" x="24" y="92">offered; calling it says</text><text class="m" x="24" y="108">what turns it on</text>
+<rect class="b" x="176" y="30" width="150" height="110" rx="10"/><text x="190" y="56">Blocked apps</text><text class="m" x="190" y="76">by name, exe, shortcut</text><text class="m" x="190" y="92">nothing overrides it</text>
+<rect class="b" x="342" y="30" width="150" height="110" rx="10"/><text x="356" y="56">Privacy</text><text class="m" x="356" y="76">Standard / Private /</text><text class="m" x="356" y="92">Offline, plus a socket</text><text class="m" x="356" y="108">backstop</text>
+<rect class="b" x="508" y="30" width="150" height="110" rx="10"/><text x="522" y="56">Policy</text><text class="m" x="522" y="76">secrets in args: deny</text><text class="m" x="522" y="92">Rule of Two after</text><text class="m" x="522" y="108">outside content: ask</text>
+<rect class="hl" x="674" y="30" width="170" height="110" rx="10"/><text x="688" y="56">Approvals</text><text class="m" x="688" y="76">Risky only · Every action ·</text><text class="m" x="688" y="92">Never · Autonomous</text><text class="m" x="688" y="108">Always allow · For this chat</text>
+<rect class="s" x="860" y="30" width="130" height="110" rx="10"/><text x="874" y="56">Run</text><text class="m" x="874" y="76">progress · cards</text><text class="m" x="874" y="92">secrets redacted</text><text class="m" x="874" y="108">audit log</text>
+<path class="l" d="M160 85 H176 M326 85 H342 M492 85 H508 M658 85 H674 M844 85 H860"/>
+</g>
+<rect class="s" x="674" y="160" width="316" height="76" rx="10"/><text x="688" y="184">Autonomous mode</text><text class="m" x="688" y="204">approves: desktop control, ordinary terminal asks</text><text class="m" x="688" y="220">holds (not run, reported): deletes, dangerous commands,</text><text class="m" x="688" y="234" style="font-size:11px">sends, identity, A2A, outside-content asks · app chats only</text>
+</svg></section>
+
+<section id="workers" aria-label="Research workers"><h2>Research workers under a lead</h2>
+<p class="lead">Phase 1 is deliberately narrow: few workers, read-only, bounded, and the lead stays responsible for the answer. Off by default until the bench shows a gain for your model.</p>
+<svg viewBox="0 0 1000 300" role="img" aria-label="The lead calls spawn_workers; tasks are de-duplicated; a queue runs 1 to 4 workers at a time under a shared token budget; workers use a read-only subset of the lead's tools; structured findings return as untrusted content; the lead writes the answer.">
+<rect class="hl" x="10" y="110" width="150" height="80" rx="10"/><text x="24" y="138">Lead agent</text><text class="m" x="24" y="158">spawn_workers(2–6</text><text class="m" x="24" y="174">independent questions)</text>
+<path class="l" d="M160 150 H200"/>
+<rect class="b" x="200" y="110" width="150" height="80" rx="10"/><text x="214" y="138">Queue</text><text class="m" x="214" y="158">1 at a time local · 4 cloud</text><text class="m" x="214" y="174">shared token budget</text>
+<path class="l" d="M350 130 C380 130 380 60 410 60 M350 150 H410 M350 170 C380 170 380 240 410 240"/>
+<g><rect class="b" x="410" y="30" width="230" height="60" rx="10"/><text x="424" y="54">Worker 1 · fresh context</text><text class="m" x="424" y="74">search + read pages · ≤12 steps</text>
+<rect class="b" x="410" y="120" width="230" height="60" rx="10"/><text x="424" y="144">Worker 2</text><text class="m" x="424" y="164">tools ⊆ lead's read-only tools</text>
+<rect class="b" x="410" y="210" width="230" height="60" rx="10"/><text x="424" y="234">Worker 3</text><text class="m" x="424" y="254">no writes · no sends · no approvals</text></g>
+<path class="l" d="M640 60 C670 60 670 150 700 150 M640 150 H700 M640 240 C670 240 670 150 700 150"/>
+<rect class="b" x="700" y="100" width="150" height="100" rx="10"/><text x="714" y="126">Findings</text><text class="m" x="714" y="146">answer · sources opened</text><text class="m" x="714" y="162">(checked against tool</text><text class="m" x="714" y="178">records) · confidence</text>
+<path class="l" d="M850 150 H880"/>
+<rect class="hl" x="880" y="110" width="110" height="80" rx="10"/><text x="894" y="138">Lead writes</text><text class="m" x="894" y="158">the reply,</text><text class="m" x="894" y="174">cites sources</text>
+<text class="m" x="410" y="292">Stop cancels all · privacy and taint apply to workers · one worker episode each in learning</text>
+</svg>
+<div class="grid3" style="margin-top:14px">
+<div class="node"><span class="tag ok">built</span><h3>Phase 1 · read-only workers</h3><p>spawn_workers, budgets, queue, retry, structured findings, Workers card, worker episodes, 20-task bench.</p></div>
+<div class="node"><span class="tag warn">not measured</span><h3>Benchmark</h3><p>scripts/swarm_bench.py compares single vs swarm at matched worker tokens. Not yet run on a real model.</p></div>
+<div class="node"><span class="tag">gated</span><h3>Phases 2–4</h3><p>Reviewer / best-of-N, shared findings board, A2A workers: only if phase 1 measurably helps.</p></div>
+</div></section>
+
+<section id="steer" aria-label="Queue and steer"><h2>Talking while it works: queue vs steer</h2>
+<p class="lead">Sending during a run used to cancel it. Now there are two clearly different paths, and neither runs two turns against one chat.</p>
+<svg viewBox="0 0 1000 250" role="img" aria-label="Enter while busy queues a durable follow-up that runs after the turn; Steer goes to an inbox read at the next safe checkpoint of the running turn.">
+<rect class="s" x="10" y="90" width="150" height="70" rx="10"/><text x="24" y="118">You type</text><text class="m" x="24" y="138">while Echo works</text>
+<path class="l" d="M160 110 C190 110 190 50 220 50 M160 140 C190 140 190 200 220 200"/>
+<rect class="b" x="220" y="20" width="220" height="64" rx="10"/><text x="234" y="46">Enter → Queue</text><text class="m" x="234" y="66">durable · edit · remove</text>
+<path class="l" d="M440 52 H500"/>
+<rect class="b" x="500" y="20" width="230" height="64" rx="10"/><text x="514" y="46">Runs after this turn ends</text><text class="m" x="514" y="66">FIFO · paused after Stop</text>
+<rect class="b" x="220" y="168" width="220" height="64" rx="10"/><text x="234" y="194">Steer (Ctrl+Enter)</text><text class="m" x="234" y="214">in-memory inbox per chat</text>
+<path class="l" d="M440 200 H500"/>
+<rect class="hl" x="500" y="150" width="300" height="100" rx="10"/><text x="514" y="176">Read at the next safe checkpoint</text><text class="m" x="514" y="196">before the next model call, or instead of ending</text><text class="m" x="514" y="212">never inside a tool · work so far is kept</text><text class="m" x="514" y="228">"You added: …" in the message</text>
+<path class="l" d="M800 200 C860 200 860 52 730 52" stroke-dasharray="4 4"/><text class="m" x="820" y="130">too late?</text><text class="m" x="820" y="146">becomes a queued</text><text class="m" x="820" y="162">follow-up</text>
+</svg></section>
+
+<section id="learning" aria-label="Learning"><h2>How experience feeds future work</h2>
+<p class="lead">Learning writes advice, never settings. Grades come from what ran, not from what the agent says; lessons have to beat their own control group.</p>
+<svg viewBox="0 0 1000 230" role="img" aria-label="Task, graded episode, reflection, code vetting, lesson, used or held back, promoted or retired by comparison.">
+<rect class="b" x="10" y="70" width="130" height="80" rx="10"/><text x="24" y="98">Task done</text><text class="m" x="24" y="118">yours, or a</text><text class="m" x="24" y="134">research worker's</text>
+<rect class="b" x="160" y="70" width="140" height="80" rx="10"/><text x="174" y="98">Episode</text><text class="m" x="174" y="118">graded V0–V4 from</text><text class="m" x="174" y="134">tool records</text>
+<rect class="b" x="320" y="70" width="140" height="80" rx="10"/><text x="334" y="98">Reflect</text><text class="m" x="334" y="118">idle, own model,</text><text class="m" x="334" y="134">≤2 proposals</text>
+<rect class="b" x="480" y="70" width="140" height="80" rx="10"/><text x="494" y="98">Code vets</text><text class="m" x="494" y="118">no permissions, links,</text><text class="m" x="494" y="134">secrets, test-weakening</text>
+<rect class="hl" x="640" y="40" width="160" height="60" rx="10"/><text x="654" y="66">Shown in prompt</text><text class="m" x="654" y="86">wins / losses</text>
+<rect class="s" x="640" y="120" width="160" height="60" rx="10"/><text x="654" y="146">Held back at random</text><text class="m" x="654" y="166">its control group</text>
+<rect class="b" x="820" y="70" width="170" height="80" rx="10"/><text x="834" y="98">Promote / retire</text><text class="m" x="834" y="118">only if better than</text><text class="m" x="834" y="134">without it (3+ controls)</text>
+<path class="l" d="M140 110 H160 M300 110 H320 M460 110 H480 M620 110 C630 110 630 70 640 70 M620 110 C630 110 630 150 640 150 M800 70 C810 70 810 110 820 110 M800 150 C810 150 810 110 820 110"/>
+<text class="m" x="10" y="210">Memory is separate: facts about you, recalled by relevance; saved "current version" claims are left out because the running app knows its version.</text>
+</svg></section>
+
+<section id="docs" aria-label="Docs and artifacts"><h2>Project documents and artifacts</h2>
+<div class="grid2">
+<div class="node"><h3>Chat artifacts</h3><ul><li>create_artifact / update_artifact, versioned in app data</li><li>HTML/SVG run in a sandboxed frame: scripts yes, network no, opaque origin</li><li>for apps, calculators, explainers you'll iterate on</li></ul></div>
+<div class="node"><h3>Project documents</h3><ul><li>docs/&lt;topic&gt;.md is the technical record; artifacts/&lt;topic&gt;.html is the visual report</li><li>discovered by the project workspace; previews with scripts off</li><li>taught by the optional, reviewed project-documentation skill</li></ul></div>
+</div>
+<p class="note">This page is itself an artifacts/ report paired with docs/research/echospeak-architecture.md.</p></section>
+
+<section id="next" aria-label="Now and next"><h2>Now vs recommended next</h2>
+<div class="grid2">
+<div class="node"><span class="tag ok">now</span><h3>Built and tested with doubles</h3><ul><li>Self-knowledge from version.py; Documents as default folder</li><li>Blocked apps instead of a whitelist</li><li>Always allow and Autonomous approvals</li><li>Queue and steer without cancelling</li><li>Research workers phase 1, off by default</li><li>Lessons tested against a control</li></ul></div>
+<div class="node"><span class="tag warn">next</span><h3>Highest value, in order</h3><ul><li>Run swarm_bench on your local and cloud models; enable only where it wins</li><li>Run eval_learning (on / off / control)</li><li>Freshness for time-sensitive memories in general</li><li>Reviewer phase only if the bench shows reviewable errors</li><li>MCP OAuth against the 2026-07-28 spec</li></ul></div>
+</div></section>
+<footer>Technical record: docs/research/echospeak-architecture.md · Manual tests: docs/TESTING_GUIDE.md · Not verified: real-model behavior, packaged Windows build, browser UI.</footer>
+</main></body></html>

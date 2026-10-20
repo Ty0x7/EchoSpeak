@@ -2,7 +2,13 @@
 
 ## Unreleased
 
-Audit notes: [Harness audit, 2026-10-20](docs/research/harness-audit-2026-10-20.md).
+Audit notes: [Harness audit, 2026-10-20](docs/research/harness-audit-2026-10-20.md). Architecture: [docs/research/echospeak-architecture.md](docs/research/echospeak-architecture.md). Manual tests: [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md).
+
+* **Self-knowledge.** Echo's prompt says what it is from the running app: Echo, EchoSpeak version from `version.py`, desktop app or source build, OS, created by Ty (ty0x7), source on GitHub. Saved "current version" claims are left out of recall. The installed app's default folder is Documents, not its install folder, and `project_status` labels what a folder is.
+* **Apps.** Allowed apps (a whitelist) is gone: Open apps launches any installed app except **Blocked apps** (new installs block Windows' system-settings tools). Saved Allowed apps became **Favorite apps**, suggestions only. App names reach the prompt only when the request is about apps or the desktop.
+* **Always allow and Autonomous.** "Always allow" on an approval saves a revocable grant for that class of action (desktop control, ordinary commands on this PC, sandbox internet, one connected-app action, cloud generation). The **Autonomous** approval mode approves desktop control and ordinary terminal asks itself and holds everything else for you without stalling. Deletes, dangerous commands, sends, identity changes, A2A and outside-content asks are never auto-approved.
+* **Queue and steer.** Typing while an agent works no longer cancels it: Enter queues a follow-up (edit or remove it before it runs), Steer adds to the work in progress at the next safe step. Stop pauses the queue.
+* **Research workers (phase 1, off by default).** `spawn_workers` lets the lead send up to six read-only workers in parallel under a shared token budget, with a Workers card, worker episodes in learning, and `scripts/swarm_bench.py` (20 tasks, single vs. swarm at matched tokens). Not yet benchmarked on a real model.
 
 * **Security fix.** Settings › Permissions now holds for the lean runtime's own `file_edit` and `terminal` tools. Through 11.9.3 they ignored **Create and edit files**, **Run terminal commands** and the master switch, all off by default, so a default install could edit files and run commands (on this PC when Docker was unavailable). Native tools are checked when the toolbox is built and again when they run.
 * Agents get a "What you can use right now" section built from the live toolbox, permission switches, Private/Offline mode and their toolsets. A call to a tool that's off gets back why and what turns it on, instead of "unknown tool".

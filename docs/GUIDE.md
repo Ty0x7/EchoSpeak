@@ -101,6 +101,19 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
 - **Stop** stops the reply and pauses the queue: queued messages wait for **Run next** or your next
   message instead of starting by themselves.
 
+### Research workers (off by default)
+
+- **Settings › General › Research workers** lets an agent send up to six read-only workers to look
+  up separate questions at the same time ("compare these four laptops"), then write the answer
+  itself from what they found. Workers can only search and read; they never edit files, send
+  anything, appear in the chat or ask you for approval.
+- A **Research workers** card under the reply shows each worker's question, status, steps, the
+  sources it actually opened and its time. Open a row for its findings. Stop stops every worker.
+- They share one token budget per request and run one or two at a time on a local model, up to
+  four on a cloud model. They're off by default because they only pay off for broad research,
+  and mostly on capable models. Run `python scripts/swarm_bench.py` with your model to see whether
+  they help you.
+
 ### Agents and group chats
 
 - Built-in agents: **Echo** (everything), **Jarvis** (research and memory) and **Glados**
