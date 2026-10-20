@@ -250,6 +250,34 @@ def _file_tool_roots() -> list[Path]:
     return roots
 
 
+def _folder_kind(path: Path) -> str:
+    """install | project | workspace | folder: what a folder is to the user."""
+    from config import app_install_dir
+
+    try:
+        resolved = path.resolve()
+    except Exception:
+        resolved = path
+    install = app_install_dir()
+    if install is not None and (resolved == install or install in resolved.parents):
+        return "install"
+    context = _tool_execution_context.get() or {}
+    scoped = str(context.get("project_root") or "").strip()
+    try:
+        active = get_active_project_root()
+    except Exception:
+        active = None
+    for root in [scoped, active]:
+        try:
+            if root and resolved == Path(root).resolve():
+                return "project"
+        except Exception:
+            pass
+    if resolved == _file_tool_root():
+        return "workspace"
+    return "folder"
+
+
 def _desktop_root() -> Path:
     return (Path.home() / "Desktop").expanduser().resolve()
 
@@ -1446,32 +1474,27 @@ def _resolve_app_command(app: str, args: Optional[str]) -> Optional[list[str]]:
     return [*cmd, *extra]
 
 
-@tool(args_schema=OpenApplicationArgs, description="Launch a permitted Windows app by executable, exact Start-menu name, or desktop shortcut name. The owner manages Allowed apps in Settings > Permissions.")
+def _app_blocked_message(app: str, entry: str) -> str:
+    return (f"Error: {app} is in Blocked apps ({entry}), so it can't be launched. Only the owner can change "
+            "Settings > Permissions > Blocked apps. Do not open it another way (terminal, shortcuts, other tools).")
+
+
+@tool(args_schema=OpenApplicationArgs, description="Launch an installed Windows app by its Start-menu name, desktop shortcut name or executable path. Apps in the owner's Blocked apps list are refused.")
 def open_application(app: str, args: Optional[str] = None) -> str:
     if not getattr(config, "enable_system_actions", False) or not getattr(config, "allow_open_application", False):
         return "Error: Application launching is disabled. The owner must enable Allow actions on this computer and Open apps in Settings > Permissions."
     if os.name != "nt":
         return "Error: open_application is only supported on Windows."
 
-    allow = [
-        _normalize_app_token(x)
-        for x in (getattr(config, "open_application_allowlist", None) or [])
-        if str(x).strip()
-    ]
-    token = _normalize_app_token(app)
-    if not allow:
-        return ("Error: No applications are allowed to launch. Open apps is enabled, but Allowed apps is empty. "
-                "The owner must add an exact installed app name or executable path in Settings > Permissions > Allowed apps. "
-                "This is separate from terminal command restrictions. Do not bypass this restriction with another tool.")
-    if token not in set(allow):
-        return (f"Error: Application not allowlisted: {app}. The owner can add this exact installed app name or executable path "
-                "in Settings > Permissions > Allowed apps. Do not bypass this restriction with another tool.")
-
     from agent import app_launcher
 
+    if entry := app_launcher.blocked_by(app):
+        return _app_blocked_message(app, entry)
     try:
         shortcut = app_launcher.shortcut_path(app)
         if shortcut is not None:
+            if entry := app_launcher.blocked_by(app, shortcut=shortcut):
+                return _app_blocked_message(app, entry)
             if str(args or "").strip():
                 return "Error: Shortcuts open exactly as saved and do not take extra arguments."
             app_launcher.launch_shortcut(shortcut)
@@ -1481,6 +1504,8 @@ def open_application(app: str, args: Optional[str] = None) -> str:
     cmd = _resolve_app_command(app, args)
     if not cmd:
         return "Error: Failed to resolve application command."
+    if entry := app_launcher.blocked_by(app, command=cmd):
+        return _app_blocked_message(app, entry)
     if str(args or "").strip() and app_launcher.runs_commands(cmd):
         return (f"Error: {app} runs commands, so open_application does not pass it arguments. "
                 "Use the terminal tool, where terminal permissions and approvals apply.")
@@ -1492,10 +1517,10 @@ def open_application(app: str, args: Optional[str] = None) -> str:
         except FileNotFoundError:
             app_id = app_launcher.installed_app_id(app)
             if not app_id:
-                return (f"Error: Allowed application was not found: {app}. Use its exact Start-menu name or executable path. "
-                        "The application may need to be installed first.")
+                return (f"Error: Application was not found: {app}. Use its exact Start-menu name, a desktop shortcut "
+                        "name or an executable path. The application may need to be installed first.")
             if str(args or "").strip():
-                return "Error: Start-menu app launches do not support extra arguments. Use an allowed executable path for arguments."
+                return "Error: Start-menu app launches do not support extra arguments. Use an executable path for arguments."
             os.startfile(f"shell:AppsFolder\\{app_id}")
         return "Application launch requested. Check desktop_list_windows or take_screenshot before interacting."
     except Exception as e:
@@ -1517,13 +1542,10 @@ def notepad_write(content: str, filename: Optional[str] = None) -> str:
     if os.name != "nt":
         return "notepad_write is only supported on Windows."
 
-    allow = {
-        _normalize_app_token(x)
-        for x in (getattr(config, "open_application_allowlist", None) or [])
-        if str(x).strip()
-    }
-    if "notepad" not in allow and "notepad.exe" not in allow:
-        return "Error: Notepad is not allowlisted. The owner must add 'notepad' in Settings > Permissions > Allowed apps."
+    from agent import app_launcher
+
+    if entry := app_launcher.blocked_by("notepad", command=["notepad.exe"]):
+        return _app_blocked_message("Notepad", entry)
 
     data = str(content or "")
     if data == "":
@@ -4844,8 +4866,19 @@ def project_status(workspace_path: str = "") -> str:
         if not ws_root.exists():
             return f"Workspace path not found: {ws_root}"
 
+        kind = _folder_kind(ws_root)
+        if kind == "install":
+            return (f"`{ws_root}` is EchoSpeak's own install folder (programs and libraries), not a user project. "
+                    "Nothing in it describes the user's work, and the app's version is in your identity, not here. "
+                    "Ask the user which project they mean, or have them attach one.")
+        labels = {
+            "project": "Attached project",
+            "workspace": "Your default workspace folder (no project is attached to this chat)",
+            "folder": "A folder (not an attached project)",
+        }
         sections = []
-        sections.append(f"# Project Status Report\n**Workspace:** `{ws_root}`\n**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        sections.append(f"# Project Status Report\n**Folder:** `{ws_root}`\n**Kind:** {labels[kind]}\n"
+                        f"**Generated:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
         # ── 1. Git Status ──
         try:

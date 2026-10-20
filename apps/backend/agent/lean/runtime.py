@@ -934,7 +934,7 @@ class LeanSession:
             project_root=self.project_root,
             notes=list(toolbox.notes) + learned.notes + ([] if guest else [n for n in [mcp_apps.context_note(self.session_id)] if n]),
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
-            computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox)),
+            computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox), goal=goal),
             git_note=repo_note,
             git_rules="terminal" in toolbox.names and git_context.wants_rules(goal, repo_note),
             project_overview=project_overview(self.project_root) if self.project_root else "",
@@ -1160,7 +1160,11 @@ class LeanSession:
                 except Exception:
                     pass
                 lines = list(dict.fromkeys(str(r.get("content") or "").strip() for r in rows if str(r.get("content") or "").strip()))
-                return "\n".join(f"- {line}" for line in lines[:12]) or "No matching memories."
+                # The running app's version outranks any version a memory remembers.
+                kept = [line for line in lines if not memory_quality.stale_version_claim(line)]
+                note = ("\n(Left out: saved claims about which EchoSpeak version is current. The running version is "
+                        "in your instructions.)" if len(kept) < len(lines) else "")
+                return ("\n".join(f"- {line}" for line in kept[:12]) or "No matching memories.") + note
 
             tools.append(NativeTool(
                 name="memory_save",
@@ -1492,6 +1496,8 @@ class LeanSession:
         for hit in hits:
             if hit["session_id"] == self.session_id or hit["turn_id"] == self.execution_id:
                 continue
+            if memory_quality.stale_version_claim(str(hit["snippet"] or "")):
+                continue  # an old "current version" answer; the live version is in the prompt
             when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
             who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
             lines.append(f"{when} {who}: {hit['snippet']}")

@@ -855,7 +855,7 @@ const PERMS: { key: string; label: string; help: string }[] = [
   { key: "allow_file_write", label: "Create and edit files", help: "Inside the folders below. Every overwrite is checkpointed so it can be undone." },
   { key: "allow_terminal_commands", label: "Run terminal commands", help: "Uses the Terminal settings. Dangerous commands still ask first." },
   { key: "allow_playwright", label: "Browse the web in a real browser", help: "For pages that need clicking or logging in." },
-  { key: "allow_open_application", label: "Open apps", help: "Launch only the programs in Allowed apps below. An empty list allows none." },
+  { key: "allow_open_application", label: "Open apps", help: "Launch installed apps and shortcuts, except the ones in Blocked apps below." },
   { key: "allow_open_chrome", label: "Open Chrome", help: "Open links in your browser." },
   { key: "allow_desktop_automation", label: "Control the desktop", help: "Click, type, and switch windows. Always asks first." },
   { key: "allow_email", label: "Email", help: "Read and send email with the account in Channels." },
@@ -884,10 +884,12 @@ function PermissionsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; 
           </Row>
         ) : null}
       </Group>
-      <Group title="Apps agents may open" description="Open apps must be enabled above. This list is separate from terminal command restrictions.">
-        <Row label="Allowed apps" help="Add an exact Start-menu name (Minecraft Launcher), a desktop shortcut's name (26.2), or an executable path. Short names such as notepad also work." stack>
-          <ListEditor items={asList(s.open_application_allowlist)} onChange={(items) => save({ open_application_allowlist: items })} placeholder="e.g. Minecraft Launcher" />
-          {asList(s.open_application_allowlist).length === 0 ? <div className="st-muted" role="status">No apps allowed yet. Turning on Open apps does not add any automatically.</div> : null}
+      <Group title="Apps" description="Open apps must be enabled above. Separate from terminal command restrictions.">
+        <Row label="Blocked apps" help="Agents can't open these, even with approvals off. Use a Start-menu name, a shortcut's name or an executable name (regedit or regedit.exe)." stack>
+          <ListEditor items={asList(s.open_application_blocklist)} onChange={(items) => save({ open_application_blocklist: items })} placeholder="e.g. regedit" />
+        </Row>
+        <Row label="Favorite apps" help="Optional names agents can suggest when you ask them to open something, such as a shortcut called 26.2. Not a limit: any other app can open too." stack>
+          <ListEditor items={asList(s.open_application_favorites)} onChange={(items) => save({ open_application_favorites: items })} placeholder="e.g. Minecraft Launcher" />
         </Row>
       </Group>
       <Group title="Folders agents can use" description="Agents read and write only inside these. A project folder attached to a chat is added automatically.">

@@ -26,10 +26,13 @@ def test_apply_overrides_migrates_string_allowlist(tmp_path, monkeypatch):
     from config import Config
 
     cfg = Config()
+    # The retired whitelist becomes favorites (suggestions), never a restriction or a block.
     cfg.apply_overrides({"open_application_allowlist": "notepad,visual studio code"})
-    assert cfg.open_application_allowlist == ["notepad", "visual studio code"]
-    cfg.apply_overrides({"open_application_allowlist": ["Paint", "calc"]})
-    assert cfg.open_application_allowlist == ["paint", "calc"]
+    assert cfg.open_application_favorites == ["notepad", "visual studio code"]
+    assert "notepad" not in cfg.open_application_blocklist
+    assert not hasattr(cfg, "open_application_allowlist")
+    cfg.apply_overrides({"open_application_blocklist": "Paint, calc"})
+    assert cfg.open_application_blocklist == ["paint", "calc"]
 
 
 def test_memory_list_does_not_require_bound_project(monkeypatch, tmp_path):
