@@ -208,8 +208,16 @@ export type LearningEpisode = {
   tamper: { what: string; target: string; expected: boolean }[];
   tools: { name: string; label: string; target: string; ok: boolean; not_run: boolean }[];
   lessons_used: string[];
+  /** Lessons that matched but were held back at random: this task is part of their control group. */
+  lessons_withheld?: string[];
   verified_success: boolean;
   failed: boolean;
+  execution_id?: string;
+  session_id?: string;
+  /** solo | lead | worker (research workers and team helpers). */
+  role?: string;
+  /** "swarm" for research workers. */
+  source?: string;
 };
 
 export type LearningKindStats = { wins: number; losses: number; checked: number; answered: number; confirmed: number; decided: number; rate: number };

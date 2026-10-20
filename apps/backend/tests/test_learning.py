@@ -396,6 +396,21 @@ def _lesson(store: ExperienceStore, title: str, text: str, status: str = "probat
                             actor="test")
 
 
+def test_episodes_page_by_offset_and_split_own_from_workers(store):
+    import api.routes.learning as routes
+
+    for i in range(25):
+        store.add_episode(Episode(agent_id="echo", goal=f"task {i}", outcome="success", created_at=1000 + i,
+                                  role="worker" if i % 5 == 0 else "solo"))
+    page = lambda **kw: routes.learning_episodes(**{"agent_id": "", "limit": 10, "offset": 0, "role": "", **kw})  # noqa: E731
+    first, second = page(), page(offset=10)
+    assert first["total"] == 25 and [e["goal"] for e in first["episodes"]][:2] == ["task 24", "task 23"]
+    assert not {e["id"] for e in first["episodes"]} & {e["id"] for e in second["episodes"]}
+    workers = page(limit=50, role="worker")
+    assert workers["total"] == 5 and all(e["role"] == "worker" for e in workers["episodes"])
+    assert page(limit=50, role="own")["total"] == 20
+
+
 def test_selection_is_relevant_and_limits_unproven_lessons(store):
     _lesson(store, "Run python scripts", "After writing a python script, run it once.", "established", task_kind="coding")
     for i in range(3):

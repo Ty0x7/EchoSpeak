@@ -172,19 +172,33 @@ class ExperienceStore:
             row = self._conn.execute("SELECT body FROM episodes WHERE id = ?", (episode_id,)).fetchone()
         return _episode_from(row) if row else None
 
-    def episodes(self, *, agent_id: str = "", task_kind: str = "", since: float = 0.0, limit: int = 50,
-                 execution_id: str = "") -> list[Episode]:
+    def _episode_filter(self, agent_id: str, task_kind: str, since: float, execution_id: str,
+                        role: str) -> tuple[str, list[Any]]:
         clauses, params = ["created_at >= ?"], [since]
         for column, value in (("agent_id", agent_id), ("task_kind", task_kind), ("execution_id", execution_id)):
             if value:
                 clauses.append(f"{column} = ?")
                 params.append(value)
+        if role == "worker":
+            clauses.append("json_extract(body, '$.role') = 'worker'")
+        elif role == "own":  # the agents' own replies: everything but research workers
+            clauses.append("COALESCE(json_extract(body, '$.role'), 'solo') != 'worker'")
+        return " AND ".join(clauses), params
+
+    def episodes(self, *, agent_id: str = "", task_kind: str = "", since: float = 0.0, limit: int = 50,
+                 execution_id: str = "", offset: int = 0, role: str = "") -> list[Episode]:
+        where, params = self._episode_filter(agent_id, task_kind, since, execution_id, role)
         with self._lock:
             rows = self._conn.execute(
-                f"SELECT body FROM episodes WHERE {' AND '.join(clauses)} ORDER BY created_at DESC LIMIT ?",
-                (*params, max(1, int(limit))),
+                f"SELECT body FROM episodes WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (*params, max(1, int(limit)), max(0, int(offset))),
             ).fetchall()
         return [_episode_from(row) for row in rows]
+
+    def count_episodes(self, *, agent_id: str = "", role: str = "") -> int:
+        where, params = self._episode_filter(agent_id, "", 0.0, "", role)
+        with self._lock:
+            return int(self._conn.execute(f"SELECT COUNT(*) FROM episodes WHERE {where}", params).fetchone()[0])
 
     def prune(self, keep: int = MAX_EPISODES) -> int:
         """Drop the oldest episodes beyond ``keep``. Lessons keep their ids as provenance."""

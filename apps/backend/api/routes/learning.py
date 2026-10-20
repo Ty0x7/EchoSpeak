@@ -139,9 +139,13 @@ def learning_lesson_delete(lesson_id: str) -> dict[str, Any]:
 
 
 @router.get("/learning/episodes")
-def learning_episodes(agent_id: str = "", limit: int = Query(30, ge=1, le=200)) -> dict[str, Any]:
-    episodes = learning.get_experience_store().episodes(agent_id=agent_id, limit=limit)
-    return {"episodes": [ep.to_dict() for ep in episodes]}
+def learning_episodes(agent_id: str = "", limit: int = Query(30, ge=1, le=200), offset: int = Query(0, ge=0),
+                      role: Literal["", "own", "worker"] = "") -> dict[str, Any]:
+    """Newest first, a page at a time. role: own (agents' replies) or worker (research workers)."""
+    store = learning.get_experience_store()
+    episodes = store.episodes(agent_id=agent_id, limit=limit, offset=offset, role=role)
+    return {"episodes": [ep.to_dict() for ep in episodes], "total": store.count_episodes(agent_id=agent_id, role=role),
+            "offset": offset}
 
 
 @router.get("/learning/reliability")

@@ -147,6 +147,14 @@ export const leanApi = (apiBase: string) => ({
     const data = await json<{ episodes: LearningEpisode[] }>(await fetch(`${apiBase}/lean/learning/episodes?${query}`));
     return data.episodes || [];
   },
+  /** One page of experiences, newest first; role "own" (agents' replies) or "worker" (research workers). */
+  async episodesPage(opts: { offset?: number; limit?: number; agentId?: string; role?: "" | "own" | "worker" } = {}): Promise<{ episodes: LearningEpisode[]; total: number }> {
+    const query = new URLSearchParams({ limit: String(opts.limit ?? 20), offset: String(opts.offset ?? 0) });
+    if (opts.agentId) query.set("agent_id", opts.agentId);
+    if (opts.role) query.set("role", opts.role);
+    const data = await json<{ episodes: LearningEpisode[]; total?: number }>(await fetch(`${apiBase}/lean/learning/episodes?${query}`));
+    return { episodes: data.episodes || [], total: Number(data.total ?? (data.episodes || []).length) };
+  },
   async reliability(): Promise<Record<string, ReliabilityRow[]>> {
     return json(await fetch(`${apiBase}/lean/learning/reliability`));
   },

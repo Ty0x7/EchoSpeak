@@ -138,8 +138,11 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
   worked".
 - Under a reply, **Worked** confirms it and **Didn't work** marks it failed, with an optional note
   the agent reads when it reviews the task. Press the button again to take it back.
-- **Learning** in the sidebar shows track records, lessons with their source tasks and history,
-  recent grades and tool reliability. Approve or reject lessons waiting for your review. You can
+- **Learning** in the sidebar opens on four short sections: **Is Echo improving?** (an honest verdict
+  from the with/without comparisons), **Needs your feedback**, **What Echo learned** and **Recent
+  experiences**, three items each with **View all** (paged, filterable). Click any card for its details
+  and actions. **How learning works** walks through the process with links to your own records;
+  agents, tool reliability and Review now sit under **Agents, tools and settings**. Approve or reject lessons waiting for your review. You can
   edit, retire, restore, delete or **Undo** any change, and pause learning for one agent.
 - Lessons are advice only. They never change permissions, approvals, tools or settings. Lessons
   learned while reading the web or email, or from a task that changed tests or EchoSpeak's own
