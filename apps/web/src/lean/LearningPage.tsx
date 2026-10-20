@@ -355,6 +355,8 @@ function LessonRow({ lesson, agentName, open, onToggle, api, act }: {
     <button type="button" className={`es-btn es-btn-sm${primary ? " es-btn-primary" : ""}`} onClick={() => void act(() => api.lessonAction(lesson.id, name))}>{label}</button>
   );
   const decided = lesson.wins + lesson.losses;
+  const heldWins = lesson.held_wins ?? 0;
+  const held = heldWins + (lesson.held_losses ?? 0);
   return (
     <article className={`es-learn-row is-${lesson.status}`}>
       <div className="es-learn-row-main">
@@ -383,6 +385,7 @@ function LessonRow({ lesson, agentName, open, onToggle, api, act }: {
         )}
         <small className="es-learn-why">
           {lesson.uses ? `Used ${lesson.uses}× · helped ${lesson.wins} · failed ${lesson.losses}${decided ? "" : " (no checked result yet)"}` : "Not used yet"}
+          {held ? ` · without it: ${heldWins} of ${held} worked` : ""}
           {lesson.note ? ` · ${lesson.note}` : ""}
         </small>
       </div>

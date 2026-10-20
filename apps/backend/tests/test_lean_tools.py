@@ -15,6 +15,15 @@ from agent.lean.toolbox import DEFAULT_TOOLSETS, TOOLSETS, NativeTool, Toolbox
 from tests.test_lean_runtime import ScriptedClient
 
 
+@pytest.fixture(autouse=True)
+def _permissions_on(monkeypatch):
+    """The owner has allowed file edits and the terminal (native tools follow those switches)."""
+    from config import config
+
+    for name in ("enable_system_actions", "allow_file_write", "allow_terminal_commands"):
+        monkeypatch.setattr(config, name, True)
+
+
 def _box(*names: str) -> Toolbox:
     box = Toolbox(toolsets=["none"], session_id="t")
     box.native = {

@@ -65,7 +65,49 @@ The chat can show rich blocks. Pick the simplest form that fits, and always writ
 - An artifact (create_artifact) for substantial or interactive output the user will use, keep or iterate on: apps, calculators, games, visual explainers, documents, longer code files. Follow-up changes use update_artifact with the same id. Give a one or two sentence reply alongside it.
 - Never make up links, images, prices or figures. If a tool didn't return the data, say so plainly."""
 
-def _environment(*, project_root: str, notes: list[str], terminal_note: str = "", project_overview: str = "", computer_note: str = "") -> str:
+# Rules about specific tools, kept only when one of those tools is offered this turn:
+# a small model told how to use take_screenshot when it has none tends to promise it.
+_RULE_TOOLS: dict[str, set[str]] = {
+    "- For research, split": {"web_search", "safe_web_fetch"},
+    "- For comparisons, prices": {"web_search", "safe_web_fetch"},
+    "- Use research_notebook": {"research_notebook"},
+    "- For visual tasks": {"take_screenshot", "read_image"},
+    "- Follow the computer-control": {"take_screenshot", "read_image", "vision_qa", "computer_action"},
+    "- An artifact (create_artifact)": {"create_artifact"},
+}
+CARD_TOOLS = {
+    "weather_live": "weather card", "stock_history": "price chart", "product_search": "product cards with prices and links",
+    "video_search": "video cards", "image_search": "image gallery", "web_search": "source chips",
+}
+_CARDS_LINE = "- Cards appear by themselves when you use these tools"
+
+
+def _for_tools(text: str, tool_names: Optional[set[str]]) -> str:
+    """``text`` without the rules for tools this turn doesn't offer (all of it when unknown)."""
+    if tool_names is None:
+        return text
+    lines: list[str] = []
+    skip_continuation = False
+    for line in text.split("\n"):
+        if skip_continuation and line.startswith("  "):
+            continue
+        skip_continuation = False
+        if line.startswith(_CARDS_LINE):
+            cards = [f"{name} ({what})" for name, what in CARD_TOOLS.items() if name in tool_names]
+            skip_continuation = True
+            if cards:
+                lines.append(line)
+                lines.append("  " + ", ".join(cards) + ".")
+            continue
+        needs = next((tools for prefix, tools in _RULE_TOOLS.items() if line.startswith(prefix)), None)
+        if needs is not None and not needs & tool_names:
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _environment(*, project_root: str, notes: list[str], terminal_note: str = "", project_overview: str = "",
+                 computer_note: str = "", can_write: bool = True) -> str:
     from agent.tools import _file_tool_roots, _tool_execution_context
 
     now = datetime.now().astimezone()
@@ -84,7 +126,10 @@ def _environment(*, project_root: str, notes: list[str], terminal_note: str = ""
     finally:
         _tool_execution_context.reset(token)
     if roots:
-        lines.append("- You may read and write files under: " + "; ".join(roots[:6]))
+        if can_write:
+            lines.append("- You may read and write files under: " + "; ".join(roots[:6]))
+        else:
+            lines.append("- You may read files under: " + "; ".join(roots[:6]) + " (creating and editing files is off)")
     if terminal_note:
         lines.append(f"- The {terminal_note}")
     if computer_note:
@@ -145,6 +190,9 @@ def build_system_prompt(
     project_evidence: str = "",
     playbook: str = "",
     skills: str = "",
+    capabilities: str = "",
+    tool_names: Optional[set[str]] = None,
+    can_write: bool = True,
 ) -> str:
     identity = (persona.soul or "").strip() or (soul_text or "").strip()
     if not identity:
@@ -153,12 +201,15 @@ def build_system_prompt(
         identity = f"Your name is {persona.name}" + (f", {persona.title}" if persona.title else "") + ".\n\n" + identity
     sections = [
         identity,
-        WORKING_RULES,
+        _for_tools(WORKING_RULES, tool_names),
         WRITING_REPLIES,
-        SHOWING_ANSWERS,
+        _for_tools(SHOWING_ANSWERS, tool_names),
         _team(persona, list(teammates or []), room_name),
         _environment(project_root=project_root, notes=list(notes or []) + ([git_note] if git_note else []),
-                     terminal_note=terminal_note, project_overview=project_overview, computer_note=computer_note),
+                     terminal_note=terminal_note, project_overview=project_overview, computer_note=computer_note,
+                     can_write=can_write),
+        # What is on and off this turn, from the live toolbox and settings (agent/lean/capabilities.py).
+        capabilities.strip(),
         # Only for repos and git/GitHub requests (agent/lean/git_context.py).
         GIT_RULES if git_rules else "",
         _memory(list(memories or [])),

@@ -95,8 +95,23 @@ Details that matter:
   - Per agent message (every one carries `message_id` and `agent_id`): `agent_start`, `step_start`, `reasoning_delta`, `agent_token`, `text_replace`, `tool_start`, `tool_end`, `approval_request`, `approval_resolved`, `memory_saved`, `token_usage`, `agent_done`.
   - Job level: `job_continue`, `run_outcome`.
   - The UI batches events per animation frame (`useLeanLive.ts`) and reduces them by `message_id` (`liveReducer.ts`).
+- **What the agent knows it can use** (`lean/capabilities.py`).
+  - The toolbox offers only tools whose Settings › Permissions switches are on: registry tools by their
+    `policy_flags`, and lean-native tools (`file_edit`, `terminal`, `process_output`, `process_stop`) by
+    `toolbox.NATIVE_POLICY_FLAGS`. Native tools are checked again when they run, since a switch can change
+    mid-turn. (Through 11.9.3 the native ones ignored the switches.)
+  - For the owner, the system prompt gets a "What you can use right now" section built in code from the live
+    toolbox, the switches, Private/Offline mode (`privacy.decide`) and the agent's toolsets: what is ready,
+    what is off and what turns it on, and when approvals apply. Guests never get it.
+  - A call to a tool the turn doesn't have gets the same reason back ("not available right now: turned off
+    in Settings › Permissions (Run terminal commands)… don't work around it") instead of "unknown tool".
+  - Working rules and answer formats about specific tools (screenshots, research notebook, artifacts, cards)
+    are left out of the prompt when those tools aren't offered (`prompt._for_tools`).
 - **The loop never gives up on its own.**
   - Errors, bad tool arguments, denied approvals and repeated identical calls all go back to the model as tool results.
+  - A call the user denied or the policy blocked is not asked for or tried again with the same arguments in
+    that turn. After 3 failures in a row of one tool (any arguments), the result tells the agent to change
+    approach (`fail_streak` event).
   - The loop ends when the model replies without calling a tool, when the user presses Stop (`POST /query/cancel`), or when it reaches `lean_max_iterations` (default 60). At that limit it stops honestly: `agent_done` carries `stop_reason: "max_steps"`, the message says what was done so far, and the UI shows **Continue**.
 - **Context.** Two layers, so nothing is silently lost:
   - Across turns, `lean/summaries.py` keeps a rolling summary of each chat (the last 12 turns stay verbatim; older ones are folded in, 4 at a time, in the background). It goes into the system prompt as "Earlier in this chat".
@@ -301,12 +316,24 @@ flowchart LR
     C -->|refused| X[dropped]
     C -->|untrusted, tampered, outward| P[pending_review: owner]
     C -->|ok| L[probation]
-    L --> PB[playbook.py: lessons in the next prompt]
-    PB --> A[attribution: wins / losses]
-    A -->|3+ wins, 75%+| Est[established]
-    A -->|3+ losses, under 40%| Ret[retired]
+    L --> PB[playbook.py: matching lessons]
+    PB -->|shown| A[attribution: wins / losses]
+    PB -->|held back at random| H[control: held_wins / held_losses]
+    H --> A
+    A -->|3+ wins, 75%+, not worse than control| Est[established]
+    A -->|3+ losses, under 40%, or clearly worse than control| Ret[retired]
     F[Worked / Didn't work] --> A
 ```
+
+- **Randomized holdout.** `playbook.holdout` holds back a matching lesson 20% of the time (10% when
+  established, never an owner-written one). The episode records it in `lessons_withheld`, and its checked
+  result counts as the lesson's control (`held_wins`, `held_losses`): the same kind of task, picked by the
+  same selection. With 3+ control results, a lesson that does no better than its control stays unproven,
+  and one whose win rate trails the control's by more than 25 points is retired (or an established one
+  demoted). Reason: wins alone also accrue to lessons that ride along on tasks the agent would have done
+  anyway, and self-written playbooks can score below no playbook (arXiv 2610.18427). Few owners repeat a
+  task kind often enough for this to decide quickly, so with fewer than 3 control results the old rules
+  apply unchanged.
 
 - **Hook points.**
   - `LeanSession._build_turn` asks `learning.prepare_turn` for the playbook section and reliability notes

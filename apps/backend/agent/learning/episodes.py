@@ -323,6 +323,7 @@ def build_episodes(
     team: bool,
     lead: str = "",
     routed: Optional[dict[str, str]] = None,
+    lessons_withheld: Optional[dict[str, list[str]]] = None,
 ) -> list[Episode]:
     """One episode per agent that spoke in this request (TurnResults in order)."""
     goal = redact_secrets(" ".join(str(goal or "").split()))[:2000]
@@ -382,6 +383,8 @@ def build_episodes(
             taint=sorted(set(taint)),
             tamper=tamper,
             lessons_used=list(dict.fromkeys(lessons_used.get(agent_id, []))),
+            lessons_withheld=[i for i in dict.fromkeys((lessons_withheld or {}).get(agent_id, []))
+                              if i not in lessons_used.get(agent_id, [])],
             error_kind=classify_error(errors[0]) if errors else "",
             duration_s=_duration(mine),
             tokens=sum(int((r.usage or {}).get("fresh", (r.usage or {}).get("total", 0)) or 0) for r in mine),

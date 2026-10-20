@@ -61,6 +61,7 @@ class TurnLearning:
     """What learning adds to one agent's turn."""
     section: str = ""  # the "Lessons from your past work" prompt section
     lesson_ids: list[str] = field(default_factory=list)
+    withheld_ids: list[str] = field(default_factory=list)  # matched but held back: the control group
     notes: list[str] = field(default_factory=list)  # tool reliability notes
 
 
@@ -84,8 +85,9 @@ def prepare_turn(agent_id: str, goal: str, tool_names: Iterable[str]) -> TurnLea
         lessons = playbook.select(agent_id, goal, settings.playbook_size())
         if mode == "control":
             return TurnLearning(section=playbook.control_section(lessons))
-        return TurnLearning(section=playbook.section(lessons), lesson_ids=[l.id for l in lessons],
-                            notes=reliability.tool_notes(tool_names))
+        used, withheld = playbook.holdout(lessons)
+        return TurnLearning(section=playbook.section(used), lesson_ids=[l.id for l in used],
+                            withheld_ids=[l.id for l in withheld], notes=reliability.tool_notes(tool_names))
     except Exception:
         logger.warning("Learning: could not prepare lessons", exc_info=True)
         return TurnLearning()
@@ -123,6 +125,7 @@ def record_request(
     cancelled: bool,
     lead: str = "",
     routed: Optional[dict[str, str]] = None,
+    lessons_withheld: Optional[dict[str, list[str]]] = None,
 ) -> list[Episode]:
     """Grade and keep a finished request. Only the owner's, never a cancelled one."""
     try:
@@ -137,7 +140,7 @@ def record_request(
         for episode in build_episodes(goal=goal, results=results, job=job, taint=taint, session_id=session_id,
                                       execution_id=execution_id, source=source, names=names, endpoints=endpoints,
                                       lessons_used=lessons_used, team=team,
-                                      lead=lead, routed=routed):
+                                      lead=lead, routed=routed, lessons_withheld=lessons_withheld):
             if episode.agent_id in paused:
                 continue
             playbook.attribute(episode)

@@ -12,12 +12,23 @@ import threading
 import uuid
 from typing import Any
 
+import pytest
+
 from agent.lean import runtime as lean_runtime
 from agent.lean.job import Job, needs_action
 from agent.lean.provider import ModelTurn, ToolCall
 from agent.lean.rooms import Room
 from agent.lean.toolbox import NativeTool
 from tests.test_lean_runtime import ScriptedClient
+
+
+@pytest.fixture(autouse=True)
+def _permissions_on(monkeypatch):
+    """Group coding work: the owner has allowed file edits and the terminal."""
+    from config import config
+
+    for name in ("enable_system_actions", "allow_file_write", "allow_terminal_commands"):
+        monkeypatch.setattr(config, name, True)
 
 
 class Project:

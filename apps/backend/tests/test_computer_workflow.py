@@ -16,6 +16,7 @@ def test_screenshot_bad_terminal_call_and_desktop_recovery(monkeypatch, tmp_path
     monkeypatch.setattr(observations, "root", lambda: tmp_path / "observations")
     monkeypatch.setattr(config, "enable_system_actions", True)
     monkeypatch.setattr(config, "allow_desktop_automation", True)
+    monkeypatch.setattr(config, "allow_terminal_commands", True)
     monkeypatch.setattr(terminal, "resolved_mode", lambda: "docker")
     monkeypatch.setattr(policy, "_secret_values", lambda: [])
     monkeypatch.setattr(policy, "audit", lambda *a, **kw: None)

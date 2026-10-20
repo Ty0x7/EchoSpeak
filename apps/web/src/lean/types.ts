@@ -143,6 +143,9 @@ export type LearningLesson = {
   uses: number;
   wins: number;
   losses: number;
+  /** Checked results of matching tasks where the lesson was held back at random (its control). */
+  held_wins?: number;
+  held_losses?: number;
   last_used_at: number;
   created_at: number;
   updated_at: number;

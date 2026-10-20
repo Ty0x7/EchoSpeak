@@ -59,6 +59,8 @@ class Episode:
     taint: list[str] = field(default_factory=list)
     tamper: list[dict[str, Any]] = field(default_factory=list)
     lessons_used: list[str] = field(default_factory=list)
+    # Lessons that matched this task but were held back at random: the lesson's control group.
+    lessons_withheld: list[str] = field(default_factory=list)
     # What this episode counted for, for the lessons it used: win | loss | ''.
     # Kept so the owner's feedback can correct it later without double counting.
     attribution: str = ""
@@ -107,6 +109,9 @@ class Lesson:
     uses: int = 0
     wins: int = 0
     losses: int = 0
+    # Checked results of matching tasks where it was held back at random (playbook.holdout).
+    held_wins: int = 0
+    held_losses: int = 0
     last_used_at: float = 0.0
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)

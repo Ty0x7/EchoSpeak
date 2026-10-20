@@ -14,10 +14,21 @@ same history always gives the same playbook.
 A "win" is a task that succeeded with a check after the work (V2+) or that
 the owner said worked. An unchecked success counts as nothing: lessons are
 promoted on evidence, not on the agent's say-so.
+
+Wins alone can't tell a helpful lesson from one that rides along on tasks the
+agent would have done anyway, and self-written playbooks can do worse than no
+playbook at all (arXiv 2610.18427, "Reliable Memory from Unstable Growth").
+So a matching lesson is sometimes held back at random, and the checked results
+of those tasks are its control group: the same kind of task, picked the same way.
+
+    probation -> stays unproven  when it has 3+ held-back results and does no better with it
+    probation -> retired         when tasks went clearly better without it
+    established -> probation     the same, for a proven lesson (held back less often)
 """
 
 from __future__ import annotations
 
+import random
 import time
 from typing import Optional
 
@@ -33,6 +44,14 @@ STALE_UNPROVEN_DAYS = 60
 STALE_PROVEN_DAYS = 120
 # Unproven lessons per prompt: room to try new ones without crowding out proven ones.
 MAX_UNPROVEN_IN_PROMPT = 2
+# How often a matching lesson is held back to measure tasks without it. The owner's own
+# lessons are never held back.
+HOLDOUT_UNPROVEN = 0.2
+HOLDOUT_PROVEN = 0.1
+# Held-back checked results needed before the comparison can block a promotion or retire.
+MIN_HELD = 3
+# How much better tasks must go without a lesson before it counts as harmful.
+HARM_MARGIN = 0.25
 
 HEADER = (
     "## Lessons from your past work\n"
@@ -91,6 +110,17 @@ def select(agent_id: str, goal: str, limit: int) -> list[Lesson]:
     return picked
 
 
+def holdout(lessons: list[Lesson], rng: Optional[random.Random] = None) -> tuple[list[Lesson], list[Lesson]]:
+    """(lessons to show, lessons held back this time as the control group)."""
+    rng = rng or random
+    used: list[Lesson] = []
+    withheld: list[Lesson] = []
+    for lesson in lessons:
+        rate = 0.0 if lesson.origin == "owner" else HOLDOUT_PROVEN if lesson.status == "established" else HOLDOUT_UNPROVEN
+        (withheld if rng.random() < rate else used).append(lesson)
+    return used, withheld
+
+
 def section(lessons: list[Lesson]) -> str:
     if not lessons:
         return ""
@@ -134,32 +164,41 @@ def attribute(episode: Episode, *, previous: Optional[str] = None) -> None:
     new = verdict(episode) or "none"
     first_time = previous is None
     old = "none" if first_time else (previous or "none")
-    if not episode.lessons_used or (not first_time and old == new):
+    counted = [(lesson_id, False) for lesson_id in episode.lessons_used]
+    counted += [(lesson_id, True) for lesson_id in episode.lessons_withheld if lesson_id not in episode.lessons_used]
+    if not counted or (not first_time and old == new):
         episode.attribution = new
         return
     store = get_experience_store()
-    for lesson_id in episode.lessons_used:
+    for lesson_id, held in counted:
         lesson = store.get_lesson(lesson_id)
         if lesson is None or lesson.agent_id != episode.agent_id:
             continue
         before = Lesson.from_dict(lesson.to_dict())
-        if first_time:
+        if first_time and not held:
             lesson.uses += 1
             lesson.last_used_at = max(lesson.last_used_at, episode.created_at)
+        wins, losses = ("held_wins", "held_losses") if held else ("wins", "losses")
         if old == "win":
-            lesson.wins = max(0, lesson.wins - 1)
+            setattr(lesson, wins, max(0, getattr(lesson, wins) - 1))
         elif old == "loss":
-            lesson.losses = max(0, lesson.losses - 1)
+            setattr(lesson, losses, max(0, getattr(lesson, losses) - 1))
         if new == "win":
-            lesson.wins += 1
+            setattr(lesson, wins, getattr(lesson, wins) + 1)
         elif new == "loss":
-            lesson.losses += 1
+            setattr(lesson, losses, getattr(lesson, losses) + 1)
         change = lifecycle(lesson)
         if change:
             lesson.status, lesson.note = change
             store.update_lesson(lesson, actor="system", action=f"status:{lesson.status}", reason=change[1], before=before)
         elif new == "none" and old == "none":
-            store.update_lesson(lesson, actor="system", action="used", before=before, quiet=True)
+            store.update_lesson(lesson, actor="system", action="held_back" if held else "used", before=before, quiet=True)
+        elif held:
+            store.update_lesson(lesson, actor="system", action=f"control:{new}",
+                                reason=f"{episode.id}: held back at random; the task "
+                                       + ("succeeded" if new == "win" else "failed" if new == "loss" else "had no checked result")
+                                       + " without it",
+                                before=before)
         else:
             store.update_lesson(lesson, actor="system", action=f"counted:{new}",
                                 reason=f"{episode.id}: " + ("helped" if new == "win" else "failed" if new == "loss" else "no checked result"),
@@ -171,13 +210,24 @@ def lifecycle(lesson: Lesson) -> Optional[tuple[str, str]]:
     """(new status, reason) when the counts call for a change, else None."""
     decided = lesson.wins + lesson.losses
     rate = lesson.wins / decided if decided else 0.0
+    held = lesson.held_wins + lesson.held_losses
+    held_rate = lesson.held_wins / held if held else 0.0
+    compared = held >= MIN_HELD
+    harmful = compared and decided >= RETIRE_LOSSES and rate + HARM_MARGIN < held_rate
+    versus = f"{lesson.wins} of {decided} checked tasks with it, {lesson.held_wins} of {held} without"
     if lesson.status == "probation":
-        if lesson.wins >= PROMOTE_WINS and rate >= PROMOTE_RATE:
-            return "established", f"proven: helped in {lesson.wins} of {decided} checked tasks"
+        if harmful:
+            return "retired", f"tasks went better without it: {versus}"
+        if lesson.wins >= PROMOTE_WINS and rate >= PROMOTE_RATE and not (compared and rate <= held_rate):
+            return "established", f"proven: helped in {lesson.wins} of {decided} checked tasks" + (
+                f" ({lesson.held_wins} of {held} without it)" if compared else "")
         if lesson.losses >= RETIRE_LOSSES and rate < RETIRE_RATE:
             return "retired", f"didn't help: {lesson.losses} of {decided} checked tasks failed with it"
-    elif lesson.status == "established" and lesson.losses > lesson.wins:
-        return "probation", f"started failing ({lesson.losses} losses, {lesson.wins} wins): unproven again"
+    elif lesson.status == "established":
+        if harmful:
+            return "probation", f"tasks went better without it ({versus}): unproven again"
+        if lesson.losses > lesson.wins:
+            return "probation", f"started failing ({lesson.losses} losses, {lesson.wins} wins): unproven again"
     return None
 
 
