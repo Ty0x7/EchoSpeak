@@ -29,6 +29,7 @@ from loguru import logger
 
 from agent.lean import policy, settings
 from agent.lean import quarantine, tool_outputs, tracing
+from agent.lean import approvals
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, outbound
 from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, is_promise_without_action,
@@ -115,6 +116,8 @@ class LeanTurn:
         self._refused: dict[str, str] = {}
         # Failures in a row per tool, whatever the arguments: after a few, say so.
         self._fail_streak: dict[str, int] = {}
+        # Approvals autonomous mode held for the owner instead of waiting ({tool, summary, reason}).
+        self.held: list[dict[str, str]] = []
         self.interactive = interactive
         # Re-prompt an agent whose reply only promises work (see agent/lean/job.py).
         self.promise_guard = promise_guard
@@ -421,6 +424,8 @@ class LeanTurn:
             "usage": dict(self.usage),
             "empty": empty,
             "stop_reason": stop_reason,
+            # Approvals autonomous mode held for the owner: the actionable exceptions of a walk-away run.
+            "held": list(self.held),
             "completed": self.completed_summary or "",
         })
         return TurnResult(
@@ -646,6 +651,8 @@ class LeanTurn:
             if not allowed:
                 if denial.startswith("The user denied"):
                     self._refused[self._sig(name, args)] = "denied by the user"
+                elif denial.startswith("Not run:") and "autonomous mode" in denial:
+                    self._refused[self._sig(name, args)] = "held for the owner's approval"
                 results[call.id] = (False, denial)
                 self._tool_finished(call, name, args, step, False, denial, 0)
                 continue
@@ -743,6 +750,11 @@ class LeanTurn:
         if ok and policy.is_untrusted_source(name, self.toolbox.entry(name), args) and name not in self.taint:
             self.taint.append(name)
 
+    def _auto_note(self, step: int, text: str) -> None:
+        """A visible line in the message for an approval that didn't need the owner this time."""
+        self.timeline.append({"kind": "note", "step": step, "text": text, "at": time.time()})
+        self.emit({"type": "auto_approved", "step": step, "note": text})
+
     def _approve(self, call: Any, name: str, args: dict[str, Any], step: int) -> tuple[bool, str]:
         entry = self.toolbox.entry(name)
         needs, reason = tool_needs_approval(entry, name, args)
@@ -759,6 +771,32 @@ class LeanTurn:
             needs, reason = True, policy_reason
         elif not needs or broker.granted(self.session_id, policy.grant_name(name)):
             return True, ""
+        scope = approvals.scope_for(name, args, reason, self._policy_rules.get(call.id, ""))
+        if scope is not None and approvals.get_grant_store().has(scope.key):
+            # The owner chose "Always allow" for this class of action.
+            policy.audit(policy.Decision("allow", reason, "always_allowed"), name=name, args=args,
+                         session_id=self.session_id, agent=self.persona.id, outcome=f"always allowed: {scope.key}")
+            self._auto_note(step, f"Allowed by your Always allow: {scope.label}")
+            return True, ""
+        if settings.approval_mode() == "autonomous" and self.interactive:
+            # Only chats in the app: Discord, routines and other sources keep refusing below.
+            if scope is not None and scope.autonomous:
+                policy.audit(policy.Decision("allow", reason, "autonomous"), name=name, args=args,
+                             session_id=self.session_id, agent=self.persona.id, outcome=f"autonomous: {scope.key}")
+                self._auto_note(step, f"Allowed automatically (autonomous mode): {scope.label}")
+                return True, ""
+            # Not something autonomy may approve: held for the owner instead of stalling the run.
+            summary = describe_call(name, args)
+            self.held.append({"tool": name, "summary": summary, "reason": reason})
+            self.timeline.append({"kind": "approval", "step": step, "id": f"held_{len(self.held)}", "tool_call_id": call.id,
+                                  "summary": summary, "reason": reason, "decision": "held", "at": time.time()})
+            self.emit({"type": "approval_held", "step": step, "tool_call_id": call.id, "tool": name, "summary": summary,
+                       "reason": reason})
+            policy.audit(policy.Decision("ask", reason, "autonomous_held"), name=name, args=args,
+                         session_id=self.session_id, agent=self.persona.id, outcome="held for the owner")
+            return False, (f"Not run: {name} needs the owner's approval ({reason}), and autonomous mode doesn't approve "
+                           "this kind of action. Don't retry it or work around it. Continue with the rest of the task, "
+                           "and at the end tell the user exactly what is waiting for their approval.")
         if not self.interactive:
             return False, (
                 f"{name} needs the user's approval, which can only be given in the EchoSpeak app. "
@@ -777,6 +815,7 @@ class LeanTurn:
             args=args,
             reason=reason,
             grantable=grantable,
+            scope=scope,
         )
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})

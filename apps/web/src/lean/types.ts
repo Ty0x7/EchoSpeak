@@ -42,9 +42,12 @@ export type LeanSegment =
       summary: string;
       args?: Record<string, unknown>;
       reason: string;
-      decision: "" | "allow" | "deny" | "timeout" | "cancelled" | "answered";
+      decision: "" | "allow" | "deny" | "timeout" | "cancelled" | "answered" | "held";
       /** False when "For this chat" cannot apply (outside content read this turn). */
       grantable?: boolean;
+      /** "Always allow" can grant this class of action; scopeLabel names the class. */
+      persistable?: boolean;
+      scopeLabel?: string;
       /** ask_user: a question with choices instead of a permission request. */
       question?: string;
       options?: string[];
@@ -76,6 +79,8 @@ export type LeanLiveState = {
   requestId: string;
   executionId: string;
   routing: boolean;
+  /** Autonomous mode: routine approvals don't interrupt this run. */
+  autonomous?: boolean;
   startedAt: number;
   order: string[];
   messages: Record<string, LeanMessageData>;

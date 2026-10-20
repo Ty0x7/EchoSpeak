@@ -343,6 +343,7 @@
 }
 .lm-approval-done > span:first-child { flex: 0 0 auto; color: var(--es-dim); font-weight: 600; }
 .lm-approval-done[data-decision="allow"] > span:first-child { color: var(--es-ok); }
+.lm-approval-done[data-decision="held"] > span:first-child { color: var(--es-warn); }
 .lm-approval-done-what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lm-approval-text { display: grid; gap: 3px; min-width: 0; }
 .lm-approval-text strong { color: var(--es-text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
@@ -841,6 +842,7 @@
 .lm-status-dot { width: 8px; height: 8px; margin: 0 4px; border-radius: 50%; background: var(--es-emph); animation: lm-dot 1.1s ease-in-out infinite; }
 .lm-status-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lm-status-time { color: var(--es-faint); font: 500 11px var(--es-mono); font-variant-numeric: tabular-nums; }
+.lm-status-auto { flex: 0 0 auto; color: var(--es-warn); font: 650 9.5px/1 var(--es-font); letter-spacing: 0.1em; text-transform: uppercase; }
 .lm-status-stop {
   display: inline-flex;
   align-items: center;

@@ -250,7 +250,9 @@ class LeanSession:
             metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else ""},
         )
         self.execution_id = execution.id
-        self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else ""})
+        self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else "",
+                   # The status pill shows when routine approvals won't interrupt.
+                   "autonomous": settings.approval_mode() == "autonomous" and self.source in INTERACTIVE_SOURCES})
 
         self._user_message = message
         self.job = Job(goal=message, max_rounds=settings.group_max_rounds(), token_budget=settings.group_token_budget())

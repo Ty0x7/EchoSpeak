@@ -19,6 +19,7 @@ import { SmartModelChoice } from "./SmartModelChoice";
 import { UPDATES_OFF_MESSAGE, updatesAllowed } from "../desktop/privacyGate";
 import { AgentSkillsSection } from "./AgentSkillsSection";
 import { DesktopControlOffer } from "./DesktopControlOffer";
+import { AlwaysAllowed } from "./AlwaysAllowed";
 import { VoiceProviders } from "./VoiceProviders";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
@@ -460,11 +461,19 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
             onChange={(v) => save({ lean_approval_mode: v })}
             options={[
               { value: "smart", label: "Risky only", hint: "Recommended" },
+              { value: "autonomous", label: "Autonomous", hint: "Walk away" },
               { value: "always", label: "Every action" },
               { value: "never", label: "Never" },
             ]}
           />
         </Row>
+        {String(s.lean_approval_mode || "smart") === "autonomous" ? (
+          <div className="st-muted" role="status">
+            Autonomous: desktop control and ordinary commands outside the sandbox run without asking, so long tasks keep going while you're away.
+            Deleting, dangerous commands, sending messages, cloud costs and tasks for other agents are never approved for you: the agent skips them
+            and lists them for you at the end. Permissions, Blocked apps, Private mode and Stop still apply.
+          </div>
+        ) : null}
         <Row label="Separate reader for outside content" help="A web page, email or app result goes first to a reader with no tools, and the agent sees only the facts it found. Lowers the chance hidden instructions work, and tells you when content tried. Costs one extra model call per result.">
           <Segmented
             value={String(s.lean_quarantine_reader || "messages")}
@@ -878,6 +887,7 @@ function PermissionsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; 
           </Row>
         ))}
         {master && asBool(s.allow_desktop_automation) ? <DesktopControlOffer apiBase={apiBase} /> : null}
+        <AlwaysAllowed apiBase={apiBase} />
         {master && asBool(s.allow_desktop_automation) ? (
           <Row label="Claude's own computer tool" help="With a Claude 5 model, use the computer tool Claude was trained on instead of Echo's general one. Same permissions and approvals. Turn off to compare.">
             <Toggle checked={s.computer_native_tools === undefined ? true : asBool(s.computer_native_tools)} onChange={(v) => save({ computer_native_tools: v })} label="Claude's own computer tool" />

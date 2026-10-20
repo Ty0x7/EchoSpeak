@@ -24,6 +24,9 @@ export const LEAN_EVENT_TYPES = new Set([
   "task_board",
   "claim_unverified",
   "security_note",
+  "approval_held",
+  "auto_approved",
+  "fail_streak",
 ]);
 
 /** Only numeric facts (results, pages, products) are kept from a step's meta. */
@@ -83,7 +86,7 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
   const id = String(evt.message_id || "");
   switch (evt.type) {
     case "run_start":
-      return { ...state, executionId: String(evt.execution_id || "") };
+      return { ...state, executionId: String(evt.execution_id || ""), autonomous: Boolean(evt.autonomous) };
     case "routing":
       return { ...state, routing: true };
     case "run_outcome": {
@@ -206,9 +209,33 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
             reason: String(evt.reason || ""),
             decision: "",
             ...(evt.grantable === false ? { grantable: false } : {}),
+            ...(evt.persistable ? { persistable: true, scopeLabel: String(evt.scope_label || "") } : {}),
             ...questionFields(evt),
           },
         ],
+      }));
+    case "approval_held":
+      // Autonomous mode held this for the owner instead of waiting; the run carried on.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [
+          ...closeThinking(m.segments, at),
+          {
+            kind: "approval",
+            step: Number(evt.step || 0),
+            id: `held_${String(evt.tool_call_id || at)}`,
+            toolCallId: String(evt.tool_call_id || ""),
+            tool: String(evt.tool || ""),
+            summary: String(evt.summary || ""),
+            reason: String(evt.reason || ""),
+            decision: "held",
+          },
+        ],
+      }));
+    case "auto_approved":
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [...m.segments, { kind: "note", step: Number(evt.step || 0), text: String(evt.note || "Allowed automatically"), at }],
       }));
     case "context_compacted":
       return patchMessage(state, id, (m) => ({

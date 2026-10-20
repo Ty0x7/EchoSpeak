@@ -95,6 +95,9 @@ export function LiveStatusPill({ live, onStop }: { live: LeanLiveState | null; o
         <span className="lm-status-dot" aria-hidden />
       )}
       <span className="lm-status-text lm-shimmer">{activity}</span>
+      {shown.autonomous ? (
+        <span className="lm-status-auto" title="Autonomous mode: routine approvals don't interrupt. Risky actions wait for you; Stop always works.">Autonomous</span>
+      ) : null}
       <span className="lm-status-time">{elapsed(Date.now() - shown.startedAt)}</span>
       <button type="button" className="lm-status-stop" onClick={onStop} title="Stop (Esc)" aria-label="Stop">
         <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden><rect x="1" y="1" width="8" height="8" rx="1.6" fill="currentColor" /></svg>

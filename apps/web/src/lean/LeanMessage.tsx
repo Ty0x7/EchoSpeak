@@ -237,7 +237,7 @@ function ApprovalCard({
 }) {
   const [busy, setBusy] = useState(false);
   const decided = Boolean(seg.decision);
-  const decide = async (decision: "allow" | "deny" | "always") => {
+  const decide = async (decision: "allow" | "deny" | "always" | "persist") => {
     if (!onDecide || busy) return;
     setBusy(true);
     try {
@@ -248,6 +248,15 @@ function ApprovalCard({
   };
   const verdict =
     seg.decision === "allow" ? "Allowed" : seg.decision === "deny" ? "Denied" : seg.decision === "timeout" ? "Timed out" : seg.decision === "cancelled" ? "Stopped" : "";
+  if (seg.decision === "held") {
+    // Autonomous mode didn't wait: this is what the run left for the owner.
+    return (
+      <div className="lm-approval-done" data-decision="held">
+        <span>Waiting for you</span>
+        <span className="lm-approval-done-what">{seg.summary}{seg.reason ? ` · ${seg.reason}` : ""}</span>
+      </div>
+    );
+  }
   if (decided) {
     return (
       <div className="lm-approval-done" data-decision={seg.decision}>
@@ -269,6 +278,10 @@ function ApprovalCard({
       {!decided ? (
         <div className="lm-approval-actions">
           <button type="button" className="es-btn es-btn-primary" disabled={busy} onClick={() => void decide("allow")}>{busy ? "Applying…" : "Allow once"}</button>
+          {seg.persistable ? (
+            <button type="button" className="es-btn" disabled={busy} onClick={() => void decide("persist")}
+              title={`Always allow: ${seg.scopeLabel || seg.tool}. In every chat, until you remove it in Settings › Permissions.`}>Always allow</button>
+          ) : null}
           {seg.grantable !== false ? <button type="button" className="es-btn" disabled={busy} onClick={() => void decide("always")} title={`Allow ${seg.tool} for the rest of this chat`}>For this chat</button> : null}
           <button type="button" className="es-btn es-btn-quiet" disabled={busy} onClick={() => void decide("deny")}>Decline</button>
         </div>

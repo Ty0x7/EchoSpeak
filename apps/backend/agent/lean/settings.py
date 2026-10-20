@@ -54,9 +54,16 @@ def max_output_tokens() -> int:
 
 
 def approval_mode() -> str:
-    """smart (default): approve destructive/external only; always; never."""
+    """smart (default): approve destructive/external only; always; never.
+
+    autonomous: like smart, but for walking away. Classes marked autonomous in
+    approvals.scope_for (desktop control, non-dangerous terminal asks) are approved
+    automatically; every other ask is held for the owner without waiting, so the run
+    keeps going and reports what still needs them. Disabled permissions, Blocked apps,
+    privacy modes, project scope, the Rule of Two and Stop are unchanged.
+    """
     mode = str(_setting("lean_approval_mode", "smart") or "smart").strip().lower()
-    return mode if mode in {"smart", "always", "never"} else "smart"
+    return mode if mode in {"smart", "always", "never", "autonomous"} else "smart"
 
 
 def approval_timeout_seconds() -> float:

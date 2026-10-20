@@ -154,7 +154,18 @@ Dangerous commands ask first in every mode.
   turn it on, so it can tell you instead of looking for a way around it.
 - If you decline an action, the agent won't ask you for that exact action again in the same
   request. After three failures in a row of one tool, it is told to change approach.
-- **Approvals** decide what asks first: **Risky only** (recommended), **Every action**, or **Never**.
+- **Always allow** on an approval card stops the questions for that kind of action, in every chat:
+  desktop control, ordinary commands on this PC, sandbox internet, a particular connected-app action,
+  or cloud generation. Settings › Permissions › **Always allowed** lists them; remove one and it asks
+  again. Deleting, dangerous commands, sending messages, identity changes, tasks for other agents
+  (A2A) and anything asked because outside content was read can't be always allowed.
+- **Autonomous** (Settings › General › Ask before risky actions) is for walking away from a long task.
+  Desktop control and ordinary commands outside the sandbox run without asking; everything else that
+  would ask (deleting, dangerous commands, sends, cloud costs, A2A) is skipped and listed as
+  **Waiting for you**, so the run keeps going. The status pill shows **Autonomous**. Permissions,
+  Blocked apps, Private mode, project folders and Stop all still apply, and Discord or routines never
+  get approvals from it.
+- **Approvals** decide what asks first: **Risky only** (recommended), **Autonomous**, **Every action**, or **Never**.
   Risky means deleting files, dangerous commands, messages that leave the PC, desktop control,
   and MCP actions. An approval shows in the chat with **Allow once**, **For this chat** and **Decline**.
 - After an agent reads a web page or email, anything that would send data out asks first, even

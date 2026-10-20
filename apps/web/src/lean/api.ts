@@ -69,6 +69,13 @@ export const leanApi = (apiBase: string) => ({
   async decide(approvalId: string, decision: string): Promise<void> {
     await json(await fetch(`${apiBase}/lean/approvals/${encodeURIComponent(approvalId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision }) }));
   },
+  /** The owner's "Always allow" grants (persistent, by class of action). */
+  async approvalGrants(): Promise<{ items: { key: string; label: string; created_at: number }[]; mode: string }> {
+    return json(await fetch(`${apiBase}/lean/approval-grants`));
+  },
+  async removeApprovalGrant(key: string): Promise<void> {
+    await json(await fetch(`${apiBase}/lean/approval-grants/${encodeURIComponent(key)}`, { method: "DELETE" }));
+  },
   async toolsets(): Promise<{ id: string; tools: string[] }[]> {
     const data = await json<{ toolsets: { id: string; tools: string[] }[] }>(await fetch(`${apiBase}/lean/toolsets`));
     return data.toolsets || [];
