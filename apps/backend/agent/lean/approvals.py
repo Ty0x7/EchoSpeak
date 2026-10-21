@@ -40,7 +40,8 @@ DESKTOP_CONTROL_TOOLS = {
 # Hermes-style dangerous command detection for terminal_run.
 _DANGEROUS_COMMAND = re.compile(
     r"""(?ix)
-    (^|[\s;&|(])(
+    # A quote or backtick also starts a command: cmd /c "rd /s /q …", pwsh -c 'Remove-Item …'.
+    (^|[\s;&|("'`])(
         rm|rmdir|rd|del|erase|remove-item|format|diskpart|shutdown|restart-computer|stop-computer|
         reg|regedit|bcdedit|takeown|icacls|cipher|set-executionpolicy|
         stop-process|kill|taskkill|net\s+user|new-service|sc\s+delete|
@@ -55,6 +56,11 @@ _DANGEROUS_COMMAND = re.compile(
     |>\s*[a-z]:\\|\|\s*(iex|invoke-expression|sh|bash)\b
     |\b(?:powershell|pwsh)(?:\.exe)?\b[^|;&]*\s-e(?:nc|ncodedcommand)?\b
     |\b(?:shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|send2trash)\b|\.unlink\(
+    # Inline code that deletes, or hands a string to a shell, in other runtimes.
+    |\b(?:rmSync|rmdirSync|unlinkSync|rimraf)\b
+    |\[(?:system\.)?io\.(?:file|directory)\]::(?:delete|move)
+    |\b(?:invoke-expression|iex)\b
+    |\b(?:os\.system|os\.popen|subprocess\.(?:run|call|popen|check_call|check_output)|child_process|execSync)\b
     """
 )
 
