@@ -1,7 +1,7 @@
 {
   "name": "echospeak-web",
   "private": true,
-  "version": "11.9.3",
+  "version": "11.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

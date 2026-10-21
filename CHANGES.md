@@ -1,6 +1,6 @@
 # Changes
 
-## Unreleased
+## v11.10.0 — 2026-10-21
 
 Audit notes: [Full-system audit, 2026-10-21](docs/research/full-audit-2026-10-21.md), [Harness audit, 2026-10-20](docs/research/harness-audit-2026-10-20.md). Architecture: [docs/research/echospeak-architecture.md](docs/research/echospeak-architecture.md). Manual tests: [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md).
 
