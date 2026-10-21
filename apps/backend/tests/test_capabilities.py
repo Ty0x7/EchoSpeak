@@ -104,8 +104,8 @@ def test_sandbox_paths_given_to_file_tools_map_back_to_this_pc(tmp_path, switche
     box = _box(tmp_path)
     name, args = box.normalize_call("file_write", {"path": "/work/Desktop/Game/index.html", "content": "<h1>DAWN</h1>"})
     assert args["path"] == str(desktop / "Game" / "index.html")
-    assert "give file_read, file_write and the other file tools the Windows paths" in Terminal(str(tmp_path)).describe() \
-        or Terminal(str(tmp_path)).mode == "host"
+    monkeypatch.setattr(term, "resolved_mode", lambda: "docker")  # describe the sandbox, whatever this PC has
+    assert "give file_read, file_write and the other file tools the Windows paths" in Terminal(str(tmp_path)).describe()
 
 
 # ── the report the agent reads ──────────────────────────────────────────

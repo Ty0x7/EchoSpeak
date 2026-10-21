@@ -92,7 +92,7 @@ def test_one_request_through_swarm_policy_and_learning(monkeypatch, store):
     assert "<untrusted-content" in findings and "Pixel battery life: 30 hours" in findings
     # Rule of Two: what the workers read taints the whole request.
     assert {"safe_web_fetch", "spawn_workers"} <= set(session._taint)
-    assert "30 hours" in out.get("response", "") or "30 hours" in json.dumps(out)
+    assert "Both last about 30 hours" in json.dumps(out)  # the lead's own synthesis is the reply
     # Learning: one episode for the lead's reply, one per worker, kept apart.
     episodes = store.episodes(limit=20)
     workers = [e for e in episodes if e.source == "swarm"]
