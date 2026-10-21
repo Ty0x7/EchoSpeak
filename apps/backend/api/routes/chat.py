@@ -161,7 +161,7 @@ async def get_queued_queries(thread_id: str):
     """List pending queued turns for a Session."""
     key = _normalize_thread_id(thread_id)
     items = get_state_store().list_queued_turns(key)
-    return {"thread_id": key, "queue": items}
+    return {"thread_id": key, "queue": items, "paused": get_state_store().queue_paused(key)}
 
 
 class QueryQueueEdit(BaseModel):
@@ -214,18 +214,23 @@ async def steer_query(request: QuerySteerRequest):
 
 
 @router.post("/query/queue/claim")
-async def claim_queued_query(thread_id: str):
-    """Claim one durable follow-up only after the Session has no active Turn."""
+async def claim_queued_query(thread_id: str, force: bool = False):
+    """Claim one durable follow-up only after the Session has no active Turn.
+
+    After Stop the queue is paused: nothing is claimed until the owner presses Run next
+    (force=true, which also un-pauses it) or sends a new message.
+    """
     key = _normalize_thread_id(thread_id)
     with _ACTIVE_QUERY_CANCEL_LOCK:
         session_active = any(owner == key for owner, _event, _execution in _ACTIVE_QUERY_CANCELLATIONS.values())
     if session_active:
         raise HTTPException(status_code=409, detail="This Session still has an active Turn.")
-    item = get_state_store().claim_queued_turn(key)
+    item = get_state_store().claim_queued_turn(key, force=force)
     return {
         "thread_id": key,
         "claimed": item is not None,
         "item": item,
+        "paused": get_state_store().queue_paused(key),
         "queue_length": len(get_state_store().list_queued_turns(key)),
     }
 
@@ -280,6 +285,8 @@ async def cancel_query(request: QueryCancelRequest):
                 raise HTTPException(status_code=409, detail=str(exc)) from exc
             raise
     event.set()
+    # Stop means stop: queued follow-ups (and steers moved to the queue) wait for the owner.
+    get_state_store().set_queue_paused(owner_session, True)
     from agent.query_journal import get_query_journal
     get_query_journal().finish(request.request_id, "cancelled")
     return {
@@ -446,6 +453,8 @@ async def query_stream(request: QueryRequest):
     q: queue.Queue = queue.Queue()
     request_id = str(request.client_request_id or "").strip() or str(uuid.uuid4())
     fingerprint = hashlib.sha256(request.model_dump_json().encode()).hexdigest()
+    # The owner is talking again: a queue paused by Stop may continue after this turn.
+    get_state_store().set_queue_paused(session, False)
     try:
         claimed = journal.claim(request_id, session, fingerprint)
     except ValueError as exc:

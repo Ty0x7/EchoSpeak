@@ -24,6 +24,15 @@ export function useFollowUps(apiBase: string, threadId: string) {
       if (!response.ok) return;
       const data = await response.json();
       if (session === threadId) setItems(Array.isArray(data.queue) ? data.queue : []);
+      // The backend owns the pause, so it survives reconnects and restarts.
+      if (typeof data.paused === "boolean") {
+        setPaused((current) => {
+          const next = new Set(current);
+          if (data.paused) next.add(session);
+          else next.delete(session);
+          return next;
+        });
+      }
     } catch {
       // The queue is durable on the backend; the list catches up on the next refresh.
     }
