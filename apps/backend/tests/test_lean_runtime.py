@@ -459,8 +459,13 @@ def test_example_json_in_an_answer_is_left_alone():
     assert extract_text_tool_calls(text, _KNOWN) == ([], text)
 
 
-def test_tools_report_live_progress_and_finish_with_a_summary():
+def test_tools_report_live_progress_and_finish_with_a_summary(monkeypatch):
     from agent.lean import progress
+    from config import config
+
+    # The native terminal is offered only with the owner's permission switches on.
+    monkeypatch.setattr(config, "enable_system_actions", True)
+    monkeypatch.setattr(config, "allow_terminal_commands", True)
 
     def build(args):
         progress.report("Compiling 3 files")

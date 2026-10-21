@@ -5,11 +5,22 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+import pytest
+
 from agent.lean.job import changed_code_file
 from agent.lean.loop import LeanTurn
 from agent.lean.personas import AgentPersona
 from agent.lean.provider import ModelTurn, ToolCall
 from agent.lean.toolbox import NativeTool, Toolbox
+
+
+@pytest.fixture(autouse=True)
+def _permissions_on(monkeypatch):
+    """These tests are about coding work: the owner has allowed file edits and the terminal."""
+    from config import config
+
+    for name in ("enable_system_actions", "allow_file_write", "allow_terminal_commands"):
+        monkeypatch.setattr(config, name, True)
 
 
 class Client:

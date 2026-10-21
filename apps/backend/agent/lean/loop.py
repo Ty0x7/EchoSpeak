@@ -45,6 +45,8 @@ NUDGE_EMPTY = (
     "otherwise write your answer."
 )
 NUDGE_TRUNCATED = "Your last reply was cut off by the output limit. Continue from where you stopped, concisely."
+# Failures in a row of one tool (any arguments) before the agent is told to change approach.
+FAIL_STREAK_NOTE = 3
 
 
 @dataclass
@@ -108,6 +110,11 @@ class LeanTurn:
         self.taint: list[str] = taint if taint is not None else []
         self._policy_reasons: dict[str, str] = {}
         self._policy_rules: dict[str, str] = {}
+        # Calls (by signature) the user denied or a policy blocked in this turn: never asked
+        # or tried a second time. Persistence after a "no" is a failure mode, not diligence.
+        self._refused: dict[str, str] = {}
+        # Failures in a row per tool, whatever the arguments: after a few, say so.
+        self._fail_streak: dict[str, int] = {}
         self.interactive = interactive
         # Re-prompt an agent whose reply only promises work (see agent/lean/job.py).
         self.promise_guard = promise_guard
@@ -534,6 +541,8 @@ class LeanTurn:
             signature = self._sig(name, args)
             call_counts[signature] = call_counts.get(signature, 0) + 1
             problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} | computer_names else "repeat")
+            if not problem and signature in self._refused:
+                problem = "refused"
             if not problem:
                 # Checked for every call, parallel read-only ones included.
                 decision = policy.evaluate(name, args, entry=self.toolbox.entry(name), tainted_by=self.taint,
@@ -590,6 +599,14 @@ class LeanTurn:
             if problem == "policy":
                 output = (f"Blocked by EchoSpeak's safety policy: {self._policy_reasons.get(call.id, 'not allowed')}. "
                           "Don't retry it; continue without it or tell the user what was blocked.")
+                self._refused[self._sig(name, args)] = "blocked by EchoSpeak's safety policy"
+                results[call.id] = (False, output)
+                self._tool_finished(call, name, args, step, False, output, 0)
+                continue
+            if problem == "refused":
+                output = (f"Not run: this exact {name} call was already {self._refused[self._sig(name, args)]} "
+                          "earlier in this request. Don't ask again or work around it; continue without it or "
+                          "tell the user.")
                 results[call.id] = (False, output)
                 self._tool_finished(call, name, args, step, False, output, 0)
                 continue
@@ -627,6 +644,8 @@ class LeanTurn:
                 continue
             allowed, denial = self._approve(call, name, args, step)
             if not allowed:
+                if denial.startswith("The user denied"):
+                    self._refused[self._sig(name, args)] = "denied by the user"
                 results[call.id] = (False, denial)
                 self._tool_finished(call, name, args, step, False, denial, 0)
                 continue
@@ -665,6 +684,14 @@ class LeanTurn:
             text = self._shorten(name, output, limit, untrusted)
             if untrusted:
                 text = policy.wrap_untrusted(name, text)  # data, not instructions
+            streak = 0 if ok else self._fail_streak.get(name, 0) + 1
+            self._fail_streak[name] = streak
+            if streak and streak % FAIL_STREAK_NOTE == 0:
+                # Loop detection beyond identical calls: variations of a failing call rarely recover.
+                text += (f"\n\n[EchoSpeak: {name} has failed {streak} times in a row in this request. Stop trying "
+                         "variations of it. Read the errors above, then take a different approach or tell the user "
+                         "what is blocking you.]")
+                self.emit({"type": "fail_streak", "step": step, "tool": name, "count": streak})
             messages.append({"role": "tool", "tool_call_id": call.id, "name": name, "content": text or "(empty result)"})
             if visual_results.get(call.id):
                 messages[-1]["observations"] = visual_results[call.id]

@@ -62,6 +62,17 @@ TOOLSETS: dict[str, list[str]] = {
 # External tools sent with every request before the rest wait for find_tools.
 EXTERNAL_INLINE_LIMIT = 12
 
+# Lean-native tools that change this PC, held to the same Settings › Permissions
+# switches as their registry counterparts (file_write, terminal_run in agent/tools.py).
+# Checked when the toolbox is built and again when the tool runs, since settings can
+# change mid-turn.
+NATIVE_POLICY_FLAGS: dict[str, tuple[str, ...]] = {
+    "file_edit": ("ENABLE_SYSTEM_ACTIONS", "ALLOW_FILE_WRITE"),
+    "terminal": ("ENABLE_SYSTEM_ACTIONS", "ALLOW_TERMINAL_COMMANDS"),
+    "process_output": ("ENABLE_SYSTEM_ACTIONS", "ALLOW_TERMINAL_COMMANDS"),
+    "process_stop": ("ENABLE_SYSTEM_ACTIONS", "ALLOW_TERMINAL_COMMANDS"),
+}
+
 # Names kept so stored personas and API callers keep working; not offered in the editor.
 TOOLSET_ALIASES: dict[str, list[str]] = {"research": ["web", "live"]}
 for _alias, _parts in TOOLSET_ALIASES.items():
@@ -205,6 +216,11 @@ def _flag_enabled(flag: str) -> bool:
     return bool(getattr(config, str(flag).lower(), False))
 
 
+def native_permitted(name: str) -> bool:
+    """A lean-native tool's Settings › Permissions switches are all on (or it has none)."""
+    return all(_flag_enabled(flag) for flag in NATIVE_POLICY_FLAGS.get(name, ()))
+
+
 def _compact_description(text: str, limit: int = 240) -> str:
     text = re.sub(r"\s+", " ", str(text or "")).strip()
     if len(text) <= limit:
@@ -281,10 +297,13 @@ class Toolbox:
             if any(not _flag_enabled(flag) for flag in getattr(entry, "policy_flags", ()) or ()):
                 continue
             self.entries[name] = entry
-        # Native tools only appear when one of their toolsets was requested.
+        # Native tools only appear when one of their toolsets was requested, and the
+        # owner's permission switches allow them.
         requested = set(wanted)
+        self.requested = requested
         self.native = {name: tool for name, tool in self.native.items()
-                       if name in requested or tool.always or (tool.rides_with and tool.rides_with in requested)}
+                       if (name in requested or tool.always or (tool.rides_with and tool.rides_with in requested))
+                       and native_permitted(name)}
         # Connected apps can bring dozens of tools each (one Photoshop server has 128). Past a
         # few, their schemas wait until find_tools asks for them (Anthropic's Tool Search,
         # "deferred loading"): every schema is sent on every request, and small models
@@ -536,6 +555,11 @@ class Toolbox:
 
     def _run(self, name: str, args: dict[str, Any]) -> ToolResult:
         started = time.perf_counter()
+        if name in self.native and not native_permitted(name):
+            # Switched off after this turn started.
+            from agent.lean import capabilities
+
+            return ToolResult(False, capabilities.unavailable_message(name, self), 0)
         if name in self.native:
             from agent.tools import _tool_execution_context
 
@@ -619,8 +643,9 @@ class Toolbox:
         started = time.perf_counter()
         entry = self.entries.get(name)
         if entry is None:
-            close = ", ".join(sorted(self.names)[:40])
-            return ToolResult(False, f"Error: unknown tool '{name}'. Available tools: {close}", 0)
+            from agent.lean import capabilities
+
+            return ToolResult(False, capabilities.unavailable_message(name, self), 0)
 
         from agent.tools import _tool_execution_context, strip_echo_file_wrapper
 

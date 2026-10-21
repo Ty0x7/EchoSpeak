@@ -13,7 +13,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import agent_skills, git_context, memory_quality, recall, settings, soul, summaries
+from agent.lean import agent_skills, capabilities, git_context, memory_quality, recall, settings, soul, summaries
 from agent.lean.job import ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, needs_action, parse_review
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import AgentPersona, get_persona_store
@@ -157,6 +157,7 @@ class LeanSession:
         self._taint: list[str] = list(untrusted_sources or [])
         # For learning (agent/learning): which lessons each agent read, and which model it ran on.
         self._lessons_used: dict[str, list[str]] = {}
+        self._lessons_withheld: dict[str, list[str]] = {}  # matched but held back at random (the control)
         self._endpoints: dict[str, tuple[str, str]] = {}
         # Smart model choice (agent/learning/routing.py): decisions per agent for this request, the
         # models auto mode switched to, and who picked each agent's model (for learning's records).
@@ -362,6 +363,7 @@ class LeanSession:
             names={r.agent_id: self._name_of(r.agent_id) for r in self.results},
             endpoints=dict(self._endpoints),
             lessons_used={k: list(v) for k, v in self._lessons_used.items()},
+            lessons_withheld={k: list(v) for k, v in self._lessons_withheld.items()},
             team=self._job_needs_closing(),
             cancelled=cancelled,
             lead=self._lead_id,
@@ -920,9 +922,10 @@ class LeanSession:
         # Lessons from this agent's own checked past work, and tools that keep failing lately.
         from agent.learning import TurnLearning, prepare_turn
         learned = TurnLearning() if guest else prepare_turn(persona.id, goal, toolbox.names)
-        if learned.lesson_ids:
+        if learned.lesson_ids or learned.withheld_ids:
             with self._state_lock:
                 self._lessons_used.setdefault(persona.id, []).extend(learned.lesson_ids)
+                self._lessons_withheld.setdefault(persona.id, []).extend(learned.withheld_ids)
         # Where the repo stands (branch, ahead/behind, changes), like a coding agent's git status.
         repo_note = git_context.summary(self.project_root) if self.project_root and "terminal" in toolbox.names else ""
         prompt = build_system_prompt(
@@ -946,6 +949,10 @@ class LeanSession:
             project_evidence=project_evidence,
             playbook=learned.section,
             skills="" if guest else agent_skills.prompt_section(),
+            # Guests get no description of the owner's settings.
+            capabilities="" if guest else capabilities.report(toolbox),
+            tool_names=set(toolbox.names),
+            can_write=capabilities.can_write_files(toolbox),
         )
         turn = LeanTurn(
             client=self._client_for(persona),

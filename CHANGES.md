@@ -1,5 +1,15 @@
 # Changes
 
+## Unreleased
+
+Audit notes: [Harness audit, 2026-10-20](docs/research/harness-audit-2026-10-20.md).
+
+* **Security fix.** Settings › Permissions now holds for the lean runtime's own `file_edit` and `terminal` tools. Through 11.9.3 they ignored **Create and edit files**, **Run terminal commands** and the master switch, all off by default, so a default install could edit files and run commands (on this PC when Docker was unavailable). Native tools are checked when the toolbox is built and again when they run.
+* Agents get a "What you can use right now" section built from the live toolbox, permission switches, Private/Offline mode and their toolsets. A call to a tool that's off gets back why and what turns it on, instead of "unknown tool".
+* Tool-specific working rules and answer formats leave the prompt when those tools aren't offered. Read-only file access is described as read-only.
+* A denied or policy-blocked call isn't asked for again in the same request. Three failures in a row of one tool tell the agent to change approach.
+* Learning holds a matching lesson back at random (20% unproven, 10% proven, never the owner's). Lessons no better than their control stay unproven; lessons clearly worse than it are retired or demoted. The Learning page shows "without it: n of m worked".
+
 ## v11.9.3 — 2026-10-19
 
 User-facing notes: [EchoSpeak 11.9.3](docs/releases/v11.9.3.md).

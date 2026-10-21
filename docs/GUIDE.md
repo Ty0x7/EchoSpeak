@@ -108,6 +108,11 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
   **Double-checked** or **You confirmed**. When no chat is running, the agent reviews checked
   work and failures with its own model and keeps up to two short lessons. It reads the relevant
   ones before similar tasks.
+- Now and then a matching lesson is held back at random (one time in five for unproven lessons,
+  one in ten for proven ones, never your own). Those tasks show how the agent does without it. A
+  lesson is proven only when tasks go at least as well with it, and it is retired or demoted when
+  tasks go clearly better without it. The lesson's line shows both: "helped 3 · without it: 1 of 3
+  worked".
 - Under a reply, **Worked** confirms it and **Didn't work** marks it failed, with an optional note
   the agent reads when it reviews the task. Press the button again to take it back.
 - **Learning** in the sidebar shows track records, lessons with their source tasks and history,
@@ -144,7 +149,11 @@ Dangerous commands ask first in every mode.
 ## 4. Approvals and permissions
 
 - **Settings › Permissions** turns whole abilities on or off: editing files, running commands,
-  a real browser, opening apps, desktop control, email, and editing EchoSpeak itself.
+  a real browser, opening apps, desktop control, email, and editing EchoSpeak itself. A switch
+  that is off removes the tools from the agent, and the agent is told what is off and where to
+  turn it on, so it can tell you instead of looking for a way around it.
+- If you decline an action, the agent won't ask you for that exact action again in the same
+  request. After three failures in a row of one tool, it is told to change approach.
 - **Approvals** decide what asks first: **Risky only** (recommended), **Every action**, or **Never**.
   Risky means deleting files, dangerous commands, messages that leave the PC, desktop control,
   and MCP actions. An approval shows in the chat with **Allow once**, **For this chat** and **Decline**.

@@ -28,6 +28,9 @@ from tests.test_lean_runtime import ScriptedClient
 def store(monkeypatch, tmp_path):
     monkeypatch.setenv("LEARNING_ENABLED", "1")
     monkeypatch.setenv("LEARNING_MODE", "on")
+    # Deterministic lessons: the random holdout has its own tests.
+    monkeypatch.setattr(playbook, "HOLDOUT_UNPROVEN", 0.0)
+    monkeypatch.setattr(playbook, "HOLDOUT_PROVEN", 0.0)
     fresh = ExperienceStore(tmp_path / "experience.db")
     learning.set_experience_store(fresh)
     profiles.forget_cache()
@@ -80,6 +83,10 @@ def tools(monkeypatch) -> dict[str, list[dict[str, Any]]]:
 
     monkeypatch.setattr(lean_runtime, "coding_tools", lambda: fakes)
     monkeypatch.setattr(lean_runtime, "Terminal", FakeTerminal)
+    # The native terminal is offered only with the owner's permission switches on.
+    from config import config
+    monkeypatch.setattr(config, "enable_system_actions", True)
+    monkeypatch.setattr(config, "allow_terminal_commands", True)
     return calls
 
 
@@ -439,6 +446,55 @@ def test_lifecycle_promotes_retires_and_demotes():
     assert playbook.lifecycle(Lesson(agent_id="a", title="t", text="x", wins=1, losses=3))[0] == "retired"
     assert playbook.lifecycle(Lesson(agent_id="a", title="t", text="x", wins=2, losses=1)) is None
     assert playbook.lifecycle(Lesson(agent_id="a", title="t", text="x", status="established", wins=3, losses=4))[0] == "probation"
+
+
+def test_a_lesson_no_better_than_its_control_stays_unproven():
+    # 3 of 4 with it, 3 of 3 without it: it rides along on tasks that go well anyway.
+    lesson = Lesson(agent_id="a", title="t", text="x", wins=3, losses=1, held_wins=3, held_losses=0)
+    assert playbook.lifecycle(lesson) is None
+    # Same record, but tasks without it went worse: promoted, and the note shows both.
+    better = Lesson(agent_id="a", title="t", text="x", wins=3, losses=1, held_wins=1, held_losses=2)
+    status, note = playbook.lifecycle(better)
+    assert status == "established" and "1 of 3 without it" in note
+    # Too few held-back results to compare: the old rule applies.
+    assert playbook.lifecycle(Lesson(agent_id="a", title="t", text="x", wins=3, losses=1, held_wins=2))[0] == "established"
+
+
+def test_a_lesson_tasks_do_better_without_is_retired_or_demoted():
+    harmful = Lesson(agent_id="a", title="t", text="x", wins=1, losses=2, held_wins=3, held_losses=0)
+    status, note = playbook.lifecycle(harmful)
+    assert status == "retired" and "better without it" in note
+    proven = Lesson(agent_id="a", title="t", text="x", status="established", wins=5, losses=4, held_wins=4, held_losses=0)
+    assert playbook.lifecycle(proven)[0] == "probation"
+
+
+def test_holdout_keeps_the_owners_lessons_and_holds_back_at_the_set_rates():
+    import random as _random
+
+    owners = Lesson(agent_id="a", title="mine", text="x", origin="owner")
+    unproven = Lesson(agent_id="a", title="new", text="x")
+    proven = Lesson(agent_id="a", title="old", text="x", status="established")
+    rng = _random.Random(7)
+    held = {"mine": 0, "new": 0, "old": 0}
+    for _ in range(2000):
+        _, withheld = playbook.holdout([owners, unproven, proven], rng)
+        for lesson in withheld:
+            held[lesson.title] += 1
+    assert held["mine"] == 0
+    assert 300 < held["new"] < 500 and 120 < held["old"] < 280
+
+
+def test_held_back_results_count_for_the_control_not_the_lesson(store):
+    lesson = _lesson(store, "Run python scripts", "After writing a python script, run it once.", "probation")
+    episode = Episode(agent_id="echo", goal="g", outcome="success", level=2, lessons_withheld=[lesson.id])
+    playbook.attribute(episode)
+    stored = store.get_lesson(lesson.id)
+    assert (stored.uses, stored.wins, stored.held_wins, stored.held_losses) == (0, 0, 1, 0)
+    # The owner's "Didn't work" moves the control's count too, without counting it twice.
+    episode.feedback = -1
+    playbook.attribute(episode, previous="win")
+    stored = store.get_lesson(lesson.id)
+    assert (stored.held_wins, stored.held_losses) == (0, 1)
 
 
 def test_unused_lessons_retire(store):
