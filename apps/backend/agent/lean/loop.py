@@ -798,7 +798,10 @@ class LeanTurn:
         elif not needs or broker.granted(self.session_id, policy.grant_name(name)):
             return True, ""
         scope = approvals.scope_for(name, args, reason, self._policy_rules.get(call.id, ""))
-        if scope is not None and approvals.get_grant_store().has(scope.key):
+        # Grants were made on an approval card in the app and cover chats there. Channels
+        # (Discord, Telegram) and unattended routines keep refusing below: a grant must not
+        # widen what a channel message, or a routine nobody watches, can do on this PC.
+        if self.interactive and scope is not None and approvals.get_grant_store().has(scope.key):
             # The owner chose "Always allow" for this class of action.
             policy.audit(policy.Decision("allow", reason, "always_allowed"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome=f"always allowed: {scope.key}")

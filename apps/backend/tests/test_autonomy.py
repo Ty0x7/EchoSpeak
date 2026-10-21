@@ -113,6 +113,20 @@ def test_an_always_allowed_class_runs_without_asking(grants, monkeypatch):
     assert any(e["type"] == "auto_approved" and "Always allow" in e["note"] for e in events)
 
 
+def test_a_grant_never_reaches_channels_or_unattended_runs(grants, monkeypatch):
+    # An owner's Discord DM or a routine (non-interactive) with an "Always allow" grant for
+    # host commands must still be refused: the grant was made for chats in the app.
+    _mode(monkeypatch, "smart")
+    grants.add(approvals.DESKTOP_SCOPE)
+    ran: list[str] = []
+    events: list[dict[str, Any]] = []
+    turn, client = _turn({"computer_action": lambda a: ran.append("x") or "done"},
+                         [ModelTurn(tool_calls=[ToolCall("c1", "computer_action", "{}")]), ModelTurn(content="Couldn't.")],
+                         events, interactive=False)
+    turn.run("click it")
+    assert ran == [] and "can only be given in the EchoSpeak app" in client.calls[1][-1]["content"]
+
+
 def test_autonomous_mode_approves_routine_classes_and_holds_the_rest(monkeypatch):
     _mode(monkeypatch, "autonomous")
     ran: list[str] = []
