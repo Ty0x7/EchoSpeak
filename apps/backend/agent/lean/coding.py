@@ -111,6 +111,119 @@ def file_read(args: dict[str, Any]) -> str:
 
 
 # ── file_edit ───────────────────────────────────────────────────────────
+# Exact text first. When that misses, the same whole lines are looked for again
+# with Codex apply_patch's passes (codex-rs/apply-patch/src/seek_sequence.rs):
+# ignoring trailing spaces, then indentation, then typographic quotes and dashes.
+# Small local models often retype a block with one space more or less; an edit
+# that matches exactly one place is applied, re-indented to the file's own
+# indentation like Gemini CLI does. Nothing fuzzier: a near-miss could change
+# the wrong lines.
+_TYPOGRAPHY = str.maketrans({
+    **{c: "-" for c in "‐‑‒–—―−"},
+    **{c: "'" for c in "‘’‚‛"},
+    **{c: '"' for c in "“”„‟"},
+    **{c: " " for c in "            　"},
+})
+_LOOSE_PASSES: tuple[tuple[str, Any], ...] = (
+    ("ignoring trailing spaces", str.rstrip),
+    ("ignoring indentation", str.strip),
+    ("ignoring indentation and quote or dash style", lambda line: line.strip().translate(_TYPOGRAPHY)),
+)
+# Misses per file, so a short file can be rewritten whole after a couple of them.
+_MISSES: dict[str, int] = {}
+SHORT_FILE_LINES = 200
+
+
+def _indent(line: str) -> str:
+    return line[: len(line) - len(line.lstrip())]
+
+
+def _loose_match(text: str, old: str, new: str) -> tuple[Optional[str], str, int]:
+    """(updated text, how it matched, places found) for an old_text that isn't in the file exactly."""
+    pattern = old.splitlines()
+    while pattern and not pattern[-1].strip():
+        pattern.pop()
+    while pattern and not pattern[0].strip():
+        pattern.pop(0)
+    if not pattern:
+        return None, "", 0
+    lines = text.splitlines(keepends=True)
+    bare = [line.rstrip("\r\n") for line in lines]
+    size = len(pattern)
+    for label, norm in _LOOSE_PASSES:
+        want = [norm(line) for line in pattern]
+        found = [i for i in range(len(bare) - size + 1) if all(norm(bare[i + k]) == want[k] for k in range(size))]
+        if not found:
+            continue
+        if len(found) > 1:
+            return None, label, len(found)
+        start = found[0]
+        region = lines[start:start + size]
+        eol = "\r\n" if region[0].endswith("\r\n") else "\n"
+        ends_line = region[-1].endswith(("\n", "\r"))
+        # Move the new lines from old_text's indentation to the file's.
+        theirs = next(_indent(line) for line in pattern if line.strip())
+        ours = next(_indent(bare[start + k]) for k, line in enumerate(pattern) if line.strip())
+        body = []
+        for line in new.splitlines():
+            if line.strip() and theirs != ours and line.startswith(theirs):
+                line = ours + line[len(theirs):]
+            body.append(line)
+        replacement = eol.join(body) + (eol if body and ends_line else "")
+        return "".join(lines[:start]) + replacement + "".join(lines[start + size:]), label, 1
+    return None, "", 0
+
+
+def _visible(line: str) -> str:
+    """Show a line's spacing: · for a space, → for a tab, at the start and the end."""
+    core = line.strip(" \t")
+    if not core:
+        return line.replace(" ", "·").replace("\t", "→")
+    lead, trail = _indent(line), line[len(line.rstrip(" \t")):]
+    return lead.replace(" ", "·").replace("\t", "→") + core + trail.replace(" ", "·").replace("\t", "→")
+
+
+def _miss_hint(text: str, old: str) -> str:
+    """Where old_text comes closest, its first differing line next to the file's, and how to retry."""
+    pattern = old.splitlines()
+    while pattern and not pattern[0].strip():
+        pattern.pop(0)
+    if not pattern:
+        return ""
+    lines = text.splitlines()
+    first = pattern[0].strip()
+    starts = [i for i, line in enumerate(lines) if line.strip() == first]
+    if not starts:
+        starts = [i for i, line in enumerate(lines) if first and first in line]
+    if not starts:
+        close = difflib.get_close_matches(first, [line.strip() for line in lines], n=1, cutoff=0.75)
+        starts = [i for i, line in enumerate(lines) if close and line.strip() == close[0]][:1]
+    if not starts:
+        return (f" Its first line ({first[:80]!r}) isn't in the file. Find the right place with file_search or "
+                "file_read before trying again.")
+    best_start, best_k = starts[0], -1
+    for start in starts[:5]:
+        k = 0
+        while k < len(pattern) and start + k < len(lines) and lines[start + k].strip() == pattern[k].strip():
+            k += 1
+        if k > best_k:
+            best_start, best_k = start, k
+    k = best_k
+    head = f" The closest match starts at line {best_start + 1}"
+    if k >= len(pattern):
+        detail = "."
+    elif best_start + k >= len(lines):
+        detail = f"; your text runs past the end of the file at its line {k + 1}."
+    else:
+        detail = (f"; the first difference is at line {best_start + k + 1}:\n"
+                  f"  file: {_visible(lines[best_start + k])[:200]}\n"
+                  f"  yours: {_visible(pattern[k])[:200]}")
+    span_start = max(1, best_start + 1 - 3)
+    span = len(pattern) + 6
+    return (f"{head}{detail}\nRe-read lines {span_start}–{span_start + span - 1} (file_read offset={span_start}, "
+            f"limit={span}) and copy the lines exactly. Replace 2–5 lines at a time, not a whole block.")
+
+
 def file_edit(args: dict[str, Any]) -> str:
     target, error = _resolve(args.get("path") or "")
     if error:
@@ -137,17 +250,28 @@ def file_edit(args: dict[str, Any]) -> str:
         if old_crlf in text:
             old, new = old_crlf, new_crlf
     count = text.count(old)
+    key = str(target).casefold()
     if count == 0:
-        hint = ""
-        first = next((line.strip() for line in old.splitlines() if line.strip()), "")
-        if first:
-            matches = [i + 1 for i, line in enumerate(text.splitlines()) if first in line]
-            if matches:
-                hint = f" The first line appears near line(s) {matches[:5]}; re-read those lines and copy them exactly (spacing matters)."
+        updated, how, places = _loose_match(text, old, new)
+        if updated is not None:
+            _MISSES.pop(key, None)
+            _atomic_write(target, updated, "file_edit")
+            return (f"Edited {target} (1 replacement). old_text wasn't exact; it matched one place {how}, and your "
+                    f"new text was fitted to the file's indentation. Check the diff:\n{_diff(text, updated, target.name)}")
+        if places > 1:
+            return (f"Error: old_text matches {places} places in {target.name} {how}. Include more surrounding lines "
+                    "so it is unique.")
+        _MISSES[key] = _MISSES.get(key, 0) + 1
+        hint = _miss_hint(text, old)
+        line_count = len(text.splitlines())
+        if _MISSES[key] >= 2 and line_count <= SHORT_FILE_LINES:
+            hint += (f"\nThis edit has missed {_MISSES[key]} times and {target.name} is short ({line_count} lines): "
+                     "file_read it whole, then rewrite it with file_write, keeping everything you aren't changing.")
         return f"Error: old_text was not found in {target.name}.{hint}"
     if count > 1 and not replace_all:
         return f"Error: old_text appears {count} times in {target.name}. Include more surrounding lines so it is unique, or set replace_all=true."
     updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    _MISSES.pop(key, None)
     _atomic_write(target, updated, "file_edit")
     changed = count if replace_all else 1
     return f"Edited {target} ({changed} replacement{'s' if changed != 1 else ''}).\n{_diff(text, updated, target.name)}"
@@ -265,8 +389,10 @@ def coding_tools() -> list[NativeTool]:
         NativeTool(
             name="file_edit",
             description=(
-                "Change part of an existing file by replacing exact text. old_text must match the file exactly "
-                "(copy it from file_read without the line-number prefix) and be unique unless replace_all is true. "
+                "Change part of an existing file by replacing exact text. file_read it first. old_text must match "
+                "the file exactly, including each line's indentation after the line-number prefix (leave the prefix "
+                "out), and be unique unless replace_all is true. Keep it small: the 2-5 lines you are changing, not "
+                "a whole function. If it misses, re-read just those lines with offset/limit and copy them again. "
                 "Prefer this over rewriting whole files."
             ),
             parameters={"type": "object", "properties": {

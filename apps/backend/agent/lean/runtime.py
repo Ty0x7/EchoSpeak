@@ -29,7 +29,7 @@ from agent import a2a_trust, mcp_apps
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
-from agent.lean.toolbox import DEFAULT_TOOLSETS, NativeTool, Toolbox, project_root_for_session
+from agent.lean.toolbox import BUILDER_FOCUS, DEFAULT_TOOLSETS, NativeTool, Toolbox, project_root_for_session
 from agent.stopwords import keywords
 
 Emit = Callable[[dict[str, Any]], None]
@@ -914,6 +914,9 @@ class LeanSession:
         if read_only:
             # Planning turns: look things up, but nothing that changes state.
             toolbox.restrict_to_read_only()
+        elif not guest and self._small_builder(persona):
+            # A builder on a local model sees its file, terminal and team tools; the rest load on demand.
+            toolbox.focus(BUILDER_FOCUS)
         if "spawn_workers" in toolbox.native:
             # Workers get a subset of exactly this toolbox: never more than their lead.
             toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]
@@ -1425,6 +1428,17 @@ class LeanSession:
         if decision.applied:
             self._route_overrides[persona.id] = decision.chosen
         return decision.note()
+
+    def _small_builder(self, persona: AgentPersona) -> bool:
+        """A builder (Glados, or any agent titled Builder) running on a local model."""
+        if persona.id != "forge" and "builder" not in persona.title.casefold():
+            return False
+        try:
+            from agent.cloud_providers import CLOUD_PROVIDERS
+
+            return str(self._endpoint_for(persona).provider) not in CLOUD_PROVIDERS
+        except Exception:
+            return False
 
     def _native_computer(self, persona: AgentPersona, toolbox: Toolbox) -> bool:
         """This agent's model gets Claude's own computer toolset (agent/lean/cloud_streams.py)."""
