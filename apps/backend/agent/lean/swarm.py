@@ -257,6 +257,7 @@ class Swarm:
                 )
                 turn.meta = {"swarm_worker": worker.index}
                 turn.max_steps_override = settings.swarm_worker_steps()
+                turn.steerable = False  # the user's steer is for the lead, not one worker's subtask
                 worker.turn = turn
                 result = turn.run(brief, announce=False)
                 worker.result = result

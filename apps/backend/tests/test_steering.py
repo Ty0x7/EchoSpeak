@@ -85,6 +85,18 @@ def test_a_steer_that_arrives_with_the_final_answer_keeps_the_agent_going():
     assert result.text == "Laptop A is best; 18h battery."
 
 
+def test_helpers_never_swallow_the_users_steer():
+    # A research worker or delegated teammate shares the chat's session id. A steer meant for
+    # the agent the user is talking to must wait for that agent, not vanish into a helper.
+    client = _Scripted([ModelTurn(content="worker done")])
+    worker = _turn({}, client, [])
+    worker.steerable = False
+    steering.add("steer", "focus on prices", "s9")
+    worker.run("look this up")
+    assert [r["id"] for r in steering.pending("steer")] == ["s9"]
+    assert "focus on prices" not in str(client.calls)
+
+
 def test_steering_never_interrupts_a_running_tool():
     seen: list[str] = []
 

@@ -759,6 +759,8 @@ class LeanTurn:
 
     def _absorb_steering(self, messages: list[dict[str, Any]], step: int) -> bool:
         """Add instructions the user sent during this run (agent/lean/steering.py). True when any arrived."""
+        if not getattr(self, "steerable", True):
+            return False  # helpers (workers, delegated teammates) leave it for the agent the user talks to
         rows = steering.take(self.session_id)
         if not rows:
             return False
