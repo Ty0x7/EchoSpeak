@@ -2,8 +2,8 @@
 
 This collection presents every existing versioned note in `docs/releases/v*.md`
 as a complementary HTML report in `artifacts/releases/`. It currently covers
-31 documented updates from 10.0.0 through 11.9.3. Earlier release notes remain
-unchanged; the new 11.9.3 note records the current project UI work.
+32 documented updates from 10.0.0 through 11.10.0. Earlier release notes remain
+unchanged; the new 11.10.0 note records the harness, autonomy and audit work.
 The atlas is a source-history presentation, not evidence of installer publication.
 
 Each page includes a curated visual narrative, a conceptual diagram, concise
@@ -68,7 +68,8 @@ and atlas navigation. No manifest, notification or model call is required.
 | 11.8.0 | A stronger native harness | [11.8.0](v11.8.0.md) | [Report](../../artifacts/releases/v11.8.0.html) | `55ff0fc` |
 | 11.9.0 | Visual project work and integrated 11.8 | [11.9.0](v11.9.0.md) | [Report](../../artifacts/releases/v11.9.0.html) | `55ff0fc` |
 | 11.9.2 | Optional local speech and consistent setup | [11.9.2](v11.9.2.md) | [Report](../../artifacts/releases/v11.9.2.html) | `210fe72` |
-| 11.9.3 | Your project work, clearly presented | [11.9.3](v11.9.3.md) | [Report](../../artifacts/releases/v11.9.3.html) | Current source |
+| 11.9.3 | Your project work, clearly presented | [11.9.3](v11.9.3.md) | [Report](../../artifacts/releases/v11.9.3.html) | `0161d14` |
+| 11.10.0 | Echo knows what it can do, and keeps working | [11.10.0](v11.10.0.md) | [Report](../../artifacts/releases/v11.10.0.html) | Current source |
 
 ## Verification scope
 
