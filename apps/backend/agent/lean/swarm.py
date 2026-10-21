@@ -257,6 +257,8 @@ class Swarm:
                 )
                 turn.meta = {"swarm_worker": worker.index}
                 turn.max_steps_override = settings.swarm_worker_steps()
+                turn.steerable = False  # the user's steer is for the lead, not one worker's subtask
+                turn.final_grace = True  # out of steps: one last tool-less call to report its findings
                 worker.turn = turn
                 result = turn.run(brief, announce=False)
                 worker.result = result
@@ -403,6 +405,10 @@ class Swarm:
                     lessons_used={}, team=False,
                 ):
                     episode.role = "worker"
+                    # Workers run on their lead's model: when the router picked it, their spend
+                    # counts toward auto mode's daily cloud budget (routing.cloud_tokens_today).
+                    if self.persona.id in (getattr(self.session, "_route_overrides", None) or {}):
+                        episode.routed = "router"
                     episode.summary = (f"Worker {worker.index}: {worker.status}. " + episode.summary)[:600]
                     store.add_episode(episode)
                     reliability.record_episode(episode)

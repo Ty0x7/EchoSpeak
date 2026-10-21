@@ -984,6 +984,8 @@ class LeanSession:
             taint=self._taint,
             goal=goal,
         )
+        # Only the agent the user is talking to reads steering; a teammate doing delegated work doesn't.
+        turn.steerable = depth == 0
         if self.source == "voice" and depth == 0:
             from agent.live_voice import claim_client
             live_client = claim_client(self.session_id, self.request_id, turn.client.endpoint, persona, history)

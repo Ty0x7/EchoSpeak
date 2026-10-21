@@ -86,7 +86,7 @@ def find_contrast(episode: Episode) -> Optional[Episode]:
     won = episode.verified_success
     for other in get_experience_store().episodes(agent_id=episode.agent_id, task_kind=episode.task_kind,
                                                  since=time.time() - CONTRAST_DAYS * 86400, limit=60):
-        if other.id == episode.id or not other.trusted or skip_reason(other):
+        if other.id == episode.id or not other.trusted or skip_reason(other) or other.source == "swarm":
             continue
         if other.verified_success != won and (other.verified_success or other.failed):
             return other

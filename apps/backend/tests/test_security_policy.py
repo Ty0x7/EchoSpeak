@@ -244,3 +244,16 @@ def test_local_api_refuses_dns_rebinding_and_cross_site_writes(monkeypatch):
     assert guard("POST", "localhost:8765", "", "127.0.0.1") == ""  # scripts and bots send no Origin
     assert guard("GET", "[::1]:8765", "", "::1") == ""
     assert guard("GET", "127.0.0.1:8765", "https://evil.example", "127.0.0.1") == ""  # reads are CORS-protected
+
+
+def test_third_party_server_output_is_outside_content_from_actions_too():
+    # Audit 2026-10-21: an MCP action's result ("issue created: …") wasn't wrapped or tainting,
+    # and find_tools returned server-written descriptions as trusted text.
+    from types import SimpleNamespace
+
+    action = SimpleNamespace(origin="mcp", is_action=True)
+    read = SimpleNamespace(origin="mcp", is_action=False)
+    assert policy.is_untrusted_source("mcp__gh__create_issue", action, {})
+    assert policy.is_untrusted_source("mcp__gh__list_issues", read, {})
+    assert policy.is_untrusted_source("find_tools", None, {"query": "github"})
+    assert not policy.is_untrusted_source("file_read", SimpleNamespace(origin="native", is_action=False), {})

@@ -98,10 +98,14 @@ def stop_everything(reason: str = "") -> dict[str, Any]:
         from api.deps import _ACTIVE_QUERY_CANCEL_LOCK, _ACTIVE_QUERY_CANCELLATIONS
 
         with _ACTIVE_QUERY_CANCEL_LOCK:
-            for _owner, event, _execution in list(_ACTIVE_QUERY_CANCELLATIONS.values()):
-                if not event.is_set():
-                    event.set()
-                    cancelled_requests += 1
+            active = list(_ACTIVE_QUERY_CANCELLATIONS.values())
+        from agent.state import get_state_store
+
+        for owner, event, _execution in active:
+            get_state_store().set_queue_paused(owner, True)  # queued follow-ups wait for the owner
+            if not event.is_set():
+                event.set()
+                cancelled_requests += 1
     except Exception:
         pass
     waiting = get_approval_broker().cancel_all()

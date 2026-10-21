@@ -1251,7 +1251,8 @@ export const Dashboard: React.FC<{
     const session = activeThreadIdRef.current || activeThreadId;
     followUps.resume(session);
     try {
-      const response = await fetch(`${apiBase}/query/queue/claim?thread_id=${encodeURIComponent(session)}`, { method: "POST" });
+      // force: Run next is the owner's explicit go-ahead after Stop.
+      const response = await fetch(`${apiBase}/query/queue/claim?thread_id=${encodeURIComponent(session)}&force=true`, { method: "POST" });
       if (!response.ok) return;
       const payload = await response.json();
       const message = String(payload?.item?.message || "").trim();

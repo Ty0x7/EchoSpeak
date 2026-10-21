@@ -464,6 +464,9 @@ class ThreadSessionState(BaseModel):
     # User-authored follow-ups waiting to enter the ordinary canonical Chat
     # pipeline. Session owns this input queue; it is not a TaskRun scheduler.
     queued_turns: list[dict[str, Any]] = Field(default_factory=list)
+    # Set by Stop, cleared by the owner's next message or "Run next": queued follow-ups
+    # never start by themselves after a Stop, even after a reconnect or restart.
+    queue_paused: bool = False
     pending_approval_id: str = ""
     last_execution_id: str = ""
     last_trace_id: str = ""
@@ -1691,15 +1694,39 @@ class StateStore:
             self._persist_thread_state()
             return item
 
-    def claim_queued_turn(self, thread_id: Optional[str]) -> Optional[dict[str, Any]]:
-        """Atomically remove and return the oldest queued follow-up."""
+    def set_queue_paused(self, thread_id: Optional[str], paused: bool) -> None:
+        key = str(thread_id or "default").strip() or "default"
+        with self._lock:
+            state = self._thread_state.get(key)
+            if state is None or bool(state.queue_paused) == bool(paused):
+                return
+            state.queue_paused = bool(paused)
+            state.updated_at = time.time()
+            self._thread_state[key] = state
+            self._persist_thread_state()
+
+    def queue_paused(self, thread_id: Optional[str]) -> bool:
+        key = str(thread_id or "default").strip() or "default"
+        with self._lock:
+            state = self._thread_state.get(key)
+            return bool(state.queue_paused) if state is not None else False
+
+    def claim_queued_turn(self, thread_id: Optional[str], *, force: bool = False) -> Optional[dict[str, Any]]:
+        """Atomically remove and return the oldest queued follow-up (none while paused, unless forced)."""
         key = str(thread_id or "default").strip() or "default"
         with self._lock:
             state = self._thread_state.get(key) or ThreadSessionState(
                 thread_id=key, session_id=key
             )
+            if state.queue_paused and not force:
+                return None
             pending = list(state.queued_turns or [])
+            if force:
+                state.queue_paused = False
             if not pending:
+                if force:
+                    self._thread_state[key] = state
+                    self._persist_thread_state()
                 return None
             item = dict(pending.pop(0))
             state.queued_turns = pending

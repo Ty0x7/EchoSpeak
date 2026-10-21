@@ -98,6 +98,27 @@ def test_persist_is_refused_for_an_ungrantable_approval():
     broker.resolve(approval.id, "deny")
 
 
+@pytest.mark.parametrize("command", [
+    'cmd /c "rd /s /q C:\\Users\\me\\Documents"',           # quoted after cmd /c
+    "powershell -c \"[IO.File]::Delete('C:\\x')\"",
+    "node -e \"require('fs').rmSync('x',{recursive:true})\"",
+    "python -c \"import os; os.system('del x')\"",
+    "Invoke-Expression $payload",
+])
+def test_inline_and_wrapped_destructive_commands_ask_on_this_pc(command):
+    # Found in the 2026-10-21 audit: these ran on the host without asking.
+    from agent.lean.approvals import dangerous_command
+
+    assert dangerous_command(command)
+
+
+@pytest.mark.parametrize("command", ["npm test", "git status", "python -m pytest -q", "dir", "python build.py"])
+def test_ordinary_commands_still_run_without_asking(command):
+    from agent.lean.approvals import dangerous_command
+
+    assert not dangerous_command(command)
+
+
 # ── the loop ────────────────────────────────────────────────────────────
 
 def test_an_always_allowed_class_runs_without_asking(grants, monkeypatch):
@@ -111,6 +132,20 @@ def test_an_always_allowed_class_runs_without_asking(grants, monkeypatch):
     assert ran == ["x"]
     assert not any(e["type"] == "approval_request" for e in events)
     assert any(e["type"] == "auto_approved" and "Always allow" in e["note"] for e in events)
+
+
+def test_a_grant_never_reaches_channels_or_unattended_runs(grants, monkeypatch):
+    # An owner's Discord DM or a routine (non-interactive) with an "Always allow" grant for
+    # host commands must still be refused: the grant was made for chats in the app.
+    _mode(monkeypatch, "smart")
+    grants.add(approvals.DESKTOP_SCOPE)
+    ran: list[str] = []
+    events: list[dict[str, Any]] = []
+    turn, client = _turn({"computer_action": lambda a: ran.append("x") or "done"},
+                         [ModelTurn(tool_calls=[ToolCall("c1", "computer_action", "{}")]), ModelTurn(content="Couldn't.")],
+                         events, interactive=False)
+    turn.run("click it")
+    assert ran == [] and "can only be given in the EchoSpeak app" in client.calls[1][-1]["content"]
 
 
 def test_autonomous_mode_approves_routine_classes_and_holds_the_rest(monkeypatch):

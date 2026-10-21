@@ -104,8 +104,8 @@ def test_sandbox_paths_given_to_file_tools_map_back_to_this_pc(tmp_path, switche
     box = _box(tmp_path)
     name, args = box.normalize_call("file_write", {"path": "/work/Desktop/Game/index.html", "content": "<h1>DAWN</h1>"})
     assert args["path"] == str(desktop / "Game" / "index.html")
-    assert "give file_read, file_write and the other file tools the Windows paths" in Terminal(str(tmp_path)).describe() \
-        or Terminal(str(tmp_path)).mode == "host"
+    monkeypatch.setattr(term, "resolved_mode", lambda: "docker")  # describe the sandbox, whatever this PC has
+    assert "give file_read, file_write and the other file tools the Windows paths" in Terminal(str(tmp_path)).describe()
 
 
 # ── the report the agent reads ──────────────────────────────────────────
@@ -229,6 +229,38 @@ def test_three_failures_in_a_row_tell_the_agent_to_change_approach():
     assert "has failed" not in client.calls[2][-1]["content"]
     assert "fetch has failed 3 times in a row" in client.calls[3][-1]["content"]
     assert any(e["type"] == "fail_streak" and e["count"] == 3 for e in events)
+
+
+def test_refusals_in_a_row_get_one_firm_note_and_too_many_end_the_turn():
+    from agent.lean.loop import REFUSAL_STOP
+
+    # Each call is a different blocked action, so exact-repeat detection never fires.
+    blocked = lambda a: "Error: email_send is not available right now: turned off in Settings › Permissions (Email)."  # noqa: E731
+    turns = [ModelTurn(tool_calls=[ToolCall(f"c{i}", "send", f'{{"to": "p{i}@x.test"}}')]) for i in range(REFUSAL_STOP + 2)]
+    client = _Scripted(turns + [ModelTurn(content="unreachable")])
+    events: list[dict[str, Any]] = []
+    result = _turn(client, {"send": blocked}, events).run("email everyone")
+    assert "all refused or blocked" in client.calls[3][-1]["content"]  # after the third refusal
+    assert "all refused or blocked" not in client.calls[2][-1]["content"]
+    assert sum(1 for e in events if e["type"] == "refusal_streak") == 1
+    assert result.stop_reason == "refusals" and "refused or blocked" in result.text
+    assert len(client.calls) == REFUSAL_STOP  # it stopped instead of probing on
+
+
+def test_a_worker_out_of_steps_gets_one_tool_less_turn_to_report():
+    client = _Scripted([ModelTurn(tool_calls=[ToolCall(f"c{i}", "look", f'{{"n": {i}}}')]) for i in range(2)]
+                       + [ModelTurn(content='{"answer": "found 2 of 3", "sources": [], "confidence": "low"}')])
+    turn = _turn(client, {"look": lambda a: "partial data"}, [])
+    turn.max_steps_override = 2
+    turn.final_grace = True
+    result = turn.run("research it")
+    assert result.stop_reason == "max_steps" and "found 2 of 3" in result.text
+    assert "step budget is used up" in client.calls[-1][-1]["content"] and client.calls[-1][-1]["role"] == "tool"
+    # The lead's own turns keep the honest "out of steps" note instead (no final_grace).
+    plain = _turn(_Scripted([ModelTurn(tool_calls=[ToolCall(f"d{i}", "look", f'{{"n": {i}}}')]) for i in range(2)]),
+                  {"look": lambda a: "partial data"}, [])
+    plain.max_steps_override = 2
+    assert "found" not in plain.run("research it").text
 
 
 def test_a_success_resets_the_failure_streak():

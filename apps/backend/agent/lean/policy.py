@@ -39,8 +39,9 @@ UNTRUSTED_SOURCES = {
     "stock_history", "product_search", "video_search", "image_search",
     # Uploaded documents can come from anywhere (a downloaded PDF, a forwarded email).
     "document_search", "research_notebook", "project_workspace",
-    # MCP registry listings and third-party servers' error text (agent/integrations.py).
-    "find_integrations", "check_integration",
+    # MCP registry listings and third-party servers' error text (agent/integrations.py), and
+    # the tool descriptions those servers wrote, as find_tools returns them.
+    "find_integrations", "check_integration", "find_tools",
     # Replies from other agents (agent/a2a_trust.py), and research workers' findings (agent/lean/swarm.py).
     "ask_remote_agent", "a2a_delegate", "a2a_discover", "spawn_workers",
 }
@@ -105,8 +106,10 @@ def is_untrusted_source(name: str, entry: Any = None, args: Optional[dict[str, A
         from agent.lean.tool_outputs import is_untrusted
         return is_untrusted((args or {}).get("id"))  # reopened web or email text is still outside content
     origin = str(getattr(entry, "origin", "") or "")
-    if origin in {"mcp", "connection"} and not getattr(entry, "is_action", False):
-        return True  # third-party servers return third-party content
+    if origin in {"mcp", "connection"}:
+        # Third-party servers return third-party content, from actions as much as reads:
+        # an action's result ("issue created: …") can carry injected text too.
+        return True
     if name in {"terminal", "terminal_run"} and (args or {}).get("network"):
         return True  # curl, git clone, pip: downloaded text
     return False

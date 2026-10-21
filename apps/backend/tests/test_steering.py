@@ -85,6 +85,18 @@ def test_a_steer_that_arrives_with_the_final_answer_keeps_the_agent_going():
     assert result.text == "Laptop A is best; 18h battery."
 
 
+def test_helpers_never_swallow_the_users_steer():
+    # A research worker or delegated teammate shares the chat's session id. A steer meant for
+    # the agent the user is talking to must wait for that agent, not vanish into a helper.
+    client = _Scripted([ModelTurn(content="worker done")])
+    worker = _turn({}, client, [])
+    worker.steerable = False
+    steering.add("steer", "focus on prices", "s9")
+    worker.run("look this up")
+    assert [r["id"] for r in steering.pending("steer")] == ["s9"]
+    assert "focus on prices" not in str(client.calls)
+
+
 def test_steering_never_interrupts_a_running_tool():
     seen: list[str] = []
 
@@ -143,6 +155,25 @@ def test_queued_follow_ups_can_be_edited_and_removed_before_they_run(tmp_path, m
     store.enqueue_turn("t", message="x", client_request_id="q3")
     with pytest.raises(ValueError):
         store.update_queued_turn("t", "q3", message="  ")
+
+
+def test_stop_pauses_the_queue_durably_until_run_next(tmp_path, monkeypatch):
+    import asyncio
+
+    import api.routes.chat as chat_routes
+    from agent.state import StateStore
+
+    store = StateStore(tmp_path / "s")
+    monkeypatch.setattr(chat_routes, "get_state_store", lambda: store)
+    store.enqueue_turn("t", message="next thing", client_request_id="q1")
+    store.set_queue_paused("t", True)  # what /query/cancel and Stop everything do
+    reopened = StateStore(tmp_path / "s")  # the app restarted: the pause is still there
+    assert reopened.queue_paused("t") and reopened.claim_queued_turn("t") is None
+    assert asyncio.run(chat_routes.get_queued_queries("t"))["paused"] is True
+    auto = asyncio.run(chat_routes.claim_queued_query("t", force=False))
+    assert auto["claimed"] is False and auto["paused"] is True
+    run_next = asyncio.run(chat_routes.claim_queued_query("t", force=True))
+    assert run_next["claimed"] and run_next["item"]["message"] == "next thing" and run_next["paused"] is False
 
 
 def test_steer_route_needs_a_running_turn_in_that_session(monkeypatch):
