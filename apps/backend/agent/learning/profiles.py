@@ -45,6 +45,8 @@ def profile(agent_id: str) -> dict[str, Any]:
     kinds: dict[str, dict[str, int]] = {}
     false_success = 0
     for ep in episodes:
+        if ep.source == "swarm":
+            continue  # a research worker's capped subtask is not a request this agent handled
         row = kinds.setdefault(ep.task_kind, {"wins": 0, "losses": 0, "checked": 0, "answered": 0, "confirmed": 0})
         verdict = _verdict(ep)
         if verdict == "win":

@@ -396,6 +396,24 @@ def _lesson(store: ExperienceStore, title: str, text: str, status: str = "probat
                             actor="test")
 
 
+def test_research_workers_stay_out_of_track_records_but_their_cloud_spend_counts(store):
+    from agent.learning import routing
+
+    now = time.time()
+    store.add_episode(Episode(agent_id="echo", goal="whole request", outcome="success", level=2, task_kind="research",
+                              provider="anthropic", model="m", created_at=now))
+    for i in range(3):  # three failed worker subtasks on the same model
+        store.add_episode(Episode(agent_id="echo", goal=f"worker {i}", outcome="failure", task_kind="research",
+                                  provider="anthropic", model="m", role="worker", source="swarm", created_at=now,
+                                  routed="router", tokens=1000))
+    profiles.forget_cache()
+    routing.forget_cache()
+    kinds = profiles.profile("echo")["kinds"]
+    assert kinds["research"]["wins"] == 1 and kinds["research"]["losses"] == 0
+    assert routing.profiles()[("anthropic", "m")]["overall"].decided == 1
+    assert routing.cloud_tokens_today() == 3000
+
+
 def test_episodes_page_by_offset_and_split_own_from_workers(store):
     import api.routes.learning as routes
 

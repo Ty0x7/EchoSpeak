@@ -173,8 +173,8 @@ def profiles(window_days: int = WINDOW_DAYS) -> dict[tuple[str, str], dict[str, 
             return hit[1]
     data: dict[tuple[str, str], dict[str, Any]] = {}
     for episode in get_experience_store().episodes(since=now - window_days * 86400, limit=5000):
-        if not episode.provider or not episode.model:
-            continue
+        if not episode.provider or not episode.model or episode.source == "swarm":
+            continue  # workers' capped subtasks would skew a model's record for whole requests
         row = data.setdefault((episode.provider, episode.model), {"overall": Stats(), "kinds": {}, "last_at": 0.0})
         verdict = _verdict(episode)
         row["overall"].add(episode, verdict)

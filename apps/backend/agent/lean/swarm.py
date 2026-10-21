@@ -403,6 +403,10 @@ class Swarm:
                     lessons_used={}, team=False,
                 ):
                     episode.role = "worker"
+                    # Workers run on their lead's model: when the router picked it, their spend
+                    # counts toward auto mode's daily cloud budget (routing.cloud_tokens_today).
+                    if self.persona.id in (getattr(self.session, "_route_overrides", None) or {}):
+                        episode.routed = "router"
                     episode.summary = (f"Worker {worker.index}: {worker.status}. " + episode.summary)[:600]
                     store.add_episode(episode)
                     reliability.record_episode(episode)
