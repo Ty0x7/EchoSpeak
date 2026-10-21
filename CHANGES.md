@@ -2,7 +2,16 @@
 
 ## Unreleased
 
-Audit notes: [Harness audit, 2026-10-20](docs/research/harness-audit-2026-10-20.md). Architecture: [docs/research/echospeak-architecture.md](docs/research/echospeak-architecture.md). Manual tests: [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md).
+Audit notes: [Full-system audit, 2026-10-21](docs/research/full-audit-2026-10-21.md), [Harness audit, 2026-10-20](docs/research/harness-audit-2026-10-20.md). Architecture: [docs/research/echospeak-architecture.md](docs/research/echospeak-architecture.md). Manual tests: [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md).
+
+* **Security fix: Always allow stays in the app.** A saved grant used to apply to Discord DMs and routines too, so they could run commands on this PC that needed approval in the app. Grants now apply only to chats in the app.
+* **Security fix: wrapped commands.** A destructive command inside quotes after `cmd /c`, `pwsh -c`, `node -e` or `python -c` ran on this PC without asking. So did `[IO.File]::Delete`, `fs.rmSync`, `os.system` and `Invoke-Expression`. These now ask first. A script run by name (`python cleanup.py`) still can't be judged, which is why the sandbox matters.
+* **Security fix: connected-app output is outside content.** Results of MCP *actions*, and the tool descriptions `find_tools` returns, now count as outside content for the Rule of Two, like MCP reads already did.
+* Steering only reaches the agent you're talking to. A research worker or teammate could read your steer instead.
+* Stop's queue pause is saved by the backend. Queued messages no longer start by themselves after Stop plus a restart or reconnect. The next message you send, or Run next, clears it.
+* After three refused or blocked actions in a row, the agent gets one firm note to stop and explain. After ten in one request, it stops and hands back to you.
+* A research worker that runs out of steps gets one more call, without tools, to report what it found.
+* Learning no longer counts research-worker runs in agent and model track records, and counts their cloud spend against smart model choice's daily budget when it picked their model. Actions that were switched off, privacy-blocked, held or in Blocked apps are graded "not run" instead of as the agent's failures.
 
 * **Self-knowledge.** Echo's prompt says what it is from the running app: Echo, EchoSpeak version from `version.py`, desktop app or source build, OS, created by Ty (ty0x7), source on GitHub. Saved "current version" claims are left out of recall. The installed app's default folder is Documents, not its install folder, and `project_status` labels what a folder is.
 * **Apps.** Allowed apps (a whitelist) is gone: Open apps launches any installed app except **Blocked apps** (new installs block Windows' system-settings tools). Saved Allowed apps became **Favorite apps**, suggestions only. App names reach the prompt only when the request is about apps or the desktop.

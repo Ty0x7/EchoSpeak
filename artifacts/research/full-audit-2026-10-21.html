@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Full-system audit, 21 Oct 2026</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--ok:#1f7a3f;--bad:#b42318;--warn:#8a5a00;--soft:#f0f0f0}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--ok:#5cc983;--bad:#ff8a7a;--warn:#e0b04a;--soft:#222}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 36px}header{padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:24px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 5px}header p{margin:0;font-size:13px;color:var(--muted)}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 14px}h3{font-size:14px;margin:0 0 6px}section{margin:30px 0}p,small,figcaption{color:var(--muted)}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:16px;min-width:0}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.node p{font-size:13px;margin:0}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:1px 8px;margin-bottom:8px;white-space:nowrap}.tag.bad{color:var(--bad)}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}td .tag{margin:0}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:13px system-ui,sans-serif}svg .mut{fill:var(--muted);font-size:11.5px}svg .box{fill:var(--panel);stroke:var(--line)}svg .soft{fill:var(--soft);stroke:var(--line)}svg .ln{stroke:var(--muted);fill:none;stroke-width:1.4}svg .ah{fill:var(--muted)}svg .bad{fill:var(--bad)}svg .ok{fill:var(--ok)}svg .fx{fill:var(--ok);font-size:11.5px;font-weight:600}svg .edge-bad{stroke:var(--bad)}.scroll{overflow-x:auto}.scroll svg{min-width:640px}.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{font-weight:600}td.c{white-space:nowrap;font-family:ui-monospace,monospace;font-size:12px}.note{font-size:13px;margin:10px 0 0}ul{font-size:13px;padding-left:20px;margin:0}ol{font-size:13px;padding-left:20px;margin:0}li{margin:2px 0}code{font:12px ui-monospace,monospace}footer{font-size:12px;margin-top:28px;color:var(--muted)}a{color:inherit;text-underline-offset:3px}@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}}
+</style></head><body><main>
+<header><h1>Full-system audit</h1><p>21 Oct 2026 · main at 11.9.3 · branch claude/full-audit on PR #83 and PR #82, unreleased · technical record in docs/research/full-audit-2026-10-21.md</p></header>
+
+<section aria-label="Where the fixes landed"><h2>1 · One owner message, and where this audit changed it</h2>
+<div class="scroll"><svg viewBox="0 0 1000 250" role="img" aria-label="Simplified request path. Top row: composer, API key check, LeanSession, steering, model call. Bottom row: gates, tool run, guards, research workers, learning. Green labels F1 to F9 mark where each fix landed.">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 L10 5 L0 10 z"/></marker></defs>
+<rect class="box" x="20" y="30" width="160" height="72" rx="9"/><text x="34" y="54">Composer</text><text class="fx" x="168" y="54" text-anchor="end">F5</text><text class="mut" x="34" y="74">queue or steer</text><text class="mut" x="34" y="90">paused after Stop</text>
+<rect class="box" x="220" y="30" width="160" height="72" rx="9"/><text x="234" y="54">API</text><text class="mut" x="234" y="74">per-launch key</text><text class="mut" x="234" y="90">no localhost bypass</text>
+<rect class="box" x="420" y="30" width="160" height="72" rx="9"/><text x="434" y="54">LeanSession</text><text class="mut" x="434" y="74">toolbox + prompt</text><text class="mut" x="434" y="90">capability report</text>
+<rect class="box" x="620" y="30" width="160" height="72" rx="9"/><text x="634" y="54">Steering</text><text class="fx" x="768" y="54" text-anchor="end">F4</text><text class="mut" x="634" y="74">read at checkpoints</text><text class="mut" x="634" y="90">main agent only</text>
+<rect class="box" x="820" y="30" width="160" height="72" rx="9"/><text x="834" y="54">Model call</text><text class="fx" x="968" y="54" text-anchor="end">F9</text><text class="mut" x="834" y="74">lead or worker</text><text class="mut" x="834" y="90">worker: grace turn</text>
+<path class="ln" d="M180 66 H216" marker-end="url(#a)"/><path class="ln" d="M380 66 H416" marker-end="url(#a)"/><path class="ln" d="M580 66 H616" marker-end="url(#a)"/><path class="ln" d="M780 66 H816" marker-end="url(#a)"/>
+<path class="ln" d="M900 102 V128 H100 V150" marker-end="url(#a)"/>
+<rect class="box" x="20" y="154" width="160" height="72" rx="9"/><text x="34" y="178">Gates</text><text class="fx" x="168" y="178" text-anchor="end">F1 F2</text><text class="mut" x="34" y="198">switches · privacy</text><text class="mut" x="34" y="214">policy · approvals</text>
+<rect class="box" x="220" y="154" width="160" height="72" rx="9"/><text x="234" y="178">Tool runs</text><text class="fx" x="368" y="178" text-anchor="end">F3</text><text class="mut" x="234" y="198">outside content</text><text class="mut" x="234" y="214">wrapped + tainted</text>
+<rect class="box" x="420" y="154" width="160" height="72" rx="9"/><text x="434" y="178">Guards</text><text class="fx" x="568" y="178" text-anchor="end">F8</text><text class="mut" x="434" y="198">repeats · failures</text><text class="mut" x="434" y="214">refusal breaker</text>
+<rect class="box" x="620" y="154" width="160" height="72" rx="9"/><text x="634" y="178">Research workers</text><text class="mut" x="634" y="198">read-only helpers</text><text class="mut" x="634" y="214">one shared budget</text>
+<rect class="box" x="820" y="154" width="160" height="72" rx="9"/><text x="834" y="178">Learning</text><text class="fx" x="968" y="178" text-anchor="end">F6 F7</text><text class="mut" x="834" y="198">graded from records</text><text class="mut" x="834" y="214">refusals: not run</text>
+<path class="ln" d="M180 190 H216" marker-end="url(#a)"/><path class="ln" d="M380 190 H416" marker-end="url(#a)"/><path class="ln" d="M580 190 H616" marker-end="url(#a)"/><path class="ln" d="M780 190 H816" marker-end="url(#a)"/>
+</svg></div>
+<p class="note">Simplified. Workers run as a tool call inside the loop, and the guards run after every batch of tools. The diagram describes code, not product UI.</p></section>
+
+<section aria-label="Fixed"><h2>2 · Confirmed and fixed</h2><div class="table"><table>
+<thead><tr><th>#</th><th>Severity</th><th>What was wrong</th><th>Now</th><th>Commit</th></tr></thead><tbody>
+<tr><td>F1</td><td><span class="tag bad">high</span></td><td>An <b>Always allow</b> grant also applied to Discord DMs and routines, so they could run commands that needed approval in the app</td><td>Grants apply to app chats only</td><td class="c">2d61d52</td></tr>
+<tr><td>F2</td><td><span class="tag bad">high</span></td><td>A destructive command quoted after <code>cmd /c</code>, <code>pwsh -c</code>, <code>node -e</code> or <code>python -c</code> ran on this PC without asking. So did <code>[IO.File]::Delete</code>, <code>rmSync</code>, <code>os.system</code> and <code>iex</code></td><td>Detected; 10 cases tested both ways</td><td class="c">4adc356</td></tr>
+<tr><td>F3</td><td><span class="tag bad">med-high</span></td><td>MCP action results, and server-written tool descriptions from <code>find_tools</code>, were trusted text</td><td>All third-party server output counts as outside content</td><td class="c">4017f78</td></tr>
+<tr><td>F4</td><td><span class="tag warn">medium</span></td><td>A steer could be read by a research worker or teammate instead of the agent you were talking to</td><td>Only the main agent reads steering (failed before the fix)</td><td class="c">7b6f5bd</td></tr>
+<tr><td>F5</td><td><span class="tag warn">medium</span></td><td>After Stop plus a restart, queued messages started by themselves</td><td>The pause is saved on the server until the next message or Run next</td><td class="c">e3e27e6</td></tr>
+<tr><td>F6</td><td><span class="tag warn">medium</span></td><td>Worker episodes fed agent and model track records, and their cloud spend was missing from the daily budget</td><td>Kept out of records, shown in Learning; spend counted</td><td class="c">f110d79</td></tr>
+<tr><td>F7</td><td><span class="tag warn">medium</span></td><td>Switched-off, privacy-blocked, held or Blocked-apps calls were graded as the agent's own failures</td><td>Graded "not run"</td><td class="c">7d5f9a5</td></tr>
+<tr><td>F8</td><td><span class="tag">low-med</span></td><td>Nothing stopped an agent trying new arguments after being told no</td><td>One firm note after 3 refusals in a row; hands back after 10 in one turn</td><td class="c">7d5f9a5</td></tr>
+<tr><td>F9</td><td><span class="tag">low</span></td><td>A worker at its step cap lost what it had found</td><td>One tool-less call to report its findings</td><td class="c">7d5f9a5</td></tr>
+</tbody></table></div>
+<p class="note">Also on this branch: an end-to-end test of one request through context, workers, policy and learning (<code>822950c</code>), and two test assertions that could pass vacuously (<code>49b159e</code>). The base commit <code>e6ff2a6</code> fixed the squeezed composer and <code>/work</code> paths from your 4B-model run.</p></section>
+
+<section aria-label="Biggest open risk"><h2>3 · The biggest open risk: Auto terminal falls back to this PC</h2>
+<div class="scroll"><svg viewBox="0 0 1000 230" role="img" aria-label="In Auto terminal mode, if Docker is running, commands go to the sandbox. If not, they run on this PC, where only commands the detector flags ask first; a script run by name is not judged.">
+<defs><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 L10 5 L0 10 z"/></marker></defs>
+<rect class="box" x="20" y="84" width="170" height="62" rx="9"/><text x="36" y="110">Auto terminal mode</text><text class="mut" x="36" y="129">the default</text>
+<rect class="soft" x="240" y="84" width="170" height="62" rx="9"/><text x="256" y="110">Docker running?</text><text class="mut" x="256" y="129">often not, on Windows</text>
+<rect class="box" x="470" y="20" width="220" height="62" rx="9"/><text x="486" y="46">Docker sandbox</text><text class="mut" x="486" y="65">only /work/&lt;name&gt; is mounted</text>
+<rect class="box" x="470" y="148" width="220" height="62" rx="9"/><text x="486" y="174">This PC</text><text class="mut" x="486" y="193">gated by a denylist only</text>
+<rect class="box" x="760" y="104" width="220" height="50" rx="9"/><text x="776" y="125">Flagged: asks first</text><text class="mut" x="776" y="142">rd /s, rm -rf, iex, Remove-Item</text>
+<rect class="box" x="760" y="168" width="220" height="50" rx="9"/><text class="bad" x="776" y="189">Not flagged: runs</text><text class="mut" x="776" y="206">python cleanup.py</text>
+<path class="ln" d="M190 115 H236" marker-end="url(#b)"/>
+<path class="ln" d="M410 106 C440 106 440 51 466 51" marker-end="url(#b)"/><text class="mut" x="446" y="40">yes</text>
+<path class="ln" d="M410 124 C440 124 440 179 466 179" marker-end="url(#b)"/><text class="mut" x="448" y="198">no</text>
+<path class="ln" d="M690 172 C722 172 722 129 756 129" marker-end="url(#b)"/>
+<path class="ln edge-bad" d="M690 186 C722 186 722 193 756 193" marker-end="url(#b)"/>
+<text class="ok" x="710" y="46" style="font-size:12px">✓ contained</text>
+</svg></div>
+<p class="note">A denylist can't tell what a script will do from its name. Codex and Claude Code use OS sandboxes for this: Codex ships a native Windows sandbox, and Claude Code points native Windows users to WSL2. This needs your decision, so it wasn't changed:</p>
+<div class="grid3" style="margin-top:14px">
+<div class="node"><span class="tag">option</span><h3>Ask on fallback</h3><p>When the sandbox isn't available, every command on this PC asks first. Safest, and noisier.</p></div>
+<div class="node"><span class="tag">option</span><h3>Explicit choice</h3><p>Auto never falls back silently. The owner picks "this PC" once, and the agent is told which one is in use.</p></div>
+<div class="node"><span class="tag">research</span><h3>WSL2 or OS sandbox</h3><p>Use WSL2 as the sandbox, or Windows restricted tokens and ACLs. Most work, and the only real fix.</p></div>
+</div></section>
+
+<section aria-label="Checked and holding"><h2>4 · Checked and holding</h2><div class="grid3">
+<div class="node"><span class="tag ok">holds</span><h3>Desktop API</h3><p>A random key per launch, no localhost bypass, proxy headers ignored. No HTTP route runs a tool outside the loop.</p></div>
+<div class="node"><span class="tag ok">holds</span><h3>Who's asking</h3><p>A2A inbound and Twitch/Twitter resolve to public look-up tools. Unknown sources fail closed. Approvals and autonomy are app-only.</p></div>
+<div class="node"><span class="tag ok">holds</span><h3>Frames and views</h3><p>Artifacts have no network. MCP App views reach only declared https/wss origins and call only read-only tools of their own server.</p></div>
+<div class="node"><span class="tag ok">holds</span><h3>Paths</h3><p><code>/work/…</code> mapping can't escape the folder: three <code>..</code> forms were refused.</p></div>
+<div class="node"><span class="tag ok">holds</span><h3>History and loops</h3><p>History is rebuilt as text, so no orphaned tool calls. Per-turn signature counts catch A/B/A/B loops.</p></div>
+<div class="node"><span class="tag ok">holds</span><h3>Privacy and OAuth</h3><p>Private and Offline hold through the socket backstop. MCP OAuth passes <code>iss</code> for RFC 9207 checks.</p></div>
+</div></section>
+
+<section aria-label="Comparison"><h2>5 · Against the strongest comparable practice</h2><div class="table"><table>
+<thead><tr><th>Area</th><th>EchoSpeak</th><th>Best documented elsewhere</th><th>Verdict</th></tr></thead><tbody>
+<tr><td>Loop guards</td><td>Repeats, refused-call memory, failure streak, refusal breaker, promise and claim checks</td><td>OpenHands stuck detector (5 patterns); Gemini CLI loop service with an LLM check</td><td><span class="tag ok">on par</span></td></tr>
+<tr><td>Context</td><td>Clear old tool output, then summarize; system message untouched</td><td>Gemini: compress at 50% with a check pass; Claude Code stops when thrashing</td><td><span class="tag ok">sound</span></td></tr>
+<tr><td>Tool discovery</td><td>Deferred tools behind <code>find_tools</code>; says why a tool is off</td><td>Claude tool search, over 85% fewer definition tokens</td><td><span class="tag ok">on par</span></td></tr>
+<tr><td>Permissions</td><td>Switches, Blocked apps, policy, approval modes, scoped grants</td><td>Claude Code deny → ask → allow, 3/20 denial fallback; Codex auto-review 3 / 10 of 50</td><td><span class="tag ok">sound</span></td></tr>
+<tr><td>Grant lifetime</td><td>Grants never expire</td><td>Goose grants expire; Gemini scopes grants by mode</td><td><span class="tag warn">behind</span></td></tr>
+<tr><td>Sandboxing</td><td>Docker; Auto falls back to this PC</td><td>Codex Seatbelt, bubblewrap, native Windows sandbox; Claude Code OS sandbox and egress proxy</td><td><span class="tag bad">gap</span></td></tr>
+<tr><td>Steer and queue</td><td>Steer at checkpoints; editable queue, durable pause</td><td>Codex: Enter steers, Tab queues; Claude Code delivers after the tool batch</td><td><span class="tag ok">on par</span></td></tr>
+<tr><td>Injection defense</td><td>Rule of Two in code, wrapping, quarantined reader</td><td>Plus trained classifiers (Claude Code auto mode, ChatGPT agent)</td><td><span class="tag warn">no classifier</span></td></tr>
+<tr><td>Learning</td><td>Graded episodes, vetted lessons, randomized holdout</td><td>No surveyed product documents learning from graded outcomes</td><td><span class="tag">unproven</span></td></tr>
+<tr><td>Helpers</td><td>Read-only workers, one writer, shared budget, grace turn</td><td>Claude subagents (about 15× tokens); Gemini grace turn</td><td><span class="tag">unmeasured</span></td></tr>
+</tbody></table></div>
+<p class="note">From primary sources read on 21 Oct: product docs and engineering posts for the commercial tools, and source code for OpenHands, Gemini CLI, Codex, Goose, Microsoft Agent Framework, LangGraph and letta-code. Unknown proprietary internals are left unknown. Links are in the technical record.</p></section>
+
+<section aria-label="Verification"><h2>6 · What was and wasn't verified</h2><div class="grid2">
+<div class="node"><span class="tag ok">verified</span><ul><li>F2 and F4 reproduced before the fix</li><li>A test for every fix, plus the end-to-end session test</li><li>Full backend suite: 1153 passed, 13 skipped</li><li>Web: typecheck plus 165 tests</li><li>Static analysis: no undefined names</li></ul></div>
+<div class="node"><span class="tag bad">not verified</span><ul><li>Any real model: capability report use, worker benefit, learning benefit</li><li>The packaged Windows app</li><li>The live UI: queue, steering, Workers card</li><li>Paid or cloud benchmarks (not run without your go-ahead)</li></ul></div>
+</div></section>
+
+<section aria-label="Roadmap"><h2>7 · What next</h2><div class="grid3">
+<div class="node"><span class="tag bad">before release</span><ol><li>Decide the terminal fallback (section 3)</li><li>Run the worker and learning benchmarks on one local and one cloud model</li><li>Manual tests on the packaged build</li><li>Version bump and notes for PR #82, PR #83 and this branch</li></ol></div>
+<div class="node"><span class="tag warn">near term</span><ol><li>Grant expiry and mode scoping</li><li>Message-shape tests for steering, compaction and parallel results</li><li>One source for "what's allowed"; drop the legacy route logic and dead sources</li><li>A compaction check pass and thrash stop</li></ol></div>
+<div class="node"><span class="tag">research</span><ol><li>An OS sandbox on Windows, or WSL2</li><li>A reasoning-blind reviewer for Autonomous mode, measured first</li><li>An egress allowlist for the terminal</li><li>Randomized lesson curation, if learning proves useful</li></ol></div>
+</div></section>
+<footer>Technical record: <a href="../../docs/research/full-audit-2026-10-21.md">docs/research/full-audit-2026-10-21.md</a>. No screenshots: the diagrams describe code, not product UI.</footer>
+</main></body></html>
