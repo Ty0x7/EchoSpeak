@@ -41,8 +41,8 @@ UNTRUSTED_SOURCES = {
     "document_search", "research_notebook", "project_workspace",
     # MCP registry listings and third-party servers' error text (agent/integrations.py).
     "find_integrations", "check_integration",
-    # Replies from other agents (agent/a2a_trust.py).
-    "ask_remote_agent", "a2a_delegate", "a2a_discover",
+    # Replies from other agents (agent/a2a_trust.py), and research workers' findings (agent/lean/swarm.py).
+    "ask_remote_agent", "a2a_delegate", "a2a_discover", "spawn_workers",
 }
 
 # (C) Actions that leave the machine, speak for the user, or persist something

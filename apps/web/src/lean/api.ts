@@ -69,6 +69,13 @@ export const leanApi = (apiBase: string) => ({
   async decide(approvalId: string, decision: string): Promise<void> {
     await json(await fetch(`${apiBase}/lean/approvals/${encodeURIComponent(approvalId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision }) }));
   },
+  /** The owner's "Always allow" grants (persistent, by class of action). */
+  async approvalGrants(): Promise<{ items: { key: string; label: string; created_at: number }[]; mode: string }> {
+    return json(await fetch(`${apiBase}/lean/approval-grants`));
+  },
+  async removeApprovalGrant(key: string): Promise<void> {
+    await json(await fetch(`${apiBase}/lean/approval-grants/${encodeURIComponent(key)}`, { method: "DELETE" }));
+  },
   async toolsets(): Promise<{ id: string; tools: string[] }[]> {
     const data = await json<{ toolsets: { id: string; tools: string[] }[] }>(await fetch(`${apiBase}/lean/toolsets`));
     return data.toolsets || [];
@@ -139,6 +146,14 @@ export const leanApi = (apiBase: string) => ({
     if (agentId) query.set("agent_id", agentId);
     const data = await json<{ episodes: LearningEpisode[] }>(await fetch(`${apiBase}/lean/learning/episodes?${query}`));
     return data.episodes || [];
+  },
+  /** One page of experiences, newest first; role "own" (agents' replies) or "worker" (research workers). */
+  async episodesPage(opts: { offset?: number; limit?: number; agentId?: string; role?: "" | "own" | "worker" } = {}): Promise<{ episodes: LearningEpisode[]; total: number }> {
+    const query = new URLSearchParams({ limit: String(opts.limit ?? 20), offset: String(opts.offset ?? 0) });
+    if (opts.agentId) query.set("agent_id", opts.agentId);
+    if (opts.role) query.set("role", opts.role);
+    const data = await json<{ episodes: LearningEpisode[]; total?: number }>(await fetch(`${apiBase}/lean/learning/episodes?${query}`));
+    return { episodes: data.episodes || [], total: Number(data.total ?? (data.episodes || []).length) };
   },
   async reliability(): Promise<Record<string, ReliabilityRow[]>> {
     return json(await fetch(`${apiBase}/lean/learning/reliability`));

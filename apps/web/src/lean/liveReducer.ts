@@ -1,4 +1,4 @@
-import type { LeanEvent, LeanLiveState, LeanMessageData, LeanSegment } from "./types";
+import type { LeanEvent, LeanLiveState, LeanMessageData, LeanSegment, WorkersState } from "./types";
 
 /** Event types produced by the lean runtime. Anything else is legacy. */
 export const LEAN_EVENT_TYPES = new Set([
@@ -24,6 +24,11 @@ export const LEAN_EVENT_TYPES = new Set([
   "task_board",
   "claim_unverified",
   "security_note",
+  "approval_held",
+  "auto_approved",
+  "fail_streak",
+  "steer_applied",
+  "tool_state",
 ]);
 
 /** Only numeric facts (results, pages, products) are kept from a step's meta. */
@@ -83,7 +88,7 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
   const id = String(evt.message_id || "");
   switch (evt.type) {
     case "run_start":
-      return { ...state, executionId: String(evt.execution_id || "") };
+      return { ...state, executionId: String(evt.execution_id || ""), autonomous: Boolean(evt.autonomous) };
     case "routing":
       return { ...state, routing: true };
     case "run_outcome": {
@@ -164,6 +169,14 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
           },
         ],
       }));
+    case "tool_state":
+      // Structured live state under a tool's row (research workers); kept after the tool ends.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: m.segments.map((s) =>
+          s.kind === "tool" && s.id === evt.id && evt.state && typeof evt.state === "object" ? { ...s, state: evt.state as WorkersState } : s
+        ),
+      }));
     case "tool_progress":
       return patchMessage(state, id, (m) => ({
         ...m,
@@ -206,9 +219,39 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
             reason: String(evt.reason || ""),
             decision: "",
             ...(evt.grantable === false ? { grantable: false } : {}),
+            ...(evt.persistable ? { persistable: true, scopeLabel: String(evt.scope_label || "") } : {}),
             ...questionFields(evt),
           },
         ],
+      }));
+    case "approval_held":
+      // Autonomous mode held this for the owner instead of waiting; the run carried on.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [
+          ...closeThinking(m.segments, at),
+          {
+            kind: "approval",
+            step: Number(evt.step || 0),
+            id: `held_${String(evt.tool_call_id || at)}`,
+            toolCallId: String(evt.tool_call_id || ""),
+            tool: String(evt.tool || ""),
+            summary: String(evt.summary || ""),
+            reason: String(evt.reason || ""),
+            decision: "held",
+          },
+        ],
+      }));
+    case "steer_applied":
+      // The user's words, joined to this run at a safe checkpoint.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [...closeThinking(m.segments, at), { kind: "note", step: Number(evt.step || 0), text: `You added: ${String(evt.text || "")}`, at }],
+      }));
+    case "auto_approved":
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [...m.segments, { kind: "note", step: Number(evt.step || 0), text: String(evt.note || "Allowed automatically"), at }],
       }));
     case "context_compacted":
       return patchMessage(state, id, (m) => ({
@@ -268,6 +311,7 @@ export function messageFromTimeline(args: {
     }
     else if (row?.kind === "text") segments.push({ kind: "text", step, text: String(row.text || "") });
     else if (row?.kind === "note") segments.push({ kind: "note", step, text: String(row.text || "") });
+    else if (row?.kind === "steer") segments.push({ kind: "note", step, text: `You added: ${String(row.text || "")}` });
     else if (row?.kind === "tool")
       segments.push({
         kind: "tool",
@@ -283,6 +327,7 @@ export function messageFromTimeline(args: {
         doneLabel: row.done_label ? String(row.done_label) : undefined,
         summary: row.summary ? String(row.summary) : undefined,
         meta: numericMeta(row.meta),
+        ...(row.state && typeof row.state === "object" && row.state.kind === "workers" ? { state: row.state as WorkersState } : {}),
       });
     else if (row?.kind === "approval")
       segments.push({

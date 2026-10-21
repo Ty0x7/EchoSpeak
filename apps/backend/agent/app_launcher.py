@@ -86,6 +86,34 @@ def launch_shortcut(path: Path) -> None:
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
+def _name_forms(value: str) -> set[str]:
+    """'C:\\Windows\\regedit.exe' -> {'c:\\windows\\regedit.exe', 'regedit.exe', 'regedit'}."""
+    text = " ".join(str(value or "").strip().strip('"').lower().split())
+    if not text:
+        return set()
+    path = Path(text.replace("\\", "/"))
+    return {text, path.name, path.stem} - {""}
+
+
+def blocked_by(app: str, command: list[str] | None = None, shortcut: Path | None = None) -> str:
+    """The Blocked apps entry that matches this launch, or ''.
+
+    Compares the requested name, the executable it resolves to and the shortcut's
+    name, each with and without its extension. A shortcut's target isn't read.
+    """
+    from config import config
+
+    names = _name_forms(app)
+    if command:
+        names |= _name_forms(command[0])
+    if shortcut is not None:
+        names |= _name_forms(shortcut.name)
+    for entry in getattr(config, "open_application_blocklist", None) or []:
+        if _name_forms(entry) & names:
+            return str(entry)
+    return ""
+
+
 def runs_commands(command: list[str]) -> bool:
     name = Path(str(command[0] if command else "")).name.lower()
     return name.removesuffix(".exe") in COMMAND_HOSTS

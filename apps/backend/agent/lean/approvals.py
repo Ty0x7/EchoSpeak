@@ -64,6 +64,119 @@ def dangerous_command(command: str) -> bool:
     return bool(_DANGEROUS_COMMAND.search(command or ""))
 
 
+# ── approval scopes: what "Always allow" and autonomous mode may cover ────
+#
+# An approval is about one call. "Always allow" stores a grant for its *scope*, a named
+# class of action the owner can read and revoke (Settings › Permissions › Always allowed).
+# Only some classes can be granted. Never: deletes and dangerous commands, messages that
+# leave the machine, changes to an agent's identity, tasks for other agents (A2A), and
+# anything asked because outside content was read (Rule of Two), except on-screen control.
+
+@dataclass(frozen=True)
+class Scope:
+    key: str
+    label: str
+    # Autonomous mode approves this class by itself; others are held for the owner.
+    autonomous: bool = False
+
+
+DESKTOP_SCOPE = Scope("desktop_control", "Control the mouse and keyboard", autonomous=True)
+
+
+def scope_for(name: str, args: dict[str, Any], reason: str = "", rule: str = "") -> Optional[Scope]:
+    """The grantable class this approval belongs to, or None when it must be asked every time."""
+    if rule and rule != "screen_control":
+        return None  # Rule of Two after web, email or app content: always the owner's call
+    if name in {"ask_remote_agent", "a2a_delegate"} or name in IDENTITY_TOOLS or name in EXTERNAL_TOOLS:
+        return None
+    if name in DESKTOP_CONTROL_TOOLS or rule == "screen_control":
+        return DESKTOP_SCOPE
+    if name in {"terminal", "terminal_run", "process_start"}:
+        command = str(args.get("command") or args.get("cmd") or "")
+        if dangerous_command(command) or "delete or overwrite" in reason:
+            return None
+        if "outside the sandbox" in reason:
+            return Scope("terminal:host", "Run commands on this PC that aren't dangerous", autonomous=True)
+        if "internet" in reason:
+            return Scope("terminal:network", "Let sandbox commands use the internet", autonomous=True)
+        return None
+    if rule == "generation_cost" or name == "create_media":
+        return Scope("generation", "Cloud image and video generation (may cost money)")
+    if name.startswith("mcp__") or "external MCP action" in reason:
+        return Scope(f"mcp:{name}", f"Run the connected-app action {name}")
+    return None
+
+
+class GrantStore:
+    """The owner's "Always allow" grants, kept across chats and restarts in DATA_DIR/security."""
+
+    def __init__(self, path: Optional[Any] = None) -> None:
+        self._lock = threading.Lock()
+        self._path = path
+
+    def _file(self):
+        if self._path is not None:
+            return self._path
+        from pathlib import Path
+
+        from config import DATA_DIR
+
+        return Path(DATA_DIR) / "security" / "approval-grants.json"
+
+    def _read(self) -> dict[str, dict[str, Any]]:
+        import json
+
+        try:
+            data = json.loads(self._file().read_text(encoding="utf-8"))
+            return {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)} if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _write(self, data: dict[str, dict[str, Any]]) -> None:
+        import json
+
+        path = self._file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        tmp.replace(path)
+
+    def has(self, key: str) -> bool:
+        with self._lock:
+            return key in self._read()
+
+    def add(self, scope: Scope) -> None:
+        with self._lock:
+            data = self._read()
+            data[scope.key] = {"label": scope.label, "created_at": time.time()}
+            self._write(data)
+
+    def remove(self, key: str) -> bool:
+        with self._lock:
+            data = self._read()
+            if key not in data:
+                return False
+            data.pop(key)
+            self._write(data)
+            return True
+
+    def list(self) -> list[dict[str, Any]]:
+        with self._lock:
+            return [{"key": key, **value} for key, value in sorted(self._read().items(), key=lambda kv: kv[1].get("created_at", 0))]
+
+
+_GRANTS = GrantStore()
+
+
+def get_grant_store() -> GrantStore:
+    return _GRANTS
+
+
+def set_grant_store(store: Optional[GrantStore]) -> None:
+    global _GRANTS
+    _GRANTS = store or GrantStore()
+
+
 def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bool, str]:
     """Return (needs_approval, reason)."""
     # An independent agent may execute the request on another machine. The
@@ -114,6 +227,8 @@ class PendingApproval:
     answer: str = ""
     # False when "For this chat" cannot cover it (Rule of Two outside screen control).
     grantable: bool = True
+    # The class "Always allow" would grant (approvals.scope_for), or None when it can't.
+    scope: Optional[Scope] = None
 
     def public(self) -> dict[str, Any]:
         return {
@@ -132,6 +247,8 @@ class PendingApproval:
             "allow_other": self.allow_other,
             "answer": self.answer,
             "grantable": self.grantable,
+            "persistable": self.scope is not None,
+            "scope_label": self.scope.label if self.scope else "",
         }
 
 
@@ -147,7 +264,7 @@ class ApprovalBroker:
             return tool in self._session_grants.get(session_id, set())
 
     def open(self, *, session_id: str, request_id: str, tool: str, summary: str, args: dict[str, Any], reason: str,
-             grantable: bool = True) -> PendingApproval:
+             grantable: bool = True, scope: Optional[Scope] = None) -> PendingApproval:
         approval = PendingApproval(
             id=f"apr_{uuid.uuid4().hex[:12]}",
             session_id=session_id,
@@ -157,6 +274,7 @@ class ApprovalBroker:
             args=args,
             reason=reason,
             grantable=grantable,
+            scope=scope,
         )
         with self._lock:
             self._pending[approval.id] = approval
@@ -210,15 +328,19 @@ class ApprovalBroker:
                 question.event.set()
                 return question
         decision = text.lower()
-        if decision not in {"allow", "deny", "always"}:
-            raise ValueError("decision must be allow, deny, or always")
+        if decision not in {"allow", "deny", "always", "persist"}:
+            raise ValueError("decision must be allow, deny, always or persist")
         with self._lock:
             approval = self._pending.get(approval_id)
             if approval is None:
                 return None
+            if decision == "persist" and approval.scope is None:
+                raise ValueError("this action can't be always allowed; allow it once or for this chat")
             if decision == "always" and approval.grantable:
                 self._session_grants.setdefault(approval.session_id, set()).add(approval.tool)
-            approval.decision = "allow" if decision == "always" else decision
+            approval.decision = "allow" if decision in {"always", "persist"} else decision
+        if decision == "persist" and approval.scope is not None:
+            get_grant_store().add(approval.scope)
         approval.event.set()
         return approval
 

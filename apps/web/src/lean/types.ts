@@ -32,6 +32,8 @@ export type LeanSegment =
       summary?: string;
       /** Counts behind the summary (results, pages, products). */
       meta?: Record<string, number>;
+      /** Live structured state from the tool (tool_state), e.g. research workers. */
+      state?: WorkersState;
     }
   | {
       kind: "approval";
@@ -42,9 +44,12 @@ export type LeanSegment =
       summary: string;
       args?: Record<string, unknown>;
       reason: string;
-      decision: "" | "allow" | "deny" | "timeout" | "cancelled" | "answered";
+      decision: "" | "allow" | "deny" | "timeout" | "cancelled" | "answered" | "held";
       /** False when "For this chat" cannot apply (outside content read this turn). */
       grantable?: boolean;
+      /** "Always allow" can grant this class of action; scopeLabel names the class. */
+      persistable?: boolean;
+      scopeLabel?: string;
       /** ask_user: a question with choices instead of a permission request. */
       question?: string;
       options?: string[];
@@ -72,10 +77,31 @@ export type LeanMessageData = {
 
 export type LeanOutcome = { status: "done" | "stopped"; summary?: string; reason?: string };
 
+/** Research workers under a lead's spawn_workers call (agent/lean/swarm.py Worker.public). */
+export type WorkerRow = {
+  id: string;
+  index: number;
+  goal: string;
+  status: "queued" | "running" | "done" | "partial" | "failed" | "skipped" | "cancelled";
+  steps: number;
+  tools: number;
+  tokens: number;
+  elapsed_s: number;
+  confidence: string;
+  answer: string;
+  note: string;
+  activity: string;
+  sources: { url: string; title: string; opened: boolean }[];
+  open_questions: string[];
+};
+export type WorkersState = { kind: "workers"; budget: number; used: number; stop_reason: string; workers: WorkerRow[] };
+
 export type LeanLiveState = {
   requestId: string;
   executionId: string;
   routing: boolean;
+  /** Autonomous mode: routine approvals don't interrupt this run. */
+  autonomous?: boolean;
   startedAt: number;
   order: string[];
   messages: Record<string, LeanMessageData>;
@@ -182,8 +208,16 @@ export type LearningEpisode = {
   tamper: { what: string; target: string; expected: boolean }[];
   tools: { name: string; label: string; target: string; ok: boolean; not_run: boolean }[];
   lessons_used: string[];
+  /** Lessons that matched but were held back at random: this task is part of their control group. */
+  lessons_withheld?: string[];
   verified_success: boolean;
   failed: boolean;
+  execution_id?: string;
+  session_id?: string;
+  /** solo | lead | worker (research workers and team helpers). */
+  role?: string;
+  /** "swarm" for research workers. */
+  source?: string;
 };
 
 export type LearningKindStats = { wins: number; losses: number; checked: number; answered: number; confirmed: number; decided: number; rate: number };

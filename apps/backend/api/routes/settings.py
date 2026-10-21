@@ -322,13 +322,6 @@ def _validate_settings_effective(effective: dict) -> list[dict]:
         if not secret and not secret_path:
             issues.append({"key": "webhook_secret", "message": "Webhooks enabled but WEBHOOK_SECRET / WEBHOOK_SECRET_PATH is not set.", "severity": "error"})
 
-    if bool(s.get("allow_open_application")):
-        from config import _normalize_open_application_allowlist
-
-        allowlist = _normalize_open_application_allowlist(s.get("open_application_allowlist"))
-        if not allowlist:
-            issues.append({"key": "open_application_allowlist", "message": "Application launching is enabled but OPEN_APPLICATION_ALLOWLIST is empty.", "severity": "error"})
-
     if bool(s.get("allow_self_modification")):
         issues.append({"key": "allow_self_modification", "message": "Self-modification is enabled. This is high-risk and should stay off outside controlled development sessions.", "severity": "warning"})
 
@@ -445,12 +438,15 @@ def _sanitize_incoming_settings(patch: dict) -> dict:
         if isinstance(val, str) and val.strip() == "***":
             out.pop(secret_key, None)
 
-    if "open_application_allowlist" in out:
-        from config import _normalize_open_application_allowlist
+    from config import APP_NAME_LIST_KEYS, _normalize_open_application_allowlist
 
-        out["open_application_allowlist"] = _normalize_open_application_allowlist(
-            out.get("open_application_allowlist")
-        )
+    if "open_application_allowlist" in out:
+        # Allowed apps was retired (launching needs no whitelist): its names become favorites.
+        old = _normalize_open_application_allowlist(out.pop("open_application_allowlist"))
+        out["open_application_favorites"] = list(out.get("open_application_favorites") or []) + old
+    for key in APP_NAME_LIST_KEYS:
+        if key in out:
+            out[key] = _normalize_open_application_allowlist(out.get(key))
 
     return out
 

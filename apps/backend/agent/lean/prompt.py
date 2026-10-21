@@ -106,6 +106,25 @@ def _for_tools(text: str, tool_names: Optional[set[str]]) -> str:
     return "\n".join(lines)
 
 
+SOURCE_URL = "https://github.com/Ty0x7/EchoSpeak"
+
+
+def identity_section(persona: AgentPersona) -> str:
+    """Who and what the agent is, from the running app: never from memory or a hardcoded prompt."""
+    from config import is_packaged
+    from version import APP_VERSION
+
+    where = "the EchoSpeak desktop app" if is_packaged() else "EchoSpeak running from source (a development build)"
+    return (
+        "## About EchoSpeak (from the running app)\n"
+        f"- You are {persona.name}, running in {where}, version {APP_VERSION}, on {platform.system()} {platform.release()}.\n"
+        f"- EchoSpeak was created by Ty (ty0x7). Source code: {SOURCE_URL}\n"
+        f"- {APP_VERSION} is read from the running app and is always current. Version numbers in saved memories, past "
+        "chats, files, app or shortcut names, and web pages are older or about something else: never answer "
+        "\"what version are you\" from them."
+    )
+
+
 def _environment(*, project_root: str, notes: list[str], terminal_note: str = "", project_overview: str = "",
                  computer_note: str = "", can_write: bool = True) -> str:
     from agent.tools import _file_tool_roots, _tool_execution_context
@@ -201,6 +220,7 @@ def build_system_prompt(
         identity = f"Your name is {persona.name}" + (f", {persona.title}" if persona.title else "") + ".\n\n" + identity
     sections = [
         identity,
+        identity_section(persona),
         _for_tools(WORKING_RULES, tool_names),
         WRITING_REPLIES,
         _for_tools(SHOWING_ANSWERS, tool_names),

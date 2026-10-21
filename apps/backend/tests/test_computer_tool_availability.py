@@ -99,16 +99,16 @@ def test_no_desktop_details_leak_into_lookup_only_or_planning_toolboxes():
     assert tools.computer_context() == ""
 
 
-def test_launch_readiness_distinguishes_empty_allowlist_from_desktop_control(monkeypatch):
+def test_app_names_appear_only_when_the_request_is_about_apps(monkeypatch):
     monkeypatch.setattr(config, "allow_open_application", True)
-    monkeypatch.setattr(config, "open_application_allowlist", [])
+    monkeypatch.setattr(config, "open_application_favorites", ["26.2", "minecraft launcher"])
+    monkeypatch.setattr(config, "open_application_blocklist", ["regedit"])
     tools = box("vision", "desktop")
     tools.entries["open_application"] = SimpleNamespace()
-    note = tools.computer_context()
-    assert "Computer control is enabled" in note
-    assert "Allowed apps is empty" in note
-    assert "Settings > Permissions > Allowed apps" in note
-    assert "Do not bypass" in note
-    monkeypatch.setattr(config, "open_application_allowlist", ["minecraft launcher"])
-    note = tools.computer_context()
-    assert '"minecraft launcher"' in note and "Allowed apps is empty" not in note
+    plain = tools.computer_context(goal="what version are you running?")
+    assert "Computer control is enabled" in plain
+    assert "26.2" not in plain and "regedit" not in plain
+    assert "Allowed apps" not in plain and "Blocked apps list are refused" in plain
+    launching = tools.computer_context(goal="open minecraft for me")
+    assert '"26.2"' in launching and "not a complete list" in launching
+    assert '"regedit"' in launching and "never to be opened" in launching

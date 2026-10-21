@@ -13,7 +13,7 @@ import threading
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Callable, Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 _sink: ContextVar[Optional[Callable[[str], None]]] = ContextVar("echospeak_tool_progress", default=None)
 # The running turn's Stop, for tools that wait a long time (MCP tasks, agent/mcp_tasks.py).
@@ -33,6 +33,28 @@ def report(text: str) -> None:
         sink(line)
 
 
+_state_sink: ContextVar[Optional[Callable[[dict], None]]] = ContextVar("echospeak_tool_state", default=None)
+# The running turn's trace spans (agent/lean/tracing.py), for tools that do traced work of their own.
+_span_factory: ContextVar[Optional[Callable[..., Any]]] = ContextVar("echospeak_tool_spans", default=None)
+
+
+def span_factory() -> Optional[Callable[..., Any]]:
+    """``factory(name, **attrs)`` -> a span context manager on the turn's trace, or None."""
+    return _span_factory.get()
+
+
+def state_sink() -> Optional[Callable[[dict], None]]:
+    """The live-card sink, captured to call from worker threads (contextvars don't follow threads)."""
+    return _state_sink.get()
+
+
+def report_state(state: dict) -> None:
+    """Structured live state for a card under the tool's row (e.g. research workers). Latest wins."""
+    sink = _state_sink.get()
+    if sink is not None:
+        sink(dict(state))
+
+
 def stop_requested() -> bool:
     """The user stopped the turn this tool is running for."""
     event = _cancel.get()
@@ -40,9 +62,13 @@ def stop_requested() -> bool:
 
 
 @contextmanager
-def reporting(emit: Callable[[str], None], cancel: Optional[threading.Event] = None) -> Iterator[None]:
+def reporting(emit: Callable[[str], None], cancel: Optional[threading.Event] = None,
+              emit_state: Optional[Callable[[dict], None]] = None,
+              spans: Optional[Callable[..., Any]] = None) -> Iterator[None]:
     """Route ``report`` calls made in this context to ``emit``, throttled; expose the turn's Stop."""
     state = {"at": 0.0, "last": ""}
+    state_token = _state_sink.set(emit_state)
+    span_token = _span_factory.set(spans)
 
     def throttled(line: str) -> None:
         now = time.monotonic()
@@ -59,6 +85,8 @@ def reporting(emit: Callable[[str], None], cancel: Optional[threading.Event] = N
     finally:
         _sink.reset(token)
         _cancel.reset(stop)
+        _state_sink.reset(state_token)
+        _span_factory.reset(span_token)
         pending = state.get("pending")
         if pending and pending != state["last"]:
             emit(str(pending))

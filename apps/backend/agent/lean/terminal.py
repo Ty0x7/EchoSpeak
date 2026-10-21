@@ -346,6 +346,23 @@ def to_container_path(host_path: Path, plan: list[tuple[Path, str]]) -> Optional
     return None
 
 
+def to_host_path(path: str, project_root: str = "") -> Optional[str]:
+    """/work/Desktop/Game/x.js -> C:\\Users\\me\\Desktop\\Game\\x.js, or None when it isn't a sandbox path.
+
+    The terminal's description names the sandbox mounts, and models then pass those
+    paths to the file tools, which run on this PC. Only mounted folders map back, so
+    this never reaches anything the file tools couldn't already use.
+    """
+    text = str(path or "").strip().replace("\\", "/")
+    if not (text == "/work" or text.startswith("/work/")):
+        return None
+    for root, target in sorted(mount_plan(project_root), key=lambda item: -len(item[1])):
+        if text == target or text.startswith(target + "/"):
+            rest = text[len(target):].lstrip("/")
+            return str(root / Path(*rest.split("/"))) if rest else str(root)
+    return None
+
+
 def translate_windows_paths(command: str, plan: list[tuple[Path, str]]) -> str:
     """Rewrite C:\\Users\\me\\Desktop\\app\\x.js -> /work/Desktop/app/x.js inside commands."""
     out = command
@@ -738,7 +755,8 @@ class Terminal:
         }[policy]
         return ("terminal runs bash in a Linux sandbox container (Node 22, Python 3, git; "
                 f"{network}). Your folders are mounted: {mounts}. "
-                "Windows paths in commands are translated automatically. Only if a task truly needs this PC "
+                "Windows paths in commands are translated automatically. The /work paths exist only inside the "
+                "terminal: give file_read, file_write and the other file tools the Windows paths. Only if a task truly needs this PC "
                 "(Windows apps, installed tools), set where=\"host\"; that asks the user first.")
 
     def effective_where(self, args: dict[str, Any]) -> str:

@@ -54,9 +54,16 @@ def max_output_tokens() -> int:
 
 
 def approval_mode() -> str:
-    """smart (default): approve destructive/external only; always; never."""
+    """smart (default): approve destructive/external only; always; never.
+
+    autonomous: like smart, but for walking away. Classes marked autonomous in
+    approvals.scope_for (desktop control, non-dangerous terminal asks) are approved
+    automatically; every other ask is held for the owner without waiting, so the run
+    keeps going and reports what still needs them. Disabled permissions, Blocked apps,
+    privacy modes, project scope, the Rule of Two and Stop are unchanged.
+    """
     mode = str(_setting("lean_approval_mode", "smart") or "smart").strip().lower()
-    return mode if mode in {"smart", "always", "never"} else "smart"
+    return mode if mode in {"smart", "always", "never", "autonomous"} else "smart"
 
 
 def approval_timeout_seconds() -> float:
@@ -81,6 +88,32 @@ def group_fan_out() -> bool:
 def group_merge() -> bool:
     """After a fan-out, the room's lead writes a short merged reply."""
     return _as_bool(_setting("lean_group_merge", True))
+
+
+def research_swarm() -> bool:
+    """Offer spawn_workers (agent/lean/swarm.py). Off until the bench shows a gain for your models."""
+    return _as_bool(_setting("lean_research_swarm", False))
+
+
+def _int(name: str, default: int, low: int, high: int) -> int:
+    try:
+        return max(low, min(high, int(_setting(name, default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def swarm_token_budget() -> int:
+    """New tokens all of one request's workers may use together (their prompts plus replies)."""
+    return _int("lean_swarm_token_budget", 120_000, 10_000, 2_000_000)
+
+
+def swarm_worker_steps() -> int:
+    return _int("lean_swarm_worker_steps", 12, 3, 40)
+
+
+def swarm_parallel(local: bool) -> int:
+    """Workers at once: a local server has one GPU's worth of slots; a cloud API has more."""
+    return _int("lean_swarm_local_parallel", 1, 1, 4) if local else _int("lean_swarm_cloud_parallel", 4, 1, 6)
 
 
 def group_max_rounds() -> int:

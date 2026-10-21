@@ -34,7 +34,7 @@ TOOLSETS: dict[str, list[str]] = {
         "create_media", "creation_status",
     ],
     # Looking things up on the web.
-    "web": ["web_search", "safe_web_fetch", "youtube_transcript", "research_notebook"],
+    "web": ["web_search", "safe_web_fetch", "youtube_transcript", "research_notebook", "spawn_workers"],
     # Live data and media shown as cards.
     "live": [
         "weather_live", "sports_live", "browse_task",
@@ -114,6 +114,10 @@ ARG_ALIASES: dict[str, dict[str, str]] = {
     "safe_web_fetch": {"link": "url"},
     "web_search": {"q": "query"},
 }
+
+# Tools that take paths on this PC (sandbox /work/... paths are mapped back for them).
+FILE_PATH_TOOLS = {"file_read", "file_write", "file_edit", "file_list", "file_find", "file_search", "file_copy",
+                   "file_move", "file_delete", "file_mkdir", "read_image"}
 
 # Read-only tools can run in parallel when the model asks for several at once.
 PARALLEL_SAFE = {
@@ -214,6 +218,16 @@ def _alias_key(name: str) -> str:
 
 def _flag_enabled(flag: str) -> bool:
     return bool(getattr(config, str(flag).lower(), False))
+
+
+_APP_WORDS = re.compile(
+    r"(?i)\b(open|launch|start|run|play|close|switch\s+to|app|apps|application|program|game|games|shortcut|"
+    r"desktop|window|click|type|screen)\b")
+
+
+def wants_apps(goal: str) -> bool:
+    """The request is about launching apps or using the desktop."""
+    return bool(_APP_WORDS.search(str(goal or "")))
 
 
 def native_permitted(name: str) -> bool:
@@ -370,11 +384,14 @@ class Toolbox:
                 and bool(getattr(config, "enable_system_actions", False))
                 and bool(getattr(config, "allow_desktop_automation", False)))
 
-    def computer_context(self, native: bool = False) -> str:
+    def computer_context(self, native: bool = False, goal: str = "") -> str:
         """Describe this turn's actual screen/control tools without granting any.
 
         native: the model gets Claude's own computer toolset instead of computer_action
         (agent/lean/cloud_streams.py), so the note names its actions instead.
+        goal: the request. App names (favorites, blocked apps) are added only when it is
+        about launching apps or using the desktop; elsewhere they are noise a model can
+        mistake for facts (a shortcut called "26.2" was once given as Echo's version).
         """
         names = set(self.names)
         if not names.intersection({"take_screenshot", "read_image", "vision_qa", "computer_action"}):
@@ -382,17 +399,20 @@ class Toolbox:
         guidance = (" Use your built-in computer tool for mouse and keyboard input, never a made-up terminal click command."
                     if native else " Use computer_action for mouse/keyboard input, never a made-up terminal click command.")
         if "open_application" in names:
-            allowed = list(getattr(config, "open_application_allowlist", None) or [])
             if not getattr(config, "allow_open_application", False):
                 guidance += " App launching is disabled in Settings > Permissions > Open apps."
-            elif not allowed:
-                guidance += (" App launching is separately restricted: Allowed apps is empty, so open_application cannot "
-                             "launch anything. The owner must add the exact Start-menu name or executable path in "
-                             "Settings > Permissions > Allowed apps. Do not bypass this restriction with other tools.")
             else:
-                guidance += (" open_application may launch only entries in Settings > Permissions > Allowed apps: "
-                             + json.dumps(allowed[:12], ensure_ascii=False)[:600]
-                             + ". A missing app needs the owner's permission-setting change, not a terminal workaround.")
+                guidance += (" open_application launches installed apps by Start-menu name, desktop shortcut name or "
+                             "executable path; apps in the owner's Blocked apps list are refused.")
+                if wants_apps(goal):
+                    favorites = list(getattr(config, "open_application_favorites", None) or [])
+                    blocked = list(getattr(config, "open_application_blocklist", None) or [])
+                    if favorites:
+                        guidance += (" App or shortcut names the owner often opens (suggestions, not a complete list "
+                                     "of what may launch): " + json.dumps(favorites[:12], ensure_ascii=False)[:600] + ".")
+                    if blocked:
+                        guidance += (" Blocked apps, never to be opened any other way: "
+                                     + json.dumps(blocked[:20], ensure_ascii=False)[:600] + ".")
         if "computer_action" not in names:
             return ("Computer control is not available to this agent. Screen/image tools only inspect; "
                     "they do not click or type. To enable control, the owner must find this agent under Agents "
@@ -513,6 +533,13 @@ class Toolbox:
         for old, new in ARG_ALIASES.get(resolved, {}).items():
             if old in args and new not in args:
                 args[new] = args.pop(old)
+        if resolved in FILE_PATH_TOOLS:
+            # A sandbox path from the terminal (/work/Desktop/...) means the same folder on this PC.
+            from agent.lean.terminal import to_host_path
+
+            for key in ("path", "src", "dst", "source", "destination"):
+                if isinstance(args.get(key), str) and (host := to_host_path(args[key], self.project_root)):
+                    args[key] = host
         if resolved == "terminal" and resolved in self.native:
             terminal = getattr(self.native[resolved].func, "__self__", None)
             if terminal is not None and hasattr(terminal, "effective_where"):

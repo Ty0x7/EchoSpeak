@@ -47,6 +47,23 @@ _TRANSIENT = re.compile(
 )
 
 
+# A saved claim about which EchoSpeak version is current ("The current version is 10.4.1").
+# The running app knows its version (prompt.identity_section), so such claims are only
+# ever stale: they are left out of recall instead of being deleted from memory.
+_VERSION_NUMBER = re.compile(r"\bv?\d+\.\d+(?:\.\d+)?\b")
+_VERSION_CLAIM = re.compile(
+    r"(?i)\b(echo\s?speak|current(?:ly)?\s+(?:on\s+)?(?:version|release|build)|latest\s+(?:version|release)|"
+    r"you(?:'re|\s+are)\s+(?:on|running)\s+(?:version\s+)?v?\d)"
+)
+_VERSION_WORD = re.compile(r"(?i)\b(version|ver[is]{2}on|release|build|v\d)")
+
+
+def stale_version_claim(text: str) -> bool:
+    """A remembered statement of which EchoSpeak version is current (outranked by the live version)."""
+    body = str(text or "")
+    return bool(_VERSION_NUMBER.search(body) and _VERSION_WORD.search(body) and _VERSION_CLAIM.search(body))
+
+
 def tidy_fact(text: str) -> str:
     """One line, no 'remember that' lead-in, a capital first letter and a full stop."""
     fact = " ".join(str(text or "").split())
@@ -126,7 +143,8 @@ def _compact(text: str) -> str:
 
 def render(memories: Iterable[dict[str, Any]]) -> str:
     """The prompt section: pinned facts first, then the relevant ones, compact and capped."""
-    rows = [m for m in memories if str(m.get("content") or "").strip() and str(m.get("type") or "") != "conversation"]
+    rows = [m for m in memories if str(m.get("content") or "").strip() and str(m.get("type") or "") != "conversation"
+            and not stale_version_claim(str(m.get("content") or ""))]
     rows.sort(key=lambda m: 0 if m.get("pinned") else 1)
     lines: list[str] = []
     seen: list[str] = []

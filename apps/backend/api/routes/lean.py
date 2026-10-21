@@ -291,6 +291,24 @@ def decide_approval(approval_id: str, request: ApprovalDecisionRequest) -> dict[
     return {"ok": True, "approval": approval.public()}
 
 
+@router.get("/approval-grants")
+def list_approval_grants() -> dict[str, Any]:
+    """The owner's "Always allow" grants, and the approval mode they work with."""
+    from agent.lean import settings
+    from agent.lean.approvals import get_grant_store
+
+    return {"items": get_grant_store().list(), "mode": settings.approval_mode()}
+
+
+@router.delete("/approval-grants/{key:path}")
+def remove_approval_grant(key: str) -> dict[str, Any]:
+    from agent.lean.approvals import get_grant_store
+
+    if not get_grant_store().remove(key):
+        raise HTTPException(status_code=404, detail="That grant doesn't exist.")
+    return {"ok": True}
+
+
 class SkillImportRequest(BaseModel):
     path: str = Field(default="", description="A folder that contains SKILL.md")
     text: str = Field(default="", description="The contents of a SKILL.md file")

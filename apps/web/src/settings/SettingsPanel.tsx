@@ -19,6 +19,7 @@ import { SmartModelChoice } from "./SmartModelChoice";
 import { UPDATES_OFF_MESSAGE, updatesAllowed } from "../desktop/privacyGate";
 import { AgentSkillsSection } from "./AgentSkillsSection";
 import { DesktopControlOffer } from "./DesktopControlOffer";
+import { AlwaysAllowed } from "./AlwaysAllowed";
 import { VoiceProviders } from "./VoiceProviders";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
@@ -460,10 +461,21 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
             onChange={(v) => save({ lean_approval_mode: v })}
             options={[
               { value: "smart", label: "Risky only", hint: "Recommended" },
+              { value: "autonomous", label: "Autonomous", hint: "Walk away" },
               { value: "always", label: "Every action" },
               { value: "never", label: "Never" },
             ]}
           />
+        </Row>
+        {String(s.lean_approval_mode || "smart") === "autonomous" ? (
+          <div className="st-muted" role="status">
+            Autonomous: desktop control and ordinary commands outside the sandbox run without asking, so long tasks keep going while you're away.
+            Deleting, dangerous commands, sending messages, cloud costs and tasks for other agents are never approved for you: the agent skips them
+            and lists them for you at the end. Permissions, Blocked apps, Private mode and Stop still apply.
+          </div>
+        ) : null}
+        <Row label="Research workers" help="For broad research, the agent can send up to 6 read-only workers to look things up at the same time, then writes the answer itself. Uses more tokens; on a local model they run one or two at a time. Off until you've seen it help with your models (Echo bench: --swarm).">
+          <Toggle checked={asBool(s.lean_research_swarm)} onChange={(v) => save({ lean_research_swarm: v })} label="Research workers" />
         </Row>
         <Row label="Separate reader for outside content" help="A web page, email or app result goes first to a reader with no tools, and the agent sees only the facts it found. Lowers the chance hidden instructions work, and tells you when content tried. Costs one extra model call per result.">
           <Segmented
@@ -855,7 +867,7 @@ const PERMS: { key: string; label: string; help: string }[] = [
   { key: "allow_file_write", label: "Create and edit files", help: "Inside the folders below. Every overwrite is checkpointed so it can be undone." },
   { key: "allow_terminal_commands", label: "Run terminal commands", help: "Uses the Terminal settings. Dangerous commands still ask first." },
   { key: "allow_playwright", label: "Browse the web in a real browser", help: "For pages that need clicking or logging in." },
-  { key: "allow_open_application", label: "Open apps", help: "Launch only the programs in Allowed apps below. An empty list allows none." },
+  { key: "allow_open_application", label: "Open apps", help: "Launch installed apps and shortcuts, except the ones in Blocked apps below." },
   { key: "allow_open_chrome", label: "Open Chrome", help: "Open links in your browser." },
   { key: "allow_desktop_automation", label: "Control the desktop", help: "Click, type, and switch windows. Always asks first." },
   { key: "allow_email", label: "Email", help: "Read and send email with the account in Channels." },
@@ -878,16 +890,19 @@ function PermissionsSection({ s, save, apiBase }: { s: SettingsMap; save: Save; 
           </Row>
         ))}
         {master && asBool(s.allow_desktop_automation) ? <DesktopControlOffer apiBase={apiBase} /> : null}
+        <AlwaysAllowed apiBase={apiBase} />
         {master && asBool(s.allow_desktop_automation) ? (
           <Row label="Claude's own computer tool" help="With a Claude 5 model, use the computer tool Claude was trained on instead of Echo's general one. Same permissions and approvals. Turn off to compare.">
             <Toggle checked={s.computer_native_tools === undefined ? true : asBool(s.computer_native_tools)} onChange={(v) => save({ computer_native_tools: v })} label="Claude's own computer tool" />
           </Row>
         ) : null}
       </Group>
-      <Group title="Apps agents may open" description="Open apps must be enabled above. This list is separate from terminal command restrictions.">
-        <Row label="Allowed apps" help="Add an exact Start-menu name (Minecraft Launcher), a desktop shortcut's name (26.2), or an executable path. Short names such as notepad also work." stack>
-          <ListEditor items={asList(s.open_application_allowlist)} onChange={(items) => save({ open_application_allowlist: items })} placeholder="e.g. Minecraft Launcher" />
-          {asList(s.open_application_allowlist).length === 0 ? <div className="st-muted" role="status">No apps allowed yet. Turning on Open apps does not add any automatically.</div> : null}
+      <Group title="Apps" description="Open apps must be enabled above. Separate from terminal command restrictions.">
+        <Row label="Blocked apps" help="Agents can't open these, even with approvals off. Use a Start-menu name, a shortcut's name or an executable name (regedit or regedit.exe)." stack>
+          <ListEditor items={asList(s.open_application_blocklist)} onChange={(items) => save({ open_application_blocklist: items })} placeholder="e.g. regedit" />
+        </Row>
+        <Row label="Favorite apps" help="Optional names agents can suggest when you ask them to open something, such as a shortcut called 26.2. Not a limit: any other app can open too." stack>
+          <ListEditor items={asList(s.open_application_favorites)} onChange={(items) => save({ open_application_favorites: items })} placeholder="e.g. Minecraft Launcher" />
         </Row>
       </Group>
       <Group title="Folders agents can use" description="Agents read and write only inside these. A project folder attached to a chat is added automatically.">

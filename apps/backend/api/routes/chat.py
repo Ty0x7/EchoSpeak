@@ -164,6 +164,55 @@ async def get_queued_queries(thread_id: str):
     return {"thread_id": key, "queue": items}
 
 
+class QueryQueueEdit(BaseModel):
+    thread_id: str = Field(min_length=1, max_length=200)
+    message: str = Field(min_length=1, max_length=50000)
+
+
+@router.patch("/query/queue/{client_request_id}")
+async def edit_queued_query(client_request_id: str, request: QueryQueueEdit):
+    """Change a follow-up that hasn't started yet."""
+    key = _normalize_thread_id(request.thread_id)
+    try:
+        item = get_state_store().update_queued_turn(key, client_request_id, message=request.message)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=404, detail="That message already started or was removed.")
+    return {"thread_id": key, "item": item, "queue": get_state_store().list_queued_turns(key)}
+
+
+@router.delete("/query/queue/{client_request_id}")
+async def remove_queued_query(client_request_id: str, thread_id: str):
+    key = _normalize_thread_id(thread_id)
+    if get_state_store().update_queued_turn(key, client_request_id, remove=True) is None:
+        raise HTTPException(status_code=404, detail="That message already started or was removed.")
+    return {"thread_id": key, "queue": get_state_store().list_queued_turns(key)}
+
+
+class QuerySteerRequest(BaseModel):
+    thread_id: str = Field(min_length=1, max_length=200)
+    message: str = Field(min_length=1, max_length=8000)
+    client_request_id: Optional[str] = Field(default=None, max_length=128)
+
+
+@router.post("/query/steer")
+async def steer_query(request: QuerySteerRequest):
+    """Add an instruction to the turn running in this Session, read at its next safe checkpoint."""
+    from agent.lean import steering
+
+    key = _normalize_thread_id(request.thread_id)
+    with _ACTIVE_QUERY_CANCEL_LOCK:
+        session_active = any(owner == key for owner, _event, _execution in _ACTIVE_QUERY_CANCELLATIONS.values())
+    if not session_active:
+        raise HTTPException(status_code=409, detail="Nothing is running in this Session; send it as a message instead.")
+    try:
+        item = steering.add(key, request.message, request.client_request_id or "")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"steered": True, "thread_id": key, "item": item, "pending": len(steering.pending(key))}
+
+
 @router.post("/query/queue/claim")
 async def claim_queued_query(thread_id: str):
     """Claim one durable follow-up only after the Session has no active Turn."""

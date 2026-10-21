@@ -29,6 +29,7 @@ from loguru import logger
 
 from agent.lean import policy, settings
 from agent.lean import quarantine, tool_outputs, tracing
+from agent.lean import approvals, steering
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, outbound
 from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, is_promise_without_action,
@@ -115,6 +116,8 @@ class LeanTurn:
         self._refused: dict[str, str] = {}
         # Failures in a row per tool, whatever the arguments: after a few, say so.
         self._fail_streak: dict[str, int] = {}
+        # Approvals autonomous mode held for the owner instead of waiting ({tool, summary, reason}).
+        self.held: list[dict[str, str]] = []
         self.interactive = interactive
         # Re-prompt an agent whose reply only promises work (see agent/lean/job.py).
         self.promise_guard = promise_guard
@@ -259,7 +262,8 @@ class LeanTurn:
         messages.append({"role": "user", "content": user_message})
         self._goal = user_message  # what the quarantined reader extracts facts for
 
-        max_steps = settings.max_iterations()
+        # A research worker gets its own, smaller step budget (agent/lean/swarm.py).
+        max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
         call_counts: dict[str, int] = {}
         stop_reason = ""
         nudges = 0
@@ -278,6 +282,8 @@ class LeanTurn:
                 success = False
                 break
             step += 1
+            # Safe checkpoint: tool results are in, the next model call hasn't started.
+            self._absorb_steering(messages, step)
             if getattr(self.toolbox, "schema_version", 0) != tools_version:
                 # find_tools loaded connected-app tools in the last step.
                 tools_version = self.toolbox.schema_version
@@ -356,6 +362,10 @@ class LeanTurn:
                         self.emit({"type": "check_nudge", "step": step, "files": list(self._unchecked)[:5]})
                         self._retract_text(step)
                         continue
+                    if self._absorb_steering(messages, step):
+                        # The user added something while this answer was written: keep going with it.
+                        self._retract_text(step)
+                        continue
                     final_text = content.strip()
                     break
                 if self._handed_off:
@@ -421,6 +431,8 @@ class LeanTurn:
             "usage": dict(self.usage),
             "empty": empty,
             "stop_reason": stop_reason,
+            # Approvals autonomous mode held for the owner: the actionable exceptions of a walk-away run.
+            "held": list(self.held),
             "completed": self.completed_summary or "",
         })
         return TurnResult(
@@ -646,6 +658,8 @@ class LeanTurn:
             if not allowed:
                 if denial.startswith("The user denied"):
                     self._refused[self._sig(name, args)] = "denied by the user"
+                elif denial.startswith("Not run:") and "autonomous mode" in denial:
+                    self._refused[self._sig(name, args)] = "held for the owner's approval"
                 results[call.id] = (False, denial)
                 self._tool_finished(call, name, args, step, False, denial, 0)
                 continue
@@ -743,6 +757,30 @@ class LeanTurn:
         if ok and policy.is_untrusted_source(name, self.toolbox.entry(name), args) and name not in self.taint:
             self.taint.append(name)
 
+    def _absorb_steering(self, messages: list[dict[str, Any]], step: int) -> bool:
+        """Add instructions the user sent during this run (agent/lean/steering.py). True when any arrived."""
+        rows = steering.take(self.session_id)
+        if not rows:
+            return False
+        text = steering.as_user_text(rows)
+        last = messages[-1] if messages else {}
+        if last.get("role") in {"tool", "user"}:
+            # Appended, not a new message: some chat templates (Gemma) need strict alternation.
+            last["content"] = f"{last.get('content') or ''}\n\n{text}"
+        else:
+            messages.append({"role": "user", "content": text})
+        for row in rows:
+            self.timeline.append({"kind": "steer", "step": step, "text": row["text"], "at": time.time()})
+            self.emit({"type": "steer_applied", "step": step, "id": row["id"], "text": row["text"][:2000]})
+        if self.goal:
+            self.goal = f"{self.goal}\n(The user added: {' / '.join(r['text'] for r in rows)[:600]})"
+        return True
+
+    def _auto_note(self, step: int, text: str) -> None:
+        """A visible line in the message for an approval that didn't need the owner this time."""
+        self.timeline.append({"kind": "note", "step": step, "text": text, "at": time.time()})
+        self.emit({"type": "auto_approved", "step": step, "note": text})
+
     def _approve(self, call: Any, name: str, args: dict[str, Any], step: int) -> tuple[bool, str]:
         entry = self.toolbox.entry(name)
         needs, reason = tool_needs_approval(entry, name, args)
@@ -759,6 +797,32 @@ class LeanTurn:
             needs, reason = True, policy_reason
         elif not needs or broker.granted(self.session_id, policy.grant_name(name)):
             return True, ""
+        scope = approvals.scope_for(name, args, reason, self._policy_rules.get(call.id, ""))
+        if scope is not None and approvals.get_grant_store().has(scope.key):
+            # The owner chose "Always allow" for this class of action.
+            policy.audit(policy.Decision("allow", reason, "always_allowed"), name=name, args=args,
+                         session_id=self.session_id, agent=self.persona.id, outcome=f"always allowed: {scope.key}")
+            self._auto_note(step, f"Allowed by your Always allow: {scope.label}")
+            return True, ""
+        if settings.approval_mode() == "autonomous" and self.interactive:
+            # Only chats in the app: Discord, routines and other sources keep refusing below.
+            if scope is not None and scope.autonomous:
+                policy.audit(policy.Decision("allow", reason, "autonomous"), name=name, args=args,
+                             session_id=self.session_id, agent=self.persona.id, outcome=f"autonomous: {scope.key}")
+                self._auto_note(step, f"Allowed automatically (autonomous mode): {scope.label}")
+                return True, ""
+            # Not something autonomy may approve: held for the owner instead of stalling the run.
+            summary = describe_call(name, args)
+            self.held.append({"tool": name, "summary": summary, "reason": reason})
+            self.timeline.append({"kind": "approval", "step": step, "id": f"held_{len(self.held)}", "tool_call_id": call.id,
+                                  "summary": summary, "reason": reason, "decision": "held", "at": time.time()})
+            self.emit({"type": "approval_held", "step": step, "tool_call_id": call.id, "tool": name, "summary": summary,
+                       "reason": reason})
+            policy.audit(policy.Decision("ask", reason, "autonomous_held"), name=name, args=args,
+                         session_id=self.session_id, agent=self.persona.id, outcome="held for the owner")
+            return False, (f"Not run: {name} needs the owner's approval ({reason}), and autonomous mode doesn't approve "
+                           "this kind of action. Don't retry it or work around it. Continue with the rest of the task, "
+                           "and at the end tell the user exactly what is waiting for their approval.")
         if not self.interactive:
             return False, (
                 f"{name} needs the user's approval, which can only be given in the EchoSpeak app. "
@@ -777,6 +841,7 @@ class LeanTurn:
             args=args,
             reason=reason,
             grantable=grantable,
+            scope=scope,
         )
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})
@@ -838,7 +903,15 @@ class LeanTurn:
                     item["detail"] = text
             self.emit({"type": "tool_progress", "step": step, "id": call.id, "text": text})
 
-        with self._span("tool.run", step=step, tool=name) as span, progress.reporting(emit, cancel=self.cancel):
+        def emit_state(state: dict) -> None:
+            # A live card under the tool's row (research workers); kept in the timeline for reloads.
+            for item in self.timeline:
+                if item.get("kind") == "tool" and item.get("id") == call.id:
+                    item["state"] = state
+            self.emit({"type": "tool_state", "step": step, "id": call.id, "state": state})
+
+        with self._span("tool.run", step=step, tool=name) as span, \
+                progress.reporting(emit, cancel=self.cancel, emit_state=emit_state, spans=self._span):
             result = self.toolbox.run(name, args)
             span.set(ok=bool(result.ok), output_chars=len(result.output or ""))
             if not result.ok:

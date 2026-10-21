@@ -176,6 +176,12 @@ class LeanSession:
             try:
                 return self._run_locked(message, persona_id=persona_id)
             finally:
+                try:
+                    # Instructions sent too late for this turn (or before Stop) become queued follow-ups.
+                    from agent.lean import steering
+                    steering.to_queue(self.session_id)
+                except Exception:
+                    logger.warning("Could not move unread steering to the queue", exc_info=True)
                 with _LOCKS_GUARD:
                     _ACTIVITY["running"] -= 1
                     _ACTIVITY["last_end"] = time.time()
@@ -250,7 +256,9 @@ class LeanSession:
             metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else ""},
         )
         self.execution_id = execution.id
-        self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else ""})
+        self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else "",
+                   # The status pill shows when routine approvals won't interrupt.
+                   "autonomous": settings.approval_mode() == "autonomous" and self.source in INTERACTIVE_SOURCES})
 
         self._user_message = message
         self.job = Job(goal=message, max_rounds=settings.group_max_rounds(), token_budget=settings.group_token_budget())
@@ -906,6 +914,9 @@ class LeanSession:
         if read_only:
             # Planning turns: look things up, but nothing that changes state.
             toolbox.restrict_to_read_only()
+        if "spawn_workers" in toolbox.native:
+            # Workers get a subset of exactly this toolbox: never more than their lead.
+            toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]
         # Recall from what is actually being asked (the user's request, plus the task this
         # agent was given), never from a "[System]: ..." brief full of boilerplate words.
         goal = self._goal(message, task)
@@ -934,7 +945,7 @@ class LeanSession:
             project_root=self.project_root,
             notes=list(toolbox.notes) + learned.notes + ([] if guest else [n for n in [mcp_apps.context_note(self.session_id)] if n]),
             terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
-            computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox)),
+            computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox), goal=goal),
             git_note=repo_note,
             git_rules="terminal" in toolbox.names and git_context.wants_rules(goal, repo_note),
             project_overview=project_overview(self.project_root) if self.project_root else "",
@@ -1039,6 +1050,11 @@ class LeanSession:
         tools.extend(research_tools(self.session_id))
         from agent.generation_service import generation_tools
         tools.extend(generation_tools(self.session_id, self.execution_id))
+        # Research swarm (agent/lean/swarm.py): only the agent answering the user leads workers;
+        # workers and teammates never spawn more. Off unless Settings › Agent › Research workers is on.
+        if depth == 0 and settings.research_swarm() and self.caller_role == "owner":
+            from agent.lean import swarm
+            tools.append(swarm.tool(self, persona))
 
         # Work-together groups: the lead turns a decision into owned tasks on the shared board.
         if allow_assign and self.job is not None:
@@ -1160,7 +1176,11 @@ class LeanSession:
                 except Exception:
                     pass
                 lines = list(dict.fromkeys(str(r.get("content") or "").strip() for r in rows if str(r.get("content") or "").strip()))
-                return "\n".join(f"- {line}" for line in lines[:12]) or "No matching memories."
+                # The running app's version outranks any version a memory remembers.
+                kept = [line for line in lines if not memory_quality.stale_version_claim(line)]
+                note = ("\n(Left out: saved claims about which EchoSpeak version is current. The running version is "
+                        "in your instructions.)" if len(kept) < len(lines) else "")
+                return ("\n".join(f"- {line}" for line in kept[:12]) or "No matching memories.") + note
 
             tools.append(NativeTool(
                 name="memory_save",
@@ -1492,6 +1512,8 @@ class LeanSession:
         for hit in hits:
             if hit["session_id"] == self.session_id or hit["turn_id"] == self.execution_id:
                 continue
+            if memory_quality.stale_version_claim(str(hit["snippet"] or "")):
+                continue  # an old "current version" answer; the live version is in the prompt
             when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
             who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
             lines.append(f"{when} {who}: {hit['snippet']}")

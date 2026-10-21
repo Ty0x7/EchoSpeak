@@ -26,6 +26,47 @@ describe("lean live reducer", () => {
     expect(msg.status).toBe("done");
   });
 
+  it("shows steering, autonomous approvals and held actions inside the running message", () => {
+    const state = run([
+      { type: "run_start", request_id: "r1", execution_id: "e1", autonomous: true },
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "auto_approved", ...base, step: 1, note: "Allowed automatically (autonomous mode): Control the mouse and keyboard" },
+      { type: "approval_held", ...base, step: 2, tool_call_id: "c9", tool: "file_delete", summary: "Delete notes.txt", reason: "this can delete or overwrite work" },
+      { type: "steer_applied", ...base, step: 3, id: "s1", text: "only under $1000" },
+    ]);
+    expect(state.autonomous).toBe(true);
+    const segs = state.messages.m1.segments;
+    expect(segs.map((s) => s.kind)).toEqual(["note", "approval", "note"]);
+    expect((segs[1] as { decision: string }).decision).toBe("held");
+    expect((segs[2] as { text: string }).text).toBe("You added: only under $1000");
+    // Reloaded from the saved timeline, a steer reads the same.
+    const saved = messageFromTimeline({ messageId: "m1", agentId: "echo", agentName: "Echo", text: "Done", at: 1, timeline: [
+      { kind: "steer", step: 3, text: "only under $1000" },
+      { kind: "approval", step: 2, id: "held_1", tool: "file_delete", summary: "Delete notes.txt", reason: "x", decision: "held" },
+    ] });
+    expect(saved.segments.some((s) => s.kind === "note" && (s as { text: string }).text === "You added: only under $1000")).toBe(true);
+    expect(saved.segments.some((s) => s.kind === "approval" && (s as { decision: string }).decision === "held")).toBe(true);
+  });
+
+  it("keeps research workers' live state on their tool row, and after a reload", () => {
+    const workers = { kind: "workers", budget: 120000, used: 2400, stop_reason: "", workers: [
+      { id: "wk1", index: 1, goal: "Pixel battery", status: "done", steps: 2, tools: 1, tokens: 1200, elapsed_s: 4, confidence: "high",
+        answer: "30h", note: "", activity: "", sources: [{ url: "https://a.example", title: "A", opened: true }], open_questions: [] },
+    ] };
+    const state = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "tool_start", ...base, step: 1, id: "t1", name: "spawn_workers", label: "Research workers" },
+      { type: "tool_state", ...base, step: 1, id: "t1", state: workers },
+      { type: "tool_end", ...base, step: 1, id: "t1", name: "spawn_workers", ok: true, output: "findings" },
+    ]);
+    const tool = state.messages.m1.segments[0] as { state?: { workers: { status: string }[] } };
+    expect(tool.state?.workers[0].status).toBe("done");
+    const saved = messageFromTimeline({ messageId: "m1", agentId: "echo", agentName: "Echo", text: "x", at: 1, timeline: [
+      { kind: "tool", step: 1, id: "t1", name: "spawn_workers", label: "Research workers", status: "done", output: "f", state: workers },
+    ] });
+    expect((saved.segments[0] as { state?: { kind: string } }).state?.kind).toBe("workers");
+  });
+
   it("shows which model smart model choice picked, and why, under the reply", () => {
     const note = "Model: qwen3.6 (ollama) instead of gemma-4 (lmstudio). qwen3.6: 9 of 10 coding tasks done with proof here.";
     const state = run([

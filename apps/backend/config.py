@@ -209,6 +209,43 @@ def _copy_jsonish(value: Any) -> Any:
     return value
 
 
+def is_packaged() -> bool:
+    """Running from the installed desktop app (PyInstaller), not a source checkout."""
+    import sys
+
+    return bool(getattr(sys, "frozen", False))
+
+
+def app_install_dir() -> Optional[Path]:
+    """Where the installed app lives (…\\AppData\\Local\\EchoSpeak), or None in a source checkout.
+
+    In the installed app REPO_ROOT resolves here too. It holds executables and
+    libraries, never the user's work, so it must not be a default file folder.
+    """
+    return REPO_ROOT.resolve() if is_packaged() else None
+
+
+def default_workspace() -> Path:
+    """The default file folder: the source checkout when developing, Documents when installed."""
+    if not is_packaged():
+        return REPO_ROOT
+    documents = Path.home() / "Documents"
+    return documents if documents.is_dir() else Path.home()
+
+
+def _workspace_root(value: Any) -> str:
+    """FILE_TOOL_ROOT, with a missing or install-folder value replaced by the default workspace."""
+    resolved = _resolve_repo_path(value or str(default_workspace()), default_workspace())
+    install = app_install_dir()
+    if install is not None:
+        try:
+            if Path(resolved).resolve() == install or install in Path(resolved).resolve().parents:
+                return str(default_workspace().resolve())
+        except Exception:
+            pass
+    return resolved
+
+
 def _resolve_repo_path(value: Any, default: Path = REPO_ROOT) -> str:
     raw = str(value or "").strip()
     target = default if not raw else Path(raw).expanduser()
@@ -230,8 +267,32 @@ def _deep_merge(dst: dict[str, Any], src: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+# Apps open_application refuses by default: tools that change Windows' own system and
+# security settings. The owner can edit the list (Settings › Permissions › Blocked apps).
+DEFAULT_APP_BLOCKLIST = ["regedit", "gpedit.msc", "secpol.msc", "msconfig", "diskpart", "bcdedit"]
+APP_NAME_LIST_KEYS = ("open_application_blocklist", "open_application_favorites")
+
+
+def _migrate_app_allowlist(payload: dict[str, Any]) -> dict[str, Any]:
+    """Allowed apps (a whitelist) became Favorite apps (suggestions only) in 11.10.
+
+    Existing entries keep working as names Echo can suggest; launching no longer
+    needs them. The blocklist is untouched.
+    """
+    if "open_application_allowlist" not in payload:
+        return payload
+    old = _normalize_open_application_allowlist(payload.pop("open_application_allowlist"))
+    payload["open_application_favorites"] = _normalize_open_application_allowlist(
+        list(_normalize_open_application_allowlist(payload.get("open_application_favorites"))) + old)
+    try:
+        _write_json_dict(SETTINGS_PATH, payload)
+    except OSError:
+        pass
+    return payload
+
+
 def _normalize_open_application_allowlist(value: Any) -> list[str]:
-    """Canonical string[] for OPEN_APPLICATION_ALLOWLIST.
+    """Canonical string[] for app-name lists (blocked apps, favorite apps).
 
     Accepts list, tuple, or legacy comma/newline/semicolon-separated string.
     Entries may contain spaces and hyphens; only separators split tokens.
@@ -375,7 +436,7 @@ def _drop_retired_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def read_runtime_override_payload(include_secrets: bool = True, migrate_legacy: bool = True) -> dict[str, Any]:
-    public_payload = _drop_retired_settings(_migrate_v10_defaults(_read_json_dict(SETTINGS_PATH)))
+    public_payload = _drop_retired_settings(_migrate_app_allowlist(_migrate_v10_defaults(_read_json_dict(SETTINGS_PATH))))
     refs = public_payload.get(_CREDENTIAL_REFS_KEY)
     refs = dict(refs) if isinstance(refs, dict) else {}
     secret_payload: dict[str, Any] = {}
@@ -894,9 +955,15 @@ class Config:
         self.terminal_max_output_chars = int(os.getenv("TERMINAL_MAX_OUTPUT_CHARS", "8000") or 8000)
         self.allow_open_application = os.getenv("ALLOW_OPEN_APPLICATION", "false").lower() == "true"
         self.allow_self_modification = os.getenv("ALLOW_SELF_MODIFICATION", "false").lower() == "true"
-        raw_apps = os.getenv("OPEN_APPLICATION_ALLOWLIST", "")
-        self.open_application_allowlist = _normalize_open_application_allowlist(raw_apps)
-        self.file_tool_root = _resolve_repo_path(os.getenv("FILE_TOOL_ROOT", str(REPO_ROOT)), REPO_ROOT)
+        # Blocked apps are refused; everything else may launch when Open apps is on.
+        raw_blocked = os.getenv("OPEN_APPLICATION_BLOCKLIST")
+        self.open_application_blocklist = _normalize_open_application_allowlist(
+            DEFAULT_APP_BLOCKLIST if raw_blocked is None else raw_blocked)
+        # Favorite apps: names Echo can suggest when launching. Never a restriction.
+        # OPEN_APPLICATION_ALLOWLIST is read here for old .env files.
+        self.open_application_favorites = _normalize_open_application_allowlist(
+            os.getenv("OPEN_APPLICATION_FAVORITES") or os.getenv("OPEN_APPLICATION_ALLOWLIST", ""))
+        self.file_tool_root = _workspace_root(os.getenv("FILE_TOOL_ROOT", ""))
         raw_file_extra_roots = os.getenv("FILE_TOOL_EXTRA_ROOTS", str(Path.home() / "Desktop"))
         self.file_tool_extra_roots = [
             str(Path(p.strip()).expanduser())
@@ -938,6 +1005,11 @@ class Config:
         # Lean runtime controls (Settings > Agent).
         self.lean_approval_mode = os.getenv("LEAN_APPROVAL_MODE", "smart").strip().lower() or "smart"
         self.lean_max_iterations = int(os.getenv("LEAN_MAX_ITERATIONS", "60") or 60)
+        # Research swarm (agent/lean/swarm.py): off until measured to help with your models.
+        self.lean_research_swarm = os.getenv("LEAN_RESEARCH_SWARM", "false").strip().lower() in {"1", "true", "yes", "on"}
+        self.lean_swarm_token_budget = int(os.getenv("LEAN_SWARM_TOKEN_BUDGET", "120000") or 120000)
+        self.lean_swarm_local_parallel = int(os.getenv("LEAN_SWARM_LOCAL_PARALLEL", "1") or 1)
+        self.lean_swarm_cloud_parallel = int(os.getenv("LEAN_SWARM_CLOUD_PARALLEL", "4") or 4)
         # Quarantined reader (agent/lean/quarantine.py): "off", "messages" (email, Discord,
         # connected apps) or "all" (also web pages and documents). One extra model call per result.
         self.lean_quarantine_reader = os.getenv("LEAN_QUARANTINE_READER", "messages").strip().lower() or "messages"
@@ -1173,6 +1245,13 @@ class Config:
     def apply_overrides(self, overrides: dict[str, Any]) -> None:
         if not isinstance(overrides, dict):
             return
+        if "open_application_allowlist" in overrides:
+            # The retired whitelist arrives from old settings or callers: its names become favorites.
+            overrides = dict(overrides)
+            old = overrides.pop("open_application_allowlist")
+            overrides["open_application_favorites"] = _normalize_open_application_allowlist(
+                list(_normalize_open_application_allowlist(overrides.get("open_application_favorites")))
+                + _normalize_open_application_allowlist(old))
 
         def _coerce_model_provider(val: Any) -> Any:
             if isinstance(val, ModelProvider):
@@ -1218,7 +1297,7 @@ class Config:
                     elif isinstance(current, list) and isinstance(val, tuple):
                         val = list(val)
                     elif key == "file_tool_root":
-                        val = _resolve_repo_path(val, REPO_ROOT)
+                        val = _workspace_root(val)
                     setattr(obj, key, val)
             except Exception:
                 return
@@ -1242,7 +1321,7 @@ class Config:
                 ):
                     if isinstance(v, str):
                         v = [u.strip() for u in v.replace("\n", ",").split(",") if u.strip()]
-                if k == "open_application_allowlist":
+                if k in APP_NAME_LIST_KEYS:
                     v = _normalize_open_application_allowlist(v)
                 if k == "terminal_command_denylist" and isinstance(v, str):
                     v = [u.strip().lower() for u in v.replace("\n", ",").split(",") if u.strip()]
@@ -1379,7 +1458,8 @@ class Config:
             "terminal_max_output_chars",
             "allow_open_application",
             "allow_self_modification",
-            "open_application_allowlist",
+            "open_application_blocklist",
+            "open_application_favorites",
             "file_tool_root",
             "file_tool_extra_roots",
             "artifacts_dir",
@@ -1479,6 +1559,10 @@ class Config:
             "terminal_docker_network",
             "lean_approval_mode",
             "lean_max_iterations",
+            "lean_research_swarm",
+            "lean_swarm_token_budget",
+            "lean_swarm_local_parallel",
+            "lean_swarm_cloud_parallel",
             "lean_quarantine_reader",
             "trace_export_url",
             "computer_native_tools",

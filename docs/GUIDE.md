@@ -91,6 +91,29 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
 - **Think** and effort controls follow the selected model and adapter. Unsupported
   thinking controls are disabled. Models that always think cannot turn thinking off.
 
+### Talking to an agent while it works
+
+- The box stays usable while an agent works. **Enter queues a follow-up**: it waits above the box
+  and runs as its own message when the current reply ends. Edit or remove it before then.
+- **Steer** (the button, or **Ctrl+Enter**) adds to the work in progress. The agent reads it at its
+  next step (never in the middle of a command or search), keeps what it has already done, and the
+  message shows "You added: …". If it had already finished, the steer is queued instead.
+- **Stop** stops the reply and pauses the queue: queued messages wait for **Run next** or your next
+  message instead of starting by themselves.
+
+### Research workers (off by default)
+
+- **Settings › General › Research workers** lets an agent send up to six read-only workers to look
+  up separate questions at the same time ("compare these four laptops"), then write the answer
+  itself from what they found. Workers can only search and read; they never edit files, send
+  anything, appear in the chat or ask you for approval.
+- A **Research workers** card under the reply shows each worker's question, status, steps, the
+  sources it actually opened and its time. Open a row for its findings. Stop stops every worker.
+- They share one token budget per request and run one or two at a time on a local model, up to
+  four on a cloud model. They're off by default because they only pay off for broad research,
+  and mostly on capable models. Run `python scripts/swarm_bench.py` with your model to see whether
+  they help you.
+
 ### Agents and group chats
 
 - Built-in agents: **Echo** (everything), **Jarvis** (research and memory) and **Glados**
@@ -115,8 +138,11 @@ use its own model (**Settings › Agents**), so a small local model can chat whi
   worked".
 - Under a reply, **Worked** confirms it and **Didn't work** marks it failed, with an optional note
   the agent reads when it reviews the task. Press the button again to take it back.
-- **Learning** in the sidebar shows track records, lessons with their source tasks and history,
-  recent grades and tool reliability. Approve or reject lessons waiting for your review. You can
+- **Learning** in the sidebar opens on four short sections: **Is Echo improving?** (an honest verdict
+  from the with/without comparisons), **Needs your feedback**, **What Echo learned** and **Recent
+  experiences**, three items each with **View all** (paged, filterable). Click any card for its details
+  and actions. **How learning works** walks through the process with links to your own records;
+  agents, tool reliability and Review now sit under **Agents, tools and settings**. Approve or reject lessons waiting for your review. You can
   edit, retire, restore, delete or **Undo** any change, and pause learning for one agent.
 - Lessons are advice only. They never change permissions, approvals, tools or settings. Lessons
   learned while reading the web or email, or from a task that changed tests or EchoSpeak's own
@@ -154,7 +180,18 @@ Dangerous commands ask first in every mode.
   turn it on, so it can tell you instead of looking for a way around it.
 - If you decline an action, the agent won't ask you for that exact action again in the same
   request. After three failures in a row of one tool, it is told to change approach.
-- **Approvals** decide what asks first: **Risky only** (recommended), **Every action**, or **Never**.
+- **Always allow** on an approval card stops the questions for that kind of action, in every chat:
+  desktop control, ordinary commands on this PC, sandbox internet, a particular connected-app action,
+  or cloud generation. Settings › Permissions › **Always allowed** lists them; remove one and it asks
+  again. Deleting, dangerous commands, sending messages, identity changes, tasks for other agents
+  (A2A) and anything asked because outside content was read can't be always allowed.
+- **Autonomous** (Settings › General › Ask before risky actions) is for walking away from a long task.
+  Desktop control and ordinary commands outside the sandbox run without asking; everything else that
+  would ask (deleting, dangerous commands, sends, cloud costs, A2A) is skipped and listed as
+  **Waiting for you**, so the run keeps going. The status pill shows **Autonomous**. Permissions,
+  Blocked apps, Private mode, project folders and Stop all still apply, and Discord or routines never
+  get approvals from it.
+- **Approvals** decide what asks first: **Risky only** (recommended), **Autonomous**, **Every action**, or **Never**.
   Risky means deleting files, dangerous commands, messages that leave the PC, desktop control,
   and MCP actions. An approval shows in the chat with **Allow once**, **For this chat** and **Decline**.
 - After an agent reads a web page or email, anything that would send data out asks first, even
@@ -172,7 +209,7 @@ Ask Echo to capture a monitor or a visible window. The screenshot appears in the
 
 For input, enable **Allow actions on this computer** and **Control the desktop** in Settings › Permissions. Right below, **Add to Echo** gives Echo (or another agent) Desktop control and screenshots in one click; you can also do it under **Agents** in the left sidebar with the agent's **Edit** button. **Screen & images** (Vision) provides screenshots; **Desktop control** provides input. Echo reports which is available instead of treating a screenshot as permission to click. Desktop control is optional and is not enabled on agents automatically.
 
-To launch an app, also enable **Open apps** and add its exact Start-menu name (for example, **Minecraft Launcher**), the name of a shortcut on your desktop (for example, **26.2** for `26.2.lnk`, or a Steam game's `.url` shortcut) or an executable path under **Allowed apps** in Settings › Permissions. Shortcuts open exactly as saved. An empty list allows no app launches. Shells and script hosts such as PowerShell, cmd or Python can be opened but never receive arguments from Echo; commands go through the terminal and its approvals. This is separate from terminal command restrictions. Windows Store apps are resolved through their installed Windows registration, without needing their protected executable path. Echo checks the window or a screenshot after requesting a launch; launching does not prove the app is ready or that game input will work.
+To launch an app, also enable **Open apps**. Echo can then open any installed app by its Start-menu name (for example, **Minecraft Launcher**), the name of a shortcut on your desktop (for example, **26.2** for `26.2.lnk`, or a Steam game's `.url` shortcut) or an executable path. **Blocked apps** in Settings › Permissions lists what it may never open; new installs start with Windows' system-settings tools (Registry Editor, Group Policy, System Configuration, diskpart, bcdedit). **Favorite apps** are optional names Echo can suggest, not a limit. The old **Allowed apps** list moved into Favorite apps when you upgraded. Shortcuts open exactly as saved. Shells and script hosts such as PowerShell, cmd or Python can be opened but never receive arguments from Echo; commands go through the terminal and its approvals. Windows Store apps are resolved through their installed Windows registration. Echo checks the window or a screenshot after requesting a launch; launching does not prove the app is ready or that game input will work.
 
 Echo can click, right-click, double-, triple- and middle-click, move, drag, scroll up, down and sideways, type, press shortcuts and hold keys or a mouse button, including together. Relative mouse movement lets it attempt camera movement in games that capture the pointer. Holds and waits last at most five seconds, with up to ten seconds per batch. With a Claude 5 model, Echo uses **Claude's own computer tool** (the one Claude was trained on, including zoom), through the same checks; turn it off in Settings › Permissions to compare with Echo's general tool. Each batch uses a recent screenshot and returns a new capture so Echo can check the result. Changed window or monitor geometry requires another capture. Desktop control always asks first, even when ordinary approvals are off. Choose **For this chat** to let Echo keep acting on what it sees for the rest of that chat, so a game or a long task doesn't stop at every step. If the same request also read web pages, email or other outside content, every action asks again and **For this chat** isn't offered. Keys are sent with hardware scan codes, which more games accept.
 
