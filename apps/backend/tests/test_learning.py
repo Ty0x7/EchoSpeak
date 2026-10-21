@@ -396,6 +396,18 @@ def _lesson(store: ExperienceStore, title: str, text: str, status: str = "probat
                             actor="test")
 
 
+@pytest.mark.parametrize("output", [
+    "Error: email_send is not available right now: turned off in Settings › Permissions (Email).",
+    "Blocked by the user's privacy setting: Offline mode is on.",
+    "Not run: file_delete needs the owner's approval (this can delete work), and autonomous mode doesn't approve it.",
+    "Error: regedit is in Blocked apps (regedit), so it can't be launched.",
+])
+def test_refused_or_held_actions_are_not_the_agents_failures(output):
+    from agent.learning.episodes import not_run
+
+    assert not_run(output)
+
+
 def test_research_workers_stay_out_of_track_records_but_their_cloud_spend_counts(store):
     from agent.learning import routing
 

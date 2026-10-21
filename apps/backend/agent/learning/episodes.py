@@ -36,12 +36,16 @@ _NOT_RUN = (
     "blocked by echospeak's safety policy", "you already called", "the user denied permission",
     "the user did not respond to the approval", "the user stopped this request",
     "cancelled by the user before", "has more than 64 kib of arguments", "no result.",
+    # Refused by a setting or held for the owner: the owner's call, not the agent's failure.
+    "blocked by the user's privacy setting", "not run:",
 )
+_NOT_RUN_ANYWHERE = ("is not available right now", "is in blocked apps")
 
 
 def not_run(output: str) -> bool:
     low = str(output or "").strip().lower()
-    return low.startswith(_NOT_RUN) or "needs the user's approval, which can only be given" in low \
+    return low.startswith(_NOT_RUN) or any(m in low[:300] for m in _NOT_RUN_ANYWHERE) \
+        or "needs the user's approval, which can only be given" in low \
         or (low.startswith("error:") and " again with a json object matching its parameters" in low)
 
 
@@ -351,6 +355,9 @@ def build_episodes(
                        else "claimed work that no tool call did")
         elif "max_steps" in stops:
             outcome, summary = "stopped", "ran out of steps"
+        elif "refusals" in stops:
+            # Handed back after repeated refusals: the owner's decision, so neither a win nor a loss.
+            outcome, summary = "answered", "stopped after its actions were refused or blocked"
         elif ran and not ran[-1]["ok"]:
             outcome, summary = "failure", f"its last action failed: {ran[-1]['label'][:160]}"
         elif job_outcome.get("status") == "stopped" and owned_open:

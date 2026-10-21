@@ -48,6 +48,23 @@ NUDGE_EMPTY = (
 NUDGE_TRUNCATED = "Your last reply was cut off by the output limit. Continue from where you stopped, concisely."
 # Failures in a row of one tool (any arguments) before the agent is told to change approach.
 FAIL_STREAK_NOTE = 3
+# Refused or blocked actions (denied, policy, privacy, switched off, held): a firm note after
+# this many in a row, and the turn hands back to the user after this many in total. Persisting
+# after a "no" is a known failure mode; Claude Code (3 in a row / 20) and Codex auto-review
+# (3 in a row / 10 of 50) both stop and return control.
+REFUSAL_STREAK_NOTE = 3
+REFUSAL_STOP = 10
+_REFUSAL_MARKERS = (
+    "blocked by echospeak's safety policy", "blocked by the user's privacy setting", "the user denied permission",
+    "not run:", "is not available right now", "needs the user's approval, which can only be given",
+    "the user did not respond to the approval", "is in blocked apps",
+)
+
+
+def is_refusal(output: str) -> bool:
+    """The action was refused or blocked by a person, a setting or the policy (not a tool error)."""
+    low = str(output or "").strip().lower()
+    return any(marker in low[:400] for marker in _REFUSAL_MARKERS)
 
 
 @dataclass
@@ -118,6 +135,9 @@ class LeanTurn:
         self._fail_streak: dict[str, int] = {}
         # Approvals autonomous mode held for the owner instead of waiting ({tool, summary, reason}).
         self.held: list[dict[str, str]] = []
+        # Refused or blocked actions: in a row (reset by any action that ran) and in total.
+        self._refusal_streak = 0
+        self._refusals = 0
         self.interactive = interactive
         # Re-prompt an agent whose reply only promises work (see agent/lean/job.py).
         self.promise_guard = promise_guard
@@ -384,6 +404,14 @@ class LeanTurn:
                 break
 
             self._run_tools(calls, messages, step, call_counts)
+            if self._refusals >= REFUSAL_STOP:
+                # Circuit breaker: hand back to the user instead of probing for a way around "no".
+                stop_reason = "refusals"
+                note = (f"I stopped here: {self._refusals} of my actions were refused or blocked in this request. "
+                        "Tell me how you'd like to go on, or change the setting that blocks it.")
+                self._append_text("text", step, note)
+                self.emit({"type": "agent_token", "step": step, "data": note})
+                break
             if self.goal and step % REMIND_EVERY == 0 and messages[-1].get("role") == "tool":
                 # Appended to the tool result, not sent as its own message: some chat
                 # templates (Gemma) require strict user/assistant alternation.
@@ -400,9 +428,13 @@ class LeanTurn:
             # Out of steps: stop honestly instead of forcing a rushed answer.
             # The note lists what was done so a "Continue" turn has context.
             stop_reason = "max_steps"
-            note = self._out_of_steps_note(max_steps)
-            self._append_text("text", step, note)
-            self.emit({"type": "agent_token", "step": step, "data": note})
+            grace = self._grace_answer(messages, step + 1) if getattr(self, "final_grace", False) else ""
+            if grace:
+                final_text = grace
+            else:
+                note = self._out_of_steps_note(max_steps)
+                self._append_text("text", step, note)
+                self.emit({"type": "agent_token", "step": step, "data": note})
 
         visible = self._visible_text()
         if not visible:
@@ -698,6 +730,17 @@ class LeanTurn:
             text = self._shorten(name, output, limit, untrusted)
             if untrusted:
                 text = policy.wrap_untrusted(name, text)  # data, not instructions
+            refused = not ok and is_refusal(output)
+            if refused:
+                self._refusals += 1
+                self._refusal_streak += 1
+                if self._refusal_streak == REFUSAL_STREAK_NOTE:
+                    text += ("\n\n[EchoSpeak: the last few actions were all refused or blocked. Don't look for other "
+                             "ways to do the same thing. Finish what you can without them, then tell the user "
+                             "plainly what needs their decision or a setting change.]")
+                    self.emit({"type": "refusal_streak", "step": step, "count": self._refusal_streak})
+            elif ok:
+                self._refusal_streak = 0
             streak = 0 if ok else self._fail_streak.get(name, 0) + 1
             self._fail_streak[name] = streak
             if streak and streak % FAIL_STREAK_NOTE == 0:
@@ -756,6 +799,29 @@ class LeanTurn:
     def _note_source(self, name: str, args: dict[str, Any], ok: bool) -> None:
         if ok and policy.is_untrusted_source(name, self.toolbox.entry(name), args) and name not in self.taint:
             self.taint.append(name)
+
+    def _grace_answer(self, messages: list[dict[str, Any]], step: int) -> str:
+        """One last call, without tools, for a budget-limited helper to report what it found.
+
+        Gemini CLI gives a subagent that hits its turn or time limit one final turn to hand
+        back its best answer; without it a research worker's findings were lost to an
+        "out of steps" note. Only for turns that set final_grace (research workers).
+        """
+        if self.cancel.is_set():
+            return ""
+        ask = ("[EchoSpeak]: Your step budget is used up. Reply now, without tools, with your findings in the "
+               "required format, using only what you actually found. Say what you couldn't confirm.")
+        last = messages[-1] if messages else {}
+        if last.get("role") in {"tool", "user"}:
+            last["content"] = f"{last.get('content') or ''}\n\n{ask}"  # keep strict role alternation
+        else:
+            messages.append({"role": "user", "content": ask})
+        try:
+            turn = self._call_model(messages, [], step)
+        except Exception:
+            logger.debug("Grace answer failed", exc_info=True)
+            return ""
+        return str(turn.content or "").strip()
 
     def _absorb_steering(self, messages: list[dict[str, Any]], step: int) -> bool:
         """Add instructions the user sent during this run (agent/lean/steering.py). True when any arrived."""

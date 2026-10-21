@@ -258,6 +258,7 @@ class Swarm:
                 turn.meta = {"swarm_worker": worker.index}
                 turn.max_steps_override = settings.swarm_worker_steps()
                 turn.steerable = False  # the user's steer is for the lead, not one worker's subtask
+                turn.final_grace = True  # out of steps: one last tool-less call to report its findings
                 worker.turn = turn
                 result = turn.run(brief, announce=False)
                 worker.result = result
