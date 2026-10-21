@@ -343,6 +343,16 @@ Copy-and-paste tests for the real app, grouped by feature. They're written to fi
 - **What to inspect:** the file is unchanged.
 - **Failure indicators:** the file changes. This was a real bug before this release.
 
+**10.4 A small local model edits code** [local ok] [files]
+- **Test prompt:** in a group with Glados, `@Glados In main.js, add an E key that pets the dog: when Dawn is within 3 units, lower stress by 25 and keep the dog calm for 10 seconds.`
+- **Setup:** Glados on a 4B local model, the DAWN `Game` folder attached, Create and edit files on.
+- **Expected:**
+  - Glados's first message lists only file, terminal and team tools, and says more load with find_tools;
+  - edits apply, or a miss names the exact differing line and the lines to re-read;
+  - no run of four failed edits.
+- **What to inspect:** the file_edit rows ("matched one place ignoring …" is fine) and the diff.
+- **Failure indicators:** repeated "old_text was not found" with nothing changing between tries.
+
 ---
 
 ## 11. Memory freshness and learning

@@ -2,6 +2,11 @@
 
 ## v11.10.0 — 2026-10-21
 
+* **Edits that survive small models.** When `file_edit`'s text isn't in the file exactly, it looks again ignoring trailing spaces, then indentation, then curly quotes and dashes (Codex's matching passes). The edit applies only if exactly one place matches, re-indented to the file, and the result says how it matched. A 4B Glados failed the same 40-line edit four times over a 13-space indent and a trailing space; that edit now applies first try.
+* A miss shows the first line that differs, file and yours side by side with spaces visible, and which lines to re-read. After two misses on a file under 200 lines, it suggests rewriting the file whole.
+* `file_edit`'s description now asks for small edits (2-5 lines) with exact indentation, and re-reading just those lines after a miss, the habits Claude Code's Edit tool teaches.
+* Builders on a local model (Glados, or any agent titled Builder) see only their file, terminal and team tools; the rest load through `find_tools` or by name. Glados on gemma-4-e4b had been offered 58 tools per step.
+
 Audit notes: [Full-system audit, 2026-10-21](docs/research/full-audit-2026-10-21.md), [Harness audit, 2026-10-20](docs/research/harness-audit-2026-10-20.md). Architecture: [docs/research/echospeak-architecture.md](docs/research/echospeak-architecture.md). Manual tests: [docs/TESTING_GUIDE.md](docs/TESTING_GUIDE.md).
 
 * **Security fix: Always allow stays in the app.** A saved grant used to apply to Discord DMs and routines too, so they could run commands on this PC that needed approval in the app. Grants now apply only to chats in the app.

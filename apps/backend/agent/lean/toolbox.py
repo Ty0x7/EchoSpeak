@@ -62,6 +62,13 @@ TOOLSETS: dict[str, list[str]] = {
 # External tools sent with every request before the rest wait for find_tools.
 EXTERNAL_INLINE_LIMIT = 12
 
+# What a builder on a small local model is shown up front (Toolbox.focus); team, ask and
+# saved-output tools ride along as always-on tools, and everything else waits for find_tools.
+BUILDER_FOCUS = {
+    "file_list", "file_read", "file_find", "file_search", "file_edit", "file_write", "checkpoint_undo",
+    "project_status", "terminal", "process_output", "process_stop",
+}
+
 # Lean-native tools that change this PC, held to the same Settings › Permissions
 # switches as their registry counterparts (file_write, terminal_run in agent/tools.py).
 # Checked when the toolbox is built and again when the tool runs, since settings can
@@ -329,15 +336,7 @@ class Toolbox:
                     if str(getattr(entry, "origin", "native")) in {"skill", "mcp", "connection"}]
         if len(external) > EXTERNAL_INLINE_LIMIT and "find_tools" in requested:
             self.deferred = set(external)
-            self.native["find_tools"] = NativeTool(
-                name="find_tools",
-                description=("Load tools from the user's connected apps (MCP servers, skills) by what they do, e.g. "
-                             "\"blender render\" or \"obs scenes\". They become callable from your next step."),
-                parameters={"type": "object", "properties": {
-                    "query": {"type": "string", "description": "What you need to do, or the app's name."},
-                }, "required": ["query"]},
-                func=self._find_tools,
-            )
+            self._offer_find_tools()
             groups: dict[str, int] = {}
             for name in external:
                 entry = self.entries[name]
@@ -347,6 +346,41 @@ class Toolbox:
             self.notes.append(f"{len(external)} tools from connected apps load on demand: {listing}. "
                               "Call find_tools with what you need before using one.")
 
+    def _offer_find_tools(self) -> None:
+        if "find_tools" in self.native:
+            return
+        self.native["find_tools"] = NativeTool(
+            name="find_tools",
+            description=("Load more tools by what they do, e.g. \"web search\", \"blender render\" or \"obs scenes\": "
+                         "the user's connected apps and any of your tools not listed yet. They become callable "
+                         "from your next step."),
+            parameters={"type": "object", "properties": {
+                "query": {"type": "string", "description": "What you need to do, or the app's name."},
+            }, "required": ["query"]},
+            func=self._find_tools,
+        )
+
+    def focus(self, keep: set[str]) -> None:
+        """Send only `keep`'s schemas; every other tool waits behind find_tools, still callable by name.
+
+        For small local models (Claude Code defers its rarely used tools the same way): a 4B
+        builder offered 58 tools spent minutes per step and chose worse among them.
+        """
+        held = {name for name in self.entries if name not in keep}
+        held |= {name for name, tool in self.native.items()
+                 if name not in keep and name != "find_tools" and not tool.always and not tool.hidden}
+        if not held:
+            return
+        self.deferred |= held
+        self._offer_find_tools()
+        self.schema_version += 1
+        self.notes.append(f"Only your main tools are listed, to keep this model focused. {len(held)} more "
+                          f"(for example {', '.join(sorted(held)[:6])}) load when you call find_tools with what you need.")
+
+    def _description(self, name: str) -> str:
+        tool = self.native.get(name)
+        return str(tool.description if tool else getattr(self.entries.get(name), "description", "") or "")
+
     def _find_tools(self, args: dict[str, Any]) -> str:
         words = [w for w in re.findall(r"[a-z0-9]+", str(args.get("query") or "").lower()) if len(w) > 1]
         if not words:
@@ -354,8 +388,7 @@ class Toolbox:
         from agent import semantic
 
         pool = sorted(self.deferred | {n for n in self.entries if n not in self.deferred and n.startswith("mcp__")})
-        texts = [f"{name.split('__')[-1].replace('_', ' ')}: {getattr(self.entries.get(name), 'description', '')}"
-                 for name in pool]
+        texts = [f"{name.split('__')[-1].replace('_', ' ')}: {self._description(name)}" for name in pool]
         # By meaning too, when the local embedding model is installed: "make the video brighter"
         # finds a tool called adjust_lumetri. Keywords alone otherwise (agent/semantic.py).
         meaning = semantic.similarities(str(args.get("query") or ""), texts) or [0.0] * len(pool)
@@ -367,10 +400,10 @@ class Toolbox:
         scored.sort(key=lambda row: (-row[0], row[1]))
         found = [name for _, name in scored[:8]]
         if not found:
-            return f"No connected-app tool matches \"{args.get('query')}\". Use find_integrations to connect a new app."
+            return f"No tool matches \"{args.get('query')}\". Use find_integrations to connect a new app."
         self.deferred.difference_update(found)
         self.schema_version += 1
-        lines = [f"- {name}: {_compact_description(getattr(self.entries[name], 'description', ''), 160)}" for name in found]
+        lines = [f"- {name}: {_compact_description(self._description(name), 160)}" for name in found]
         return "Loaded these tools; call them from your next step:\n" + "\n".join(lines)
 
     @property
@@ -481,7 +514,7 @@ class Toolbox:
                 },
             })
         for tool in self.native.values():
-            if tool.hidden:
+            if tool.hidden or tool.name in self.deferred:
                 continue
             rendered.append({
                 "type": "function",
@@ -582,6 +615,9 @@ class Toolbox:
 
     def _run(self, name: str, args: dict[str, Any]) -> ToolResult:
         started = time.perf_counter()
+        if name in self.deferred:  # called by name: keep its schema from now on
+            self.deferred.discard(name)
+            self.schema_version += 1
         if name in self.native and not native_permitted(name):
             # Switched off after this turn started.
             from agent.lean import capabilities
@@ -618,9 +654,6 @@ class Toolbox:
                               redact_payload(widgets) if ok else [])
         if name == "web_search" and name in self.entries:
             return self._search_and_read(args)
-        if name in self.deferred:  # called by name: keep its schema from now on
-            self.deferred.discard(name)
-            self.schema_version += 1
         return self._run_entry(name, args)
 
     def _search_and_read(self, args: dict[str, Any]) -> ToolResult:
