@@ -1,5 +1,15 @@
 # Changes
 
+## Unreleased
+
+Notes: [Live test, 2026-10-22](docs/research/live-test-2026-10-22.md).
+
+* **Blocked apps hold in the terminal too.** A command that runs a blocked app (`regedit`, `start regedit`, `cmd /c "C:\Windows\regedit.exe"`) is refused outright. Before, it reached an approval card, because only open_application checked the list.
+* **No more "I've written mics.md" without a write.** A message that says a named file was written now needs a tool that wrote a file by that name. This is checked even when the message also calls tools, which is where the false claim came from. Research workers no longer count as something that changed. Their report says nothing has been saved yet.
+* **"On this PC" means this PC.** When the request says to run something on this PC, terminal calls without a destination run on this PC (still with approvals), not in the sandbox.
+* **Clicks land, and misses are noticed.** A screenshot now lists the named controls Windows reports, with their exact points in the screenshot (for example `Start [392, 704]`): the taskbar, plus the window you're working in. After every computer_action, Echo is told how much of the screen changed; "the screen looks unchanged" means the click probably missed. The tool also teaches keys for Windows itself (win opens Start). A 4B model had guessed the Start button's position, hit empty taskbar, and said the menu opened.
+* **Research workers: deep research only, all at once.** spawn_workers is offered on Ultra effort or when you ask for in-depth or many-source research, not for a quick comparison. Workers run at the same time by default. Settings › Agent › **Workers one at a time** is there for PCs that run short on memory. Workers sharing one local GPU get proportionally more time.
+
 ## v11.10.0 — 2026-10-21
 
 * **Edits that survive small models.** When `file_edit`'s text isn't in the file exactly, it looks again ignoring trailing spaces, then indentation, then curly quotes and dashes (Codex's matching passes). The edit applies only if exactly one place matches, re-indented to the file, and the result says how it matched. A 4B Glados failed the same 40-line edit four times over a 13-space indent and a trailing space; that edit now applies first try.

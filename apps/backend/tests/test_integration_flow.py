@@ -79,7 +79,8 @@ def test_one_request_through_swarm_policy_and_learning(monkeypatch, store):
     session = lean_runtime.LeanSession(agent=type("Agent", (), {"memory": None})(), session_id=f"flow-{uuid.uuid4().hex[:6]}",
                                        request_id="req-flow", emit=events.append, cancel=threading.Event(), source="web")
 
-    out = session.run("Compare the battery life of the Pixel and the iPhone", persona_id="echo")
+    # Workers are offered for deep research (or Ultra effort), not every comparison.
+    out = session.run("Research in depth: compare the battery life of the Pixel and the iPhone", persona_id="echo")
 
     # Context: the identity and capability sections reached the lead's system prompt.
     system = lead.calls[0][0]["content"]

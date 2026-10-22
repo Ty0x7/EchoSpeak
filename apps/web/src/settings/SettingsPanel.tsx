@@ -474,9 +474,14 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
             and lists them for you at the end. Permissions, Blocked apps, Private mode and Stop still apply.
           </div>
         ) : null}
-        <Row label="Research workers" help="For broad research, the agent can send up to 6 read-only workers to look things up at the same time, then writes the answer itself. Uses more tokens; on a local model they run one or two at a time. Off until you've seen it help with your models (Echo bench: --swarm).">
+        <Row label="Research workers" help="For deep research, the agent can send up to 6 read-only workers to look things up at the same time, then writes the answer itself. Used only on Ultra effort or when you ask for in-depth research across many sources. Uses more tokens (Echo bench: --swarm).">
           <Toggle checked={asBool(s.lean_research_swarm)} onChange={(v) => save({ lean_research_swarm: v })} label="Research workers" />
         </Row>
+        {asBool(s.lean_research_swarm) ? (
+          <Row label="Workers one at a time" help="Workers normally run all at once, which finishes fastest. Turn this on if your PC runs out of memory or the local model server struggles with several requests at once.">
+            <Toggle checked={asBool(s.lean_swarm_one_at_a_time)} onChange={(v) => save({ lean_swarm_one_at_a_time: v })} label="Workers one at a time" />
+          </Row>
+        ) : null}
         <Row label="Separate reader for outside content" help="A web page, email or app result goes first to a reader with no tools, and the agent sees only the facts it found. Lowers the chance hidden instructions work, and tells you when content tried. Costs one extra model call per result.">
           <Segmented
             value={String(s.lean_quarantine_reader || "messages")}

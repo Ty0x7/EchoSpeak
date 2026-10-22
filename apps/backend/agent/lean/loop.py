@@ -32,8 +32,9 @@ from agent.lean import quarantine, tool_outputs, tracing
 from agent.lean import approvals, steering
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, outbound
-from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, is_promise_without_action,
-                            promise_nudge, unbacked_claim)
+from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
+                            is_promise_without_action, promise_nudge, unbacked_claim, unbacked_file_claim,
+                            written_names)
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
 from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
@@ -144,6 +145,8 @@ class LeanTurn:
         self.completed_summary: Optional[str] = None
         # Tools that worked in this turn: what a reply's "I've saved it" must be backed by.
         self.succeeded: set[str] = set()
+        # Names of files successful tools wrote (or commands named): what "I've written mics.md" must match.
+        self._written: set[str] = set()
         # Code files changed since the last terminal run (the check step before 'done').
         self._unchecked: dict[str, bool] = {}
         self._on_seal = on_seal
@@ -361,7 +364,8 @@ class LeanTurn:
                             self.emit({"type": "promise_nudge", "step": step, "count": promise_nudges})
                             continue
                         stop_reason = "promise_unfulfilled"
-                    claim = unbacked_claim(content, self.succeeded) if self.promise_guard and self.toolbox.names else ""
+                    claim = ((unbacked_claim(content, self.succeeded) or unbacked_file_claim(content, self._written))
+                             if self.promise_guard and self.toolbox.names else "")
                     if claim and not stop_reason:
                         # "I've saved it" with nothing saved: ask once for the tool call or the truth.
                         if claim_nudges < 1:
@@ -404,6 +408,13 @@ class LeanTurn:
                 break
 
             self._run_tools(calls, messages, step, call_counts)
+            file_claim = (unbacked_file_claim(content, self._written)
+                          if self.promise_guard and content and messages[-1].get("role") == "tool" else "")
+            if file_claim:
+                # Text sent beside tool calls is checked too: "I've written mics.md" while only running `dir`.
+                messages[-1]["content"] = (str(messages[-1].get("content") or "") + "\n\n" + file_claim_note(file_claim))
+                self._retract_text(step)
+                self.emit({"type": "claim_nudge", "step": step, "claim": file_claim[:200]})
             if self._refusals >= REFUSAL_STOP:
                 # Circuit breaker: hand back to the user instead of probing for a way around "no".
                 stop_reason = "refusals"
@@ -1039,6 +1050,7 @@ class LeanTurn:
         self._outcomes.append(bool(ok))
         if ok:
             self.succeeded.add(name)
+            self._written |= written_names(name, args)
         for item in self.timeline:
             if item.get("kind") == "tool" and item.get("id") == call.id:
                 item.update({"status": "done" if ok else "failed", "output": preview, "duration_ms": duration_ms,

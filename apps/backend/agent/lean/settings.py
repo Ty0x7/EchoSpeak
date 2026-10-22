@@ -111,9 +111,20 @@ def swarm_worker_steps() -> int:
     return _int("lean_swarm_worker_steps", 12, 3, 40)
 
 
+def swarm_one_at_a_time() -> bool:
+    """Settings › Agent: run research workers one after another, for PCs short on memory or GPU."""
+    return _as_bool(_setting("lean_swarm_one_at_a_time", False))
+
+
 def swarm_parallel(local: bool) -> int:
-    """Workers at once: a local server has one GPU's worth of slots; a cloud API has more."""
-    return _int("lean_swarm_local_parallel", 1, 1, 4) if local else _int("lean_swarm_cloud_parallel", 4, 1, 6)
+    """Workers at once: all of them (up to 6) unless the owner chose one at a time.
+
+    A local server that takes one request at a time (LM Studio with one parallel slot,
+    or an older build) simply queues them; it is never slower than one at a time.
+    """
+    if swarm_one_at_a_time():
+        return 1
+    return _int("lean_swarm_local_parallel", 6, 1, 6) if local else _int("lean_swarm_cloud_parallel", 6, 1, 6)
 
 
 def group_max_rounds() -> int:

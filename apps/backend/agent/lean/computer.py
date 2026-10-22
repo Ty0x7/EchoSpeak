@@ -6,7 +6,7 @@ import math
 import os
 import threading
 import time
-from typing import Any
+from typing import Any, Optional
 
 from PIL import Image
 
@@ -27,14 +27,134 @@ def _result(item: dict, detail: str = ""):
     from agent.lean.toolbox import ToolResult
     if item.get("screen"):
         _current[item["session_id"]] = item["id"]
+    named = _controls_note(item) if item.get("screen") else ""
     return ToolResult(True, (f"{detail}\nScreenshot {item['id']}: {item['source']}. "
         f"Image attached. Coordinate space: {item['model_width']}x{item['model_height']}. "
-        "Use read_image with this ID to revisit it. Capture again after the screen changes.").strip(), 0,
+        "Use read_image with this ID to revisit it. Capture again after the screen changes." + named).strip(), 0,
         widgets=[{"type": "observation", "data": observations.public(item)}],
         observations=[observations.reference(item)])
 
 
+# ── grounding: named controls from Windows UI Automation ────────────────
+# Small vision models can't place a click on a 20-pixel taskbar icon in a downscaled
+# screenshot (a 4B model clicked empty taskbar for "Start" and said the menu opened).
+# Windows already knows where its named buttons are; listing them in the screenshot's
+# own coordinates turns "find the icon" into "read the list", the way UFO and
+# Windows Agent Arena pair screenshots with the accessibility tree.
+CLICKABLE = {"Button", "MenuItem", "TabItem", "ListItem", "Hyperlink", "CheckBox", "RadioButton", "ComboBox",
+             "SplitButton", "TreeItem", "Edit"}
+CONTROLS_LIMIT = 50
+CONTROLS_SECONDS = 1.5
+
+
+def _roots(screen: dict) -> list[Any]:
+    """The taskbar (for a monitor capture) and the captured or foreground window, as UIA wrappers."""
+    from pywinauto import Desktop
+    desktop = Desktop(backend="uia")
+    roots = []
+    if screen.get("window"):
+        roots.append(desktop.window(handle=screen["window"]).wrapper_object())
+        return roots
+    try:
+        roots.append(desktop.window(class_name="Shell_TrayWnd").wrapper_object())
+    except Exception:
+        pass
+    handle = _working_window()
+    if handle:
+        try:
+            roots.append(desktop.window(handle=handle).wrapper_object())
+        except Exception:
+            pass
+    return roots
+
+
+def _working_window() -> int:
+    """The window the user is working in: the foreground one, or the next one down when that is EchoSpeak itself."""
+    import ctypes
+    user32 = ctypes.windll.user32
+    handle = user32.GetForegroundWindow()
+    for _ in range(50):
+        if not handle:
+            return 0
+        length = user32.GetWindowTextLengthW(handle)
+        title = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(handle, title, length + 1)
+        if (user32.IsWindowVisible(handle) and not user32.IsIconic(handle) and title.value.strip()
+                and not title.value.startswith("EchoSpeak") and title.value != "Taskbar"):
+            return int(handle)
+        handle = user32.GetWindow(handle, 2)  # GW_HWNDNEXT: next window down in z-order
+    return 0
+
+
+def visible_controls(item: dict, roots: Optional[list[Any]] = None, seconds: float = CONTROLS_SECONDS) -> list[tuple[str, int, int]]:
+    """(name, x, y) of named clickable controls inside the capture, in its model coordinates. Best effort."""
+    screen = item.get("screen") or {}
+    try:
+        roots = _roots(screen) if roots is None else roots
+    except Exception:
+        return []
+    stop = time.monotonic() + seconds
+    found: list[tuple[str, int, int]] = []
+    seen: set[tuple[str, int, int]] = set()
+    queue = list(roots)
+    while queue and len(found) < CONTROLS_LIMIT and time.monotonic() < stop:
+        node = queue.pop(0)
+        try:
+            kind = str(node.element_info.control_type or "")
+            name = " ".join(str(node.window_text() or "").split())[:60]
+            rect = node.rectangle()
+            children = node.children()
+        except Exception:
+            continue
+        queue.extend(children)
+        if kind not in CLICKABLE or not name or rect.width() <= 0 or rect.height() <= 0:
+            continue
+        cx, cy = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
+        if not (screen["left"] <= cx < screen["left"] + screen["width"] and screen["top"] <= cy < screen["top"] + screen["height"]):
+            continue
+        x = int((cx - screen["left"]) * item["model_width"] / screen["width"])
+        y = int((cy - screen["top"]) * item["model_height"] / screen["height"])
+        if (name, x, y) not in seen:
+            seen.add((name, x, y))
+            found.append((name, x, y))
+    return found
+
+
+def _controls_note(item: dict) -> str:
+    if os.name != "nt":
+        return ""
+    controls = visible_controls(item)
+    if not controls:
+        return ""
+    listed = "; ".join(f"{name} [{x}, {y}]" for name, x, y in controls)
+    return ("\nNamed controls Windows reports on this screen (name [x, y] in this screenshot's coordinates; click "
+            f"these points instead of estimating from the image): {listed}")
+
+
+def _change(before: Image.Image, after: Image.Image) -> float:
+    """Share of the screen that visibly changed, 0.0 to 1.0 (small thumbnails, so cheap and noise-tolerant)."""
+    from PIL import ImageChops
+    size = (320, 180)
+    a = before.convert("L").resize(size)
+    b = after.convert("L").resize(size)
+    diff = ImageChops.difference(a, b).point(lambda value: 255 if value > 24 else 0)
+    return sum(1 for value in diff.getdata() if value) / (size[0] * size[1])
+
+
+def change_note(fraction: float) -> str:
+    if fraction < 0.005:
+        return ("The screen looks unchanged after these actions (under 0.5% of it changed), so the click or key "
+                "probably missed. Don't say it worked: look at the new screenshot, then try a named control's point "
+                "or a key instead.")
+    return f"About {round(fraction * 100)}% of the screen changed."
+
+
 def _grab(session: str, args: dict):
+    image, screen, source = _capture(args)
+    return observations.save(image, session, source, screen=screen)
+
+
+def _capture(args: dict) -> tuple[Image.Image, dict, str]:
     import mss
     screen: dict[str, Any]
     window = str(args.get("window_title") or "").strip()
@@ -62,7 +182,7 @@ def _grab(session: str, args: dict):
             raise ValueError("Window cannot be captured at this size")
         raw = capture.grab(region)
         image = Image.frombytes("RGB", raw.size, raw.rgb)
-    return observations.save(image, session, source, screen=screen)
+    return image, screen, source
 
 
 def screenshot(session: str, args: dict):
@@ -267,6 +387,12 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
                 monitor = screen["monitor"]
                 if monitor >= len(capture.monitors) or any(capture.monitors[monitor][k] != screen[k] for k in ("left", "top", "width", "height")):
                     raise ValueError("Monitor layout changed; capture again before acting")
+        next_args = {"window_handle": screen["window"]} if screen.get("window") else {"monitor": screen.get("monitor", 1)}
+        try:
+            # The screen right before acting, to tell whether the actions did anything.
+            before = _capture(next_args)[0]
+        except Exception:
+            before = None
         for a in prepared:
             if cancel.is_set():
                 raise ValueError("Computer action cancelled")
@@ -314,14 +440,21 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
                     held.discard(key)
             elif cancel.wait(a["duration"]):
                 raise ValueError("Computer action cancelled")
-        # Give the target a render tick after immediate SendInput before observing.
-        if cancel.wait(0.1):
+        # Give the target time to react before observing: a render tick, or a menu's opening animation.
+        settle = 0.6 if any(a["action"] in {"click", "double_click", "triple_click", "right_click", "key"} for a in prepared) else 0.1
+        if cancel.wait(settle):
             raise ValueError("Computer action cancelled")
         # Always observe the actual result, including games and non-accessible canvas UIs.
-        next_args = {"monitor": screen.get("monitor", 1)}
-        if screen.get("window"):
-            next_args = {"window_handle": screen["window"]}
-        return _result(_grab(session, next_args), f"Executed {len(prepared)} actions. Inspect the resulting screen.")
+        item_after = _grab(session, next_args)
+        detail = f"Executed {len(prepared)} actions."
+        if before is not None:
+            try:
+                _, data = observations.load(item_after["id"], session)
+                with Image.open(io.BytesIO(data)) as after:
+                    detail += " " + change_note(_change(before, after))
+            except (OSError, ValueError, KeyError, PermissionError):
+                pass
+        return _result(item_after, detail + " Inspect the resulting screen.")
     finally:
         # The user's failsafe corner must stop actions without preventing key release.
         previous = gui.FAILSAFE
@@ -485,7 +618,7 @@ def tools(session: str, cancel: threading.Event):
                        {**capture_schema, "properties": {**capture_schema["properties"], "question": {"type": "string"}}}, lambda a: screenshot(session, a)),
             NativeTool("read_image", "View an existing screenshot by observation_id or an allowed project image by path. Optional crop [left,top,right,bottom] uses ORIGINAL pixels; crops cannot control the screen.",
                        {"type": "object", "properties": {"observation_id": {"type": "string"}, "path": {"type": "string"}, "crop": {"type": "array", "items": {"type": "integer"}}}}, lambda a: read_image(session, a)),
-            NativeTool("computer_action", "Control the desktop using a FRESH screenshot ID. Coordinates use its model image size. Run 1–12 bounded actions, at most ten seconds of total requested durations, then inspect the returned screenshot. hold accepts text keys, a mouse button, or both for up to five seconds; inputs release before the next action. move_relative uses delta for pointer-locked cameras. Requires desktop permission and owner approval.",
+            NativeTool("computer_action", "Control the desktop using a FRESH screenshot ID. Coordinates use its model image size. Click a control at the point the screenshot result lists for it rather than estimating from the image. For Windows itself a key beats a guessed click: win opens Start, win+s search, win+d the desktop, alt+tab switches windows. Run 1–12 bounded actions, at most ten seconds of total requested durations, then inspect the returned screenshot and its change note before saying it worked. hold accepts text keys, a mouse button, or both for up to five seconds; inputs release before the next action. move_relative uses delta for pointer-locked cameras. Requires desktop permission and owner approval.",
                        {"type": "object", "properties": {"observation_id": {"type": "string"}, "actions": {"type": "array", "items": action_schema, "minItems": 1, "maxItems": 12}}, "required": ["observation_id", "actions"]}, lambda a: act(session, a, cancel))] + [
             # Claude's own action names (computer_toolset_20260801). Hidden: never sent as schemas;
             # the Anthropic adapter declares the toolset instead, and calls arrive under these names.
