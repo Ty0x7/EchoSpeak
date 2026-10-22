@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Search models, 22 Oct 2026</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--ok:#1f7a3f;--bad:#b42318;--warn:#8a5a00;--soft:#f0f0f0}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--ok:#5cc983;--bad:#ff8a7a;--warn:#e0b04a;--soft:#222}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 36px}header{padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:24px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 5px}header p{margin:0;font-size:13px;color:var(--muted)}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 14px}h3{font-size:14px;margin:0 0 6px}section{margin:30px 0}p,small,figcaption{color:var(--muted)}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:16px;min-width:0}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.node p{font-size:13px;margin:0}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:1px 8px;margin-bottom:8px;white-space:nowrap}.tag.bad{color:var(--bad)}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:13px system-ui,sans-serif}svg .mut{fill:var(--muted);font-size:11.5px}svg .box{fill:var(--panel);stroke:var(--line)}svg .soft{fill:var(--soft);stroke:var(--line)}svg .ln{stroke:var(--muted);fill:none;stroke-width:1.4}svg .ah{fill:var(--muted)}svg .bad{fill:var(--bad)}svg .ok{fill:var(--ok)}.scroll{overflow-x:auto}.scroll svg{min-width:660px}.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{font-weight:600}.note{font-size:13px;margin:10px 0 0}ul{font-size:13px;padding-left:20px;margin:0}li{margin:2px 0}code{font:12px ui-monospace,monospace}footer{font-size:12px;margin-top:28px;color:var(--muted)}a{color:inherit;text-underline-offset:3px}
+.card{border:1px solid var(--line);border-radius:12px;background:var(--panel);padding:18px;max-width:640px}.card h3{font-size:15px;margin:0 0 4px}.card .sub{font-size:12px;color:var(--muted);margin:0 0 14px}.opt{display:grid;grid-template-columns:18px 1fr auto;gap:10px;align-items:start;padding:10px 0;border-top:1px solid var(--line)}.opt .dot{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--muted);margin-top:3px}.opt.on .dot{border:5px solid var(--ink)}.opt b{font-weight:600;font-size:13px}.opt span{display:block;font-size:12px;color:var(--muted)}.opt em{font-style:normal;font-size:12px;color:var(--muted);white-space:nowrap}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;border-top:1px solid var(--line);padding:12px 0 0;margin-top:4px;font-size:13px}.switch{width:34px;height:20px;border-radius:20px;background:var(--soft);border:1px solid var(--line);position:relative;flex:none}.switch::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--muted)}.btn{display:inline-block;margin-top:14px;padding:7px 14px;border-radius:8px;background:var(--ink);color:var(--bg);font-size:13px}.status{font-size:12px;color:var(--muted);margin-top:10px}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.opt{grid-template-columns:18px 1fr}.opt em{grid-column:2}}
+</style></head><body><main>
+<header><h1>Search models</h1><p>22 Oct 2026 · embeddings, rerankers and the five linked models · research only, nothing changed yet · technical record in docs/research/embeddings-2026-10-22.md</p></header>
+
+<section aria-label="Where search is used"><h2>1 · Where EchoSpeak searches by meaning today</h2>
+<div class="scroll"><svg viewBox="0 0 1000 230" role="img" aria-label="One embedder, all-MiniLM-L6-v2 or a provider, serves memory, documents and tool search; the reranker needs PyTorch, which the installed app lacks.">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 L10 5 L0 10 z"/></marker></defs>
+<rect class="box" x="20" y="70" width="230" height="90" rx="10"/><text x="36" y="96" style="font-weight:600">Embedder</text><text class="mut" x="36" y="116">all-MiniLM-L6-v2 (local, 90 MB)</text><text class="mut" x="36" y="134">or LM Studio / OpenAI</text><text class="mut" x="36" y="150">English · 256-token limit</text>
+<rect class="box" x="330" y="20" width="250" height="52" rx="9"/><text x="346" y="44">Memory recall</text><text class="mut" x="346" y="62">rebuilds itself on a model switch</text>
+<rect class="box" x="330" y="89" width="250" height="52" rx="9"/><text x="346" y="113">Document search</text><text class="mut" x="346" y="131">plus keyword search; rebuildable</text>
+<rect class="box" x="330" y="158" width="250" height="52" rx="9"/><text x="346" y="182">find_tools, setup guides</text><text class="mut" x="346" y="200">picks connected-app tools</text>
+<path class="ln" d="M250 100 C290 100 290 46 326 46" marker-end="url(#a)"/><path class="ln" d="M250 115 H326" marker-end="url(#a)"/><path class="ln" d="M250 130 C290 130 290 184 326 184" marker-end="url(#a)"/>
+<rect class="soft" x="660" y="89" width="320" height="52" rx="9"/><text x="676" y="113">Reranker: ms-marco-MiniLM</text><text class="bad" x="676" y="131" style="font-size:11.5px">needs PyTorch: can't turn on in the installed app</text>
+<path class="ln" d="M580 115 H656" marker-end="url(#a)"/>
+</svg></div></section>
+
+<section aria-label="The linked models"><h2>2 · The five linked models</h2><div class="table"><table><thead><tr><th>Model</th><th>What it really is</th><th>Verdict</th></tr></thead><tbody>
+<tr><td>all-MiniLM-L6-v2</td><td>Tiny English embedder from 2021, 384-d</td><td><span class="tag ok">keep as "Fast"</span></td></tr>
+<tr><td>ms-marco-MiniLM-L6-v2</td><td>Tiny English reranker; a 23 MB int8 ONNX file exists</td><td><span class="tag ok">run it on ONNX: makes reranking real</span></td></tr>
+<tr><td>EmbeddingGemma 2</td><td>Text, image and audio embedder, 740M; 8K context</td><td><span class="tag">watch; heavy, no ONNX yet</span></td></tr>
+<tr><td>Qwen3-0.6B</td><td>A chat model, not an embedder</td><td><span class="tag">not for search</span></td></tr>
+<tr><td>Qwen-Image-2.1</td><td>7B image generator and editor, research licence</td><td><span class="tag warn">image generation, later via ComfyUI</span></td></tr>
+</tbody></table></div></section>
+
+<section aria-label="Better options"><h2>3 · The better options for search</h2><div class="table"><table><thead><tr><th>Model</th><th>English / multilingual (MTEB v2)</th><th>Size</th><th>Runs in EchoSpeak via</th><th></th></tr></thead><tbody>
+<tr><td>all-MiniLM-L6-v2 (now)</td><td>older, English only</td><td>90 MB</td><td>ONNX, today</td><td><span class="tag">fast</span></td></tr>
+<tr><td><b>EmbeddingGemma-300M</b></td><td>69.67 / 61.15 (q4: 60.62)</td><td>about 197 MB q4</td><td>the same ONNX runtime, no new dependencies</td><td><span class="tag ok">recommended "Better"</span></td></tr>
+<tr><td><b>Qwen3-Embedding-0.6B</b></td><td>70.70 / 64.33</td><td>639 MB Q8</td><td>LM Studio, already supported</td><td><span class="tag ok">best, if LM Studio runs</span></td></tr>
+<tr><td>Qwen3-Reranker-0.6B</td><td>MTEB-R 65.80</td><td>0.6B LLM</td><td>too heavy per search on CPU</td><td><span class="tag">skip</span></td></tr>
+</tbody></table></div><p class="note">Scores are from the model cards. No model was downloaded or benchmarked for this report. The honest answer: it isn't urgent for an English-only owner, but it's cheap. It fixes non-English text, long-chunk truncation, code, and reranking that can't run today.</p></section>
+
+<section aria-label="Proposed settings"><h2>4 · Proposed: one card in Settings › Memory &amp; documents</h2>
+<div class="card" role="img" aria-label="Proposed settings card design, not a screenshot"><h3>Search by meaning</h3><p class="sub">How Echo finds memories, documents and tools by meaning. Stays on this PC unless you pick Cloud.</p>
+<div class="opt"><div class="dot"></div><div><b>Keywords only</b><span>Works with nothing installed</span></div><em>—</em></div>
+<div class="opt"><div class="dot"></div><div><b>Fast · English</b><span>all-MiniLM-L6-v2</span></div><em>90 MB</em></div>
+<div class="opt on"><div class="dot"></div><div><b>Better · 100+ languages, longer text</b> <small>(recommended)</small><span>EmbeddingGemma-300M</span></div><em>200 MB</em></div>
+<div class="opt"><div class="dot"></div><div><b>Use LM Studio</b><span>Pick a loaded embedding model; Qwen3-Embedding-0.6B suggested</span></div><em>yours</em></div>
+<div class="opt"><div class="dot"></div><div><b>Cloud · OpenAI</b><span>Hidden in Private and Offline modes</span></div><em>—</em></div>
+<div class="row"><span>Sharper document results <small>(+23 MB)</small></span><span class="switch" aria-hidden="true"></span></div>
+<span class="btn">Download and switch</span><div class="status">Re-indexing 1,240 memories and 18 documents… done (example)</div></div>
+<p class="note">A design sketch, not a screenshot: nothing here exists in the app yet. Re-indexing after a switch reuses rebuilds EchoSpeak already has. Offline mode blocks the download and says so.</p></section>
+
+<section aria-label="Plan"><h2>5 · If you say go: about a day</h2><div class="grid3">
+<div class="node"><span class="tag ok">1</span><h3>Reranker on ONNX</h3><p>A small cross-encoder class on onnxruntime; sentence-transformers stays only as a fallback.</p></div>
+<div class="node"><span class="tag ok">2</span><h3>A model catalog</h3><p>Fast and Better entries with pinned revisions, pooling and query/document prefixes.</p></div>
+<div class="node"><span class="tag ok">3</span><h3>The card</h3><p>Status, download with progress, automatic re-indexing; LM Studio's embedding models listed.</p></div>
+</div></section>
+<footer>Technical record: <a href="../../docs/research/embeddings-2026-10-22.md">docs/research/embeddings-2026-10-22.md</a>. Sources are linked there.</footer>
+</main></body></html>
