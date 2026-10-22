@@ -50,8 +50,16 @@ def _tool(name: str, func) -> NativeTool:
 
 
 @pytest.fixture()
-def tools(monkeypatch) -> dict[str, list[dict[str, Any]]]:
+def tools(monkeypatch, tmp_path) -> dict[str, list[dict[str, Any]]]:
     calls: dict[str, list[dict[str, Any]]] = {}
+    # The harness checks writes on disk (agent/lean/evidence.py): the fake file_write really writes, in tmp_path.
+    from agent.lean import evidence
+
+    monkeypatch.setattr(evidence, "_resolve", lambda raw: (tmp_path / str(raw)) if str(raw or "").strip() else None)
+
+    def write(args: dict[str, Any]) -> str:
+        (tmp_path / str(args.get("path"))).write_text(str(args.get("content") or ""), encoding="utf-8")
+        return f"Wrote {args.get('path')}"
 
     def record(name: str, reply):
         def run(args: dict[str, Any]) -> str:
@@ -65,7 +73,7 @@ def tools(monkeypatch) -> dict[str, list[dict[str, Any]]]:
         return "[ok · 0.1s · sandbox · /w]\nhi"
 
     fakes = [
-        _tool("file_write", record("file_write", lambda a: f"Wrote {a.get('path')}")),
+        _tool("file_write", record("file_write", write)),
         _tool("file_read", record("file_read", lambda a: "print('hi')")),
         _tool("web_search", record("web_search", "1. Example result — snippet")),
         _tool("safe_web_fetch", record("safe_web_fetch", "Page text")),

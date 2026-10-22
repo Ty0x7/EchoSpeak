@@ -23,7 +23,7 @@ MAX_ACTION_SECONDS = 5
 MAX_BATCH_SECONDS = 10
 
 
-def _result(item: dict, detail: str = ""):
+def _result(item: dict, detail: str = "", meta: dict | None = None):
     from agent.lean.toolbox import ToolResult
     if item.get("screen"):
         _current[item["session_id"]] = item["id"]
@@ -32,7 +32,7 @@ def _result(item: dict, detail: str = ""):
         f"Image attached. Coordinate space: {item['model_width']}x{item['model_height']}. "
         "Use read_image with this ID to revisit it. Capture again after the screen changes." + named).strip(), 0,
         widgets=[{"type": "observation", "data": observations.public(item)}],
-        observations=[observations.reference(item)])
+        observations=[observations.reference(item)], meta=dict(meta or {}))
 
 
 # ── grounding: named controls from Windows UI Automation ────────────────
@@ -446,15 +446,16 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
             raise ValueError("Computer action cancelled")
         # Always observe the actual result, including games and non-accessible canvas UIs.
         item_after = _grab(session, next_args)
-        detail = f"Executed {len(prepared)} actions."
+        detail, meta = f"Executed {len(prepared)} actions.", {}
         if before is not None:
             try:
                 _, data = observations.load(item_after["id"], session)
                 with Image.open(io.BytesIO(data)) as after:
-                    detail += " " + change_note(_change(before, after))
+                    meta["screen_change"] = _change(before, after)  # the evidence layer reads it (agent/lean/evidence.py)
+                detail += " " + change_note(meta["screen_change"])
             except (OSError, ValueError, KeyError, PermissionError):
                 pass
-        return _result(item_after, detail + " Inspect the resulting screen.")
+        return _result(item_after, detail + " Inspect the resulting screen.", meta)
     finally:
         # The user's failsafe corner must stop actions without preventing key release.
         previous = gui.FAILSAFE

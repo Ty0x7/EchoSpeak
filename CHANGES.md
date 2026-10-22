@@ -2,7 +2,13 @@
 
 ## Unreleased
 
-Notes: [Live test, 2026-10-22](docs/research/live-test-2026-10-22.md).
+Notes: [Live test, 2026-10-22](docs/research/live-test-2026-10-22.md), [Execution evidence, 2026-10-22](docs/research/harness-evidence-2026-10-22.md).
+
+* **Execution evidence.** Every tool call now ends with one recorded outcome, set where it's decided: ran, failed, no visible effect, refused, denied, held or skipped. It also records what the harness observed: files on disk after a write or delete, a command's exit code and where it ran, the screen change after a click.
+  * The refusal breaker, the "I've done it" checks, learning's grading, traces and tool-run records all read this record, instead of matching phrases in the result text.
+  * A write a tool reports that isn't on disk becomes a failure.
+  * A click that changed nothing shows "No visible change on screen", and a reply saying the Start menu opened is challenged.
+* **Commands on this PC ask when the sandbox isn't running.** In Auto terminal mode, a silent fallback to this PC because Docker is down now asks for ordinary commands, like a command sent to this PC on purpose. "Always allow" for ordinary commands on this PC, and Autonomous mode, still cover it. Choosing This PC explicitly is unchanged.
 
 * **Blocked apps hold in the terminal too.** A command that runs a blocked app (`regedit`, `start regedit`, `cmd /c "C:\Windows\regedit.exe"`) is refused outright. Before, it reached an approval card, because only open_application checked the list.
 * **No more "I've written mics.md" without a write.** A message that says a named file was written now needs a tool that wrote a file by that name. This is checked even when the message also calls tools, which is where the false claim came from. Research workers no longer count as something that changed. Their report says nothing has been saved yet.

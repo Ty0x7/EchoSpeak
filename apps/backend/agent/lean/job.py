@@ -192,6 +192,29 @@ def check_nudge(files: list[str]) -> str:
     )
 
 
+# "The Start menu has opened", "I've clicked it": a claimed change on screen.
+_SCREEN_CLAIM = re.compile(
+    r"(?i)\b(?:has|have|is|are)\s+(?:now\s+)?(?:successfully\s+)?(?:opened|open|launched|started|appeared|closed|showing)\b"
+    r"|\b(?:i'?ve|i\s+have|i)\s+(?:successfully\s+)?(?:opened|clicked|launched|started|closed)\b"
+    r"|\bsuccessfully\s+(?:opened|clicked|launched|started|closed)\b")
+
+
+def unbacked_screen_claim(text: str, last_change: Optional[float]) -> str:
+    """A sentence claiming a visible change when the latest screen action changed nothing visible, or ''.
+
+    ``last_change`` is the share of the screen the newest computer action changed (agent/lean/evidence.py),
+    None when nothing acted on the screen this turn.
+    """
+    from agent.lean.evidence import SCREEN_UNCHANGED
+
+    if last_change is None or last_change >= SCREEN_UNCHANGED:
+        return ""
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")):
+        if sentence.strip() and _SCREEN_CLAIM.search(sentence) and not _EARLIER.search(sentence):
+            return sentence.strip()
+    return ""
+
+
 def file_claim_note(claim: str) -> str:
     missing = ", ".join(sorted(named_files(claim)))
     return (f"[EchoSpeak: your message said \"{claim[:200]}\", but no tool has written {missing} in this request, so "

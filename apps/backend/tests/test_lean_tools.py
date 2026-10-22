@@ -74,7 +74,8 @@ def test_the_loop_runs_an_aliased_call_instead_of_failing():
     )
     result = turn.run("fix it")
     tool_result = next(m for m in client.calls[1] if m.get("role") == "tool")
-    assert tool_result["content"] == "file_edit got [('new_text', 'y'), ('old_text', 'x'), ('path', 'a.py')]"
+    # The fake edit writes nothing, so the harness's on-disk check (agent/lean/evidence.py) adds its note after.
+    assert tool_result["content"].startswith("file_edit got [('new_text', 'y'), ('old_text', 'x'), ('path', 'a.py')]")
     assert next(e for e in events if e["type"] == "tool_start")["name"] == "file_edit"
     assert result.text == "Edited."
 

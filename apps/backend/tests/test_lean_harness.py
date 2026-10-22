@@ -83,6 +83,7 @@ def test_dangerous_terminal_commands_need_approval(monkeypatch):
     from agent.lean import terminal
 
     monkeypatch.setattr(terminal, "resolved_mode", lambda: "host")
+    monkeypatch.setattr(terminal, "execution_mode", lambda: "host")  # the owner chose This PC
     E = _TerminalEntry
     assert tool_needs_approval(E(), "terminal", {"command": "git push origin main"})[0]
     assert tool_needs_approval(E(), "terminal", {"command": "npm install && rm build.txt"})[0]

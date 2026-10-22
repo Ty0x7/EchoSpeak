@@ -40,7 +40,7 @@ def test_screenshot_bad_terminal_call_and_desktop_recovery(monkeypatch, tmp_path
 
     def approve(self, call, name, args, step):
         approved.append((name, self._policy_reasons.get(call.id, "")))
-        return True, ""  # Simulate the user's approval; no desktop input runs.
+        return True, "", ""  # Simulate the user's approval; no desktop input runs.
 
     monkeypatch.setattr(LeanTurn, "_approve", approve)
 
