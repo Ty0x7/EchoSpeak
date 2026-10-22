@@ -43,6 +43,8 @@ MAX_DISCUSS_TURNS = 3
 DEFAULT_WORK_TURNS = 30
 # Bookkeeping tools: calling them is not evidence that work got done.
 _BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "project_workspace", "save_project_image", "save_project_report"}  # Preserve historical report-write classification too.
+# "On this PC", "on my computer": the user picked where a terminal command runs.
+_ON_THIS_PC = re.compile(r"(?i)\b(?:on|in)\s+(?:this|my)\s+(?:pc|computer|machine|laptop|desktop\s+pc)\b|\bon\s+the\s+host\b")
 # Sources with a live UI that can show an approval card.
 INTERACTIVE_SOURCES = {"web", "desktop", "voice", "chat", "api"}
 
@@ -923,6 +925,14 @@ class LeanSession:
         # Recall from what is actually being asked (the user's request, plus the task this
         # agent was given), never from a "[System]: ..." brief full of boilerplate words.
         goal = self._goal(message, task)
+        from agent.lean.swarm import wants_workers
+
+        if "spawn_workers" in toolbox.native and not wants_workers(goal, self.reasoning_effort):
+            # Workers are for deep research: Ultra effort, or a request for in-depth, many-source research.
+            # A three-product comparison is a few searches; spawning for it cost minutes on a local model.
+            toolbox.native.pop("spawn_workers")
+        # "Run dir in the terminal on this PC": the user chose the destination, so it's the default.
+        toolbox.prefer_host = bool(_ON_THIS_PC.search(goal))
         # The learned router has no verified vision ranking. Retain the user's
         # selected model for visual work rather than silently choosing a text model.
         visual = any(row.get("observations") for row in history) or bool(re.search(

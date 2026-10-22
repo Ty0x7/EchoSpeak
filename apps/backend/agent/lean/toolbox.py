@@ -289,6 +289,8 @@ class Toolbox:
         self.session_id = session_id
         self.project_root = project_root
         self.notes: list[str] = []
+        # The request named this PC as where commands run (see runtime._ON_THIS_PC).
+        self.prefer_host = False
         self.native: dict[str, NativeTool] = {tool.name: tool for tool in (extra_tools or [])}
         wanted: list[str] = []
         include_external = False
@@ -574,6 +576,9 @@ class Toolbox:
                 if isinstance(args.get(key), str) and (host := to_host_path(args[key], self.project_root)):
                     args[key] = host
         if resolved == "terminal" and resolved in self.native:
+            if getattr(self, "prefer_host", False) and not str(args.get("where") or "").strip():
+                # The user asked for this PC; host commands still go through approvals and the command checks.
+                args["where"] = "host"
             terminal = getattr(self.native[resolved].func, "__self__", None)
             if terminal is not None and hasattr(terminal, "effective_where"):
                 # The policy sees the destination the Terminal instance will use,

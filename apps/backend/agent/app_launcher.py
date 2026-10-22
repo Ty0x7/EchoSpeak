@@ -114,6 +114,27 @@ def blocked_by(app: str, command: list[str] | None = None, shortcut: Path | None
     return ""
 
 
+def blocked_in_command(command: str) -> tuple[str, str]:
+    """(the word, its Blocked apps entry) when a shell command names a blocked app, else ('', '').
+
+    Every word counts, so `regedit`, `start regedit`, `Start-Process regedit.exe` and
+    `cmd /c "C:\\Windows\\regedit.exe"` are all caught. Blocked apps is the owner's
+    list of programs never to open, by any route; a word that merely mentions one
+    (`echo regedit`) is refused too, which errs toward the owner's intent.
+    """
+    from config import config
+
+    entries = [str(e) for e in getattr(config, "open_application_blocklist", None) or [] if str(e).strip()]
+    if not entries:
+        return "", ""
+    for word in re.split(r"[\s;&|()\"'`,<>]+", str(command or "")):
+        forms = _name_forms(word)
+        for entry in entries:
+            if forms and _name_forms(entry) & forms:
+                return word, entry
+    return "", ""
+
+
 def runs_commands(command: list[str]) -> bool:
     name = Path(str(command[0] if command else "")).name.lower()
     return name.removesuffix(".exe") in COMMAND_HOSTS

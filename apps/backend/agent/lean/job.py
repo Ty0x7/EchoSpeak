@@ -92,7 +92,33 @@ READ_ONLY_TOOLS = {
     "memory_search", "chat_search", "email_read_inbox", "email_search", "email_get_thread", "discord_read_channel",
     "self_list", "self_read", "self_grep", "self_git_status", "desktop_list_windows", "process_output",
     "stock_history", "product_search", "video_search", "image_search", "take_screenshot", "analyze_screen", "vision_qa",
+    # Research workers only look things up: their findings back no "I've written…" claim.
+    "spawn_workers", "read_image", "read_output", "find_tools", "document_search", "research_notebook",
 }
+
+# "mics.md", "notes/plan.txt": a file named in a claim must be one a tool actually wrote.
+_FILE_NAME = re.compile(r"(?<![\w@])([\w.-]+\.(?:md|txt|py|js|ts|tsx|jsx|json|html|css|csv|yaml|yml|toml|xml|ini|"
+                        r"log|ps1|bat|sh|java|c|cpp|cs|go|rs|rb|php|sql|docx|xlsx|pdf))\b", re.I)
+
+
+def named_files(text: str) -> set[str]:
+    """Lower-cased file names (no folders) mentioned in text."""
+    return {match.group(1).lower() for match in _FILE_NAME.finditer(str(text or ""))}
+
+
+def unbacked_file_claim(text: str, written: set[str]) -> str:
+    """A sentence saying a named file was written, created or saved when no tool wrote a file by that name, or ''.
+
+    ``written`` holds the lower-cased names of files successful tools wrote this turn,
+    plus names that appeared in commands that ran (a redirect can create a file).
+    """
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")):
+        if not sentence.strip() or _EARLIER.search(sentence) or not _ACTION_CLAIM.search(sentence):
+            continue
+        missing = named_files(sentence) - written
+        if missing:
+            return sentence.strip()
+    return ""
 
 
 def unbacked_claim(text: str, succeeded: set[str]) -> str:
@@ -135,6 +161,20 @@ CODE_SUFFIXES = (
 )
 
 
+def written_names(name: str, args: dict) -> set[str]:
+    """Lower-cased names of files a successful call may have written: change tools' targets, and files a command names."""
+    if name in CHECK_TOOLS:
+        return named_files(str(args.get("command") or args.get("cmd") or ""))
+    if name not in CHANGE_TOOLS | {"self_edit", "notepad_write", "create_artifact", "update_artifact", "save_project_image"}:
+        return set()
+    names = set()
+    for key in ("path", "destination", "dst", "file_path", "filename"):
+        value = str(args.get(key) or "").strip()
+        if value:
+            names.add(value.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower())
+    return names
+
+
 def changed_code_file(name: str, args: dict) -> str:
     """The code file a successful change tool touched, or ''."""
     if name not in CHANGE_TOOLS:
@@ -150,6 +190,12 @@ def check_nudge(files: list[str]) -> str:
         "tests with the terminal and look at the result. If it can't be run here, say plainly that it isn't checked "
         "and why. If the check fails, fix it or say what's left."
     )
+
+
+def file_claim_note(claim: str) -> str:
+    missing = ", ".join(sorted(named_files(claim)))
+    return (f"[EchoSpeak: your message said \"{claim[:200]}\", but no tool has written {missing} in this request, so "
+            "it doesn't exist yet. Write it with file_write first; never say a file is saved until a tool saved it.]")
 
 
 def claim_nudge(claim: str) -> str:

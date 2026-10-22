@@ -205,6 +205,9 @@ def redact_payload(value: Any, secrets: Optional[list[str]] = None) -> Any:
 
 # ── the decision ────────────────────────────────────────────────────────
 
+# Tools whose argument is a shell command.
+COMMAND_TOOLS = {"terminal", "terminal_run", "process_start"}
+
 def evaluate(
     name: str,
     args: dict[str, Any],
@@ -217,6 +220,14 @@ def evaluate(
     """allow / ask / deny for one tool call. Deterministic: no model involved."""
     if contains_secret(args, secrets):
         return Decision("deny", "its arguments contain one of your stored API keys or tokens", "secret_in_args")
+    if name in COMMAND_TOOLS:
+        # Blocked apps hold on every route, not only open_application: no approval can lift them here.
+        from agent.app_launcher import blocked_in_command
+
+        word, entry = blocked_in_command(str(args.get("command") or args.get("cmd") or ""))
+        if entry:
+            return Decision("deny", f"it would run {word}, which is in Blocked apps ({entry}). Only the owner can "
+                            "change Settings > Permissions > Blocked apps; don't open it any other way", "blocked_app")
     if name == "create_media" and args.get("provider") != "comfyui-local":
         reason = "this sends your prompt to a cloud generation provider and may charge your API account"
         if args.get("input_asset_ids"):

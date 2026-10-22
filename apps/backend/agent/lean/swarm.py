@@ -51,8 +51,9 @@ _RESEARCH_TOOLS = {"web_search", "safe_web_fetch", "file_read", "file_search", "
 
 DESCRIPTION = (
     "Research several independent questions at the same time with short-lived, read-only workers, then write the "
-    "answer yourself from their findings. Use it only for breadth: comparing several products, places or options, "
-    "or covering separate sub-questions that don't depend on each other. Don't use it for a single fact, for "
+    "answer yourself from their findings. Use it only for deep, broad research: many sources, or several separate "
+    "sub-questions that don't depend on each other. Don't use it for a quick comparison you can search yourself, a "
+    "single fact, for "
     "step-by-step work where one answer feeds the next, or for anything that changes files or sends messages. "
     "Simple question: no workers. Comparison: one worker per option (2-4). Broad research: up to 6. "
     "Each worker gets only its goal, so make each goal self-contained."
@@ -110,6 +111,28 @@ class Worker:
                         for s in self.sources[:8]],
             "open_questions": self.open_questions[:4],
         }
+
+
+# Requests that ask for deep research by name, or for many sources.
+_DEEP = re.compile(r"(?i)\b(deep[\s-]?(?:research|search|dive)|in[\s-]depth|thorough(?:ly)?|comprehensive(?:ly)?|"
+                   r"exhaustive(?:ly)?|extensive(?:ly)?|literature\s+review|research\s+(?:widely|broadly))\b")
+_SOURCES = re.compile(r"(?i)\b(\d{1,2}|five|six|seven|eight|nine|ten|twelve|fifteen|twenty)\+?\s+"
+                      r"(?:different\s+|separate\s+|independent\s+|good\s+|reliable\s+)?sources\b")
+_WORDS = {"five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "twelve": 12, "fifteen": 15, "twenty": 20}
+
+
+def wants_workers(goal: str, effort: str = "") -> bool:
+    """Workers are for deep research: Ultra effort, or a request for in-depth or many-source research."""
+    if str(effort or "").lower() == "ultra":
+        return True
+    text = str(goal or "")
+    if _DEEP.search(text):
+        return True
+    count = _SOURCES.search(text)
+    if count:
+        raw = count.group(1).lower()
+        return (int(raw) if raw.isdigit() else _WORDS.get(raw, 0)) >= 5
+    return False
 
 
 def is_local(endpoint: Any) -> bool:
@@ -315,9 +338,13 @@ class Swarm:
     # ── the whole call ──────────────────────────────────────────────────
     def run(self, tasks: list[dict[str, Any]]) -> ToolResult:
         started = time.time()
-        self.deadline = started + WORKER_SECONDS * 2
         self.workers = [Worker(index=i + 1, goal=t["goal"], expected=t.get("expected", "")) for i, t in enumerate(tasks)]
-        parallel = settings.swarm_parallel(is_local(self.session._endpoint_for(self.persona)))
+        local = is_local(self.session._endpoint_for(self.persona))
+        parallel = settings.swarm_parallel(local)
+        # Workers sharing one local GPU each go slower (or wait in its queue), so each gets more time.
+        sharing = min(parallel, len(self.workers)) if local else 1
+        limit = WORKER_SECONDS * (1 + (sharing - 1) / 2)
+        self.deadline = started + max(limit, WORKER_SECONDS * 2)
         self.publish()
         stop_watch = threading.Event()
 
@@ -327,8 +354,8 @@ class Swarm:
                 for worker in self.workers:
                     if self.lead_cancel.is_set() and not worker.cancel.is_set():
                         worker.cancel.set()
-                    elif worker.status == "running" and time.time() - worker.started > WORKER_SECONDS and not worker.cancel.is_set():
-                        worker.note = f"stopped at the {int(WORKER_SECONDS)}s limit"
+                    elif worker.status == "running" and time.time() - worker.started > limit and not worker.cancel.is_set():
+                        worker.note = f"stopped at the {int(limit)}s limit"
                         worker.cancel.set()
 
         watcher = threading.Thread(target=watch, name="swarm-watch", daemon=True)
@@ -348,8 +375,9 @@ class Swarm:
 
     def report(self, seconds: float) -> str:
         lines = [f"{len(self.workers)} workers finished in {seconds:.0f}s using {self.tokens_used():,} of {self.budget:,} "
-                 "tokens. Their findings are below: check them against each other, resolve conflicts, then write the "
-                 "answer yourself, citing the sources they opened."]
+                 "tokens. Their findings are below: check them against each other, resolve conflicts, then compose the "
+                 "answer yourself, citing the sources they opened. These are findings only: nothing has been saved to "
+                 "a file or done yet. Do the rest of the request (for example file_write) before saying it's done."]
         if self.stop_reason:
             lines.append(f"Note: {self.stop_reason}; later workers were skipped or stopped early.")
         url_owners: dict[str, list[int]] = {}
