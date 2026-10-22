@@ -208,14 +208,21 @@ class DocumentStore:
             return None
         if self._reranker is not None:
             return self._reranker
+        # The ONNX cross-encoder from Settings › Search by meaning runs in the installed app;
+        # sentence-transformers (PyTorch) stays as the source-build fallback.
+        from agent.embeddings import local_reranker
+
+        self._reranker = local_reranker()
+        if self._reranker is not None:
+            return self._reranker
         try:
             from sentence_transformers import CrossEncoder
 
             self._reranker = CrossEncoder(self.rerank_model)
         except Exception as exc:
             logger.warning(
-                f"Document reranking is on but unavailable ({exc}). It is optional: "
-                "pip install -r requirements-optional.txt, or set DOC_RERANK_ENABLED=false."
+                f"Document reranking is on but its model isn't downloaded ({exc}). Download it under "
+                "Settings › Memory & documents › Search by meaning, or turn Sharper document results off."
             )
             self._reranker = None
         return self._reranker

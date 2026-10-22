@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AvatarEditor } from "../components/AvatarEditor";
 import { isDesktopRuntime, pickDesktopConnectionFolder } from "../desktop/bridge";
 import { Group, ListEditor, Row, SecretField, Segmented, Select, Status, TextField, Toggle } from "./controls";
+import { SearchModelCard } from "./SearchModelCard";
 import type { SettingsMap } from "./useSettings";
 
 /**
@@ -73,29 +74,13 @@ export function AdvancedSection(props: {
 // ── Settings ────────────────────────────────────────────────────────────
 
 function AdvancedSettings({ s, save }: { s: SettingsMap; save: Save }) {
-  const embedding = s.embedding || {};
-  // "ollama" is the stored value for the built-in ONNX search model: memory.py uses
-  // OpenAI or the local model server for those two, and the private local model for anything else.
-  const embeddingOptions = [
-    { value: "ollama", label: "Private search model on this PC" },
-    { value: "lmstudio", label: "Local model server (LM Studio)" },
-    { value: "openai", label: "OpenAI (needs an API key)" },
-  ];
-  const embeddingProvider = String(embedding.provider || "openai");
   return (
     <>
       <Group title="Models" description="Rarely needed. Chat models are chosen in Models.">
         <Row label="LM Studio only" help="Every chat uses LM Studio, whatever a chat had selected.">
           <Toggle checked={asBool(s.lm_studio_only)} onChange={(v) => save({ lm_studio_only: v })} label="LM Studio only" />
         </Row>
-        <Row label="Memory search" help="Turns memories into vectors so they can be found by meaning. The private model is installed from Memory & documents; LM Studio needs an embedding model loaded.">
-          <Select value={embeddingProvider} options={embeddingOptions} onChange={(v) => save({ embedding: { provider: v } })} />
-        </Row>
-        {embeddingProvider === "openai" || embeddingProvider === "lmstudio" ? (
-          <Row label="Embedding model">
-            <TextField mono value={embedding.model || ""} placeholder={embeddingProvider === "openai" ? "text-embedding-3-small" : "text-embedding-nomic-embed-text-v1.5"} onCommit={(v) => save({ embedding: { model: v } })} />
-          </Row>
-        ) : null}
+        <Row label="Memory search" help="How memories, documents and tools are found by meaning is now under Memory & documents › Search by meaning." />
       </Group>
 
       <Group title="Traces" description="Every reply records where its time went (thinking, tools, waiting for you). See it under Activity › Timing. Traces hold timings, tool names and token counts, never message text.">
@@ -223,9 +208,6 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
   const [error, setError] = useState("");
   const [docs, setDocs] = useState<{ enabled: boolean; items: any[] } | null>(null);
   const [docBusy, setDocBusy] = useState(false);
-  const [embeddingStatus, setEmbeddingStatus] = useState<{ runtime_available: boolean; installed: boolean; size_bytes: number } | null>(null);
-  const [embeddingBusy, setEmbeddingBusy] = useState(false);
-  const [embeddingRestart, setEmbeddingRestart] = useState(false);
   const [obsidian, setObsidian] = useState<{ plan: any; status: string; busy: boolean }>({ plan: null, status: "", busy: false });
 
   const load = useCallback(async () => {
@@ -253,12 +235,6 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
       setDocs({ enabled: Boolean(data.enabled), items: Array.isArray(data.items) ? data.items : [] });
     } catch {
       setDocs({ enabled: false, items: [] });
-    }
-    try {
-      const response = await fetch(`${apiBase}/embeddings/local/status`);
-      if (response.ok) setEmbeddingStatus(await response.json());
-    } catch {
-      setEmbeddingStatus(null);
     }
   }, [apiBase, sessionId, projectId]);
 
@@ -303,22 +279,6 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setDocBusy(false);
-    }
-  };
-
-  const installEmbeddings = async () => {
-    setEmbeddingBusy(true);
-    setError("");
-    try {
-      const response = await fetch(`${apiBase}/embeddings/local/download`, { method: "POST" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(String(data?.detail || `Download failed (${response.status})`));
-      setEmbeddingStatus(data);
-      setEmbeddingRestart(Boolean(data.restart_required));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setEmbeddingBusy(false);
     }
   };
 
@@ -416,13 +376,7 @@ function MemoryPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap
 
       <MemoryTidy apiBase={apiBase} />
 
-      <Group title="Local search model" description="Optional ONNX model for private memory and document search. Model-server embeddings can be used instead.">
-        <Row label={<Status tone={embeddingStatus?.installed ? "ok" : "idle"}>{embeddingStatus?.installed ? "Installed" : "Not installed"}</Status>}
-          help={embeddingRestart ? "Restart EchoSpeak to use the newly installed model." : "About 90 MB; downloaded only when you choose Install."}>
-          {!embeddingStatus?.installed ? <button type="button" className="es-btn es-btn-sm" disabled={!embeddingStatus?.runtime_available || embeddingBusy}
-            onClick={() => void installEmbeddings()}>{embeddingBusy ? "Downloading…" : "Install"}</button> : null}
-        </Row>
-      </Group>
+      <SearchModelCard apiBase={apiBase} />
 
       <Group title="Documents" description="Files agents can search when answering. Turn document search on in Memory.">
         {docs && !docs.enabled ? <Row label={<span className="st-muted">Document search is off.</span>} /> : null}

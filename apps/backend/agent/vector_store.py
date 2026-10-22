@@ -82,6 +82,11 @@ class VectorStore:
         self.docs.extend(Document(t, dict(m or {})) for t, m in zip(texts, metadatas))
         return ids
 
+    def add_documents(self, documents: Iterable[Document], ids: Optional[list[str]] = None) -> list[str]:
+        """Add Document objects (text plus metadata). document_store.add_document uploads through this."""
+        documents = list(documents)
+        return self.add_texts([d.page_content for d in documents], metadatas=[dict(d.metadata or {}) for d in documents], ids=ids)
+
     def similarity_search_with_score(self, query: str, k: int = 4) -> list[tuple[Document, float]]:
         if not self.ids:
             return []

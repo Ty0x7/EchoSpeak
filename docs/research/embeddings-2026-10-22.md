@@ -1,6 +1,20 @@
 # Embeddings, rerankers and the linked models: what EchoSpeak should use, 2026-10-22
 
-**What this covers:** research on the models the owner linked, newer alternatives, and whether and how EchoSpeak should adopt them. Nothing here is implemented yet.
+**What this covers:** research on the models the owner linked, newer alternatives, and whether and how EchoSpeak should adopt them.
+
+**Status:** implemented in 11.10.1, following sections 5–7:
+- `agent/embeddings.py` gained a catalog with Fast and Better entries, `OnnxCrossEncoder`, `local_reranker` and `lmstudio_embedding_models`.
+- `AgentMemory.switch_embeddings` switches models without a restart.
+- `GET/POST /embeddings/search-model` serve the card.
+- `apps/web/src/settings/SearchModelCard.tsx` is the card.
+
+Verified on the real files on the owner's PC:
+- **Better (EmbeddingGemma q4):** an English and a Spanish note scored 0.51 and 0.48 for the same question; an unrelated note scored 0.03. A code question found the code (0.43).
+- **Reranker:** the relevant passage scored −3.2; the others scored below −10.
+
+The reranker is English only, so its switch is labelled "for English documents".
+
+Also found and fixed while testing: `VectorStore` had no `add_documents`, so document uploads failed since 11.8. The tests that would have caught it skipped wherever `onnx` isn't installed.
 
 **Visual report:** [artifacts/research/embeddings-2026-10-22.html](../../artifacts/research/embeddings-2026-10-22.html).
 

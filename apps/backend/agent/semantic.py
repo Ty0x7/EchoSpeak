@@ -68,7 +68,7 @@ def similarities(query: str, texts: list[str]) -> Optional[list[float]]:
 
 
 def reset() -> None:
-    """Tests: forget the model and cache."""
+    """Forget the model and cache: after a search-model switch, and in tests."""
     global _embedder, _unavailable
     with _lock:
         _embedder, _unavailable = None, False

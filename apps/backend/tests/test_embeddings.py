@@ -92,13 +92,13 @@ def test_memory_uses_the_local_model_and_rebuilds_the_index_when_the_size_change
     assert first.use_faiss
     first.add_memory_item("my name is ty", memory_type="profile")
     first._save_to_disk()
-    assert first.vector_store.index.d == 384
+    assert first.vector_store.dim == 384
 
     # A different embedding model (8 dimensions) must not search the old 384-d vectors.
     small = _stand_in_model(tmp_path / "small", dim=8)
     monkeypatch.setattr(emb, "local_model_dir", lambda: small)
     second = memory_mod.AgentMemory(str(store_dir))
-    assert second.vector_store.index.d == 8
+    assert second.vector_store.dim == 8
     hits = second.retrieve_relevant("my name", k=3)
     assert any("my name is ty" in doc.page_content for doc in hits)
 
@@ -125,11 +125,11 @@ def test_document_index_rebuilds_from_canonical_text_after_embedding_size_change
     meta = str(tmp_path / "documents.json")
     original = DocumentStore(FixedEmbeddings(8), index, meta)
     doc = original.add_document("notes.txt", "EchoSpeak launch is Friday", project_id="project-1")
-    assert original.vector_store.index.d == 8
+    assert original.vector_store.dim == 8
 
     reopened = DocumentStore(FixedEmbeddings(384), index, meta)
     assert reopened.index_health == "healthy"
-    assert reopened.vector_store.index.d == 384
+    assert reopened.vector_store.dim == 384
     assert reopened._docs[doc["id"]]["project_id"] == "project-1"
     hits = reopened.vector_store.similarity_search("launch", k=3)
     assert any("Friday" in hit.page_content for hit in hits)
