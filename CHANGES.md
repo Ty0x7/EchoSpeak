@@ -1,8 +1,19 @@
 # Changes
 
-## Unreleased
+## v11.10.1 — 2026-10-22
 
-Notes: [Live test, 2026-10-22](docs/research/live-test-2026-10-22.md), [Execution evidence, 2026-10-22](docs/research/harness-evidence-2026-10-22.md).
+User-facing notes: [EchoSpeak 11.10.1](docs/releases/v11.10.1.md). Technical notes: [Live test](docs/research/live-test-2026-10-22.md), [Execution evidence](docs/research/harness-evidence-2026-10-22.md), [Search models](docs/research/embeddings-2026-10-22.md).
+
+* **Search by meaning, one card.** Settings › Memory & documents › **Search by meaning** replaces the old provider select, model field and separate installer. The choices are:
+  * Keywords only;
+  * Fast · English (all-MiniLM-L6-v2, 90 MB);
+  * **Better · 100+ languages, longer text** (EmbeddingGemma-300M, 4-bit ONNX, about 220 MB, 2K-token inputs instead of 256);
+  * Use LM Studio, which lists LM Studio's embedding models and suggests Qwen3-Embedding-0.6B;
+  * Cloud · OpenAI, only when a key is set.
+
+  One button downloads what's needed (pinned revisions; Offline mode refuses), saves the choice, and re-indexes memories and documents right away, with no restart. Tool search picks up the new model too.
+* **Sharper results for English documents.** Document reranking now runs on a 24 MB ONNX cross-encoder (ms-marco-MiniLM-L6-v2, 8-bit) on the runtime the app already ships. Before, it needed PyTorch, which the installed app doesn't include, so it could never turn on. It reads English, and the switch says so.
+* **Fix: uploading a document failed.** Uploading with document search on called a method EchoSpeak's own vector store lost when LangChain was removed in 11.8. Uploads work again. The tests that would have caught it skipped on machines without the `onnx` package; the search tests now skip only the parts that need it, and a new regression test runs everywhere.
 
 * **Execution evidence.** Every tool call now ends with one recorded outcome, set where it's decided: ran, failed, no visible effect, refused, denied, held or skipped. It also records what the harness observed: files on disk after a write or delete, a command's exit code and where it ran, the screen change after a click.
   * The refusal breaker, the "I've done it" checks, learning's grading, traces and tool-run records all read this record, instead of matching phrases in the result text.

@@ -379,6 +379,36 @@ Copy-and-paste tests for the real app, grouped by feature. They're written to fi
 - **What to inspect:** Learning shows no lesson about short answers.
 - **Failure indicators:** a "lesson" made from a stated preference.
 
+**11.3 Switch to the Better search model** [local ok]
+- **Test prompt:** first `Remember that my dog Biscuit eats salmon kibble.` Then switch, then in a new chat: `¿Qué come mi perro?`
+- **Setup:** Settings › Memory & documents › Search by meaning › **Better** › Download and switch.
+- **Expected:**
+  - one download (about 220 MB);
+  - then "Done. Re-indexed N memories…" with no restart;
+  - the status reads "Using Better · 100+ languages, longer text";
+  - the Spanish question recalls the English memory.
+- **What to inspect:** the card's status line, and the reply.
+- **Failure indicators:** a restart needed, the memory not found, or the card stuck on "Downloading".
+
+**11.4 LM Studio embeddings** [local ok]
+- **Test prompt:** `What do you know about me?`
+- **Setup:** load an embedding model in LM Studio (for example Qwen3-Embedding-0.6B). Pick **Use LM Studio**, choose it from the list, then Switch.
+- **Expected:** the list shows LM Studio's embedding models with "(loaded)", and the status reads "Using LM Studio · …". Memories are still recalled.
+- **What to inspect:** the status line.
+- **Failure indicators:** chat models in the list, or recall breaking.
+
+**11.5 Documents and sharper results** [local ok]
+- **Test prompt:** upload a PDF or text file, then ask a question only it answers.
+- **Setup:** document search on, plus **Sharper results for English documents** (24 MB).
+- **Expected:** the upload succeeds (it failed before 11.10.1), and the answer cites the document.
+- **What to inspect:** the Documents list and the reply's sources.
+- **Failure indicators:** an upload error, or an answer that ignores the document.
+
+**11.6 Offline mode refuses downloads**
+- **Setup:** Privacy › Offline, then try Download and switch to a model that isn't downloaded.
+- **Expected:** a plain message that Offline mode blocks downloads. The setting stays as it was.
+- **Failure indicators:** a download in Offline mode, or the choice changing anyway.
+
 ---
 
 ## 12. Artifacts, documentation and visuals

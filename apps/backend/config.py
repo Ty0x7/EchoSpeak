@@ -866,6 +866,8 @@ class Config:
         self.doc_final_k = int(os.getenv("DOC_FINAL_K", "5") or 5)
         self.doc_candidate_k = int(os.getenv("DOC_CANDIDATE_K", "0") or 0)
         self.doc_rrf_k = int(os.getenv("DOC_RRF_K", "60") or 60)
+        # Settings › Search by meaning: the local ONNX model when no provider is used ("off", "fast", "better").
+        self.embedding_local_model = os.getenv("EMBEDDING_LOCAL_MODEL", "fast").strip().lower() or "fast"
         self.doc_rerank_enabled = os.getenv("DOC_RERANK_ENABLED", "false").lower() == "true"
         self.doc_rerank_model = os.getenv(
             "DOC_RERANK_MODEL",
@@ -1419,6 +1421,7 @@ class Config:
             "doc_final_k",
             "doc_candidate_k",
             "doc_rrf_k",
+            "embedding_local_model",
             "doc_rerank_enabled",
             "doc_rerank_model",
             "doc_rerank_k",

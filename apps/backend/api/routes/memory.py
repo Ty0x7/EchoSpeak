@@ -38,6 +38,126 @@ def install_local_embedding_model():
     return {**local_status(), "restart_required": True}
 
 
+# ── Settings › Memory & documents › Search by meaning ──────────────────
+SEARCH_CHOICES = ("off", "fast", "better", "lmstudio", "openai")
+
+
+def _search_choice() -> str:
+    """What the card shows as selected, from the settings memory actually follows."""
+    from agent.embeddings import chosen_key
+
+    provider = str(getattr(getattr(config.embedding, "provider", None), "value", config.embedding.provider) or "")
+    if provider == "lmstudio":
+        return "lmstudio"
+    if provider == "openai" and str(config.openai.api_key or "").strip():
+        return "openai"
+    return chosen_key()  # any other provider value means the local model (memory.py)
+
+
+def search_model_status() -> Dict[str, Any]:
+    from agent.embeddings import lmstudio_embedding_models, local_status
+    from agent.memory import get_agent_memory
+
+    try:
+        health = dict(get_agent_memory().embedding_health)
+    except Exception:
+        health = {}
+    return {
+        **local_status(),
+        "selected": _search_choice(),
+        "lmstudio_model": str(config.embedding.model or "") if _search_choice() == "lmstudio" else "",
+        "lmstudio_models": lmstudio_embedding_models(str(getattr(config.local, "base_url", "") or "")),
+        "openai_ready": bool(str(config.openai.api_key or "").strip()),
+        "active": health,
+    }
+
+
+@router.get("/embeddings/search-model")
+def get_search_model():
+    """Everything the Search by meaning card shows: the choice, local models, LM Studio's models, what's active."""
+    return search_model_status()
+
+
+class SearchModelRequest(BaseModel):
+    choice: str
+    model: str = ""  # LM Studio's embedding model id, for choice=lmstudio
+    rerank: Optional[bool] = None
+
+
+@router.post("/embeddings/search-model")
+def set_search_model(request: SearchModelRequest):
+    """Switch search by meaning: download what's needed, save the choice, re-index memory and documents now.
+
+    The owner's explicit action (the Download and switch button); downloads go through the privacy gate,
+    so Offline mode refuses them. No restart: memory and the document index are rebuilt in the new vectors.
+    """
+    from agent import semantic
+    from agent.embeddings import CATALOG, RERANKER, download_model, local_runtime_available
+    from agent.memory import get_agent_memory
+    from agent.privacy import PrivacyBlocked
+    from api.routes.settings import _apply_settings_patch
+
+    choice = str(request.choice or "").strip().lower()
+    if choice not in SEARCH_CHOICES:
+        raise HTTPException(status_code=400, detail=f"choice must be one of {', '.join(SEARCH_CHOICES)}")
+    if choice == "lmstudio" and not request.model.strip():
+        raise HTTPException(status_code=400, detail="Pick the LM Studio embedding model to use")
+    if choice == "openai" and not str(config.openai.api_key or "").strip():
+        raise HTTPException(status_code=400, detail="Add an OpenAI API key first (Settings › Models)")
+    try:
+        if choice in CATALOG or request.rerank:
+            if not local_runtime_available():
+                raise HTTPException(status_code=503, detail="The local search runtime (onnxruntime) isn't installed")
+            if choice in CATALOG:
+                download_model(CATALOG[choice])
+            if request.rerank:
+                download_model(RERANKER)
+    except PrivacyBlocked as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning("Search model download failed: {}", exc)
+        raise HTTPException(status_code=503, detail="Could not download the search model. Check your connection and try again.") from exc
+
+    # "ollama" is the stored provider value memory.py treats as "the local model" (see AdvancedSection.tsx).
+    provider = {"lmstudio": "lmstudio", "openai": "openai"}.get(choice, "ollama")
+    embedding: Dict[str, Any] = {"provider": provider}
+    if choice == "lmstudio":
+        embedding["model"] = request.model.strip()
+    elif choice == "openai":
+        embedding["model"] = "text-embedding-3-small"
+    patch: Dict[str, Any] = {"embedding": embedding}
+    if choice in CATALOG or choice == "off":
+        patch["embedding_local_model"] = choice
+    if request.rerank is not None:
+        patch["doc_rerank_enabled"] = bool(request.rerank)
+    _apply_settings_patch(patch)
+
+    semantic.reset()  # tool search picks up the new model on its next call
+    memory = get_agent_memory()
+    switched = memory.switch_embeddings()
+    documents: Dict[str, Any] = {"rebuilt": False}
+    if bool(getattr(config, "document_rag_enabled", False)) and memory.embeddings is not None:
+        try:
+            from agent.document_store import DocumentStore
+
+            store = DocumentStore(memory.embeddings, str(getattr(config, "docs_index_path", "")),
+                                  str(getattr(config, "docs_meta_path", "")))
+            # Always rebuild: two models can share a vector size (768) without sharing a meaning.
+            documents = store.rebuild_index()
+        except Exception as exc:
+            logger.warning("Document index rebuild after a search-model switch failed: {}", exc)
+            documents = {"rebuilt": False, "reason": str(exc)}
+    return {
+        **search_model_status(),
+        "reindexed": {"memories": int(switched.get("indexed") or 0), "documents": int(documents.get("documents") or 0),
+                      "chunks": int(documents.get("chunks") or 0)},
+        "note": "" if memory.embeddings is not None or choice == "off"
+        else f"Search by meaning isn't available: {memory.embedding_health.get('detail')}. Keyword search is used.",
+    }
+
+
 def get_document_store():
     agent = get_agent()
     if not bool(getattr(config, "document_rag_enabled", False)):

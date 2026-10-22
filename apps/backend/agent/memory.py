@@ -92,31 +92,17 @@ class AgentMemory:
             }
             self.embeddings = None
 
-    def __init__(self, memory_path: Optional[str] = None):
-        self.memory_root = Path(memory_path or str(config.memory_path))
-        self.memory_path = str(self.memory_root)
-        self._profile: Dict[str, Any] = {}
-        self.use_faiss = True
-        self.file_memory_enabled = bool(getattr(config, "file_memory_enabled", False))
-        self.file_memory_dir = Path(str(getattr(config, "file_memory_dir", "")).strip() or str(Path(self.memory_path).parent))
-        self.file_memory_log_conversations = bool(getattr(config, "file_memory_log_conversations", True))
-        self.file_memory_max_chars = int(getattr(config, "file_memory_max_chars", 2000) or 2000)
-        self.partition_enabled = bool(getattr(config, "memory_partition_enabled", False))
-        self._vector_stores: Dict[str, VectorStore] = {}
-        self.embedding_health: Dict[str, Any] = {
-            "available": False,
-            "provider": "none",
-            "model": "",
-            "detail": "Embeddings have not initialized",
-        }
+    def _select_embeddings(self) -> None:
+        """Pick the embedder from settings: OpenAI or the local model server, else the chosen local ONNX model.
 
+        Sets ``use_faiss`` off (keyword recall from records) when none is usable.
+        """
+        self.embeddings = None
+        self.use_faiss = True
         api_key = config.openai.api_key if config.openai.api_key else os.getenv("OPENAI_API_KEY", "")
         embedding_provider = getattr(getattr(config, "embedding", None), "provider", None)
         embedding_model = getattr(getattr(config, "embedding", None), "model", None) or "text-embedding-3-small"
 
-        self.embeddings = None
-        self._embedding_dim = 0
-        self._index_needs_rebuild = False
         if embedding_provider in {ModelProvider.OPENAI, ModelProvider.LM_STUDIO}:
             if embedding_provider == ModelProvider.OPENAI and not api_key:
                 # A missing credential is a readiness state, not a failed
@@ -172,6 +158,49 @@ class AgentMemory:
         if self.embeddings is None:
             self.use_faiss = False
             self.simple_memory = []
+
+    @_synchronized_records()
+    def switch_embeddings(self) -> Dict[str, Any]:
+        """Apply a new search-by-meaning choice now: pick the embedder again and rebuild the index.
+
+        records.json is the source of truth, so the index is rebuilt from it in the new model's vectors
+        (Settings › Memory & documents › Search by meaning). No restart needed.
+        """
+        previous = dict(self.embedding_health)
+        self._select_embeddings()
+        self._vector_stores = {}
+        self.vector_store = None
+        if not self.use_faiss or self.embeddings is None:
+            self._save_records()
+            return {"ok": True, "indexed": 0, "faiss": False, "embedding": dict(self.embedding_health), "previous": previous}
+        if self.partition_enabled:
+            # Partitioned indexes are created per scope on first use, in the new model's vectors.
+            return {"ok": True, "indexed": 0, "faiss": True, "embedding": dict(self.embedding_health), "previous": previous}
+        result = self.rebuild_faiss_from_canonical()
+        return {**result, "embedding": dict(self.embedding_health), "previous": previous}
+
+    def __init__(self, memory_path: Optional[str] = None):
+        self.memory_root = Path(memory_path or str(config.memory_path))
+        self.memory_path = str(self.memory_root)
+        self._profile: Dict[str, Any] = {}
+        self.use_faiss = True
+        self.file_memory_enabled = bool(getattr(config, "file_memory_enabled", False))
+        self.file_memory_dir = Path(str(getattr(config, "file_memory_dir", "")).strip() or str(Path(self.memory_path).parent))
+        self.file_memory_log_conversations = bool(getattr(config, "file_memory_log_conversations", True))
+        self.file_memory_max_chars = int(getattr(config, "file_memory_max_chars", 2000) or 2000)
+        self.partition_enabled = bool(getattr(config, "memory_partition_enabled", False))
+        self._vector_stores: Dict[str, VectorStore] = {}
+        self.embedding_health: Dict[str, Any] = {
+            "available": False,
+            "provider": "none",
+            "model": "",
+            "detail": "Embeddings have not initialized",
+        }
+
+        self.embeddings = None
+        self._embedding_dim = 0
+        self._index_needs_rebuild = False
+        self._select_embeddings()
 
         if self.use_faiss and self.embeddings is not None:
             if self.partition_enabled:
