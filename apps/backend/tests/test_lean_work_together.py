@@ -29,6 +29,10 @@ def _permissions_on(monkeypatch):
 
     for name in ("enable_system_actions", "allow_file_write", "allow_terminal_commands"):
         monkeypatch.setattr(config, name, True)
+    # The fake project's file tools don't touch disk; the on-disk check has its own tests (test_execution_evidence.py).
+    from agent.lean import evidence
+
+    monkeypatch.setattr(evidence, "_resolve", lambda raw: None)
 
 
 class Project:

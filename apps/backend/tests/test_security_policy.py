@@ -112,13 +112,13 @@ def test_approval_arguments_are_exact_and_oversized_calls_are_refused():
         if event["type"] == "approval_request":
             get_approval_broker().resolve(event["id"], "deny")
     turn._emit = on
-    allowed, _ = turn._approve(call, "terminal", args, 1)
+    allowed, _, _ = turn._approve(call, "terminal", args, 1)
     assert not allowed
     approval = next(event for event in events if event["type"] == "approval_request")
     assert approval["args"] == args and approval["args"]["command"].endswith("FINAL_MARKER")
     events.clear()
     oversized = {"command": "x" * 65537}
-    allowed, reason = turn._approve(call, "terminal", oversized, 1)
+    allowed, reason, _ = turn._approve(call, "terminal", oversized, 1)
     assert not allowed and "64 KiB" in reason and not events
 
 

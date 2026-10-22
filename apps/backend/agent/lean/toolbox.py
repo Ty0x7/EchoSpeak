@@ -191,6 +191,14 @@ class ToolResult:
     meta: dict[str, Any] = field(default_factory=dict)
     # Scoped IDs only. The provider loads actual pixels immediately before inference.
     observations: list[dict[str, str]] = field(default_factory=list)
+    # What happened to the call (agent/lean/evidence.py OUTCOMES), set where it is known.
+    outcome: str = ""
+    # What the harness observed it change: files on disk, a process's exit, the screen.
+    effects: list[dict[str, Any]] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.outcome:
+            self.outcome = "ok" if self.ok else "failed"
 
 
 @dataclass
@@ -613,10 +621,41 @@ class Toolbox:
         if blocked:
             return ToolResult(False, f"Blocked by the user's privacy setting: {blocked} This is intended, not a fault: "
                               "don't retry it or look for another way around it. Continue without it, or tell the "
-                              "user what it would need.", 0)
+                              "user what it would need.", 0, outcome="refused")
         # Connections the tool makes count as its component's (agent/privacy.py backstop).
         with privacy.scope(privacy.tool_component(name, args)):
-            return self._run(name, args)
+            result = self._run(name, args)
+        return self._observe(name, args, result)
+
+    def _unavailable(self, name: str) -> ToolResult:
+        """A call to a tool this turn doesn't have: the owner's setting (refused) or a name that doesn't exist (skipped)."""
+        from agent.lean import capabilities
+
+        message = capabilities.unavailable_message(name, self)
+        return ToolResult(False, message, 0, outcome="skipped" if "unknown tool" in message[:40] else "refused")
+
+    def _observe(self, name: str, args: dict[str, Any], result: ToolResult) -> ToolResult:
+        """Record what the call actually changed (agent/lean/evidence.py), and catch success that isn't there."""
+        from agent.lean import evidence
+
+        if not (result.ok or name in evidence.TERMINAL_TOOLS) or result.outcome != ("ok" if result.ok else "failed"):
+            return result
+        from agent.tools import _tool_execution_context
+
+        token = _tool_execution_context.set(self.tool_context())
+        try:
+            effects, problem = evidence.observe(name, args, result.output, result.meta)
+        except Exception:
+            logger.debug("Observing {}'s effects failed", name, exc_info=True)
+            return result
+        finally:
+            _tool_execution_context.reset(token)
+        result.effects.extend(effects)
+        if problem:
+            result.ok, result.outcome = False, "failed"
+            result.output = (result.output or "").rstrip() + f"\n\n[EchoSpeak: {problem}. Don't report it as done.]"
+        result.outcome = evidence.outcome_for(result.ok, result.outcome, result.effects)
+        return result
 
     def _run(self, name: str, args: dict[str, Any]) -> ToolResult:
         started = time.perf_counter()
@@ -625,9 +664,7 @@ class Toolbox:
             self.schema_version += 1
         if name in self.native and not native_permitted(name):
             # Switched off after this turn started.
-            from agent.lean import capabilities
-
-            return ToolResult(False, capabilities.unavailable_message(name, self), 0)
+            return self._unavailable(name)
         if name in self.native:
             from agent.tools import _tool_execution_context
 
@@ -708,9 +745,7 @@ class Toolbox:
         started = time.perf_counter()
         entry = self.entries.get(name)
         if entry is None:
-            from agent.lean import capabilities
-
-            return ToolResult(False, capabilities.unavailable_message(name, self), 0)
+            return self._unavailable(name)
 
         from agent.tools import _tool_execution_context, strip_echo_file_wrapper
 

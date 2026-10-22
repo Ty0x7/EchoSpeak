@@ -31,10 +31,10 @@ from agent.lean import policy, settings
 from agent.lean import quarantine, tool_outputs, tracing
 from agent.lean import approvals, steering
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
-from agent.lean import ask, outbound
+from agent.lean import ask, evidence, outbound
 from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
                             is_promise_without_action, promise_nudge, unbacked_claim, unbacked_file_claim,
-                            written_names)
+                            unbacked_screen_claim, written_names)
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
 from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
@@ -147,6 +147,9 @@ class LeanTurn:
         self.succeeded: set[str] = set()
         # Names of files successful tools wrote (or commands named): what "I've written mics.md" must match.
         self._written: set[str] = set()
+        # Each call's outcome (agent/lean/evidence.py), and how much the screen changed after the latest action.
+        self._outcomes_by_call: dict[str, str] = {}
+        self._screen_changed: Optional[float] = None
         # Code files changed since the last terminal run (the check step before 'done').
         self._unchecked: dict[str, bool] = {}
         self._on_seal = on_seal
@@ -364,7 +367,8 @@ class LeanTurn:
                             self.emit({"type": "promise_nudge", "step": step, "count": promise_nudges})
                             continue
                         stop_reason = "promise_unfulfilled"
-                    claim = ((unbacked_claim(content, self.succeeded) or unbacked_file_claim(content, self._written))
+                    claim = ((unbacked_claim(content, self.succeeded) or unbacked_file_claim(content, self._written)
+                              or unbacked_screen_claim(content, self._screen_changed))
                              if self.promise_guard and self.toolbox.names else "")
                     if claim and not stop_reason:
                         # "I've saved it" with nothing saved: ask once for the tool call or the truth.
@@ -629,7 +633,7 @@ class LeanTurn:
                     visual_results[call.id] = result.observations if result.ok else []
                     self._note_source(name, args, result.ok)
                     self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets,
-                                        meta=result.meta)
+                                        meta=result.meta, outcome=result.outcome, effects=result.effects)
         else:
             sequential = prepared
 
@@ -640,6 +644,7 @@ class LeanTurn:
                 continue
             if self.cancel.is_set():
                 results[call.id] = (False, "Cancelled by the user before this tool ran.")
+                self._outcomes_by_call[call.id] = "skipped"
                 continue
             failed_before = any(not results.get(cid, (True, ""))[0] for cid in computer_calls)
             if name in computer:
@@ -648,7 +653,7 @@ class LeanTurn:
                 # The rest of a batch planned against a screen that didn't behave as expected.
                 output = "Not executed: an earlier computer action in this turn failed."
                 results[call.id] = (False, output)
-                self._tool_finished(call, name, args, step, False, output, 0)
+                self._tool_finished(call, name, args, step, False, output, 0, outcome="skipped")
                 continue
             self._tool_started(call, name, args, step)
             if problem == "policy":
@@ -656,14 +661,14 @@ class LeanTurn:
                           "Don't retry it; continue without it or tell the user what was blocked.")
                 self._refused[self._sig(name, args)] = "blocked by EchoSpeak's safety policy"
                 results[call.id] = (False, output)
-                self._tool_finished(call, name, args, step, False, output, 0)
+                self._tool_finished(call, name, args, step, False, output, 0, outcome="refused")
                 continue
             if problem == "refused":
                 output = (f"Not run: this exact {name} call was already {self._refused[self._sig(name, args)]} "
                           "earlier in this request. Don't ask again or work around it; continue without it or "
                           "tell the user.")
                 results[call.id] = (False, output)
-                self._tool_finished(call, name, args, step, False, output, 0)
+                self._tool_finished(call, name, args, step, False, output, 0, outcome="refused")
                 continue
             if problem == "repeat":
                 output = (
@@ -671,17 +676,17 @@ class LeanTurn:
                     "and the result is above. Use that result, change the arguments, or answer the user."
                 )
                 results[call.id] = (False, output)
-                self._tool_finished(call, name, args, step, False, output, 0)
+                self._tool_finished(call, name, args, step, False, output, 0, outcome="skipped")
                 continue
             if problem:
                 output = f"Error: {problem}. Call {name} again with a JSON object matching its parameters{self._param_hint(name)}."
                 results[call.id] = (False, output)
-                self._tool_finished(call, name, args, step, False, output, 0)
+                self._tool_finished(call, name, args, step, False, output, 0, outcome="skipped")
                 continue
             if name == ask.ASK_USER:
                 ok, output = self._ask_user(call, args, step)
                 results[call.id] = (ok, output)
-                self._tool_finished(call, name, args, step, ok, output, 0)
+                self._tool_finished(call, name, args, step, ok, output, 0, outcome="ok" if ok else "skipped")
                 continue
             handoff = self.toolbox.handoff(name)
             if handoff is not None:
@@ -697,27 +702,27 @@ class LeanTurn:
                 # Open the continuation only now, so it sorts after the teammate's reply.
                 self._start_message(continues=True, **self.meta)
                 continue
-            allowed, denial = self._approve(call, name, args, step)
+            allowed, denial, denied_as = self._approve(call, name, args, step)
             if not allowed:
                 if denial.startswith("The user denied"):
                     self._refused[self._sig(name, args)] = "denied by the user"
                 elif denial.startswith("Not run:") and "autonomous mode" in denial:
                     self._refused[self._sig(name, args)] = "held for the owner's approval"
                 results[call.id] = (False, denial)
-                self._tool_finished(call, name, args, step, False, denial, 0)
+                self._tool_finished(call, name, args, step, False, denial, 0, outcome=denied_as)
                 continue
             if outbound.is_outbound(name, self.toolbox.entry(name)):
                 # Per-channel send budget (agent/lean/outbound.py): no spamming the user's contacts.
                 limited = outbound.take(outbound.channel_of(name))
                 if limited:
                     results[call.id] = (False, limited)
-                    self._tool_finished(call, name, args, step, False, limited, 0)
+                    self._tool_finished(call, name, args, step, False, limited, 0, outcome="refused")
                     continue
             result = self._run_tool(call, name, args, step)
             results[call.id] = (result.ok, result.output)
             visual_results[call.id] = result.observations if result.ok else []
             self._tool_finished(call, name, args, step, result.ok, result.output, result.duration_ms, result.widgets,
-                                meta=result.meta)
+                                meta=result.meta, outcome=result.outcome, effects=result.effects)
             self._note_source(name, args, result.ok)
 
         limit = 14000
@@ -741,7 +746,9 @@ class LeanTurn:
             text = self._shorten(name, output, limit, untrusted)
             if untrusted:
                 text = policy.wrap_untrusted(name, text)  # data, not instructions
-            refused = not ok and is_refusal(output)
+            outcome = self._outcomes_by_call.get(call.id) or ("ok" if ok else "failed")
+            # The outcome says it; text matching remains for refusals a tool reports in its own words.
+            refused = outcome in evidence.REFUSED or (outcome == "failed" and is_refusal(output))
             if refused:
                 self._refusals += 1
                 self._refusal_streak += 1
@@ -860,7 +867,8 @@ class LeanTurn:
         self.timeline.append({"kind": "note", "step": step, "text": text, "at": time.time()})
         self.emit({"type": "auto_approved", "step": step, "note": text})
 
-    def _approve(self, call: Any, name: str, args: dict[str, Any], step: int) -> tuple[bool, str]:
+    def _approve(self, call: Any, name: str, args: dict[str, Any], step: int) -> tuple[bool, str, str]:
+        """(allowed, the result text when not, and its outcome: refused, denied, held or skipped)."""
         entry = self.toolbox.entry(name)
         needs, reason = tool_needs_approval(entry, name, args)
         broker = get_approval_broker()
@@ -870,12 +878,12 @@ class LeanTurn:
         if policy_reason and grantable and broker.granted(self.session_id, policy.grant_name(name)):
             policy.audit(policy.Decision("allow", policy_reason, "screen_control"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome="allowed for this chat")
-            return True, ""
+            return True, "", ""
         if policy_reason:
             # Rule of Two: always ask, even with "always allow" grants or approvals off.
             needs, reason = True, policy_reason
         elif not needs or broker.granted(self.session_id, policy.grant_name(name)):
-            return True, ""
+            return True, "", ""
         scope = approvals.scope_for(name, args, reason, self._policy_rules.get(call.id, ""))
         # Grants were made on an approval card in the app and cover chats there. Channels
         # (Discord, Telegram) and unattended routines keep refusing below: a grant must not
@@ -885,14 +893,14 @@ class LeanTurn:
             policy.audit(policy.Decision("allow", reason, "always_allowed"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome=f"always allowed: {scope.key}")
             self._auto_note(step, f"Allowed by your Always allow: {scope.label}")
-            return True, ""
+            return True, "", ""
         if settings.approval_mode() == "autonomous" and self.interactive:
             # Only chats in the app: Discord, routines and other sources keep refusing below.
             if scope is not None and scope.autonomous:
                 policy.audit(policy.Decision("allow", reason, "autonomous"), name=name, args=args,
                              session_id=self.session_id, agent=self.persona.id, outcome=f"autonomous: {scope.key}")
                 self._auto_note(step, f"Allowed automatically (autonomous mode): {scope.label}")
-                return True, ""
+                return True, "", ""
             # Not something autonomy may approve: held for the owner instead of stalling the run.
             summary = describe_call(name, args)
             self.held.append({"tool": name, "summary": summary, "reason": reason})
@@ -904,16 +912,16 @@ class LeanTurn:
                          session_id=self.session_id, agent=self.persona.id, outcome="held for the owner")
             return False, (f"Not run: {name} needs the owner's approval ({reason}), and autonomous mode doesn't approve "
                            "this kind of action. Don't retry it or work around it. Continue with the rest of the task, "
-                           "and at the end tell the user exactly what is waiting for their approval.")
+                           "and at the end tell the user exactly what is waiting for their approval."), "held"
         if not self.interactive:
             return False, (
                 f"{name} needs the user's approval, which can only be given in the EchoSpeak app. "
                 "It was not run. Tell the user to ask for it from the app."
-            )
+            ), "refused"
         # The approval card promises exact arguments. Refuse calls too large to
         # present intact instead of approving a truncated command or hidden key.
         if len(json.dumps(args, ensure_ascii=False, default=str).encode("utf-8")) > 65536:
-            return False, f"{name} has more than 64 KiB of arguments and cannot be shown safely for approval."
+            return False, f"{name} has more than 64 KiB of arguments and cannot be shown safely for approval.", "skipped"
         approval = broker.open(
             session_id=self.session_id,
             request_id=self.request_id,
@@ -939,12 +947,12 @@ class LeanTurn:
                 item["decision"] = decision
         self.emit({"type": "approval_resolved", "id": approval.id, "decision": decision, "tool_call_id": call.id})
         if decision == "allow":
-            return True, ""
+            return True, "", ""
         if decision == "timeout":
-            return False, f"The user did not respond to the approval request for {name}, so it was not run."
+            return False, f"The user did not respond to the approval request for {name}, so it was not run.", "denied"
         if decision == "cancelled":
-            return False, "The user stopped this request."
-        return False, f"The user denied permission to run {name}. Do not retry it; continue without it or explain what is blocked."
+            return False, "The user stopped this request.", "skipped"
+        return False, f"The user denied permission to run {name}. Do not retry it; continue without it or explain what is blocked.", "denied"
 
     def _ask_user(self, call: Any, args: dict[str, Any], step: int) -> tuple[bool, str]:
         """Show a question card and wait for the user's answer (agent/lean/ask.py)."""
@@ -995,7 +1003,8 @@ class LeanTurn:
         with self._span("tool.run", step=step, tool=name) as span, \
                 progress.reporting(emit, cancel=self.cancel, emit_state=emit_state, spans=self._span):
             result = self.toolbox.run(name, args)
-            span.set(ok=bool(result.ok), output_chars=len(result.output or ""))
+            span.set(ok=bool(result.ok), output_chars=len(result.output or ""), outcome=result.outcome,
+                     effects=[e.get("kind") for e in result.effects][:8])
             if not result.ok:
                 span.status = "error"
             return result
@@ -1030,9 +1039,14 @@ class LeanTurn:
                 logger.debug("Lean tool run persistence failed", exc_info=True)
 
     def _tool_finished(self, call: Any, name: str, args: dict[str, Any], step: int, ok: bool, output: str, duration_ms: int,
-                       widgets: Optional[list[dict[str, Any]]] = None, meta: Optional[dict[str, Any]] = None) -> None:
+                       widgets: Optional[list[dict[str, Any]]] = None, meta: Optional[dict[str, Any]] = None,
+                       outcome: str = "", effects: Optional[list[dict[str, Any]]] = None) -> None:
         from agent.lean import steps
 
+        # Execution evidence (agent/lean/evidence.py): the outcome is set where it's known, not read back from text.
+        outcome = outcome or ("ok" if ok else "failed")
+        effects = list(effects or [])
+        self._outcomes_by_call[call.id] = outcome
         facts = {**steps.widget_counts(widgets), **(meta or {})}
         if name in CHECK_TOOLS:
             self._unchecked.clear()  # something ran after the changes, pass or fail
@@ -1043,23 +1057,35 @@ class LeanTurn:
         label = describe_call(name, args)
         done = steps.done_label(label) if ok else label
         summary = steps.summarize(name, args, ok, output, facts)
+        if outcome == "no_effect":
+            summary = "No visible change on screen"  # the row says what the screen showed, whatever the reply claims
         preview = (output or "").strip()
         if len(preview) > 1600:
             preview = preview[:1600] + "…"
         cards = list(widgets or []) if ok else []
         self._outcomes.append(bool(ok))
-        if ok:
+        for effect in effects:
+            if effect.get("kind") == "screen":
+                self._screen_changed = float(effect.get("changed", 1.0))
+        if outcome == "ok":
+            # A call that ran but changed nothing visible (no_effect) backs no "it worked".
             self.succeeded.add(name)
-            self._written |= written_names(name, args)
+            observed = evidence.written_files(effects)
+            # Files seen on disk count; a path the harness couldn't resolve falls back to the call's own arguments.
+            self._written |= observed or written_names(name, args)
         for item in self.timeline:
             if item.get("kind") == "tool" and item.get("id") == call.id:
                 item.update({"status": "done" if ok else "failed", "output": preview, "duration_ms": duration_ms,
-                             "done_label": done, "summary": summary, "meta": facts})
+                             "done_label": done, "summary": summary, "meta": facts, "outcome": outcome})
+                if effects:
+                    item["effects"] = effects[:8]
                 item.pop("detail", None)
                 if cards:
                     item["widgets"] = cards
-        event = {"type": "tool_end", "step": step, "id": call.id, "name": name, "ok": ok,
+        event = {"type": "tool_end", "step": step, "id": call.id, "name": name, "ok": ok, "outcome": outcome,
                  "output": preview, "duration_ms": duration_ms, "done_label": done, "summary": summary, "meta": facts}
+        if effects:
+            event["effects"] = effects[:8]
         if cards:
             event["widgets"] = cards
         self.emit(event)
@@ -1073,6 +1099,9 @@ class LeanTurn:
                     "output": (output or "")[:8000],
                     "error_message": "" if ok else (output or "")[:1000],
                     "tool_name": name,
+                    # The tool-run record's existing evidence fields carry the same outcome and effects.
+                    "execution_status": outcome,
+                    **({"verification": {"effects": effects[:8]}} if effects else {}),
                 })
             except Exception:
                 logger.debug("Lean tool run persistence failed", exc_info=True)

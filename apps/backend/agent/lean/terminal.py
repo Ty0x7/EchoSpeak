@@ -133,7 +133,14 @@ def approval_for(args: dict[str, Any]) -> tuple[bool, str]:
 
     command = str(args.get("command") or args.get("cmd") or "")
     if resolved_mode() == "host":
-        return (True, "this command can change or delete things") if dangerous_command(command) else (False, "")
+        if dangerous_command(command):
+            return True, "this command can change or delete things"
+        if execution_mode() == "auto":
+            # Auto fell back because Docker isn't running. Running on this PC was never the owner's choice,
+            # so it gets the same boundary as where="host": ask, or the "Always allow" for this PC, or
+            # autonomous mode. A denylist can't judge `python cleanup.py`; the sandbox could have contained it.
+            return True, "the sandbox isn't running, so this runs directly on your PC, outside the sandbox"
+        return False, ""
     if str(args.get("where") or "").lower() == "host":
         return True, "this runs directly on your PC, outside the sandbox"
     if args.get("network") and network_policy() == "ask":
@@ -743,8 +750,10 @@ class Terminal:
     def describe(self) -> str:
         if self.mode == "host":
             shell = "PowerShell 7" if shutil.which("pwsh") else "Windows PowerShell" if os.name == "nt" else "bash"
+            fallback = (" The Docker sandbox isn't running, so commands run here instead and each asks the user "
+                        "first (unless they chose Always allow)." if execution_mode() == "auto" else "")
             return (f"terminal runs {shell} directly on this PC (pipes, $variables and ; chaining work; "
-                    "use `;` not `&&` in Windows PowerShell).")
+                    "use `;` not `&&` in Windows PowerShell)." + fallback)
         plan = mount_plan(self.project_root)
         mounts = ", ".join(f"{root} -> {target}" for root, target in plan) or "none"
         policy = network_policy()

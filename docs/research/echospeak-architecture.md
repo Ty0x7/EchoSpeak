@@ -76,13 +76,22 @@ The sections run from stable to volatile, so the provider can cache the prefix:
   5. redacts secrets;
   6. collects cards (`widgets`), live progress (`progress.report`) and live state (`progress.report_state`, used by the Workers card).
 - **Unavailable tools.** A call to a tool that's off returns the reason and the setting that turns it on, from the same source as the prompt section.
+- **Execution evidence** (`agent/lean/evidence.py`, since 2026-10-22). Every call ends with an `outcome`, set where it's decided:
+  - `ok`, `failed` or `no_effect` when it ran;
+  - `refused`, `denied`, `held` or `skipped` when it didn't.
+
+  It also records the `effects` the harness observed: a file stat after a write, copy, move or delete; the terminal's exit header; the screen change after a computer action. A reported write that isn't on disk becomes `failed`.
+  - **Readers:** the refusal breaker, the claim checks, learning's tool rows, traces, tool-run records (`execution_status`, `verification`) and the step summary.
+  - **Old records:** the earlier phrase matching remains only as their fallback.
+
+  See [harness-evidence-2026-10-22.md](harness-evidence-2026-10-22.md).
 
 ## 4. Permissions, policy and approvals
 
 These checks run in this order, all in code:
 
 1. **Permission switches** (Settings › Permissions). A switched-off ability has no tools. Autonomy and grants can't add tools back.
-2. **Blocked apps** (`agent/app_launcher.blocked_by`). These are refused by name, executable and shortcut name. Nothing overrides the list.
+2. **Blocked apps** (`agent/app_launcher.blocked_by`, and `blocked_in_command` for terminal commands). These are refused by name, executable and shortcut name, from open_application and from any shell command that names one. Nothing overrides the list.
 3. **Privacy** (Standard, Private or Offline). The tool gate plus a socket backstop.
 4. **Policy** (`agent/lean/policy.py`):
    - Stored secrets in arguments: always denied.
@@ -99,6 +108,9 @@ These checks run in this order, all in code:
      - "**Always allow**": persistent, per *scope* from `scope_for`, stored in `security/approval-grants.json` and listed in Settings.
    - **Autonomous mode:**
      - It approves autonomous scopes by itself (desktop control, non-dangerous terminal asks on this PC or for internet).
+   - **Commands on this PC:**
+     - In Auto terminal mode with Docker down (the silent fallback to this PC), ordinary commands ask like `where="host"`. That ask is covered by the "Run commands on this PC that aren't dangerous" grant and by Autonomous mode.
+     - With This PC chosen explicitly, only dangerous commands ask.
      - Every other ask is *held*: not run, not waited on, and reported in `agent_done.held`.
      - App chats only.
    - **Never grantable or auto-approved:** deletes, dangerous commands, outward sends, identity changes, A2A and Rule-of-Two asks (on-screen control excepted).

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Execution evidence, 22 Oct 2026</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--ok:#1f7a3f;--bad:#b42318;--warn:#8a5a00;--soft:#f0f0f0}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--ok:#5cc983;--bad:#ff8a7a;--warn:#e0b04a;--soft:#222}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 36px}header{padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:24px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 5px}header p{margin:0;font-size:13px;color:var(--muted)}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 14px}h3{font-size:14px;margin:0 0 6px}section{margin:30px 0}p,small,figcaption{color:var(--muted)}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:16px;min-width:0}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.node p{font-size:13px;margin:0}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:1px 8px;margin-bottom:8px;white-space:nowrap}.tag.bad{color:var(--bad)}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:13px system-ui,sans-serif}svg .mut{fill:var(--muted);font-size:11.5px}svg .box{fill:var(--panel);stroke:var(--line)}svg .soft{fill:var(--soft);stroke:var(--line)}svg .ln{stroke:var(--muted);fill:none;stroke-width:1.4}svg .ah{fill:var(--muted)}svg .bad{fill:var(--bad)}svg .ok{fill:var(--ok)}svg .okline{stroke:var(--ok)}svg .badline{stroke:var(--bad)}svg .dash{stroke-dasharray:4 4}.scroll{overflow-x:auto}.scroll svg{min-width:680px}.table{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{font-weight:600}.note{font-size:13px;margin:10px 0 0}ul{font-size:13px;padding-left:20px;margin:0}li{margin:2px 0}code{font:12px ui-monospace,monospace}footer{font-size:12px;margin-top:28px;color:var(--muted)}a{color:inherit;text-underline-offset:3px}@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}}
+</style></head><body><main>
+<header><h1>Execution evidence</h1><p>22 Oct 2026 · model versus harness responsibility · branch claude/harness-evidence on PR #88, unreleased · technical record in docs/research/harness-evidence-2026-10-22.md</p></header>
+
+<section aria-label="The finding"><h2>1 · The recent failures were one problem</h2>
+<p class="note" style="margin:0 0 14px">The harness always knew what happened to each call. A policy deny, your "no", an autonomous hold, a switched-off tool: then it wrote that down as a sentence. The refusal breaker, learning and the claim checks each re-guessed it by matching phrases, and nothing checked whether a reported change actually happened.</p>
+<div class="scroll"><svg viewBox="0 0 1000 300" role="img" aria-label="Before: producers wrote outcomes as text, and three consumers re-parsed phrases. After: producers set one outcome and observed effects, and every consumer reads that record.">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 L10 5 L0 10 z"/></marker></defs>
+<text x="20" y="22" style="font-weight:600">Before</text>
+<rect class="box" x="20" y="36" width="180" height="104" rx="9"/><text x="34" y="60">Where it's decided</text><text class="mut" x="34" y="80">policy, privacy, approvals,</text><text class="mut" x="34" y="96">autonomy, switches,</text><text class="mut" x="34" y="112">the tool itself</text>
+<rect class="soft" x="240" y="62" width="150" height="52" rx="9"/><text x="254" y="84">A sentence</text><text class="mut" x="254" y="102">"Blocked by…", "Wrote…"</text>
+<path class="ln" d="M200 88 H236" marker-end="url(#a)"/>
+<rect class="box" x="430" y="36" width="170" height="30" rx="7"/><text x="444" y="56">Refusal breaker</text>
+<rect class="box" x="430" y="73" width="170" height="30" rx="7"/><text x="444" y="93">Learning grades</text>
+<rect class="box" x="430" y="110" width="170" height="30" rx="7"/><text x="444" y="130">Claim checks</text>
+<path class="ln badline dash" d="M390 80 C410 80 410 51 426 51" marker-end="url(#a)"/><path class="ln badline dash" d="M390 88 H426" marker-end="url(#a)"/><path class="ln badline dash" d="M390 96 C410 96 410 125 426 125" marker-end="url(#a)"/>
+<text class="bad" x="430" y="162" style="font-size:12px">✗ each matched phrases; nobody looked at the disk or screen</text>
+<text x="20" y="196" style="font-weight:600">Now</text>
+<rect class="box" x="20" y="210" width="180" height="74" rx="9"/><text x="34" y="234">Where it's decided</text><text class="mut" x="34" y="254">sets the outcome</text><text class="mut" x="34" y="270">at that moment</text>
+<rect class="box" x="236" y="210" width="236" height="74" rx="9"/><text x="254" y="234" style="font-weight:600">Evidence record</text><text class="mut" x="254" y="254">outcome: ok · failed · no_effect · refused</text><text class="mut" x="254" y="270">· denied · held · skipped, plus effects</text>
+<rect class="soft" x="236" y="152" width="236" height="44" rx="9"/><text x="254" y="172">Harness observes</text><text class="mut" x="254" y="188">file stat · exit code · screen diff</text>
+<path class="ln" d="M200 247 H232" marker-end="url(#a)"/><path class="ln" d="M345 196 V206" marker-end="url(#a)"/>
+<rect class="box" x="490" y="204" width="150" height="26" rx="7"/><text x="502" y="222">Refusal breaker</text>
+<rect class="box" x="490" y="234" width="150" height="26" rx="7"/><text x="502" y="252">Learning grades</text>
+<rect class="box" x="490" y="264" width="150" height="26" rx="7"/><text x="502" y="282">Claim checks</text>
+<rect class="box" x="660" y="204" width="150" height="26" rx="7"/><text x="672" y="222">Traces</text>
+<rect class="box" x="660" y="234" width="150" height="26" rx="7"/><text x="672" y="252">Tool-run records</text>
+<rect class="box" x="660" y="264" width="150" height="26" rx="7"/><text x="672" y="282">Step summary</text>
+<path class="ln okline" d="M472 247 H486" marker-end="url(#a)"/>
+<text class="ok" x="830" y="240" style="font-size:12px">✓ one record,</text><text class="ok" x="830" y="258" style="font-size:12px">read everywhere</text>
+</svg></div></section>
+
+<section aria-label="Call lifecycle"><h2>2 · Four stages of a call, and who fills each</h2>
+<div class="scroll"><svg viewBox="0 0 1000 170" role="img" aria-label="Attempted by the model, executed with an outcome set by the gates and the toolbox, observed by the harness as effects, verified later by learning's ladder.">
+<defs><marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 L10 5 L0 10 z"/></marker></defs>
+<rect class="box" x="20" y="30" width="210" height="110" rx="10"/><text x="36" y="56" style="font-weight:600">Attempted</text><text class="mut" x="36" y="78">the model's tool call</text><text class="mut" x="36" y="96">and what it says it did</text><text class="mut" x="36" y="122">model's responsibility</text>
+<rect class="box" x="270" y="30" width="210" height="110" rx="10"/><text x="286" y="56" style="font-weight:600">Executed: outcome</text><text class="mut" x="286" y="78">gates, approvals and the</text><text class="mut" x="286" y="96">toolbox set it when they decide</text><text class="ok" x="286" y="122" style="font-size:11.5px">harness · new</text>
+<rect class="box" x="520" y="30" width="210" height="110" rx="10"/><text x="536" y="56" style="font-weight:600">Observed: effects</text><text class="mut" x="536" y="78">file on disk, exit code,</text><text class="mut" x="536" y="96">screen change; no model call</text><text class="ok" x="536" y="122" style="font-size:11.5px">harness · new</text>
+<rect class="box" x="770" y="30" width="210" height="110" rx="10"/><text x="786" y="56" style="font-weight:600">Verified</text><text class="mut" x="786" y="78">read-backs, runs, tests,</text><text class="mut" x="786" y="96">sources; V0–V4 ladder</text><text class="mut" x="786" y="122">learning · unchanged</text>
+<path class="ln" d="M230 85 H266" marker-end="url(#b)"/><path class="ln" d="M480 85 H516" marker-end="url(#b)"/><path class="ln" d="M730 85 H766" marker-end="url(#b)"/>
+</svg></div>
+<p class="note">A reported write that isn't on disk is now a failure, with a note to the model. A click that changed under 0.5% of the screen is <code>no_effect</code>. Its row reads "No visible change on screen", and "the Start menu has opened" is challenged.</p></section>
+
+<section aria-label="Trust boundaries"><h2>3 · Where an action can go, and what guards each way out</h2>
+<div class="scroll"><svg viewBox="0 0 1000 330" role="img" aria-label="The model's call passes switches, Blocked apps, privacy, policy and approvals, then reaches one of six executors. The silent fallback to this PC now asks like any host command.">
+<defs><marker id="c" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="ah" d="M0 0 L10 5 L0 10 z"/></marker></defs>
+<rect class="box" x="20" y="135" width="130" height="60" rx="9"/><text x="34" y="160">Model's call</text><text class="mut" x="34" y="178">any agent, any size</text>
+<rect class="soft" x="190" y="30" width="230" height="270" rx="10"/><text x="206" y="54" style="font-weight:600">Gates, in code, in order</text>
+<text x="206" y="84">1 Permission switches</text><text x="206" y="112">2 Blocked apps</text><text class="mut" x="222" y="129">open_application and commands</text><text x="206" y="156">3 Privacy</text><text class="mut" x="222" y="173">tool gate plus socket backstop</text><text x="206" y="200">4 Policy</text><text class="mut" x="222" y="217">secrets, Rule of Two, cost</text><text x="206" y="244">5 Approvals</text><text class="mut" x="222" y="261">ask, grant, autonomous, hold</text><text class="mut" x="206" y="288">each sets an outcome</text>
+<path class="ln" d="M150 165 H186" marker-end="url(#c)"/>
+<rect class="box" x="480" y="30" width="230" height="40" rx="8"/><text x="494" y="55">Sandbox (Docker), /work mounts</text>
+<rect class="box" x="480" y="80" width="230" height="52" rx="8"/><text x="494" y="102">This PC</text><text class="ok" x="494" y="121" style="font-size:11.5px">Auto fallback now asks</text>
+<rect class="box" x="480" y="142" width="230" height="40" rx="8"/><text x="494" y="167">Desktop: UIA points + input</text>
+<rect class="box" x="480" y="192" width="230" height="40" rx="8"/><text x="494" y="217">Connected apps (MCP)</text>
+<rect class="box" x="480" y="242" width="230" height="40" rx="8"/><text x="494" y="267">Other agents (A2A): always ask</text>
+<path class="ln" d="M420 50 H476" marker-end="url(#c)"/><path class="ln" d="M420 106 H476" marker-end="url(#c)"/><path class="ln" d="M420 162 H476" marker-end="url(#c)"/><path class="ln" d="M420 212 H476" marker-end="url(#c)"/><path class="ln" d="M420 262 H476" marker-end="url(#c)"/>
+<rect class="soft" x="760" y="30" width="220" height="252" rx="10"/><text x="776" y="54" style="font-weight:600">Observed after</text>
+<text class="mut" x="776" y="84">exit code, where it ran</text><text class="mut" x="776" y="112">files on disk</text><text class="mut" x="776" y="140">screen change</text><text class="mut" x="776" y="168">MCP isError</text><text class="mut" x="776" y="196">network: privacy log</text><text class="mut" x="776" y="232">recorded as effects;</text><text class="mut" x="776" y="250">never a model's opinion</text>
+<path class="ln" d="M710 156 H756" marker-end="url(#c)"/>
+</svg></div>
+<p class="note">Before, a command asked when the model chose <code>where="host"</code>, but ran unasked when Auto silently fell back to this PC because Docker was down. The boundary now follows the destination. Your "Always allow ordinary commands on this PC" grant and Autonomous mode still cover it, and choosing This PC explicitly keeps the old behaviour.</p></section>
+
+<section aria-label="Research"><h2>4 · What others do, and what we took</h2><div class="table"><table><thead><tr><th>System</th><th>Approach</th><th>For EchoSpeak</th></tr></thead><tbody>
+<tr><td>False-success study (arXiv 2606.09863)</td><td>45–76% of agent failures claim success; LLM judges reach at most AUROC 0.65 at catching it</td><td><span class="tag ok">evidence from the environment, not a judge</span></td></tr>
+<tr><td>Microsoft UFO2</td><td>GUI + native APIs; UI Automation state checks instead of extra inference</td><td><span class="tag ok">UIA points (PR #88); cheap observation</span></td></tr>
+<tr><td>Meta Muse</td><td>Own VM; a separate Sentinel approves anything leaving it; audit trail</td><td><span class="tag">boundaries outside the model, as we already have</span></td></tr>
+<tr><td>Claude Code</td><td>Block before (PreToolUse), observe after (PostToolUse gets the result)</td><td><span class="tag ok">gates before, effects after</span></td></tr>
+<tr><td>Codex</td><td>Sandbox and approval policy are separate layers</td><td><span class="tag ok">approval mustn't widen when the sandbox is gone</span></td></tr>
+<tr><td>Deep Agents</td><td>Todo statuses, filesystem, subagents returning one report</td><td><span class="tag">status as data</span></td></tr>
+</tbody></table></div><p class="note">Some details come from secondary sources and are marked in the technical record. Proprietary internals are treated as unknown.</p></section>
+
+<section aria-label="Next"><h2>5 · Kept, changed, and next</h2><div class="grid3">
+<div class="node"><span class="tag ok">kept</span><ul><li>Deterministic gates; no LLM approver</li><li>Capability report from code</li><li>Learning from tool records, holdout-tested</li><li>Local-first, owner-set autonomy</li></ul></div>
+<div class="node"><span class="tag ok">changed</span><ul><li>One outcome per call, set where it's decided</li><li>Effects observed on disk, in exit codes, on screen</li><li>Refusals, claims and learning read the record</li><li>Host fallback asks like any host command</li></ul></div>
+<div class="node"><span class="tag">next (speculative)</span><ul><li>UIA precondition check before a click</li><li>Launch effects for open_application</li><li>MCP structured results as effects</li><li>Per-destination egress for the sandbox</li><li>Windows OS sandbox or WSL2</li></ul></div>
+</div></section>
+
+<section aria-label="Verification"><h2>6 · What was and wasn't verified</h2><div class="grid2">
+<div class="node"><span class="tag ok">verified</span><ul><li>New evidence tests through a real LeanTurn</li><li>Learning graded from outcomes, with the text fallback</li><li>Host-fallback boundary in both modes</li><li>17 new tests; full backend suite: 1220 passed, 13 skipped</li></ul></div>
+<div class="node"><span class="tag bad">not verified</span><ul><li>How a live model responds to the new notes</li><li>The packaged app</li><li>Approval cadence on a PC without Docker</li></ul></div>
+</div></section>
+<footer>Technical record: <a href="../../docs/research/harness-evidence-2026-10-22.md">docs/research/harness-evidence-2026-10-22.md</a>. Diagrams describe code, not product UI.</footer>
+</main></body></html>

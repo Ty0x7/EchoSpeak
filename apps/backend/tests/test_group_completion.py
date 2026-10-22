@@ -45,6 +45,10 @@ def written(monkeypatch) -> list[dict[str, Any]]:
     tool = NativeTool(name="file_write", description="Write a file.", parameters={"type": "object", "properties": {
         "path": {"type": "string"}, "content": {"type": "string"}}}, func=file_write)
     monkeypatch.setattr(lean_runtime, "coding_tools", lambda: [tool])
+    # The stand-in writes nothing to disk; the on-disk check has its own tests (test_execution_evidence.py).
+    from agent.lean import evidence
+
+    monkeypatch.setattr(evidence, "_resolve", lambda raw: None)
     return calls
 
 

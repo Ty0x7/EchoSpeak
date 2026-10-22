@@ -24,6 +24,7 @@ import re
 from typing import Any, Iterable, Optional
 from urllib.parse import urlparse
 
+from agent.lean.evidence import NOT_RUN as NOT_RUN_OUTCOMES
 from agent.lean.job import READ_ONLY_TOOLS, Job
 from agent.lean.policy import redact_secrets
 from agent.learning.store import Episode
@@ -32,6 +33,8 @@ BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "proj
 
 # Results the loop wrote itself because the tool never ran (refused, denied,
 # repeated, bad arguments). They say nothing about the tool or the task.
+# Timelines now carry each call's outcome (agent/lean/evidence.py); these phrases
+# grade records saved before that, and refusals a tool reports in its own words.
 _NOT_RUN = (
     "blocked by echospeak's safety policy", "you already called", "the user denied permission",
     "the user did not respond to the approval", "the user stopped this request",
@@ -266,14 +269,20 @@ def tool_rows(timeline: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         if item.get("kind") != "tool" or str(item.get("name") or "") in BOOKKEEPING_TOOLS:
             continue
         output = str(item.get("output") or "")
-        rows.append({
+        # The loop records each call's outcome (agent/lean/evidence.py); older timelines only have the text.
+        outcome = str(item.get("outcome") or "")
+        row = {
             "name": str(item.get("name") or ""),
             "label": str(item.get("label") or "")[:200],
             "target": redact_secrets(str(item.get("target") or ""))[:300],
-            "ok": item.get("status") == "done",
+            # A screen action that changed nothing visible ran, but didn't work.
+            "ok": outcome == "ok" if outcome else item.get("status") == "done",
             "output": redact_secrets(" ".join(output.split()))[:240],
-            "not_run": not_run(output),
-        })
+            "not_run": outcome in NOT_RUN_OUTCOMES if outcome else not_run(output),
+        }
+        if outcome:
+            row["outcome"] = outcome
+        rows.append(row)
     return rows[:80]
 
 
