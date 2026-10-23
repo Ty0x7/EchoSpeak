@@ -453,6 +453,12 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
         <Row label="Your name" help="How your agents refer to you.">
           <TextField value={s.user_display_name || ""} placeholder="Your first name" onCommit={(v) => save({ user_display_name: v })} />
         </Row>
+        {isDesktopRuntime() ? (
+          <Row label="Keep running in the tray when closed"
+            help="Closing the window hides EchoSpeak to the system tray (under Show hidden icons on the taskbar) instead of quitting, so reminders and their notifications still arrive. Click the tray icon to reopen it; right-click it and choose Quit EchoSpeak to quit.">
+            <Toggle checked={asBool(s.desktop_close_to_tray)} onChange={(v) => save({ desktop_close_to_tray: v })} label="Keep running in the tray" />
+          </Row>
+        ) : null}
       </Group>
       <Group title="How agents work" description="These apply to Echo and every agent you create.">
         <Row label="Ask before risky actions" help="Deleting files, sending messages, controlling the desktop, and dangerous commands.">
@@ -1149,6 +1155,10 @@ type RoutineItem = {
   last_result_status: string;
   last_error: string;
   session_id: string;
+  // Reminders (agent/reminders.py) are routines too: kind "reminder", one-time ones with run_at.
+  kind?: string;
+  run_at?: string | null;
+  metadata?: { repeat?: string };
 };
 
 const SCHEDULES = [
@@ -1161,10 +1171,20 @@ const SCHEDULES = [
   { value: "custom", label: "Custom (cron)…" },
 ];
 
-function describeSchedule(r: RoutineItem): string {
+export function describeSchedule(r: Pick<RoutineItem, "trigger_type" | "schedule" | "enabled" | "run_at" | "kind" | "metadata">): string {
+  if (r.trigger_type === "once") return r.enabled && r.run_at ? `Once · ${whenFull(r.run_at)}` : "Once · done";
   if (r.trigger_type !== "schedule" || !r.schedule) return "Manual";
+  if (r.kind === "reminder" && r.metadata?.repeat && r.metadata.repeat !== "none") return `Repeats ${r.metadata.repeat}`;
   return SCHEDULES.find((s) => s.value === r.schedule)?.label || `Cron: ${r.schedule}`;
 }
+
+function whenFull(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+/** A reminder that already fired once: nothing left to switch on or run. */
+const doneOnce = (r: RoutineItem) => r.trigger_type === "once" && !r.enabled;
 
 function when(iso: string | null): string {
   if (!iso) return "";
@@ -1233,7 +1253,7 @@ export function RoutinesGroup({ apiBase, agents, embedded = false }: { apiBase: 
                 const failed = r.last_result_status === "failed";
                 return (
                   <div key={r.id} className={`es-page-row${r.enabled ? "" : " is-off"}`}>
-                    <button type="button" className="es-page-row-main" onClick={() => setEditing({ ...r })} title="Edit routine">
+                    <button type="button" className="es-page-row-main" onClick={() => (r.kind === "reminder" ? undefined : setEditing({ ...r }))} title={r.kind === "reminder" ? "Reminder (set from a chat)" : "Edit routine"}>
                       <span className="es-row-tile is-folder" aria-hidden>
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></svg>
                       </span>
@@ -1246,8 +1266,10 @@ export function RoutinesGroup({ apiBase, agents, embedded = false }: { apiBase: 
                       </span>
                     </button>
                     <div className="es-row-actions">
-                      <Toggle checked={r.enabled} onChange={(v) => void call(`/${r.id}`, "PATCH", { enabled: v })} label={`Enable ${r.name}`} />
-                      <button type="button" className="es-btn es-btn-sm" onClick={() => void call(`/${r.id}/run`, "POST")}>Run</button>
+                      {doneOnce(r) ? null : <Toggle checked={r.enabled} onChange={(v) => void call(`/${r.id}`, "PATCH", { enabled: v })} label={`Enable ${r.name}`} />}
+                      {r.kind === "reminder"
+                        ? <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => void call(`/${r.id}`, "DELETE")}>{doneOnce(r) ? "Remove" : "Cancel"}</button>
+                        : <button type="button" className="es-btn es-btn-sm" onClick={() => void call(`/${r.id}/run`, "POST")}>Run</button>}
                     </div>
                   </div>
                 );
@@ -1278,9 +1300,15 @@ export function RoutinesGroup({ apiBase, agents, embedded = false }: { apiBase: 
               help={<>{describeSchedule(r)} · {agent?.name || "Echo"}{r.next_run && r.enabled && r.trigger_type === "schedule" ? ` · next ${when(r.next_run)}` : ""}{r.last_result_status === "failed" && r.last_error ? <span className="st-err"> · {r.last_error.slice(0, 120)}</span> : null}</>}
             >
               <div className="st-inline-actions">
-                <Toggle checked={r.enabled} onChange={(v) => void call(`/${r.id}`, "PATCH", { enabled: v })} label={`Enable ${r.name}`} />
-                <button type="button" className="es-btn es-btn-sm" onClick={() => void call(`/${r.id}/run`, "POST")}>Run</button>
-                <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => setEditing({ ...r })}>Edit</button>
+                {doneOnce(r) ? null : <Toggle checked={r.enabled} onChange={(v) => void call(`/${r.id}`, "PATCH", { enabled: v })} label={`Enable ${r.name}`} />}
+                {r.kind === "reminder" ? (
+                  <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => void call(`/${r.id}`, "DELETE")}>{doneOnce(r) ? "Remove" : "Cancel"}</button>
+                ) : (
+                  <>
+                    <button type="button" className="es-btn es-btn-sm" onClick={() => void call(`/${r.id}/run`, "POST")}>Run</button>
+                    <button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => setEditing({ ...r })}>Edit</button>
+                  </>
+                )}
               </div>
             </Row>
           );

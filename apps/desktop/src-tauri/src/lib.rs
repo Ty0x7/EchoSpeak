@@ -1,4 +1,5 @@
 mod backend;
+mod tray;
 mod updates;
 
 use backend::{DesktopRuntime, DesktopState};
@@ -85,6 +86,11 @@ fn control_desktop_window(action: String, window: Window) -> Result<(), String> 
             }
         }
         "close" if matches!(window.label(), "settings" | "setup" | "companion") => window.hide(),
+        // Keep running in the tray (Settings › General): hide instead of quitting.
+        "close" if tray::close_to_tray() => {
+            tray::hide_to_tray(window.app_handle());
+            Ok(())
+        }
         "close" => {
             if let Some(settings) = window.app_handle().get_webview_window("settings") {
                 let _ = settings.close();
@@ -189,14 +195,21 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         // Single-instance must initialize first so a second launch only focuses this window.
+        // A second launch (also while hidden in the tray) brings the window back.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            tray::show_main(app);
         }))
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_notification::init())
+        // The window's own close button and Alt+F4: hidden to the tray when the owner chose that.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && tray::close_to_tray() {
+                    api.prevent_close();
+                    tray::hide_to_tray(window.app_handle());
+                }
+            }
+        })
         // Restore size/position, but not visibility: the UI reveals the window
         // itself once its splash has painted, so there is never a blank frame.
         .plugin(
@@ -238,6 +251,8 @@ pub fn run() {
                 .unwrap_or(app.path().app_log_dir()?);
             let state = DesktopState::new(data_dir, log_dir).map_err(std::io::Error::other)?;
             app.manage(state.clone());
+            // Windows notifications and the close-to-tray setting, from the local service.
+            tray::start_poller(app.handle().clone(), state.clone());
             if let Err(error) = backend::launch_backend(app.handle().clone(), state.clone()) {
                 log::error!("Initial desktop backend launch failed: {error}");
                 backend::recover_from_launch_failure(app.handle().clone(), state, error);

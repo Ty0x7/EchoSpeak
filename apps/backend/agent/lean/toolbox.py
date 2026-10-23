@@ -32,6 +32,7 @@ TOOLSETS: dict[str, list[str]] = {
         "file_copy", "file_move", "file_delete", "checkpoint_undo",
         "project_status", "project_workspace", "save_project_image", "create_artifact", "update_artifact",
         "create_media", "creation_status",
+        "set_reminder", "list_reminders", "cancel_reminder",
     ],
     # Looking things up on the web.
     "web": ["web_search", "safe_web_fetch", "youtube_transcript", "research_notebook", "spawn_workers"],

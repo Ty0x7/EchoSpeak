@@ -248,7 +248,7 @@ def _native(monkeypatch, session, depth):
     fake = runtime.LeanSession.__new__(runtime.LeanSession)
     fake.agent = SimpleNamespace(memory=None)
     fake.session_id, fake.execution_id, fake.caller_role, fake.job = "sw", "exe", "owner", None
-    fake.room = None
+    fake.room, fake.source = None, "web"
     fake.personas = SimpleNamespace(list=lambda: [])
     persona = AgentPersona(id="echo", name="Echo")
     monkeypatch.setattr(runtime.LeanSession, "_is_group", lambda self: False)

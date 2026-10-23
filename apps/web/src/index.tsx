@@ -50,6 +50,7 @@ import { isStreamThreadCurrent } from "./agentActivity";
 import { type ActivityItem, type AgentStreamEvent, type Message, type Role, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse } from "./app/types";
 import { buildMessageUsage } from "./app/toolDisplay";
 import { colors, fetchWithTimeout, isEmptySessionDraft, normalizeTimestampMs, stopTts, useAppStore } from "./app/runtime";
+import { applyFeed, browserNotify } from "./app/reminderFeed";
 import { ComposerToolbar, type ReasoningEffort } from "./dashboard/ComposerToolbar";
 import { globalCss } from "./app/globalCss";
 import { useProviderSettings } from "./dashboard/useProviderSettings";
@@ -328,6 +329,29 @@ export const Dashboard: React.FC<{
       refreshThreadState(activeThreadId);
     }
   }, [activeThreadId, initialHydrationComplete]);
+
+  // Reminders firing into a chat (app/reminderFeed.ts): refresh it if it's open.
+  useEffect(() => {
+    if (!initialHydrationComplete) return;
+    let latest = -1;
+    const tick = async () => {
+      try {
+        const resp = await fetchWithTimeout(`${apiBase}/lean/notifications?after=${Math.max(latest, 0)}`, undefined, 8000);
+        if (!resp.ok) return;
+        const step = applyFeed(latest, await resp.json(), activeThreadIdRef.current, desktopMode);
+        latest = step.latest;
+        for (const sid of step.refresh) {
+          if (!streamControllersRef.current.has(sid)) void loadHistory(sid);
+        }
+        for (const item of step.notify) void browserNotify(item.title, item.body);
+      } catch {
+        // offline for a moment; the next poll catches up
+      }
+    };
+    void tick();
+    const timer = window.setInterval(() => void tick(), 20000);
+    return () => window.clearInterval(timer);
+  }, [apiBase, initialHydrationComplete, desktopMode]);
 
   /**
    * Reconstruct the completed chat timeline from durable Session → Turn records.
