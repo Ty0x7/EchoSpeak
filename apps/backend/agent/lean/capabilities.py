@@ -70,6 +70,8 @@ ABILITIES: tuple[Ability, ...] = (
     Ability("Memory and past chats", ("memory_save", "memory_search", "chat_search"), "memory"),
     Ability("Artifacts (apps, documents, diagrams in the side panel)", ("create_artifact", "update_artifact"), "core"),
     Ability("Image and video generation", ("create_media",), "core"),
+    Ability("Reminders (one-time or repeating, in this chat and as Windows notifications)",
+            ("set_reminder", "list_reminders", "cancel_reminder"), "core"),
     Ability("Editing EchoSpeak's own code", ("self_edit", "self_read"), "self", only_if_requested=True),
 )
 

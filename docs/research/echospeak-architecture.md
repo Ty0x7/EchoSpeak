@@ -161,6 +161,14 @@ This is memory-based adaptation, not recursive self-improvement: no weights, pro
 - **A2A.** `ask_remote_agent` to pinned, signed agents. Every task asks first, in every mode.
 - **Later phases, gated:** reviewer/best-of-N, the task board as a shared findings board, A2A workers.
 
+## 7b. Routines, reminders and the tray (11.10.2)
+
+- **Routines.** `agent/routines.py` holds them, and its scheduler checks every 60 s. Triggers are `schedule` (cron), `once` (`run_at`, disabled after it fires), `webhook` or `manual`. `agent/lean/automations.py` runs them: a `query` routine runs an agent unattended; a `remind` routine posts its message with no model call.
+- **Reminders.** `agent/reminders.py` exposes `set_reminder`, `list_reminders` and `cancel_reminder` to owners. A reminder is a routine with `metadata.kind="reminder"`, and it goes to the chat it was set in.
+- **Delivery.** `automations.deliver` sends to `desktop` (the `agent/notifications.py` feed), Discord and Telegram.
+- **Desktop shell.** `src-tauri/src/tray.rs` claims the feed every 5 s and shows Windows notifications. It also follows `desktop_close_to_tray`: when that's on, closing the main window hides it to the tray; Quit in the tray menu exits.
+- **Details:** [reminders-2026-10-23.md](reminders-2026-10-23.md).
+
 ## 8. Streaming, queue and steering
 
 - **Events.** NDJSON events per message, reduced by `apps/web/src/lean/liveReducer.ts` and replayable (`/query/runs/{id}/events`). The new ones:

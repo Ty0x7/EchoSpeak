@@ -175,6 +175,41 @@ Copy-and-paste tests for the real app, grouped by feature. They're written to fi
 - **What to inspect:** the file, the sources, and Timing for how long each step took.
 - **Failure indicators:** a half-done file presented as complete, or it stops on a question.
 
+**4.2 A reminder in a few minutes** [local ok]
+- **Test prompt:** `Remind me in 2 minutes to stretch.`
+- **Setup:** the installed desktop app.
+- **Expected:**
+  - Echo replies with the exact time.
+  - Within about 3 minutes, "⏰ Reminder: stretch" appears in this chat, and a Windows notification pops up.
+  - No model call is needed; it works even with LM Studio closed.
+- **What to inspect:** the chat, Windows' notification area, and Routines (it shows "Once · done").
+- **Failure indicators:** Echo says it can't set reminders; no message; or a reminder that needs the model to be running.
+
+**4.3 The Raptors reminder** [local ok]
+- **Test prompt:** `The Raptors play the Timberwolves on Sunday October 25th at 5 PM. Remind me that day.`
+- **Expected:** a reminder for Sunday (an hour before, 4:00 PM, or 9:00 AM), said back as a weekday, date and time. `What reminders do I have?` lists it with an id; `cancel the Raptors reminder` removes it.
+- **Failure indicators:** a wrong day, a time in the past, or "reminder set" with nothing on the Routines page.
+
+**4.4 Keep running in the tray** [local ok]
+- **Setup:** Settings › General › **Keep running in the tray when closed** on. Then `Remind me in 2 minutes to check the oven.` and close the window.
+- **Expected:**
+  - EchoSpeak's icon is under Show hidden icons on the taskbar.
+  - The reminder's Windows notification still arrives.
+  - Clicking the icon reopens the window, with the reminder in the chat.
+  - Right-click › Quit EchoSpeak quits for real (the window and the icon are gone).
+- **What to inspect:** Task Manager shows no EchoSpeak processes after Quit.
+- **Failure indicators:** closing quits anyway, no notification while hidden, the window can't be reopened, or EchoSpeak keeps running after Quit.
+
+**4.5 Tray off (the default)**
+- **Setup:** the setting off.
+- **Expected:** closing the window quits EchoSpeak, as before. A reminder that was due while it was closed arrives at the next start, marked late.
+- **Failure indicators:** a tray icon with the setting off, or a missed reminder that never arrives.
+
+**4.6 Repeating, and a task** [cloud] [web]
+- **Test prompt:** `Every weekday at 8 AM remind me to check the weather, and look up today's forecast for Edmonton when it fires.`
+- **Expected:** a weekday reminder on the Routines page ("Repeats weekdays"). When it fires, Echo posts the forecast.
+- **Failure indicators:** it fires every day, or the forecast step asks for approval mid-run instead of reporting.
+
 ---
 
 ## 5. Research workers

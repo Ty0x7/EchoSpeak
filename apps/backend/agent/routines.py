@@ -39,10 +39,12 @@ class Routine(BaseModel):
     name: str
     description: Optional[str] = ""
     enabled: bool = True
-    trigger_type: str = "schedule"  # "schedule" | "webhook" | "manual"
+    trigger_type: str = "schedule"  # "schedule" | "once" | "webhook" | "manual"
     schedule: Optional[str] = None  # Cron expression for scheduled routines
+    # "once": the moment it fires (ISO 8601 with its UTC offset). After it fires it's disabled, not deleted.
+    run_at: Optional[str] = None
     webhook_path: Optional[str] = None  # URL path for webhook routines
-    action_type: str = "query"  # "query" | "tool" | "skill"
+    action_type: str = "query"  # "query" (run an agent) | "remind" (post a message, no model call) | "tool" | "skill"
     action_config: Dict[str, Any] = Field(default_factory=dict)  # Query text, tool name/args, etc.
     last_run: Optional[str] = None
     next_run: Optional[str] = None
@@ -144,6 +146,7 @@ class RoutineManager:
         project_id: str = "",
         session_id: str = "",
         missed_run_policy: str = "run_next",
+        run_at: Optional[str] = None,
     ) -> Routine:
         """Create a new routine."""
         routine = Routine(
@@ -152,6 +155,7 @@ class RoutineManager:
             enabled=enabled,
             trigger_type=trigger_type,
             schedule=schedule,
+            run_at=run_at,
             webhook_path=webhook_path,
             action_type=action_type,
             action_config=action_config or {},
@@ -169,7 +173,9 @@ class RoutineManager:
                 routine.next_run = cron.get_next(datetime).isoformat()
             except Exception as e:
                 logger.warning(f"Invalid cron expression for routine {name}: {e}")
-        
+        elif routine.trigger_type == "once" and routine.run_at:
+            routine.next_run = routine.run_at
+
         self._save_routine(routine)
         self._cache[routine.id] = routine
         logger.info(f"Created routine: {routine.name} ({routine.id})")
@@ -191,12 +197,15 @@ class RoutineManager:
         project_id: Optional[str] = None,
         session_id: Optional[str] = None,
         missed_run_policy: Optional[str] = None,
+        run_at: Optional[str] = None,
     ) -> Optional[Routine]:
         """Update an existing routine."""
         routine = self._cache.get(routine_id)
         if not routine:
             return None
-        
+        if run_at is not None:
+            routine.run_at = run_at
+
         if name is not None:
             routine.name = name.strip()
         if description is not None:
@@ -233,7 +242,9 @@ class RoutineManager:
                 routine.next_run = cron.get_next(datetime).isoformat()
             except Exception as e:
                 logger.warning(f"Invalid cron expression: {e}")
-        
+        elif routine.trigger_type == "once" and run_at is not None:
+            routine.next_run = run_at  # a moved one-time reminder fires at its new moment
+
         self._save_routine(routine)
         logger.info(f"Updated routine: {routine.name} ({routine.id})")
         return routine
@@ -275,7 +286,11 @@ class RoutineManager:
                 routine.next_run = cron.get_next(datetime).isoformat()
             except Exception:
                 pass
-        
+        elif routine.trigger_type == "once":
+            # Done: kept (disabled) so the Routines page can show it ran; never fires again.
+            routine.next_run = None
+            routine.enabled = False
+
         self._save_routine(routine)
     
     def _save_routine(self, routine: Routine) -> None:
@@ -329,16 +344,19 @@ class RoutineManager:
         
         now = datetime.now(timezone.utc)
         for routine in self.list_routines(enabled_only=True):
-            if routine.trigger_type != "schedule":
+            if routine.trigger_type not in {"schedule", "once"}:
                 continue
             if not routine.next_run:
                 continue
-            
+
             try:
                 next_run = datetime.fromisoformat(routine.next_run.replace("Z", "+00:00"))
                 if next_run <= now:
                     logger.info(f"Running scheduled routine: {routine.name}")
                     result = self._on_run(routine)
+                    if isinstance(result, dict) and result.get("deferred"):
+                        # Not now (the chat is mid-reply, or Stop everything is on): still due, retried next check.
+                        continue
                     success = isinstance(result, dict) and bool(result.get("success", False))
                     self.mark_run(
                         routine.id,

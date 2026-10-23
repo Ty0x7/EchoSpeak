@@ -1070,6 +1070,11 @@ class LeanSession:
         if depth == 0 and settings.research_swarm() and self.caller_role == "owner":
             from agent.lean import swarm
             tools.append(swarm.tool(self, persona))
+        # Reminders (agent/reminders.py), on Routines: the owner's, in this chat. A routine's own run can't
+        # schedule more of them.
+        if self.caller_role == "owner" and self.source not in {"routine", "heartbeat", "proactive"}:
+            from agent import reminders
+            tools.extend(reminders.tools(self.session_id, self.source))
 
         # Work-together groups: the lead turns a decision into owned tasks on the shared board.
         if allow_assign and self.job is not None:

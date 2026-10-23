@@ -149,9 +149,34 @@ class RoutinePayload(BaseModel):
 
 def _routine_public(routine: Any) -> dict[str, Any]:
     data = routine.model_dump()
-    data["prompt"] = str((routine.action_config or {}).get("query") or routine.description or "")
+    config_ = routine.action_config or {}
+    data["kind"] = str((routine.metadata or {}).get("kind") or "routine")
+    # A reminder's "prompt" is its message (agent/reminders.py); a routine's is its instructions.
+    data["prompt"] = str(config_.get("message") if data["kind"] == "reminder" and not config_.get("query")
+                         else config_.get("query") or routine.description or "")
     data["agent_id"] = str((routine.metadata or {}).get("agent_id") or "echo")
     return data
+
+
+# ── notifications (agent/notifications.py) ──────────────────────────────
+@router.get("/notifications")
+def list_notifications(after: int = 0) -> dict[str, Any]:
+    """New notifications after a sequence number: the web UI refreshes the chat a reminder posted into."""
+    from agent import notifications
+
+    return notifications.since(after)
+
+
+@router.post("/notifications/claim")
+def claim_notifications() -> dict[str, Any]:
+    """The desktop shell takes notifications it hasn't shown, so each Windows notification appears once.
+
+    It polls every few seconds, so this also tells it whether closing the window keeps EchoSpeak in the tray.
+    """
+    from agent import notifications
+    from config import config
+
+    return {"items": notifications.claim(), "close_to_tray": bool(getattr(config, "desktop_close_to_tray", False))}
 
 
 def _check_cron(expr: Optional[str]) -> None:

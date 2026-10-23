@@ -220,6 +220,14 @@ def evaluate(
     """allow / ask / deny for one tool call. Deterministic: no model involved."""
     if contains_secret(args, secrets):
         return Decision("deny", "its arguments contain one of your stored API keys or tokens", "secret_in_args")
+    if name == "set_reminder" and str(args.get("task") or "").strip() and tainted_by:
+        # A reminder with a task runs instructions later, unattended: outside content must not plant one.
+        sources = ", ".join(sorted(set(tainted_by)))
+        reason = (f"this turn read outside content ({sources}), and this reminder would run instructions later "
+                  "on its own; content from outside could be trying to schedule them")
+        if not interactive:
+            return Decision("deny", reason + ". Nobody can approve it from here", "rule_of_two")
+        return Decision("ask", reason, "rule_of_two")
     if name in COMMAND_TOOLS:
         # Blocked apps hold on every route, not only open_application: no approval can lift them here.
         from agent.app_launcher import blocked_in_command

@@ -32,8 +32,12 @@ AUTOMATION_PREFIX = (
 )
 
 
-def deliver(text: str, channels: list[str], label: str) -> list[str]:
-    """Send a finished automation result to external channels. Returns where it went."""
+def deliver(text: str, channels: list[str], label: str, *, session_id: str = "", ref: str = "") -> list[str]:
+    """Send a finished automation result to its channels. Returns where it went.
+
+    "desktop" queues a Windows notification (agent/notifications.py; the desktop shell shows it, even
+    with the window in the tray). Discord and Telegram go to the owner.
+    """
     from agent.lean import outbound, stop
 
     sent: list[str] = []
@@ -41,6 +45,12 @@ def deliver(text: str, channels: list[str], label: str) -> list[str]:
         return sent
     body = f"{label}\n\n{text}".strip()
     for channel in {str(c).strip().lower() for c in channels or []}:
+        if channel == "desktop":
+            from agent import notifications
+
+            notifications.push(label, text, session_id=session_id, ref=ref)
+            sent.append("desktop")
+            continue
         if outbound.take(channel):
             logger.warning("Routine result not sent to {}: outbound limit reached", channel)
             continue
@@ -92,7 +102,7 @@ def run_automation(
         persona_id=agent_id,
     )
     text = str(result.get("response") or "").strip()
-    delivered = deliver(text, list(channels or []), f"{name}") if text else []
+    delivered = deliver(text, list(channels or []), f"{name}", session_id=session_id) if text else []
     return {
         "success": bool(result.get("success")),
         "task_id": str(result.get("execution_id") or ""),
@@ -110,6 +120,20 @@ def routine_runner(agent_factory: AgentFactory) -> Callable[[Any], dict[str, Any
     def run(routine: Any) -> dict[str, Any]:
         from agent.routines import get_routine_manager
 
+        if routine.action_type == "remind":
+            # A plain reminder: its message goes out as it is, with no model call (agent/reminders.py).
+            from agent import reminders
+
+            try:
+                return reminders.fire(routine)
+            except Exception as exc:
+                logger.exception("Reminder {} failed", routine.name)
+                return {"success": False, "error": str(exc)}
+        if routine.trigger_type == "once":
+            from agent.lean import stop
+
+            if stop.paused():
+                return {"deferred": True}  # a one-time run would otherwise be lost to Stop everything
         query = str(routine.action_config.get("query") or routine.action_config.get("message") or routine.description or routine.name).strip()
         session_id = str(getattr(routine, "session_id", "") or "").strip()
         if not session_id or not _thread_exists(session_id):

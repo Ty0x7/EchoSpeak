@@ -155,7 +155,7 @@ def test_routine_runs_on_lean_loop_and_delivers(monkeypatch):
 
     sent = []
     monkeypatch.setattr(automations, "run_lean_query", fake_run)
-    monkeypatch.setattr(automations, "deliver", lambda text, channels, label: sent.append((text, channels)) or channels)
+    monkeypatch.setattr(automations, "deliver", lambda text, channels, label, **_: sent.append((text, channels)) or channels)
     result = automations.run_automation(
         agent_factory=lambda session_id: object(),
         name="Morning briefing",

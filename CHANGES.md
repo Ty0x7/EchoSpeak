@@ -1,5 +1,23 @@
 # Changes
 
+## v11.10.2 — 2026-10-23
+
+User-facing notes: [EchoSpeak 11.10.2](docs/releases/v11.10.2.md). Technical notes: [Reminders and the tray](docs/research/reminders-2026-10-23.md).
+
+* **Reminders.** Ask Echo "remind me Sunday at 4 about the Raptors game", "in 20 minutes", or "every weekday at 8". It sets the reminder and says the exact time back.
+  * Reminders can be one-time or repeating (daily, weekdays, weekly, monthly). You can list them, and cancel them by id or by words from the message.
+  * They're built on Routines. A reminder is a Routine with a new one-time trigger (`once`, `run_at`), so it uses the same scheduler and shows on the Routines page with a Cancel button.
+  * A plain reminder posts "⏰ Reminder: …" into the chat where you set it, with **no model call**, so it works even when the model isn't running.
+  * A reminder can also carry a task ("then check the final score"). That task runs the agent unattended, like any routine.
+  * It waits while its chat is mid-reply and under Stop everything. If EchoSpeak was closed at the due time, the reminder arrives at the next start, marked late.
+  * Under the Rule of Two, a task reminder set after reading web or app content asks first.
+* **Windows notifications.** Reminders, and routine results sent to "desktop", show as Windows notifications. The desktop shell (`tauri-plugin-notification` 2.4.0) polls the local service every 5 seconds, so notifications arrive while the window is hidden. Discord and Telegram receive reminders too, when they're set up.
+* **Keep running in the tray** (Settings › General, off by default). With it on, closing the window (its X, Alt+F4 or the taskbar) hides EchoSpeak to the system tray under Show hidden icons, instead of quitting. The local service, scheduler and notifications keep running.
+  * Clicking the tray icon reopens EchoSpeak, and so does launching it again.
+  * The tray menu has **Open EchoSpeak** and **Quit EchoSpeak**. Quitting stops the local service as before.
+  * Turning the setting off while hidden brings the window back.
+* The open chat refreshes when a reminder lands in it. In a plain browser, reminders show as browser notifications.
+
 ## v11.10.1 — 2026-10-22
 
 User-facing notes: [EchoSpeak 11.10.1](docs/releases/v11.10.1.md). Technical notes: [Live test](docs/research/live-test-2026-10-22.md), [Execution evidence](docs/research/harness-evidence-2026-10-22.md), [Search models](docs/research/embeddings-2026-10-22.md).
