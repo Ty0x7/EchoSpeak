@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { PageShell } from "../lean/Pages";
 import { WorkspacePopover } from "../components/WorkspacePopover";
 import { RuntimeMark } from "../components/RuntimeMark";
+import { ExternalSession } from "./ExternalSession";
 import { ProjectFile } from "../projects/ProjectDocument";
 import { request } from "../projects/model";
 import { canStartSession, CodeRequestError, createCodeSession, runtimeStatus, type CodeSession, type CodeWorkspace, type RuntimeCatalog } from "./model";
@@ -90,14 +91,16 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
     action={<><button className="es-btn es-btn-quiet es-btn-sm" aria-expanded={showFiles} onClick={() => setShowFiles(value => !value)}>Files &amp; sessions</button><button className="es-btn es-btn-quiet es-btn-sm" onClick={onAddFolder}>Add folder</button></>}>
     <div className="ec-workspace">
       {error ? <p role="alert" className="ec-notice">{error}</p> : null}
-      <div className="ec-start">
+      <div className={`ec-start${runtimeId !== "echo" ? " ec-start-external" : ""}`}>
+        {runtimeId === "echo" ? <>
         <div className="ec-welcome"><h2>What should we build{projectName ? <> in <span>{projectName}</span></> : <> together</>}?</h2>
           <p>{projectName ? "Make a change, explore your code, or work through an idea." : "Choose a project folder to get started."}</p></div>
-        <div className="ec-draft-card">
+        </> : null}<div className="ec-draft-card">
+          {runtimeId === "echo" ?
           <textarea aria-label="Coding task draft" value={draft} onChange={event => setDraft(event.target.value)} disabled={busy}
             placeholder="Describe a change, ask about your code, or plan what to build" rows={1}
             onInput={event => { const field=event.currentTarget; field.style.height="auto"; field.style.height=`${Math.min(field.scrollHeight,156)}px`; }} />
-          <div className="ec-draft-tools">
+          : null}<div className="ec-draft-tools">
             <button className="ec-runtime-picker" ref={runtimeButton} type="button" aria-label="Agent runtime" aria-haspopup="dialog" aria-expanded={runtimeOpen}
               disabled={busy || !catalog} onClick={() => setRuntimeOpen(value => !value)}>
               <RuntimeMark runtime={runtimeId} />
@@ -110,11 +113,11 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
               </button>)}
               <footer>Each runtime keeps its own tools, sessions, and sign-in.</footer>
             </WorkspacePopover> : null}
-            <span className="ec-native-policy" title="Your existing Echo permission rules apply. No permission settings are changed.">Echo permissions</span>
+            {runtimeId === "echo" ? <><span className="ec-native-policy" title="Your existing Echo permission rules apply. No permission settings are changed.">Echo permissions</span>
             <button className="ec-continue" disabled={busy || !canStartSession(selected, workspace)} onClick={() => void start()}
               aria-label={selected?.id === "echo" ? "New native coding session" : "Execution planned"} title={selected?.id === "echo" ? "Open a native coding session with this draft" : "External runtime execution is not implemented"}>
               {busy ? <span>…</span> : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 19V5m-6 6 6-6 6 6" /></svg>}
-            </button>
+            </button></> : <span className="ec-native-policy">Own harness · separate sessions</span>}
           </div>
         </div>
         <div className="ec-checkout-bar">
@@ -124,10 +127,12 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
           <span title={workspace?.project.workspace_root}>{workspace?.git_summary || (projectId ? "Opening project…" : "Local workspace")}</span>
           <button className="ec-link" disabled={busy} onClick={() => setRevision(value => value + 1)} aria-label="Refresh workspace" title="Refresh workspace">↻</button>
         </div>
+        {runtimeId !== "echo" && projectId ? <ExternalSession key={`${projectId}:${runtimeId}`} apiBase={apiBase} projectId={projectId} runtimeId={runtimeId}
+          canStart={Boolean(workspace?.can_start_native && selected?.can_start)} initialDraft={draft} /> : null}
         <div className="ec-start-note" role="status">
-          {selected && !selected.implemented ? <><strong>{runtimeStatus(selected)}</strong><p>{selected.blockers.join(" ")}</p></>
+          {selected && (!selected.implemented || !selected.can_start) ? <><strong>{runtimeStatus(selected)}</strong><p>{selected.blockers.join(" ")}</p></>
             : workspace?.native_blocker ? <p>{workspace.native_blocker}</p>
-            : <p>Continue with Echo's own harness. Your text stays a draft until you choose a model and send.</p>}
+            : runtimeId === "echo" ? <p>Continue with Echo's own harness. Your text stays a draft until you choose a model and send.</p> : null}
           {catalog && catalog.privacy_mode !== "standard" ? <small>{catalog.privacy_mode} mode · External runtimes remain blocked.</small> : null}
         </div>
       </div>

@@ -274,6 +274,8 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        from agent.code_sessions import stop_all as stop_code_runtimes
+        await asyncio.to_thread(stop_code_runtimes, "Backend shutdown")
         for task in (research_cleanup, learning_task):
             task.cancel()
             try:

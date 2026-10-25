@@ -19,7 +19,7 @@ export function canStartSession(runtime: CodeRuntime | undefined, workspace: Cod
 }
 
 export function runtimeStatus(runtime: CodeRuntime): string {
-  if (runtime.implemented) return "Available";
+  if (runtime.implemented) return runtime.can_start ? "Available · own account" : "Setup required";
   return runtime.installed ? "CLI found · execution planned" : runtime.installed === false ? "CLI not found · execution planned" : "Planned";
 }
 

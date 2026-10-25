@@ -1,4 +1,4 @@
-"""Echo Code foundation. No model calls, agent CLI launches, or credential reads.
+"""Echo Code native sessions and passive external-runtime availability.
 
 Runtime identity is deliberately separate from ModelProvider. External harnesses
 must never enter Echo's query loop as if they were model endpoints.
@@ -32,23 +32,27 @@ def runtime_catalog() -> dict:
     definitions = (
         ("codex", "Codex", "codex-app-server", "codex",
          "Use the official app-server and Codex-owned sign-in. ChatGPT access depends on your account and usage limits."),
-        ("claude_code", "Claude Code", "claude-cli", "claude",
-         "Run the original Claude Code binary with its own sign-in. Product terms and supported authentication must be checked before enabling."),
+        ("claude_code", "Claude Agent", "claude-agent-sdk", None,
+         "Original Claude tools and sessions through the official Agent SDK. Requires a separate Anthropic API key; subscription OAuth is not copied."),
         ("acp", "Other ACP agents", "acp", None,
          "Connect compatible agents through their own ACP sessions and capability negotiation."),
     )
     for runtime_id, name, protocol, command, description in definitions:
         # No --version or auth probes: even a health-check process can run hooks.
         found = shutil.which(command) if command else None
-        blockers = ["Runtime execution is not implemented in this foundation."]
-        if command and not found:
+        from agent.code_sessions import sdk_installed
+        installed = sdk_installed() if runtime_id == "claude_code" else bool(found) if command else None
+        blockers = []
+        if installed is False:
             blockers.append(f"{name} was not found on the backend's PATH.")
+        if runtime_id == "claude_code" and not installed:
+            blockers = ["The optional Claude Agent SDK is not installed in this backend."]
         if current_mode != "standard":
             blockers.append("External runtimes are blocked in Private/Offline mode until their process network access can be enforced.")
         rows.append({
             "id": runtime_id, "name": name, "protocol": protocol,
-            "implemented": False, "installed": bool(found) if command else None,
-            "authentication": "unverified", "can_start": False,
+            "implemented": True, "installed": installed,
+            "authentication": "unverified", "can_start": not blockers,
             "blockers": blockers, "description": description,
         })
     return {"schema_version": 1, "privacy_mode": current_mode, "runtimes": rows}
@@ -91,8 +95,8 @@ def create_session(project_id: str, *, runtime_id: str, idempotency_key: str) ->
     credential, agent initialization, or additional model router is involved.
     """
     runtime = next((r for r in runtime_catalog()["runtimes"] if r["id"] == runtime_id), None)
-    if not runtime or not runtime["can_start"]:
-        raise RuntimeUnavailable("This agent runtime cannot start yet. Select Echo native; external runtime execution is not implemented.")
+    if runtime_id != "echo" or not runtime or not runtime["can_start"]:
+        raise RuntimeUnavailable("External runtimes use isolated external sessions; they cannot enter the native query transport.")
     item = project_workspace.project(project_id)
     root = project_workspace.root_for(item)
     if item.trust_state != "trusted":

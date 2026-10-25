@@ -93,6 +93,8 @@ def stop_everything(reason: str = "") -> dict[str, Any]:
         events = list(_running)
     for event in events:
         event.set()
+    from agent.code_sessions import stop_all as stop_code_runtimes
+    stop_code_runtimes(reason or "Stop everything")
     cancelled_requests = 0
     try:
         from api.deps import _ACTIVE_QUERY_CANCEL_LOCK, _ACTIVE_QUERY_CANCELLATIONS

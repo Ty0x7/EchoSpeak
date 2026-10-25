@@ -1,5 +1,12 @@
 # Changes
 
+## Unreleased — Echo Code external runtimes
+
+* Connects Codex through its official app-server with native sign-in, sessions, models, streaming and correlated approvals.
+* Adds separate Git worktrees, writer leases, inspected diffs and bounded rollback with recovery copies. Rolled-back sessions cannot resume against stale native history.
+* Adds the optional pinned Claude Agent SDK with separate API authentication and every-tool approval hooks, plus ACP v1 for owner-selected, preauthenticated agents with native tools.
+* Stops owned Windows process trees on privacy changes, trust withdrawal and Stop everything. Private/Offline blocks external launches. Live account/model and signed installer acceptance remain pending. [Implementation record](docs/research/echo-code.md#phases-25-external-coding-runtimes).
+
 ## v11.10.5 — 2026-10-25
 
 User-facing notes: [EchoSpeak 11.10.5](docs/releases/v11.10.5.md). Technical UI record: [Echo Code and shared workspace](docs/research/echo-code.md#11105-ui-refinement).

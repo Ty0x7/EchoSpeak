@@ -146,5 +146,23 @@
       "sha256": "36d216f45d3c8adb8c409f9f183c1656927b6abf2441482afc619f62e2a0e233"
     }
   ],
-  "brand_asset_notice": "Brand SVG assets only, from the pinned T3 commit; MIT notice retained in public/runtime-marks/NOTICE.txt. Marks belong to their owners; no affiliation or runtime execution is implied."
+  "brand_asset_notice": "Brand SVG assets only, from the pinned T3 commit; MIT notice retained in public/runtime-marks/NOTICE.txt. Marks belong to their owners; no affiliation or runtime execution is implied.",
+  "runtime_implementation": {
+    "date_utc": "2026-10-25",
+    "sdk": "claude-agent-sdk==0.2.174",
+    "protocols": [
+      "Codex app-server stdio",
+      "ACP v1 stdio"
+    ],
+    "references": [
+      "https://learn.chatgpt.com/docs/app-server",
+      "https://code.claude.com/docs/en/agent-sdk/overview",
+      "https://code.claude.com/docs/en/agent-sdk/python",
+      "https://code.claude.com/docs/en/agent-sdk/permissions",
+      "https://agentclientprotocol.com/protocol/v1/initialization",
+      "https://agentclientprotocol.com/protocol/v1/tool-calls",
+      "https://pypi.org/project/claude-agent-sdk/0.2.174/"
+    ],
+    "validation_boundary": "No live login, paid inference or signed installer acceptance; original foundation source manifest retained as history."
+  }
 }
