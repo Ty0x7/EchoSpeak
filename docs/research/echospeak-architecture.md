@@ -169,6 +169,15 @@ This is memory-based adaptation, not recursive self-improvement: no weights, pro
 - **Desktop shell.** `src-tauri/src/tray.rs` claims the feed every 5 s and shows Windows notifications. It also follows `desktop_close_to_tray`: when that's on, closing the main window hides it to the tray; Quit in the tray menu exits.
 - **Details:** [reminders-2026-10-23.md](reminders-2026-10-23.md).
 
+## 7c. Screen work, skills and your folder (11.10.3)
+
+- **Looking vs doing.** `take_screenshot`, `vision_qa` and `read_image` only look; `computer_action` acts. `vision_qa` asked to "click" says it didn't (outcome `no_effect`). A captured window that names nothing but its title bar is marked as drawn (games, canvases), with the coordinate-click route.
+- **Stalls.** `agent/lean/loop.py` `_screen_progress` adds a note after 3 looks in a row without an action, and after 2 screen actions in a row that failed or changed nothing. Desktop tools' failure texts count as failures (`toolbox._FAILURE_PREFIXES`).
+- **Skills.** `propose_skill` (owner, interactive) drafts a SKILL.md that waits for review. Settings › Skills offers bundled skills (`resources/agent-skills`, including `desktop-apps-and-games`) and ones in `~/.echospeak/skills`, `~/.agents/skills`, `~/.claude/skills`, `~/.codex/skills`.
+- **`~/.echospeak`** (`agent/home.py`): your `AGENTS.md` and `skills/`, like `~/.codex` and `~/.claude`. The attached project's `AGENTS.md` (else `CLAUDE.md`) is read too, up to 32 KiB together.
+- **This PC terminal.** Lists installed programs, PowerShell equivalents for bash habits, and runs Git Bash with `shell="bash"` when it's installed.
+- **Details:** [computer-control-2026-10-25.md](computer-control-2026-10-25.md).
+
 ## 8. Streaming, queue and steering
 
 - **Events.** NDJSON events per message, reduced by `apps/web/src/lean/liveReducer.ts` and replayable (`/query/runs/{id}/events`). The new ones:

@@ -249,9 +249,60 @@ def import_documentation_skill() -> AgentSkill:
     name = "project-documentation"
     if get(name) is not None:
         raise ValueError("This skill is already installed. Your existing files were kept.")
-    bundled = Path(__file__).resolve().parents[2] / "resources/agent-skills" / name
+    bundled = bundled_dir() / name
     source = Path(__file__).resolve().parents[4] / ".agents/skills" / name
     return import_folder(str(bundled if bundled.is_dir() else source), overwrite=False)
+
+
+def bundled_dir() -> Path:
+    """Skills that ship with EchoSpeak (apps/backend/resources/agent-skills, packaged as resources/agent-skills)."""
+    return Path(__file__).resolve().parents[2] / "resources" / "agent-skills"
+
+
+def skill_sources(project_root: str = "") -> list[tuple[Path, str]]:
+    """Folders of skill folders to offer, with a label: EchoSpeak's own, then where agents keep them.
+
+    The same places Claude Code and Codex read (~/.claude/skills, ~/.codex/skills, ~/.agents/skills,
+    and a project's .agents/skills), plus ~/.echospeak/skills (agent/home.py). Nothing here is
+    used directly: a skill is copied in and approved like any import.
+    """
+    from agent import home
+
+    user = Path.home()
+    sources = [(bundled_dir(), "Comes with EchoSpeak"),
+               # A source checkout keeps project-documentation in the repo's .agents/skills (the installer bundles it).
+               (Path(__file__).resolve().parents[4] / ".agents" / "skills", "Comes with EchoSpeak"),
+               (home.skills_dir(), str(home.skills_dir())),
+               (user / ".agents" / "skills", str(user / ".agents" / "skills")),
+               (user / ".claude" / "skills", str(user / ".claude" / "skills")),
+               (user / ".codex" / "skills", str(user / ".codex" / "skills"))]
+    if project_root:
+        sources.append((Path(project_root) / ".agents" / "skills", str(Path(project_root) / ".agents" / "skills")))
+    return sources
+
+
+def available(project_root: str = "") -> list[dict[str, str]]:
+    """Skills found in those folders that aren't installed yet: name, description, where, and the folder to import."""
+    installed = {skill.name for skill in list_skills()}
+    found: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for root, label in skill_sources(project_root):
+        try:
+            folders = sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith("."))
+        except OSError:
+            continue
+        for folder in folders[:50]:
+            try:
+                meta, _body, problem = parse_skill_md((folder / "SKILL.md").read_text(encoding="utf-8", errors="replace"))
+            except OSError:
+                continue
+            name = str(meta.get("name") or "")
+            if problem or name in installed or name in seen:
+                continue
+            seen.add(name)
+            found.append({"name": name, "description": str(meta.get("description") or "")[:300],
+                          "source": label, "path": str(folder)})
+    return found
 
 
 def import_folder(source: str, *, overwrite: bool = True) -> AgentSkill:
@@ -295,6 +346,58 @@ def skill_from_lesson(lesson: Any, name: str = "") -> AgentSkill:
         f"_Made from a lesson EchoSpeak learned and proved on {getattr(lesson, 'wins', 0)} tasks._\n"
     )
     return import_text(skill_md)
+
+
+MAX_PROPOSED_CHARS = 20_000
+
+
+def propose(args: dict[str, Any]) -> str:
+    """An agent drafts a skill from work that worked. It waits for the owner's review like any import.
+
+    Agents learn procedures the hard way (how a launcher's menus go, which keys a game wants);
+    a draft skill keeps that for next time without letting an agent give itself instructions:
+    nothing it writes is read back until the owner approves it in Settings › Skills.
+    """
+    name = str(args.get("name") or "").strip().lower()
+    description = " ".join(str(args.get("description") or "").split())
+    instructions = str(args.get("instructions") or "").replace("\r\n", "\n").strip()
+    if not NAME_RE.match(name) or len(name) > MAX_NAME:
+        return "Error: name must be lowercase letters, digits and hyphens, e.g. minecraft-new-world."
+    if not description:
+        return "Error: description is missing: one sentence on when to use the skill."
+    if not instructions:
+        return "Error: instructions are missing: the steps that worked, as Markdown."
+    if len(instructions) > MAX_PROPOSED_CHARS:
+        return f"Error: instructions are too long ({len(instructions)} characters); keep them under {MAX_PROPOSED_CHARS}."
+    existing = get(name)
+    if existing is not None and existing.status != "needs_review":
+        return (f"Error: a skill named {name} is already installed. Pick another name; the user can change "
+                "existing skills in Settings › Skills.")
+    skill_md = (f"---\nname: {name}\ndescription: {json.dumps(description[:MAX_DESCRIPTION])}\n---\n\n"
+                f"{instructions}\n\n_Drafted by an EchoSpeak agent from a task it completed._\n")
+    try:
+        import_text(skill_md)
+    except ValueError as exc:
+        return f"Error: {exc}"
+    return (f"Saved {name} as a draft skill. It isn't active yet: the user reviews and approves it in Settings › "
+            "Skills. Tell them it's waiting there.")
+
+
+def propose_skill_tool() -> NativeTool:
+    return NativeTool(
+        name="propose_skill",
+        description=("Draft a skill (reusable instructions) from something you just worked out and that worked, such "
+                     "as how to drive a particular app or game, or a multi-step routine the user will ask for again. "
+                     "Offer it first and save it when the user agrees. Write only steps that worked, not guesses. "
+                     "It stays a draft until the user approves it in Settings › Skills."),
+        parameters={"type": "object", "properties": {
+            "name": {"type": "string", "description": "Lowercase-with-hyphens, e.g. minecraft-new-world."},
+            "description": {"type": "string", "description": "One sentence: what it does and when to use it."},
+            "instructions": {"type": "string", "description": "Markdown steps: what to look for on screen, what to "
+                             "click or press, how to check each step worked, and what to do when it doesn't."},
+        }, "required": ["name", "description", "instructions"]},
+        func=propose,
+    )
 
 
 # ── what agents see ──────────────────────────────────────────────────

@@ -20,6 +20,9 @@ export type AgentSkillInfo = {
   body?: string;
 };
 
+/** A skill folder that isn't installed yet (backend: agent_skills.available). */
+export type AvailableSkill = { name: string; description: string; source: string; path: string };
+
 async function json<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
     let detail = `HTTP ${resp.status}`;
@@ -114,6 +117,11 @@ export const leanApi = (apiBase: string) => ({
   // ── agent skills (open SKILL.md format) ───────────────────────────────
   async agentSkills(): Promise<AgentSkillInfo[]> {
     return (await json<{ items: AgentSkillInfo[] }>(await fetch(`${apiBase}/lean/agent-skills`, { cache: "no-store" }))).items || [];
+  },
+  /** Installed skills, plus ones you could add: EchoSpeak's own and those in other agents' skill folders. */
+  async agentSkillCatalog(): Promise<{ items: AgentSkillInfo[]; available: AvailableSkill[] }> {
+    const data = await json<{ items?: AgentSkillInfo[]; available?: AvailableSkill[] }>(await fetch(`${apiBase}/lean/agent-skills`, { cache: "no-store" }));
+    return { items: data.items || [], available: data.available || [] };
   },
   async importDocumentationSkill(): Promise<AgentSkillInfo> {
     const data = await json<{ skill: AgentSkillInfo }>(await fetch(`${apiBase}/lean/agent-skills/documentation/import`, { method: "POST" }));

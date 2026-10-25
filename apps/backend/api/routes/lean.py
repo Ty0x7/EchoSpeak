@@ -692,8 +692,11 @@ def stop_status() -> dict[str, Any]:
 def list_agent_skills() -> dict[str, Any]:
     """Open-format Agent Skills (agent/lean/agent_skills.py), with their review status."""
     from agent.lean import agent_skills
+    from config import config
 
-    return {"items": [skill.public(with_body=True) for skill in agent_skills.list_skills()]}
+    # Skills you could add: EchoSpeak's own, and those in the folders other agents use (~/.agents/skills, ...).
+    return {"items": [skill.public(with_body=True) for skill in agent_skills.list_skills()],
+            "available": agent_skills.available(str(getattr(config, "file_tool_root", "") or ""))}
 
 
 @router.post("/agent-skills/import")

@@ -112,6 +112,12 @@ async def lifespan(app: FastAPI):
         refresh_default_soul()
     except Exception:
         logger.warning("SOUL.md default refresh failed", exc_info=True)
+    try:
+        from agent import home
+
+        home.ensure()  # ~/.echospeak: your AGENTS.md and skills folder, like ~/.claude and ~/.codex
+    except Exception:
+        logger.warning("Could not create the ~/.echospeak folder", exc_info=True)
     threading.Thread(target=_autoconfigure_local_provider, name="local-model-autoconfig", daemon=True).start()
     from agent.query_journal import get_query_journal
     get_query_journal()  # Mark interrupted transport logs before any new run can claim an ID.

@@ -57,7 +57,8 @@ TOOLSETS: dict[str, list[str]] = {
     "memory": ["memory_save", "memory_search", "chat_search", "document_search", "soul_update"],
     # Skill, MCP, and Connection tools that registered at runtime, plus finding,
     # proposing and checking new connections (agent/integrations.py).
-    "skills": ["@external", "find_tools", "find_integrations", "propose_integration", "check_integration", "ask_remote_agent"],
+    "skills": ["@external", "find_tools", "find_integrations", "propose_integration", "check_integration", "ask_remote_agent",
+               "propose_skill"],
 }
 
 # External tools sent with every request before the rest wait for find_tools.
@@ -178,6 +179,10 @@ _FAILURE_PREFIXES = (
     "failed", "error", "path not allowed", "cwd not allowed", "command rejected",
     "command blocked", "tool '", "file write is disabled", "terminal commands are disabled",
     "rejected", "mutation blocked", "playwright error", "unsupported", "exitcode=127",
+    # The desktop tools (agent/tools.py) report failure only in their text. "Control not found."
+    # once counted as a success, and a 4B model took it as "I clicked Singleplayer".
+    "control not found", "window not found", "no matching controls", "click failed", "type failed",
+    "hotkey failed", "activate failed", "invalid hotkey", "pywinauto is not available", "no text provided",
 )
 
 

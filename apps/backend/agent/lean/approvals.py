@@ -51,8 +51,11 @@ _DANGEROUS_COMMAND = re.compile(
         npm\s+publish|pip\s+uninstall|winget\s+uninstall|choco\s+uninstall|
         invoke-webrequest|iwr|invoke-restmethod|irm|curl|wget|start-bitstransfer|certutil|bitsadmin|
         scp|sftp|ftp|ssh|nc|ncat|
-        ri|remove-itemproperty|clear-content|set-content|out-file|mv|move|move-item|ren|rename-item
+        ri|remove-itemproperty|clear-content|set-content|out-file|mv|move|move-item|ren|rename-item|
+        unlink|shred|truncate
     )\b
+    # Bash deleters for Git Bash on this PC (the sandbox's _WORKSPACE_DESTRUCTIVE has the same).
+    |\bfind\b[^;&|]*\s-delete\b
     |>\s*[a-z]:\\|\|\s*(iex|invoke-expression|sh|bash)\b
     |\b(?:powershell|pwsh)(?:\.exe)?\b[^|;&]*\s-e(?:nc|ncodedcommand)?\b
     |\b(?:shutil\.rmtree|os\.remove|os\.unlink|os\.rmdir|send2trash)\b|\.unlink\(

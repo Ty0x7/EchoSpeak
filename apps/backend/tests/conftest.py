@@ -16,6 +16,8 @@ _TEST_STATE_ROOT = Path(tempfile.mkdtemp(prefix="echospeak-pytest-state-"))
 Path(__file__).resolve().parents[3].joinpath(".test-state").mkdir(parents=True, exist_ok=True)
 os.environ["ECHOSPEAK_TESTING"] = "1"
 os.environ["ECHOSPEAK_DATA_DIR"] = str(_TEST_STATE_ROOT)
+# ~/.echospeak (agent/home.py): the owner's real AGENTS.md must not reach test prompts.
+os.environ["ECHOSPEAK_HOME"] = str(_TEST_STATE_ROOT / "home")
 os.environ["ECHOSPEAK_ALLOW_MULTI_WRITER"] = "1"
 # Learning (agent/learning) would carry lessons and track records from one test's
 # chats into the next one's prompts. Learning tests turn it on with a fresh store.
