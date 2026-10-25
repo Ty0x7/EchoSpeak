@@ -1,0 +1,11 @@
+# Everything the release build environment (apps/backend/.venv) needs: the app, the
+# test runner and PyInstaller. requirements.lock.txt is this file resolved to exact,
+# hash-checked versions; build releases from the lock, not from these ranges:
+#   python -m venv apps/backend/.venv
+#   apps/backend/.venv/Scripts/python -m pip install --require-hashes -r apps/backend/requirements.lock.txt
+-r requirements.txt
+-r requirements-dev.txt
+pyinstaller==6.21.0
+# A new venv starts with the pip its Python bundled (25.0.1 for 3.12.10); 26.2 fixes
+# doubly-encoded index URLs (CVE-2026-13346). Installing the lock upgrades it.
+pip>=26.2.0

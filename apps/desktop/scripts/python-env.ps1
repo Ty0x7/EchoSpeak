@@ -57,6 +57,22 @@ The Python at $where has MCP SDK $mcpVersion; the app needs 2.3 or newer (MCP 20
 Update it:  & "$where" -m pip install -r "$requirements"
 "@
     }
+    # The installer ships this Python's packages, so they must be the locked, hash-checked,
+    # patched versions (apps/backend/requirements.lock.txt), not whatever a shared Python has.
+    $lock = (Resolve-Path (Join-Path $PSScriptRoot "..\..\backend\requirements.lock.txt")).Path
+    # Printed, not returned: this function's only output must be the Python path.
+    $report = & $PythonExecutable (Join-Path $PSScriptRoot "check-build-env.py")
+    $lockOk = $LASTEXITCODE -eq 0
+    $report | ForEach-Object { Write-Host $_ }
+    if (-not $lockOk) {
+        $fix = @"
+The build Python's packages don't match $lock.
+Make EchoSpeak's own build environment once (the build scripts use it automatically):
+  py -3.12 -m venv apps\backend\.venv
+  apps\backend\.venv\Scripts\python -m pip install --require-hashes -r apps\backend\requirements.lock.txt
+"@
+        if ($env:ECHOSPEAK_ALLOW_UNLOCKED_BUILD -eq "1") { Write-Warning $fix } else { throw $fix }
+    }
     Write-Host "Building with Python: $where"
     return $where
 }

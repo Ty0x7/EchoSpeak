@@ -68,6 +68,11 @@ def _model_dump(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _is_npx(command: str) -> bool:
+    """npx itself, by name or path (npx, npx.cmd, C:\\...\\npx.cmd)."""
+    return Path(str(command or "")).name.lower() in {"npx", "npx.cmd", "npx.exe"}
+
+
 def _safe_error(value: Any) -> str:
     text = str(value or "")
     text = re.sub(r"(?i)\bbearer\s+[^\s,;]+", "Bearer [REDACTED]", text)
@@ -301,7 +306,12 @@ class MCPSession:
             if self.state.transport == "stdio":
                 from agent.child_env import child_env
 
-                environment = child_env(self.state.env)
+                # npx installs the server's dependencies on first launch. The 2026 npm worms
+                # (Shai-Hulud, ChainDrop) ran from install scripts of hijacked dependencies, so
+                # those don't run; a server that truly needs them sets npm_config_ignore_scripts
+                # to false in its own environment settings.
+                guard = {"npm_config_ignore_scripts": "true"} if _is_npx(self.state.command) else {}
+                environment = child_env({**guard, **dict(self.state.env or {})})
                 parameters = StdioServerParameters(
                     command=self.state.command,
                     args=list(self.state.args),

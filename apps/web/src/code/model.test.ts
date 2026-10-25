@@ -1,0 +1,51 @@
+import { describe, expect, it } from "vitest";
+import { canStartSession, CodeRequestError, createCodeSession, runtimeStatus, type CodeRuntime, type CodeWorkspace } from "./model";
+
+const native: CodeRuntime = { id: "echo", name: "Echo native", protocol: "native", implemented: true, installed: true, authentication: "existing_model_settings", can_start: true, blockers: [], description: "" };
+const workspace = { can_start_native: true } as CodeWorkspace;
+
+describe("Echo Code runtime admission", () => {
+  it("requires a project, its trust gate, and a working native adapter", () => {
+    expect(canStartSession(native, workspace)).toBe(true);
+    expect(canStartSession(native, null)).toBe(false);
+    expect(canStartSession(native, { ...workspace, can_start_native: false })).toBe(false);
+    expect(canStartSession({ ...native, implemented: false }, workspace)).toBe(false);
+    expect(canStartSession({ ...native, can_start: false }, workspace)).toBe(false);
+  });
+  it("cannot route an external runtime through the native query path", () => {
+    for (const id of ["codex", "claude_code", "acp"]) expect(canStartSession({ ...native, id }, workspace)).toBe(false);
+  });
+  it("does not turn a discovered CLI into an authenticated or executable integration", () => {
+    expect(runtimeStatus({ ...native, id: "codex", implemented: false })).toBe("CLI found · execution planned");
+    expect(runtimeStatus({ ...native, implemented: false, installed: false }).includes("CLI not found")).toBe(true);
+    expect(runtimeStatus({ ...native, implemented: false, installed: null })).toBe("Planned");
+  });
+  it("sends the selected runtime and retry identity to the separate creation endpoint", async () => {
+    const original = globalThis.fetch;
+    let requestedUrl = ""; let requestedBody = "";
+    globalThis.fetch = async (url, options) => {
+      requestedUrl = String(url); requestedBody = String(options?.body);
+      return new Response(JSON.stringify({ thread_id: "code-1" }));
+    };
+    try {
+      expect(await createCodeSession("http://local", "project/a", "echo", "same-request")).toEqual({ thread_id: "code-1" });
+      expect(requestedUrl).toBe("http://local/echo-code/projects/project%2Fa/sessions");
+      expect(JSON.parse(requestedBody)).toEqual({ runtime_id: "echo", idempotency_key: "same-request" });
+    } finally { globalThis.fetch = original; }
+  });
+  it("retains the HTTP status so rejected requests can release their retry key", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => new Response(JSON.stringify({ detail: "Runtime unavailable" }), { status: 409 });
+    try {
+      let rejected = false;
+      try { await createCodeSession("", "p", "codex", "key"); }
+      catch (err) {
+        rejected = true;
+        expect(err instanceof CodeRequestError).toBe(true);
+        expect((err as CodeRequestError).status).toBe(409);
+        expect((err as Error).message).toBe("Runtime unavailable");
+      }
+      expect(rejected).toBe(true);
+    } finally { globalThis.fetch = original; }
+  });
+});

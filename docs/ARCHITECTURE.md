@@ -4,6 +4,14 @@ How EchoSpeak works today (10.2). For setup and day-to-day use see [GUIDE.md](GU
 for what's next see [ROADMAP.md](ROADMAP.md). Older design documents are in
 [archive/](archive/) and describe runtimes that no longer exist.
 
+For the separate Echo Code workspace foundation and the researched external-runtime
+boundaries, see [Echo Code architecture and implementation](research/echo-code.md).
+The native harness described here remains independent; external agent execution is
+not implemented by that foundation.
+
+For the combined dependency, child-process, untrusted-input and updater changes,
+see the [October 2026 security implementation](research/security-audit-2026-10-25.md).
+
 ## 1. System overview
 
 ```mermaid

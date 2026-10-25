@@ -13,6 +13,24 @@ import json
 from pathlib import Path
 
 
+def signed_fields(signature: str) -> dict[str, str]:
+    """The trusted comment's tab-separated fields, e.g. {"timestamp": ..., "file": ..., "version": ...}."""
+    lines = base64.b64decode(signature.strip(), validate=True).decode("utf-8").splitlines()
+    comment = lines[2][len("trusted comment: "):] if len(lines) > 2 and lines[2].startswith("trusted comment: ") else ""
+    return dict(part.split(":", 1) for part in comment.split("\t") if ":" in part)
+
+
+def require_version(signature: str, version: str) -> None:
+    """The app's updater runs with requireSignedVersion: a release whose signature doesn't carry
+    its own version can't be installed by an update (and stops the downgrade attack in
+    CVE-2026-95625). Refuse to publish one."""
+    signed = signed_fields(signature).get("version", "")
+    if not signed:
+        raise ValueError("The updater signature doesn't record the app version. Sign with Tauri CLI 2.12 or newer.")
+    if signed != version:
+        raise ValueError(f"The updater signature is for version {signed}, not {version}.")
+
+
 def verify(artifact: Path, signature: str, public_key: str):
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     key_lines = base64.b64decode(public_key.strip(), validate=True).decode("utf-8").splitlines()
@@ -42,7 +60,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("artifact", type=Path)
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--version", default="", help="Require the signature to record this app version.")
     args = parser.parse_args()
     config = json.loads(args.config.read_text(encoding="utf-8-sig"))
-    verify(args.artifact, Path(str(args.artifact) + ".sig").read_text().strip(), config["plugins"]["updater"]["pubkey"])
+    signature = Path(str(args.artifact) + ".sig").read_text().strip()
+    verify(args.artifact, signature, config["plugins"]["updater"]["pubkey"])
+    if args.version:
+        require_version(signature, args.version)
     print("Updater signature and trusted comment verified:", args.artifact.name)

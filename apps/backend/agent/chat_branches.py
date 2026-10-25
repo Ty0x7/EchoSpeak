@@ -33,7 +33,8 @@ def branch_before_prompt(session_id: str, *, execution_id: str = "", request_id:
             target = manager.get_thread(target_room.thread_id)
         else:
             target = manager.create_thread(title=f"{source.title} · branch", source=source.source,
-                                           workspace_id=source.workspace_id)
+                                           workspace_id=source.workspace_id, surface=source.surface,
+                                           agent_runtime=source.agent_runtime)
         state = store.get_thread_state(session_id)
         binding = state.model_binding
         if binding:

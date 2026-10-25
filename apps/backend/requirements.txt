@@ -13,11 +13,12 @@ huggingface-hub>=0.24.0
 # the model). Without it the mic needs manual setup.
 faster-whisper==1.1.1
 
-# Vision and image processing
+# Vision and image processing. The floors are security fixes (docs/research/security-audit-2026-10-25.md):
+# Pillow 13.0.0 (decoder memory-safety fixes), pypdf 6.21.2 (crafted-PDF loops and memory use).
 opencv-python>=4.8.0
-Pillow>=10.0.0
+Pillow>=13.0.0
 pytesseract>=0.3.10
-pypdf>=4.0.0
+pypdf>=6.21.2
 
 # Web search
 requests>=2.31.0
@@ -46,7 +47,8 @@ python-multipart>=0.0.6
 python-dotenv>=1.0.0
 pydantic>=2.5.0
 # Signs and checks A2A Agent Cards (agent/a2a_trust.py); MCP sign-in uses it too.
-cryptography>=42
+# 50.0.0 fixes a PKCS#7 decryption oracle (CVE-2026-69247).
+cryptography>=50.0.0
 
 # Logging
 loguru>=0.7.0
@@ -56,9 +58,7 @@ loguru>=0.7.0
 python-dateutil>=2.8.2
 mss>=9.0.0
 
-# WebSocket support for uvicorn (/gateway/ws)
-websockets>=12.0
-numpy>=1.24.0
+# WebSocket support for uvicorn (/gateway/ws) is the websockets pin under Web search.
 
 # Discord bot
 discord.py>=2.3.0
@@ -79,3 +79,21 @@ notion-client>=2.0.0
 
 # GitHub integration
 PyGithub>=2.1.0
+
+# Security floors for packages the ones above pull in, all shipped in the installer
+# (OSV / GitHub advisories, October 2026). requirements.lock.txt pins the exact,
+# hash-checked versions a release is built from; regenerate it after changing this file.
+aiohttp>=3.14.4        # discord.py: request smuggling, header and pool-exhaustion fixes
+anyio>=4.14.2          # TLS host name encoding (CVE-2026-63374)
+brotli>=1.2.1          # decoder out-of-bounds write (CVE-2026-111497)
+certifi>=2026.10.19    # drops emSign roots whose intermediate CA keys were compromised
+filelock>=4.2.1        # Windows lock races (CVE-2026-112907)
+fsspec>=2026.6.0       # template injection in ReferenceFileSystem (CVE-2026-104851)
+h2>=4.4.1              # duplicate Host header smuggling (CVE-2026-71554)
+hpack>=4.2.0           # unbounded integer decoding (CVE-2026-59980)
+multidict>=6.9.1       # reference leak (CVE-2026-104874)
+PyJWT>=2.15.0          # PyGithub: key confusion and claim bypasses (CVE-2026-101917 and others)
+setuptools>=84.1.0     # bundled pkg_resources; path escape in legacy installs (CVE-2026-59890)
+httplib2>=0.32.0       # Google Calendar: decompression bomb (CVE-2026-59939)
+oauthlib>=4.0.0        # Google sign-in: PKCE timing and JSONP callback injection (CVE-2026-49264)
+pyasn1>=0.6.4          # google-auth: decoder denial of service (CVE-2026-59884)

@@ -58,8 +58,9 @@ EXTERNAL_ACTIONS = {
     "notion_create_page", "spotify_control", "ask_remote_agent", "a2a_delegate",
     "desktop_click", "desktop_type_text", "desktop_send_hotkey", "notepad_write", "computer_action",
     # Saved memories and the soul are re-read in every future chat: writing one
-    # from untrusted content would plant a persistent injection.
-    "memory_save", "soul_update", "save_project_image",
+    # from untrusted content would plant a persistent injection. A drafted skill too,
+    # once approved; asking here keeps a web page from writing the draft the owner approves.
+    "memory_save", "soul_update", "save_project_image", "propose_skill",
 }
 
 # Claude's native computer toolset (agent/lean/computer.py native()): members that

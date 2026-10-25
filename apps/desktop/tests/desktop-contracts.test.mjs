@@ -64,7 +64,8 @@ test("desktop composer submits only into an explicitly selected Session", () => 
   assert.ok(composerInput.includes("void onSend()"));
   assert.ok(composerInput.includes("disabled={!activeThreadId || !input.trim()}"));
   assert.ok(composerInput.includes("disabled={!activeThreadId}"));
-  assert.ok(dashboard.includes("onSend={() => void sendText()}"));
+  // Enter either submits now or queues behind the current turn in the selected Session.
+  assert.ok(dashboard.includes("onSend={() => void (streaming ? queueFromComposer() : sendText())}"));
 });
 
 test("desktop startup and sidebar use one monochrome Echo identity", () => {
@@ -150,7 +151,7 @@ test("sidecar lifetime has both graceful and crash recovery ownership", () => {
 test("native contract is reproducible and supports disposable acceptance data", () => {
   for (const version of [
     'tauri-build = { version = "=2.6.3"',
-    'tauri = { version = "=2.11.5"',
+    'tauri = { version = "=2.11.6"',
     'tauri-plugin-shell = "=2.3.5"',
     'tauri-plugin-single-instance = "=2.4.2"',
     'tauri-plugin-window-state = "=2.4.1"',
@@ -182,6 +183,7 @@ test("in-app updates verify signed GitHub releases and stop the service before i
   assert.equal(typeof updater.pubkey, "string");
   assert.deepEqual(updater.endpoints, ["https://github.com/Ty0x7/EchoSpeak/releases/latest/download/latest.json"]);
   assert.equal(updater.windows.installMode, "passive");
+  assert.equal(updater.requireSignedVersion, true);
   // Ordinary builds must not need the private signing key; only the release script turns this on.
   assert.notEqual(config.bundle.createUpdaterArtifacts, true);
   assert.ok(cargo.includes('tauri-plugin-updater = "=2.12.0"'));

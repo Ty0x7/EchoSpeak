@@ -19,6 +19,7 @@ import learningCss from "./lean/learning.css?inline";
 import { LearningPage } from "./lean/LearningPage";
 import settingsCss from "./settings/settings.css?inline";
 import chatPolishCss from "./dashboard/chatPolish.css?inline";
+import workspaceCss from "./theme/workspace.css?inline";
 import { CreationsPage } from "./creations/CreationsPage";
 import { FirstRunSetup } from "./setup/FirstRunSetup";
 import { SettingsPanel } from "./settings/SettingsPanel";
@@ -40,6 +41,7 @@ import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, lastReply
 import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
+import { EchoCodeWorkspace } from "./code/EchoCodeWorkspace";
 import { AgentEditor, RoomDialog } from "./lean/Dialogs";
 import type { LeanEvent, LeanPersona, LeanRoom } from "./lean/types";
 import {
@@ -104,6 +106,8 @@ export const Dashboard: React.FC<{
   const [showSidebar, setShowSidebar] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarVisible);
   /** Which page the main area shows: the chat, or one of the sidebar nav pages. */
   const [mainPage, setMainPage] = useState<SidebarPage>("chat");
+  const [codeConversationOpen, setCodeConversationOpen] = useState(false);
+  const [codeProjectId, setCodeProjectId] = useState("");
   /** The artifact shown in the side panel. */
   const [openArtifact, setOpenArtifact] = useState<{ id: string; version?: number } | null>(null);
   const [openObservation, setOpenObservation] = useState<ObservationRef | null>(null);
@@ -140,13 +144,15 @@ export const Dashboard: React.FC<{
   const [initialHydrationComplete, setInitialHydrationComplete] = useState(false);
   const [threadState, setThreadState] = useState<ThreadSessionState | null>(() => (desktopBootstrap?.thread_state || null) as ThreadSessionState | null);
 
-  const [threads, setThreads] = useState<{ id: string; name: string; at: number; projectId?: string; messageCount?: number }[]>(() =>
+  const [threads, setThreads] = useState<{ id: string; name: string; at: number; projectId?: string; messageCount?: number; surface?: string; agentRuntime?: string }[]>(() =>
     (desktopBootstrap?.threads || []).map((item: any) => ({
       id: String(item.thread_id || item.id || ""),
       name: String(item.title || item.name || "Session"),
       at: normalizeTimestampMs(item.last_active_at || item.created_at || Date.now()),
       projectId: String(item.project_id || ""),
       messageCount: Number(item.message_count || 0),
+      surface: String(item.surface || "chat"),
+      agentRuntime: String(item.agent_runtime || "echo"),
     })),
   );
   const [activeThreadId, setActiveThreadId] = useState<string>(() => desktopBootstrap?.active_session_id || "");
@@ -282,6 +288,8 @@ export const Dashboard: React.FC<{
         at: normalizeTimestampMs(item.last_active_at || item.created_at || Date.now()),
         projectId: String(item.project_id || ""),
         messageCount: Number(item.message_count || 0),
+        surface: String(item.surface || "chat"),
+        agentRuntime: String(item.agent_runtime || "echo"),
       }));
       setProjects(Array.isArray(bootstrap.projects) ? bootstrap.projects : []);
       setThreads(mapped);
@@ -448,6 +456,8 @@ export const Dashboard: React.FC<{
         at: normalizeTimestampMs(item.last_active_at || item.created_at || Date.now()),
         projectId: String(item.project_id || ""),
         messageCount: Number(item.message_count || 0),
+        surface: String(item.surface || "chat"),
+        agentRuntime: String(item.agent_runtime || "echo"),
       })).filter((item: any) => {
         if (!item.id) return false;
         const placeholder = isEmptySessionDraft(item);
@@ -984,6 +994,7 @@ export const Dashboard: React.FC<{
           message: requestText,
           include_memory: true,
           thread_id: streamThreadId,
+          workspace: threads.find(thread => thread.id === streamThreadId)?.surface === "code" ? "coding" : undefined,
           client_request_id: runRequestId,
           thinking_enabled: providerInfo?.model_profile?.thinking_controls?.supported
             ? (providerInfo.model_profile.thinking_controls.toggle ? thinkingEnabled : true) : false,
@@ -1517,7 +1528,9 @@ export const Dashboard: React.FC<{
   }, [desktopMode, studioOpen]);
 
   const currentObservation = openObservation?.session_id === activeThreadId ? openObservation : null;
-  const rightOpen = !voiceConversationMode && (mainPage === "chat" ? Boolean(openArtifact || activityOpen || currentObservation) : mainPage === "projects" && Boolean(workspaceProjectId && openArtifact));
+  const conversationVisible = mainPage === "chat" || (mainPage === "code" && codeConversationOpen);
+  const emptyConversation = !timeline.length && !streaming && !lean.live?.order.length && !voiceConversationMode;
+  const rightOpen = !voiceConversationMode && (conversationVisible ? Boolean(openArtifact || activityOpen || currentObservation) : mainPage === "projects" && Boolean(workspaceProjectId && openArtifact));
   const rightDocked = rightOpen && !narrowLayout;
   const shellColumns = [
     desktopMode
@@ -1531,7 +1544,24 @@ export const Dashboard: React.FC<{
     rightDocked ? `${panelWidth}px` : "",
   ].filter(Boolean).join(" ");
 
-  const closePage = useCallback(() => setMainPage("chat"), []);
+  const closePage = useCallback(() => {
+    const coding = threads.find(thread => thread.id === activeThreadId)?.surface === "code";
+    setCodeConversationOpen(coding);
+    setMainPage(coding ? "code" : "chat");
+  }, [activeThreadId, threads]);
+
+  // Recover the session's surface on selection or hydration without moving the
+  // user away from another page on every background session-list refresh.
+  const lastSurfaceSession = useRef("");
+  useEffect(() => {
+    const thread = threads.find(row => row.id === activeThreadId);
+    if (!thread || lastSurfaceSession.current === activeThreadId) return;
+    lastSurfaceSession.current = activeThreadId;
+    const coding = thread.surface === "code";
+    setCodeConversationOpen(coding);
+    setMainPage(coding ? "code" : "chat");
+    if (coding) setCodeProjectId(thread.projectId || "");
+  }, [activeThreadId, threads]);
   const sidebarWidthPx = showSidebar ? (sidebarCollapsed || narrowLayout ? 56 : SIDEBAR_WIDTH) : 0;
   /** Room chat + side panel share (the shell minus the left sidebar). */
   const measurePanelRoom = useCallback(() => {
@@ -1668,6 +1698,7 @@ export const Dashboard: React.FC<{
       <style>{learningCss}</style>
       <style>{settingsCss}</style>
       <style>{chatPolishCss}</style>
+      <style>{workspaceCss}</style>
       {agentEditor.open ? (
         <AgentEditor
           agent={agentEditor.agent}
@@ -1734,7 +1765,7 @@ export const Dashboard: React.FC<{
           hydrating={!initialHydrationComplete}
           collapsed={sidebarCollapsed || narrowLayout}
           projects={projects}
-          sessions={threads.filter((thread) => !roomThreadIds.has(thread.id))}
+          sessions={threads.filter((thread) => thread.surface !== "code" && !roomThreadIds.has(thread.id))}
           agents={agents.length ? {
             count: agents.length,
             onNew: () => setAgentEditor({ open: true, agent: null }),
@@ -1750,7 +1781,7 @@ export const Dashboard: React.FC<{
           } : undefined}
           collapsedRoster={agents.length ? <CollapsedRoster agents={agents} onOpenAgent={(agent) => void openAgentChat(agent)} /> : undefined}
           page={mainPage}
-          onPage={(page) => { if (page === "projects") setWorkspaceProjectId(""); setMainPage(page); }}
+          onPage={(page) => { if (page === "projects") setWorkspaceProjectId(""); if (page === "code") setCodeConversationOpen(false); setMainPage(page); }}
           pageCounts={{ groups: rooms.filter((r) => r.kind === "group").length, projects: projects.filter((p) => !p.archived).length }}
           activeProjectId={activeProjectId}
           activeSessionId={activeThreadId}
@@ -1824,10 +1855,26 @@ export const Dashboard: React.FC<{
             }}
           />
         ) : null}
-        {mainPage !== "chat" ? (
+        {!conversationVisible ? (
           <PageCloseContext.Provider value={closePage}>
           <div className="glow-panel es-page-host" data-testid="sidebar-page">
-            {mainPage === "groups" ? (
+            {mainPage === "code" ? (
+              <WidgetEnvProvider value={widgetEnv}>
+                <EchoCodeWorkspace apiBase={apiBase} projects={projects} projectId={codeProjectId}
+                  onProject={setCodeProjectId} onAddFolder={() => void attachFolder()}
+                  onSession={(session, draft) => {
+                    setThreads(previous => [{ id: session.thread_id, name: session.title,
+                      at: normalizeTimestampMs(session.last_active_at), projectId: session.project_id,
+                      messageCount: session.message_count, surface: session.surface, agentRuntime: session.agent_runtime },
+                    ...previous.filter(thread => thread.id !== session.thread_id)]);
+                    switchThread(session.thread_id);
+                    activeProjectIdRef.current = session.project_id;
+                    setActiveProjectId(session.project_id);
+                    if (draft) setInput(draft);
+                    setCodeConversationOpen(true); setMainPage("code");
+                  }} />
+              </WidgetEnvProvider>
+            ) : mainPage === "groups" ? (
               <GroupChatsPage
                 agents={agents}
                 rooms={rooms}
@@ -1889,8 +1936,8 @@ export const Dashboard: React.FC<{
           </PageCloseContext.Provider>
         ) : null}
         <div
-          className={`glow-panel${desktopContextualWorkspace ? " desktop-contextual-workspace" : desktopMode ? " desktop-chat-workspace" : ""}`}
-          data-page-hidden={mainPage !== "chat" ? "true" : undefined}
+          className={`glow-panel${emptyConversation ? " is-empty-conversation" : ""}${desktopContextualWorkspace ? " desktop-contextual-workspace" : desktopMode ? " desktop-chat-workspace" : ""}`}
+          data-page-hidden={!conversationVisible ? "true" : undefined}
         >
           <div className="panel-header">
             <div className="title">
@@ -1989,6 +2036,7 @@ export const Dashboard: React.FC<{
                   <PausedNotice apiBase={apiBase} />
                   <SystemCheckNotice apiBase={apiBase} onOpen={() => openSettingsAt("system")} />
                   <ChatThread
+                    contextBar={<div className="ec-conversation-bar"><strong className="workspace-breadcrumb"><span>{mainPage === "code" ? "Echo Code · Echo native" : "EchoSpeak"}</span><i aria-hidden>/</i>{threads.find(thread => thread.id === activeThreadId)?.name || "New chat"}</strong>{mainPage === "code" ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setCodeConversationOpen(false)}>Workspace</button> : null}</div>}
                     activeThreadId={activeThreadId} streaming={streaming} scrollRef={chatScrollRef}
                     onScroll={onChatScroll} onWheel={onChatWheel} onKeyDown={onChatKeyDown}
                     onTouchStart={onChatTouchStart} onTouchEnd={onChatTouchEnd}
@@ -2002,9 +2050,11 @@ export const Dashboard: React.FC<{
                   />
                   </WidgetEnvProvider>
                   {!voiceConversationMode || mainPage !== "chat" ? <div className="input-bar">
+                    {emptyConversation ? <div className="conversation-welcome"><h1>{mainPage === "code" ? "What should we build" : "What can I help you with"}{mainPage === "code" && activeProjectId ? <> in <span>{projects.find(project => project.id === activeProjectId)?.name || "this project"}</span></> : null}?</h1><p>{mainPage === "code" ? "Your project, your model, Echo's own harness." : "An idea, a question, or something you'd like to work on."}</p></div> : null}
                     <LiveStatusPill live={streaming ? lean.live : null} onStop={stopActiveTurn} />
                     {/* One card: session strip, the text box, then tools · context · send */}
                     <ComposerInput
+                      coding={mainPage === "code"}
                       threads={threads} projects={projects} activeThreadId={activeThreadId}
                       activeProjectId={activeProjectId} threadState={threadState} providerError={providerError}
                       folderPathFromDrop={folderPathFromDrop} attachFolder={attachFolder} onRemoveFolder={async () => {
@@ -2024,6 +2074,8 @@ export const Dashboard: React.FC<{
                       messages={messages} providerInfo={providerInfo}
                       toolbar={
                         <ComposerToolbar
+                          onPermissions={() => openSettingsAt("permissions")}
+                          onProviderSettings={() => openSettingsAt("models")}
                           listening={listening} voicePhase={voicePhase} voiceNotice={voiceNotice}
                           voiceInputLevel={voiceInputLevel} startMic={() => void start()} stopMic={() => void stop()}
                           monitoring={monitoring} toggleMonitor={toggleMonitor}

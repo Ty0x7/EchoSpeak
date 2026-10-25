@@ -40,10 +40,31 @@ AUTH_VARS = frozenset({
 })
 
 
+# Git settings for every process EchoSpeak starts, passed as GIT_CONFIG_* so they apply to
+# that process only and never change the user's git config. transfer.bundleURI: a hostile
+# server can point a clone or fetch at a network share and collect the user's Windows NTLM
+# hash (CVE-2026-62960, Git for Windows before 2.55.0.windows.4). Agents clone strangers' repos.
+GIT_GUARD = {"transfer.bundleURI": "false"}
+
+
+def _git_guard(env: Mapping[str, str]) -> dict[str, str]:
+    """GIT_CONFIG_* entries adding GIT_GUARD after any the environment already sets."""
+    try:
+        start = max(0, int(env.get("GIT_CONFIG_COUNT") or 0))
+    except ValueError:
+        start = 0
+    out = {"GIT_CONFIG_COUNT": str(start + len(GIT_GUARD))}
+    for index, (key, value) in enumerate(GIT_GUARD.items(), start):
+        out[f"GIT_CONFIG_KEY_{index}"] = key
+        out[f"GIT_CONFIG_VALUE_{index}"] = value
+    return out
+
+
 def child_env(extra: Optional[Mapping[str, str]] = None) -> dict[str, str]:
     """The user's environment without EchoSpeak's secrets, plus `extra` (settings configured
     for this one child, e.g. an MCP server's own token), which may not include auth keys."""
     env = {key: value for key, value in os.environ.items() if not is_private(key)}
     if extra:
         env.update({str(k): str(v) for k, v in extra.items() if str(k).upper() not in AUTH_VARS})
+    env.update(_git_guard(env))
     return env

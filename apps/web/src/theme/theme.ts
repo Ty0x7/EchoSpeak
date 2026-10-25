@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 /**
- * Appearance: light (the default since 11.1), dark, or whatever the system uses.
+ * Appearance: dark by default, light, or whatever the system uses.
  *
  * The choice is a per-device preference kept in localStorage. Every EchoSpeak
  * window (main, Settings, setup, companion) shares that storage, and the
@@ -17,9 +17,9 @@ const CHANGE = "echospeak:theme";
 export function readThemeChoice(): ThemeChoice {
   try {
     const value = localStorage.getItem(KEY);
-    return value === "dark" || value === "system" || value === "light" ? value : "light";
+    return value === "dark" || value === "system" || value === "light" ? value : "dark";
   } catch {
-    return "light";
+    return "dark";
   }
 }
 

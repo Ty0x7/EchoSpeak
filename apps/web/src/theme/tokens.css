@@ -1,8 +1,8 @@
 /*
  * EchoSpeak theme tokens. One set of names, two themes.
  *
- * Dark keeps the colours EchoSpeak has always used. Light ("blueprint") is the
- * default since 11.1: white surfaces, navy text, blue hairlines and a blue accent.
+ * Quiet dark and neutral light share the same workspace geometry. Dark is the
+ * default for new profiles; saved appearance choices remain authoritative.
  * The theme is chosen in Settings › General › Appearance (theme/theme.ts sets
  * data-es-theme on <html>); every window follows the same choice.
  *
@@ -31,20 +31,20 @@
   --es-surface-rgb: 10, 10, 11;
 
   --es-bg-0: #000000;
-  --es-bg: #050505;
-  --es-surface-1: #0b0b0c;
-  --es-surface-2: #111112;
-  --es-surface-3: #18181a;
-  --es-border-soft: #222222;
-  --es-border: #333333;
-  --es-border-strong: #444444;
+  --es-bg: #0a0a0b;
+  --es-surface-1: #111112;
+  --es-surface-2: #141415;
+  --es-surface-3: #1b1b1e;
+  --es-border-soft: #1c1c1f;
+  --es-border: #262629;
+  --es-border-strong: #424247;
 
-  --es-text-strong: #ffffff;
-  --es-text: #f4f4f5;
-  --es-text-soft: #cccccc;
-  --es-text-2: #aaaaaa;
-  --es-text-3: #888888;
-  --es-text-4: #555555;
+  --es-text-strong: #eeeeef;
+  --es-text: #d9d9dd;
+  --es-text-soft: #b8b8bf;
+  --es-text-2: #a0a0a8;
+  --es-text-3: #888891;
+  --es-text-4: #73737c;
   --es-dim: rgba(var(--es-ink-rgb), 0.62);
   --es-faint: rgba(var(--es-ink-rgb), 0.5);
 
@@ -62,8 +62,8 @@
   --es-emph-fill: #f4f4f5;
   --es-emph-hover: #ffffff;
   --es-on-emph: #0a0a0a;
-  --es-accent: #f4f4f5;
-  --es-accent-soft: rgba(255, 255, 255, 0.08);
+  --es-accent: #4c72df;
+  --es-accent-soft: rgba(76, 114, 223, 0.12);
 
   --es-ok: #41c77a;
   --es-warn: #d6a955;
@@ -86,40 +86,39 @@
 
 :root[data-es-theme="light"] {
   color-scheme: light;
-  --es-ink-rgb: 18, 58, 122;
-  --es-edge-rgb: 47, 110, 205;
-  --es-edge-k: 2.4;
-  --es-wash-rgb: 37, 105, 205;
-  --es-wash-k: 1.25;
+  --es-ink-rgb: 30, 30, 35;
+  --es-edge-rgb: 40, 40, 50;
+  --es-edge-k: 1.1;
+  --es-wash-rgb: 40, 40, 50;
+  --es-wash-k: 1;
   --es-shade-rgb: 22, 54, 102;
   --es-shade-k: 0.32;
   --es-surface-rgb: 255, 255, 255;
 
-  --es-bg-0: #eef3f9;
-  --es-bg: #f5f8fc;
+  --es-bg-0: #f3f3f5;
+  --es-bg: #fafafa;
   --es-surface-1: #ffffff;
-  --es-surface-2: #f8fbff;
-  --es-surface-3: #edf3fa;
-  --es-border-soft: #e4edf8;
-  --es-border: #d4e2f3;
-  --es-border-strong: #b6cbe6;
+  --es-surface-2: #f6f6f7;
+  --es-surface-3: #efeff1;
+  --es-border-soft: #ededf0;
+  --es-border: #e0e0e5;
+  --es-border-strong: #bdbdc6;
 
-  /* Blue ink everywhere outside the chat; .chat-scroll and the composer
-     switch back to the neutral ink in blueprint.css. */
-  --es-text-strong: #0a2b63;
-  --es-text: #123a7a;
-  --es-text-soft: #1d4a8e;
-  --es-text-2: #275aa3;
-  --es-text-3: #3566b0;
-  --es-text-4: #6a8cc2;
-  --es-dim: #275aa3;
-  --es-faint: #4a76b8;
+  /* Neutral ink keeps controls, the workspace and the transcript consistent. */
+  --es-text-strong: #202024;
+  --es-text: #303036;
+  --es-text-soft: #50505a;
+  --es-text-2: #60606b;
+  --es-text-3: #70707b;
+  --es-text-4: #767680;
+  --es-dim: #60606b;
+  --es-faint: #70707b;
 
   --es-sheen: inset 0 1px 0 rgba(255, 255, 255, 0.9);
   --es-focus: rgba(47, 125, 242, 0.55);
 
   --es-emph: #2f7df2;
-  --es-emph-fill: linear-gradient(180deg, #4f97ff 0%, #2c73e8 100%);
+  --es-emph-fill: #4268d4;
   --es-emph-hover: #2a6fe0;
   --es-on-emph: #ffffff;
   --es-accent: #2f7df2;
@@ -134,5 +133,5 @@
   --es-info: #2f7df2;
 
   --es-glow: rgba(64, 145, 255, 0.35);
-  --es-label: #2f63b0;
+  --es-label: #70707b;
 }

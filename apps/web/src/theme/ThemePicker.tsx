@@ -3,8 +3,8 @@ import { useTheme, type ThemeChoice } from "./theme";
 
 /** Light, Dark or Match system, each with a small preview. Used in Settings and in setup. */
 const OPTIONS: { value: ThemeChoice; label: string; hint: string }[] = [
-  { value: "light", label: "Light", hint: "Blueprint white" },
-  { value: "dark", label: "Dark", hint: "Classic black" },
+  { value: "light", label: "Light", hint: "Quiet light" },
+  { value: "dark", label: "Dark", hint: "Quiet dark" },
   { value: "system", label: "Match system", hint: "Follows Windows" },
 ];
 
