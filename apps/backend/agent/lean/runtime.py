@@ -25,7 +25,7 @@ from agent.integrations import integration_tools
 from agent.lean.computer import tools as computer_tools
 from agent.project_workspace import tools as workspace_tools
 from agent.lean import tool_outputs
-from agent import a2a_trust, mcp_apps
+from agent import a2a_trust, home, mcp_apps
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
@@ -973,6 +973,7 @@ class LeanSession:
             project_evidence=project_evidence,
             playbook=learned.section,
             skills="" if guest else agent_skills.prompt_section(),
+            instructions="" if guest else home.instructions_section(self.project_root),
             # Guests get no description of the owner's settings.
             capabilities="" if guest else capabilities.report(toolbox),
             tool_names=set(toolbox.names),
@@ -1145,6 +1146,9 @@ class LeanSession:
         tools.append(ask_user_tool())
         if agent_skills.approved():
             tools.append(agent_skills.read_skill_tool())
+        # Drafting a skill: only the owner's agent in a chat they're in. It waits for their review either way.
+        if self.caller_role == "owner" and self.source in INTERACTIVE_SOURCES and depth == 0:
+            tools.append(agent_skills.propose_skill_tool())
         if memory is not None:
             def memory_save(args: dict[str, Any]) -> str:
                 fact = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))

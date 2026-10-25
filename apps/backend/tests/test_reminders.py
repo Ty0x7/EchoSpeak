@@ -149,7 +149,8 @@ def test_a_due_reminder_posts_notifies_and_is_done_without_a_model(manager, chat
 def test_a_late_reminder_says_it_was_late(manager, chat):
     _tool("set_reminder", chat)({"message": "Take the bins out", "when": "2026-10-23T12:30"})
     routine = manager.list_routines()[0]
-    manager.update_routine(routine.id, run_at=(datetime.now(timezone.utc) - timedelta(hours=3)).isoformat())
+    # Three hours before the test's fixed "now" (not the real clock, which moves past NOW).
+    manager.update_routine(routine.id, run_at=(NOW - timedelta(hours=3)).isoformat())
     assert reminders.fire(manager.get_routine(routine.id))["success"]
     assert any("EchoSpeak wasn't running then" in t for t in _posted(chat))
 

@@ -210,6 +210,32 @@ Copy-and-paste tests for the real app, grouped by feature. They're written to fi
 - **Expected:** a weekday reminder on the Routines page ("Repeats weekdays"). When it fires, Echo posts the forecast.
 - **Failure indicators:** it fires every day, or the forecast step asks for approval mid-run instead of reporting.
 
+**4.7 A game's menu (the Minecraft retest)** [local ok] [desktop]
+- **Test prompt:** `Open Minecraft and make a new world in Peaceful, then stop at the world.`
+- **Setup:** Desktop control on, Autonomous mode or For this chat, the same model as the 11.10.1 run.
+- **Expected:**
+  - If Echo tries `desktop_click` by name, the step shows as failed, with "draws its own interface".
+  - Echo clicks with `computer_action` at a point on the screenshot. Each click's step shows a screen change.
+  - If it keeps looking without clicking, the third look carries the "looked at the screen 3 times" note, and it acts or tells you what's blocking it.
+- **What to inspect:** the steps (failed vs done), Timing, and whether it ever asks `vision_qa` to click (it should say it didn't).
+- **Failure indicators:** "Control not found" shown as done; ten minutes of screenshots with no click; "I clicked" with no visible change.
+
+**4.8 Echo offers a skill** [local ok] [desktop]
+- **Test prompt:** after 4.7 works, `Can you remember how to do that for next time?`
+- **Expected:** Echo drafts a skill (`propose_skill`, e.g. `minecraft-new-world`). Settings › Skills shows it as Needs review. It isn't used until you approve it.
+- **Failure indicators:** a skill that's active without approval, or one full of steps that didn't happen.
+
+**4.9 Your own instructions file**
+- **Setup:** open `%USERPROFILE%\.echospeak\AGENTS.md` (created on first start) and add a line under the comment, e.g. `Always answer in one sentence unless I ask for more.` Start a new chat.
+- **Expected:** Echo follows it. Settings › Skills lists skills from `~/.agents/skills`, `~/.claude/skills` or `~/.codex/skills` if you have any, plus **desktop-apps-and-games**.
+- **Failure indicators:** the instruction is ignored, or the untouched template changes Echo's behaviour.
+
+**4.10 Terminal on This PC** [local ok] [terminal]
+- **Setup:** Settings › Terminal › This PC (or Auto with Docker stopped).
+- **Test prompts:** `Using bash, list this folder with ls -la and count the Python files.` then `What version of Python and Node are installed here?`
+- **Expected:** with Git for Windows installed, the first runs with `shell="bash"`; without it, in PowerShell with `Get-ChildItem`. The second uses the right launcher (`py` or `python`), not `python3`.
+- **Failure indicators:** `&&` errors in Windows PowerShell repeated, `python3` attempts, or grep's "exit code 1" treated as a broken command.
+
 ---
 
 ## 5. Research workers

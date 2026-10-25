@@ -1647,6 +1647,29 @@ def _find_window_by_title_substring(desktop, window_title: str):
     return candidates[0][1]
 
 
+def _control_not_found(window, wanted: Optional[str]) -> str:
+    """Why a named control can't be reached, and what reaches it instead.
+
+    Games and canvas apps (Minecraft, most launchers, Electron canvases) draw their own
+    buttons; Windows UI Automation sees none of them, so asking again by name never works.
+    """
+    title = (window.window_text() or "").strip() or "that window"
+    # Every window's title bar: its buttons, and the bar itself named after the window.
+    chrome = {"", title, "Minimize", "Maximize", "Restore", "Close", "System", "System Menu"}
+    try:
+        named = any((c.window_text() or "").strip() not in chrome for c in window.descendants())
+    except Exception:
+        named = False
+    what = f"'{wanted}'" if wanted else "a matching control"
+    if not named:
+        return (f"Control not found: {title} reports no named controls at all. It draws its own interface (a game or "
+                "canvas app), so desktop_click can't reach anything in it. Take a screenshot of the window, then click "
+                "the button with computer_action at the point you see it in that image, or use keys (enter, esc, tab).")
+    return (f"Control not found: no control named {what} in {title}. Take a screenshot: it lists the named controls "
+            "Windows reports with their points. If the button isn't listed, click it with computer_action at the point "
+            "you see it in the image.")
+
+
 def _find_controls(window, control_name: Optional[str], control_type: Optional[str], automation_id: Optional[str], limit: int):
     kwargs = {}
     if control_name:
@@ -1744,7 +1767,7 @@ def desktop_click(
             return "Window not found."
         ctrls = _find_controls(win, control_name, control_type, automation_id, limit=1)
         if not ctrls:
-            return "Control not found."
+            return _control_not_found(win, control_name or automation_id)
         c = ctrls[0]
         name = (c.window_text() or "").strip()
         ctype = getattr(c, "control_type", lambda: "")()
@@ -1825,7 +1848,7 @@ def desktop_type_text(
             return "Window not found."
         ctrls = _find_controls(win, control_name, control_type, automation_id, limit=1)
         if not ctrls:
-            return "Control not found."
+            return _control_not_found(win, control_name or automation_id)
         c = ctrls[0]
         name = (c.window_text() or "").strip()
         ctype = getattr(c, "control_type", lambda: "")()

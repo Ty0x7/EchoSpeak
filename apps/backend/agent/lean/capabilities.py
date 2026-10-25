@@ -72,6 +72,8 @@ ABILITIES: tuple[Ability, ...] = (
     Ability("Image and video generation", ("create_media",), "core"),
     Ability("Reminders (one-time or repeating, in this chat and as Windows notifications)",
             ("set_reminder", "list_reminders", "cancel_reminder"), "core"),
+    Ability("Drafting skills from work that worked (the user approves them in Settings › Skills)",
+            ("propose_skill",), "skills"),
     Ability("Editing EchoSpeak's own code", ("self_edit", "self_read"), "self", only_if_requested=True),
 )
 

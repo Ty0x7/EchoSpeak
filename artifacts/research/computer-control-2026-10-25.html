@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Computer control, skills and your folder, 25 Oct 2026</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--ok:#1f7a3f;--bad:#b42318;--warn:#8a5a00;--soft:#f0f0f0}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--ok:#5cc983;--bad:#ff8a7a;--warn:#e0b04a;--soft:#222}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 36px}header{padding-bottom:14px;border-bottom:1px solid var(--line);margin-bottom:24px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 5px}header p{margin:0;font-size:13px;color:var(--muted)}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 14px}h3{font-size:14px;margin:0 0 6px}section{margin:30px 0}p,small,figcaption{color:var(--muted)}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:16px;min-width:0}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.node p{font-size:13px;margin:0}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:1px 8px;margin-bottom:8px;white-space:nowrap}.tag.bad{color:var(--bad)}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:13px system-ui,sans-serif}svg .mut{fill:var(--muted);font-size:11.5px}svg .box{fill:var(--panel);stroke:var(--line)}svg .soft{fill:var(--soft);stroke:var(--line)}svg .ln{stroke:var(--muted);fill:none;stroke-width:1.4}svg .ah{fill:var(--muted)}svg .ok{fill:var(--ok)}svg .bad{fill:var(--bad)}.scroll{overflow-x:auto}.scroll svg{min-width:680px}.note{font-size:13px;margin:10px 0 0}ul{font-size:13px;padding-left:20px;margin:0}li{margin:2px 0}code{font:12px ui-monospace,monospace}pre{margin:0;white-space:pre-wrap;font:12px/1.65 ui-monospace,monospace;background:var(--soft);border-radius:8px;padding:12px 14px;overflow-wrap:anywhere;color:var(--muted)}pre b{color:var(--ink);font-weight:600}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{font-weight:600}td code{white-space:nowrap}footer{font-size:12px;margin-top:28px;color:var(--muted)}a{color:inherit;text-underline-offset:3px}@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}}
+</style></head>
+<body><main>
+<header><h1>Computer control, skills and your folder</h1><p>25 Oct 2026 · EchoSpeak 11.10.3 · from the 11.10.1 Minecraft run · technical record in docs/research/computer-control-2026-10-25.md</p></header>
+
+<section aria-labelledby="run"><h2 id="run">1 · The run that looped, and what each step now says</h2>
+<p class="note" style="margin:0 0 12px">From the saved trace of the 11.10.1 run (gemma-4-e4b, LM Studio). The right column is what the same calls return in 11.10.3, checked by a replay test.</p>
+<div class="scroll"><svg viewBox="0 0 1000 470" role="img" aria-label="Step by step: the 11.10.1 run on the left, the 11.10.3 results on the right">
+<text x="20" y="22" class="mut">Step</text><text x="90" y="22" class="mut">Echo's call</text><text x="430" y="22" class="mut">11.10.1 recorded</text><text x="640" y="22" class="mut">11.10.3 says</text>
+<g><rect class="box" x="10" y="34" width="980" height="44" rx="8"/><text x="22" y="61">3</text><text x="90" y="61">take_screenshot (monitor)</text><text x="430" y="61" class="ok">ok</text><text x="640" y="61" class="mut">ok · look 1</text></g>
+<g><rect class="box" x="10" y="86" width="980" height="62" rx="8"/><text x="22" y="113">4</text><text x="90" y="113">desktop_click "Singleplayer"</text><text x="90" y="134" class="mut">by name, in Minecraft 26.3</text><text x="430" y="113" class="ok">ok</text><text x="430" y="134" class="mut">"Control not found."</text><text x="640" y="113" class="bad">failed</text><text x="640" y="134" class="mut">"draws its own interface… click with computer_action"</text></g>
+<g><rect class="box" x="10" y="156" width="980" height="62" rx="8"/><text x="22" y="183">5</text><text x="90" y="183">vision_qa "Click the Singleplayer button"</text><text x="430" y="183" class="ok">ok</text><text x="430" y="204" class="mut">a screenshot</text><text x="640" y="183">no visible effect</text><text x="640" y="204" class="mut">"only looks: nothing was clicked" · look 1</text></g>
+<g><rect class="box" x="10" y="226" width="980" height="44" rx="8"/><text x="22" y="253">6</text><text x="90" y="253">vision_qa "Click Singleplayer to proceed"</text><text x="430" y="253" class="ok">ok</text><text x="640" y="253" class="mut">same note · look 2</text></g>
+<g><rect class="soft" x="10" y="278" width="980" height="62" rx="8"/><text x="22" y="305">7</text><text x="90" y="305">vision_qa "Click Singleplayer…"</text><text x="430" y="305" class="ok">ok</text><text x="430" y="326" class="mut">"I have clicked Singleplayer"</text><text x="640" y="305">look 3 → stall note</text><text x="640" y="326" class="mut">"looked 3 times without acting… do it now with computer_action"</text></g>
+<g><rect class="box" x="10" y="348" width="980" height="44" rx="8"/><text x="22" y="375">8–10</text><text x="90" y="375">three more of the same</text><text x="430" y="375" class="ok">ok ×3</text><text x="640" y="375" class="mut">a second note at look 6</text></g>
+<g><rect class="box" x="10" y="400" width="980" height="56" rx="8"/><text x="22" y="427">11</text><text x="90" y="427">reply after ~10 minutes</text><text x="90" y="446" class="mut">"every time I click Singleplayer it brings me back"</text><text x="430" y="427" class="bad">never clicked</text><text x="640" y="427" class="mut">expected: a click at the button's point by step 8,</text><text x="640" y="446" class="mut">or a plain "this is blocking me"</text></g>
+</svg></div>
+</section>
+
+<section aria-labelledby="why"><h2 id="why">2 · Four causes, all in the harness</h2>
+<div class="grid2">
+<div class="node"><span class="tag bad">recorded as success</span><h3>"Control not found." was ok</h3><p>Desktop tools report failure only in their text, and none of their wording was on the failure list. The model took it as "clicked".</p></div>
+<div class="node"><span class="tag bad">looking ≠ doing</span><h3>vision_qa ignores its question</h3><p>It's a screenshot. Asked to "click", it captured, succeeded, and said nothing about not clicking.</p></div>
+<div class="node"><span class="tag warn">no explanation</span><h3>A game names no buttons</h3><p>Minecraft draws its menu itself; Windows sees only the title bar. The screenshot listed nothing and didn't say why.</p></div>
+<div class="node"><span class="tag warn">no stall check</span><h3>Every look "worked"</h3><p>The repeat check skips screenshots (screens change), the animated menu changed every image, and the fail streak counts failures only.</p></div>
+</div>
+</section>
+
+<section aria-labelledby="stall"><h2 id="stall">3 · How the stall check counts</h2>
+<div class="scroll"><svg viewBox="0 0 1000 250" role="img" aria-label="Looks are counted until an action runs; actions that change nothing are counted until one changes the screen">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0L10,5L0,10z" class="ah"/></marker></defs>
+<rect class="box" x="10" y="20" width="200" height="70" rx="10"/><text x="26" y="48">A look</text><text x="26" y="70" class="mut">screenshot · vision_qa · read_image</text>
+<rect class="box" x="10" y="150" width="200" height="70" rx="10"/><text x="26" y="178">An action</text><text x="26" y="200" class="mut">computer_action · desktop_click</text>
+<path class="ln" d="M210 55H330" marker-end="url(#a)"/><path class="ln" d="M210 185H330" marker-end="url(#a)"/>
+<rect class="soft" x="330" y="20" width="260" height="70" rx="10"/><text x="346" y="48">looks in a row +1</text><text x="346" y="70" class="mut">3 → "act now, or say what's blocking"</text>
+<rect class="soft" x="330" y="150" width="260" height="70" rx="10"/><text x="346" y="178">screen changed?</text><text x="346" y="200" class="mut">yes: both counts reset</text>
+<path class="ln" d="M590 185H700" marker-end="url(#a)"/><text x="610" y="176" class="mut">no / failed</text>
+<rect class="soft" x="700" y="150" width="280" height="70" rx="10"/><text x="716" y="178">no-change in a row +1</text><text x="716" y="200" class="mut">2 → "change approach: point, focus, keys"</text>
+<path class="ln" d="M460 150V90" marker-end="url(#a)"/><text x="470" y="125" class="mut">any action resets the looks</text>
+</svg></div>
+<p class="note">Calls that never ran (skipped after an earlier failure, refused, denied) count for nothing. Approvals are unchanged.</p>
+</section>
+
+<section aria-labelledby="skill"><h2 id="skill">4 · Did it need a skill?</h2>
+<div class="grid3">
+<div class="node"><span class="tag ok">harness</span><h3>The fix is in the tools and loop</h3><p>A skill is advice the model reads; it can't stop a tool reporting a failure as success. So the loop was fixed where it broke.</p></div>
+<div class="node"><span class="tag ok">bundled skill</span><h3>desktop-apps-and-games</h3><p>General know-how: look, one step, act, check; recovery; menus and toggles; game input. Add it in Settings › Skills.</p></div>
+<div class="node"><span class="tag ok">Echo drafts</span><h3>propose_skill</h3><p>After something works, Echo offers to save the steps (e.g. <code>minecraft-new-world</code>). It's a draft until you approve it.</p></div>
+</div>
+</section>
+
+<section aria-labelledby="home"><h2 id="home">5 · Your folder, like ~/.claude and ~/.codex</h2>
+<div class="scroll"><table>
+<thead><tr><th></th><th>Claude Code</th><th>Codex</th><th>EchoSpeak 11.10.3</th></tr></thead>
+<tbody>
+<tr><th>Your folder</th><td><code>%USERPROFILE%\.claude</code></td><td><code>%USERPROFILE%\.codex</code></td><td><code>%USERPROFILE%\.echospeak</code></td></tr>
+<tr><th>Your instructions</th><td><code>CLAUDE.md</code></td><td><code>AGENTS.md</code></td><td><code>AGENTS.md</code></td></tr>
+<tr><th>Project instructions</th><td><code>CLAUDE.md</code> / <code>AGENTS.md</code></td><td><code>AGENTS.md</code>, 32 KiB</td><td><code>AGENTS.md</code>, else <code>CLAUDE.md</code>; 32 KiB</td></tr>
+<tr><th>Skills</th><td><code>~/.claude/skills</code></td><td><code>~/.agents/skills</code></td><td>all of these, plus <code>~/.echospeak/skills</code>, added for review</td></tr>
+<tr><th>Shell on Windows</th><td>Git Bash + PowerShell tool</td><td>PowerShell + Windows sandbox</td><td>PowerShell, Git Bash with <code>shell="bash"</code>, Docker sandbox</td></tr>
+</tbody></table></div>
+<p class="note">Chats, memory and settings stay in the app's data folder. <code>.echospeak</code> holds only what you write.</p>
+</section>
+
+<section aria-labelledby="term"><h2 id="term">6 · This PC now tells Echo what the sandbox always did</h2>
+<div class="grid2">
+<div class="node"><span class="tag warn">11.10.2</span><pre>terminal runs Windows PowerShell directly on this PC (pipes, $variables and ; chaining work; use `;` not `&amp;&amp;` in Windows PowerShell).</pre></div>
+<div class="node"><span class="tag ok">11.10.3, on the owner's PC</span><pre>terminal runs Windows PowerShell 5.1 directly on this PC: … chain commands with ; (there is no &amp;&amp; …). <b>Found on this PC: git, node, npm, pnpm, python, py, pip, uv, rg, gh, docker, winget, curl.</b> <b>PowerShell is not bash: ls -la -&gt; Get-ChildItem -Force; grep x f -&gt; Select-String x f; …</b> <b>Git Bash is installed too: pass shell="bash"</b> to run bash commands … on this PC.</pre></div>
+</div>
+<p class="note">Bash on this PC goes through the same approvals; <code>find -delete</code>, <code>shred</code> and <code>truncate</code> now ask here as they did in the sandbox.</p>
+</section>
+
+<section aria-labelledby="ver"><h2 id="ver">7 · Verification and what's left</h2>
+<div class="grid2">
+<div class="node"><span class="tag ok">checked</span><ul><li>Backend: 1287 passed, 0 failed (24 new tests, including the replayed run)</li><li>Web: typecheck and 175 tests</li><li>Git Bash ran in the requested folder on this PC; the PowerShell hints fired</li></ul></div>
+<div class="node"><span class="tag warn">owner testing</span><ul><li>Minecraft (or another game) with a real model: TESTING_GUIDE 4.7</li><li>Echo offering a skill: 4.8 · AGENTS.md: 4.9 · This PC terminal: 4.10</li><li>A small model can still misjudge a small button's position</li></ul></div>
+</div>
+</section>
+
+<footer>Technical record: docs/research/computer-control-2026-10-25.md · Release notes: docs/releases/v11.10.3.md</footer>
+</main></body></html>

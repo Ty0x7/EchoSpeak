@@ -55,6 +55,12 @@ FAIL_STREAK_NOTE = 3
 # (3 in a row / 10 of 50) both stop and return control.
 REFUSAL_STREAK_NOTE = 3
 REFUSAL_STOP = 10
+# Screen work that isn't moving. A 4B model on Minecraft's menu took a screenshot seven times
+# in ten minutes and never clicked: every look "worked", and the animated menu made each image
+# slightly different, so neither the repeat check nor the fail streak ever fired.
+SCREEN_LOOK = {"take_screenshot", "vision_qa", "read_image", "analyze_screen"} | policy.NATIVE_COMPUTER_LOOK
+LOOK_STREAK_NOTE = 3  # looks in a row with no action between them
+NO_EFFECT_STREAK_NOTE = 2  # screen actions in a row that failed or changed nothing visible
 _REFUSAL_MARKERS = (
     "blocked by echospeak's safety policy", "blocked by the user's privacy setting", "the user denied permission",
     "not run:", "is not available right now", "needs the user's approval, which can only be given",
@@ -150,6 +156,9 @@ class LeanTurn:
         # Each call's outcome (agent/lean/evidence.py), and how much the screen changed after the latest action.
         self._outcomes_by_call: dict[str, str] = {}
         self._screen_changed: Optional[float] = None
+        # Screen progress: looks since the last action, and actions in a row that moved nothing.
+        self._look_streak = 0
+        self._no_effect_streak = 0
         # Code files changed since the last terminal run (the check step before 'done').
         self._unchecked: dict[str, bool] = {}
         self._on_seal = on_seal
@@ -767,9 +776,54 @@ class LeanTurn:
                          "variations of it. Read the errors above, then take a different approach or tell the user "
                          "what is blocking you.]")
                 self.emit({"type": "fail_streak", "step": step, "tool": name, "count": streak})
+            if not refused:
+                text += self._screen_progress(name, ok, outcome, step)
             messages.append({"role": "tool", "tool_call_id": call.id, "name": name, "content": text or "(empty result)"})
             if visual_results.get(call.id):
                 messages[-1]["observations"] = visual_results[call.id]
+
+    def _screen_progress(self, name: str, ok: bool, outcome: str, step: int) -> str:
+        """A note when screen work stalls: looking without acting, or acting with nothing to show for it.
+
+        Looks are counted until an action runs; actions that failed or changed nothing visible
+        (evidence "no_effect") are counted until one changes the screen. Any other tool that ran
+        (open_application, a command) may have moved things on, so it starts the count again.
+        Calls that never ran (skipped after an earlier failure, refused) count for nothing.
+        """
+        if not evidence.ran(outcome):
+            return ""
+        if name in SCREEN_LOOK:
+            if not ok:
+                return ""
+            self._look_streak += 1
+            if self._look_streak % LOOK_STREAK_NOTE:
+                return ""
+            self.emit({"type": "screen_stall", "step": step, "kind": "looking", "count": self._look_streak})
+            if "computer_action" not in self.toolbox.names:
+                return (f"\n\n[EchoSpeak: you've looked at the screen {self._look_streak} times in a row. Looking never "
+                        "clicks or types, and you can't control the screen in this chat, so tell the user what you see "
+                        "and what they'd need to do or switch on.]")
+            return (f"\n\n[EchoSpeak: you've looked at the screen {self._look_streak} times in a row without acting. "
+                    "Looking never clicks or types, so the screen won't move on by itself. If you can see the next step, "
+                    "do it now with computer_action: a click at the point you see in the newest screenshot, or a key. "
+                    "If you can't tell what to do, tell the user what you see and what is blocking you.]")
+        if name in policy.SCREEN_CONTROL:
+            self._look_streak = 0
+            if ok and outcome == "ok":
+                self._no_effect_streak = 0
+                return ""
+            self._no_effect_streak += 1
+            if self._no_effect_streak % NO_EFFECT_STREAK_NOTE:
+                return ""
+            self.emit({"type": "screen_stall", "step": step, "kind": "no_effect", "count": self._no_effect_streak})
+            return (f"\n\n[EchoSpeak: your last {self._no_effect_streak} screen actions failed or changed nothing "
+                    "visible. Don't repeat them. Change approach: click the middle of the button's label using "
+                    "coordinates from the newest screenshot; click once inside the window to focus it first; use the "
+                    "keyboard (tab moves between buttons, enter presses, esc goes back); or try double_click. If two "
+                    "different approaches fail, stop and tell the user what is blocking you.]")
+        if ok:
+            self._look_streak = 0
+        return ""
 
     def _shorten(self, name: str, output: str, limit: int, untrusted: bool) -> str:
         """Fit one result into the context. A longer one is saved whole behind an out-… handle."""

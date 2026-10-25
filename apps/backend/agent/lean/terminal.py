@@ -241,14 +241,29 @@ def routing_argument_problem(command: str) -> str:
             "tools if computer_action is unavailable.")
 
 
-def failure_hint(code: int, text: str, where: str, command: str = "") -> str:
+def failure_hint(code: int, text: str, where: str, command: str = "", shell: str = "") -> str:
     """One line on the usual cause of a failure small models get stuck on."""
     low = (text or "").lower()
+    first = _first_word(command)
+    if code == 1 and not (text or "").strip() and (first in {"grep", "rg", "findstr", "egrep", "fgrep"}
+                                                   or re.match(r"\s*git\s+(?:diff|grep)\b", command or "")):
+        # Claude Code's PowerShell tool treats these the same way.
+        return "Hint: exit code 1 here means nothing matched (or, for git diff, that files differ), not that it broke."
+    powershell = where == "host" and os.name == "nt" and shell != "bash"
     if code == 127 or "command not found" in low or "is not recognized as" in low:
         if _GUI_SHELL_VERB.match(command):
             return ("Hint: use computer_action with a recent screenshot for mouse/keyboard input, or desktop_click "
                     "for a named Windows control. Enable this agent's Desktop tools if those tools are unavailable. "
                     "A shell command such as click does not control the desktop.")
+        term = re.search(r"the term '([^']+)' is not recognized", low)
+        name = term.group(1) if term else first
+        if powershell and name in _BASH_ONLY:
+            also = ' Or pass shell="bash" to run it in Git Bash on this PC.' if git_bash() else ""
+            return f"Hint: {name} is a bash command; in PowerShell use {_BASH_ONLY[name]}.{also}"
+    if powershell and "a parameter cannot be found that matches parameter name" in low:
+        also = ' Or pass shell="bash" to use bash flags in Git Bash.' if git_bash() else ""
+        return "Hint: PowerShell commands take their own options, not bash flags. " + POWERSHELL_EQUIVALENTS + also
+    if code == 127 or "command not found" in low or "is not recognized as" in low:
         place = "in the sandbox (install it with network=true, or" if where == "docker" else "on this PC (install it, or"
         return f"Hint: that program isn't installed {place} check the name)."
     if "'&&' is not a valid statement separator" in low or "token '&&' is not a valid" in low:
@@ -573,7 +588,94 @@ def parse_launch(stdout: str, stderr: str = "") -> tuple[bool, int, str, str]:
 
 
 # ── host backend ────────────────────────────────────────────────────────
-def _host_shell() -> list[str]:
+# The sandbox tells agents what it has (Node 22, Python 3, git) and runs bash, the shell models
+# know best. This PC said only "PowerShell", so agents guessed: python3 (not a Windows command),
+# grep, ls -la, && in Windows PowerShell. Like Claude Code on Windows, this PC now says what's
+# installed, how PowerShell differs, and offers Git Bash for the same commands the sandbox runs.
+_HOST_PROGRAMS = ("git", "node", "npm", "pnpm", "python", "py", "pip", "uv", "rg", "gh", "docker", "winget", "curl")
+_HOST_FOUND: dict[str, str] = {}
+_BASH_FOUND: dict[str, str] = {}
+
+
+def git_bash() -> str:
+    """Git for Windows' bash.exe; '' when it isn't installed (or this isn't Windows).
+
+    Never WSL's bash.exe from System32, which starts a Linux distribution instead of running
+    here. ECHOSPEAK_GIT_BASH_PATH points at it when it's somewhere unusual, like Claude Code's
+    CLAUDE_CODE_GIT_BASH_PATH.
+    """
+    if os.name != "nt":
+        return ""
+    if "path" in _BASH_FOUND:
+        return _BASH_FOUND["path"]
+    candidates = [os.getenv("ECHOSPEAK_GIT_BASH_PATH", "").strip()]
+    git = shutil.which("git")
+    if git:
+        # ...\Git\cmd\git.exe or ...\Git\mingw64\bin\git.exe: bash.exe is in ...\Git\bin.
+        for parent in list(Path(git).resolve().parents)[:3]:
+            candidates.append(str(parent / "bin" / "bash.exe"))
+    for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"),
+                 str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs")):
+        if base:
+            candidates.append(str(Path(base) / "Git" / "bin" / "bash.exe"))
+    found = next((c for c in candidates if c and Path(c).is_file() and "system32" not in c.lower()), "")
+    _BASH_FOUND["path"] = found
+    return found
+
+
+def host_programs() -> dict[str, str]:
+    """Programs on this PC's PATH that commands commonly need: name -> note ('' when plainly there).
+
+    PATH lookups only, once per run. The Microsoft Store's python.exe shortcut opens the Store
+    instead of running Python, so it is reported as such.
+    """
+    if not _HOST_FOUND:
+        for name in _HOST_PROGRAMS:
+            path = shutil.which(name)
+            if not path:
+                continue
+            store_stub = name == "python" and "windowsapps" in path.lower()
+            _HOST_FOUND[name] = "may be the Microsoft Store shortcut" if store_stub else ""
+        _HOST_FOUND.setdefault("_checked", "")
+    return {name: note for name, note in _HOST_FOUND.items() if name != "_checked"}
+
+
+def _toolchain_note() -> str:
+    found = host_programs()
+    have = [name + (f" ({note})" if note else "") for name, note in found.items()]
+    missing = [name for name in _HOST_PROGRAMS if name not in found]
+    text = "Found on this PC: " + (", ".join(have) or "none of the usual developer tools") + "."
+    if missing:
+        text += " Not found: " + ", ".join(missing) + "."
+    if "py" in found and ("python" not in found or found["python"]):
+        text += " Run Python with py."
+    return text
+
+
+# What a bash habit is in PowerShell (Claude Code's PowerShell tool gives models the same table).
+POWERSHELL_EQUIVALENTS = (
+    "PowerShell is not bash: ls -la -> Get-ChildItem -Force; cat f -> Get-Content f; grep x f -> Select-String x f; "
+    "head -n 5 / tail -n 5 -> Select-Object -First 5 / -Last 5; rm -rf d -> Remove-Item -Recurse -Force d; "
+    "mkdir -p d -> New-Item -ItemType Directory -Force d; touch f -> New-Item -ItemType File f; "
+    "export X=1 -> $env:X = '1'; which x -> Get-Command x; python3 -> python or py."
+)
+_BASH_ONLY = {
+    "grep": "Select-String", "head": "Select-Object -First N", "tail": "Select-Object -Last N",
+    "touch": "New-Item -ItemType File", "export": "$env:NAME = 'value'", "which": "Get-Command",
+    "sed": "(Get-Content f) -replace 'a','b'", "awk": "ForEach-Object", "wc": "Measure-Object",
+    "xargs": "ForEach-Object", "python3": "python or py", "pip3": "pip or py -m pip", "chmod": "icacls (rarely needed on Windows)",
+}
+
+
+def _first_word(command: str) -> str:
+    match = re.match(r"\s*([A-Za-z0-9_.-]+)", command or "")
+    return match.group(1).lower() if match else ""
+
+
+def _host_shell(shell: str = "") -> list[str]:
+    if shell == "bash" and (bash := git_bash()):
+        # -l loads Git Bash's PATH (/usr/bin: grep, sed, find); CHERE_INVOKING keeps the folder (child env).
+        return [bash, "-lc"]
     pwsh = shutil.which("pwsh")
     if os.name == "nt":
         exe = pwsh or "powershell.exe"
@@ -581,8 +683,8 @@ def _host_shell() -> list[str]:
     return [shutil.which("bash") or "/bin/sh", "-lc"]
 
 
-def _host_command(command: str) -> str:
-    if os.name == "nt":
+def _host_command(command: str, shell: str = "") -> str:
+    if os.name == "nt" and not (shell == "bash" and git_bash()):
         # Windows PowerShell 5.1 writes UTF-16 for `>` / `>>` and ANSI for Set-Content;
         # make files written by commands plain UTF-8 so file tools (and people) can read them.
         utf8_writes = "".join(
@@ -592,13 +694,13 @@ def _host_command(command: str) -> str:
     return command
 
 
-def _host_launch(command: str, cwd: Path, log: Path, err: Path) -> subprocess.Popen:
+def _host_launch(command: str, cwd: Path, log: Path, err: Path, shell: str = "") -> subprocess.Popen:
     """Start on this PC with no keyboard input, output to files, in its own process group."""
     with open(log, "w", encoding="utf-8", errors="replace") as out_handle, \
             open(err, "w", encoding="utf-8", errors="replace") as err_handle:
         return subprocess.Popen(
-            [*_host_shell(), _host_command(command)], cwd=str(cwd), stdin=subprocess.DEVNULL,
-            stdout=out_handle, stderr=err_handle, env=child_env(_QUIET_ENV),
+            [*_host_shell(shell), _host_command(command, shell)], cwd=str(cwd), stdin=subprocess.DEVNULL,
+            stdout=out_handle, stderr=err_handle, env=child_env({**_QUIET_ENV, "CHERE_INVOKING": "1"}),
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             start_new_session=os.name != "nt",
         )
@@ -749,11 +851,14 @@ class Terminal:
 
     def describe(self) -> str:
         if self.mode == "host":
-            shell = "PowerShell 7" if shutil.which("pwsh") else "Windows PowerShell" if os.name == "nt" else "bash"
-            fallback = (" The Docker sandbox isn't running, so commands run here instead and each asks the user "
-                        "first (unless they chose Always allow)." if execution_mode() == "auto" else "")
-            return (f"terminal runs {shell} directly on this PC (pipes, $variables and ; chaining work; "
-                    "use `;` not `&&` in Windows PowerShell)." + fallback)
+            if os.name != "nt":
+                return "terminal runs bash directly on this computer." + self._fallback_note()
+            pwsh = bool(shutil.which("pwsh"))
+            shell = "PowerShell 7" if pwsh else "Windows PowerShell 5.1"
+            chaining = ("&& and ; both chain commands" if pwsh
+                        else "chain commands with ; (there is no &&; for 'only if it worked' use: cmd1; if ($?) { cmd2 })")
+            return (f"terminal runs {shell} directly on this PC: pipes and $variables work, {chaining}. "
+                    f"{_toolchain_note()} {POWERSHELL_EQUIVALENTS}{self._bash_note()}" + self._fallback_note())
         plan = mount_plan(self.project_root)
         mounts = ", ".join(f"{root} -> {target}" for root, target in plan) or "none"
         policy = network_policy()
@@ -766,11 +871,32 @@ class Terminal:
                 f"{network}). Your folders are mounted: {mounts}. "
                 "Windows paths in commands are translated automatically. The /work paths exist only inside the "
                 "terminal: give file_read, file_write and the other file tools the Windows paths. Only if a task truly needs this PC "
-                "(Windows apps, installed tools), set where=\"host\"; that asks the user first.")
+                "(Windows apps, installed tools), set where=\"host\"; that asks the user first. On this PC commands run "
+                f"in PowerShell{self._bash_note(host_only=True)}")
+
+    @staticmethod
+    def _bash_note(host_only: bool = False) -> str:
+        if not git_bash():
+            return "." if host_only else ""
+        if host_only:
+            return ', or in Git Bash with shell="bash" (the same commands as here).'
+        return (' Git Bash is installed too: pass shell="bash" to run bash commands (grep, sed, ls -la, &&, the same '
+                "ones the sandbox runs) on this PC; keep PowerShell for Windows things (Get-Process, the registry, "
+                "Start-Process).")
+
+    @staticmethod
+    def _fallback_note() -> str:
+        return (" The Docker sandbox isn't running, so commands run here instead and each asks the user first (unless "
+                "they chose Always allow)." if execution_mode() == "auto" else "")
 
     def effective_where(self, args: dict[str, Any]) -> str:
         """Use the same destination for policy checks and process launch."""
         return "host" if self.mode == "host" or str(args.get("where") or "").lower() == "host" else "docker"
+
+    @staticmethod
+    def shell_for(args: dict[str, Any], where: str) -> str:
+        """"bash" when a command on this PC asked for Git Bash and it's installed; '' (PowerShell) otherwise."""
+        return "bash" if where == "host" and str(args.get("shell") or "").lower() == "bash" and git_bash() else ""
 
     def _checkpoint_redirects(self, command: str, cwd: Path) -> None:
         """Back up files the command overwrites via redirection, so undo covers them like file_write."""
@@ -785,12 +911,12 @@ class Terminal:
             if path.is_file() and any(_is_within(path.resolve(), root) for root in workspace_roots(self.project_root) or [cwd]):
                 create_checkpoint(str(path), reason="before_terminal_write")
 
-    def _launch(self, command: str, cwd: Path, wait: int, where: str, *, network: bool = False) -> Launch:
+    def _launch(self, command: str, cwd: Path, wait: int, where: str, *, network: bool = False, shell: str = "") -> Launch:
         proc_id = uuid.uuid4().hex[:8]
         if where == "host":
             _PROC_DIR.mkdir(parents=True, exist_ok=True)
             log, err = _PROC_DIR / f"{proc_id}.log", _PROC_DIR / f"{proc_id}.err"
-            popen = _host_launch(command, cwd, log, err)
+            popen = _host_launch(command, cwd, log, err, shell)
             # Wait in short slices, showing the newest output line under the step as it runs.
             from agent.lean import progress
 
@@ -837,6 +963,9 @@ class Terminal:
         if error:
             return None, error, Path("."), ""
         where = self.effective_where(args)
+        if where == "host" and str(args.get("shell") or "").lower() == "bash" and os.name == "nt" and not git_bash():
+            return None, ("Error: not run. Git Bash isn't installed on this PC, so bash commands can't run here. Write "
+                          "it for PowerShell instead. " + POWERSHELL_EQUIVALENTS), cwd, where
         want_net = False
         if where == "docker":
             ok, detail = _SANDBOX.ensure_container(mount_plan(self.project_root))
@@ -851,7 +980,7 @@ class Terminal:
             if want_net:
                 _SANDBOX.set_network(True)
         self._checkpoint_redirects(command, cwd)
-        launch = self._launch(command, cwd, wait, where, network=want_net)
+        launch = self._launch(command, cwd, wait, where, network=want_net, shell=self.shell_for(args, where))
         if want_net and launch.finished:
             _SANDBOX.set_network(False)
         return launch, "", cwd, where
@@ -898,7 +1027,8 @@ class Terminal:
         body = _clip(launch.out.strip(), 400_000) or ("(no output)" if not launch.err.strip() else "")
         if launch.err.strip():
             body = (body + "\n" if body else "") + "[stderr]\n" + _clip(launch.err.strip(), 6000)
-        hint = failure_hint(launch.code, launch.out + "\n" + launch.err, where, command) if launch.code != 0 else ""
+        hint = (failure_hint(launch.code, launch.out + "\n" + launch.err, where, command, self.shell_for(args, where))
+                if launch.code != 0 else "")
         return f"[{status} · {elapsed:.1f}s · {label} · {cwd}]\n{body}" + (f"\n{hint}" if hint else "")
 
     def process_start(self, args: dict[str, Any]) -> str:
@@ -964,6 +1094,11 @@ class Terminal:
                         "network": {"type": "boolean", "description": "Separate tool argument: true if the command needs internet (installs, git clone). Never put network=true inside command."},
                         "where": {"type": "string", "enum": ["sandbox", "host"], "description": "Separate tool argument, never a shell prefix. Use host for installed Windows apps/tools when this PC is needed; default sandbox."},
                     } if self.mode == "docker" else {}),
+                    **({
+                        "shell": {"type": "string", "enum": ["powershell", "bash"], "description": (
+                            "This PC only: powershell (default) or bash, which runs Git Bash here for bash commands "
+                            "and scripts." + (" Applies with where=host." if self.mode == "docker" else ""))},
+                    } if git_bash() else {}),
                 }, "required": ["command"]},
                 func=self.run,
             ),
@@ -990,6 +1125,8 @@ def terminal_status() -> dict[str, Any]:
     info: dict[str, Any] = {"mode": mode, "network": docker_network()}
     info["docker"] = _SANDBOX.status()
     info["host_shell"] = "PowerShell 7" if shutil.which("pwsh") else "Windows PowerShell" if os.name == "nt" else "bash"
+    info["git_bash"] = git_bash()
+    info["host_programs"] = sorted(host_programs())
     info["mounts"] = [{"host": str(r), "container": t} for r, t in mount_plan()]
     info["processes"] = [
         {"id": p.id, "command": p.command, "mode": p.mode, "started_at": p.started_at}

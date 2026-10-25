@@ -1,5 +1,24 @@
 # Changes
 
+## v11.10.3 — 2026-10-25
+
+User-facing notes: [EchoSpeak 11.10.3](docs/releases/v11.10.3.md). Technical notes: [Computer control, skills and your folder](docs/research/computer-control-2026-10-25.md). 11.10.2 was never published; 11.10.3 includes it.
+
+* **Computer control notices when it's stuck.** From the 11.10.1 Minecraft run, where a 4B model spent ten minutes on the main menu:
+  * Desktop tools' failures ("Control not found.", "Click failed") now count as failures, not successes. "Not found" says why: a game or canvas app draws its own buttons, so click them with `computer_action` at the point you see.
+  * `vision_qa` only looks. Asked to "click", it says nothing was clicked and gives the `computer_action` call to make.
+  * A screenshot of a window with no named controls says so, and how to act on it.
+  * After 3 looks in a row without an action, or 2 actions in a row that changed nothing, Echo is told to act, change approach, or tell you what's blocking it.
+* **Skills Echo can draft.** `propose_skill` saves the steps that worked (for example how to set up a world in a particular game) as a draft skill. It waits in Settings › Skills until you approve it.
+* **More skills to add.** Settings › Skills lists the bundled **desktop-apps-and-games** skill, plus skills in `~/.echospeak/skills`, `~/.agents/skills`, `~/.claude/skills` and `~/.codex/skills`. Adding one copies it in for review.
+* **`~/.echospeak`, like `~/.claude` and `~/.codex`.** EchoSpeak creates `%USERPROFILE%\.echospeak` with an `AGENTS.md` for your standing instructions and a `skills` folder. The attached project's `AGENTS.md` (or `CLAUDE.md`) is read too, up to 32 KiB together.
+* **Terminal on This PC works like the sandbox.**
+  * Echo is told which programs are installed (git, node, python or py, …) and how PowerShell differs from bash.
+  * With Git for Windows installed, `shell="bash"` runs Git Bash on this PC, with the same commands as the sandbox.
+  * Failure hints turn bash habits into PowerShell, and explain that grep's exit code 1 means "no match".
+  * `find -delete`, `shred` and `truncate` now ask on this PC, as they did in the sandbox.
+* Fix: an 11.10.2 reminder test depended on the date it was written.
+
 ## v11.10.2 — 2026-10-23
 
 User-facing notes: [EchoSpeak 11.10.2](docs/releases/v11.10.2.md). Technical notes: [Reminders and the tray](docs/research/reminders-2026-10-23.md).

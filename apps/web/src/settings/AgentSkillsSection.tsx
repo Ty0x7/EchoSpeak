@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { leanApi, type AgentSkillInfo } from "../lean/api";
+import { leanApi, type AgentSkillInfo, type AvailableSkill } from "../lean/api";
 import "./agentskills.css";
 
 /**
@@ -18,6 +18,7 @@ const STATUS: Record<AgentSkillInfo["status"], string> = {
 export function AgentSkillsSection({ apiBase }: { apiBase: string }) {
   const api = useMemo(() => leanApi(apiBase), [apiBase]);
   const [skills, setSkills] = useState<AgentSkillInfo[] | null>(null);
+  const [available, setAvailable] = useState<AvailableSkill[]>([]);
   const [open, setOpen] = useState("");
   const [notice, setNotice] = useState("");
   const [mode, setMode] = useState<"folder" | "paste">("folder");
@@ -27,7 +28,9 @@ export function AgentSkillsSection({ apiBase }: { apiBase: string }) {
 
   const load = useCallback(async () => {
     try {
-      setSkills(await api.agentSkills());
+      const catalog = await api.agentSkillCatalog();
+      setSkills(catalog.items);
+      setAvailable(catalog.available);
     } catch (err) {
       setNotice(err instanceof Error ? err.message : String(err));
     }
@@ -63,9 +66,15 @@ export function AgentSkillsSection({ apiBase }: { apiBase: string }) {
         Agents see a skill's name and description, and read the rest only when a task needs it. Nothing is used until you approve it.
       </p>
       {notice ? <p className="st-skills-notice" role="status">{notice}</p> : null}
-      {skills && !skills.some(skill => skill.name === "project-documentation") ? <div className="st-skills-import">
-        <b>Project documentation</b><p>Keep technical notes in Markdown and present results with HTML styled for the attached project. HTML reports appear in Work automatically.</p>
-        <button className="es-btn es-btn-sm" disabled={busy} onClick={() => void run(async () => { const skill = await api.importDocumentationSkill(); setOpen(skill.name); }, "Added for review. Approve the instructions below before Echo can use them.")}>Add for review</button>
+      {available.length ? <div className="st-skills-available" aria-label="Skills you can add">
+        <p className="st-skills-intro">Skills you can add: ones that come with EchoSpeak, and ones in the folders other agents use (your .echospeak, .agents, .claude and .codex skills folders). Adding copies it here for your review.</p>
+        {available.map((item) => (
+          <div className="st-skills-import" key={item.path}>
+            <b>{item.name}</b> <span className="st-skill-status">{item.source}</span>
+            <p>{item.description}</p>
+            <button className="es-btn es-btn-sm" disabled={busy} onClick={() => void run(async () => { const skill = await api.importAgentSkill({ path: item.path }); setOpen(skill.name); }, "Added for review. Approve the instructions below before Echo can use them.")}>Add for review</button>
+          </div>
+        ))}
       </div> : null}
 
       <div className="st-skills-list">

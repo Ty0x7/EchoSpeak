@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import math
 import os
+import re
 import threading
 import time
 from typing import Any, Optional
@@ -124,11 +125,46 @@ def _controls_note(item: dict) -> str:
     if os.name != "nt":
         return ""
     controls = visible_controls(item)
+    # A captured window that names nothing but its title bar draws its own interface: a game, a launcher, a canvas.
+    drawn = DRAWN_NOTE if (item.get("screen") or {}).get("window") and all(name in WINDOW_CHROME for name, _, _ in controls) else ""
     if not controls:
-        return ""
+        return drawn
     listed = "; ".join(f"{name} [{x}, {y}]" for name, x, y in controls)
     return ("\nNamed controls Windows reports on this screen (name [x, y] in this screenshot's coordinates; click "
-            f"these points instead of estimating from the image): {listed}")
+            f"these points instead of estimating from the image): {listed}" + drawn)
+
+
+# Title-bar buttons every window has; they say nothing about what's inside it.
+WINDOW_CHROME = {"Minimize", "Maximize", "Restore", "Close", "System", "System Menu"}
+
+
+# Games and canvas apps expose no controls to Windows, so name-based tools can't reach them. A 4B
+# model on Minecraft's menu tried desktop_click by name, then asked vision_qa to "click Singleplayer"
+# six times: nothing told it that the button is just pixels to click at.
+DRAWN_NOTE = ("\nThis window reports no named controls: it draws its own interface (a game or canvas app), so "
+              "desktop_click and control names can't reach it. Click with computer_action at the point you see in "
+              "this image, or use keys (enter, esc, tab, arrows), then check the returned screenshot.")
+
+# vision_qa only captures. Asked to "click Singleplayer" it captured six times and the model
+# believed each one clicked.
+_ACTION_REQUEST = re.compile(
+    r"^\s*(?:please\s+|now\s+|then\s+)*(?:click|double[- ]?click|right[- ]?click|tap|press|type|enter|select|choose|"
+    r"open|scroll|drag|move|hold|start|go\s+to|navigate|launch|play)\b", re.I)
+
+
+def vision_qa(session: str, args: dict):
+    """A screenshot for the model to answer a question about. It never clicks or types."""
+    from agent.lean.toolbox import ToolResult
+
+    result = screenshot(session, args)
+    question = str(args.get("question") or "")
+    if isinstance(result, ToolResult) and _ACTION_REQUEST.match(question):
+        ref = _current.get(session, "the new screenshot")
+        result.output = ("vision_qa only looks: nothing was clicked or typed, and the screen is as it was. To do "
+                         f"\"{question[:80]}\", call computer_action with observation_id {ref} and an action such as "
+                         '{"action": "click", "coordinate": [x, y]} at the point you see in this image.\n' + result.output)
+        result.outcome = "no_effect"
+    return result
 
 
 def _change(before: Image.Image, after: Image.Image) -> float:
@@ -615,11 +651,11 @@ def tools(session: str, cancel: threading.Event):
         "amount": {"type": "integer", "minimum": -20, "maximum": 20},
         "horizontal": {"type": "boolean", "description": "scroll only: true scrolls sideways (positive amount = right)."}}, "required": ["action"]}
     return [NativeTool("take_screenshot", "Capture a monitor or visible window. Returns the actual image to you and chat, plus its observation ID and coordinate size.", capture_schema, lambda a: screenshot(session, a)),
-            NativeTool("vision_qa", "Capture the screen so YOU can answer the question visually using your current model. The result includes the image, not OCR.",
-                       {**capture_schema, "properties": {**capture_schema["properties"], "question": {"type": "string"}}}, lambda a: screenshot(session, a)),
+            NativeTool("vision_qa", "Capture the screen so YOU can answer a question about it with your current model. It only looks: it never clicks, types or changes anything. To act on what you see, use computer_action. The result includes the image, not OCR.",
+                       {**capture_schema, "properties": {**capture_schema["properties"], "question": {"type": "string", "description": "What you want to know about the screen, e.g. which buttons the menu shows."}}}, lambda a: vision_qa(session, a)),
             NativeTool("read_image", "View an existing screenshot by observation_id or an allowed project image by path. Optional crop [left,top,right,bottom] uses ORIGINAL pixels; crops cannot control the screen.",
                        {"type": "object", "properties": {"observation_id": {"type": "string"}, "path": {"type": "string"}, "crop": {"type": "array", "items": {"type": "integer"}}}}, lambda a: read_image(session, a)),
-            NativeTool("computer_action", "Control the desktop using a FRESH screenshot ID. Coordinates use its model image size. Click a control at the point the screenshot result lists for it rather than estimating from the image. For Windows itself a key beats a guessed click: win opens Start, win+s search, win+d the desktop, alt+tab switches windows. Run 1–12 bounded actions, at most ten seconds of total requested durations, then inspect the returned screenshot and its change note before saying it worked. hold accepts text keys, a mouse button, or both for up to five seconds; inputs release before the next action. move_relative uses delta for pointer-locked cameras. Requires desktop permission and owner approval.",
+            NativeTool("computer_action", "Control the desktop using a FRESH screenshot ID. Coordinates use its model image size. Click a control at the point the screenshot result lists for it rather than estimating from the image; games and canvas apps list none, so click the middle of what you see. For Windows itself a key beats a guessed click: win opens Start, win+s search, win+d the desktop, alt+tab switches windows. Run 1–12 bounded actions, at most ten seconds of total requested durations, then inspect the returned screenshot and its change note before saying it worked. hold accepts text keys, a mouse button, or both for up to five seconds; inputs release before the next action. move_relative uses delta for pointer-locked cameras. Requires desktop permission and owner approval.",
                        {"type": "object", "properties": {"observation_id": {"type": "string"}, "actions": {"type": "array", "items": action_schema, "minItems": 1, "maxItems": 12}}, "required": ["observation_id", "actions"]}, lambda a: act(session, a, cancel))] + [
             # Claude's own action names (computer_toolset_20260801). Hidden: never sent as schemas;
             # the Anthropic adapter declares the toolset instead, and calls arrive under these names.
