@@ -59,6 +59,7 @@ import { useProviderSettings } from "./dashboard/useProviderSettings";
 import { useVoice } from "./dashboard/useVoice";
 import { projectSessionHistory } from "./dashboard/historyProjection";
 import { ComposerInput } from "./dashboard/ComposerInput";
+import { WelcomeTypewriter } from "./dashboard/WelcomeTypewriter";
 import { ChatThread } from "./dashboard/ChatThread";
 import { recoverableQuery } from "./dashboard/recoverableStream";
 import { VoiceStage } from "./dashboard/VoiceStage";
@@ -719,7 +720,7 @@ export const Dashboard: React.FC<{
       el.style.height = `${nextHeight}px`;
       el.style.overflowY = el.scrollHeight > 156 ? "auto" : "hidden";
     }
-  }, [input]);
+  }, [input, activeThreadId, mainPage, codeConversationOpen]);
 
 
   const timeline = useMemo<TimelineItem[]>(() => {
@@ -2017,10 +2018,13 @@ export const Dashboard: React.FC<{
               {/* Chat Tab */}
                 <>
                   <WidgetEnvProvider value={widgetEnv}>
-                  {!rightOpen && !voiceConversationMode && activeThreadId ? (
+                  <PausedNotice apiBase={apiBase} />
+                  <SystemCheckNotice apiBase={apiBase} onOpen={() => openSettingsAt("system")} />
+                  <ChatThread
+                    contextBar={<div className="ec-conversation-bar"><strong className="workspace-breadcrumb"><span>{mainPage === "code" ? "Echo Code · Echo native" : "EchoSpeak"}</span><i aria-hidden>/</i>{threads.find(thread => thread.id === activeThreadId)?.name || "New chat"}</strong><div className="workspace-header-actions">{mainPage === "code" ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setCodeConversationOpen(false)}>Workspace</button> : null}{!rightOpen && !voiceConversationMode && activeThreadId ? (
                     <button
                       type="button"
-                      className={`rp-toggle${rpPeek ? " is-peek" : ""}`}
+                      className="rp-toggle workspace-research-button"
                       aria-label="Research & activity"
                       onClick={() => {
                         setActivityOpen(true);
@@ -2032,11 +2036,7 @@ export const Dashboard: React.FC<{
                       Research &amp; activity
                       <small>{activityItems.length}</small>
                     </button>
-                  ) : null}
-                  <PausedNotice apiBase={apiBase} />
-                  <SystemCheckNotice apiBase={apiBase} onOpen={() => openSettingsAt("system")} />
-                  <ChatThread
-                    contextBar={<div className="ec-conversation-bar"><strong className="workspace-breadcrumb"><span>{mainPage === "code" ? "Echo Code · Echo native" : "EchoSpeak"}</span><i aria-hidden>/</i>{threads.find(thread => thread.id === activeThreadId)?.name || "New chat"}</strong>{mainPage === "code" ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setCodeConversationOpen(false)}>Workspace</button> : null}</div>}
+                  ) : null}</div></div>}
                     activeThreadId={activeThreadId} streaming={streaming} scrollRef={chatScrollRef}
                     onScroll={onChatScroll} onWheel={onChatWheel} onKeyDown={onChatKeyDown}
                     onTouchStart={onChatTouchStart} onTouchEnd={onChatTouchEnd}
@@ -2050,7 +2050,7 @@ export const Dashboard: React.FC<{
                   />
                   </WidgetEnvProvider>
                   {!voiceConversationMode || mainPage !== "chat" ? <div className="input-bar">
-                    {emptyConversation ? <div className="conversation-welcome"><h1>{mainPage === "code" ? "What should we build" : "What can I help you with"}{mainPage === "code" && activeProjectId ? <> in <span>{projects.find(project => project.id === activeProjectId)?.name || "this project"}</span></> : null}?</h1><p>{mainPage === "code" ? "Your project, your model, Echo's own harness." : "An idea, a question, or something you'd like to work on."}</p></div> : null}
+                    {emptyConversation ? <div className="conversation-welcome"><h1>{mainPage === "code" ? "What should we build" : "What can I help you with"}{mainPage === "code" && activeProjectId ? <> in <span>{projects.find(project => project.id === activeProjectId)?.name || "this project"}</span></> : null}?</h1>{mainPage === "code" ? <p>Your project, your model, Echo's own harness.</p> : <WelcomeTypewriter />}</div> : null}
                     <LiveStatusPill live={streaming ? lean.live : null} onStop={stopActiveTurn} />
                     {/* One card: session strip, the text box, then tools · context · send */}
                     <ComposerInput
@@ -2073,7 +2073,7 @@ export const Dashboard: React.FC<{
                       activeRoom={activeRoom} roomMembers={roomMembers} mention={mention} setMention={setMention}
                       messages={messages} providerInfo={providerInfo}
                       toolbar={
-                        <ComposerToolbar
+                        <ComposerToolbar apiBase={apiBase}
                           onPermissions={() => openSettingsAt("permissions")}
                           onProviderSettings={() => openSettingsAt("models")}
                           listening={listening} voicePhase={voicePhase} voiceNotice={voiceNotice}

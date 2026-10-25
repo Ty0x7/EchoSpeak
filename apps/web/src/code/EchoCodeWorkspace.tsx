@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { PageShell } from "../lean/Pages";
 import { WorkspacePopover } from "../components/WorkspacePopover";
+import { RuntimeMark } from "../components/RuntimeMark";
 import { ProjectFile } from "../projects/ProjectDocument";
 import { request } from "../projects/model";
 import { canStartSession, CodeRequestError, createCodeSession, runtimeStatus, type CodeSession, type CodeWorkspace, type RuntimeCatalog } from "./model";
@@ -94,17 +95,18 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
           <p>{projectName ? "Make a change, explore your code, or work through an idea." : "Choose a project folder to get started."}</p></div>
         <div className="ec-draft-card">
           <textarea aria-label="Coding task draft" value={draft} onChange={event => setDraft(event.target.value)} disabled={busy}
-            placeholder="Describe a change, ask about your code, or plan what to build" rows={3} />
+            placeholder="Describe a change, ask about your code, or plan what to build" rows={1}
+            onInput={event => { const field=event.currentTarget; field.style.height="auto"; field.style.height=`${Math.min(field.scrollHeight,156)}px`; }} />
           <div className="ec-draft-tools">
             <button className="ec-runtime-picker" ref={runtimeButton} type="button" aria-label="Agent runtime" aria-haspopup="dialog" aria-expanded={runtimeOpen}
               disabled={busy || !catalog} onClick={() => setRuntimeOpen(value => !value)}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><path d="m7 8-4 4 4 4m10-8 4 4-4 4m-3-13-4 18" /></svg>
+              <RuntimeMark runtime={runtimeId} />
               {selected?.name || "Agent runtime"}<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><path d="m6 9 6 6 6-6" /></svg>
             </button>
             {runtimeOpen ? <WorkspacePopover anchor={runtimeButton} label="Choose agent runtime" width={310} onClose={() => setRuntimeOpen(false)}>
               <div className="es-picker-heading">Agent runtime</div>{catalog?.runtimes.map(runtime => <button key={runtime.id} type="button" className="es-picker-option es-runtime-option"
                 aria-pressed={runtime.id === runtimeId} onClick={() => { setRuntime(runtime.id); setRuntimeOpen(false); runtimeButton.current?.focus(); }}>
-                <span><strong>{runtime.name}</strong><small>{runtimeStatus(runtime)}</small></span>{runtime.id === runtimeId ? <i aria-hidden>✓</i> : null}
+                <RuntimeMark runtime={runtime.id} /><span><strong>{runtime.name}</strong><small>{runtimeStatus(runtime)}</small></span>{runtime.id === runtimeId ? <i aria-hidden>✓</i> : null}
               </button>)}
               <footer>Each runtime keeps its own tools, sessions, and sign-in.</footer>
             </WorkspacePopover> : null}

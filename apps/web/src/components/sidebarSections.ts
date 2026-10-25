@@ -1,7 +1,7 @@
 /** Layout state for the sidebar's resizable Agents / Chats / Projects stack. Pure helpers + storage. */
 
 export type SectionKey = "agents" | "chats" | "projects";
-export const SECTION_ORDER: SectionKey[] = ["agents", "chats", "projects"];
+export const SECTION_ORDER: SectionKey[] = ["chats", "agents", "projects"];
 
 export type StackLayout = {
   /** Relative size of each section's list while open (any positive numbers; only ratios matter). */

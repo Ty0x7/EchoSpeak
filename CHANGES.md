@@ -1,5 +1,16 @@
 # Changes
 
+## v11.10.5 — 2026-10-25
+
+User-facing notes: [EchoSpeak 11.10.5](docs/releases/v11.10.5.md). Technical UI record: [Echo Code and shared workspace](docs/research/echo-code.md#11105-ui-refinement).
+
+* Matches the desktop titlebar to the black sidebar, removes duplicate sidebar branding, places a gray Chat/Code switch beside Search and Collapse, and displays Chats above Agents.
+* Aligns the session breadcrumb and Research & activity action in one top row. Empty and populated chats share the same dark background.
+* Uses a compact one-line composer that expands with content, removes the surrounding gray dock and inner white focus rectangle, and moves the empty-chat content upward.
+* Adds three looping typewriter descriptions with a reduced-motion alternative and no duplicate visible static description.
+* Replaces provider initials with one EchoSpeak mark and a searchable list of connected Local/API model catalogs, shared by native Chat and Code. Provider setup remains in Settings. Adds bounded Echo/Codex/Claude marks to the coding runtime selector.
+* Centers Echo in voice mode with Listen/Pause and Back to chat; required error and approval UI remains available.
+
 ## v11.10.4 — 2026-10-25
 
 User-facing notes: [EchoSpeak 11.10.4](docs/releases/v11.10.4.md). Technical records: [Echo Code](docs/research/echo-code.md) and [security implementation](docs/research/security-audit-2026-10-25.md).

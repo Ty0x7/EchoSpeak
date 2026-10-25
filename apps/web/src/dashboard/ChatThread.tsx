@@ -39,13 +39,18 @@ export function ChatThread({
 }: ChatThreadProps) {
   return (
     <div className={`conversation-view${voiceStage ? " is-voice" : ""}`}>
-    {contextBar}
+    {!voiceStage ? contextBar : null}
     {voiceStage}
-    <div key={activeThreadId || "quick-chat"} className="chat-scroll" data-live={streaming ? "true" : undefined}
+    {voiceStage && live ? <div className="voice-required-actions">{live.order.map(id => {
+      const item=live.messages[id];
+      return item?.segments.some(segment => segment.kind === "approval" && !segment.decision)
+        ? <LeanMessage key={id} data={item} live onDecide={onLeanApproval} at={item.startedAt} /> : null;
+    })}</div> : null}
+    <div key={activeThreadId || "quick-chat"} className="chat-scroll" hidden={Boolean(voiceStage)} data-live={streaming ? "true" : undefined}
       role={voiceStage ? "log" : undefined} aria-label={voiceStage ? "Voice transcript and tool activity" : undefined} style={{ flex: 1 }} ref={scrollRef} onScroll={onScroll} onWheel={onWheel} onKeyDown={onKeyDown}
       onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}>
       {activeRoom ? <RoomHeader room={activeRoom} agents={agents} onEdit={() => onEditRoom(activeRoom)} /> : null}
-      {!timeline.length && !streaming && !live ? (
+      {!voiceStage && !timeline.length && !streaming && !live ? (
         <div className="es-chat-empty">
           <strong>{voiceStage ? "Say something to Echo" : activeRoom ? activeRoom.name : "What can I help with?"}</strong>
           <span>{voiceStage ? "Your conversation will appear here." : activeRoom?.kind === "group"
@@ -64,7 +69,7 @@ export function ChatThread({
           <ActivityCard key={`act-${item.id}`} item={item.item} primarySpinner={!streaming} />
         ))}
       </AnimatePresence>
-      {live ? (
+      {!voiceStage && live ? (
         <div data-testid="lean-live-turn">
           {live.routing && !live.order.length ? <div className="lm-routing" aria-hidden><span className="lm-dots"><i /><i /><i /></span></div> : null}
           {live.order.map((id) => {

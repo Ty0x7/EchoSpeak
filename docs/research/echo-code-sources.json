@@ -133,5 +133,18 @@
     "https://agentclientprotocol.com/protocol/v1/overview",
     "https://agentclientprotocol.com/protocol/v1/session-setup",
     "https://modelcontextprotocol.io/docs/2026-07-28/getting-started/intro"
-  ]
+  ],
+  "brand_assets_reused": [
+    {
+      "source_path": "apps/marketing/public/harnesses/openai_dark.svg",
+      "local_path": "apps/web/public/runtime-marks/openai.svg",
+      "sha256": "6e3ba71f36714eaa7ce57c89454ed4a36bc2e70ba124fd33ea28ce53a7991dcc"
+    },
+    {
+      "source_path": "apps/marketing/public/harnesses/claude-ai-icon.svg",
+      "local_path": "apps/web/public/runtime-marks/claude.svg",
+      "sha256": "36d216f45d3c8adb8c409f9f183c1656927b6abf2441482afc619f62e2a0e233"
+    }
+  ],
+  "brand_asset_notice": "Brand SVG assets only, from the pinned T3 commit; MIT notice retained in public/runtime-marks/NOTICE.txt. Marks belong to their owners; no affiliation or runtime execution is implied."
 }
