@@ -144,6 +144,7 @@
       "endpoints": [
         "https://github.com/Ty0x7/EchoSpeak/releases/latest/download/latest.json"
       ],
+      "requireSignedVersion": true,
       "windows": {
         "installMode": "passive"
       }

@@ -63,7 +63,7 @@ def test_your_agents_md_and_the_projects_reach_the_prompt(fresh):
     (project / "CLAUDE.md").write_text("Run tests with pytest -q.", encoding="utf-8")
     section = home.instructions_section(str(project))
     assert "Keep replies short." in section and "note to self" not in section
-    assert "Run tests with pytest -q." in section and "This project's" in section
+    assert "Run tests with pytest -q." in section and "this project's, written by whoever made the project" in section
     (project / "AGENTS.md").write_text("Use the Makefile.", encoding="utf-8")
     section = home.instructions_section(str(project))
     assert "Use the Makefile." in section and "pytest -q" not in section  # AGENTS.md first, like Codex

@@ -41,6 +41,10 @@ class ThreadInfo:
     title_revision: int = 0
     auto_title_pending: bool = False
     auto_title_input_hash: str = ""
+    # The surface and harness are independent of the selected model provider.
+    # Old sessions remain native Chat sessions when these fields are absent.
+    surface: str = "chat"
+    agent_runtime: str = "echo"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -139,8 +143,12 @@ class ThreadManager:
         thread_id: Optional[str] = None,
         idempotency_key: str = "",
         idempotency_context: str = "",
+        surface: str = "chat",
+        agent_runtime: str = "echo",
     ) -> ThreadInfo:
         """Create a new conversation thread."""
+        if surface not in {"chat", "code"} or agent_runtime != "echo":
+            raise ValueError("Only the native Echo runtime can create EchoSpeak conversation threads")
         with self._lock:
             creation_key = str(idempotency_key or "").strip()
             creation_fingerprint = hashlib.sha256(
@@ -164,6 +172,8 @@ class ThreadManager:
                     None,
                 )
                 if existing is not None:
+                    if existing.surface != surface or existing.agent_runtime != agent_runtime:
+                        raise ValueError("idempotency key was reused for a different surface or agent runtime")
                     if existing.creation_fingerprint and existing.creation_fingerprint != creation_fingerprint:
                         raise ValueError("idempotency key was reused with different Session creation parameters")
                     logger.info("Thread creation replay collapsed: {}", existing.thread_id)
@@ -180,6 +190,8 @@ class ThreadManager:
                 workspace_id=workspace_id,
                 idempotency_key=creation_key,
                 creation_fingerprint=creation_fingerprint if creation_key else "",
+                surface=surface,
+                agent_runtime=agent_runtime,
             )
             self._threads[tid] = thread
             self._save()

@@ -17,6 +17,7 @@ param(
     [switch]$Publish,
     [switch]$SkipBuild,
     [switch]$RequirePublisherSignature,
+    [switch]$AllowAdvisories,
     [string]$InstalledAppPath = "",
     [string]$ModelsPath = ""
 )
@@ -81,8 +82,10 @@ foreach ($file in @($Setup, $Msi)) {
         & (Join-Path $PSScriptRoot "sign-windows.ps1") -FilePath $file.FullName -VerifyOnly
     }
     if ($file) {
-        & $PythonExecutable (Join-Path $PSScriptRoot "verify-updater-signature.py") $file.FullName --config $ConfPath
-        if ($LASTEXITCODE -ne 0) { throw "Updater signature does not match the final installer or shipped public key." }
+        # --version: installed copies update only to releases whose signature records their version
+        # (requireSignedVersion in tauri.conf.json), so never publish one that doesn't.
+        & $PythonExecutable (Join-Path $PSScriptRoot "verify-updater-signature.py") $file.FullName --config $ConfPath --version $Version
+        if ($LASTEXITCODE -ne 0) { throw "Updater signature does not match the final installer, the shipped public key, or version $Version." }
     }
 }
 if (-not $publisherConfigured -and -not $RequirePublisherSignature) {
@@ -145,6 +148,14 @@ if (-not $Publish) {
 }
 
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw "The GitHub CLI (gh) is not installed: https://cli.github.com" }
+# Don't publish a build whose locked dependencies have an advisory nobody has reviewed
+# (apps/backend/scripts/security_audit.py). -AllowAdvisories publishes anyway.
+& $PythonExecutable (Join-Path $RepoRoot "apps\backend\scripts\security_audit.py")
+if ($LASTEXITCODE -eq 1 -and -not $AllowAdvisories) {
+    throw "New security advisories affect this release's dependencies (listed above). Update them, or publish anyway with -AllowAdvisories."
+} elseif ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1) {
+    Write-Warning "The dependency advisory check couldn't run (offline?); publishing without it."
+}
 $commit = (git -C $RepoRoot rev-parse HEAD).Trim()
 $pushed = git -C $RepoRoot branch -r --contains $commit
 if (-not $pushed) { throw "Commit $commit is not on GitHub yet. Push your branch first, then run with -SkipBuild -Publish." }

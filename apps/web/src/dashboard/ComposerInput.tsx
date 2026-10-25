@@ -8,7 +8,8 @@ type Mention = { start: number; query: string; index: number } | null;
 
 type ComposerInputProps = {
   threads: { id: string; name: string }[];
-  projects: { id: string; git_metadata?: Record<string, any> }[];
+  projects: { id: string; workspace_root?: string; git_metadata?: Record<string, any> }[];
+  coding?: boolean;
   activeThreadId: string;
   activeProjectId: string;
   threadState: ThreadSessionState | null;
@@ -37,7 +38,7 @@ type ComposerInputProps = {
 
 export function ComposerInput({ threads, projects, activeThreadId, activeProjectId, threadState,
   providerError, folderPathFromDrop, attachFolder, onRemoveFolder, textareaRef, input, onInput, onSend,
-  activeRoom, roomMembers, mention, setMention, messages, providerInfo, toolbar, busy, onSteer, queue }: ComposerInputProps) {
+  activeRoom, roomMembers, mention, setMention, messages, providerInfo, toolbar, busy, onSteer, queue, coding }: ComposerInputProps) {
   const [folderDropActive, setFolderDropActive] = useState(false);
   const agentName = activeRoom?.kind === "group" ? "The team" : roomMembers[0]?.name || "Echo";
   return (
@@ -54,12 +55,12 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                           onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setFolderDropActive(false); }}
                           onDrop={(event) => { event.preventDefault(); setFolderDropActive(false); const path = folderPathFromDrop(event); if (path) void attachFolder(path); else void attachFolder(); }}
                         >
-                          <span style={{ whiteSpace: "nowrap" }}>
+                          <span className="composer-session-name" style={{ whiteSpace: "nowrap" }}>
                             Session: <b style={{ color: "rgba(var(--es-ink-rgb), 0.8)" }}>{threads.find(t => t.id === activeThreadId)?.name || activeThreadId}</b>
                           </span>
                           {(() => {
                             const folderFull =
-                              String(threadState?.workspace_root || threadState?.project_path || "").trim();
+                              String(threadState?.workspace_root || threadState?.project_path || projects.find(project => project.id === activeProjectId)?.workspace_root || "").trim();
                             const folderName = folderFull
                               ? folderFull.replace(/[\\/]+$/, "").split(/[/\\]/).filter(Boolean).pop() || folderFull
                               : "";
@@ -86,11 +87,11 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                                   whiteSpace: "nowrap",
                                 }}
                               >
-                                Folder:{" "}
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><path d="M3 7h6l2 2h10v11H3z" /></svg>{" "}
                                 <b style={{ color: "rgba(var(--es-ink-rgb), 0.8)" }}>
-                                  {folderName || "drop folder to start Project"}
-                                  {gitBranch ? ` · git:${gitBranch}` : ""}
+                                  {folderName || "Choose project folder"}
                                 </b>
+                                {gitBranch ? <span className="composer-branch">{gitBranch}</span> : null}
                               </button>
                             );
                           })()}
@@ -163,7 +164,7 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                               ? `Message ${activeRoom.name}  ·  @ to pick who answers`
                               : activeRoom
                               ? `Message ${roomMembers[0]?.name || activeRoom.name}`
-                              : "Ask Echo anything..."
+                              : coding ? "Ask for changes, explore this project, or plan your next step" : "Ask anything, or describe what you'd like to do"
                           }
                           aria-label="Message"
                         />
@@ -207,7 +208,7 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
                           data-mode={busy ? "queue" : "send"}
                         >
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                            <path d="M5 12L19 12M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                            <path d="M12 19V5m-6 6 6-6 6 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                           </svg>
                         </button>
                       </div>

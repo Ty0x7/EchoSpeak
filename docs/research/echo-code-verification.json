@@ -1,0 +1,473 @@
+{
+  "verified_on_utc": "2026-10-25",
+  "scope": "Combined Echo Code UI and security source checks, packaged backend smoke and local Windows bundles; no installed-app or live-model acceptance",
+  "branch": "codex/echo-code-security",
+  "base_commit": "63fc31ea1b51e3eb092ca2daa3ac3a9c10409c9c",
+  "package_version": "11.10.3",
+  "backend": {
+    "passed": 168,
+    "skipped": 1,
+    "files": [
+      "test_security_audit_1025.py",
+      "test_home_and_parity.py",
+      "test_echo_code.py",
+      "test_project_workspace.py",
+      "test_privacy.py",
+      "test_runtime_ownership.py",
+      "test_security_policy.py",
+      "test_security_controls.py",
+      "test_security_hardening.py"
+    ]
+  },
+  "frontend": {
+    "files_passed": 37,
+    "tests_passed": 180,
+    "typescript": "passed",
+    "production_build": "passed",
+    "website_build": "passed",
+    "build_advisory": "Large minified chunks"
+  },
+  "desktop": {
+    "contract_tests_passed": 16,
+    "rust_tests_passed": 4,
+    "cargo_locked": true
+  },
+  "security_scan": {
+    "source": "OSV",
+    "locked_packages": 1130,
+    "new_advisories": 0,
+    "reviewed_findings": 17,
+    "reviewed_is_not_advisory_free": true
+  },
+  "action_pins": [
+    {
+      "action": "actions/checkout",
+      "sha": "11d5960a326750d5838078e36cf38b85af677262",
+      "verified": true
+    },
+    {
+      "action": "actions/setup-node",
+      "sha": "49933ea5288caeca8642d1e84afbd3f7d6820020",
+      "verified": true
+    },
+    {
+      "action": "actions/configure-pages",
+      "sha": "983d7736d9b0ae728b81ab479565c72886d7745b",
+      "verified": true
+    },
+    {
+      "action": "actions/upload-pages-artifact",
+      "sha": "56afc609e74202658d3ffba0e8f6dda462b719fa",
+      "verified": true
+    },
+    {
+      "action": "actions/deploy-pages",
+      "sha": "d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e",
+      "verified": true
+    }
+  ],
+  "python_build": {
+    "matches_requirements_lock": true,
+    "pyinstaller": "6.21.0"
+  },
+  "ui": {
+    "fixture_data": true,
+    "real_models": false,
+    "checks": [
+      "Project choice, Git summary, and existing safe file preview",
+      "Workspace dark 1280px without horizontal overflow",
+      "Workspace dark 390px without horizontal overflow",
+      "Workspace light 960px without horizontal overflow",
+      "External runtime cannot launch from its workspace control",
+      "Model search, favorite persistence, empty results, Escape dismissal, and real reasoning selection",
+      "Native Code conversation uses existing query stream with coding workspace",
+      "Native coding session returns to the separate project session list",
+      "Narrow model popup stays in the viewport and supports keyboard selection",
+      "Reasoning popup transfers focus and supports arrow-key selection",
+      "Paired HTML report renders at 1400/390px with local images, scripts disabled, and no remote requests"
+    ],
+    "page_errors": [],
+    "unexpected_network": []
+  },
+  "reports": {
+    "checks": [
+      {
+        "report": "echo-code",
+        "width": 1400,
+        "theme": "dark",
+        "images": 7,
+        "overflow": false
+      },
+      {
+        "report": "echo-code",
+        "width": 390,
+        "theme": "light",
+        "images": 7,
+        "overflow": false
+      },
+      {
+        "report": "security-audit-2026-10-25",
+        "width": 1400,
+        "theme": "dark",
+        "images": 0,
+        "overflow": false
+      },
+      {
+        "report": "security-audit-2026-10-25",
+        "width": 390,
+        "theme": "light",
+        "images": 0,
+        "overflow": false
+      }
+    ],
+    "scripts_disabled": true,
+    "remote_requests": []
+  },
+  "packaging": {
+    "windows_build": "passed",
+    "backend_self_check": "passed",
+    "backend_smoke": {
+      "checks": [
+        "Fresh packaged backend starts with desktop auth contract in isolated state",
+        "Packaged startup readiness is core-ready",
+        "Packaged Echo Code routes require auth and keep external runtime launch disabled",
+        "Packaged native creation preserves Code identity, trusted project scope and idempotency",
+        "Packaged write-Origin guard and external-runtime rejection remain enforced",
+        "Packaged project overview lists the persisted native coding session"
+      ],
+      "core_ready": true,
+      "degraded_capabilities": [
+        "model",
+        "embeddings",
+        "document_retrieval"
+      ],
+      "live_models_tested": false,
+      "desktop_installed": false,
+      "isolated_state": true
+    },
+    "installers": [
+      {
+        "path": "apps/desktop/src-tauri/target/release/bundle/nsis/EchoSpeak_11.10.3_x64-setup.exe",
+        "bytes": 170832746,
+        "sha256": "89cb41127788ec12ff4ac0a78665fcd9db0dd5e5834cae54cdb7e7fb3d46442b"
+      },
+      {
+        "path": "apps/desktop/src-tauri/target/release/bundle/msi/EchoSpeak_11.10.3_x64_en-US.msi",
+        "bytes": 247823403,
+        "sha256": "bd989138517165518ae0bc564449ff1107164fd78070636aebbca29d7863718c"
+      }
+    ],
+    "publisher_signature": "NotSigned",
+    "release_published": false
+  },
+  "preservation": {
+    "initial_echo_code_phase_preserved_tracked_edits": 18,
+    "security_changes_included_after_explicit_owner_authorization": true,
+    "excluded_unrelated_paths": [
+      "Echo Marketing/",
+      "Echo Minecraft/",
+      "docs/research/agent-collaboration-11.9.1.md"
+    ]
+  },
+  "manual_acceptance_pending": [
+    "Installed Tauri appearance and fresh application launch",
+    "User-selected live local/cloud model and native tools",
+    "Codex/Claude authentication and execution (not implemented)",
+    "ACP interoperability (not implemented)",
+    "External process isolation and policy transitions (not implemented)",
+    "Worktree rollback (not implemented)"
+  ],
+  "hash_method": "SHA-256 of raw workspace file bytes. Checkout line endings may differ across systems.",
+  "source_sha256": [
+    {
+      "path": ".github/workflows/website.yml",
+      "sha256": "7964e6f32dfa120019c46a714c97c41cd70389bd69372090ff0a5ba4dc790b74"
+    },
+    {
+      "path": "apps/backend/agent/chat_branches.py",
+      "sha256": "8d99c96a753ffa95c0be0d9fffea77c5a6fbd3dd79296ef8a4e9f0b89039ac2e"
+    },
+    {
+      "path": "apps/backend/agent/child_env.py",
+      "sha256": "4611052b697686fdc4aab224ad7e15daae1b3ecb7655bae5f9d4e5099c7115e5"
+    },
+    {
+      "path": "apps/backend/agent/echo_code.py",
+      "sha256": "b64e5b1767bd92d37c7ccb7c91429e9ff709d5054405bb914f83668b493c6618"
+    },
+    {
+      "path": "apps/backend/agent/home.py",
+      "sha256": "4a98e3a42df36c630363dc953b43102794618dd0ea24a4cba993ae947a9d5638"
+    },
+    {
+      "path": "apps/backend/agent/lean/policy.py",
+      "sha256": "a80fa5a1c62396b2a756112ee00f93c7471d32b9ae9b7829f3a1ecda96b05f0c"
+    },
+    {
+      "path": "apps/backend/agent/mcp_client.py",
+      "sha256": "bc1f690e548c3dac94be13cddb70befcc856d023b176d9dcb1fe84c4945902b8"
+    },
+    {
+      "path": "apps/backend/agent/safe_web_retrieval.py",
+      "sha256": "8d073cf6bb4ba0d599826bb5e5cdf3587720b0e9f8158b3022108c88f5d15c7b"
+    },
+    {
+      "path": "apps/backend/agent/threads.py",
+      "sha256": "3a7bea2492a47c9ba2b99d7a62036616828d1e45eddd5dd0a235b13aca3fc981"
+    },
+    {
+      "path": "apps/backend/api/routes/echo_code.py",
+      "sha256": "51411badc144e42524f6f3b0181c67c58f313dec0c961e65af39ca617444f208"
+    },
+    {
+      "path": "apps/backend/api/routes/sessions.py",
+      "sha256": "23c054cdf848d341d019e88de0d12f196a5bbe4b88212a348564ab65e5360ded"
+    },
+    {
+      "path": "apps/backend/api/server.py",
+      "sha256": "e688a43cbe334bfaf87001c78903ea8a2fe61c41f765b87a352142f6a1b0484c"
+    },
+    {
+      "path": "apps/backend/requirements-build.txt",
+      "sha256": "987e9c0532394019b17d7d4ccbad528fccd3942a525ed78463a6634475bbfd7a"
+    },
+    {
+      "path": "apps/backend/requirements.lock.txt",
+      "sha256": "7478136a422de33d1bd31545e9a91b864e0f221066bc2666b04f27c6a0a6a8c1"
+    },
+    {
+      "path": "apps/backend/requirements.txt",
+      "sha256": "6d9dfd90aaf208cddae0ace5ccd2d790ab97c3ca04d1c1b3c58f32223c7be64e"
+    },
+    {
+      "path": "apps/backend/scripts/security_audit.py",
+      "sha256": "cc74824e412f914c0aa6159405c60b90726ede3a3d90ae0b62d9611e8f281ffd"
+    },
+    {
+      "path": "apps/backend/tests/test_echo_code.py",
+      "sha256": "4eb98caa319c5070e7bb557b748d421dfe18a1f7c77b6e7df2f671de5954123a"
+    },
+    {
+      "path": "apps/backend/tests/test_home_and_parity.py",
+      "sha256": "0ae606c58f72abdc1880f30aac8bb2153f981122f30b1b0054508be6664b9a87"
+    },
+    {
+      "path": "apps/backend/tests/test_security_audit_1025.py",
+      "sha256": "89a1173e08121ff95f9d203552d875eb2b088e37821f47fb5000416a36a5e1ad"
+    },
+    {
+      "path": "apps/desktop/package-lock.json",
+      "sha256": "0aa38d7ab2779a852d485f57b0c6469068beca29b102a79a1ab6413fcf10613b"
+    },
+    {
+      "path": "apps/desktop/package.json",
+      "sha256": "d729bf1c917e25abb0b87edb9c54f85bb100dd98b7c3461dd5cce359bde6bb5d"
+    },
+    {
+      "path": "apps/desktop/scripts/check-build-env.py",
+      "sha256": "6d80af05a8bc404a878f0cf5841d1193d1fed69867aa782cefcdc113a8419aa1"
+    },
+    {
+      "path": "apps/desktop/scripts/python-env.ps1",
+      "sha256": "be027b7ea9aa76baa6492d07c3e9287d648d612c6387c709d65add3c4a6ea122"
+    },
+    {
+      "path": "apps/desktop/scripts/release-windows.ps1",
+      "sha256": "7433250ac8a3fea12f61a697aab31e23700dbd21f66c785ba41536d14ed479af"
+    },
+    {
+      "path": "apps/desktop/scripts/verify-updater-signature.py",
+      "sha256": "5be47518132722c77171daa25ea1481e17ef5bf402b1db72c53d4e61d09ec627"
+    },
+    {
+      "path": "apps/desktop/src-tauri/Cargo.lock",
+      "sha256": "1c9587cae7a880741d33fe4979a2136b03dd5f23a11056545b080bd801127b57"
+    },
+    {
+      "path": "apps/desktop/src-tauri/Cargo.toml",
+      "sha256": "ddbaeb26808ab627a6de7b3f0e83f85842571606a0e98d9cf712c3b4c0c751c1"
+    },
+    {
+      "path": "apps/desktop/src-tauri/gen/schemas/desktop-schema.json",
+      "sha256": "8da89238199197fd4c573c4e22b272ba600264b81609837f22ab63fa79ef0c35"
+    },
+    {
+      "path": "apps/desktop/src-tauri/gen/schemas/windows-schema.json",
+      "sha256": "8da89238199197fd4c573c4e22b272ba600264b81609837f22ab63fa79ef0c35"
+    },
+    {
+      "path": "apps/desktop/src-tauri/tauri.conf.json",
+      "sha256": "c521e409586588630f4383773ebb0ab8f608906c652df77f3ac42afa2a760cd7"
+    },
+    {
+      "path": "apps/desktop/tests/desktop-contracts.test.mjs",
+      "sha256": "f181261432ac948d46be9de5735eacbea96718de53f2e79cd79b4580c94f57a2"
+    },
+    {
+      "path": "apps/web/package-lock.json",
+      "sha256": "ff3425ed6daa0218c731588f57624121740387aa8dd7a8cba29eaad50a48ae18"
+    },
+    {
+      "path": "apps/web/package.json",
+      "sha256": "ec0de6801a79e2b58bc988cd95f90a8a36188f99b6187b195f433968ed085bdf"
+    },
+    {
+      "path": "apps/web/src/app/globalCss.ts",
+      "sha256": "21ba38fbb25692783c79a94c14f53c339a6ae911e7d71929c128960cfa835daa"
+    },
+    {
+      "path": "apps/web/src/code/code.css",
+      "sha256": "9e3cc852a41325e51820f56ff7233770b189d5e1c8d557bba171d0ad02ab22d6"
+    },
+    {
+      "path": "apps/web/src/code/EchoCodeWorkspace.tsx",
+      "sha256": "238b201d22947c6c7517c8c99d9c55af39f5e73f6eadb6c7eb5fb6ab18a435cd"
+    },
+    {
+      "path": "apps/web/src/code/model.test.ts",
+      "sha256": "477fcedc40775776bd229ae90b2ab4787feeac40602e9efd00419bdb309f701d"
+    },
+    {
+      "path": "apps/web/src/code/model.ts",
+      "sha256": "75ff1cbca606ab9e3d98e0199b8d968c1cfa031859da86a09ae83594b3afea6e"
+    },
+    {
+      "path": "apps/web/src/components/ProjectSidebar.tsx",
+      "sha256": "57d3a6659502f4aac0a6a7c0b3979f766a9192b24e5e63d4e3c50c4f8824f53f"
+    },
+    {
+      "path": "apps/web/src/components/WorkspacePopover.tsx",
+      "sha256": "8e085ade5cb1bfd29c1cab1feaeec2b0009ff3d0341b33b4408bf36e01467f32"
+    },
+    {
+      "path": "apps/web/src/dashboard/ChatThread.tsx",
+      "sha256": "595cf2892d26d7db067a5892b58f44f35a60a316af448ccba7891252be3bd57e"
+    },
+    {
+      "path": "apps/web/src/dashboard/ComposerInput.tsx",
+      "sha256": "b7d8f9821ec43d4d5145f3611624ef23b3f766aa3792c0f9ecbf9bd59f0da68d"
+    },
+    {
+      "path": "apps/web/src/dashboard/ComposerToolbar.tsx",
+      "sha256": "87b87deb49f97027965620941bc3d49b54649684d8ceb44a3de107e6a5b0976a"
+    },
+    {
+      "path": "apps/web/src/index.tsx",
+      "sha256": "4bad45782e2b4ce011ecc701a8aa80896d8dbd237c62799588fbc5abd6360e57"
+    },
+    {
+      "path": "apps/web/src/theme/theme.ts",
+      "sha256": "7875be9debd2d612c28f0f1151878f52a34e4d7006ca07474cf56ac0ad6d58a5"
+    },
+    {
+      "path": "apps/web/src/theme/ThemePicker.tsx",
+      "sha256": "6d80ad76a0349ca25acbd71b6d5a12a80846a22244f8ac9a5c4e2a30025c9c54"
+    },
+    {
+      "path": "apps/web/src/theme/tokens.css",
+      "sha256": "0cde14bd7ae55c6c92f88f3127c3df5b58b7334298e710ddbab15a0f69519f28"
+    },
+    {
+      "path": "apps/web/src/theme/workspace.css",
+      "sha256": "6842074cc94edc857bee818ff340009bd84f122586233ca1b24dfb6cc48117ac"
+    },
+    {
+      "path": "artifacts/research/echo-code.html",
+      "sha256": "97cbe55d543edf1e7978d6d23bac922c968d75af5e902c7d8307710dc1f132f8"
+    },
+    {
+      "path": "artifacts/research/security-audit-2026-10-25.html",
+      "sha256": "7ae765fea8c9fce918f400ad35305ef5a633ac078754d45fe522fc020c4a07b1"
+    },
+    {
+      "path": "docs/ARCHITECTURE.md",
+      "sha256": "78fc1cd91fa20db216705d09e9204151dcea9172eea0ec87a9e3494a11c78f5b"
+    },
+    {
+      "path": "docs/GUIDE.md",
+      "sha256": "467fa0b78b698eb3b5d20d5c124342889c17fa667caf5844d1c9f47150b5977a"
+    },
+    {
+      "path": "docs/research/echo-code-sources.json",
+      "sha256": "e8df5ea193bf3da92f33c86b5f64c8a44cb9adc3704bc5eefe8c8109867453c0"
+    },
+    {
+      "path": "docs/research/echo-code-t3-license.txt",
+      "sha256": "314c0e3657a116c8472f10f3c496351e5fbb436d710e020244634517144842d3"
+    },
+    {
+      "path": "docs/research/echo-code.md",
+      "sha256": "30b699de41d1d27df0b79a2f7f382d96ff0f8f1dcb6730bf345e4f09c514d963"
+    },
+    {
+      "path": "docs/research/security-audit-2026-10-25.md",
+      "sha256": "e4d35506dd955986e26030f6d73a499dd42bd1e90287e178ec8542548b3bccb5"
+    },
+    {
+      "path": "README.md",
+      "sha256": "85d94062a28027d2956e76009f78cbf0100941f59db5941beb7fd7977674c17c"
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "artifacts/media/echo-code/foundation-before-light-1280.png",
+      "sha256": "3c1e89c203ef8e65045252f760bcf2fd616622b2e34a8529cd1393e49feec4b6"
+    },
+    {
+      "path": "artifacts/media/echo-code/models-popover-dark.png",
+      "sha256": "87987917595b7efa500015b221b43985dc3dc8d45ce7be5c28ca9b76f09b8d59"
+    },
+    {
+      "path": "artifacts/media/echo-code/models-popup-dark-1280.png",
+      "sha256": "95d24aa78aa11c8b0654ea749bed47ea582c778ff9944b4d77762fefcba9d20d"
+    },
+    {
+      "path": "artifacts/media/echo-code/native-conversation-dark-1280.png",
+      "sha256": "a9eb7409eddd64c6785a180fe2de2cfab866a3a7c866ecc559f58527b75cdfee"
+    },
+    {
+      "path": "artifacts/media/echo-code/reasoning-popover-dark.png",
+      "sha256": "29023b2e11df229020d9fe7d72f5cb965d082ca7a525486b3854c316e2fb6cf5"
+    },
+    {
+      "path": "artifacts/media/echo-code/reasoning-popup-dark-1280.png",
+      "sha256": "96bf012e2f4163bf0c2c9dedbf89456f927c49b58501a5aab9c7a83ac5248845"
+    },
+    {
+      "path": "artifacts/media/echo-code/reference-model-popup.png",
+      "sha256": "ccfa12619e98195a139983fa09b758d557935e294894dd9fc6bf9cd369d9f567"
+    },
+    {
+      "path": "artifacts/media/echo-code/reference-reasoning-popup.png",
+      "sha256": "618a287d66f4136af0af99dcfd98ffada3e0b6009ad0c1037a8dba3b17da4361"
+    },
+    {
+      "path": "artifacts/media/echo-code/runtime-popup-dark-1280.png",
+      "sha256": "1e91feff19449cae755040e92531de09007812355662c380d0427255702280aa"
+    },
+    {
+      "path": "artifacts/media/echo-code/workspace-dark-1280.png",
+      "sha256": "3018a03c082649f96fe8bdbe79588d45e7851626f1c1712db8cdfc5c99487c8f"
+    },
+    {
+      "path": "artifacts/media/echo-code/workspace-dark-390.png",
+      "sha256": "d7726f758636da36a351a695d5fbd24479ffb69ea3db9abffd31554871a0f30f"
+    },
+    {
+      "path": "artifacts/media/echo-code/workspace-dark-960.png",
+      "sha256": "607cb98505799b97fac78a731abc6bb64b943e1243ecebf06d05005d0dc238cf"
+    },
+    {
+      "path": "artifacts/media/echo-code/workspace-light-1280.png",
+      "sha256": "3c1e89c203ef8e65045252f760bcf2fd616622b2e34a8529cd1393e49feec4b6"
+    },
+    {
+      "path": "artifacts/media/echo-code/workspace-light-390.png",
+      "sha256": "13b0e6fcab7c987aac624a33b63b690dd704506bedf939d44078c8fdf9c5029e"
+    },
+    {
+      "path": "artifacts/media/echo-code/workspace-light-960.png",
+      "sha256": "5f3355c3d598f174ee12a4c4eda737104df134de1e1aeddc4805847e5e33c24c"
+    }
+  ]
+}

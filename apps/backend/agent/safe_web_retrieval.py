@@ -63,6 +63,19 @@ class SafePageResult(BaseModel):
         )
 
 
+# A "<" with no ">" before the next "<" (or the end) can't start a tag. CPython's html.parser
+# rescans those as possible tags, quadratically: 80 KB of "<a<a<a…" took 8.8 s on 3.12.10 and a
+# 2 MB page would take over an hour (CVE-2025-6069, CVE-2026-15308; fixed in CPython 3.12.14,
+# which has no Windows build). Escaping just those makes it text, which is what a parser would
+# have ended up treating it as, and the scan is linear because each lookahead stops at the next < or >.
+_BROKEN_TAG_START = re.compile(r"<(?=[^<>]*(?:<|$))")
+
+
+def defuse_html(text: str) -> str:
+    """``text`` with every "<" that can't begin a tag escaped, before html.parser sees it."""
+    return _BROKEN_TAG_START.sub("&lt;", text)
+
+
 class _PageExtractor(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -366,7 +379,7 @@ def _extract_page(body: bytes, *, content_type: str, max_text_chars: int) -> tup
         except (TypeError, ValueError):
             return "", re.sub(r"\s+", " ", text).strip()[:max_text_chars], {}, [], [], []
     parser = _PageExtractor()
-    parser.feed(text)
+    parser.feed(defuse_html(text))
     visible = re.sub(r"\s+", " ", " ".join(parser.text_parts)).strip()[:max_text_chars]
     try:
         from trafilatura import extract
@@ -453,7 +466,7 @@ def fetch_public_page(
     links = []
     if "html" in content_type:
         parser = _PageExtractor()
-        parser.feed(body.decode("utf-8", errors="replace"))
+        parser.feed(defuse_html(body.decode("utf-8", errors="replace")))
         for link in parser.links:
             try:
                 links.append({"url": _normalize_url(urljoin(current, link["url"])), "title": link["title"]})

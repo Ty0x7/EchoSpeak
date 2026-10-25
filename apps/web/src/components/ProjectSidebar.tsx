@@ -51,11 +51,12 @@ type SidebarProps = {
   onSearchChats?(query: string): Promise<ChatSearchHit[]>;
 };
 
-export type SidebarPage = "chat" | "groups" | "projects" | "artifacts" | "routines" | "creations" | "learning";
+export type SidebarPage = "chat" | "code" | "groups" | "projects" | "artifacts" | "routines" | "creations" | "learning";
 
 const SECTION_TITLES: Record<SectionKey, string> = { agents: "Agents", chats: "Chats", projects: "Projects" };
 
 const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string }[] = [
+  { id: "code", label: "Echo Code", hint: "Project files and independent coding runtimes" },
   { id: "groups", label: "Group chats", hint: "Chats with several agents" },
   { id: "projects", label: "Projects", hint: "Your project folders" },
   { id: "artifacts", label: "Artifacts", hint: "Apps, documents and diagrams your agents made" },
@@ -65,7 +66,7 @@ const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string
 ];
 
 /** How many pages show before "More". */
-const NAV_PRIMARY = 3;
+const NAV_PRIMARY = 4;
 const NAV_MORE_KEY = "echospeak.sidebar.more";
 
 function readNavMore(): boolean {
@@ -75,6 +76,8 @@ function readNavMore(): boolean {
 function NavIcon({ name }: { name: Exclude<SidebarPage, "chat"> }) {
   const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   switch (name) {
+    case "code":
+      return <svg {...common}><path d="m8 7-5 5 5 5m8-10 5 5-5 5M14 4l-4 16" /></svg>;
     case "learning":
       return <svg {...common}><path d="M3 9l9-5 9 5-9 5z" /><path d="M7 11.2V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.8M21 9v6" /></svg>;
     case "creations":
@@ -634,6 +637,7 @@ export function ProjectSidebar(props: SidebarProps) {
       {!iconOnly ? (
         <div className="es-side-body">
           <div className="es-side-top">
+            <div className="es-sidebar-brand"><img src="/logo.png" alt="" /><strong>EchoSpeak</strong></div>
             <div className="es-side-search-row">
             {props.onSearchChats ? (
               <label className="es-chat-search">
@@ -792,6 +796,11 @@ export function ProjectSidebar(props: SidebarProps) {
             </span>
             {!iconOnly && <span style={titleEllipsis}>New chat</span>}
           </button>
+          {props.onPage ? <button type="button" className={`echo-side-button${props.page === "code" ? " is-active" : ""}`}
+            style={railButton(props.page === "code")} title="Echo Code" aria-label="Echo Code"
+            aria-current={props.page === "code" ? "page" : undefined} onClick={() => props.onPage?.("code")}>
+            <span style={iconSlot(props.page === "code")}><NavIcon name="code" /></span>
+          </button> : null}
         </nav>
 
         <div className="echo-rail-divider" />

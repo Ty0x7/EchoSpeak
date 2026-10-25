@@ -6,7 +6,6 @@ export const globalCss = `
            /* ~112.5% browser zoom (~90% of prior 125% scale); shell size compensates so layout fits viewport */
            --ui-scale: 1.125;
          }
-         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
          * { box-sizing: border-box; }
          html, body {
            margin: 0;

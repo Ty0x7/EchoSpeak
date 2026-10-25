@@ -359,6 +359,8 @@ class ThreadResponse(BaseModel):
     pinned: bool = False
     archived: bool = False
     project_id: str = ""
+    surface: str = "chat"
+    agent_runtime: str = "echo"
 
 
 def _thread_response(thread) -> ThreadResponse:

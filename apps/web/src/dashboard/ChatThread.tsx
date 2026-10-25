@@ -27,6 +27,7 @@ type ChatThreadProps = {
   onLeanApproval(id: string, decision: string): void;
   actions?: MessageActionProps;
   voiceStage?: React.ReactNode;
+  contextBar?: React.ReactNode;
 };
 
 /** The message timeline owns only presentation; Dashboard owns session changes. */
@@ -34,10 +35,11 @@ export function ChatThread({
   activeThreadId, streaming, scrollRef, onScroll, onWheel, onKeyDown, onTouchStart, onTouchEnd,
   activeRoom, agents, onEditRoom, timeline, live, providerInfo, onQuickReply,
   onLeanApproval,
-  actions, voiceStage,
+  actions, voiceStage, contextBar,
 }: ChatThreadProps) {
   return (
     <div className={`conversation-view${voiceStage ? " is-voice" : ""}`}>
+    {contextBar}
     {voiceStage}
     <div key={activeThreadId || "quick-chat"} className="chat-scroll" data-live={streaming ? "true" : undefined}
       role={voiceStage ? "log" : undefined} aria-label={voiceStage ? "Voice transcript and tool activity" : undefined} style={{ flex: 1 }} ref={scrollRef} onScroll={onScroll} onWheel={onWheel} onKeyDown={onKeyDown}
