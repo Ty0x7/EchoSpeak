@@ -1,5 +1,15 @@
 # Changes
 
+## v11.10.4 — 2026-10-25
+
+User-facing notes: [EchoSpeak 11.10.4](docs/releases/v11.10.4.md). Technical records: [Echo Code](docs/research/echo-code.md) and [security implementation](docs/research/security-audit-2026-10-25.md).
+
+* Adds a native Echo Code workspace with attached-project files, coding sessions and a task draft that continues through Echo's existing composer and tools.
+* Adapts the supplied workspace reference throughout Chat and Code: charcoal surfaces, compact controls, searchable model/provider/favorites popup and keyboard-accessible reasoning menu. Saved themes and existing voice controls remain available.
+* Hardens dependencies, child-process Git/npx defaults, project instructions, malformed HTML handling, skill proposal approvals, updater signatures and CI. The Python build environment is hash-pinned and checked before packaging.
+* External Codex, Claude Code and ACP execution remains unavailable. Native Echo is the only runnable coding harness in this release.
+* Gives this change its own release version instead of reusing the already published 11.10.3 tag. Publishing remains a separate action after owner acceptance.
+
 ## v11.10.3 — 2026-10-25
 
 User-facing notes: [EchoSpeak 11.10.3](docs/releases/v11.10.3.md). Technical notes: [Computer control, skills and your folder](docs/research/computer-control-2026-10-25.md). 11.10.2 was never published; 11.10.3 includes it.

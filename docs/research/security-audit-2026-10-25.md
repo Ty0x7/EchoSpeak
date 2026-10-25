@@ -1,5 +1,7 @@
 # Security audit and patching, October 2026 (11.10.3)
 
+This audit's baseline was 11.10.3. The combined Echo Code/security source now targets **11.10.4**; see [release notes](../releases/v11.10.4.md). Historical package hashes and original test runs are retained as baseline evidence. The new signed build requires the owner's local signing-key password and is not yet claimed as built or published.
+
 An authorized, defensive audit of EchoSpeak and the machine it's built and run on: every
 dependency the installer ships, the build and release pipeline, the local service, and the
 agent's own security boundaries. Confirmed problems were patched where that was safe to do

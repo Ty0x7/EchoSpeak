@@ -187,19 +187,21 @@ Fresh combined checks: **168 backend tests passed, 1 Windows symlink test skippe
 
 The fresh packaged backend passed its import self-check and an isolated desktop-contract smoke test. Startup was core-ready; models, embeddings and document retrieval were degraded in the empty test profile. The smoke test verified authenticated Echo Code route registration, 401 without the key, trusted native project/session creation and listing, idempotent retries, 403 for an untrusted write Origin and 409 for a Codex launch attempt. No model was called, no external agent was launched and the test process was stopped afterward.
 
-The full Windows build completed successfully, producing fresh **NSIS EXE (162.92 MiB)** and **MSI (236.34 MiB)** bundles. Installer SHA-256 hashes and exact sizes are in [the verification record](echo-code-verification.json). The NSIS installer was checked as **NotSigned** for Windows publisher signing. Neither installer was installed or uploaded as a release.
+The initial 11.10.3 development build completed successfully, producing **NSIS EXE (162.92 MiB)** and **MSI (236.34 MiB)** bundles. Their historical SHA-256 hashes and exact sizes are in [the verification record](echo-code-verification.json). The NSIS installer was checked as **NotSigned** for Windows publisher signing. The owner subsequently rebuilt updater-signed 11.10.3 artifacts; these differ from those initial development hashes.
+
+The source release version is now **11.10.4**, including both npm lockfiles and the Cargo package lock, because v11.10.3 is already published. New release notes are in [v11.10.4](../releases/v11.10.4.md). The 11.10.4 signed build is pending the owner's local signing-key password. Run the normal release script below, enter the password in PowerShell, and install/test that new build before publishing. Do not rename or relabel the existing 11.10.3 installer or signatures.
 
 From the repository root in PowerShell:
 
 ```powershell
-# Build the backend, production UI, desktop shell and Windows bundles.
-& .\apps\desktop\scripts\build-windows.ps1 -PythonExecutable (Resolve-Path .\apps\backend\.venv\Scripts\python.exe).Path
+# Build the backend, production UI, desktop shell and updater-signed bundles.
+& .\apps\desktop\scripts\release-windows.ps1
 
 # Close your running EchoSpeak, then run the new local installer.
-& .\apps\desktop\src-tauri\target\release\bundle\nsis\EchoSpeak_11.10.3_x64-setup.exe
+& .\release\v11.10.4\EchoSpeak_11.10.4_x64-setup.exe
 ```
 
-This is a local development build at the current **11.10.3** version, not a published update. Windows publisher signing is not configured. Existing updater `.sig` files from older builds must not be reused with newly built installers; a public release must use the release script's fresh version-bound signing and verification flow.
+The current release target is **11.10.4**, not a published update. Windows publisher signing is not configured. Existing updater `.sig` files from older builds must not be reused with newly built installers; a public release must use the release script's fresh version-bound signing and verification flow. After testing the new signed build, publish from the repository root with `& .\apps\desktop\scripts\release-windows.ps1 -SkipBuild -Publish`.
 
 For source development after the sidecar build:
 

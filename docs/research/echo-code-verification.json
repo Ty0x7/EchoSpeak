@@ -1,9 +1,9 @@
 {
   "verified_on_utc": "2026-10-25",
-  "scope": "Combined Echo Code UI and security source checks, packaged backend smoke and local Windows bundles; no installed-app or live-model acceptance",
+  "scope": "Historical 11.10.3 implementation/package baseline plus current 11.10.4 source release preparation; no 11.10.4 signed installer or live-model acceptance claimed",
   "branch": "codex/echo-code-security",
   "base_commit": "63fc31ea1b51e3eb092ca2daa3ac3a9c10409c9c",
-  "package_version": "11.10.3",
+  "package_version": "11.10.4",
   "backend": {
     "passed": 168,
     "skipped": 1,
@@ -158,7 +158,9 @@
       }
     ],
     "publisher_signature": "NotSigned",
-    "release_published": false
+    "release_published": false,
+    "evidence_scope": "Historical initial 11.10.3 development bundles. The owner later rebuilt signed 11.10.3 artifacts, so current output files may differ from these hashes.",
+    "package_version": "11.10.3"
   },
   "preservation": {
     "initial_echo_code_phase_preserved_tracked_edits": 18,
@@ -182,6 +184,14 @@
     {
       "path": ".github/workflows/website.yml",
       "sha256": "7964e6f32dfa120019c46a714c97c41cd70389bd69372090ff0a5ba4dc790b74"
+    },
+    {
+      "path": "CHANGES.md",
+      "sha256": "73a463eff9daa86198281d7352c1a78d57b65368be266fcb3cd3599294724355"
+    },
+    {
+      "path": "README.md",
+      "sha256": "85d94062a28027d2956e76009f78cbf0100941f59db5941beb7fd7977674c17c"
     },
     {
       "path": "apps/backend/agent/chat_branches.py",
@@ -256,12 +266,16 @@
       "sha256": "89a1173e08121ff95f9d203552d875eb2b088e37821f47fb5000416a36a5e1ad"
     },
     {
+      "path": "apps/backend/version.py",
+      "sha256": "29ad0036a7a764aba33e9682c5a4d9c3b5fb77b568dd3f9a4b937b889e02335e"
+    },
+    {
       "path": "apps/desktop/package-lock.json",
-      "sha256": "0aa38d7ab2779a852d485f57b0c6469068beca29b102a79a1ab6413fcf10613b"
+      "sha256": "9f197745c916dc09b24423b46d3b8186bb971b8dc5096438bef95af1f779706d"
     },
     {
       "path": "apps/desktop/package.json",
-      "sha256": "d729bf1c917e25abb0b87edb9c54f85bb100dd98b7c3461dd5cce359bde6bb5d"
+      "sha256": "9b1355e99d1df624848ae66ed8b1525b650084cdb20d30ab63819ba480a137c0"
     },
     {
       "path": "apps/desktop/scripts/check-build-env.py",
@@ -281,11 +295,11 @@
     },
     {
       "path": "apps/desktop/src-tauri/Cargo.lock",
-      "sha256": "1c9587cae7a880741d33fe4979a2136b03dd5f23a11056545b080bd801127b57"
+      "sha256": "0da4e2f56d2940dbdac2728b41b325f595d2421e3681e27e487f02023c9b540b"
     },
     {
       "path": "apps/desktop/src-tauri/Cargo.toml",
-      "sha256": "ddbaeb26808ab627a6de7b3f0e83f85842571606a0e98d9cf712c3b4c0c751c1"
+      "sha256": "959edaf59146e1e962845c22fe7e291aabff73165b25b8b841ec4bb277f1e87f"
     },
     {
       "path": "apps/desktop/src-tauri/gen/schemas/desktop-schema.json",
@@ -297,7 +311,7 @@
     },
     {
       "path": "apps/desktop/src-tauri/tauri.conf.json",
-      "sha256": "c521e409586588630f4383773ebb0ab8f608906c652df77f3ac42afa2a760cd7"
+      "sha256": "647d9a8164b5e560d5800317d9097c776e4a054529c7c27fd16f5e375a457482"
     },
     {
       "path": "apps/desktop/tests/desktop-contracts.test.mjs",
@@ -305,23 +319,23 @@
     },
     {
       "path": "apps/web/package-lock.json",
-      "sha256": "ff3425ed6daa0218c731588f57624121740387aa8dd7a8cba29eaad50a48ae18"
+      "sha256": "782aa7864926f386d317cc17bc8e8a19a95fbc39e35b9c39c11d03992182f95d"
     },
     {
       "path": "apps/web/package.json",
-      "sha256": "ec0de6801a79e2b58bc988cd95f90a8a36188f99b6187b195f433968ed085bdf"
+      "sha256": "7741f403d4a2fcce0023fb11811385beac8b61fb88eb5d66a1e83ae4d65a0caf"
     },
     {
       "path": "apps/web/src/app/globalCss.ts",
       "sha256": "21ba38fbb25692783c79a94c14f53c339a6ae911e7d71929c128960cfa835daa"
     },
     {
-      "path": "apps/web/src/code/code.css",
-      "sha256": "9e3cc852a41325e51820f56ff7233770b189d5e1c8d557bba171d0ad02ab22d6"
-    },
-    {
       "path": "apps/web/src/code/EchoCodeWorkspace.tsx",
       "sha256": "238b201d22947c6c7517c8c99d9c55af39f5e73f6eadb6c7eb5fb6ab18a435cd"
+    },
+    {
+      "path": "apps/web/src/code/code.css",
+      "sha256": "9e3cc852a41325e51820f56ff7233770b189d5e1c8d557bba171d0ad02ab22d6"
     },
     {
       "path": "apps/web/src/code/model.test.ts",
@@ -356,12 +370,12 @@
       "sha256": "4bad45782e2b4ce011ecc701a8aa80896d8dbd237c62799588fbc5abd6360e57"
     },
     {
-      "path": "apps/web/src/theme/theme.ts",
-      "sha256": "7875be9debd2d612c28f0f1151878f52a34e4d7006ca07474cf56ac0ad6d58a5"
-    },
-    {
       "path": "apps/web/src/theme/ThemePicker.tsx",
       "sha256": "6d80ad76a0349ca25acbd71b6d5a12a80846a22244f8ac9a5c4e2a30025c9c54"
+    },
+    {
+      "path": "apps/web/src/theme/theme.ts",
+      "sha256": "7875be9debd2d612c28f0f1151878f52a34e4d7006ca07474cf56ac0ad6d58a5"
     },
     {
       "path": "apps/web/src/theme/tokens.css",
@@ -372,12 +386,20 @@
       "sha256": "6842074cc94edc857bee818ff340009bd84f122586233ca1b24dfb6cc48117ac"
     },
     {
+      "path": "artifacts/releases/index.html",
+      "sha256": "26af8c41257639f0a021468579da7862dc258e60dc79cad999dd60d492c03427"
+    },
+    {
+      "path": "artifacts/releases/v11.10.4.html",
+      "sha256": "e6ccd6c14724a2e74c39f9b03458395eaec81404e94c120f966efc5e26589129"
+    },
+    {
       "path": "artifacts/research/echo-code.html",
       "sha256": "97cbe55d543edf1e7978d6d23bac922c968d75af5e902c7d8307710dc1f132f8"
     },
     {
       "path": "artifacts/research/security-audit-2026-10-25.html",
-      "sha256": "7ae765fea8c9fce918f400ad35305ef5a633ac078754d45fe522fc020c4a07b1"
+      "sha256": "9d3acca822f7122768b02daa96a6b3d3fb0c45ad0ab2e92db8d5a4cf59699495"
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -386,6 +408,14 @@
     {
       "path": "docs/GUIDE.md",
       "sha256": "467fa0b78b698eb3b5d20d5c124342889c17fa667caf5844d1c9f47150b5977a"
+    },
+    {
+      "path": "docs/releases/index.md",
+      "sha256": "2e2b2608f5028a62a0602ca250c8e9b96d5d771e952c993e199aae038207aa6a"
+    },
+    {
+      "path": "docs/releases/v11.10.4.md",
+      "sha256": "0e99f4cf51f34059de42477d3d6c8e8f39d6ed5bf2dfe4a9107765febb1b3447"
     },
     {
       "path": "docs/research/echo-code-sources.json",
@@ -397,15 +427,11 @@
     },
     {
       "path": "docs/research/echo-code.md",
-      "sha256": "30b699de41d1d27df0b79a2f7f382d96ff0f8f1dcb6730bf345e4f09c514d963"
+      "sha256": "0f5910dcd2ec5bf667a003d2504882adaf85b68197d803c2bd3fcb04d8a351fb"
     },
     {
       "path": "docs/research/security-audit-2026-10-25.md",
-      "sha256": "e4d35506dd955986e26030f6d73a499dd42bd1e90287e178ec8542548b3bccb5"
-    },
-    {
-      "path": "README.md",
-      "sha256": "85d94062a28027d2956e76009f78cbf0100941f59db5941beb7fd7977674c17c"
+      "sha256": "b503ebe9354863cc803277485b74fad065653f891b496b6e0736f20854358266"
     }
   ],
   "screenshots": [
@@ -469,5 +495,90 @@
       "path": "artifacts/media/echo-code/workspace-light-960.png",
       "sha256": "5f3355c3d598f174ee12a4c4eda737104df134de1e1aeddc4805847e5e33c24c"
     }
-  ]
+  ],
+  "initial_implementation_commit": "226af5c52db413ce4976d08f74f4b15369bfbc36",
+  "target_release_version": "11.10.4",
+  "release_preparation": {
+    "version": "11.10.4",
+    "version_entries": {
+      "backend": "11.10.4",
+      "web_package": "11.10.4",
+      "web_lock": "11.10.4",
+      "web_lock_root": "11.10.4",
+      "desktop_package": "11.10.4",
+      "desktop_lock": "11.10.4",
+      "desktop_lock_root": "11.10.4",
+      "cargo_package": "11.10.4",
+      "cargo_lock": "11.10.4",
+      "tauri_config": "11.10.4"
+    },
+    "backend": {
+      "passed": 35,
+      "files": [
+        "test_echo_code.py",
+        "test_security_audit_1025.py"
+      ]
+    },
+    "desktop_contract_tests_passed": 16,
+    "signed_build": "pending_owner_local_signing_key_password",
+    "installer_created": false,
+    "published": false,
+    "notes": "Use the normal release-windows.ps1 build locally, then install/test and explicitly publish. No older binary or signature was relabeled.",
+    "reports": {
+      "checks": [
+        {
+          "report": "research/echo-code",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "research/echo-code",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "research/security-audit-2026-10-25",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "research/security-audit-2026-10-25",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.4",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.4",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        }
+      ],
+      "scripts_disabled": true,
+      "remote_requests": []
+    }
+  },
+  "baseline_source_record_at_commit": "226af5c52db413ce4976d08f74f4b15369bfbc36:docs/research/echo-code-verification.json",
+  "baseline_package_version": "11.10.3"
 }
