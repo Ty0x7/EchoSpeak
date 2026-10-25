@@ -174,6 +174,8 @@ class Sessions:
         self.sessions = {}
         self.suspended = False
         self.starting = set()
+        self.owned_tools = set()
+        self.tool_loans = {}
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, name="EchoCodeSupervisor", daemon=True)
         self.thread.start()
@@ -186,6 +188,12 @@ class Sessions:
     async def _monitor(self):
         while True:
             await asyncio.sleep(1)
+            for tool in list(self.owned_tools):
+                try:
+                    self.admit()
+                    tool.workbench.validate(tool.context)
+                except (ValueError, OSError, KeyError, PermissionError):
+                    await tool.stop("Workspace admission changed")
             for session in list(self.sessions.values()):
                 if not session.adapter:
                     continue
@@ -276,6 +284,8 @@ class Sessions:
 
     async def connect(self, session_id, api_key=""):
         self.admit()
+        if session_id in self.tool_loans:
+            raise ValueError("Close this worktree's terminals before reconnecting the coding runtime")
         session = self.get(session_id)
         if session.row["state"] == "rolled_back":
             raise ValueError("This session was rolled back. Start a new session so native history cannot disagree with restored files.")
@@ -420,6 +430,8 @@ class Sessions:
 
     async def rollback(self, session_id):
         session = self.get(session_id)
+        if session_id in self.tool_loans:
+            raise ValueError("Close this worktree's terminals before rollback")
         if session.task or session.adapter:
             raise ValueError("Stop this runtime before rolling back its last turn")
         session.acquire()
@@ -436,6 +448,7 @@ class Sessions:
     async def stop_all(self, reason, suspend=False):
         if suspend:
             self.suspended = True
+        await asyncio.gather(*(tool.stop(reason) for tool in list(self.owned_tools)))
         await asyncio.gather(*(session.stop(reason) for session in self.sessions.values()))
 
     async def unsuspend(self):

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { request } from "../projects/model";
 import { RuntimeMark } from "../components/RuntimeMark";
+import { useWorkbench } from "../workbench/store";
 
 type Event = { seq: number; kind: string; data: Record<string, any> };
 type Session = {
@@ -54,6 +55,9 @@ export function ExternalSession({ apiBase, projectId, runtimeId, canStart, initi
   const base = `${apiBase}/echo-code/external-sessions/${encodeURIComponent(selected)}`;
   const active = ["preparing", "running"].includes(session?.state || "");
   const name = runtimeId === "codex" ? "Codex" : runtimeId === "claude_code" ? "Claude Agent" : "ACP agent";
+  useEffect(() => {
+    useWorkbench.getState().setContext({ project_id: projectId, external_session_id: selected });
+  }, [projectId, selected]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     let live = true;

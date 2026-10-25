@@ -356,9 +356,9 @@ app = FastAPI(
 )
 
 
-from api.routes import creations, onboarding, live_voice, privacy as privacy_routes, project_workspace, echo_code
+from api.routes import creations, onboarding, live_voice, privacy as privacy_routes, project_workspace, echo_code, workbench
 
-for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, learning, media, media_runtime, creations, onboarding, live_voice, privacy_routes, project_workspace, echo_code):
+for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, learning, media, media_runtime, creations, onboarding, live_voice, privacy_routes, project_workspace, echo_code, workbench):
     app.include_router(_routes.router)
 # Ensure domain ToolRegistry entries load independently of agent import order.
 for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):

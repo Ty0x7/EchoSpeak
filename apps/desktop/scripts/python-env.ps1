@@ -9,7 +9,7 @@
 # Python that can't build at all fails here with the same clear message.
 $EchoBundleModules = @(
     "PyInstaller", "numpy", "faiss", "cryptography", "faster_whisper", "onnxruntime", "tokenizers",
-    "ddgs", "primp", "lxml", "trafilatura"
+    "ddgs", "primp", "lxml", "trafilatura", "winpty"
 )
 
 function Resolve-EchoPython {

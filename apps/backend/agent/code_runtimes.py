@@ -180,7 +180,7 @@ class Claude:
         self.session, self.rpc = session, None
 
     async def connect(self):
-        argv = [sys.executable, "--code-sdk-worker"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "agent.code_claude_worker"]
+        argv = [sys.executable, "--code-sdk-worker"] if getattr(sys, "frozen", False) else [sys.executable, "-P", "-m", "agent.code_claude_worker"]
         env = child_env({"ANTHROPIC_API_KEY": self.session.api_key})
         # Source builds need our module on sys.path even though cwd is the worktree.
         if not getattr(sys, "frozen", False):

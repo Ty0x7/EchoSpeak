@@ -3,6 +3,8 @@ import { PageShell } from "../lean/Pages";
 import { WorkspacePopover } from "../components/WorkspacePopover";
 import { RuntimeMark } from "../components/RuntimeMark";
 import { ExternalSession } from "./ExternalSession";
+import { WelcomeTypewriter } from "../dashboard/WelcomeTypewriter";
+import { useWorkbench } from "../workbench/store";
 import { ProjectFile } from "../projects/ProjectDocument";
 import { request } from "../projects/model";
 import { canStartSession, CodeRequestError, createCodeSession, runtimeStatus, type CodeSession, type CodeWorkspace, type RuntimeCatalog } from "./model";
@@ -38,6 +40,9 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
   const activeProject = useRef(projectId);
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    if (runtimeId === "echo") useWorkbench.getState().setContext({ project_id: projectId, external_session_id: "" });
+  }, [projectId, runtimeId]);
   activeProject.current = projectId;
   const fileBase = `${apiBase}/projects/${encodeURIComponent(projectId)}/workspace`;
 
@@ -94,7 +99,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
       <div className={`ec-start${runtimeId !== "echo" ? " ec-start-external" : ""}`}>
         {runtimeId === "echo" ? <>
         <div className="ec-welcome"><h2>What should we build{projectName ? <> in <span>{projectName}</span></> : <> together</>}?</h2>
-          <p>{projectName ? "Make a change, explore your code, or work through an idea." : "Choose a project folder to get started."}</p></div>
+          <WelcomeTypewriter coding /></div>
         </> : null}<div className="ec-draft-card">
           {runtimeId === "echo" ?
           <textarea aria-label="Coding task draft" value={draft} onChange={event => setDraft(event.target.value)} disabled={busy}
@@ -132,7 +137,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
         <div className="ec-start-note" role="status">
           {selected && (!selected.implemented || !selected.can_start) ? <><strong>{runtimeStatus(selected)}</strong><p>{selected.blockers.join(" ")}</p></>
             : workspace?.native_blocker ? <p>{workspace.native_blocker}</p>
-            : runtimeId === "echo" ? <p>Continue with Echo's own harness. Your text stays a draft until you choose a model and send.</p> : null}
+            : null}
           {catalog && catalog.privacy_mode !== "standard" ? <small>{catalog.privacy_mode} mode · External runtimes remain blocked.</small> : null}
         </div>
       </div>

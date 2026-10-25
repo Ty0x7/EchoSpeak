@@ -164,5 +164,23 @@
       "https://pypi.org/project/claude-agent-sdk/0.2.174/"
     ],
     "validation_boundary": "No live login, paid inference or signed installer acceptance; original foundation source manifest retained as history."
+  },
+  "workbench_11_10_6": {
+    "date_utc": "2026-10-25",
+    "reference": "Owner supplied nine annotated T3 screenshots; not implementation proof",
+    "t3_commit": "c91626176081618cf82561ca74e7e79d4ccd23ed",
+    "inspected_files": {
+      "chat/ChatRightPanel.tsx": "6acbc6a91c3501d00b128b47f835ef2133cbbe30b1cd4e61e978eee3fe76d509",
+      "RightPanelTabs.tsx": "4da7479c9bb14ca0ccafd61cb67e6956c6a2bcba58e6d2d3584134090b200514",
+      "ThreadTerminalDrawer.tsx": "957192aa87812202fc81de10ccb3f274dd82a6a0b15e52b78d6c143da238d5d0",
+      "ProjectScriptsControl.tsx": "7a3e6456da25fbdf5d26bcd20e8325757292d9688add5aeb87a0b5cc9cd746a1",
+      "chat/ThreadDetailsControl.tsx": "ca154b7cb45411104b4adabcf9bd2ab79f17bad58c3b1eef57d37247b74b4ba6"
+    },
+    "new_dependencies": {
+      "pywinpty": "3.1.0",
+      "@xterm/xterm": "6.0.0",
+      "@xterm/addon-fit": "0.11.0"
+    },
+    "reuse": "Architectural/UI research; no additional T3 source vendored"
   }
 }

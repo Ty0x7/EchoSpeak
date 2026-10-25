@@ -201,7 +201,10 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--code-sdk-worker"]:
+    if sys.argv[1:] == ["--workbench-worker"]:
+        from agent.workbench_worker import main as workbench_worker
+        workbench_worker()
+    elif sys.argv[1:] == ["--code-sdk-worker"]:
         from agent.code_claude_worker import main as sdk_worker
         sdk_worker()
     else:
