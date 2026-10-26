@@ -49,6 +49,7 @@ export function ChatThread({
     <div key={activeThreadId || "quick-chat"} className="chat-scroll" hidden={Boolean(voiceStage)} data-live={streaming ? "true" : undefined}
       role={voiceStage ? "log" : undefined} aria-label={voiceStage ? "Voice transcript and tool activity" : undefined} style={{ flex: 1 }} ref={scrollRef} onScroll={onScroll} onWheel={onWheel} onKeyDown={onKeyDown}
       onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onTouchCancel={onTouchEnd}>
+      <div className="chat-transcript">
       {activeRoom ? <RoomHeader room={activeRoom} agents={agents} onEdit={() => onEditRoom(activeRoom)} /> : null}
       {!voiceStage && !timeline.length && !streaming && !live ? (
         <div className="es-chat-empty">
@@ -79,6 +80,7 @@ export function ChatThread({
           {!live.order.length && !live.routing ? <div className="lm-routing" aria-hidden><span className="lm-dots"><i /><i /><i /></span></div> : null}
         </div>
       ) : null}
+      </div>
     </div>
     </div>
   );

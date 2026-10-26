@@ -59,11 +59,15 @@
 .echo-root .app-shell.has-bottom-terminal>.right-panel { grid-row:1 / 3; }
 .desktop-window .app-shell.desktop-single-workspace.has-bottom-terminal { grid-template-rows:minmax(0,1fr) var(--wb-terminal-height,260px) !important; }
 /* Center in the remaining conversation column, independently of dock sizes. */
-.echo-root.echo-root .is-empty-conversation .input-bar { margin:auto !important; width:calc(100% - 48px); max-width:680px; padding:0 !important; }
+.echo-root { --es-conversation-width:680px; }
+.echo-root.echo-root .conversation-view:not(.is-voice)>.chat-scroll { padding-inline:20px; scrollbar-gutter:stable both-edges; }
+.echo-root .chat-transcript { box-sizing:border-box; flex:0 0 auto; display:flex; flex-direction:column; gap:inherit; width:100%; max-width:var(--es-conversation-width); min-width:0; margin-inline:auto; }
+.echo-root.echo-root .chat-transcript .chat-line-assistant { width:100%; max-width:100% !important; }
+.echo-root.echo-root .is-empty-conversation .input-bar { margin:auto !important; width:calc(100% - 48px); max-width:var(--es-conversation-width); padding:0 !important; }
 .echo-root .conversation-welcome { text-align:center; margin-bottom:22px; }.echo-root .conversation-welcome h1 { font-size:26px; line-height:1.25; font-weight:500; }.echo-root .conversation-welcome .welcome-typewriter { min-height:2.2em; margin:9px auto 0; max-width:440px; }
-.echo-root .composer-card { max-width:680px; margin-inline:auto; width:100%; }.echo-root .composer-card textarea.input-field { min-height:46px !important; padding-top:12px !important; padding-bottom:10px !important; }
+.echo-root .composer-card { max-width:var(--es-conversation-width); margin-inline:auto; width:100%; }.echo-root .composer-card textarea.input-field { min-height:46px !important; padding-top:12px !important; padding-bottom:10px !important; }
 .echo-root .ec-page .es-page { height:100%; display:flex; flex-direction:column; padding-bottom:20px; }.echo-root .ec-page .es-page-body { flex:1; min-height:0; display:flex; flex-direction:column; width:100%; }.echo-root .ec-workspace { flex:1; min-height:0; display:flex; flex-direction:column; }
-.echo-root .ec-workspace>.ec-start:not(.ec-start-external) { margin:auto; width:calc(100% - 36px); max-width:680px; }.echo-root .ec-welcome h2 { font-size:26px; }.echo-root .ec-welcome { text-align:center; margin-bottom:22px; }.echo-root .ec-draft-card textarea { min-height:46px; padding-top:12px; padding-bottom:10px; }
+.echo-root .ec-workspace>.ec-start:not(.ec-start-external) { margin:auto; width:calc(100% - 36px); max-width:var(--es-conversation-width); }.echo-root .ec-welcome h2 { font-size:26px; }.echo-root .ec-welcome { text-align:center; margin-bottom:22px; }.echo-root .ec-draft-card textarea { min-height:46px; padding-top:12px; padding-bottom:10px; }
 /* Chat's shorter controls have no checkout/status footer. Reserve that lower
    space when centering an empty Chat, and use Code's title/caption spacing.
    Existing conversations and Code's geometry are unaffected. */
