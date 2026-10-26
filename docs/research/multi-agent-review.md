@@ -1,4 +1,78 @@
-# EchoSpeak multi-agent architecture and harness review
+# EchoSpeak native multi-agent foundation — implementation record
+
+Implementation: **2026-10-26 · 11.10.7 source preparation**. Branch: `codex/native-agent-foundation`, based on `39ec47f` / model-compatibility audit PR #98. [Visual report](../../artifacts/research/multi-agent-review.html). The research specification is preserved below as historical design context; its “proposed” labels describe the baseline before this implementation.
+
+## What changed
+
+Native Chat, specialist conversations, groups, bounded helpers and routines now share a durable coordination contract around Lean. Echo remains the default assistant; specialists keep their PersonaStore identity; workers are temporary children. An identity is not a conversation, model, execution attempt or permission tier. External Codex, Claude and ACP harnesses retain their existing execution paths.
+
+Simple conversation stays lightweight. Action requests, ongoing work, delegation and the first mutating tool can create a work record. Completed work, evidence quality and transport delivery remain separate facts. “Completed” does not mean that a live model, installed application or real recipient has been independently verified.
+
+## Components and authority
+
+| Component | Implementation and ownership |
+| --- | --- |
+| Authoritative work state | `apps/backend/agent/coordination.py`, attached to StateStore. `phase3/coordination.json` atomically stores versioned work, attempts, action intent, approvals/questions, proposals, responsibilities, private working notes and outbox records. Existing backend single-writer protection remains required in production. |
+| Execution | `agent/lean/runtime.py` creates/claims work and binds the original capability ceiling, caller principal, project, model and Execution ID. Existing Jobs still plan and verify group work. Their task-board progress is copied into the work record rather than introducing another planner. |
+| Effects | `agent/lean/loop.py` journals intent before tool execution, records outcomes/effects and rechecks budgets and capabilities. Normal policy, privacy, taint, Blocked apps and per-tool switches still run. An acknowledged nonzero process exit is a failed attempt, not a lost receipt. An exception, interruption or lost write receipt is uncertain. |
+| Bounded help | `delegate_to_agent` creates a stable child assignment, intersects target capabilities with its parent's effective grant and reuses an already completed answer. Ancestor checks prevent circular delegation; count, time and token budgets bound the tree. `lean/swarm.py` creates read-only, non-spawning worker children and records their sources/outcomes. |
+| Reviewed changes | `agent/coordination_service.py` validates inactive specialist/responsibility/transfer proposals. Only authenticated owner API actions accept them. Deterministic persona/routine IDs make approved activation retryable. New routines start disabled until their review record commits. Interrupted approved activation is repaired on the existing scheduler tick. Declining a pending proposal creates no active entity. |
+| Responsibilities | Existing RoutineManager remains the sole scheduler. A responsibility creates bounded occurrence work, identified by routine and scheduled time or stable event ID. Completion of one occurrence leaves the responsibility active. Waiting work stays due; missed-run/coalescing behavior remains RoutineManager's. Stop everything defers background work. |
+| Delivery | `agent/delivery.py` uses the same work ledger for a model-free outbox. Work success does not depend on a toast or network receipt. Chat persistence, notification-feed acceptance, transport submission, confirmed receipt, failure and unknown outcomes are distinct. |
+| Admission | `agent/admission.py` covers ChatClient consumers, including summaries and learning, plus native loop clients. One local slot and four aggregate slots bound inference. Interactive priority ages so a background waiter can eventually win. It cannot preempt a provider call already in flight. |
+| Product UI | `apps/web/src/widgets/WorkPanel.tsx` is embedded in existing Activity. It shows owner, state, evidence, review proposals, ongoing responsibilities, next wake and delivery controls. The existing interface and chat/code layout are retained. |
+
+## Complete lifecycle
+
+1. A user request or approved routine/event identifies its principal, session and project. New work records contain an objective, acceptance target, owner, plan, dependency IDs, grant, taint/provenance, budget and revision.
+2. An atomic claim creates one attempt and links the existing Lean Execution. Duplicate occurrence keys reuse the same work. Work can be resumed from another authorized conversation in its original project, retaining ownership and grant.
+3. Lean uses the current persona/model and bounded context. Group planning updates the existing Job board and the durable plan. Requests for help create children; an owner transfer is a separate explicit action and does not expand capabilities.
+4. Policy evaluation precedes each tool. The journal commits intent before an effect. Cooperative desktop/project reservations prevent competing active or uncertain actions from writing through this path. Background native processes retain a reservation until their exit/stop is observed; a restart without a final process receipt makes the outcome unknown.
+5. Evidence, tool results and the existing verification ladder determine what is observed or checked. Work does not claim semantic proof from an assistant's text. Prior completed effects are refused on later attempts rather than silently repeated.
+6. Per-agent learning episodes retain existing V0–V4 grading, feedback, review and skill governance. Work/attempt IDs and approved skill digests are attached. A helper's episode links its child attempt. Established lessons can still become draft skills through the existing reviewed Skills flow; an agent cannot approve a skill or change protected policy.
+7. The native result lands in Chat with agent/work/attempt provenance. Selected owner channels use stable outbox IDs. Retrying a failed delivery does not rerun the model. Unknown outcomes require destination inspection and an explicit owner reconciliation before retry is enabled.
+8. A responsibility returns to idle until its next due time or authenticated event. No resident thinking loop or additional inference scheduler was added.
+
+## Recovery, migration and security
+
+The schema version is checked before mutation. Unsupported/corrupt records fail closed with StateStore recovery handling. The additive v0 migration preserves a backup; atomic persistence failure does not advance an in-memory work authority. Startup reconciles in-flight attempts, read interruptions, unresolved writes, background processes and submitted deliveries. It never automatically repeats an uncertain external effect.
+
+Approvals retain the exact tool/argument hash, original project-relative resource identities, filesystem timestamps, policy/privacy snapshot, owner/actor, expiry and wake condition. A recovered approval offers exact allow/deny, not a new broad grant. Files or policy changes invalidate allow; the owner may still deny. Questions and their answers are checkpointed and consumed once. Current tool permissions are re-evaluated on continuation. Parent cancellation/pause also stops descendant work from continuing under its old context.
+
+A root group's original grant includes its configured members' tools and the group's later execution controls. Each responder still receives only its own effective tools. A read-only planning turn cannot accidentally remove the execution grant; selecting a specialist cannot expand a child's grant. Responsibilities freeze their first effective grant across later occurrences. User changes to a persona affect future work; existing work still uses its original ceiling.
+
+Private notes are keyed by authenticated principal, agent and project. Specialists receive project/session memories rather than Echo's account-wide projection, and explicit transcript search for specialists/helpers is session-scoped before retrieval. Echo can retain the owner's existing cross-chat recall. Workers receive a bounded brief and read-only tools, not another agent's unrestricted memory. Existing per-agent lessons, project context, skill hashes and memory quality rules are reused. External pages and helper reports remain evidence, never authorization.
+
+Telegram now uses stable numeric user/chat IDs. Only an explicitly configured `telegram_owner_id` in a private chat has owner authority. Allow-listed IDs remain guests; usernames and group membership do not confer owner access. Personal Telegram updates go only to that owner. Existing Discord owner IDs remain the delivery destination. Privacy mode, channel enable switches and rate limits are checked again before outbox submission.
+
+These are cooperative application guarantees. They are not OS isolation, exactly-once external messaging, provider preemption, automatic rollback of arbitrary programs or a guarantee that a 4B model finishes correctly. Other programs and external coding harnesses do not acquire this ledger's resource reservations. After unknown effects, inspect the affected files/process/destination; do not infer safety from silence.
+
+## Owner operations and acceptance
+
+Use **Research & activity → Activity → Agent work**. Expand a work row to inspect evidence or pause/cancel/resume it. Transfer only inactive reconciled work. “All conversations” finds ongoing work after changing chats. Answer recovered questions or approve the exact action, then resume the work. Unknown effects require a written reconciliation first. Delivery has separate retry/reconciliation controls.
+
+Ask Echo to propose a specialist with its purpose, explicit toolsets, context scope and budget, or a responsibility with agent, objective, schedule/event trigger, channels and budget. Inspect the proposal in Activity, then accept or decline. Review granted capabilities in the existing Agents/Permissions settings. Existing Routines controls remain available for manual runs. Event responsibilities accept stable IDs through the authenticated `POST /lean/responsibilities/{id}` action `event`; signed webhook bodies also derive stable occurrence IDs. Unsupported WhatsApp/mobile transports have not been added.
+
+Manual acceptance (the owner, with a chosen local model):
+
+- Ask Echo to inspect a small attached project; check the work owner, tool evidence and result.
+- Ask Jarvis directly, then request bounded help from GLaDOS. Confirm separate identity and bounded tools. Try deep-research workers; verify parent/child work and opened sources.
+- Propose a specialist; decline once and verify no new agent. Accept a second proposal and chat with the created specialist.
+- Accept an ongoing responsibility, run it, pause/resume it and verify that one completed occurrence leaves it active. Re-send one stable event ID and confirm no second attempt.
+- Trigger an approval, restart the backend while waiting, then inspect and answer it in Activity. Change a target file before allowing to confirm stale approval refusal. Resume in another conversation in the same project.
+- Interrupt a test write/process. Verify an unknown outcome cannot auto-retry. Inspect it and record reconciliation. Confirm a previously completed exact effect is not repeated during resume.
+- Check a model-free reminder, tray notification and specialist attribution. Retry a failed delivery without a new execution. A lost receipt must remain unknown until inspected.
+- Test Stop everything, disabled permissions, Private/Offline modes, a guest channel identity and configured Telegram owner ID. Review Learning evidence and the draft-skill approval flow.
+
+## Verification and release status
+
+Deterministic verification: **279 backend regressions passed** across 17 files; **47 focused lifecycle, memory and recall tests passed** after the final specialist memory restriction; **192 web tests passed** in 40 files. Web typecheck and a production build passed. The final PR records the complete validation boundary. Fixtures exercise real Lean, owner API handlers, StateStore restart, RoutineManager, worker and outbox paths with scripted model/transport responses. No paid/live model call, live channel message, installed-app acceptance or EXE publication was performed.
+
+The Activity component is also rendered from its actual React source with scripted test data at 440px and 900px; these report images are fixture renders, not screenshots of a live agent result. Web typecheck, existing web tests and the production build are checked separately from Windows packaging. Source versions are synchronized to 11.10.7. [Release preparation](../releases/v11.10.7.md) and [manual guide](../TESTING_GUIDE.md).
+
+---
+
+# Research specification before implementation
 
 Research snapshot: **2026-10-26**. Source baseline: `39ec47f`, branch
 `codex/model-compatibility-audit`. Scope: native Echo Chat and the shared Lean
