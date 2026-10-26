@@ -2,35 +2,47 @@
   "verified_on_utc": "2026-10-26",
   "branch": "codex/model-compatibility-audit",
   "base_commit": "70f7122",
-  "scope": "Native provider compatibility research and targeted offline contracts; no live inference",
+  "scope": "Expanded 20-model priorities, public file metadata, local protocol fixes and existing source audit; no inference",
   "tests": {
-    "summary": "109 passed across 6 targeted backend test files",
-    "log": ".test-state/model-compatibility-tests.log",
+    "summary": "135 passed across 7 targeted backend test files",
+    "log": ".test-state/model-compatibility-priorities-tests.log",
     "live_inference": false,
     "model_downloads": false,
-    "benchmarks": false
+    "benchmarks": false,
+    "files": [
+      "test_cloud_models.py",
+      "test_model_family_adapters.py",
+      "test_lean_harness.py",
+      "test_privacy.py",
+      "test_lean_runtime.py",
+      "test_lean_summaries.py",
+      "test_chat_polish.py"
+    ]
   },
   "source_sha256": {
-    "apps/backend/agent/cloud_providers.py": "4ee510f78f7612d4fd55fac7f3b5b73ba1995c9282a5d00663b23cb4db787c1a",
-    "apps/backend/agent/lean/provider.py": "8b517313e33463882188ba13ecb8defea5b0136e4618818c839ad702d0941029",
-    "apps/backend/agent/lean/responses_stream.py": "a976b01d7722b157f617c0e1c8e20154c2e3d28cc18ef6dc5473d238c9e9c23f",
+    "apps/backend/agent/cloud_providers.py": "334016e14ef9c9fd797da6ca2d4434bdf2943d0a74772c0040903875317572cd",
+    "apps/backend/agent/lean/provider.py": "c364c74d8bdd2bb9980eaf794b1df05a2b72663b748409f4086edba19aebaabd",
+    "apps/backend/agent/lean/responses_stream.py": "4e2a3293eaebe2842706c0ce5b81ac47995ad444fd5d904ef99d3ded57eaee83",
     "apps/backend/agent/lean/cloud_streams.py": "cf51002cbda9bd21b014a04ff06dd355b8308b949df6334b93ad9743d7cbbbbc",
     "apps/backend/agent/lean/loop.py": "fb0a4f1366a324ab99ad176f9fb2fde8382f7aa8ad3ff6dc06ee12893972e9b3",
     "apps/backend/agent/lean/settings.py": "0116bc805a33ff1553f9b7a3b9a37bf977a2110114daaa2c606e65804328d6d4",
     "apps/backend/agent/model_adapters.py": "ca8aad68646c77c3e1f6857c5d21cfa6cdf2ecc52520848db87f54b45c39e45f",
-    "apps/backend/tests/test_cloud_models.py": "b6ac0ba5ed773e6ebc6eb9cd8684615c7706ca6a12656492590d4604247373fa",
+    "apps/backend/tests/test_cloud_models.py": "d36d39233bf2a55a14821062c5e4459cdcb4d211b1791eeacdccb592431171d7",
     "apps/backend/tests/test_model_family_adapters.py": "0f2042d2c89c6bfabe0e9396e7c9706e24621657695aedfedf4cb4a493a095c1",
-    "apps/backend/tests/test_lean_runtime.py": "d2b6df8383fd1f2f9023f0e03c9ff62ded87b07ecd07e8c60d66c417508b0e4e",
-    "scripts/render-model-ecosystem-report.py": "170125e99a3d326f7d8bc7ca6c49776fa14853fc930d89a7c121c51c7e42335d"
+    "apps/backend/tests/test_lean_runtime.py": "7b5fa16f7d332f08e568c5c410426ed1e3fccdddee8f696b12771670704f9a49",
+    "scripts/render-model-ecosystem-report.py": "955e7050626f607d2bd91e6646c0b1a542a07940fbbe4de497e585639c0d8fe3",
+    "apps/backend/tests/test_chat_polish.py": "e5bb05a447f35375de421d94963f73fa9edd63cfaaf1c144b007906c86bd44fc"
   },
   "visual": {
     "status": "passed",
-    "method": "Installed headless Chromium; JavaScript disabled; no external requests",
+    "method": "Existing headless Chromium with JavaScript disabled; no remote requests",
     "layouts": [
       {
         "width": 1280,
         "colorScheme": "dark",
-        "rows": 26,
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
         "overflow": false,
         "errors": [],
         "remote": []
@@ -38,7 +50,9 @@
       {
         "width": 768,
         "colorScheme": "dark",
-        "rows": 26,
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
         "overflow": false,
         "errors": [],
         "remote": []
@@ -46,7 +60,9 @@
       {
         "width": 390,
         "colorScheme": "dark",
-        "rows": 26,
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
         "overflow": false,
         "errors": [],
         "remote": []
@@ -54,7 +70,9 @@
       {
         "width": 1280,
         "colorScheme": "light",
-        "rows": 26,
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
         "overflow": false,
         "errors": [],
         "remote": []
@@ -62,7 +80,9 @@
       {
         "width": 768,
         "colorScheme": "light",
-        "rows": 26,
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
         "overflow": false,
         "errors": [],
         "remote": []
@@ -70,24 +90,44 @@
       {
         "width": 390,
         "colorScheme": "light",
-        "rows": 26,
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
         "overflow": false,
         "errors": [],
         "remote": []
       }
     ],
     "inspected_images": [
-      ".test-state/model-ecosystem-dark-1280.png",
-      ".test-state/model-ecosystem-dark-390.png",
-      ".test-state/model-ecosystem-matrix.png"
+      ".test-state/model-ecosystem-priorities.png",
+      ".test-state/model-ecosystem-dark-390.png"
     ],
     "local_links": "all local HTML links exist",
-    "family_rows": 26,
-    "developers": 21
+    "priority_rows": 20,
+    "family_rows": 28,
+    "developers": 23
   },
   "packaging": {
     "new_build": false,
     "published": false,
     "note": "Existing 11.10.6 bundles predate these source changes; rebuild to include them."
-  }
+  },
+  "priorities": {
+    "local": 10,
+    "cloud": 10,
+    "families": 28,
+    "developers": 23,
+    "files": [
+      "docs/research/model-ecosystem-priorities.json",
+      "docs/research/model-ecosystem-downloads.json"
+    ],
+    "weight_downloads": false,
+    "public_file_metadata_only": true
+  },
+  "report_data_sha256": {
+    "docs/research/model-ecosystem-catalog.json": "2f17e9aecf6bb177b5703f282d2aca92b3dc0fde5c2469e7d5e68792a6275fa4",
+    "docs/research/model-ecosystem-priorities.json": "0cd6042919e5d04bd8f075203c8f304e45bcc6bf6a662230c329527895779409",
+    "docs/research/model-ecosystem-downloads.json": "45b75066ff50bd11346ab72e0b8547a8e49e8e24727d8ca8e98e818af02bfe27"
+  },
+  "expanded_audit_parent_commit": "1963d2b4b0975b2360c6094623a3010180814588"
 }

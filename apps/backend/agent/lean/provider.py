@@ -7,6 +7,7 @@ Live use native adapters while retaining the same chat and tool-loop contract.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import threading
 import uuid
@@ -29,6 +30,29 @@ class Endpoint:
     local: bool
 
 
+def provider_affinity(endpoint: Endpoint, transport: str) -> dict:
+    """Internal protocol state must never follow a different account or model."""
+    return {"transport": transport, "provider": endpoint.provider,
+            "base_url": endpoint.base_url.rstrip("/"), "model": endpoint.model,
+            "credential": hashlib.sha256(endpoint.api_key.encode()).hexdigest()}
+
+
+def _chat_history(messages: list[dict], endpoint: Endpoint) -> list[dict]:
+    registry = dict(getattr(config, "model_capability_profiles", {}) or {})
+    profile = registry.get(f"{endpoint.provider}:{endpoint.model}") or registry.get(endpoint.model) or {}
+    preserve = endpoint.local and profile.get("reasoning_history") == "reasoning_content"
+    expected = provider_affinity(endpoint, "chat_completions")
+    output = []
+    for message in messages:
+        row = {k: v for k, v in message.items() if k not in ("provider_blocks", "provider_state", "reasoning_content")}
+        state = message.get("provider_state") or {}
+        if preserve and row.get("role") == "assistant" and all(state.get(k) == v for k, v in expected.items()):
+            if isinstance(state.get("reasoning_content"), str):
+                row["reasoning_content"] = state["reasoning_content"]
+        output.append(row)
+    return output
+
+
 def thinking_controls(provider: str, model: str, local: bool, metadata: Optional[dict] = None) -> dict:
     """Controls the current adapter can actually apply; unknown models stay disabled."""
     model = model.casefold()
@@ -41,16 +65,18 @@ def thinking_controls(provider: str, model: str, local: bool, metadata: Optional
     if re.search(r"qwen3[-_.]coder[-_.]next", model):
         local_reasoner = False  # Official card: non-thinking, unlike Qwen3 general models.
     metadata = metadata or {}
-    supported = openai or gemini or anthropic or (local and bool(metadata.get("thinking_supported", local_reasoner)))
+    template_toggle = local and metadata.get("thinking_control") == "chat_template"
+    supported = openai or gemini or anthropic or (local and bool(metadata.get("thinking_supported", local_reasoner or template_toggle)))
     toggle = supported and not (openai and not model.startswith(("gpt-5.1", "gpt-5.2", "gpt-5.6", "gpt-6-sol", "gpt-6-luna"))) and not (gemini and ("-3" in model or "pro" in model or model.startswith("gemini-4-argon")))
-    if local and any(x in model for x in ("qwq", "deepseek-r1", "gpt-oss", "-thinking")):
+    if local and (any(x in model for x in ("qwq", "deepseek-r1", "gpt-oss", "-thinking")) or re.search(r"glm[-_.]5[._-]3(?:\b|[-_.])", model)):
         toggle = False
     if local and "thinking_toggle_supported" in metadata:
         toggle = supported and bool(metadata["thinking_toggle_supported"])
     if anthropic:
         toggle = False  # Effort only; do not claim a universal Claude thinking-off mode.
-    return {"supported": supported, "toggle": toggle, "effort": supported,
-            "reason": "This adapter exposes Claude effort; a thinking-off control is not available here." if anthropic else
+    return {"supported": supported, "toggle": toggle, "effort": supported and not template_toggle,
+            "reason": "This host exposes a thinking on/off switch, not numeric effort." if template_toggle else
+                      "This adapter exposes Claude effort; a thinking-off control is not available here." if anthropic else
                       "Thinking stays on for this model; you can change effort." if supported and not toggle else
                       "Thinking controls are unavailable for this model on its current adapter." if not supported else ""}
 
@@ -66,6 +92,10 @@ def reasoning_effort_for(endpoint: Endpoint, thinking_enabled: bool, effort: str
         controls = thinking_controls(endpoint.provider, endpoint.model, True, metadata)
         if not controls["supported"]:
             return ""
+        effort_map = metadata.get("reasoning_effort_map")
+        mapped = effort_map.get(effort) if isinstance(effort_map, dict) else None
+        if isinstance(mapped, str) and re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", mapped):
+            level = mapped
         return level if thinking_enabled else ("none" if controls["toggle"] else "low")
     model = endpoint.model.lower()
     from agent.cloud_providers import anthropic_effort_supported
@@ -249,6 +279,7 @@ _PY_CALL_BLOCKS = (
     re.compile(r"```tool_code\s*(.*?)```", re.S),
 )
 _PIPE_TOOL = re.compile(r"\|TOOL\|\s*([\w.\-]+)\s*(\{.*\})", re.S)
+_LIQUID_TOOL = re.compile(r"<\|tool_call_start\|>(.*?)<\|tool_call_end\|>", re.S)
 _NAME_ALIASES = {"terminal_run": "terminal", "run_terminal": "terminal", "shell": "terminal", "run_command": "terminal"}
 _ARG_ALIASES = {"file_path": "path", "filepath": "path", "filename": "path"}
 
@@ -375,6 +406,32 @@ def extract_text_tool_calls(content: str, known_tools: set[str]) -> tuple[list[T
             arguments=json.dumps(_clean_args(args)),
         ))
 
+    # Liquid's documented default is a Python list of keyword calls. Parse only
+    # literal data, never execute Python or recursively interpret nested calls.
+    for match in list(_LIQUID_TOOL.finditer(cleaned)):
+        import ast
+        batch = []
+        try:
+            tree = ast.parse(match.group(1).strip(), mode="eval").body
+            if not isinstance(tree, ast.List) or not tree.elts or len(tree.elts) > 32:
+                raise ValueError("Expected a bounded list of function calls")
+            for node in tree.elts:
+                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.args:
+                    raise ValueError("Expected named tools and keyword arguments")
+                if any(kw.arg is None for kw in node.keywords) or len({kw.arg for kw in node.keywords}) != len(node.keywords):
+                    raise ValueError("Expanded or duplicate arguments are unsupported")
+                kwargs = {kw.arg: ast.literal_eval(kw.value) for kw in node.keywords}
+                json.dumps(kwargs)  # Reject non-JSON literal types such as sets/bytes.
+                batch.append((node.func.id, kwargs))
+        except (SyntaxError, ValueError, TypeError, RecursionError):
+            # Feed the same argument-error path as malformed native calls. Never
+            # execute a partially recovered batch when another member is invalid.
+            calls.append(ToolCall(f"call_{uuid.uuid4().hex[:12]}", "invalid_tool_call", "Invalid Liquid tool-call syntax"))
+        else:
+            for name, args in batch:
+                add(name, args)
+        cleaned = cleaned.replace(match.group(0), "")
+
     for index, pattern in enumerate(_TEXT_TOOL_PATTERNS):
         for match in list(pattern.finditer(cleaned)):
             payload = _repair_json(match.group(1))
@@ -497,7 +554,7 @@ class ChatClient:
             from agent.lean.responses_stream import responses_turn
             return responses_turn(self, messages, tools, on_reasoning, on_content, cancel, max_tokens)
         # Provider-specific metadata is only meaningful to its own adapter.
-        messages = [{k: v for k, v in m.items() if k not in ("provider_blocks", "provider_state")} for m in messages]
+        messages = _chat_history(messages, self.endpoint)
         body: dict[str, Any] = {
             "model": self.endpoint.model,
             "messages": messages,
@@ -514,7 +571,10 @@ class ChatClient:
             body["tools"] = tools
             body["tool_choice"] = "auto"
         if self.reasoning_effort:
-            body["reasoning_effort"] = self.reasoning_effort
+            if self.endpoint.local and profile.get("thinking_control") == "chat_template":
+                body["chat_template_kwargs"] = {"enable_thinking": self.reasoning_effort != "none"}
+            else:
+                body["reasoning_effort"] = self.reasoning_effort
         try:
             return self._stream(body, on_reasoning, on_content, cancel)
         except ProviderError as exc:
@@ -523,10 +583,9 @@ class ChatClient:
                 # going with a note so the agent says it can't see, instead of failing.
                 logger.info("Model rejected image input; retrying with text notes")
                 self._text_only = True
-                body["messages"] = [{k: v for k, v in m.items() if k not in ("provider_blocks", "provider_state")}
-                                    for m in hydrate(raw_messages, images=False)]
+                body["messages"] = _chat_history(hydrate(raw_messages, images=False), self.endpoint)
                 return self._stream(body, on_reasoning, on_content, cancel)
-            if self.reasoning_effort and exc.status == 400 and "reason" in exc.detail.lower():
+            if "reasoning_effort" in body and exc.status == 400 and "reason" in exc.detail.lower():
                 logger.info("Provider rejected reasoning_effort; retrying without it")
                 self.reasoning_effort = ""
                 body.pop("reasoning_effort", None)
@@ -547,6 +606,7 @@ class ChatClient:
         call_indexes: dict[int, int] = {}
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
+        protocol_reasoning: list[str] = []
 
         def emit_reasoning(text: str) -> None:
             if text:
@@ -586,6 +646,8 @@ class ChatClient:
                     }
                 for choice in chunk.get("choices") or []:
                     delta = choice.get("delta") or {}
+                    if isinstance(delta.get("reasoning_content"), str):
+                        protocol_reasoning.append(delta["reasoning_content"])
                     emit_reasoning(str(delta.get("reasoning_content") or delta.get("reasoning") or ""))
                     text = delta.get("content")
                     if isinstance(text, str) and text:
@@ -635,6 +697,8 @@ class ChatClient:
         emit_content(visible)
         turn.content = "".join(content_parts)
         turn.reasoning = "".join(reasoning_parts)
+        if partial_calls and turn.finish_reason not in {"tool_calls", "stop", "cancelled"}:
+            raise ProviderError(502, "Tool-call stream did not finish completely; no tool calls from this turn were executed.", self.endpoint.provider)
         for index in sorted(partial_calls):
             slot = partial_calls[index]
             if not slot["name"]:
@@ -645,6 +709,11 @@ class ChatClient:
                 arguments=slot["arguments"],
                 extra_content=slot.get("extra_content") or {},
             ))
+        registry = dict(getattr(config, "model_capability_profiles", {}) or {})
+        profile = registry.get(f"{self.endpoint.provider}:{self.endpoint.model}") or registry.get(self.endpoint.model) or {}
+        if self.endpoint.local and profile.get("reasoning_history") == "reasoning_content" and protocol_reasoning:
+            turn.provider_state = {**provider_affinity(self.endpoint, "chat_completions"),
+                                   "reasoning_content": "".join(protocol_reasoning)}
         logger.debug(
             "Lean model turn finish={} content={} reasoning={} tools={}",
             turn.finish_reason, len(turn.content), len(turn.reasoning),

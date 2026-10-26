@@ -9,6 +9,7 @@ from config import config
 CLOUD_PROVIDERS = ("openai", "gemini", "anthropic", "xai")
 CLOUD_LABELS = {"openai": "OpenAI", "gemini": "Google Gemini", "anthropic": "Claude", "xai": "Grok"}
 BASE_URLS = {"openai": "https://api.openai.com/v1", "gemini": "https://generativelanguage.googleapis.com/v1beta/openai", "anthropic": "https://api.anthropic.com/v1", "xai": "https://api.x.ai/v1"}
+_GEMINI_SPECIALIZED = ("imagen", "veo", "embedding", "tts", "lyria", "image", "transcribe", "translate", "omni-", "robotics")
 
 
 def anthropic_effort_supported(model: str) -> bool:
@@ -84,8 +85,8 @@ def chat_model_issue(provider: str, model: str) -> str:
         return "Use an API model ID, rather than its display name."
     if provider in {"openai", "xai"} and not _model_entry(provider, {"id": model})["chat"]:
         return "This is a specialized model or requires a different endpoint; select a supported chat model."
-    if provider == "gemini" and any(word in low for word in ("imagen", "veo", "embedding", "tts", "lyria", "image")):
-        return "Use image/video models in Creations and choose a text or Live model for chat."
+    if provider == "gemini" and any(word in low for word in _GEMINI_SPECIALIZED):
+        return "Choose a general text or conversational Live model for chat; this model requires a specialized media/task endpoint."
     return ""
 
 def _model_entry(provider: str, item: dict) -> dict:
@@ -97,10 +98,10 @@ def _model_entry(provider: str, item: dict) -> dict:
     reason = ""
     if provider == "gemini":
         chat = live or "generateContent" in methods
-        if any(s in low for s in ("imagen", "veo", "embedding", "tts", "lyria", "image")):
+        if any(s in low for s in _GEMINI_SPECIALIZED):
             chat = False
     elif provider == "openai":
-        chat = not any(s in low for s in ("embedding", "whisper", "tts", "dall-e", "image", "realtime", "audio", "moderation", "transcribe", "sora", "search", "codex", "-pro")) and low.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4"))
+        chat = not any(s in low for s in ("embedding", "whisper", "tts", "dall-e", "image", "realtime", "audio", "moderation", "transcribe", "sora", "search", "codex", "-pro", "gpt-live")) and low.startswith(("gpt-", "chatgpt-", "o1", "o3", "o4"))
     elif provider == "xai":
         chat = not any(s in low for s in ("image", "video", "imagine", "embed", "voice"))
     if not chat:

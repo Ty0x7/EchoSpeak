@@ -1,0 +1,189 @@
+{
+  "as_of": "2026-10-26",
+  "method": "Read public filename/size metadata over HTTPS; no weights downloaded. Decimal bytes. Different quantizations and publishers are labeled, not considered interchangeable.",
+  "repositories": [
+    {
+      "repository": "LiquidAI/LFM2.5-24B-A2B-GGUF",
+      "url": "https://huggingface.co/api/models/LiquidAI/LFM2.5-24B-A2B-GGUF/tree/main",
+      "status": "metadata retrieved",
+      "files": [
+        {
+          "path": "LFM2.5-24B-A2B-Q4_K_M.gguf",
+          "bytes": 14526258464
+        },
+        {
+          "path": "LFM2.5-24B-A2B-Q8_0.gguf",
+          "bytes": 25493732640
+        }
+      ]
+    },
+    {
+      "repository": "LiquidAI/LFM2.5-8B-A1B-GGUF",
+      "url": "https://huggingface.co/api/models/LiquidAI/LFM2.5-8B-A1B-GGUF/tree/main",
+      "status": "metadata retrieved",
+      "files": [
+        {
+          "path": "LFM2.5-8B-A1B-Q4_K_M.gguf",
+          "bytes": 5155564768
+        },
+        {
+          "path": "LFM2.5-8B-A1B-Q8_0.gguf",
+          "bytes": 9010195680
+        }
+      ]
+    },
+    {
+      "repository": "ggml-org/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF",
+      "url": "https://huggingface.co/api/models/ggml-org/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF/tree/main",
+      "status": "metadata retrieved",
+      "files": [
+        {
+          "path": "NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q8_0.gguf",
+          "bytes": 33585495616
+        },
+        {
+          "path": "mtp-NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q8_0.gguf",
+          "bytes": 2175713216
+        },
+        {
+          "path": "NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16.gguf",
+          "bytes": 63181504576
+        },
+        {
+          "path": "NVIDIA-Nemotron-3.5-Lightning-30B-A3B-Q4_0.gguf",
+          "bytes": 18898091584
+        }
+      ]
+    },
+    {
+      "repository": "poolside/Laguna-XS-2.1-GGUF",
+      "url": "https://huggingface.co/api/models/poolside/Laguna-XS-2.1-GGUF/tree/main",
+      "status": "metadata retrieved",
+      "files": [
+        {
+          "path": "Laguna-XS-2.1-Q4_K_M.gguf",
+          "bytes": 20274300032
+        }
+      ]
+    },
+    {
+      "repository": "ggml-org/gemma-4-31B-it-GGUF",
+      "url": "https://huggingface.co/api/models/ggml-org/gemma-4-31B-it-GGUF/tree/main",
+      "status": "metadata retrieved",
+      "files": [
+        {
+          "path": "dflash-gemma-4-31B-it-Q8_0.gguf",
+          "bytes": 1647944864
+        },
+        {
+          "path": "gemma-4-31B-it-Q8_0.gguf",
+          "bytes": 32635676896
+        },
+        {
+          "path": "mmproj-gemma-4-31B-it-Q8_0.gguf",
+          "bytes": 809541728
+        },
+        {
+          "path": "mtp-gemma-4-31B-it-Q8_0.gguf",
+          "bytes": 514687104
+        },
+        {
+          "path": "gemma-4-31B-it-BF16.gguf",
+          "bytes": 61413189856
+        },
+        {
+          "path": "gemma-4-31B-it-Q4_0.gguf",
+          "bytes": 17992313088
+        }
+      ]
+    },
+    {
+      "repository": "ggml-org/gemma-4-12B-it-GGUF",
+      "url": "https://huggingface.co/api/models/ggml-org/gemma-4-12B-it-GGUF/tree/main",
+      "status": "metadata retrieved",
+      "files": [
+        {
+          "path": "gemma-4-12B-it-Q8_0.gguf",
+          "bytes": 12669646976
+        },
+        {
+          "path": "mmproj-gemma-4-12B-it-Q8_0.gguf",
+          "bytes": 158987616
+        },
+        {
+          "path": "mtp-gemma-4-12B-it-Q8_0.gguf",
+          "bytes": 465109152
+        },
+        {
+          "path": "gemma-4-12B-it-BF16.gguf",
+          "bytes": 23832066176
+        },
+        {
+          "path": "gemma-4-12B-it-Q4_0.gguf",
+          "bytes": 7219673216
+        }
+      ]
+    },
+    {
+      "repository": "ggml-org/Qwen3.6-35B-A3B-GGUF",
+      "url": "https://huggingface.co/api/models/ggml-org/Qwen3.6-35B-A3B-GGUF/tree/main",
+      "status": "metadata retrieved",
+      "files": [
+        {
+          "path": "Qwen3.6-35B-A3B-Q4_K_M.gguf",
+          "bytes": 20419565568
+        },
+        {
+          "path": "Qwen3.6-35B-A3B-Q8_0.gguf",
+          "bytes": 36903139328
+        },
+        {
+          "path": "dflash-Qwen3.6-35B-A3B-Q8_0.gguf",
+          "bytes": 421060800
+        },
+        {
+          "path": "mmproj-Qwen3.6-35B-A3B-Q8_0.gguf",
+          "bytes": 614194304
+        },
+        {
+          "path": "mtp-Qwen3.6-35B-A3B-Q8_0.gguf",
+          "bytes": 1990649632
+        }
+      ]
+    },
+    {
+      "repository": "Qwen/Qwen3.5-4B",
+      "url": "https://huggingface.co/api/models/Qwen/Qwen3.5-4B/tree/main",
+      "status": "metadata retrieved",
+      "files": [
+        {
+          "path": "model.safetensors-00001-of-00002.safetensors",
+          "bytes": 5329398688
+        },
+        {
+          "path": "model.safetensors-00002-of-00002.safetensors",
+          "bytes": 3990429408
+        }
+      ]
+    },
+    {
+      "repository": "lmstudio-community/Qwen3.5-4B-GGUF",
+      "url": "https://huggingface.co/api/models/lmstudio-community/Qwen3.5-4B-GGUF/tree/main",
+      "status": "metadata retrieved",
+      "files": [
+        {
+          "path": "Qwen3.5-4B-Q4_K_M.gguf",
+          "bytes": 2707513696
+        },
+        {
+          "path": "Qwen3.5-4B-Q6_K.gguf",
+          "bytes": 3464055136
+        },
+        {
+          "path": "Qwen3.5-4B-Q8_0.gguf",
+          "bytes": 4482402656
+        }
+      ]
+    }
+  ]
+}

@@ -43,6 +43,19 @@ def test_text_tool_calls_are_recovered():
     assert cleaned == "Sure."
 
 
+def test_liquid_tool_batches_parse_literals_in_order_and_fail_as_a_whole():
+    calls, cleaned = extract_text_tool_calls(
+        '<|tool_call_start|>[lookup(query="echo", options={"limit": 2}), lookup(query="next")]<|tool_call_end|>Checking.',
+        {"lookup"},
+    )
+    assert cleaned == "Checking." and [c.name for c in calls] == ["lookup", "lookup"]
+    assert json.loads(calls[0].arguments) == {"query": "echo", "options": {"limit": 2}}
+    calls, _ = extract_text_tool_calls(
+        '<|tool_call_start|>[lookup(query="ok"), lookup(query=__import__("os").getcwd())]<|tool_call_end|>', {"lookup"})
+    assert len(calls) == 1 and calls[0].parsed_arguments()[1]
+    assert calls[0].name == "invalid_tool_call"
+
+
 def test_loose_json_arguments_are_repaired():
     args, error = ToolCall(id="1", name="x", arguments="{'path': 'a.txt',}").parsed_arguments()
     assert error == ""

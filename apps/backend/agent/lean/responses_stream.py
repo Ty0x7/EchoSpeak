@@ -6,17 +6,14 @@ created them. Only completed function calls enter the normal Toolbox path.
 from __future__ import annotations
 
 import copy
-import hashlib
 import json
 
 from agent.lean import settings
-from agent.lean.provider import ModelTurn, ProviderError, ToolCall
+from agent.lean.provider import ModelTurn, ProviderError, ToolCall, provider_affinity
 
 
 def affinity(endpoint):
-    return {"transport": "responses", "provider": endpoint.provider,
-            "base_url": endpoint.base_url.rstrip("/"), "model": endpoint.model,
-            "credential": hashlib.sha256(endpoint.api_key.encode()).hexdigest()}
+    return provider_affinity(endpoint, "responses")
 
 
 def response_input(messages, endpoint):
