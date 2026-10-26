@@ -92,7 +92,7 @@ __PRIORITIES__
 git switch codex/model-compatibility-audit
 git pull --ff-only
 cd apps\\desktop
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1</code></pre><p><small>Updater signing key required. No new installer, merge or release was made by this research task. Do not reuse older bundles with -SkipBuild. Build/publish are separate actions; public version reuse needs review.</small></p></section>
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1</code></pre><p><small>Local test build only. Version 11.10.6 is already public; a new public update needs a newer version and signed release preparation. No installer was built by this task. Do not replace public assets or reuse older bundles with -SkipBuild.</small></p></section>
 <footer><a href="../../docs/research/model-ecosystem.md">Technical record &amp; primary sources</a> · <a href="../../docs/research/model-ecosystem-catalog.json">Structured catalog</a> · <a href="../../docs/research/model-ecosystem-verification.json">Verification evidence</a><p>Static local report. No scripts, remote assets or model requests. Maintain exact-model metadata with source, date, endpoint and verification level.</p></footer>
 </main></body></html>'''
     verification = ROOT / "docs/research/model-ecosystem-verification.json"

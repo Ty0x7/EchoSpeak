@@ -30,7 +30,7 @@
     "apps/backend/tests/test_cloud_models.py": "d36d39233bf2a55a14821062c5e4459cdcb4d211b1791eeacdccb592431171d7",
     "apps/backend/tests/test_model_family_adapters.py": "0f2042d2c89c6bfabe0e9396e7c9706e24621657695aedfedf4cb4a493a095c1",
     "apps/backend/tests/test_lean_runtime.py": "7b5fa16f7d332f08e568c5c410426ed1e3fccdddee8f696b12771670704f9a49",
-    "scripts/render-model-ecosystem-report.py": "955e7050626f607d2bd91e6646c0b1a542a07940fbbe4de497e585639c0d8fe3",
+    "scripts/render-model-ecosystem-report.py": "50df4fef64bf582086ba724a8e6c8c8dfb6f88ae66249deb7145ac0d55847c7a",
     "apps/backend/tests/test_chat_polish.py": "e5bb05a447f35375de421d94963f73fa9edd63cfaaf1c144b007906c86bd44fc"
   },
   "visual": {
@@ -110,7 +110,13 @@
   "packaging": {
     "new_build": false,
     "published": false,
-    "note": "Existing 11.10.6 bundles predate these source changes; rebuild to include them."
+    "note": "Existing 11.10.6 bundles predate these source changes; rebuild to include them.",
+    "existing_public_release": {
+      "version": "11.10.6",
+      "published_at": "2026-10-26T03:59:14Z",
+      "url": "https://github.com/Ty0x7/EchoSpeak/releases/tag/v11.10.6",
+      "scope": "Observed only; this task did not publish or inspect contents of those public assets."
+    }
   },
   "priorities": {
     "local": 10,

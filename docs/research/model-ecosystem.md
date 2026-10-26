@@ -269,14 +269,14 @@ Rebuild visual/catalog sections after editing the catalog:
 apps\backend\.venv\Scripts\python.exe scripts\render-model-ecosystem-report.py
 ```
 
-Build installers containing these changes (updater key required by the release script):
+Build local test installers containing these changes. Version 11.10.6 was observed published during final verification (2026-10-26); a new public update requires a newer release version. These commands do not publish or replace release assets:
 
 ```powershell
 # From the EchoSpeak repository root
 git switch codex/model-compatibility-audit
 git pull --ff-only
 cd apps\desktop
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-windows.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1
 ```
 
-Install from `release\v11.10.6\EchoSpeak_11.10.6_x64-setup.exe` after that signed-updater build succeeds. If no updater key is available, `scripts/build-windows.ps1` produces local test bundles under `src-tauri\target\release\bundle`; that does not publish an update. Do not use `-SkipBuild` with old bundles when testing these source changes. Publish only a correctly signed and owner-tested artifact from the intended merged revision; see the release script for the separate `-SkipBuild -Publish` action. If 11.10.6 is already public, increment the release version first rather than replacing a public release's artifacts.
+Install the local test bundle from `apps\desktop\src-tauri\target\release\bundle\nsis\EchoSpeak_11.10.6_x64-setup.exe` after the build succeeds. No installer containing this expanded audit was built by this task. These source changes retain the checkout version for local acceptance; a public update must first increment the synchronized versions and prepare matching release notes, then use `scripts/release-windows.ps1` with the updater signing key. Publish only a correctly signed and owner-tested artifact from the intended revision. Do not use old bundles with `-SkipBuild`, and do not replace public 11.10.6 assets with a different build.
