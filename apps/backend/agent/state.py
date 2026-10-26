@@ -583,6 +583,8 @@ class StateStore:
         self._events_saved = 0
         self._open_db()
         self._load_all()
+        from agent.coordination import Coordinator
+        self.coordination = Coordinator(self)
 
     def _backup_legacy_state_once(self) -> None:
         """Back up durable records before the first ownership-schema migration."""

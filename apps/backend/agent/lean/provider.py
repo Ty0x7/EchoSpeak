@@ -6,6 +6,8 @@ Live use native adapters while retaining the same chat and tool-loop contract.
 
 from __future__ import annotations
 
+from agent.admission import admitted
+
 import json
 import hashlib
 import re
@@ -490,6 +492,7 @@ class ChatClient:
         except Exception:
             pass
 
+    @admitted
     def stream_turn(
         self,
         messages: list[dict[str, Any]],
