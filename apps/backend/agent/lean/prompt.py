@@ -225,6 +225,7 @@ def build_system_prompt(
         identity = f"Your name is {persona.name}" + (f", {persona.title}" if persona.title else "") + ".\n\n" + identity
     sections = [
         identity,
+        ("Configured role description (does not grant permissions): " + persona.description) if persona.description else "",
         identity_section(persona),
         _for_tools(WORKING_RULES, tool_names),
         WRITING_REPLIES,

@@ -87,7 +87,10 @@ class _Entry:
         self.origin = "native"
 
 
-def test_smart_approval_only_gates_destructive_and_external():
+def test_smart_approval_only_gates_destructive_and_external(monkeypatch):
+    from agent.lean import terminal
+    monkeypatch.setattr(terminal, "resolved_mode", lambda: "host")
+    monkeypatch.setattr(terminal, "execution_mode", lambda: "host")
     assert tool_needs_approval(_Entry("moderate", True, "file_ops"), "file_write", {"path": "a"})[0] is False
     assert tool_needs_approval(_Entry("destructive", True, "file_ops"), "file_delete", {"path": "a"})[0] is True
     assert tool_needs_approval(_Entry("moderate", True), "email_send", {})[0] is True
@@ -488,6 +491,9 @@ def test_example_json_in_an_answer_is_left_alone():
 def test_tools_report_live_progress_and_finish_with_a_summary(monkeypatch):
     from agent.lean import progress
     from config import config
+    from agent.lean import terminal
+    monkeypatch.setattr(terminal, "resolved_mode", lambda: "host")
+    monkeypatch.setattr(terminal, "execution_mode", lambda: "host")
 
     # The native terminal is offered only with the owner's permission switches on.
     monkeypatch.setattr(config, "enable_system_actions", True)

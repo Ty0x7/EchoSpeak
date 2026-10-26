@@ -201,6 +201,7 @@ class ToolResult:
     outcome: str = ""
     # What the harness observed it change: files on disk, a process's exit, the screen.
     effects: list[dict[str, Any]] = field(default_factory=list)
+    uncertain: bool = False  # execution lost its receipt; unsafe to repeat automatically
 
     def __post_init__(self) -> None:
         if not self.outcome:
@@ -682,6 +683,7 @@ class Toolbox:
                     _tool_execution_context.reset(token)
 
             widgets: list[dict[str, Any]] = []
+            uncertain = False
             try:
                 raw, widgets = contextvars.copy_context().run(collect_widgets, invoke_native)
                 if isinstance(raw, ToolResult):
@@ -698,8 +700,9 @@ class Toolbox:
             except Exception as exc:
                 logger.warning("Lean native tool {} failed: {}", name, exc)
                 output, ok = f"Error: {exc}", False
+                uncertain = True
             return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000),
-                              redact_payload(widgets) if ok else [])
+                              redact_payload(widgets) if ok else [], uncertain=uncertain or output.lower().startswith("[timed out"))
         if name == "web_search" and name in self.entries:
             return self._search_and_read(args)
         return self._run_entry(name, args)
@@ -767,6 +770,7 @@ class Toolbox:
 
         widgets: list[dict[str, Any]] = []
         visual: list[dict[str, str]] = []
+        uncertain = False
         try:
             raw, widgets = contextvars.copy_context().run(collect_widgets, invoke)
             if str(getattr(entry, "origin", "")) == "mcp":
@@ -786,6 +790,7 @@ class Toolbox:
             if "validation error" in message.lower():
                 message = f"Invalid arguments for {name}: {message[:600]}"
             output, ok = f"Error: {message}", False
+            uncertain = True
             logger.warning("Lean tool {} failed: {}", name, exc)
         try:
             from agent.tool_registry import ToolUsageStats
@@ -803,7 +808,7 @@ class Toolbox:
             except Exception:
                 pass
         return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000),
-                          redact_payload(widgets) if ok else [], observations=visual if ok else [])
+                          redact_payload(widgets) if ok else [], observations=visual if ok else [], uncertain=uncertain)
 
 
 def describe_call(name: str, args: dict[str, Any]) -> str:

@@ -51,6 +51,9 @@ def _tool(name: str, func) -> NativeTool:
 
 @pytest.fixture()
 def tools(monkeypatch, tmp_path) -> dict[str, list[dict[str, Any]]]:
+    from agent.lean import terminal as terminal_module
+    monkeypatch.setattr(terminal_module, "resolved_mode", lambda: "host")
+    monkeypatch.setattr(terminal_module, "execution_mode", lambda: "host")
     calls: dict[str, list[dict[str, Any]]] = {}
     # The harness checks writes on disk (agent/lean/evidence.py): the fake file_write really writes, in tmp_path.
     from agent.lean import evidence

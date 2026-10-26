@@ -35,6 +35,8 @@ class AgentPersona(BaseModel):
     avatar: str = Field(default="", description="One or two characters or an emoji.")
     model: AgentModel = Field(default_factory=AgentModel)
     toolsets: list[str] = Field(default_factory=list)
+    context_scope: str = "project"
+    budget: dict[str, int] = Field(default_factory=dict)
     builtin: bool = False
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)
@@ -202,14 +204,16 @@ class PersonaStore:
                 return agent
         return None
 
-    def create(self, data: dict[str, Any]) -> AgentPersona:
+    def create(self, data: dict[str, Any], *, identity: str = "") -> AgentPersona:
+        if identity and self.get(identity):
+            return self.get(identity)
         name = str(data.get("name") or "").strip()
         if not name:
             raise ValueError("An agent needs a name")
         if self.find_by_name(name):
             raise ValueError(f"An agent named {name} already exists")
         slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "agent"
-        agent_id = slug if not self.get(slug) else f"{slug}-{uuid.uuid4().hex[:6]}"
+        agent_id = identity or (slug if not self.get(slug) else f"{slug}-{uuid.uuid4().hex[:6]}")
         agent = AgentPersona(
             id=agent_id,
             name=name[:40],
@@ -219,6 +223,8 @@ class PersonaStore:
             avatar=str(data.get("avatar") or "")[:4],
             model=AgentModel(**dict(data.get("model") or {})),
             toolsets=[str(item) for item in (data.get("toolsets") or ["core", "research", "memory"])],
+            context_scope=str(data.get("context_scope") or "project"),
+            budget=dict(data.get("budget") or {}),
         )
         with self._lock:
             self._agents[agent.id] = agent

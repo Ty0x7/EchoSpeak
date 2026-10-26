@@ -17,6 +17,99 @@ from agent.lean.toolbox import DEFAULT_TOOLSETS, TOOLSET_ALIASES, TOOLSETS
 router = APIRouter(prefix="/lean", tags=["lean"])
 
 
+class WorkDecision(BaseModel):
+    action: str
+    revision: int = 0
+    session_id: str = ""
+    reconciliation: str = ""
+    agent_id: str = ""
+
+
+@router.get("/work")
+def native_work(session_id: str = ""):
+    from agent.coordination_service import coordinator
+    coord = coordinator()
+    works = coord.view("works")
+    from agent.routines import get_routine_manager
+    responsibilities = coord.view("responsibilities")
+    for row in responsibilities:
+        routine = get_routine_manager().get_routine(row["routine_id"])
+        row["next_wake"] = routine.next_run if routine else None
+    return {"works": [r for r in works if not session_id or session_id in r.get("sessions", [])],
+            "proposals": [r for r in coord.view("proposals") if r["status"] in {"pending", "applying"}],
+            "responsibilities": responsibilities,
+            "deliveries": [r for r in coord.view("deliveries") if not session_id or r["session_id"] == session_id]}
+
+
+@router.post("/work/{work_id}")
+def native_work_decision(work_id: str, request: WorkDecision):
+    from agent.coordination_service import coordinator, resume
+    try:
+        coord = coordinator()
+        if request.action == "resume":
+            row = coord.get(work_id)
+            if row["revision"] != request.revision:
+                raise ValueError("Work changed; refresh it")
+            if row["status"] != "ready":
+                coord.transition(work_id, "ready", revision=request.revision, reconciliation=request.reconciliation)
+            return resume(work_id, request.session_id or row["session_id"])
+        if request.action == "transfer":
+            return coord.transfer(work_id, request.agent_id, revision=request.revision)
+        return coord.transition(work_id, request.action, revision=request.revision, reconciliation=request.reconciliation)
+    except (ValueError, KeyError, PermissionError) as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+
+
+@router.post("/agent-proposals/{proposal_id}")
+def review_native_proposal(proposal_id: str, request: WorkDecision):
+    from agent.coordination_service import review
+    if request.action not in {"accept", "decline"}:
+        raise HTTPException(400, detail="Choose accept or decline")
+    try:
+        return review(proposal_id, accept=request.action == "accept", revision=request.revision)
+    except (ValueError, KeyError, PermissionError) as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+
+
+@router.post("/responsibilities/{identity}")
+def native_responsibility(identity: str, request: WorkDecision):
+    from agent.coordination_service import coordinator, responsibility_state
+    try:
+        if request.action in {"pause", "resume"}:
+            return responsibility_state(identity, request.action == "resume")
+        if request.action != "event" or not request.reconciliation.strip():
+            raise ValueError("An event requires a stable source event ID in reconciliation")
+        row = next(r for r in coordinator().view("responsibilities") if r["id"] == identity)
+        if row["status"] != "active" or row["trigger"] != "event":
+            raise PermissionError("This event responsibility is not active")
+        from agent.routines import get_routine_manager
+        from agent.lean.automations import routine_runner
+        from api.deps import get_agent
+        routine = get_routine_manager().get_routine(row["routine_id"]).model_copy(deep=True)
+        routine.metadata["event_id"] = request.reconciliation[:300]
+        return routine_runner(get_agent)(routine)
+    except (ValueError, KeyError, PermissionError, StopIteration) as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+
+
+@router.post("/deliveries/{identity}/retry")
+def retry_native_delivery(identity: str):
+    from agent.delivery import dispatch
+    try:
+        return dispatch(identity)
+    except (ValueError, KeyError, PermissionError) as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+
+
+@router.post("/deliveries/{identity}/reconcile")
+def reconcile_native_delivery(identity: str, request: WorkDecision):
+    from agent.coordination_service import coordinator
+    try:
+        return coordinator().reconcile_delivery(identity, request.action, request.reconciliation)
+    except (ValueError, KeyError, PermissionError) as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
+
+
 @router.get("/observations/{observation_id}/image")
 def observation_image(observation_id: str, session_id: str = Query(...)):
     """Authenticated, chat-scoped content; never an arbitrary filesystem endpoint."""
@@ -302,15 +395,36 @@ def message_trace(message_id: str, session_id: str = Query(...)) -> dict[str, An
 
 @router.get("/approvals")
 def list_approvals(session_id: str = Query(default="")) -> dict[str, Any]:
-    return {"items": get_approval_broker().pending_for(session_id)}
+    from agent.state import get_state_store
+    items = get_approval_broker().pending_for(session_id)
+    live = {r["id"] for r in items}
+    for record in get_state_store().coordination.view("approvals"):
+        if record["status"] == "pending" and record["id"] not in live and (not session_id or record["session_id"] == session_id):
+            items.append({**record, "kind": record.get("kind", "tool"), "decision": "", "grantable": False, "persistable": False, "recovered": True})
+    return {"items": items}
 
 
 @router.post("/approvals/{approval_id}")
 def decide_approval(approval_id: str, request: ApprovalDecisionRequest) -> dict[str, Any]:
     try:
+        from agent.state import get_state_store
+        coordinator = get_state_store().coordination
+        record = next((r for r in coordinator.view("approvals") if r["id"] == approval_id), None)
+        if record:
+            recovered = approval_id not in {r["id"] for r in get_approval_broker().pending_for("")}
+            if record.get("kind") == "question":
+                decided = coordinator.answer(approval_id, request.decision)
+            elif recovered and request.decision not in {"allow", "deny"}:
+                raise ValueError("Recovered approvals allow only this exact action")
+            else:
+                decided = coordinator.decide(approval_id, "allow" if request.decision in {"always", "persist"} else request.decision)
+            if recovered:
+                return {"ok": True, "approval": decided, "resume_work_id": record["work_id"]}
         approval = get_approval_broker().resolve(approval_id, request.decision)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (PermissionError, KeyError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if approval is None:
         raise HTTPException(status_code=404, detail="That approval is no longer waiting.")
     return {"ok": True, "approval": approval.public()}

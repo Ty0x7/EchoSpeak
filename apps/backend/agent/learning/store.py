@@ -52,6 +52,9 @@ class Episode:
     summary: str = ""  # what was delivered, or why it stopped
     stop_reason: str = ""
     source: str = ""
+    work_id: str = ""
+    attempt_id: str = ""
+    skill_versions: dict[str, str] = field(default_factory=dict)
     provider: str = ""
     model: str = ""
     team: bool = False

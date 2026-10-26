@@ -147,9 +147,13 @@ class RoutineManager:
         session_id: str = "",
         missed_run_policy: str = "run_next",
         run_at: Optional[str] = None,
+        routine_id: str = "",
     ) -> Routine:
         """Create a new routine."""
+        if routine_id and self.get_routine(routine_id):
+            return self.get_routine(routine_id)
         routine = Routine(
+            **({"id": routine_id} if routine_id else {}),
             name=name.strip(),
             description=description or "",
             enabled=enabled,
@@ -339,6 +343,10 @@ class RoutineManager:
     
     def _check_scheduled_routines(self) -> None:
         """Check and run any scheduled routines that are due."""
+        from agent.delivery import drain
+        drain()
+        from agent.coordination_service import recover_reviews
+        recover_reviews()
         if not self._on_run:
             return
         
@@ -368,7 +376,7 @@ class RoutineManager:
                 logger.error(f"Error checking routine {routine.id}: {e}")
                 self.mark_run(routine.id, success=False, error=str(e))
     
-    def run_routine(self, routine_id: str) -> bool:
+    def run_routine(self, routine_id: str, *, event_id: str = "") -> bool:
         """Manually run a routine."""
         routine = self._cache.get(routine_id)
         if not routine:
@@ -378,7 +386,9 @@ class RoutineManager:
         # Without the API coordinator callback there is no canonical Task/Turn.
         if self._on_run:
             try:
-                result = self._on_run(routine)
+                occurrence = routine.model_copy(deep=True)
+                occurrence.metadata["event_id"] = event_id or "manual:" + str(uuid.uuid4())
+                result = self._on_run(occurrence)
             except Exception as e:
                 logger.error(f"Failed to run routine {routine_id}: {e}")
                 self.mark_run(routine_id, success=False, error=str(e))
@@ -389,6 +399,8 @@ class RoutineManager:
             self.mark_run(routine_id, success=False, error=error)
             return False
         
+        if isinstance(result, dict) and result.get("deferred"):
+            return False  # keep the same occurrence due, including approval waits
         success = isinstance(result, dict) and bool(result.get("success", False))
         self.mark_run(
             routine_id,

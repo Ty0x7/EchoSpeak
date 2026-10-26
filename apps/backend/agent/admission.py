@@ -63,7 +63,20 @@ class Admission:
                 self.condition.notify_all()
 
 
-GATE = Admission()
+GATE = Admission(slots=4)
+LOCAL_GATE = Admission(slots=1)
+
+
+@contextmanager
+def inference(endpoint=None, *, cancel=None):
+    from contextlib import nullcontext
+    url = str(getattr(endpoint, "base_url", "") or "").lower()
+    local = bool(getattr(endpoint, "local", False)) or any(host in url for host in ("localhost", "127.0.0.1", "[::1]"))
+    # Acquire the scarce local slot first so waiting GPU jobs do not consume
+    # all cloud slots. Both gates are reentrant on the executing thread.
+    with LOCAL_GATE.enter(cancel=cancel) if local else nullcontext():
+        with GATE.enter(cancel=cancel):
+            yield
 
 
 def admitted(function):
@@ -73,7 +86,7 @@ def admitted(function):
         context = current()
         if context:
             context.coordinator.check(context)
-        with GATE.enter(cancel=kwargs.get("cancel")):
+        with inference(getattr(args[0], "endpoint", None) if args else None, cancel=kwargs.get("cancel")):
             if context:
                 context.coordinator.check(context)
             result = function(*args, **kwargs)
@@ -81,4 +94,5 @@ def admitted(function):
                 usage = getattr(result, "usage", {}) or {}
                 context.coordinator.account(context, int(usage.get("total") or (usage.get("prompt", 0) + usage.get("completion", 0))))
             return result
+    call._echo_admitted = True
     return call

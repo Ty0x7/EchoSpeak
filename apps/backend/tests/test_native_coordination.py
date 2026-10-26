@@ -154,3 +154,14 @@ def test_admission_bounds_concurrency_and_cancel(tmp_path):
             with pytest.raises(InterruptedError):
                 future.result(timeout=1)
     assert gate.active == 0 and not gate.waiters
+
+
+def test_state_store_initialization_cannot_overwrite_a_replaced_authority(monkeypatch):
+    from agent import state
+    replacement = object()
+    def initialize():
+        state._state_store = replacement
+        return object()
+    monkeypatch.setattr(state, "_state_store", None)
+    monkeypatch.setattr(state, "StateStore", initialize)
+    assert state.get_state_store() is replacement

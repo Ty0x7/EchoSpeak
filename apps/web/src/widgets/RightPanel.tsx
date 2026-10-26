@@ -2,6 +2,7 @@ import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } f
 import type { LeanMessageData, LeanSegment } from "../lean/types";
 import { ArtifactPanel } from "./ArtifactPanel";
 import { ResearchPanel } from "./ResearchPanel";
+import { WorkPanel } from "./WorkPanel";
 import { ObservationView } from "./ObservationCard";
 import { TraceView } from "./TraceView";
 import type { ObservationRef } from "./types";
@@ -289,6 +290,7 @@ export function RightPanel({
           <ResearchPanel key={sessionId} apiBase={apiBase} sessionId={sessionId} active={active === "research"} />
         </div>
         <div className="rp-tab-panel" role="tabpanel" id={`${panelId}-activity`} aria-labelledby={`${panelId}-activity-tab`} hidden={active !== "activity"}>
+          <WorkPanel apiBase={apiBase} sessionId={sessionId} active={active === "activity"} />
           <ActivityView key={sessionId} items={activity} active={active === "activity"} apiBase={apiBase} sessionId={sessionId} replyId={replyId} />
         </div></>}
         </>}

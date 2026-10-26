@@ -1137,6 +1137,7 @@ class Config:
         # --- Telegram Bot (v5.4.0) ---
         self.allow_telegram_bot = os.getenv("ALLOW_TELEGRAM_BOT", "false").lower() == "true"
         self.telegram_bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+        self.telegram_owner_id = os.getenv("TELEGRAM_OWNER_ID", "").strip()
         raw_tg_users = os.getenv("TELEGRAM_ALLOWED_USERS", "")
         self.telegram_allowed_users = [
             u.strip() for u in raw_tg_users.replace("\n", ",").split(",") if u.strip()
@@ -1498,6 +1499,7 @@ class Config:
             "allow_telegram_bot",
             "telegram_bot_token",
             "telegram_allowed_users",
+            "telegram_owner_id",
             # Google Calendar
             "allow_calendar",
             "google_calendar_credentials_path",

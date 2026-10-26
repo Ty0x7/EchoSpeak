@@ -31,14 +31,17 @@ def digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest()
 
 
-def operation_snapshot(tool: str, args: dict) -> dict:
+def operation_snapshot(tool: str, args: dict, base_path: str = "") -> dict:
     """Exact arguments + filesystem identities, without reading credentials."""
     resources = {}
     for key in ("path", "file_path", "source", "destination", "cwd"):
         value = args.get(key)
         if not isinstance(value, str) or not value or "://" in value:
             continue
-        path = Path(value).expanduser().resolve()
+        path = Path(value).expanduser()
+        if not path.is_absolute() and base_path:
+            path = Path(base_path) / path
+        path = path.resolve()
         try:
             stat = path.stat()
             resources[key] = [str(path), stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns]
@@ -65,6 +68,7 @@ class WorkContext:
     attempt_id: str
     principal: str
     agent_id: str
+    tools: Optional[tuple[str, ...]] = None
 
 
 def current() -> Optional[WorkContext]:
@@ -145,6 +149,11 @@ class Coordinator:
                 return self._work(data, work_id, principal)
             if parent_id:
                 parent = self._work(data, parent_id, principal)
+                ancestor = parent
+                while ancestor:
+                    if ancestor["agent_id"] == agent_id:
+                        raise PermissionError("Circular delegation is not permitted")
+                    ancestor = data["works"].get(ancestor.get("parent_id"))
                 count = sum(1 for r in data["works"].values() if r.get("parent_id") == parent_id)
                 if count >= parent["budget"]["children"]:
                     raise PermissionError("Delegation budget exhausted")
@@ -162,7 +171,7 @@ class Coordinator:
             limits = {"tokens": 64000, "seconds": 900, "children": 6}
             limits.update({k: max(0, min(int(v), {"tokens": 256000, "seconds": 3600, "children": 6}[k])) for k, v in (budget or {}).items() if k in limits})
             row = {"id": work_id, "principal": principal, "agent_id": agent_id, "objective": objective[:16000],
-                   "acceptance": acceptance[:4000], "session_id": session_id, "sessions": [session_id] if session_id else [],
+                   "acceptance": (acceptance or objective)[:4000], "plan": [], "wake": {}, "session_id": session_id, "sessions": [session_id] if session_id else [],
                    "project_id": project_id, "parent_id": parent_id, "dependencies": list(dependencies), "status": "ready",
                    "revision": 1, "tools": sorted(set(tools_bound)) if tools_bound is not None else None, "taint": tainted,
                    "budget": limits, "tokens": 0, "evidence": [], "result": "", "verification": "unverified",
@@ -170,6 +179,13 @@ class Coordinator:
             data["works"][work_id] = row
             return row
         return self._tx(change)
+
+    def progress(self, context, plan):
+        def update(data):
+            row = self._work(data, context.work_id, context.principal)
+            row.update(plan=list(plan)[:30], updated_at=time.time(), revision=row["revision"] + 1)
+            return row
+        return self._tx(update)
 
     def claim(self, work_id: str, *, principal="owner", session_id="", agent_id="") -> WorkContext:
         def change(data):
@@ -190,12 +206,24 @@ class Coordinator:
         attempt_id, actor = self._tx(change)
         return WorkContext(self, work_id, attempt_id, principal, actor)
 
-    def bind(self, context: WorkContext, tools: list[str], *, execution_id="", model: Optional[dict] = None) -> set[str]:
+    def bind(self, context: WorkContext, tools: list[str], *, execution_id="", model: Optional[dict] = None, project_root="") -> set[str]:
         def change(data):
             row = self._work(data, context.work_id, context.principal)
+            original_root = row["provenance"].get("project_root")
+            if original_root and project_root and original_root != project_root:
+                raise PermissionError("The original work resource scope changed")
+            if project_root:
+                row["provenance"]["project_root"] = project_root
+            responsibility = data["responsibilities"].get(row.get("provenance", {}).get("responsibility_id", ""))
+            if responsibility:
+                if responsibility.get("tools") is None:
+                    responsibility["tools"] = sorted(set(tools))
+                tools_bound = set(tools) & set(responsibility["tools"])
+            else:
+                tools_bound = set(tools)
             if row["tools"] is None:
-                row["tools"] = sorted(set(tools))
-            allowed = set(row["tools"]) & set(tools)
+                row["tools"] = sorted(tools_bound)
+            allowed = set(row["tools"]) & tools_bound
             attempt = data["attempts"][context.attempt_id]
             attempt.update(execution_id=execution_id or attempt.get("execution_id", ""), model=model or attempt.get("model", {}))
             return sorted(allowed)
@@ -211,18 +239,25 @@ class Coordinator:
 
     def check(self, context: WorkContext, tool: str = "") -> dict:
         row = self.get(context.work_id, principal=context.principal)
+        responsibility_id = row.get("provenance", {}).get("responsibility_id")
+        if responsibility_id:
+            responsibility = next((r for r in self.view("responsibilities", principal=context.principal) if r["id"] == responsibility_id), None)
+            if not responsibility or responsibility["status"] != "active":
+                raise PermissionError("Responsibility is paused or removed")
         attempt = next(r for r in self.view("attempts", principal=context.principal) if r["id"] == context.attempt_id)
         if row["status"] not in {"running", "waiting_approval"} or attempt["status"] != "running":
             raise PermissionError(f"Work is {row['status']}")
         if row["tokens"] >= row["budget"]["tokens"] or time.time() - attempt["started_at"] > row["budget"]["seconds"]:
             raise PermissionError("Work budget exhausted")
-        if tool and tool not in (row["tools"] or []):
+        if tool and (tool not in (row["tools"] or []) or (context.tools is not None and tool not in context.tools)):
             raise PermissionError("Tool is outside the original work grant")
         parent = row.get("parent_id")
         if parent:
             parent_row = self.get(parent, principal=context.principal)
             if parent_row["status"] in TERMINAL | {"paused", "unknown", "blocked"}:
                 raise PermissionError("Parent work is no longer active")
+            if parent_row["tokens"] >= parent_row["budget"]["tokens"]:
+                raise PermissionError("Parent work budget exhausted")
         return row
 
     def finish(self, context: WorkContext, *, status: str, result="", evidence=(), verification="unverified") -> dict:
@@ -231,10 +266,14 @@ class Coordinator:
         def change(data):
             row = self._work(data, context.work_id, context.principal)
             # Cancellation/pause, pending approval and uncertain writes win over a text reply.
-            if row["status"] in {"paused", "cancelled", "waiting_approval", "unknown"}:
+            if row["status"] in {"paused", "cancelled", "waiting_approval", "waiting_input", "blocked", "unknown"}:
                 effective = row["status"]
             elif any(a["work_id"] == row["id"] and a["status"] == "unknown" for a in data["actions"].values()):
                 effective = "unknown"
+            elif status == "completed" and any(c.get("parent_id") == row["id"] and c["status"] not in TERMINAL for c in data["works"].values()):
+                effective = "waiting_dependency"
+            elif status == "completed" and any(a["work_id"] == row["id"] and a["status"] == "background" for a in data["actions"].values()):
+                effective = "waiting_dependency"
             else:
                 effective = status
             row.update(status=effective, result=str(result)[:16000], verification=verification,
@@ -251,7 +290,7 @@ class Coordinator:
             if row["revision"] != revision:
                 raise ValueError("Work changed; refresh before deciding")
             if status == "ready":
-                if row["status"] in TERMINAL | {"running", "waiting_approval"}:
+                if row["status"] in TERMINAL | {"running", "waiting_approval", "waiting_input"}:
                     raise PermissionError("Work cannot resume in its current state")
                 uncertain = [a for a in data["actions"].values() if a["work_id"] == work_id and a["status"] == "unknown"]
                 if uncertain and not reconciliation.strip():
@@ -259,6 +298,17 @@ class Coordinator:
                 for action in uncertain:
                     action.update(status="reconciled", reconciliation=reconciliation[:4000])
             row.update(status=status, revision=revision + 1, updated_at=time.time())
+            if status in {"paused", "cancelled"}:
+                descendants = {work_id}
+                for _ in range(8):
+                    descendants |= {r["id"] for r in data["works"].values() if r.get("parent_id") in descendants}
+                for child_id in descendants - {work_id}:
+                    child = data["works"][child_id]
+                    if child["status"] not in TERMINAL:
+                        child.update(status=status, revision=child["revision"] + 1)
+                for approval in data["approvals"].values():
+                    if approval["work_id"] in descendants and approval["status"] in {"pending", "approved", "answered"}:
+                        approval["status"] = "cancelled"
             return row
         return self._tx(change)
 
@@ -276,34 +326,66 @@ class Coordinator:
 
     def action_intent(self, context, call_id, tool, args, *, read_only: bool):
         self.check(context, tool)
+        if not read_only and self.previous_effect(context, tool, args):
+            raise PermissionError("This exact effect completed in an earlier attempt; inspect it instead of repeating it")
         action_id = "action_" + digest([context.attempt_id, call_id])[:24]
-        snapshot = operation_snapshot(tool, args)
+        base_path = self.get(context.work_id, principal=context.principal)["provenance"].get("project_root", "")
+        snapshot = operation_snapshot(tool, args, base_path)
         def change(data):
             existing = data["actions"].get(action_id)
             if existing:
                 raise PermissionError("Action already recorded; reconcile rather than execute twice")
+            work = self._work(data, context.work_id, context.principal)
+            # Cooperative resource exclusion, not an OS sandbox. Unknown writes
+            # retain their reservation until the owner records reconciliation.
+            bookkeeping = tool in {"delegate_to_agent", "spawn_workers", "complete_task", "assign_tasks", "work_status", "agent_notes", "propose_agent_change"}
+            own_process = tool == "process_stop" and any(a["work_id"] == context.work_id and any(e.get("running") == args.get("process_id") for e in a.get("effects", [])) for a in data["actions"].values())
+            resource = "" if read_only or bookkeeping or own_process else ("desktop" if any(k in tool for k in ("computer", "mouse", "keyboard", "browser")) else "project:" + (work.get("project_id") or "unscoped"))
+            if resource and any(a.get("resource") == resource and a["status"] in {"intent", "unknown", "background"} for a in data["actions"].values()):
+                raise PermissionError("Resource is held by another action or an uncertain effect")
             data["actions"][action_id] = {"id": action_id, "work_id": context.work_id, "attempt_id": context.attempt_id,
                 "principal": context.principal, "agent_id": context.agent_id, "tool": tool, "snapshot": snapshot,
-                "read_only": read_only, "status": "intent", "created_at": time.time()}
+                "read_only": read_only or bookkeeping, "resource": resource, "status": "intent", "created_at": time.time()}
             return action_id
         return self._tx(change)
 
-    def action_result(self, action_id, *, ok: bool, outcome: str, effects=()):
+    def previous_effect(self, context, tool, args):
+        if tool in {"delegate_to_agent", "spawn_workers", "complete_task", "assign_tasks", "agent_notes", "work_status", "propose_agent_change"}:
+            return None
+        return next((r for r in self.view("actions", principal=context.principal)
+                     if r["work_id"] == context.work_id and r["attempt_id"] != context.attempt_id
+                     and not r["read_only"] and r["status"] == "completed" and r["tool"] == tool
+                     and r["snapshot"]["arguments_hash"] == digest(args)), None)
+
+    def action_result(self, action_id, *, ok: bool, outcome: str, effects=(), uncertain=True):
         def change(data):
             row = data["actions"][action_id]
-            row.update(status="completed" if ok else "failed" if row["read_only"] else "unknown",
+            background = ok and any(e.get("kind") == "process" and e.get("running") for e in effects)
+            row.update(status="background" if background else "completed" if ok else "unknown" if uncertain and not row["read_only"] else "failed",
                        outcome=outcome, effects=list(effects)[:30], ended_at=time.time())
         self._tx(change)
 
+    def process_observed(self, context, process_id, *, success):
+        def update(data):
+            for action in data["actions"].values():
+                if action["work_id"] == context.work_id and action["status"] == "background" and any(e.get("running") == process_id for e in action.get("effects", [])):
+                    action.update(status="completed" if success else "failed", ended_at=time.time(), process_receipt=True)
+        self._tx(update)
+
     def approval(self, context, *, approval_id, tool, args, summary, reason):
-        snapshot = operation_snapshot(tool, args)
+        from agent.lean.policy import redact_payload
+        if redact_payload(args) != args:
+            raise PermissionError("Use a configured credential reference; secret-bearing arguments cannot be saved for approval")
+        base_path = self.get(context.work_id, principal=context.principal)["provenance"].get("project_root", "")
+        snapshot = operation_snapshot(tool, args, base_path)
         policy = policy_snapshot()
         def change(data):
             row = self._work(data, context.work_id, context.principal)
-            row.update(status="waiting_approval", revision=row["revision"] + 1)
+            row.update(status="waiting_approval", wake={"kind": "approval", "id": approval_id}, revision=row["revision"] + 1)
             record = {"id": approval_id, "principal": context.principal, "work_id": row["id"], "attempt_id": context.attempt_id,
                 "agent_id": context.agent_id, "tool": tool, "args": args, "summary": summary, "reason": reason,
-                "snapshot": snapshot, "policy": policy, "status": "pending", "expires_at": time.time() + 86400,
+                "owner_agent_id": row["agent_id"],
+                "snapshot": snapshot, "base_path": base_path, "policy": policy, "status": "pending", "expires_at": time.time() + 86400,
                 "session_id": data["attempts"][context.attempt_id]["session_id"], "created_at": time.time()}
             data["approvals"][approval_id] = record
             return record
@@ -316,17 +398,20 @@ class Coordinator:
             record = data["approvals"].get(approval_id)
             if not record or record["principal"] != principal or record["status"] != "pending":
                 raise KeyError("Approval is unavailable")
-            if time.time() > record["expires_at"] or record["snapshot"] != operation_snapshot(record["tool"], record["args"]) or record["policy"] != policy_snapshot():
+            if decision == "allow" and (time.time() > record["expires_at"] or record["snapshot"] != operation_snapshot(record["tool"], record["args"], record.get("base_path", "")) or record["policy"] != policy_snapshot()):
                 raise PermissionError("Approval is stale; inspect and request a fresh action")
             record["status"] = "approved" if decision == "allow" else "denied"
             row = data["works"][record["work_id"]]
+            if row["status"] != "waiting_approval" or row["agent_id"] != record.get("owner_agent_id", record["agent_id"]) or record["tool"] not in (row["tools"] or []):
+                raise PermissionError("Approval owner or original capability grant changed")
             active = data["attempts"].get(record["attempt_id"], {}).get("status") == "running"
             row.update(status=("running" if active else "ready") if decision == "allow" else "blocked", revision=row["revision"] + 1)
             return record
         return self._tx(change)
 
     def consume_approval(self, context, tool, args) -> bool:
-        snapshot = operation_snapshot(tool, args)
+        base_path = self.get(context.work_id, principal=context.principal)["provenance"].get("project_root", "")
+        snapshot = operation_snapshot(tool, args, base_path)
         policy = policy_snapshot()
         def change(data):
             for record in data["approvals"].values():
@@ -337,6 +422,40 @@ class Coordinator:
                     return True
             return False
         return self._tx(change)
+
+    def question(self, context, identity, args):
+        record = self.approval(context, approval_id=identity, tool="ask_user", args=args,
+                               summary=str(args.get("question", "")), reason="Waiting for user input")
+        def update(data):
+            data["approvals"][identity].update(kind="question", question=args.get("question", ""), options=args.get("options", []), allow_other=args.get("allow_other", True))
+            data["works"][context.work_id].update(status="waiting_input", wake={"kind": "input", "id": identity})
+        self._tx(update)
+        return record
+
+    def answer(self, identity, answer, *, principal="owner"):
+        def update(data):
+            record = data["approvals"].get(identity)
+            if not record or record["principal"] != principal or record.get("kind") != "question" or record["status"] != "pending":
+                raise KeyError("Question is no longer pending")
+            if time.time() > record["expires_at"] or (not record.get("allow_other", True) and answer not in record.get("options", [])):
+                raise ValueError("Question expired or answer is unavailable")
+            work = data["works"][record["work_id"]]
+            if work["status"] != "waiting_input":
+                raise PermissionError("Work is no longer waiting for this answer")
+            record.update(status="answered", answer=str(answer)[:2000])
+            active = data["attempts"][record["attempt_id"]]["status"] == "running"
+            work.update(status="running" if active else "ready", revision=work["revision"] + 1)
+            return record
+        return self._tx(update)
+
+    def consume_answer(self, context, args):
+        def update(data):
+            for record in data["approvals"].values():
+                if record["work_id"] == context.work_id and record.get("kind") == "question" and record["status"] == "answered" and record["snapshot"] == operation_snapshot("ask_user", args):
+                    record["status"] = "consumed"
+                    return record["answer"]
+            return None
+        return self._tx(update)
 
     def enqueue(self, *, key, channel, destination, text, agent_id="echo", work_id="", session_id="", principal="owner"):
         if channel not in {"desktop", "discord", "telegram", "chat"} or not destination:
@@ -360,6 +479,17 @@ class Coordinator:
             row.update(status=status, receipt=receipt[:1000], error=error[:1000], updated_at=time.time())
             return row
         return self._tx(change)
+
+    def reconcile_delivery(self, identity, status, evidence, *, principal="owner"):
+        if status not in {"confirmed", "failed"} or not str(evidence).strip():
+            raise ValueError("Record the inspected destination outcome before deciding")
+        def update(data):
+            row = data["deliveries"].get(identity)
+            if not row or row["principal"] != principal or row["status"] not in {"unknown", "sending"}:
+                raise PermissionError("Delivery is not awaiting reconciliation")
+            row.update(status=status, reconciliation=str(evidence)[:2000], updated_at=time.time())
+            return row
+        return self._tx(update)
 
     def proposal(self, kind, payload, *, principal="owner", proposed_by="echo"):
         if kind not in {"specialist", "responsibility", "transfer"}:
@@ -385,8 +515,11 @@ class Coordinator:
             return
         def change(data):
             for action in data["actions"].values():
-                if action["status"] == "intent":
+                if action["status"] in {"intent", "background"}:
                     action["status"] = "interrupted" if action["read_only"] else "unknown"
+                    work = data["works"][action["work_id"]]
+                    if not action["read_only"]:
+                        work.update(status="unknown", revision=work["revision"] + 1)
             for attempt in data["attempts"].values():
                 if attempt["status"] == "running":
                     attempt["status"] = "interrupted"

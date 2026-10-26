@@ -38,7 +38,7 @@ from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_n
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
 from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
-from agent.lean.toolbox import Toolbox, call_target, describe_call, safe_args_preview
+from agent.lean.toolbox import Toolbox, ToolResult, call_target, describe_call, safe_args_preview
 
 Emit = Callable[[dict[str, Any]], None]
 
@@ -129,6 +129,9 @@ class LeanTurn:
         taint: Optional[list[str]] = None,
         goal: str = "",
     ) -> None:
+        from agent.coordination import current
+        self.work_context = current()
+        self.ensure_work = None
         # What this turn is for, restated every few steps of a long turn (recall.reminder).
         self.goal = goal
         self._outcomes: list[bool] = []
@@ -543,7 +546,11 @@ class LeanTurn:
             self.emit({"type": "agent_token", "step": step, "data": text})
 
         endpoint = getattr(self.client, "endpoint", None)
-        with self._span("model.call", step=step, model=str(getattr(endpoint, "model", "") or ""),
+        if self.work_context:
+            self.work_context.coordinator.check(self.work_context)
+        from agent.coordination import work_scope
+        from agent.admission import inference
+        with work_scope(self.work_context), inference(endpoint, cancel=self.cancel), self._span("model.call", step=step, model=str(getattr(endpoint, "model", "") or ""),
                         provider=str(getattr(endpoint, "provider", "") or ""), tools=len(tools or [])) as span:
             turn = self.client.stream_turn(
                 messages,
@@ -556,6 +563,9 @@ class LeanTurn:
             span.set(tool_calls=len(turn.tool_calls), finish=str(turn.finish_reason or ""),
                      prompt_tokens=int((turn.usage or {}).get("prompt") or 0),
                      completion_tokens=int((turn.usage or {}).get("completion") or 0))
+            if self.work_context and not getattr(self.client.stream_turn, "_echo_admitted", False):
+                usage = turn.usage or {}
+                self.work_context.coordinator.account(self.work_context, int(usage.get("total") or usage.get("prompt", 0) + usage.get("completion", 0)))
         if turn.usage:
             self._account_usage(turn.usage)
             self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens(getattr(self.client, "endpoint", None))})
@@ -929,6 +939,9 @@ class LeanTurn:
         """(allowed, the result text when not, and its outcome: refused, denied, held or skipped)."""
         entry = self.toolbox.entry(name)
         needs, reason = tool_needs_approval(entry, name, args)
+        context = self.work_context
+        if context and context.coordinator.consume_approval(context, name, args):
+            return True, "", ""
         broker = get_approval_broker()
         policy_reason = self._policy_reasons.get(call.id, "")
         # Only screen-guided desktop control can be allowed for a whole chat; other outside content asks every time.
@@ -961,6 +974,13 @@ class LeanTurn:
                 return True, "", ""
             # Not something autonomy may approve: held for the owner instead of stalling the run.
             summary = describe_call(name, args)
+            if self.ensure_work and self.work_context is None:
+                self.work_context = self.ensure_work()
+            if self.work_context:
+                from agent.coordination import digest
+                context = self.work_context
+                context.coordinator.approval(context, approval_id="apr_" + digest([context.attempt_id, name, args])[:24],
+                    tool=name, args=args, summary=summary, reason=reason)
             self.held.append({"tool": name, "summary": summary, "reason": reason})
             self.timeline.append({"kind": "approval", "step": step, "id": f"held_{len(self.held)}", "tool_call_id": call.id,
                                   "summary": summary, "reason": reason, "decision": "held", "at": time.time()})
@@ -972,6 +992,17 @@ class LeanTurn:
                            "this kind of action. Don't retry it or work around it. Continue with the rest of the task, "
                            "and at the end tell the user exactly what is waiting for their approval."), "held"
         if not self.interactive:
+            if self.ensure_work and self.work_context is None:
+                self.work_context = self.ensure_work()
+            if self.work_context:
+                from agent.coordination import digest
+                context = self.work_context
+                approval_id = "apr_" + digest([context.attempt_id, name, args])[:24]
+                context.coordinator.approval(context, approval_id=approval_id, tool=name, args=args,
+                    summary=describe_call(name, args), reason=reason or policy_reason)
+                self.held.append({"tool": name, "summary": describe_call(name, args), "reason": reason})
+                self.emit({"type": "approval_held", "id": approval_id, "work_id": context.work_id, "summary": describe_call(name, args)})
+                return False, "Not run: waiting for an exact-action approval in EchoSpeak. Resume the work after review.", "held"
             return False, (
                 f"{name} needs the user's approval, which can only be given in the EchoSpeak app. "
                 "It was not run. Tell the user to ask for it from the app."
@@ -991,6 +1022,11 @@ class LeanTurn:
             grantable=grantable,
             scope=scope,
         )
+        if self.ensure_work and self.work_context is None:
+            self.work_context = self.ensure_work()
+        if self.work_context:
+            self.work_context.coordinator.approval(self.work_context, approval_id=approval.id, tool=name, args=args,
+                summary=approval.summary, reason=reason)
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})
         self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **approval.public()})
@@ -1005,6 +1041,8 @@ class LeanTurn:
                 item["decision"] = decision
         self.emit({"type": "approval_resolved", "id": approval.id, "decision": decision, "tool_call_id": call.id})
         if decision == "allow":
+            if self.work_context:
+                self.work_context.coordinator.consume_approval(self.work_context, name, args)
             return True, "", ""
         if decision == "timeout":
             return False, f"The user did not respond to the approval request for {name}, so it was not run.", "denied"
@@ -1017,12 +1055,24 @@ class LeanTurn:
         question, options, allow_other, problem = ask.parse(args)
         if problem:
             return False, problem
+        if self.ensure_work and self.work_context is None:
+            self.work_context = self.ensure_work()
+        context = self.work_context
+        if context:
+            answer = context.coordinator.consume_answer(context, args)
+            if answer is not None:
+                return True, f"The user answered: {answer}"
         if not self.interactive:
+            if context:
+                from agent.coordination import digest
+                context.coordinator.question(context, "question_" + digest([context.attempt_id, args])[:24], args)
             return False, ("A question card can't be shown here. Ask the user in plain text, list the options, "
                            "and end your reply so they can answer.")
         broker = get_approval_broker()
         pending = broker.open_question(session_id=self.session_id, request_id=self.request_id,
                                        question=question, options=options, allow_other=allow_other)
+        if context:
+            context.coordinator.question(context, pending.id, args)
         self.timeline.append({"kind": "approval", "step": step, "id": pending.id, "tool_call_id": call.id,
                               "tool": ask.ASK_USER, "summary": question, "question": question, "options": options,
                               "allow_other": allow_other, "reason": "", "decision": "", "answer": "", "at": time.time()})
@@ -1035,6 +1085,8 @@ class LeanTurn:
         self.emit({"type": "approval_resolved", "id": pending.id, "decision": decision, "answer": pending.answer,
                    "tool_call_id": call.id})
         if decision == "answered":
+            if context:
+                context.coordinator.consume_answer(context, args)
             return True, f"The user answered: {pending.answer}"
         if decision == "cancelled":
             return False, "The user stopped this request."
@@ -1060,7 +1112,28 @@ class LeanTurn:
 
         with self._span("tool.run", step=step, tool=name) as span, \
                 progress.reporting(emit, cancel=self.cancel, emit_state=emit_state, spans=self._span):
-            result = self.toolbox.run(name, args)
+            from agent.coordination import work_scope
+            if self.work_context is None and self.ensure_work and not self.toolbox.is_parallel_safe(name):
+                self.work_context = self.ensure_work()
+            context = self.work_context
+            previous = context.coordinator.previous_effect(context, name, args) if context and not self.toolbox.is_parallel_safe(name) else None
+            if previous:
+                return ToolResult(False, f"Not run: this exact action already completed in attempt {previous['attempt_id']}. Inspect its current result; do not repeat the effect. Recorded evidence: {previous.get('effects', [])}", 0, outcome="refused")
+            action_id = context.coordinator.action_intent(context, call.id, name, args, read_only=self.toolbox.is_parallel_safe(name)) if context else ""
+            try:
+                with work_scope(context):
+                    result = self.toolbox.run(name, args)
+            except BaseException:
+                if action_id:
+                    context.coordinator.action_result(action_id, ok=False, outcome="interrupted")
+                raise
+            if action_id:
+                context.coordinator.action_result(action_id, ok=result.ok, outcome=result.outcome, effects=result.effects, uncertain=result.uncertain)
+            if context and result.ok and name in {"process_output", "process_stop"}:
+                process_id = str(args.get("process_id") or args.get("id") or "")
+                line = (result.output or "").split("\n", 1)[0]
+                if line.startswith(f"Stopped process {process_id}.") or line.startswith(f"Process {process_id} is finished"):
+                    context.coordinator.process_observed(context, process_id, success="(ok)" in line or line.startswith("Stopped process"))
             span.set(ok=bool(result.ok), output_chars=len(result.output or ""), outcome=result.outcome,
                      effects=[e.get("kind") for e in result.effects][:8])
             if not result.ok:

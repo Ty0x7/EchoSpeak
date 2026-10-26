@@ -1477,6 +1477,9 @@ function ChannelsSection({ s, save }: { s: SettingsMap; save: Save }) {
         <Row label="Allowed user IDs" stack>
           <ListEditor mono items={asList(s.telegram_allowed_users)} placeholder="Telegram user ID" onChange={(items) => save({ telegram_allowed_users: items })} />
         </Row>
+        <Row label="Telegram owner ID" help="Only this numeric user ID in a private conversation can use owner tools and receive personal updates. Allow-listed users remain guests.">
+          <TextField value={s.telegram_owner_id || ""} onCommit={(v) => save({ telegram_owner_id: v.trim() })} />
+        </Row>
       </Group>
       <Group title="Email">
         <Row label="Address"><TextField value={s.email_username || ""} placeholder="you@example.com" onCommit={(v) => save({ email_username: v })} /></Row>
