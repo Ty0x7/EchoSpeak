@@ -1425,7 +1425,7 @@
       },
       {
         "path": "apps/desktop/scripts/check-workbench-browser.cjs",
-        "sha256": "c3480b31305b38c5403a61040d0cd393112325dadb294dd0947fff89eb98679a"
+        "sha256": "d520fa168bcab18daa9f49160db218281f0a36e16226cbea0c26377219a479e4"
       },
       {
         "path": "apps/desktop/src-tauri/tauri.conf.json",
@@ -1489,7 +1489,7 @@
       },
       {
         "path": "apps/web/tooling/xtermCompatibility.mjs",
-        "sha256": "83fe36dbcc349659665d62ba97da774aee5195377a56eb046341749f2a6dc725"
+        "sha256": "6a5b7f594669d46f81091b04b2437097a910f80251d82123057417d31299fb6d"
       },
       {
         "path": "apps/web/vite.config.ts",

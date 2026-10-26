@@ -245,4 +245,3 @@ const summary={name:'Echo Code sample',root:'C:/Fixture/sample',source_root:'C:/
     fs.writeFileSync(path.join(out,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
   } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);server.close();process.exitCode=1;});
-

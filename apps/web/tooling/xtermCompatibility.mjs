@@ -11,4 +11,3 @@ export function adaptXtermForFrozenPrototype(source) {
   return source.replace(assignment, (_, target, value) =>
     `Object.defineProperty(${target},"toString",{value:${value},writable:true,configurable:true,enumerable:true});`);
 }
-
