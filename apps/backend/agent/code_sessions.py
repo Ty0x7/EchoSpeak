@@ -91,6 +91,12 @@ class Session:
     def save(self):
         wt.atomic_json(self.directory / "session.json", self.row)
 
+    def record_model(self, value):
+        if isinstance(value, str) and value and len(value) <= 200 and value != self.row.get("model"):
+            from agent.lean.policy import redact_secrets
+            self.row["model"] = redact_secrets(redact_secrets(value), self.redaction_values + ([self.api_key] if self.api_key else []))
+            self.save()
+
     def emit(self, kind, data):
         from agent.lean.policy import redact_payload
         self.sequence += 1
@@ -106,7 +112,7 @@ class Session:
 
     def public(self, cursor=0):
         return {**{key: value for key, value in self.row.items() if key not in {"command", "git_marker", "creation_context", "creation_key"}},
-                "account": self.account, "models": self.models,
+                "account": self.account, "models": self.models, "turn_active": bool(self.task),
                 "events": [event for event in self.events if event["seq"] > cursor], "cursor": self.sequence,
                 "replay_gap": bool(self.events and cursor < self.events[0]["seq"] - 1),
                 "approvals": [{"id": key, "kind": row["kind"], "details": row["details"]} for key, row in self.approvals.items()],

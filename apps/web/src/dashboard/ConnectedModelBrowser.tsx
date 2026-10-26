@@ -6,9 +6,10 @@ import { RuntimeMark } from "../components/RuntimeMark";
 type Model = { id: string; provider: string; providerName: string; model: string; local: boolean };
 const FAVORITES = "echospeak.favoriteModels";
 
-export function ConnectedModelBrowser({ apiBase, info, provider, model, locked, onChoose, onConfigure }: {
+export function ConnectedModelBrowser({ apiBase, info, provider, model, locked, onChoose, onConfigure, rail }: {
   apiBase: string; info: ProviderInfo | null; provider: string; model: string; locked: boolean;
   onChoose(provider: string, model: string, models: string[]): void; onConfigure?(): void;
+  rail?: React.ReactNode;
 }) {
   const [rows, setRows] = useState<Model[]>([]);
   const [loading, setLoading] = useState(true);
@@ -50,7 +51,7 @@ export function ConnectedModelBrowser({ apiBase, info, provider, model, locked, 
   };
   return <>
     <div className="es-model-browser">
-      <nav className="es-provider-rail" aria-label="Model catalog"><button type="button" aria-label="EchoSpeak models" aria-pressed="true" onClick={() => { setOnlyFavorites(false); setSearch(""); setActive(null); }}><RuntimeMark /></button></nav>
+      {rail || <nav className="es-provider-rail" aria-label="Model catalog"><button type="button" aria-label="EchoSpeak models" aria-pressed="true" onClick={() => { setOnlyFavorites(false); setSearch(""); setActive(null); }}><RuntimeMark /></button></nav>}
       <div className="es-model-results">
         <div className="es-model-search"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><circle cx="10" cy="10" r="6" /><path d="m15 15 5 5" /></svg>
           <input autoFocus role="combobox" aria-label="Search models" aria-controls={listId} aria-expanded="true" aria-haspopup="grid" aria-autocomplete="list"

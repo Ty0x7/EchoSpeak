@@ -10,3 +10,9 @@ html, body { margin: 0; background: #070707; }
 .es-boot-face i { width: 6px; height: 15px; border-radius: 99px; background: #070707; }
 @keyframes echo-face-spin { 0% { transform: rotate(0deg); } 55%, 100% { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .es-boot-face { animation: none; } }
+.es-startup-error { max-width: 420px; padding: 28px; color: #ededed; font: 14px/1.5 "Segoe UI", sans-serif; }
+.es-startup-error h1 { font-size: 21px; font-weight: 600; }
+.es-startup-error p { color: #a0a0a0; }
+.es-startup-error div { display: flex; gap: 8px; margin-top: 20px; }
+.es-startup-error button { border: 1px solid #333; border-radius: 7px; padding: 8px 14px; background: #171717; color: #ededed; cursor: pointer; }
+.es-startup-error button:focus-visible { outline: 2px solid #4979de; outline-offset: 2px; }

@@ -1894,6 +1894,7 @@ export const Dashboard: React.FC<{
             {mainPage === "code" ? (
               <WidgetEnvProvider value={widgetEnv}>
                 <EchoCodeWorkspace apiBase={apiBase} projects={projects} projectId={codeProjectId}
+                  nativeInfo={providerInfo} nativeLocked={lmStudioOnly} onConfigureProviders={() => openSettingsAt("models")}
                   onProject={setCodeProjectId} onAddFolder={() => void attachFolder()}
                   onSession={(session, draft) => {
                     setThreads(previous => [{ id: session.thread_id, name: session.title,

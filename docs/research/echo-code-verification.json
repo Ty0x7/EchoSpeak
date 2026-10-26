@@ -1,6 +1,6 @@
 {
   "verified_on_utc": "2026-10-25",
-  "scope": "11.10.6 workbench source, isolated runtime, browser fixture and local unsigned Windows package checks; historical UI/runtime checks retained separately",
+  "scope": "Current startup/alignment/coding-model follow-up; previous foundation and workbench evidence retained as history",
   "branch": "codex/echo-code-workbench",
   "base_commit": "f61a8315698ca4f8f3a70a62054e9f6d42228660",
   "package_version": "11.10.6",
@@ -891,7 +891,7 @@
   },
   "prior_ui_branch": "codex/echo-code-security",
   "prior_ui_base_commit": "63fc31ea1b51e3eb092ca2daa3ac3a9c10409c9c",
-  "current_verification_section": "workbench_11_10_6",
+  "current_verification_section": "workbench_11_10_6_followup",
   "workbench_11_10_6": {
     "verified_on_utc": "2026-10-25",
     "versions": {
@@ -1187,6 +1187,407 @@
         "path": "apps/web/src/workbench/Workbench.tsx",
         "sha256": "13c7e91ebc9f72f826f25f8ffd6656a6b436b13e01cc51e833471e521c943f72"
       }
+    ],
+    "source_ref": "c8f224675f588ec527497f169d2d507771d6c64a"
+  },
+  "workbench_11_10_6_followup": {
+    "recorded_utc": "2026-10-26",
+    "parent_commit": "c8f224675f588ec527497f169d2d507771d6c64a",
+    "version": "11.10.6",
+    "backend_tests_passed": 107,
+    "frontend": {
+      "typescript": "passed",
+      "tests_passed": 192,
+      "files_passed": 40,
+      "production_build": "passed"
+    },
+    "desktop_contracts_passed": 16,
+    "protected_browser": {
+      "fixture_data": true,
+      "real_models": false,
+      "checks": [
+        "Three titlebar controls render",
+        "Chat composer centers in its actual content column (same bounded width as Code at desktop scale)",
+        "Code welcome and composer share the centered layout",
+        "Details show selected workspace and Git branch",
+        "File tree expands and file tabs preview source as text",
+        "Interactive terminal input is sent only to its scoped terminal API",
+        "Two terminal panes split and survive hiding",
+        "Git mutation requires a separate review and confirmation",
+        "PR list renders branch and draft state",
+        "Usage renders runtime values rather than invented zero limits",
+        "Loopback preview is opaque, cannot access parent bridge and clears on privacy update",
+        "Narrow page has no horizontal overflow",
+        "Workbench never invokes native model query transport",
+        "New Chat title and composer align with unchanged Code at both desktop sizes",
+        "Returning from an external session resets details and resources to the native source workspace",
+        "All disconnected agents retain the same centered welcome and unsent draft",
+        "Code model picker uses Chat rows and only reported or connected models",
+        "Model selection does not mutate another Chat session",
+        "Native Code selection binds only the newly created coding session",
+        "An explicit send reaches only the chosen original harness with its selected model",
+        "Original harness replies remain visible in the main coding conversation"
+      ],
+      "page_errors": [],
+      "unexpected_network": [],
+      "chat_code_alignment": [
+        {
+          "size": {
+            "width": 1354,
+            "height": 801
+          },
+          "heading_delta": 0,
+          "composer_delta": -0.015625
+        },
+        {
+          "size": {
+            "width": 1400,
+            "height": 960
+          },
+          "heading_delta": 0,
+          "composer_delta": -0.015625
+        }
+      ],
+      "layout_metrics": {
+        "rows": "556px 260px",
+        "inline": "grid-template-columns: 216px minmax(0px, 1fr) 440px; --wb-terminal-height: 260px; grid-template-rows: minmax(0px, 1fr) 260px;",
+        "bottom": {
+          "x": 243,
+          "y": 667.5,
+          "width": 662,
+          "height": 292.5,
+          "top": 667.5,
+          "right": 905,
+          "bottom": 960,
+          "left": 243
+        },
+        "tabs": [
+          {
+            "text": "Files\u00d7",
+            "rect": {
+              "x": 915,
+              "y": 51,
+              "width": 98.78125,
+              "height": 31.5,
+              "top": 51,
+              "right": 1013.78125,
+              "bottom": 82.5,
+              "left": 915
+            },
+            "display": "flex",
+            "span": [
+              {
+                "text": "Files",
+                "width": 29.765625,
+                "font": "10px",
+                "display": "block"
+              }
+            ]
+          },
+          {
+            "text": "app.ts\u00d7",
+            "rect": {
+              "x": 1016.03125,
+              "y": 51,
+              "width": 107.078125,
+              "height": 31.5,
+              "top": 51,
+              "right": 1123.109375,
+              "bottom": 82.5,
+              "left": 1016.03125
+            },
+            "display": "flex",
+            "span": [
+              {
+                "text": "app.ts",
+                "width": 38.0625,
+                "font": "10px",
+                "display": "block"
+              }
+            ]
+          }
+        ]
+      },
+      "chat_metrics": {
+        "offset": 0,
+        "width": 765,
+        "centerY": 531.375,
+        "columnCenterY": 501
+      }
+    },
+    "startup_browser": {
+      "frozen_prototype_startup": "passed",
+      "missing_bundle_recovery": "passed",
+      "window_reveal_requested_in_both_cases": true,
+      "real_accounts_or_installed_app": false
+    },
+    "installed_startup": {
+      "verified": true,
+      "backed_up": true,
+      "desktop_binary_sha256": "3c75a18b86f04d78ef524ae3c5f2afc67c56a3b7e031947c8900764b239defd2",
+      "real_windows_webview2_chat_rendered": true,
+      "normal_relaunch_visible_windows": 1,
+      "owned_backend_processes": 1,
+      "scope": "Initial startup repair only, confirmed by owner. Later alignment/picker changes tested in fixtures and packaged, not automatically installed after computer control stopped. App data and backend preserved."
+    },
+    "windows_build": {
+      "status": "Final unsigned local EXE/MSI; no updater signing, installation of latest picker or public publication",
+      "packages": [
+        {
+          "path": "apps/desktop/src-tauri/target/release/bundle/nsis/EchoSpeak_11.10.6_x64-setup.exe",
+          "sha256": "adb828848b1f8711665bb62bf52bd0f91d48ecc1345043ddb9e4b586c7dbf1db",
+          "bytes": 270735768,
+          "publisher_signature": "NotSigned",
+          "updater_signature_present": false
+        },
+        {
+          "path": "apps/desktop/src-tauri/target/release/bundle/msi/EchoSpeak_11.10.6_x64_en-US.msi",
+          "sha256": "b54299a6768ee802fc1da79142e51bc0babaa83c62ae6e38e239d18ab8babc25",
+          "bytes": 383771827,
+          "publisher_signature": "NotSigned",
+          "updater_signature_present": false
+        }
+      ],
+      "frozen_backend": {
+        "frozen_worker": true,
+        "backend_sha256": "9fe4775f136c70015900efdf8515676d85e5286ea2b2e99ac7dc494310ba554f",
+        "backend_size": 26146686,
+        "conpty_start": true,
+        "interactive_input_output": true,
+        "resize": true,
+        "echo_auth_environment_absent": true,
+        "accounts_or_models_used": false,
+        "powershell_child_exited": true
+      }
+    },
+    "reports": {
+      "checks": [
+        {
+          "report": "research/echo-code",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "research/echo-code",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.6",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.6",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        }
+      ],
+      "scripts_disabled": true,
+      "remote_requests": []
+    },
+    "source_files": [
+      {
+        "path": "apps/backend/agent/code_runtimes.py",
+        "sha256": "eb43b1a060a3d09b666ff9949a0727576f947d909664bc0c193652ad22c7c030"
+      },
+      {
+        "path": "apps/backend/agent/code_sessions.py",
+        "sha256": "07aa511fad531e6a0761f23784a8e93553db6cce159170c1d21b940e6a0cf387"
+      },
+      {
+        "path": "apps/backend/tests/fixtures/code_rpc_agent.py",
+        "sha256": "b2126bf6c97a63ae6ae7a91d521ec67278ccd061876d20dd3506f90fa6eb2738"
+      },
+      {
+        "path": "apps/backend/tests/test_code_sessions.py",
+        "sha256": "440eda08d721b601c7c9facb16ead21640ef97361cacd18cc5b4322992b583c2"
+      },
+      {
+        "path": "apps/desktop/scripts/check-startup-browser.cjs",
+        "sha256": "046bbe8f27a6ffa7a991ab4b6b0bd6d45fab871e76dcfed4532a1e6dbcfb1a74"
+      },
+      {
+        "path": "apps/desktop/scripts/check-workbench-browser.cjs",
+        "sha256": "c3480b31305b38c5403a61040d0cd393112325dadb294dd0947fff89eb98679a"
+      },
+      {
+        "path": "apps/desktop/src-tauri/tauri.conf.json",
+        "sha256": "f551fdd423ecc54c0fc19d36ed2d78824c8d0834cbb97b37f42657e8bf051512"
+      },
+      {
+        "path": "apps/desktop/tests/desktop-contracts.test.mjs",
+        "sha256": "d793855f51ab51d782f470ddecaab56142cd6578fea00ffc062c783f13c60f97"
+      },
+      {
+        "path": "apps/web/public/splash.css",
+        "sha256": "3b5f64eb53d54e1e0cb1fa4bb3d02dcfe0686f47a65ed488efeb4f6cbb5547cb"
+      },
+      {
+        "path": "apps/web/src/App.tsx",
+        "sha256": "6c97e58311ad7dae39cb5b0653c17d38777dce0568ac089e51b134b948fc8cf5"
+      },
+      {
+        "path": "apps/web/src/code/CodeModelPicker.tsx",
+        "sha256": "b0c6fd43abebf19d706054fae690f898941ebf6e28cd7e9c5766724c7f2a9c30"
+      },
+      {
+        "path": "apps/web/src/code/EchoCodeWorkspace.tsx",
+        "sha256": "dd59e4225eb388c4dc2f4b77a16dac99669dbdfa10610d29784ea4f19ba530b1"
+      },
+      {
+        "path": "apps/web/src/code/ExternalSession.tsx",
+        "sha256": "9221b283b2d100b83992c30cc0988a090759eecd3c48445589cd11221efc0d6a"
+      },
+      {
+        "path": "apps/web/src/code/code.css",
+        "sha256": "9b2a81c8f8bc176952d354448f53d083ff4a2ee79598dc8e05dcb28465c3d2e8"
+      },
+      {
+        "path": "apps/web/src/code/model.test.ts",
+        "sha256": "0cfeb9c5e4b8bea96c6ab94e5399154efa1ed7dc7147596b79362b03218a3026"
+      },
+      {
+        "path": "apps/web/src/code/model.ts",
+        "sha256": "5c9a16e5bdebc14306fdc4843d051c3de9fd1a8bd6e69c795ed2e055fe2addd5"
+      },
+      {
+        "path": "apps/web/src/dashboard/ConnectedModelBrowser.tsx",
+        "sha256": "a13a416d4a10ebc11998c0e4ff016ea90f6273d8d9fd2b62cbb54e9114fe7770"
+      },
+      {
+        "path": "apps/web/src/index.tsx",
+        "sha256": "3bc35f5c2494c1ac79db26c0ea4e464ac1b8b27c81e98522308b06280ca6e774"
+      },
+      {
+        "path": "apps/web/src/workbench/workbench.css",
+        "sha256": "9ad797fabbebdea710154e40b3d71c76c3abf9ae22c820b33188548cec076e80"
+      },
+      {
+        "path": "apps/web/src/workbench/xtermCompatibility.test.ts",
+        "sha256": "ff57b37776427e8940856e95ab106247a7b9489ea130a9260e35d7d402b91015"
+      },
+      {
+        "path": "apps/web/tooling/xtermCompatibility.d.mts",
+        "sha256": "ec0549de425f88bf21e3a0b3bab59cd9f505f026301c1772e2d9fe87f866a777"
+      },
+      {
+        "path": "apps/web/tooling/xtermCompatibility.mjs",
+        "sha256": "83fe36dbcc349659665d62ba97da774aee5195377a56eb046341749f2a6dc725"
+      },
+      {
+        "path": "apps/web/vite.config.ts",
+        "sha256": "2140b76c0cfd369430a58c77fae32737f419ace97e03b4455fe9d90b6331c510"
+      }
+    ],
+    "media": [
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/acp-disconnected-composer.png",
+        "sha256": "409efc7eedd665aa79280120360d805ed441cd6629ad751ba60a6b671f14fb10",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/changes-review-desktop.png",
+        "sha256": "014dfdf5a4fa4eee91eea86e0736d2910b2a5df3efcc156e671d7061001c6788",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/chat-centered-desktop.png",
+        "sha256": "455947f5848ec9b47cfdf0cddc5c2e8471966ed65b1b65a92e0cb988b17fe945",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/claude_code-disconnected-composer.png",
+        "sha256": "15a85e436338030bb1a503c813543d577e7ce2f7bd32c1a076f6aeea329ce8a6",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/code-centered-desktop.png",
+        "sha256": "cea25bb5a3fa26bfa9ac5da6ea631ae347d7f9bc6beb9fa465bc63ca6f8a5a24",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/code-harness-conversation.png",
+        "sha256": "1e8b852ab16de763b65cd803dcda56fae05aa985b07491a239443aba5fd738fd",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/code-model-picker-codex.png",
+        "sha256": "a108f19b42cf71bfa29e45dc278f80bcc7aea61158b99d519ee8a11f7a0016d0",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/code-model-picker-native.png",
+        "sha256": "3cdf9b848395e82a00d7d0735ddd59f09a51b2893638b5391c1d3d16b54c8fbc",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/codex-disconnected-composer.png",
+        "sha256": "e6b9e58d630bd2cc38c3b251f3adf601aa77426e8a6148028add9ce1a08c8c47",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/files-tree-desktop.png",
+        "sha256": "d36a8d036dc2d88f4ff15662a9f9a5410f1679aecacac3dd3c2f666b1b9b8c83",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/pull-requests-desktop.png",
+        "sha256": "8196333f9d3ef95d010199fa6087ca2d737b02b0fdeeb429392a8f3086d18a6f",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/startup-error-fixture.png",
+        "sha256": "1c15841428a0e0ac8ed7cbd139483fc0b70aa1abf5a3addf7b889ad061f08946",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/startup-shell-fixture.png",
+        "sha256": "e093daa146279e0735c9eac2419328ba54d6c6e0533cf709e424330c83c578ae",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/terminal-split-desktop.png",
+        "sha256": "24768276e2485ee5be2f707bd938587df90efd36d3f92154fa922008a1275ef6",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/usage-fixture-desktop.png",
+        "sha256": "df16269106cf1595500ad61fa08a18a4bd151564928c0514bc3920c80fd0eb7d",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/workbench-narrow.png",
+        "sha256": "c735fc5904faccd098676794574d118adc8ddf9dfb0a0fb8a86d1dcf66413386",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/workspace-details.png",
+        "sha256": "c2bab86c36f405239d40313ba841f0ef03bd438337a399799135e8bec93dabe5",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      }
+    ],
+    "remaining": [
+      "Owner installation and acceptance of final alignment/picker build",
+      "Live original Codex/Claude/ACP auth/model/tool acceptance",
+      "Full installed workbench, VS Code and live preview/GitHub checks",
+      "Owner updater signing and separately authorized publication"
     ]
   }
 }

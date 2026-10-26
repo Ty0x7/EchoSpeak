@@ -39,6 +39,7 @@ test("windows follow the chosen theme instead of forcing dark", () => {
 });
 
 test("renderer capability cannot spawn arbitrary shell commands", () => {
+  assert.equal(config.app.security.freezePrototype, true, "startup fixes must retain prototype protection");
   assert.deepEqual(capability.windows, ["main", "settings", "setup", "companion"]);
   assert.ok(!capability.permissions.some((permission) => String(permission).startsWith("shell:")));
   assert.ok(config.app.security.csp.includes("http://127.0.0.1:*"));

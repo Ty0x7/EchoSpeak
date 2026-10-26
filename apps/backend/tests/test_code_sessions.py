@@ -88,6 +88,7 @@ def test_stream_approval_and_rollback(setup, monkeypatch, runtime, mode):
     service.call(service.decide(sid, waiting["approvals"][0]["id"], True))
     done = wait_for(service, sid, lambda row: row["state"] == "completed" and row["rollback_available"])
     assert any("reply" in json.dumps(event) for event in done["events"])
+    assert done["model"] == ("fixture-model" if runtime == "codex" else "fixture-acp-model")
     assert Path(row["worktree"]).joinpath("hello.txt").read_text() == "agent edit"
     assert (root / "hello.txt").read_text() == "original"
     assert "agent edit" in service.call(service.inspect(sid))["diff"]
@@ -99,6 +100,32 @@ def test_stream_approval_and_rollback(setup, monkeypatch, runtime, mode):
     assert list(Path(row["worktree"]).parent.glob("rollback-backup-*.json"))
     with pytest.raises(ValueError, match="history"):
         service.call(service.connect(sid))
+
+
+def test_claude_reported_model_is_retained_and_redacted(setup):
+    service, item, _ = setup
+    row = create(service, item, runtime="claude_code")
+    session = service.sessions[row["id"]]
+    adapter = adapters.Claude(session)
+    service.call(adapter.event("sdk/event", {"kind": "SystemMessage", "data": {"data": {"model": "fixture-claude-model"}}}))
+    assert session.public()["model"] == "fixture-claude-model"
+    session.api_key = "fixture-secret-model-key-12345"
+    service.call(adapter.event("sdk/event", {"kind": "AssistantMessage", "data": {"model": session.api_key}}))
+    assert session.api_key not in (session.directory / "session.json").read_text()
+
+
+def test_acp_second_turn_retains_reported_model_without_new_session(setup, monkeypatch):
+    service, item, _ = setup
+    fake(monkeypatch, "acp")
+    row = create(service, item, "acp", command=[sys.executable, str(FIXTURE), "acp"])
+    service.call(service.connect(row["id"]))
+    for text in ["first", "second"]:
+        service.call(service.prompt(row["id"], text))
+        waiting = wait_for(service, row["id"], lambda value: bool(value["approvals"]))
+        service.call(service.decide(row["id"], waiting["approvals"][0]["id"], False))
+        done = wait_for(service, row["id"], lambda value: value["state"] == "completed" and value["rollback_available"])
+        assert done["model"] == "fixture-acp-model"
+        assert done["models"][0]["model"] == "fixture-acp-model"
 
 
 def test_rollback_preserves_newer_edits_and_index(setup):

@@ -613,3 +613,13 @@ Build and install using [11.10.6 instructions](releases/v11.10.6.md#local-build-
 6. Test GitHub CLI PR listing/filtering, branch-linked PRs and runtime-reported usage with real owner authentication. Missing limits must say unavailable rather than zero remaining. Verify native Chat research/activity still work and original external-session activity remains scoped.
 7. Run a local dev server and test the sandboxed loopback preview, API-port/credential-URL refusal, Standard/Private/Offline behavior and external-browser fallback. Confirm Device identifies the actual local host without claiming new capture/emulation permissions.
 8. Re-run existing reminder/tray/Minecraft and native/voice cases. Source/browser/ConPTY checks do not replace installed WebView2, real provider or updater-signed acceptance. Publish only after reviewing and testing the final signed build.
+
+
+### 11.10.6 startup and coding-model follow-up
+
+- Launch the repaired installer and confirm Chat appears. Launch again: one window and one owned backend should remain. The new Chat heading/composer should align with the unchanged Code starter.
+- Type a draft and switch Echo/Codex/Claude/ACP with and without a project or connection. The welcome/input must stay visible and the draft must survive. Unavailable sending must remain disabled.
+- Open the model picker. Echo should list only connected providers; external agents should show their original reported catalog/current model or an honest unavailable state. Claude explicit IDs use its own API key; ACP model selection remains agent managed.
+- Select a native model and create a coding session. Verify only that new session receives the selection. Reopen an unrelated Chat and confirm its binding is unchanged.
+- Connect a disposable original-harness session, choose its model where supported, send explicitly and verify central reply text. Tool approvals must open the original once-only permission controls. No model calls should happen merely by switching agents or opening pickers.
+- Reproducible browser scripts: `apps/desktop/scripts/check-startup-browser.cjs` and `check-workbench-browser.cjs`, after a production web build. Supply an existing Playwright module via `ECHOSPEAK_PLAYWRIGHT_MODULE` (or standard module resolution) and optionally `ECHOSPEAK_CHROMIUM_PATH`. Tests use deterministic fixtures and frozen Object.prototype. Optional output directories preserve fixture screenshots; no live account is exercised.
