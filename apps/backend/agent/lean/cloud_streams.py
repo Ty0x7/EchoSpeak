@@ -91,7 +91,11 @@ def anthropic_tools(model: str, tools: list[dict]) -> list[dict]:
 
 def anthropic_turn(client, messages, tools, on_reasoning, on_content, cancel, max_tokens):
     system, turns = anthropic_messages(messages)
-    body = {"model": client.endpoint.model, "messages": turns, "stream": True, "max_tokens": int(max_tokens or settings.max_output_tokens())}
+    limit = settings.max_output_tokens(client.endpoint)
+    body = {"model": client.endpoint.model, "messages": turns, "stream": True, "max_tokens": min(int(max_tokens or limit), limit)}
+    from agent.cloud_providers import anthropic_effort_supported
+    if client.reasoning_effort and anthropic_effort_supported(client.endpoint.model):
+        body["output_config"] = {"effort": client.reasoning_effort}
     if system:
         body["system"] = system
     if tools:

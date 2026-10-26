@@ -2,12 +2,18 @@
 from __future__ import annotations
 
 from typing import Any
+import re
 import httpx
 from config import config
 
 CLOUD_PROVIDERS = ("openai", "gemini", "anthropic", "xai")
 CLOUD_LABELS = {"openai": "OpenAI", "gemini": "Google Gemini", "anthropic": "Claude", "xai": "Grok"}
 BASE_URLS = {"openai": "https://api.openai.com/v1", "gemini": "https://generativelanguage.googleapis.com/v1beta/openai", "anthropic": "https://api.anthropic.com/v1", "xai": "https://api.x.ai/v1"}
+
+
+def anthropic_effort_supported(model: str) -> bool:
+    # Documented five-level effort families. Unknown releases keep defaults.
+    return bool(re.fullmatch(r"claude-(?:fable-5-1|(?:opus|sonnet|haiku)-5-5)(?:-\d{8})?", str(model).lower()))
 
 def cloud_config(provider: Any):
     return getattr(config, str(getattr(provider, "value", provider)))
@@ -99,9 +105,18 @@ def _model_entry(provider: str, item: dict) -> dict:
         chat = not any(s in low for s in ("image", "video", "imagine", "embed", "voice"))
     if not chat:
         reason = "Specialized model; unavailable in the chat picker"
+    limits = {target: item[source] for source, target in (("inputTokenLimit", "context_limit"), ("outputTokenLimit", "output_limit"))
+              if isinstance(item.get(source), int) and item[source] > 0}
     return {"id": model, "name": item.get("displayName") or item.get("display_name") or model, "chat": chat, "live": live,
-            "transport": "gemini_live" if live else "anthropic_messages" if provider == "anthropic" else "chat_completions",
-            "validated": False, "reason": reason}
+            "transport": "gemini_live" if live else chat_transport(provider, model),
+            "validated": False, "reason": reason, **limits}
+
+def chat_transport(provider: str, model: str) -> str:
+    """Route only documented families; compatible hosts keep their own contract."""
+    if provider == "openai" and str(model).lower().startswith("gpt-6"):
+        return "responses"
+    return "anthropic_messages" if provider == "anthropic" else "chat_completions"
+
 
 def list_cloud_models(provider: str, api_key: str | None = None) -> dict:
     key = str(api_key if api_key and api_key != "***" else cloud_config(provider).api_key).strip()
@@ -184,7 +199,7 @@ def test_cloud_model(provider: str, model: str = "", api_key: str | None = None)
                 if call.name not in names or error or args != {"token": "OK"}:
                     return {**result, "error_code": "tool_compatibility", "message": "The model returned an invalid connection-check tool call. Chat tool compatibility is not validated; no real tools ran."}
                 calls.append({"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}, **({"extra_content": call.extra_content} if call.extra_content else {})})
-            messages.append({"role": "assistant", "content": turn.content or "", "tool_calls": calls, **({"provider_blocks": turn.provider_blocks} if turn.provider_blocks else {})})
+            messages.append({"role": "assistant", "content": turn.content or "", "tool_calls": calls, **({"provider_blocks": turn.provider_blocks} if turn.provider_blocks else {}), **({"provider_state": turn.provider_state} if turn.provider_state else {})})
             for call in turn.tool_calls:
                 # Synthetic results only: never enter Toolbox, MCP or an action handler.
                 messages.append({"role": "tool", "tool_call_id": call.id, "content": "OK"})

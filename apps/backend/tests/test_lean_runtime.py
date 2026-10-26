@@ -144,6 +144,19 @@ def test_loop_runs_tools_until_the_model_answers():
     assert any(m.get("role") == "tool" and m.get("content") == "42" for m in client.calls[2])
 
 
+def test_loop_keeps_opaque_provider_state_out_of_visible_events():
+    state = {"transport": "responses", "items": [{"type": "reasoning", "encrypted_content": "opaque-fixture"}]}
+    client = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("c1", "lookup", "{}")], provider_state=state),
+        ModelTurn(content="Found 42."),
+    ])
+    events = []
+    result = _turn(client, _toolbox({"lookup": lambda args: "42"}), events).run("lookup")
+    assert result.success
+    assert any(m.get("provider_state") == state for m in client.calls[1])
+    assert "opaque-fixture" not in json.dumps(events)
+
+
 def test_tool_failure_is_returned_to_the_model_not_fatal():
     def broken(_args):
         raise RuntimeError("disk on fire")

@@ -32,19 +32,26 @@ class Endpoint:
 def thinking_controls(provider: str, model: str, local: bool, metadata: Optional[dict] = None) -> dict:
     """Controls the current adapter can actually apply; unknown models stay disabled."""
     model = model.casefold()
+    from agent.cloud_providers import anthropic_effort_supported
+    anthropic = provider == "anthropic" and anthropic_effort_supported(model)
     live = provider == "gemini" and any(x in model for x in ("live", "native-audio"))
     openai = provider == "openai" and model.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))
-    gemini = provider == "gemini" and ("2.5" in model or "-3" in model) and not live
+    gemini = provider == "gemini" and ("2.5" in model or "-3" in model or model.startswith("gemini-4-argon")) and not live
     local_reasoner = local and any(x in model for x in ("qwen3", "qwen-3", "qwq", "deepseek-r1", "gpt-oss", "gemma-4", "gemma4", "glm-4.5", "glm-4.6", "glm-5"))
+    if re.search(r"qwen3[-_.]coder[-_.]next", model):
+        local_reasoner = False  # Official card: non-thinking, unlike Qwen3 general models.
     metadata = metadata or {}
-    supported = openai or gemini or (local and bool(metadata.get("thinking_supported", local_reasoner)))
-    toggle = supported and not (openai and not model.startswith(("gpt-5.1", "gpt-5.2"))) and not (gemini and ("-3" in model or "pro" in model))
+    supported = openai or gemini or anthropic or (local and bool(metadata.get("thinking_supported", local_reasoner)))
+    toggle = supported and not (openai and not model.startswith(("gpt-5.1", "gpt-5.2", "gpt-5.6", "gpt-6-sol", "gpt-6-luna"))) and not (gemini and ("-3" in model or "pro" in model or model.startswith("gemini-4-argon")))
     if local and any(x in model for x in ("qwq", "deepseek-r1", "gpt-oss", "-thinking")):
         toggle = False
     if local and "thinking_toggle_supported" in metadata:
         toggle = supported and bool(metadata["thinking_toggle_supported"])
+    if anthropic:
+        toggle = False  # Effort only; do not claim a universal Claude thinking-off mode.
     return {"supported": supported, "toggle": toggle, "effort": supported,
-            "reason": "Thinking stays on for this model; you can change effort." if supported and not toggle else
+            "reason": "This adapter exposes Claude effort; a thinking-off control is not available here." if anthropic else
+                      "Thinking stays on for this model; you can change effort." if supported and not toggle else
                       "Thinking controls are unavailable for this model on its current adapter." if not supported else ""}
 
 
@@ -61,12 +68,17 @@ def reasoning_effort_for(endpoint: Endpoint, thinking_enabled: bool, effort: str
             return ""
         return level if thinking_enabled else ("none" if controls["toggle"] else "low")
     model = endpoint.model.lower()
+    from agent.cloud_providers import anthropic_effort_supported
+    if endpoint.provider == "anthropic" and anthropic_effort_supported(model):
+        return {"extra_high": "xhigh", "max": "max", "ultra": "max"}.get(effort, level) if thinking_enabled else "low"
     # Cloud: only reasoning models accept the parameter.
     if endpoint.provider == "openai" and (model.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))):
+        if model.startswith(("gpt-6", "gpt-5.6")):
+            level = {"extra_high": "xhigh", "max": "max", "ultra": "max"}.get(effort, level)
         return level if thinking_enabled else ("none" if thinking_controls("openai", model, False)["toggle"] else "low")
-    if endpoint.provider == "gemini" and ("2.5" in model or "-3" in model):
+    if endpoint.provider == "gemini" and ("2.5" in model or "-3" in model or model.startswith("gemini-4-argon")):
         # Pro 2.5 and Gemini 3 cannot disable thinking, including side/review calls.
-        return level if thinking_enabled else ("low" if "-3" in model or "pro" in model else "none")
+        return level if thinking_enabled else ("low" if "-3" in model or "pro" in model or model.startswith("gemini-4-argon") else "none")
     return ""
 
 
@@ -211,6 +223,7 @@ class ModelTurn:
     finish_reason: str = ""
     usage: dict[str, int] = field(default_factory=dict)
     provider_blocks: list[dict[str, Any]] = field(default_factory=list)
+    provider_state: dict[str, Any] = field(default_factory=dict)
     audio: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -479,14 +492,18 @@ class ChatClient:
         if self.endpoint.provider == "gemini" and any(s in self.endpoint.model.lower() for s in ("live", "native-audio")):
             from agent.lean.cloud_streams import gemini_live_turn
             return gemini_live_turn(self, messages, tools, on_reasoning, on_content, cancel, max_tokens)
+        from agent.cloud_providers import chat_transport
+        if not self.endpoint.local and chat_transport(self.endpoint.provider, self.endpoint.model) == "responses":
+            from agent.lean.responses_stream import responses_turn
+            return responses_turn(self, messages, tools, on_reasoning, on_content, cancel, max_tokens)
         # Provider-specific metadata is only meaningful to its own adapter.
-        messages = [{k: v for k, v in m.items() if k != "provider_blocks"} for m in messages]
+        messages = [{k: v for k, v in m.items() if k not in ("provider_blocks", "provider_state")} for m in messages]
         body: dict[str, Any] = {
             "model": self.endpoint.model,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
-            "max_tokens": int(max_tokens or settings.max_output_tokens()),
+            "max_tokens": min(int(max_tokens or settings.max_output_tokens(self.endpoint)), settings.max_output_tokens(self.endpoint)),
         }
         reasoning_model = self.endpoint.provider == "openai" and self.endpoint.model.startswith(("o1", "o3", "o4", "gpt-5", "gpt-6"))
         if self.endpoint.provider == "openai":
@@ -506,7 +523,7 @@ class ChatClient:
                 # going with a note so the agent says it can't see, instead of failing.
                 logger.info("Model rejected image input; retrying with text notes")
                 self._text_only = True
-                body["messages"] = [{k: v for k, v in m.items() if k != "provider_blocks"}
+                body["messages"] = [{k: v for k, v in m.items() if k not in ("provider_blocks", "provider_state")}
                                     for m in hydrate(raw_messages, images=False)]
                 return self._stream(body, on_reasoning, on_content, cancel)
             if self.reasoning_effort and exc.status == 400 and "reason" in exc.detail.lower():

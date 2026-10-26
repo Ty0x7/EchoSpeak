@@ -1,0 +1,93 @@
+{
+  "verified_on_utc": "2026-10-26",
+  "branch": "codex/model-compatibility-audit",
+  "base_commit": "70f7122",
+  "scope": "Native provider compatibility research and targeted offline contracts; no live inference",
+  "tests": {
+    "summary": "109 passed across 6 targeted backend test files",
+    "log": ".test-state/model-compatibility-tests.log",
+    "live_inference": false,
+    "model_downloads": false,
+    "benchmarks": false
+  },
+  "source_sha256": {
+    "apps/backend/agent/cloud_providers.py": "4ee510f78f7612d4fd55fac7f3b5b73ba1995c9282a5d00663b23cb4db787c1a",
+    "apps/backend/agent/lean/provider.py": "8b517313e33463882188ba13ecb8defea5b0136e4618818c839ad702d0941029",
+    "apps/backend/agent/lean/responses_stream.py": "a976b01d7722b157f617c0e1c8e20154c2e3d28cc18ef6dc5473d238c9e9c23f",
+    "apps/backend/agent/lean/cloud_streams.py": "cf51002cbda9bd21b014a04ff06dd355b8308b949df6334b93ad9743d7cbbbbc",
+    "apps/backend/agent/lean/loop.py": "fb0a4f1366a324ab99ad176f9fb2fde8382f7aa8ad3ff6dc06ee12893972e9b3",
+    "apps/backend/agent/lean/settings.py": "0116bc805a33ff1553f9b7a3b9a37bf977a2110114daaa2c606e65804328d6d4",
+    "apps/backend/agent/model_adapters.py": "ca8aad68646c77c3e1f6857c5d21cfa6cdf2ecc52520848db87f54b45c39e45f",
+    "apps/backend/tests/test_cloud_models.py": "b6ac0ba5ed773e6ebc6eb9cd8684615c7706ca6a12656492590d4604247373fa",
+    "apps/backend/tests/test_model_family_adapters.py": "0f2042d2c89c6bfabe0e9396e7c9706e24621657695aedfedf4cb4a493a095c1",
+    "apps/backend/tests/test_lean_runtime.py": "d2b6df8383fd1f2f9023f0e03c9ff62ded87b07ecd07e8c60d66c417508b0e4e",
+    "scripts/render-model-ecosystem-report.py": "170125e99a3d326f7d8bc7ca6c49776fa14853fc930d89a7c121c51c7e42335d"
+  },
+  "visual": {
+    "status": "passed",
+    "method": "Installed headless Chromium; JavaScript disabled; no external requests",
+    "layouts": [
+      {
+        "width": 1280,
+        "colorScheme": "dark",
+        "rows": 26,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 768,
+        "colorScheme": "dark",
+        "rows": 26,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 390,
+        "colorScheme": "dark",
+        "rows": 26,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 1280,
+        "colorScheme": "light",
+        "rows": 26,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 768,
+        "colorScheme": "light",
+        "rows": 26,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 390,
+        "colorScheme": "light",
+        "rows": 26,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      }
+    ],
+    "inspected_images": [
+      ".test-state/model-ecosystem-dark-1280.png",
+      ".test-state/model-ecosystem-dark-390.png",
+      ".test-state/model-ecosystem-matrix.png"
+    ],
+    "local_links": "all local HTML links exist",
+    "family_rows": 26,
+    "developers": 21
+  },
+  "packaging": {
+    "new_build": false,
+    "published": false,
+    "note": "Existing 11.10.6 bundles predate these source changes; rebuild to include them."
+  }
+}

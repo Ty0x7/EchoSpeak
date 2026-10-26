@@ -98,6 +98,8 @@ def _estimate_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]]
         size += len(str(message.get("content") or "")) + 16
         for call in message.get("tool_calls") or []:
             size += len(str(call.get("function", {}).get("arguments") or "")) + 32
+        # Encrypted reasoning is not visible text, but still consumes context.
+        size += len(json.dumps(message.get("provider_state") or {}))
     visual = sum(len(m.get("observations", [])) for m in messages)
     return int(size / 3.4) + min(visual, 3) * 1800
 
@@ -358,6 +360,8 @@ class LeanTurn:
             assistant: dict[str, Any] = {"role": "assistant", "content": content or ""}
             if turn.provider_blocks:
                 assistant["provider_blocks"] = turn.provider_blocks
+            if turn.provider_state and (not calls or turn.tool_calls):
+                assistant["provider_state"] = turn.provider_state
             if calls:
                 assistant["tool_calls"] = [
                     {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments or "{}"}, **({"extra_content": call.extra_content} if call.extra_content else {})}
@@ -554,7 +558,7 @@ class LeanTurn:
                      completion_tokens=int((turn.usage or {}).get("completion") or 0))
         if turn.usage:
             self._account_usage(turn.usage)
-            self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens()})
+            self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens(getattr(self.client, "endpoint", None))})
         # In group chats the transcript shows "[Name]: text"; models sometimes copy
         # that onto their own reply. Drop it.
         own_prefix = re.match(rf"\s*\[{re.escape(self.persona.name)}\]:\s*", turn.content or "")
@@ -1162,7 +1166,8 @@ class LeanTurn:
 
     # ── context ─────────────────────────────────────────────────────────
     def _fit_context(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], aggressive: bool = False) -> None:
-        budget = int(settings.context_tokens() * (0.55 if aggressive else 0.8)) - settings.max_output_tokens() // 2
+        endpoint = getattr(self.client, "endpoint", None)
+        budget = max(128, int(settings.context_tokens(endpoint) * (0.55 if aggressive else 0.8)) - settings.max_output_tokens(endpoint) // 2)
         # 0. Tool-result clearing: once the context is half full, raw output from
         #    tools used many steps ago is cut to its head. The agent already acted
         #    on it, and long sessions stay coherent instead of hitting the wall.
