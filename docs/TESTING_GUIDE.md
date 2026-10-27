@@ -576,3 +576,15 @@ For each failure, note:
 - whether it reproduces.
 
 Those notes set the next engineering priorities.
+
+## 11.10.5 UI acceptance
+
+After building and installing 11.10.5, use a normal desktop window and your configured models:
+
+1. Check that the titlebar and sidebar match, there is no duplicate sidebar brand, Chat/Code sits beside Search and Collapse, and Chats is above Agents. Minimize/restore/close should retain their existing behavior.
+2. Open a new chat. Its breadcrumb should be at the top with Research & activity on the right. Open and close that panel. Watch all three typewriter descriptions loop; check that no full static duplicate is visible. With system reduced motion enabled, one complete phrase should remain readable.
+3. Check the empty composer starts with one editable line, grows with multiline text and shrinks when cleared. Click and keyboard-focus it: no white inner rectangle or separate gray dock should appear. Send a normal message and confirm the conversation keeps the same background.
+4. Open models in Chat and a native Code session. There should be one EchoSpeak catalog mark, connected Local/API models, search and persistent favorites. Select a model from a different configured provider and confirm both provider and model change correctly. Unconfigured/disconnected providers should stay in Configure providers rather than appearing as letter buttons.
+5. Open Echo Code's runtime menu. Echo, Codex and Claude marks must remain icon-sized. Native draft/session behavior should still work; external execution must remain unavailable.
+6. Enter voice mode. Normal presentation should center Echo with Listen/Pause and Back to chat. Back to chat should restore the transcript. Check real microphone errors and benign approval requests remain actionable. Do not grant unrelated permissions just to exercise the UI.
+7. Check a narrower window, dark/light themes, saved sidebar sizes, file/session browsing, and the existing reminder/tray/Minecraft cases in sections 4.2–4.10. Native window-frame rendering, WebView2 focus, real model behavior and real audio need owner acceptance.

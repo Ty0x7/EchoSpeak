@@ -56,7 +56,6 @@ export type SidebarPage = "chat" | "code" | "groups" | "projects" | "artifacts" 
 const SECTION_TITLES: Record<SectionKey, string> = { agents: "Agents", chats: "Chats", projects: "Projects" };
 
 const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string }[] = [
-  { id: "code", label: "Echo Code", hint: "Project files and independent coding runtimes" },
   { id: "groups", label: "Group chats", hint: "Chats with several agents" },
   { id: "projects", label: "Projects", hint: "Your project folders" },
   { id: "artifacts", label: "Artifacts", hint: "Apps, documents and diagrams your agents made" },
@@ -66,7 +65,7 @@ const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string
 ];
 
 /** How many pages show before "More". */
-const NAV_PRIMARY = 4;
+const NAV_PRIMARY = 3;
 const NAV_MORE_KEY = "echospeak.sidebar.more";
 
 function readNavMore(): boolean {
@@ -411,7 +410,7 @@ export function ProjectSidebar(props: SidebarProps) {
   // space by flex-grow, so the browser sizes them and changes animate; only a
   // drag needs to measure.
   const SECTION_HEAD_PX = 30;
-  const present: SectionKey[] = props.agents ? ["agents", "chats"] : ["chats"];
+  const present: SectionKey[] = props.agents ? ["chats", "agents"] : ["chats"];
   const listArea = Math.max(0, splitHeight - SECTION_HEAD_PX * present.length - 9 * (present.length - 1));
   const effective = fitLayout(layout, props.agents?.count || 0, listArea);
   const fractions = sectionFractions(effective, present);
@@ -637,7 +636,6 @@ export function ProjectSidebar(props: SidebarProps) {
       {!iconOnly ? (
         <div className="es-side-body">
           <div className="es-side-top">
-            <div className="es-sidebar-brand"><img src="/logo.png" alt="" /><strong>EchoSpeak</strong></div>
             <div className="es-side-search-row">
             {props.onSearchChats ? (
               <label className="es-chat-search">
@@ -657,6 +655,7 @@ export function ProjectSidebar(props: SidebarProps) {
                 />
               </label>
             ) : null}
+            {props.onPage ? <button type="button" role="switch" className="es-code-switch" aria-label="Echo Code" aria-checked={props.page === "code"} title="Switch between Chat and Echo Code" onClick={() => props.onPage?.(props.page === "code" ? "chat" : "code")}><NavIcon name="code" /></button> : null}
             <button type="button" className="es-side-collapse" onClick={props.onToggleCollapsed} aria-label="Collapse sidebar" title="Collapse sidebar">
               <Icon name="collapse" size={14} />
             </button>
@@ -805,16 +804,10 @@ export function ProjectSidebar(props: SidebarProps) {
 
         <div className="echo-rail-divider" />
 
-        {props.collapsedRoster ? (
-          <>
-            {props.collapsedRoster}
-            <div className="echo-rail-divider" />
-          </>
-        ) : null}
-
         <section aria-label="Chats" style={{ padding: "0 1px", display: "grid", gap: 2, flex: "0 0 auto" }}>
           {!props.hydrating && sessions.map((session) => sessionRow(session))}
         </section>
+        {props.collapsedRoster ? <><div className="echo-rail-divider" />{props.collapsedRoster}</> : null}
 
       </div>
       )}

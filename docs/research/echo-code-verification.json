@@ -1,9 +1,9 @@
 {
   "verified_on_utc": "2026-10-25",
-  "scope": "Combined Echo Code UI and security source checks, packaged backend smoke and local Windows bundles; no installed-app or live-model acceptance",
+  "scope": "Current 11.10.5 UI source, desktop component fixtures and preparation checks, with explicitly historical implementation/package baseline; no 11.10.5 signed installer, installed WebView2 or live-provider acceptance claimed",
   "branch": "codex/echo-code-security",
   "base_commit": "63fc31ea1b51e3eb092ca2daa3ac3a9c10409c9c",
-  "package_version": "11.10.3",
+  "package_version": "11.10.5",
   "backend": {
     "passed": 168,
     "skipped": 1,
@@ -158,7 +158,9 @@
       }
     ],
     "publisher_signature": "NotSigned",
-    "release_published": false
+    "release_published": false,
+    "evidence_scope": "Historical initial 11.10.3 development bundles. The owner later rebuilt signed 11.10.3 artifacts, so current output files may differ from these hashes.",
+    "package_version": "11.10.3"
   },
   "preservation": {
     "initial_echo_code_phase_preserved_tracked_edits": 18,
@@ -182,6 +184,14 @@
     {
       "path": ".github/workflows/website.yml",
       "sha256": "7964e6f32dfa120019c46a714c97c41cd70389bd69372090ff0a5ba4dc790b74"
+    },
+    {
+      "path": "CHANGES.md",
+      "sha256": "988e5f173ce7b8386fcb6d8824446f0af646ff83eee332fd62c037de040beed5"
+    },
+    {
+      "path": "README.md",
+      "sha256": "85d94062a28027d2956e76009f78cbf0100941f59db5941beb7fd7977674c17c"
     },
     {
       "path": "apps/backend/agent/chat_branches.py",
@@ -256,12 +266,16 @@
       "sha256": "89a1173e08121ff95f9d203552d875eb2b088e37821f47fb5000416a36a5e1ad"
     },
     {
+      "path": "apps/backend/version.py",
+      "sha256": "fa4011c6d15c2c8ab0a7ad934e2a4c69abf94fdbcf51ea0f8b05fa31642e4a9e"
+    },
+    {
       "path": "apps/desktop/package-lock.json",
-      "sha256": "0aa38d7ab2779a852d485f57b0c6469068beca29b102a79a1ab6413fcf10613b"
+      "sha256": "fc50a1ecb1e3ba12829016ccf4356172c9148a3ec6a041e93c991ea038414840"
     },
     {
       "path": "apps/desktop/package.json",
-      "sha256": "d729bf1c917e25abb0b87edb9c54f85bb100dd98b7c3461dd5cce359bde6bb5d"
+      "sha256": "073c62359ff45c74a874d512d894cb123b5de726e81dc92080c7ec215884a206"
     },
     {
       "path": "apps/desktop/scripts/check-build-env.py",
@@ -281,11 +295,11 @@
     },
     {
       "path": "apps/desktop/src-tauri/Cargo.lock",
-      "sha256": "1c9587cae7a880741d33fe4979a2136b03dd5f23a11056545b080bd801127b57"
+      "sha256": "3bb617ef290f3a56e4d4911236c93438c9c0d2c2d9fe8e6507831802ccd55183"
     },
     {
       "path": "apps/desktop/src-tauri/Cargo.toml",
-      "sha256": "ddbaeb26808ab627a6de7b3f0e83f85842571606a0e98d9cf712c3b4c0c751c1"
+      "sha256": "9154ead58521d505e6317c705aa29fdb305cf273c8886aca65e3c018c35acd1d"
     },
     {
       "path": "apps/desktop/src-tauri/gen/schemas/desktop-schema.json",
@@ -297,7 +311,7 @@
     },
     {
       "path": "apps/desktop/src-tauri/tauri.conf.json",
-      "sha256": "c521e409586588630f4383773ebb0ab8f608906c652df77f3ac42afa2a760cd7"
+      "sha256": "a87ba1632c7735d172723eb0d203f20dfb8703435ba627ff41a9834d6ca2646d"
     },
     {
       "path": "apps/desktop/tests/desktop-contracts.test.mjs",
@@ -305,23 +319,35 @@
     },
     {
       "path": "apps/web/package-lock.json",
-      "sha256": "ff3425ed6daa0218c731588f57624121740387aa8dd7a8cba29eaad50a48ae18"
+      "sha256": "0c29168d24bb58e4174f6f73d711ef27213e2989b55caac27c1eef155c2d5a85"
     },
     {
       "path": "apps/web/package.json",
-      "sha256": "ec0de6801a79e2b58bc988cd95f90a8a36188f99b6187b195f433968ed085bdf"
+      "sha256": "c6b5cb3f3d8278decaec7d22ce29e47cec6c90081725ebc248107f420f6809b6"
+    },
+    {
+      "path": "apps/web/public/runtime-marks/NOTICE.txt",
+      "sha256": "388fdee17e28728f3b11f05b42ceaddbbb332b436ec5237c7f482ddfc6e31f31"
+    },
+    {
+      "path": "apps/web/public/runtime-marks/claude.svg",
+      "sha256": "36d216f45d3c8adb8c409f9f183c1656927b6abf2441482afc619f62e2a0e233"
+    },
+    {
+      "path": "apps/web/public/runtime-marks/openai.svg",
+      "sha256": "6e3ba71f36714eaa7ce57c89454ed4a36bc2e70ba124fd33ea28ce53a7991dcc"
     },
     {
       "path": "apps/web/src/app/globalCss.ts",
       "sha256": "21ba38fbb25692783c79a94c14f53c339a6ae911e7d71929c128960cfa835daa"
     },
     {
-      "path": "apps/web/src/code/code.css",
-      "sha256": "9e3cc852a41325e51820f56ff7233770b189d5e1c8d557bba171d0ad02ab22d6"
+      "path": "apps/web/src/code/EchoCodeWorkspace.tsx",
+      "sha256": "6adf7c8bbb92e70bf69eb2c16bea9463356391bd16eccc583e329099bc5e0ac2"
     },
     {
-      "path": "apps/web/src/code/EchoCodeWorkspace.tsx",
-      "sha256": "238b201d22947c6c7517c8c99d9c55af39f5e73f6eadb6c7eb5fb6ab18a435cd"
+      "path": "apps/web/src/code/code.css",
+      "sha256": "9e3cc852a41325e51820f56ff7233770b189d5e1c8d557bba171d0ad02ab22d6"
     },
     {
       "path": "apps/web/src/code/model.test.ts",
@@ -333,15 +359,23 @@
     },
     {
       "path": "apps/web/src/components/ProjectSidebar.tsx",
-      "sha256": "57d3a6659502f4aac0a6a7c0b3979f766a9192b24e5e63d4e3c50c4f8824f53f"
+      "sha256": "46a040f700de3c5983d1577ab35b76da66b27551b8ddd5c07555a53196d6ae55"
+    },
+    {
+      "path": "apps/web/src/components/RuntimeMark.tsx",
+      "sha256": "c9915d03c3a0bb28564823f67ea3c76660f8215ee6cdddb02c82d076d1925b1b"
     },
     {
       "path": "apps/web/src/components/WorkspacePopover.tsx",
       "sha256": "8e085ade5cb1bfd29c1cab1feaeec2b0009ff3d0341b33b4408bf36e01467f32"
     },
     {
+      "path": "apps/web/src/components/sidebarSections.ts",
+      "sha256": "9b3c58a1f1d27adf36ffd4ea0276d190be278a66410f542fa21f8327915062f7"
+    },
+    {
       "path": "apps/web/src/dashboard/ChatThread.tsx",
-      "sha256": "595cf2892d26d7db067a5892b58f44f35a60a316af448ccba7891252be3bd57e"
+      "sha256": "5fc5838cad4661c4c189981bc35a6fb01712e1c51f1f1b86497762faee3df08a"
     },
     {
       "path": "apps/web/src/dashboard/ComposerInput.tsx",
@@ -349,19 +383,31 @@
     },
     {
       "path": "apps/web/src/dashboard/ComposerToolbar.tsx",
-      "sha256": "87b87deb49f97027965620941bc3d49b54649684d8ceb44a3de107e6a5b0976a"
+      "sha256": "820ff6167a3b4f0c0862d14ec19cf8320d8e69b13216c6b4e1de6dbac29b2e63"
+    },
+    {
+      "path": "apps/web/src/dashboard/ConnectedModelBrowser.tsx",
+      "sha256": "336a6bbc590af3db69dd116b8fd95aca86aa2401442db24fecf404ea39783c5a"
+    },
+    {
+      "path": "apps/web/src/dashboard/VoiceStage.tsx",
+      "sha256": "2dd5bfd7142aae26b4997d97182682d7ec83d4e11d5c3bec64ebc1d6c8f1b768"
+    },
+    {
+      "path": "apps/web/src/dashboard/WelcomeTypewriter.tsx",
+      "sha256": "ab3fd337b7e9f9f4458265c289a9252679fbe708a11d7acb0227ce6b59a2cf77"
     },
     {
       "path": "apps/web/src/index.tsx",
-      "sha256": "4bad45782e2b4ce011ecc701a8aa80896d8dbd237c62799588fbc5abd6360e57"
-    },
-    {
-      "path": "apps/web/src/theme/theme.ts",
-      "sha256": "7875be9debd2d612c28f0f1151878f52a34e4d7006ca07474cf56ac0ad6d58a5"
+      "sha256": "db040b788679e3dfc575c61a69fb33105f23ecb0bc532b959a03aaa7eec335a9"
     },
     {
       "path": "apps/web/src/theme/ThemePicker.tsx",
       "sha256": "6d80ad76a0349ca25acbd71b6d5a12a80846a22244f8ac9a5c4e2a30025c9c54"
+    },
+    {
+      "path": "apps/web/src/theme/theme.ts",
+      "sha256": "7875be9debd2d612c28f0f1151878f52a34e4d7006ca07474cf56ac0ad6d58a5"
     },
     {
       "path": "apps/web/src/theme/tokens.css",
@@ -369,15 +415,27 @@
     },
     {
       "path": "apps/web/src/theme/workspace.css",
-      "sha256": "6842074cc94edc857bee818ff340009bd84f122586233ca1b24dfb6cc48117ac"
+      "sha256": "6e1f203501380a25f949ab9ee421555879fefe2d3c94c9e0c10bf6e0f665813f"
+    },
+    {
+      "path": "artifacts/releases/index.html",
+      "sha256": "322aa2961491005f0e67a59c5e7b5ecf3e54fa54f08b0908e908bcf0dad55f3d"
+    },
+    {
+      "path": "artifacts/releases/v11.10.4.html",
+      "sha256": "e6ccd6c14724a2e74c39f9b03458395eaec81404e94c120f966efc5e26589129"
+    },
+    {
+      "path": "artifacts/releases/v11.10.5.html",
+      "sha256": "2d910ac040a7b4bf69f6391cc096bf60ad84017f85d53992dea889408702a38a"
     },
     {
       "path": "artifacts/research/echo-code.html",
-      "sha256": "97cbe55d543edf1e7978d6d23bac922c968d75af5e902c7d8307710dc1f132f8"
+      "sha256": "f7cd9ab090f65def0d1f896fb0362a0857b5086f5039cc2f310e6dc44c451eaa"
     },
     {
       "path": "artifacts/research/security-audit-2026-10-25.html",
-      "sha256": "7ae765fea8c9fce918f400ad35305ef5a633ac078754d45fe522fc020c4a07b1"
+      "sha256": "d8999ec80209fd8937a6f0d2aa4c65005ed16705661fe0a6e43bc2fdf6dc764a"
     },
     {
       "path": "docs/ARCHITECTURE.md",
@@ -388,8 +446,24 @@
       "sha256": "467fa0b78b698eb3b5d20d5c124342889c17fa667caf5844d1c9f47150b5977a"
     },
     {
+      "path": "docs/TESTING_GUIDE.md",
+      "sha256": "2999f75c648c93787bc7d6e379072b3074150e97d16f13ea4a5a4967d59d390b"
+    },
+    {
+      "path": "docs/releases/index.md",
+      "sha256": "f049c14fb7cbd07639670dc9e60787d5edb1b895568add4e0076db1f028dbd1a"
+    },
+    {
+      "path": "docs/releases/v11.10.4.md",
+      "sha256": "0e99f4cf51f34059de42477d3d6c8e8f39d6ed5bf2dfe4a9107765febb1b3447"
+    },
+    {
+      "path": "docs/releases/v11.10.5.md",
+      "sha256": "111fb1d087864c0e267758ffa4d66658974e590bf10f859554289fa05a8754d6"
+    },
+    {
       "path": "docs/research/echo-code-sources.json",
-      "sha256": "e8df5ea193bf3da92f33c86b5f64c8a44cb9adc3704bc5eefe8c8109867453c0"
+      "sha256": "92aa6cd9cc3a49b0bf1b4a0cf5dae902a590e680004bde4eeb8b86ff66c47877"
     },
     {
       "path": "docs/research/echo-code-t3-license.txt",
@@ -397,15 +471,11 @@
     },
     {
       "path": "docs/research/echo-code.md",
-      "sha256": "30b699de41d1d27df0b79a2f7f382d96ff0f8f1dcb6730bf345e4f09c514d963"
+      "sha256": "bba1ae5ac4e874bb29d23a6dd4bcedb7799f5ab5e356048c779f7d38c87e337c"
     },
     {
       "path": "docs/research/security-audit-2026-10-25.md",
-      "sha256": "e4d35506dd955986e26030f6d73a499dd42bd1e90287e178ec8542548b3bccb5"
-    },
-    {
-      "path": "README.md",
-      "sha256": "85d94062a28027d2956e76009f78cbf0100941f59db5941beb7fd7977674c17c"
+      "sha256": "735bb7e1d69e12897ece2d34803ef4ae1377b44fac7a95f9be6997143c20e8f7"
     }
   ],
   "screenshots": [
@@ -446,6 +516,46 @@
       "sha256": "1e91feff19449cae755040e92531de09007812355662c380d0427255702280aa"
     },
     {
+      "path": "artifacts/media/echo-code/ui-11.10.5/chat-dark-390.png",
+      "sha256": "72b07a5ab4b0c8a92ec6f0ebf2b6ffc89fff5aa3e9ba0aa2d0c68ad728b246b2"
+    },
+    {
+      "path": "artifacts/media/echo-code/ui-11.10.5/chat-empty-desktop.png",
+      "sha256": "003d9f9301bf7fa792bc42ee176c82c1a949384c95a652ba99035208b91211f5"
+    },
+    {
+      "path": "artifacts/media/echo-code/ui-11.10.5/chat-light-1280.png",
+      "sha256": "0258f0acec4ff91082a10b123768d8a719ec7fef1b3dac767c713f499c1dc22e"
+    },
+    {
+      "path": "artifacts/media/echo-code/ui-11.10.5/code-workspace-desktop.png",
+      "sha256": "18849a10ad525812c42404e32555390042981fa27bf93299cec74b983b1d1bd6"
+    },
+    {
+      "path": "artifacts/media/echo-code/ui-11.10.5/connected-models-desktop.png",
+      "sha256": "347a0d68860d1e5441cd95811b05ca4cb274ea42a57feffd9816a2a2ab5239eb"
+    },
+    {
+      "path": "artifacts/media/echo-code/ui-11.10.5/connected-models-popover.png",
+      "sha256": "e828f1abc6355038ec150c2fd6bb30a9d50cfd3ddb4a0a039a73f07a97cbb0b1"
+    },
+    {
+      "path": "artifacts/media/echo-code/ui-11.10.5/conversation-desktop.png",
+      "sha256": "fa008cca6dd41afd54848d7736cea7057b1356b42cbbc00b5ae16692835a6aa9"
+    },
+    {
+      "path": "artifacts/media/echo-code/ui-11.10.5/runtime-logos-desktop.png",
+      "sha256": "8419c3463ade4d3b93ed4c396b7614c1cffa6c27f270336fc3338f2ab868e927"
+    },
+    {
+      "path": "artifacts/media/echo-code/ui-11.10.5/runtime-logos-popover.png",
+      "sha256": "8be26f58602ae1b87c8580816cf87f9bf02921a4dccf4664f3b21e7d93398374"
+    },
+    {
+      "path": "artifacts/media/echo-code/ui-11.10.5/voice-desktop.png",
+      "sha256": "0dd38d56d01adb625f4c863030dd3e125cec1c8fe2a574ce079c91c3b22a1b3f"
+    },
+    {
       "path": "artifacts/media/echo-code/workspace-dark-1280.png",
       "sha256": "3018a03c082649f96fe8bdbe79588d45e7851626f1c1712db8cdfc5c99487c8f"
     },
@@ -469,5 +579,132 @@
       "path": "artifacts/media/echo-code/workspace-light-960.png",
       "sha256": "5f3355c3d598f174ee12a4c4eda737104df134de1e1aeddc4805847e5e33c24c"
     }
+  ],
+  "initial_implementation_commit": "226af5c52db413ce4976d08f74f4b15369bfbc36",
+  "target_release_version": "11.10.5",
+  "release_preparation": {
+    "version": "11.10.5",
+    "version_entries": {
+      "backend": "11.10.5",
+      "web_package": "11.10.5",
+      "web_lock": "11.10.5",
+      "web_lock_root": "11.10.5",
+      "desktop_package": "11.10.5",
+      "desktop_lock": "11.10.5",
+      "desktop_lock_root": "11.10.5",
+      "cargo_package": "11.10.5",
+      "cargo_lock": "11.10.5",
+      "tauri_config": "11.10.5"
+    },
+    "signed_build": "pending_owner_local_signing_key_password",
+    "installer_created": false,
+    "published": false,
+    "notes": "Normal release-windows.ps1 workflow; enter the existing signing password locally, install/test, then explicitly publish. Earlier binary signatures were not relabeled."
+  },
+  "baseline_source_record_at_commit": "226af5c52db413ce4976d08f74f4b15369bfbc36:docs/research/echo-code-verification.json",
+  "baseline_package_version": "11.10.3",
+  "previous_preparation_record_at_commit": "c81c06aa1b8aaa425c108c31ef2724eb377cb3f1:docs/research/echo-code-verification.json",
+  "current_validation": {
+    "version": "11.10.5",
+    "frontend": {
+      "typescript": "passed",
+      "test_files": 37,
+      "tests_passed": 180,
+      "production_build": "passed",
+      "advisory": "Large minified chunks"
+    },
+    "desktop": {
+      "contract_tests_passed": 16,
+      "rust_tests_passed": 4,
+      "cargo_locked": true
+    },
+    "ui": {
+      "fixture_data": true,
+      "real_models": false,
+      "checks": [
+        "Real desktop components: black header/sidebar, no duplicate brand, Chats above Agents, gray Code switch, aligned top breadcrumb/research control and compact one-line input",
+        "Composer grows for multiline content, collapses when cleared, and shows no extra focus box",
+        "Unified EchoSpeak catalog lists connected Local/API models, excludes disconnected catalogs, supports favorites/search and commits the selected provider/model together",
+        "Reasoning selection keeps keyboard behavior",
+        "Echo Code has correctly sized Echo/Codex/Claude logos, keeps external execution blocked, transfers the task draft, and shares the connected-model catalog/favorites",
+        "Filled conversation keeps the new-chat background, transparent composer surround and existing coding query stream",
+        "Voice renders a centered Echo and only Listen/Pause plus Back to chat in its normal state; synthetic microphone only",
+        "The welcome types and erases all three descriptions and loops back to the first",
+        "Reduced-motion welcome shows one readable phrase with no duplicate visible static description",
+        "Narrow dark and wide light layouts keep the composer and connected-model popup in the viewport",
+        "An explicitly ready in-process local model remains selectable without inventing a reachable HTTP catalog"
+      ],
+      "page_errors": [],
+      "unexpected_network": []
+    },
+    "native_bridge": "mocked; real DesktopApp/Dashboard components",
+    "microphone": "Chromium synthetic device",
+    "live_models": false,
+    "installed_app_tested": false,
+    "reports": {
+      "checks": [
+        {
+          "report": "research/echo-code",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "research/echo-code",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "research/security-audit-2026-10-25",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "research/security-audit-2026-10-25",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.5",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.5",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        }
+      ],
+      "scripts_disabled": true,
+      "remote_requests": []
+    }
+  },
+  "baseline_validation_keys": [
+    "backend",
+    "frontend",
+    "desktop",
+    "security_scan",
+    "action_pins",
+    "python_build",
+    "ui",
+    "reports",
+    "packaging"
   ]
 }

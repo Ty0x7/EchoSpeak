@@ -187,19 +187,21 @@ Fresh combined checks: **168 backend tests passed, 1 Windows symlink test skippe
 
 The fresh packaged backend passed its import self-check and an isolated desktop-contract smoke test. Startup was core-ready; models, embeddings and document retrieval were degraded in the empty test profile. The smoke test verified authenticated Echo Code route registration, 401 without the key, trusted native project/session creation and listing, idempotent retries, 403 for an untrusted write Origin and 409 for a Codex launch attempt. No model was called, no external agent was launched and the test process was stopped afterward.
 
-The full Windows build completed successfully, producing fresh **NSIS EXE (162.92 MiB)** and **MSI (236.34 MiB)** bundles. Installer SHA-256 hashes and exact sizes are in [the verification record](echo-code-verification.json). The NSIS installer was checked as **NotSigned** for Windows publisher signing. Neither installer was installed or uploaded as a release.
+The initial 11.10.3 development build completed successfully, producing **NSIS EXE (162.92 MiB)** and **MSI (236.34 MiB)** bundles. Their historical SHA-256 hashes and exact sizes are in [the verification record](echo-code-verification.json). The NSIS installer was checked as **NotSigned** for Windows publisher signing. The owner subsequently rebuilt updater-signed 11.10.3 artifacts; these differ from those initial development hashes.
+
+The source release version is now **11.10.5**, including both npm lockfiles and the Cargo package lock, because v11.10.3 is already published. New release notes are in [v11.10.5](../releases/v11.10.5.md). The 11.10.5 signed build is pending the owner's local signing-key password. Run the normal release script below, enter the password in PowerShell, and install/test that new build before publishing. Do not rename or relabel the existing 11.10.3 installer or signatures.
 
 From the repository root in PowerShell:
 
 ```powershell
-# Build the backend, production UI, desktop shell and Windows bundles.
-& .\apps\desktop\scripts\build-windows.ps1 -PythonExecutable (Resolve-Path .\apps\backend\.venv\Scripts\python.exe).Path
+# Build the backend, production UI, desktop shell and updater-signed bundles.
+& .\apps\desktop\scripts\release-windows.ps1
 
 # Close your running EchoSpeak, then run the new local installer.
-& .\apps\desktop\src-tauri\target\release\bundle\nsis\EchoSpeak_11.10.3_x64-setup.exe
+& .\release\v11.10.5\EchoSpeak_11.10.5_x64-setup.exe
 ```
 
-This is a local development build at the current **11.10.3** version, not a published update. Windows publisher signing is not configured. Existing updater `.sig` files from older builds must not be reused with newly built installers; a public release must use the release script's fresh version-bound signing and verification flow.
+The current release target is **11.10.5**, not a published update. Windows publisher signing is not configured. Existing updater `.sig` files from older builds must not be reused with newly built installers; a public release must use the release script's fresh version-bound signing and verification flow. After testing the new signed build, publish from the repository root with `& .\apps\desktop\scripts\release-windows.ps1 -SkipBuild -Publish`.
 
 For source development after the sidecar build:
 
@@ -210,3 +212,19 @@ npm.cmd --prefix apps/desktop run dev
 The packaged shell needs its bundled backend resource directory. Prefer the installer or Tauri dev command rather than copying the shell EXE alone.
 
 Manual acceptance: open **Echo Code**, attach a trusted folder, select **Echo native**, enter a task and create a session. Confirm that the task arrives as a draft, choose your model and send. Check model search/favorites, keyboard and Escape behavior, reasoning choices on a supported model, the file/session view, and ordinary Chat. External runtime rows must remain unavailable; they must not fall back to native execution or start an agent process. Saved themes should remain selected. No Codex/Claude login, ACP compatibility or model access is established by this PR.
+
+## 11.10.5 UI refinement
+
+The owner's two rounds of annotated screenshots identified inconsistent empty/filled/voice surfaces, the duplicate sidebar brand, provider-letter clutter, an oversized runtime image, exposed accessible welcome text and the inner textarea focus rectangle. The shared implementation now addresses those together:
+
+- `ProjectSidebar.tsx` places a Chat/Code switch between Search and Collapse, removes the duplicate brand, and renders Chats before Agents in both rail layouts. Existing per-section resize/collapse preferences remain keyed by section.
+- `workspace.css` aligns the desktop header and sidebar black, removes interior chat separators/dock backgrounds, keeps the same darker conversation surface after sending, moves the empty composer upward and sets a one-line initial textarea. The native window startup background is black in Tauri's configuration.
+- `index.tsx` puts Research & activity in the breadcrumb's right-hand action group, rather than as a separate grid/flex child. Textarea sizing runs on input and session/surface changes. Focus indication is on the composer boundary instead of an inner white rectangle.
+- `WelcomeTypewriter.tsx` types, pauses and erases three descriptions, then loops. It cleans up timers, follows changes to reduced-motion preference and keeps the full accessible description visually clipped even if presentation styles load late.
+- `ConnectedModelBrowser.tsx` uses the existing authenticated provider catalog endpoints on popup open. Only results explicitly reporting `reachable: true` enter the combined Local/API list; an explicitly ready in-process GGUF model remains selectable without an HTTP catalog. Reads never switch providers or run inference. Choosing a row changes provider/model together through the existing settings hook. Favorites stay provider-qualified; keyboard highlight is tied to a model identity so arriving provider results do not move an active choice. The existing LM Studio-only restriction still filters available catalog requests. Unavailable catalogs belong in Configure providers.
+- `RuntimeMark.tsx` bounds the image dimensions in markup and styles. Echo uses the existing logo. OpenAI/Codex and Claude SVGs are brand assets from the pinned T3 snapshot, with its MIT notice retained under `public/runtime-marks/NOTICE.txt`. No T3 runtime executable code is added; brand marks imply neither affiliation nor runtime availability.
+- `VoiceStage.tsx` centers the avatar and normal Listen/Pause/Back controls without decorative status/transcript text. `ChatThread.tsx` restores the full transcript when leaving voice and still renders pending approvals in voice. Actual voice errors retain an alert and settings recovery action.
+
+The release notes and visual review are [11.10.5](../releases/v11.10.5.md) and [its paired report](../../artifacts/releases/v11.10.5.html). Current verification is recorded separately from the original implementation and package baseline in [the verification record](echo-code-verification.json).
+
+UI screenshots under `artifacts/media/echo-code/ui-11.10.5/` render the real desktop React components with a mocked native bridge and deterministic API responses. The microphone is synthetic. These establish layout and client interactions, not installed WebView2/native frame acceptance, real audio, cloud credentials, model inference or external agent execution. Native runtime launch restrictions and provider permissions are unchanged. A signed 11.10.5 build still needs the owner's signing-key password locally; install/test it before explicitly publishing.

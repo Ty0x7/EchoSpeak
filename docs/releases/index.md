@@ -2,9 +2,9 @@
 
 This collection presents every existing versioned note in `docs/releases/v*.md`
 as a complementary HTML report in `artifacts/releases/`. It currently covers
-35 documented updates from 10.0.0 through 11.10.3. Earlier release notes remain
-unchanged; the new 11.10.3 note records computer control that notices it's stuck,
-skills Echo can draft, your .echospeak folder and This PC terminal parity.
+37 documented updates from 10.0.0 through 11.10.5. Earlier release notes remain
+unchanged; the new 11.10.5 note records the screenshot-directed Chat, model picker, composer
+and voice UI refinements and the separate build/test/publish steps.
 The atlas is a source-history presentation, not evidence of installer publication.
 
 Each page includes a curated visual narrative, a conceptual diagram, concise
