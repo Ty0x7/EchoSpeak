@@ -1,6 +1,6 @@
 [package]
 name = "echospeak-desktop"
-version = "11.10.7"
+version = "11.10.8"
 description = "EchoSpeak Windows desktop host"
 authors = ["EchoSpeak Project"]
 edition = "2021"

@@ -14,6 +14,8 @@ first and proposes a small plan before more feature work.
 
 No paid or live model was called, no message was sent, and no account or system setting was changed.
 
+> **Implementation status:** the 11.10.8 hotfix (`claude/reliability-11108`) addresses R0–R10, R12 and R17; see [§13](#13-implementation-status-11108). The findings below are kept as found.
+
 ## 1. Verified state
 
 | Item | Checked |
@@ -276,3 +278,48 @@ Proposed order, without a redesign:
 - [Codex app-server protocol](https://learn.chatgpt.com/docs/app-server)
 - [ACP v1 overview](https://agentclientprotocol.com/protocol/v1/overview)
 - Earlier records reconciled: [multi-agent-review.md](multi-agent-review.md), [echo-code.md](echo-code.md), [model-ecosystem.md](model-ecosystem.md), [computer-control-2026-10-25.md](computer-control-2026-10-25.md), [security-audit-2026-10-25.md](security-audit-2026-10-25.md), [TESTING_GUIDE.md](../TESTING_GUIDE.md).
+
+## 13. Implementation status (11.10.8)
+
+Branch `claude/reliability-11108`, prepared as the source hotfix 11.10.8. Each fix was made at
+its source, and the review tests became plain tests once fixed. **Test** means a deterministic
+test in the repository; live and installed behavior is still **Owner**.
+
+| ID | Status | What changed | Evidence |
+|---|---|---|---|
+| R0 | Fixed | The full suite is green: 1447 passed, 22 skipped, no expected failures. See below for the three "order-dependent" failures. | Test (full `pytest`) |
+| R1 | Fixed | `uncertain_after(exc)`: argument, lookup, permission and file-existence errors are rejections before any effect. Other exceptions stay uncertain. A computer batch cancelled after a step started raises `InterruptedError` with the count. | Test |
+| R2 | Fixed | A held resource returns `Not run: …` as a refused tool result, naming the resource, reason, holding work and where to reconcile it. Resources are `desktop`, `project:<id>` or `session:<id>`. | Test |
+| R3 | Fixed | A background process holds its resource against *other* work only. An exited process is released when the next conflict is checked, and work can complete while its process runs. | Test |
+| R4 | Fixed | No work record from keywords: chat work starts at the first state-changing tool. `needs_action` judges per sentence and ignores questions. Interactive replies skip the outbox row. | Test |
+| R5 | Fixed | `looks_failed()`: about 40 failure prefixes, including `❌`, plus `[TAG] ok=false`, `exitcode=N status=fail` and not-found lines. A rescan left 11 legitimate empty or partial results. | Test |
+| R6 | Fixed | Spec hidden imports for googleapiclient (Calendar discovery document only, not 97 MB), google_auth_oauthlib, google.oauth2, github and notion_client. The packaged `--self-check` imports them. | Test; packaged self-check |
+| R7 | Fixed | Your name goes into "Who you're talking to". Remember conversations gates `chat_search` and past-chat recall. | Test |
+| R8 | Fixed (narrowed) | The judge is skipped only for a reply-room *question* already answered with no tasks, tools, repeats or empty promise. Requests ("pick a name") still go to the model judge, which catches dodged answers. | Test |
+| R9 | Fixed and published (metadata only) | 11.10.7 `latest.json` notes and release body corrected. Signatures, URLs, `pub_date` and binaries are unchanged, and both installers verify against the shipped key. The release script refuses unreleased wording. | Verified on GitHub |
+| R10 | Fixed (retention) | `prune()` runs hourly from the delivery tick and drops finished work older than 30 days with its records. Unknown, waiting, unsettled and referenced records stay. The single-document design is unchanged. | Test |
+| R12 | Fixed (local models) | `CHAT_FOCUS` for any agent on a local model: 32 → 19 schemas, about 6.8k → 5.0k tokens at default switches. Cloud is unchanged. Deferred tools load via `find_tools`. | Test; measured with the real `_build_turn` |
+| R17 | Fixed | The webhook body reaches the routine wrapped as untrusted `webhook` content, and the run is tainted. | Test |
+| R11, R13–R15 | Open | Phase 5 (Settings structure, browser runtime, DPI, Codex protocol drift). | — |
+
+**Found while fixing (all Test):**
+- **Answered questions still listed as pending.** This was the real cause of the "order-dependent" approval-restart failure. The broker listed decided items until their waiter collected them.
+- **Windows sharing violations.** About 37 settings and JSON writers did a single `os.replace`. They now share `agent/atomic_replace.py`, a bounded retry like the one in `StateStore`. This was the cause of the `test_code_sessions` and `mcp-trust` failures.
+- **Execution order within one clock tick.** Turns created in the same tick were returned out of order, so a chat branch could copy the wrong history. Ties now break by insertion order.
+- **Approval names.** The approval list's external tool names didn't match registered tools, so GitHub comments, Calendar create/delete and Notion append ran unasked in smart mode.
+- **GitHub CLI writes.** In "This PC" mode, `gh pr create` and other writes ran without asking. All `gh` writes ask now.
+
+**Phase 3, the first complete workflow:**
+- `github_create_pull_request` asks in every mode, has no session or saved grant, opens a draft by default and never merges.
+- The bundled `github-issue-to-pr` Agent Skill is imported and approved by the owner.
+- A scripted end-to-end test runs branch → fix → test → commit → push to a real local bare remote → PR through a fake GitHub client, and checks that `main` never moves.
+- Echo Code sessions are untouched: the skill tells agents not to drive Codex or Claude Code.
+
+**Remaining, by design or for later:**
+- Restart reconcile marks a running background process unknown. This is conservative.
+- The desktop is one global resource.
+- A budget or pause `check()` can still end a turn.
+- Failed deliveries retry on every tick.
+- The ledger is still one document. Retention bounds it, and per-record storage is a later change.
+- Owner acceptance A1–A4 on the installed 11.10.8 is pending.
+

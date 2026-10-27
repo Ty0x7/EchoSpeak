@@ -7,6 +7,7 @@ described separately by ``extension_packages.PackageManifest``.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import os
@@ -371,7 +372,7 @@ class ConnectionRegistry:
                 )
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp, self.path)
+            atomic_replace(temp, self.path)
         except Exception as exc:
             try:
                 temp.unlink(missing_ok=True)

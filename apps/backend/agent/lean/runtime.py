@@ -17,7 +17,8 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from agent.lean import agent_skills, capabilities, git_context, memory_quality, recall, settings, soul, summaries
-from agent.lean.job import ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, needs_action, parse_review
+from agent.lean.job import (ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, is_promise_without_action,
+                            needs_action, parse_review)
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import AgentPersona, get_persona_store
 from agent.lean.prompt import build_system_prompt
@@ -32,7 +33,7 @@ from agent import a2a_trust, home, mcp_apps
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
-from agent.lean.toolbox import BUILDER_FOCUS, DEFAULT_TOOLSETS, NativeTool, Toolbox, project_root_for_session
+from agent.lean.toolbox import BUILDER_FOCUS, CHAT_FOCUS, DEFAULT_TOOLSETS, NativeTool, Toolbox, project_root_for_session
 from agent.stopwords import keywords
 
 Emit = Callable[[dict[str, Any]], None]
@@ -61,13 +62,26 @@ _CHANNEL_NAMES = {
 }
 
 
-def caller_note(source: str, role: str) -> str:
-    """Tell the agent who is talking when the message comes from a channel, not the app."""
+def _remembers_chats() -> bool:
+    """Settings › Memory › Remember conversations: whether agents may search past chats (review R7)."""
+    from config import config
+    return bool(getattr(config, "session_memory_enabled", True))
+
+
+def _owner_name() -> str:
+    """Settings › General › Your name."""
+    from config import config
+    return str(getattr(config, "user_display_name", "") or "").strip()
+
+
+def caller_note(source: str, role: str, owner_name: str = "") -> str:
+    """Tell the agent who is talking: the owner's name (Settings › Your name), and the channel when not the app."""
     channel = _CHANNEL_NAMES.get(str(source or "").lower())
+    named = f"Your owner's name is {owner_name[:60]}." if role == "owner" and owner_name else ""
     if not channel:
-        return ""
+        return named
     if role == "owner":
-        return f"This message comes from your owner through {channel}. Keep replies short enough to read there."
+        return (named + " " if named else "") + f"This message comes from your owner through {channel}. Keep replies short enough to read there."
     who = "someone your owner trusts" if role == "trusted" else "a member of the public, not your owner"
     return (
         f"This message comes from {who}, through {channel}. You can only look things up for them "
@@ -255,7 +269,9 @@ class LeanSession:
                 raise ValueError("The work owner no longer exists")
             self._taint.extend(row.get("taint", []))
             self.work_context = coordinator.claim(row["id"], principal=self.principal_id, session_id=self.session_id, agent_id=persona.id)
-        elif self.caller_role == "owner" and (needs_action(message) or self._is_discussion() or self.source in {"routine", "responsibility"}):
+        elif self.caller_role == "owner" and (self._is_discussion() or self.source in {"routine", "responsibility"}):
+            # Plain chat gets a work record on its first state-changing tool call (LeanTurn.ensure_work),
+            # not from words in the message: questions stay out of Activity (review R4).
             self._ensure_work(persona, message)
         try:
             with work_scope(self.work_context), inference_priority(self.source in INTERACTIVE_SOURCES):
@@ -273,7 +289,8 @@ class LeanSession:
             work = coordinator.finish(self.work_context, status=status, result=result.get("response", ""), evidence=evidence,
                                       verification="observed" if checked else "unverified")
             result["work"] = work
-            if work["status"] == "completed":
+            if work["status"] == "completed" and self.source not in INTERACTIVE_SOURCES:
+                # An interactive reply already streamed into its chat; only unattended runs need an outbox row.
                 from agent.delivery import queue_result
                 queue_result(str(result.get("response", "")), ["chat"], label=persona.name, agent_id=persona.id,
                     session_id=self.session_id, key=work["id"], work_id=work["id"])
@@ -572,6 +589,12 @@ class LeanSession:
         fallback = (job.claim or {}).get("summary") or "; ".join(delivered) or _first_sentence(last_text)
         if not self._is_group():
             # One-to-one chat with hand-offs: every handed-off task is done and backed by work.
+            return {"done": True, "summary": fallback}
+        if (not self._is_discussion() and not job.subtasks and not job.evidence and not job.repeats
+                and request_text(job.goal).rstrip().endswith("?") and not needs_action(job.goal)
+                and last_text and not is_promise_without_action(last_text)):
+            # A plain question that was answered: no tasks, tools or loop for a model to check (review R8).
+            # Requests ("pick a name") still go to the judge, which catches replies that dodge them.
             return {"done": True, "summary": fallback}
         members = [_roster_line(m) for m in self._members()]
         data: dict[str, Any] = {}
@@ -999,6 +1022,9 @@ class LeanSession:
         elif not guest and self._small_builder(persona):
             # A builder on a local model sees its file, terminal and team tools; the rest load on demand.
             toolbox.focus(BUILDER_FOCUS)
+        elif not guest and self._local_model(persona):
+            # Any other agent on a local model: everyday tools up front, the rest through find_tools (R12).
+            toolbox.focus(CHAT_FOCUS)
         if "spawn_workers" in toolbox.native:
             # Workers get a subset of exactly this toolbox: never more than their lead.
             toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]
@@ -1066,8 +1092,8 @@ class LeanSession:
             memories=memories,
             # Teammates start with a clean history, not without the story so far.
             chat_summary=summaries.summary_text(self.session_id),
-            caller_note=caller_note(self.source, self.caller_role),
-            past_chats=[] if guest or persona.id != "echo" or delegated_by else self._past_chats(),
+            caller_note=caller_note(self.source, self.caller_role, _owner_name()),
+            past_chats=[] if guest or persona.id != "echo" or delegated_by or not _remembers_chats() else self._past_chats(),
             project_brief=project_brief,
             project_evidence=project_evidence,
             playbook=learned.section,
@@ -1415,14 +1441,15 @@ class LeanSession:
                 parallel_safe=True,
             ))
 
-        tools.append(NativeTool(
-            name="chat_search",
-            description="Search the words of every past conversation with the user (all chats, including group chats). "
-            "Use it when the user refers to something discussed before. For saved facts about the user, use memory_search.",
-            parameters={"type": "object", "properties": {"query": {"type": "string", "description": "A few keywords."}}, "required": ["query"]},
-            func=chat_search,
-            parallel_safe=True,
-        ))
+        if _remembers_chats():
+            tools.append(NativeTool(
+                name="chat_search",
+                description="Search the words of every past conversation with the user (all chats, including group chats). "
+                "Use it when the user refers to something discussed before. For saved facts about the user, use memory_search.",
+                parameters={"type": "object", "properties": {"query": {"type": "string", "description": "A few keywords."}}, "required": ["query"]},
+                func=chat_search,
+                parallel_safe=True,
+            ))
 
         if allow_handoff and depth < MAX_DELEGATION_DEPTH:
             candidates = self._members() if self.room else self.personas.list()
@@ -1606,6 +1633,10 @@ class LeanSession:
         """A builder (Glados, or any agent titled Builder) running on a local model."""
         if persona.id != "forge" and "builder" not in persona.title.casefold():
             return False
+        return LeanSession._local_model(self, persona)
+
+    def _local_model(self, persona: AgentPersona) -> bool:
+        """Whether this agent runs on a local model (not a cloud provider)."""
         try:
             from agent.cloud_providers import CLOUD_PROVIDERS
 

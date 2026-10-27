@@ -297,17 +297,24 @@ def test_event_responsibility_uses_authenticated_stable_occurrences(env, monkeyp
     assert len(store.coordination.view("attempts")) == 1
 
 
-def test_background_process_retains_resource_until_exit_is_observed(env):
+def test_background_process_retains_resource_against_other_work_until_exit_is_observed(env):
+    """A running process holds its resource against *other* work; its own work carries on
+    (review R3: "start the dev server, then fix App.tsx" was impossible in one request)."""
     store, _, _ = env
     coord = store.coordination
-    row = coord.create(objective="Run tests", agent_id="echo", tools=["terminal", "process_output"])
+    row = coord.create(objective="Run tests", agent_id="echo", project_id="project", tools=["terminal", "process_output"])
     ctx = coord.claim(row["id"])
     action = coord.action_intent(ctx, "start", "terminal", {"command": "tests"}, read_only=False)
     coord.action_result(action, ok=True, outcome="ok", effects=[{"kind": "process", "running": "p1"}])
-    with pytest.raises(PermissionError, match="Resource"):
-        coord.action_intent(ctx, "again", "terminal", {"command": "other"}, read_only=False)
+    again = coord.action_intent(ctx, "again", "terminal", {"command": "other"}, read_only=False)  # its own work: allowed
+    coord.action_result(again, ok=True, outcome="ok", uncertain=False)
+    other = coord.claim(coord.create(objective="Edit", agent_id="forge", project_id="project", tools=["terminal"])["id"])
+    with pytest.raises(PermissionError, match="still running"):
+        coord.action_intent(other, "elsewhere", "terminal", {"command": "build"}, read_only=False)
     coord.process_observed(ctx, "p1", success=True)
-    coord.action_intent(ctx, "after-exit", "terminal", {"command": "other"}, read_only=False)
+    coord.action_intent(other, "after-exit", "terminal", {"command": "build"}, read_only=False)
+    # The work itself finishes; a long-running process doesn't keep it waiting.
+    assert coord.finish(ctx, status="completed")["status"] == "completed"
 
 
 def test_loop_returns_previous_effect_as_refusal_without_running_it(env):
@@ -345,3 +352,23 @@ def test_specialist_memory_save_cannot_overwrite_account_memory(env):
     tool = next(t for t in session._native_tools(roster.get("scout"), 0) if t.name == "memory_save")
     tool.func({"fact": "The project uses Python.", "key": "language"})
     assert captured[0]["scope"] == "session" and captured[0]["semantic_key"] == "agent:scout:language"
+
+
+def test_chat_question_creates_no_work_but_a_real_write_does(env, monkeypatch):
+    """Review R4: a work record comes from a state-changing tool call, not from words in the message."""
+    store, _, _ = env
+    native = runtime.LeanSession._native_tools
+    writes = []
+    monkeypatch.setattr(runtime.LeanSession, "_native_tools", lambda self, *a, **k: native(self, *a, **k) + [
+        NativeTool("fixture_read", "read", {"type": "object", "properties": {}}, lambda _: "Lima", parallel_safe=True, always=True),
+        NativeTool("fixture_write", "write", {"type": "object", "properties": {}}, lambda _: writes.append(1) or "saved", always=True)])
+    monkeypatch.setattr(loop, "tool_needs_approval", lambda entry, name, args: (False, ""))
+    install_clients(monkeypatch, {"echo": [ModelTurn(tool_calls=[ToolCall("r1", "fixture_read", "{}")]), ModelTurn(content="Lima.")]})
+    asked = runtime.run_lean_query(SimpleNamespace(memory=None), message="Can you add up how many letters are in Lima?",
+        session_id="ask", request_id="request-ask", emit=lambda _: None, cancel=threading.Event())
+    assert "work" not in asked and store.coordination.view("works") == []
+    install_clients(monkeypatch, {"echo": [ModelTurn(tool_calls=[ToolCall("w1", "fixture_write", "{}")]), ModelTurn(content="Saved.")]})
+    wrote = runtime.run_lean_query(SimpleNamespace(memory=None), message="What do you think? Keep it.",
+        session_id="write", request_id="request-write", emit=lambda _: None, cancel=threading.Event())
+    assert writes == [1] and wrote["work"]["status"] == "completed"
+    assert store.coordination.view("deliveries") == []  # the reply streamed into the chat; no outbox row

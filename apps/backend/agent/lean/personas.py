@@ -5,6 +5,7 @@ Echo is the built-in default and keeps using SOUL.md as its soul.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import re
@@ -181,7 +182,7 @@ class PersonaStore:
         payload = {"version": _STORE_VERSION, "agents": [agent.model_dump() for agent in self._agents.values()]}
         temp = self.path.with_suffix(".tmp")
         temp.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
-        temp.replace(self.path)
+        atomic_replace(temp, self.path)
 
     def list(self) -> list[AgentPersona]:
         with self._lock:

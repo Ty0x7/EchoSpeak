@@ -17,6 +17,7 @@ once, the first time it runs, so upgrading doesn't switch off working setups.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import hashlib
 import json
@@ -45,7 +46,7 @@ def _save(data: dict[str, Any]) -> None:
     path = _path()
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
+    atomic_replace(tmp, path)
 
 
 def _sha(value: Any) -> str:

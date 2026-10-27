@@ -14,6 +14,7 @@ Project and Session for every run and blocked all external delivery.
 
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from typing import Any, Callable, Optional
@@ -39,8 +40,10 @@ def deliver(text: str, channels: list[str], label: str, *, session_id: str = "",
     with the window in the tray). Discord and Telegram go to the owner.
     """
     from agent.delivery import queue_result
+    # The outbox dedupes by key. Without a caller's ref every call is its own notice: keying
+    # by the text silently dropped a repeated one ("No new email" on the second day).
     return queue_result(text, channels, label=label, agent_id="echo", session_id=session_id,
-                        key=ref or f"notice:{session_id}:{label}:{text}")
+                        key=ref or f"notice:{uuid.uuid4().hex}")
 
 
 def _ensure_chat(title: str) -> str:
@@ -62,6 +65,7 @@ def run_automation(
     project_id: str = "",
     budget: Optional[dict] = None,
     responsibility_id: str = "",
+    untrusted_sources: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     from agent.state import get_state_store
     from agent.lean.personas import get_persona_store
@@ -75,7 +79,8 @@ def run_automation(
     work = store.coordination.create(objective=AUTOMATION_PREFIX.format(name=name) + prompt,
         agent_id=owner.id, session_id=session_id, project_id=project_id,
         key=occurrence or f"automation:{uuid.uuid4().hex}", budget=budget,
-        provenance={"source": source, "occurrence": occurrence, "responsibility_id": responsibility_id})
+        provenance={"source": source, "occurrence": occurrence, "responsibility_id": responsibility_id},
+        taint=list(untrusted_sources or []))
     if work["status"] not in {"ready", "completed", "failed", "cancelled"}:
         return {"deferred": True, "work_id": work["id"], "status": work["status"]}
     if work["status"] in {"completed", "failed", "cancelled"}:
@@ -93,6 +98,7 @@ def run_automation(
         source=source,
         persona_id=agent_id,
         work_id=work["id"],
+        untrusted_sources=list(untrusted_sources or []),
     )
     text = str(result.get("response") or "").strip()
     state = result.get("work", {}).get("status", "failed")
@@ -132,6 +138,15 @@ def routine_runner(agent_factory: AgentFactory) -> Callable[[Any], dict[str, Any
         if stop.paused():
             return {"deferred": True}
         query = str(routine.action_config.get("query") or routine.action_config.get("message") or routine.description or routine.name).strip()
+        untrusted: list[str] = []
+        if "webhook_body" in routine.action_config:
+            # The event's data: whoever holds the webhook secret wrote it, so it is outside content.
+            # The agent reads it as information, and the run is tainted (Rule of Two) like a web page.
+            from agent.lean.policy import wrap_untrusted
+
+            body = json.dumps(routine.action_config["webhook_body"], ensure_ascii=False, indent=2)[:10_000]
+            query += "\n\nThe webhook that started this run sent this data:\n" + wrap_untrusted("webhook", body)
+            untrusted.append("webhook")
         session_id = str(getattr(routine, "session_id", "") or "").strip()
         if not session_id or not _thread_exists(session_id):
             session_id = _ensure_chat(f"Routine · {routine.name}")
@@ -147,6 +162,7 @@ def routine_runner(agent_factory: AgentFactory) -> Callable[[Any], dict[str, Any
                 occurrence=f"routine:{routine.id}:{(routine.metadata or {}).get('event_id') or routine.next_run or routine.last_run or 'manual'}",
                 project_id=str(routine.project_id or ""), budget=(routine.metadata or {}).get("budget"),
                 responsibility_id=str((routine.metadata or {}).get("responsibility_id", "")),
+                untrusted_sources=untrusted,
             )
         except Exception as exc:
             logger.exception("Routine {} failed", routine.name)

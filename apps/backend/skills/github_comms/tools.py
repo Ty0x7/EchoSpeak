@@ -80,6 +80,15 @@ class GHGetPRArgs(BaseModel):
     repo: Optional[str] = Field(default=None, description="Repo in 'owner/name' format")
 
 
+class GHCreatePRArgs(BaseModel):
+    title: str = Field(description="Pull request title")
+    head: str = Field(description="The pushed branch with the changes, e.g. 'fix/issue-12'")
+    base: str = Field(default="", description="Branch to merge into later. Defaults to the repo's default branch.")
+    body: Optional[str] = Field(default=None, description="What changed, why, how it was tested, and 'Fixes #N' for the issue")
+    draft: bool = Field(default=True, description="Open as a draft (default) so the owner reviews before anyone merges")
+    repo: Optional[str] = Field(default=None, description="Repo in 'owner/name' format")
+
+
 class GHCommentIssueArgs(BaseModel):
     number: int = Field(description="Issue or PR number")
     comment: str = Field(description="Comment body text")
@@ -319,3 +328,42 @@ def github_comment_issue(
     except Exception as exc:
         logger.error(f"github_comment_issue failed: {exc}")
         return f"❌ Failed to comment on #{number}: {exc}"
+
+
+# ── github_create_pull_request ──────────────────────────────────────
+
+@ToolRegistry.register(
+    name="github_create_pull_request",
+    description="Open a pull request from an already pushed branch. Asks the owner first, every time. "
+    "It never merges: merging stays the owner's decision on GitHub.",
+    category="github",
+    is_action=True,
+    risk_level="moderate",
+)
+@tool(args_schema=GHCreatePRArgs)
+def github_create_pull_request(
+    title: str,
+    head: str,
+    base: str = "",
+    body: Optional[str] = None,
+    draft: bool = True,
+    repo: Optional[str] = None,
+) -> str:
+    """Open a pull request; never merges."""
+    head, base = head.strip(), base.strip()
+    if not title.strip() or not head:
+        return "❌ Failed to create pull request: a title and the pushed head branch are required"
+    try:
+        r = _resolve_repo(repo)
+        base = base or r.default_branch
+        if head == base:
+            return f"❌ Failed to create pull request: the changes must be on their own branch, not {base}"
+        pr = r.create_pull(title=title.strip(), body=(body or "").strip(), head=head, base=base, draft=bool(draft))
+        return (
+            f"✅ Pull request opened: **#{pr.number}: {pr.title}**{' (draft)' if draft else ''}\n"
+            f"- URL: {pr.html_url}\n"
+            f"- {head} → {base} in {r.full_name}. Not merged: review and merge it on GitHub when you're ready."
+        )
+    except Exception as exc:
+        logger.error(f"github_create_pull_request failed: {exc}")
+        return f"❌ Failed to create pull request: {exc}"

@@ -9,6 +9,7 @@ agent can't tell the user "I've updated my soul" when nothing changed.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import os
 import tempfile
@@ -64,7 +65,7 @@ def write_atomic(path: Path, text: str) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp, path)
+        atomic_replace(temp, path)
     except BaseException:
         try:
             os.unlink(temp)

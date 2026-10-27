@@ -7,6 +7,7 @@ The summary is updated in the background after a turn, a few turns at a time.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import re
@@ -48,7 +49,7 @@ def _save(session_id: str, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_suffix(".tmp")
     temp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    temp.replace(path)
+    atomic_replace(temp, path)
 
 
 def _turn_lines(turn: dict[str, Any]) -> list[str]:

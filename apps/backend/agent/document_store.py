@@ -4,6 +4,7 @@ Handles document ingestion, chunking, FAISS indexing, and retrieval.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import hashlib
@@ -405,7 +406,7 @@ class DocumentStore:
                 handle.write(json.dumps(self._docs, indent=2, ensure_ascii=False) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp, self.meta_path)
+            atomic_replace(temp, self.meta_path)
         except Exception as exc:
             temp.unlink(missing_ok=True)
             raise RuntimeError(f"Failed to atomically persist document metadata: {exc}") from exc
@@ -450,7 +451,7 @@ class DocumentStore:
                 handle.write(str(text))
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp, path)
+            atomic_replace(temp, path)
         except Exception:
             temp.unlink(missing_ok=True)
             raise

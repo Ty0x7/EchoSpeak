@@ -945,7 +945,7 @@ class LeanTurn:
         broker = get_approval_broker()
         policy_reason = self._policy_reasons.get(call.id, "")
         # Only screen-guided desktop control can be allowed for a whole chat; other outside content asks every time.
-        grantable = not policy_reason or self._policy_rules.get(call.id) == "screen_control"
+        grantable = (not policy_reason or self._policy_rules.get(call.id) == "screen_control") and name not in approvals.ALWAYS_ASK_TOOLS
         if policy_reason and grantable and broker.granted(self.session_id, policy.grant_name(name)):
             policy.audit(policy.Decision("allow", policy_reason, "screen_control"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome="allowed for this chat")
@@ -953,7 +953,7 @@ class LeanTurn:
         if policy_reason:
             # Rule of Two: always ask, even with "always allow" grants or approvals off.
             needs, reason = True, policy_reason
-        elif not needs or broker.granted(self.session_id, policy.grant_name(name)):
+        elif not needs or (grantable and broker.granted(self.session_id, policy.grant_name(name))):
             return True, "", ""
         scope = approvals.scope_for(name, args, reason, self._policy_rules.get(call.id, ""))
         # Grants were made on an approval card in the app and cover chats there. Channels
@@ -1119,7 +1119,12 @@ class LeanTurn:
             previous = context.coordinator.previous_effect(context, name, args) if context and not self.toolbox.is_parallel_safe(name) else None
             if previous:
                 return ToolResult(False, f"Not run: this exact action already completed in attempt {previous['attempt_id']}. Inspect its current result; do not repeat the effect. Recorded evidence: {previous.get('effects', [])}", 0, outcome="refused")
-            action_id = context.coordinator.action_intent(context, call.id, name, args, read_only=self.toolbox.is_parallel_safe(name)) if context else ""
+            try:
+                action_id = context.coordinator.action_intent(context, call.id, name, args, read_only=self.toolbox.is_parallel_safe(name)) if context else ""
+            except PermissionError as exc:
+                # The work ledger refused this action (a held resource, the work's grant or budget). That is
+                # a result the agent can read and explain, not a crash of the whole turn (review R2).
+                return ToolResult(False, f"Not run: {exc}", 0, outcome="refused")
             try:
                 with work_scope(context):
                     result = self.toolbox.run(name, args)

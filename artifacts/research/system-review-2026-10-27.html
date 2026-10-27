@@ -8,11 +8,22 @@
 @media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
 </style></head>
 <body><main>
-<header><h1>EchoSpeak / System review</h1><p>27 October 2026 · main 1a8f4c3 = published v11.10.7 · ordinary Echo Chat first · technical record: docs/research/system-review-2026-10-27.md</p></header>
-<nav aria-label="Report sections"><a href="#chat">Echo Chat path</a><a href="#map">Feature map</a><a href="#groups">Group chats</a><a href="#lock">Work-ledger lock</a><a href="#findings">Findings</a><a href="#integrations">Integrations</a><a href="#windows">Windows control</a><a href="#runtimes">Codex · Claude · ACP</a><a href="#settings">Settings</a><a href="#plan">Plan</a><a href="#check">Checklist</a></nav>
+<header><h1>EchoSpeak / System review</h1><p>27 October 2026 · main 1a8f4c3 = published v11.10.7 · fixes prepared as 11.10.8 on claude/reliability-11108 · technical record: docs/research/system-review-2026-10-27.md</p></header>
+<nav aria-label="Report sections"><a href="#status">11.10.8 status</a><a href="#chat">Echo Chat path</a><a href="#map">Feature map</a><a href="#groups">Group chats</a><a href="#lock">Work-ledger lock</a><a href="#findings">Findings</a><a href="#integrations">Integrations</a><a href="#windows">Windows control</a><a href="#runtimes">Codex · Claude · ACP</a><a href="#settings">Settings</a><a href="#plan">Plan</a><a href="#check">Checklist</a></nav>
 <p class="lead">One harness, many identities.<br>Make its outcomes truthful before adding more.</p>
 <p class="note"><strong>Evidence:</strong> source reading at main, plus deterministic tests added in this review (14 expected failures that reproduce the open findings), fresh web, desktop and Rust runs, and official docs checked on 27 October. No live model, installed-app run, account or message was used. Items marked <em>owner</em> need your acceptance.</p>
-<div class="legend"><span class="badge current">Holds today</span><span class="badge documented">Defect (reproduced)</span><span class="badge proposed">Proposed</span></div>
+<div class="legend"><span class="badge current">Holds today / fixed in 11.10.8</span><span class="badge documented">Defect (reproduced at 11.10.7)</span><span class="badge proposed">Proposed / open</span></div>
+
+<section id="status"><h2>11.10.8: what changed</h2>
+<p class="note"><strong>Hotfix, source only.</strong> Every fix is at its source, the review tests are plain tests now, and the full backend suite is green (1447 passed, no expected failures). The diagrams below show the defects as found at 11.10.7. Live and installed behavior still needs your acceptance.</p>
+<div class="grid3">
+<div class="box"><h3 class="current">Truthful outcomes · R1 R2 R3 R5 R17</h3><p>Rejected arguments are plain failures. A held resource is a readable “Not run” result, not a crashed turn. A task’s own dev server no longer blocks it. About 40 failure shapes (including every skill’s ❌) count as failures. Webhook bodies arrive as outside content.</p></div>
+<div class="box"><h3 class="current">Lighter chat · R4 R7 R8 R10 R12</h3><p>Questions open no work. A plain answered group question skips the judge; requests still get it. Local models get 19 everyday tool schemas instead of 32 (about 6.8k → 5.0k tokens). Your name and Remember conversations work. Finished history ages out after 30 days.</p></div>
+<div class="box"><h3 class="current">Issue → fix → PR · R6</h3><p>A new PR tool that asks every time and never merges, a bundled step-by-step skill, <code>gh</code> writes that ask, and the skill libraries in the installer. Tested end to end against a local bare remote with a fake GitHub client.</p></div>
+<div class="box"><h3 class="current">Found while fixing</h3><p>Answered questions listed as pending. Windows sharing violations across about 37 writers, now with one shared retry. Same-tick chat turns out of order. Approval names that matched no tool, so GitHub comments, Calendar and Notion writes ran unasked.</p></div>
+<div class="box"><h3 class="current">Release text · R9</h3><p>The 11.10.7 update text and release page are corrected; signatures, links and binaries are unchanged and re-verified. The release script now refuses unreleased wording.</p></div>
+<div class="box"><h3 class="proposed">Still open</h3><p>R11 and R13–R15 (Settings layout, browser runtime, DPI, Codex drift). After a restart a running process is marked unknown. The desktop is one resource, the ledger is still one document, and failed deliveries retry every tick.</p></div>
+</div></section>
 
 <section id="chat"><h2>What happens when you ask Echo something</h2>
 <div class="diagram" role="img" aria-label="A chat message goes through work-record creation, context, model and tool loop with policy and the work ledger, checks, persistence and background follow-ups. Defects sit at the work-record and ledger steps.">
@@ -56,19 +67,19 @@
 </div></section>
 
 <section id="findings"><h2>Findings</h2>
-<div class="comparison"><table><thead><tr><th>ID</th><th>Priority · type</th><th>What and why it matters</th><th>Evidence</th></tr></thead><tbody>
-<tr><td>R0</td><td class="documented">P0 · process</td><td>The full backend suite on main isn’t green: 5 deterministic and 3 order-dependent failures (#99 verified 17 files)</td><td>full pytest</td></tr>
-<tr><td>R17</td><td class="documented">P1 · bug</td><td>Signed webhooks run the routine but drop the payload (in every version back to 11.10.1)</td><td>source + history</td></tr>
-<tr><td>R1–R3</td><td class="documented">P0 · bug</td><td>Argument errors become “uncertain”; global resource locks fail later turns; background processes block their own work</td><td>3 tests</td></tr>
-<tr><td>R5</td><td class="documented">P0 · bug</td><td>93 failure messages in 36 legacy tools count as success (“Email send failed…”, “Discord bot client not available”)</td><td>static scan + 5 tests</td></tr>
-<tr><td>R4</td><td class="documented">P1 · bug/UX</td><td>“What should I make for dinner?” opens durable work</td><td>3 tests</td></tr>
-<tr><td>R6</td><td class="documented">P1 · missing</td><td>GitHub, Calendar and Notion skill libraries aren’t in the installer; the tools fail when called</td><td>build module table + test</td></tr>
-<tr><td>R7</td><td class="documented">P1 · UX</td><td>Your name and Remember conversations save but do nothing</td><td>test</td></tr>
-<tr><td>R8</td><td class="documented">P1 · arch</td><td>Every group message calls the judge model; routing allows 1,200 tokens for a name</td><td>test</td></tr>
-<tr><td>R9</td><td>P1 · UX</td><td>The in-app 11.10.7 update text says it “wasn’t published”</td><td>latest.json</td></tr>
-<tr><td>R10</td><td>P1 · arch</td><td>coordination.json is rewritten in full on every transaction and never pruned</td><td>source</td></tr>
-<tr><td>R12</td><td>P1 · arch</td><td>All tool schemas on every local-model chat</td><td>measured</td></tr>
-<tr><td>R11 · R13–R15</td><td>P2</td><td>Settings placement; Chromium missing for browse_task; DPI untested; Codex app-server labelled experimental</td><td>source · docs · owner</td></tr>
+<div class="comparison"><table><thead><tr><th>ID</th><th>Priority · type</th><th>What and why it matters</th><th>Evidence</th><th>11.10.8</th></tr></thead><tbody>
+<tr><td>R0</td><td class="documented">P0 · process</td><td>The full backend suite on main isn’t green: 5 deterministic and 3 order-dependent failures (#99 verified 17 files)</td><td>full pytest</td><td class="current">fixed</td></tr>
+<tr><td>R17</td><td class="documented">P1 · bug</td><td>Signed webhooks run the routine but drop the payload (in every version back to 11.10.1)</td><td>source + history</td><td class="current">fixed</td></tr>
+<tr><td>R1–R3</td><td class="documented">P0 · bug</td><td>Argument errors become “uncertain”; global resource locks fail later turns; background processes block their own work</td><td>3 tests</td><td class="current">fixed</td></tr>
+<tr><td>R5</td><td class="documented">P0 · bug</td><td>93 failure messages in 36 legacy tools count as success (“Email send failed…”, “Discord bot client not available”)</td><td>static scan + 5 tests</td><td class="current">fixed</td></tr>
+<tr><td>R4</td><td class="documented">P1 · bug/UX</td><td>“What should I make for dinner?” opens durable work</td><td>3 tests</td><td class="current">fixed</td></tr>
+<tr><td>R6</td><td class="documented">P1 · missing</td><td>GitHub, Calendar and Notion skill libraries aren’t in the installer; the tools fail when called</td><td>build module table + test</td><td class="current">fixed</td></tr>
+<tr><td>R7</td><td class="documented">P1 · UX</td><td>Your name and Remember conversations save but do nothing</td><td>test</td><td class="current">fixed</td></tr>
+<tr><td>R8</td><td class="documented">P1 · arch</td><td>Every group message calls the judge model; routing allows 1,200 tokens for a name</td><td>test</td><td class="current">narrowed</td></tr>
+<tr><td>R9</td><td>P1 · UX</td><td>The in-app 11.10.7 update text says it “wasn’t published”</td><td>latest.json</td><td class="current">fixed</td></tr>
+<tr><td>R10</td><td>P1 · arch</td><td>coordination.json is rewritten in full on every transaction and never pruned</td><td>source</td><td class="current">retention</td></tr>
+<tr><td>R12</td><td>P1 · arch</td><td>All tool schemas on every local-model chat</td><td>measured</td><td class="current">local models</td></tr>
+<tr><td>R11 · R13–R15</td><td>P2</td><td>Settings placement; Chromium missing for browse_task; DPI untested; Codex app-server labelled experimental</td><td>source · docs · owner</td><td class="proposed">open</td></tr>
 </tbody></table></div></section>
 
 <section id="integrations"><h2>What exists for practical work</h2>
@@ -111,16 +122,17 @@
 <div class="phase"><b>Controller v2 · settings · documents</b><span>§7, §9, DOCX/XLSX/PDF with render-and-verify</span></div>
 </div></section>
 
-<section id="check"><h2>Owner checklist (installed 11.10.7, your model)</h2>
+<section id="check"><h2>Owner checklist (install 11.10.8, your model)</h2>
 <div class="comparison"><table><thead><tr><th>#</th><th>Try</th><th>Expect</th></tr></thead><tbody>
 <tr><td>A1</td><td>“What’s the capital of Peru?”</td><td>An answer, no tools, no new work row</td></tr>
-<tr><td>A2</td><td>“What should I make for dinner?”</td><td><span class="documented">Today: a work row appears</span></td></tr>
+<tr><td>A2</td><td>“What should I make for dinner?”</td><td>11.10.8: no work row (11.10.7 added one)</td></tr>
 <tr><td>A3</td><td>“Save a note test.md that says hi”</td><td>Tool done, the file exists, one work row</td></tr>
-<tr><td>A4</td><td>“Click at 9999, 9999”, then in a new chat “take a screenshot and click Start”</td><td><span class="documented">Today the second turn may fail: Resource is held</span></td></tr>
-<tr><td>A5</td><td>Group: “What’s your favourite movie?”</td><td>Short answers; note the time (judge call)</td></tr>
-<tr><td>B1 · C1</td><td>Your name = Ty → “What’s my name?”; GitHub skill → “list my open issues”</td><td><span class="documented">Today: not known; No module named 'github'</span></td></tr>
+<tr><td>A4</td><td>“Click at 9999, 9999”, then in a new chat “take a screenshot and click Start”</td><td>11.10.8: the first is a plain failure, the second runs (11.10.7 could fail the turn)</td></tr>
+<tr><td>A5</td><td>Group: “What’s your favourite movie?”</td><td>Short answers, no extra judge call</td></tr>
+<tr><td>B1 · C1</td><td>Your name = Ty → “What’s my name?”; GitHub skill → “list my open issues”</td><td>11.10.8: Echo knows your name; issues listed (needs a GitHub token)</td></tr>
+<tr><td>C2</td><td>On a test repo: “Fix issue #N and open a PR”</td><td>A branch, tests run, push and PR each ask; a draft PR, never merged</td></tr>
 <tr><td>D1 · D2</td><td>A Codex task with a denial, stop and resume; a click at 150 % scaling</td><td>Record what happens</td></tr>
 </tbody></table></div></section>
 
-<footer>Verification this review: backend full suite on main 1397 passed, 7 failed, 1 error (R0) · web 192 tests + typecheck · desktop contracts 16 · Rust 4 · new review tests 2 passed, 14 expected failures. No live model, account, message or install. Older records got dated status notes; their history is unchanged.</footer>
+<footer>11.10.8 verification: backend full suite 1447 passed, 22 skipped, 0 failed · web 192 · desktop contracts 16 · Rust 4 · packaged sidecar self-check. Review-time verification: backend full suite on main 1397 passed, 7 failed, 1 error (R0) · web 192 tests + typecheck · desktop contracts 16 · Rust 4 · new review tests 2 passed, 14 expected failures. No live model, account, message or install. Older records got dated status notes; their history is unchanged.</footer>
 </main></body></html>

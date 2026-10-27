@@ -2009,7 +2009,9 @@ class StateStore:
             items = list(self._executions.values())
         if key:
             items = [item for item in items if item.thread_id == key]
-        items.sort(key=lambda item: item.created_at, reverse=True)
+        # Newest first. Turns stamped in the same clock tick keep the order they were added in.
+        order = {id(item): index for index, item in enumerate(items)}
+        items.sort(key=lambda item: (item.created_at, order[id(item)]), reverse=True)
         return [ExecutionRecord(**item.model_dump()) for item in items[:limit]]
 
     def create_approval(self, **payload: Any) -> ApprovalRecord:

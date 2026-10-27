@@ -87,12 +87,10 @@ async def webhook_trigger(path: str, request: Request):
     except Exception:
         body = {}
     
-    # Merge body into action config for the routine
-    action_config = {**routine.action_config, "webhook_body": body}
-    
-    # Run the routine
+    # Run the routine with the body as this occurrence's data. The same body is the same event,
+    # so a re-sent webhook doesn't run the routine twice.
     from agent.coordination import digest
-    manager.run_routine(routine.id, event_id="signed-webhook:" + digest([routine.id, body]))
+    manager.run_routine(routine.id, event_id="signed-webhook:" + digest([routine.id, body]), payload=body)
     
     return {"ok": True, "triggered": routine.name}
 

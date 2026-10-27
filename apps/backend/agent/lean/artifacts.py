@@ -11,6 +11,7 @@ that adds ``sandbox="allow-scripts"`` on top.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import re
@@ -68,7 +69,7 @@ def _save(record: dict[str, Any]) -> None:
     path = _path(record["id"])
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(record, ensure_ascii=False), encoding="utf-8")
-    tmp.replace(path)
+    atomic_replace(tmp, path)
     _SUMMARY_CACHE.pop(str(path), None)
 
 

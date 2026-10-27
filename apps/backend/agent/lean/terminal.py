@@ -122,7 +122,7 @@ def docker_network() -> str:
 _WORKSPACE_DESTRUCTIVE = re.compile(
     r"(?ix)(^|[\s;&|(])(rm\s|rmdir|unlink\s|shred\s|git\s+reset\s+--hard|git\s+clean|git\s+checkout\s+--|"
     r"git\s+push|git\s+rebase|git\s+restore|git\s+branch\s+-D|git\s+stash\s+(?:drop|clear)|git\s+filter-branch|"
-    r"gh\s+(?:pr\s+(?:merge|close)|repo\s+delete|release\s+(?:create|delete)|issue\s+(?:close|delete))|"
+    r"gh\s+(?:pr|issue|release|repo|workflow|run|gist|secret|variable|label|ruleset)\s+(?!(?:view|list|status|diff|checks)\b)[a-z-]+|gh\s+api|"
     r"find\s+.*-delete|truncate\s)"
 )
 

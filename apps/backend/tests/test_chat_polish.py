@@ -54,6 +54,19 @@ def test_branch_keeps_only_prior_context_and_binding_without_authority(stores):
     assert StateStore(state.root).session_timeline(branch.thread_id)["turns"]
 
 
+def test_turns_in_the_same_clock_tick_keep_their_order(stores):
+    """Windows can stamp quick turns with the same time; a branch must still cut at the right one."""
+    state, threads, _ = stores
+    source = threads.create_thread(title="Garden plan")
+    turns = [completed_turn(state, source.thread_id, f"Prompt {i}", f"Reply {i}") for i in range(3)]
+    for turn in turns:
+        state._executions[turn.id].created_at = 1_800_000_000.0  # one clock tick for all three
+    assert [t.id for t in state.list_executions(source.thread_id)] == [t.id for t in reversed(turns)]
+    branch = branch_before_prompt(source.thread_id, execution_id=turns[1].id)
+    timeline = state.session_timeline(branch.thread_id)
+    assert [m["text"] for t in timeline["turns"] for m in t["messages"]] == ["Prompt 0", "Reply 0"]
+
+
 def test_branch_rejects_foreign_anchor_before_creating_anything(stores):
     state, threads, _ = stores
     first, second = threads.create_thread(), threads.create_thread()

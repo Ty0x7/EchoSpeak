@@ -165,3 +165,32 @@ def test_state_store_initialization_cannot_overwrite_a_replaced_authority(monkey
     monkeypatch.setattr(state, "_state_store", None)
     monkeypatch.setattr(state, "StateStore", initialize)
     assert state.get_state_store() is replacement
+
+
+def test_retention_drops_old_finished_history_but_keeps_anything_unresolved(tmp_path):
+    """Review R10: the ledger is rewritten whole on every change, so finished history must age out."""
+    coord = StateStore(tmp_path).coordination
+
+    def finished(name, *, uncertain=False, delivery=None):
+        ctx = coord.claim(coord.create(objective=name, agent_id="echo", project_id=name, tools=["file_write"])["id"])
+        action = coord.action_intent(ctx, name, "file_write", {"path": name}, read_only=False)
+        coord.action_result(action, ok=not uncertain, outcome="ok" if not uncertain else "lost receipt", uncertain=uncertain)
+        if delivery:
+            row = coord.enqueue(key=name, channel="chat", destination="s", text=name, work_id=ctx.work_id)
+            coord.delivery_state(row["id"], delivery)
+        coord.finish(ctx, status="completed")
+        return ctx.work_id
+
+    old = finished("old", delivery="accepted")
+    unknown = finished("unknown-write", uncertain=True)
+    unsettled = finished("unsettled", delivery="unknown")
+    notice = coord.enqueue(key="notice", channel="desktop", destination="s", text="reminder")
+    coord.delivery_state(notice["id"], "accepted")
+    later = time.time() + 31 * 86400
+    assert coord.prune(now=time.time()) == 0  # nothing is old yet
+    assert coord.prune(now=later) == 1
+    works = {w["id"] for w in coord.view("works")}
+    assert old not in works and {unknown, unsettled} <= works
+    assert all(a["work_id"] != old for a in coord.view("actions") + coord.view("attempts"))
+    assert {d["key"] for d in coord.view("deliveries")} == {"unsettled"}  # settled notice aged out too
+    assert coord.prune(now=later) == 0

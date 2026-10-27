@@ -6,6 +6,7 @@ side silently.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import hashlib
 import os
@@ -95,7 +96,7 @@ def _atomic_write(path: Path, text: str) -> None:
             handle.write(text)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp, path)
+        atomic_replace(temp, path)
     except Exception:
         temp.unlink(missing_ok=True)
         raise

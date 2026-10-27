@@ -386,3 +386,24 @@ def test_withdrawn_trust_stops_live_runtime_and_stop_remains_available(setup, mo
 def test_raw_blob_paths_cannot_replace_git_binding_or_use_windows_aliases(tmp_path, name):
     with pytest.raises(ValueError):
         wt.path(tmp_path, name)
+
+
+def test_session_metadata_survives_a_brief_windows_sharing_violation(tmp_path, monkeypatch):
+    """A reader or scanner holding session.json for a moment must not fail the session (seen as WinError 5)."""
+    target = tmp_path / "session.json"
+    target.write_text("{}", encoding="utf-8")
+    from agent import atomic_replace
+    real, calls = os.replace, []
+
+    def flaky(source, target):
+        calls.append(source)
+        if len(calls) == 1:
+            raise PermissionError(5, "Access is denied")
+        return real(source, target)
+
+    monkeypatch.setattr(atomic_replace.os, "replace", flaky)
+    monkeypatch.setattr(atomic_replace, "WINDOWS", True)
+    monkeypatch.setattr(atomic_replace.time, "sleep", lambda _: None)
+    wt.atomic_json(target, {"state": "running"})
+    assert json.loads(target.read_text(encoding="utf-8")) == {"state": "running"} and len(calls) == 2
+    assert [p.name for p in tmp_path.iterdir()] == ["session.json"]  # no temp left behind

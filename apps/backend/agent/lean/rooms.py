@@ -5,6 +5,7 @@ tool runs, and reload all use the existing durable records.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import re
@@ -73,7 +74,7 @@ class RoomStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_suffix(".tmp")
         temp.write_text(json.dumps({"version": 1, "rooms": [r.model_dump() for r in self._rooms.values()]}, indent=2, ensure_ascii=False), encoding="utf-8")
-        temp.replace(self.path)
+        atomic_replace(temp, self.path)
 
     def list(self) -> list[Room]:
         with self._lock:

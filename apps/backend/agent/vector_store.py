@@ -19,6 +19,7 @@ text splitter. This module provides the same, in plain Python and NumPy:
   after the privacy check.
 """
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import io
 import json
@@ -114,8 +115,8 @@ class VectorStore:
         store.write_text(json.dumps({"format": 1, "dim": self.dim, "ids": self.ids,
                                      "docs": [{"text": d.page_content, "metadata": d.metadata} for d in self.docs]},
                                     ensure_ascii=False, default=str), encoding="utf-8")
-        os.replace(vectors, folder / VECTORS)
-        os.replace(store, folder / STORE)
+        atomic_replace(vectors, folder / VECTORS)
+        atomic_replace(store, folder / STORE)
         for name in LEGACY:  # converted: the old pickle is no longer needed
             (folder / name).unlink(missing_ok=True)
         (folder / "index.pkl.sha256").unlink(missing_ok=True)

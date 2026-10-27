@@ -7,6 +7,7 @@ history lives in the durable Session store and the memory system.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import hashlib
@@ -129,7 +130,7 @@ class ThreadManager:
                 handle.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp, self._path)
+            atomic_replace(temp, self._path)
         except Exception as exc:
             logger.warning(f"Failed to save threads: {exc}")
 

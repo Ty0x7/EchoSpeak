@@ -9,6 +9,7 @@ All paths go through the same allowed-root checks as the legacy file tools.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import difflib
 import fnmatch
@@ -73,7 +74,7 @@ def _atomic_write(path: Path, text: str, reason: str) -> None:
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
     with open(temp, "w", encoding="utf-8", newline="") as handle:
         handle.write(text)
-    os.replace(temp, path)
+    atomic_replace(temp, path)
 
 
 def _diff(before: str, after: str, name: str, limit: int = 60) -> str:

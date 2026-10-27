@@ -1121,7 +1121,7 @@ function MemorySection({ s, save, openAdvanced }: { s: SettingsMap; save: Save; 
   return (
     <>
       <Group description="Agents save lasting facts with their memory tool and recall them automatically.">
-        <Row label="Remember conversations" help="Keep a searchable record of past chats for recall.">
+        <Row label="Remember conversations" help="Let agents search your past chats when you refer back to them.">
           <Toggle checked={asBool(s.session_memory_enabled)} onChange={(v) => save({ session_memory_enabled: v })} label="Remember conversations" />
         </Row>
         <Row label="Use your documents" help="Search uploaded PDFs and notes when answering.">

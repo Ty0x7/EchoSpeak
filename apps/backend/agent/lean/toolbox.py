@@ -71,6 +71,19 @@ BUILDER_FOCUS = {
     "project_status", "terminal", "process_output", "process_stop",
 }
 
+# What any agent on a local model is shown up front in ordinary chat (review R12): the everyday
+# tools. Always-on tools ride along; the rest (media, shopping, stocks, integrations, proposals…)
+# stay callable by name and load through find_tools. Cloud models keep every schema.
+CHAT_FOCUS = BUILDER_FOCUS | {
+    "calculate", "file_write", "create_artifact", "update_artifact",
+    "set_reminder", "list_reminders", "cancel_reminder",
+    "web_search", "safe_web_fetch", "weather_live", "sports_live",
+    "take_screenshot", "read_image", "vision_qa", "computer_action", "open_application",
+    "memory_save", "memory_search", "chat_search", "document_search",
+    # Offered only when this request asks for deep research, so it stays when present.
+    "spawn_workers",
+}
+
 # Lean-native tools that change this PC, held to the same Settings › Permissions
 # switches as their registry counterparts (file_write, terminal_run in agent/tools.py).
 # Checked when the toolbox is built and again when the tool runs, since settings can
@@ -175,7 +188,7 @@ TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
 
 
 _FAILURE_PREFIXES = (
-    "refused", "[exit code", "[timed out",
+    "refused", "[exit code", "[timed out", "❌",  # ❌: every skill tool's failure marker
     "failed", "error", "path not allowed", "cwd not allowed", "command rejected",
     "command blocked", "tool '", "file write is disabled", "terminal commands are disabled",
     "rejected", "mutation blocked", "playwright error", "unsupported", "exitcode=127",
@@ -183,7 +196,49 @@ _FAILURE_PREFIXES = (
     # once counted as a success, and a 4B model took it as "I clicked Singleplayer".
     "control not found", "window not found", "no matching controls", "click failed", "type failed",
     "hotkey failed", "activate failed", "invalid hotkey", "pywinauto is not available", "no text provided",
+    # The rest of agent/tools.py (review R5: 93 failure messages in 36 tools counted as success,
+    # among them "Email send failed: …"). Exact starts, never a keyword anywhere: file and page
+    # content returned by a tool can begin with any word.
+    "file not found", "path not found", "source path not found", "workspace path not found",
+    "cwd not found", "original email", "email send failed", "email reply failed", "email read failed",
+    "email search failed", "email get_thread failed", "discord bot client not available",
+    "discord bot module not available", "playwright is not available", "screen analysis is not available",
+    "screen analysis failed", "calculation error", "invalid url", "missing contact", "missing discord",
+    "undo is blocked", "code preview is disabled", "code preview blocked", "code preview failed",
+    "self-modification is disabled", "system actions are disabled", "file operations are disabled",
+    "artifact write is disabled", "discord contacts update is disabled", "application launching is disabled",
+    "desktop automation is disabled", "execution_status=error", "browse failed", "invalid discord",
+    "discord contact discovery failed", "could not find user", "discord web read failed", "discord web send failed",
+    "no content provided", "search error", "invalid youtube url", "youtube transcript is not available",
+    # Not failures, so not listed: empty results ("No emails found.", "No matches found …").
 )
+# Structured failure lines some tools print instead of a sentence: "[WEATHER_LIVE] ok=false …",
+# "ExitCode=1 Status=fail …", "Channel 'x' not found in server 'y'".
+_FAILURE_LINE = re.compile(r"^(?:\[[A-Z_]+\]\s+ok=false\b|exitcode=-?\d+\s+status=fail\b|channel '[^'\n]*' not found in server\b"
+                           r"|server '[^'\n]*' not found\.)",
+                           re.IGNORECASE)
+
+
+def looks_failed(output: str) -> bool:
+    """Whether a tool's plain-text result reports a failure (its first line, by known shapes only)."""
+    text = str(output or "").strip()
+    return text.lower().startswith(_FAILURE_PREFIXES) or bool(_FAILURE_LINE.match(text))
+
+
+# Exceptions a tool raises when it checks its inputs and refuses (bad arguments, validation, a
+# missing file, a denied permission): nothing ran, so the call simply failed. Any other exception
+# may have interrupted an effect halfway (a lost connection, a timeout, a cancel mid-batch), so its
+# outcome is uncertain and the work ledger won't let it be repeated blindly. A tool that can fail
+# after it starts changing things raises something else (OSError, InterruptedError, RuntimeError);
+# computer_action does (agent/lean/computer.py _stopped). Review R1: every exception used to count
+# as uncertain, so one bad click coordinate needed the owner to reconcile it by hand.
+_REJECTED_BEFORE_EFFECT = (ValueError, TypeError, LookupError, PermissionError,
+                           FileNotFoundError, NotADirectoryError, IsADirectoryError, FileExistsError)
+
+
+def uncertain_after(exc: BaseException) -> bool:
+    """Whether a tool's exception leaves its effect unknown (see _REJECTED_BEFORE_EFFECT)."""
+    return not isinstance(exc, _REJECTED_BEFORE_EFFECT)
 
 
 @dataclass
@@ -696,11 +751,11 @@ class Toolbox:
                     raw.widgets = redact_payload([clean for w in raw.widgets if (clean := normalize(w)) is not None])
                     return raw
                 output = str(raw or "")
-                ok = not output.lower().startswith(_FAILURE_PREFIXES)
+                ok = not looks_failed(output)
             except Exception as exc:
                 logger.warning("Lean native tool {} failed: {}", name, exc)
                 output, ok = f"Error: {exc}", False
-                uncertain = True
+                uncertain = uncertain_after(exc)
             return ToolResult(ok, redact_secrets(output), int((time.perf_counter() - started) * 1000),
                               redact_payload(widgets) if ok else [], uncertain=uncertain or output.lower().startswith("[timed out"))
         if name == "web_search" and name in self.entries:
@@ -779,7 +834,7 @@ class Toolbox:
                 widgets.extend({"type": "observation", "data": observations.public(item)} for item in images)
                 visual = [observations.reference(item) for item in images]
             output = raw if isinstance(raw, str) else json.dumps(raw, default=str, ensure_ascii=False)
-            ok = not output.strip().lower().startswith(_FAILURE_PREFIXES) and not (isinstance(raw, dict) and raw.get("isError"))
+            ok = not looks_failed(output) and not (isinstance(raw, dict) and raw.get("isError"))
             if ok and str(getattr(entry, "origin", "")) == "mcp":
                 from agent import mcp_apps
                 view = mcp_apps.for_result(self.session_id, name, args, raw)  # the server's interactive view, if any
@@ -790,7 +845,7 @@ class Toolbox:
             if "validation error" in message.lower():
                 message = f"Invalid arguments for {name}: {message[:600]}"
             output, ok = f"Error: {message}", False
-            uncertain = True
+            uncertain = uncertain_after(exc)
             logger.warning("Lean tool {} failed: {}", name, exc)
         try:
             from agent.tool_registry import ToolUsageStats

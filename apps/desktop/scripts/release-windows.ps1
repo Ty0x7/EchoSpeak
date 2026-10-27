@@ -125,7 +125,11 @@ if ($Msi) {
 }
 # First paragraph of the notes is what the app shows next to "Update to ...".
 $notes = (Get-Content -LiteralPath $NotesPath -Raw) -replace "`r", ""
-$summary = (($notes -split "`n`n") | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") } | Select-Object -First 1)
+# Headings and "> Status" notes are skipped; a pre-publication sentence must never reach the update prompt (R9).
+$summary = (($notes -split "`n`n") | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith("#") -and -not $_.Trim().StartsWith(">") } | Select-Object -First 1)
+if ($summary -match "(?i)no installer|not (yet )?(built|published|released)|prepared source release") {
+    throw "The first paragraph of $NotesPath reads as unreleased; the app would show it beside the update: $($summary.Trim())"
+}
 $latest = [ordered]@{
     version = $Version
     notes = if ($summary) { $summary.Trim() } else { "EchoSpeak $Version" }

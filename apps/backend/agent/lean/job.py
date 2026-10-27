@@ -249,9 +249,23 @@ _ACTION_WORDS = re.compile(
 )
 
 
+# "What should I make…", "How do I update…": a question about the owner's own task, answered in words.
+_ASKING = re.compile(r"^\s*(what|how|why|when|where|who|which|should|is|are|do|does|did|would|was|were)\b(?!\s+you\b)", re.I)
+# Phrases built on an action verb that ask for an answer, not a change.
+_ANSWER_PHRASES = re.compile(r"\b(add(s|ed)?\s+up|make(s)?\s+sense|run(s)?\s+out|test(s)?\s+positive)\b", re.I)
+
+
 def needs_action(task: str) -> bool:
-    """Whether a task asks for real work (files, commands, changes), not just an answer."""
-    return bool(_ACTION_WORDS.search(str(task or "")))
+    """Whether a task asks for real work (files, commands, changes), not just an answer.
+
+    Judged per sentence: an action verb counts unless its sentence is a question about the owner's
+    own task. This only decides how a reply is checked; work records come from real tool calls.
+    """
+    for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(task or "")):
+        sentence = _ANSWER_PHRASES.sub(" ", sentence)
+        if _ACTION_WORDS.search(sentence) and not (sentence.rstrip().endswith("?") and _ASKING.match(sentence)):
+            return True
+    return False
 
 
 @dataclass

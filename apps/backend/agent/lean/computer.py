@@ -332,6 +332,14 @@ def _key(gui, key: str, down: bool) -> None:
     user32.keybd_event(code, scan, flags, 0)
 
 
+def _stopped(executed: int, total: int) -> Exception:
+    """A cancel inside a batch. Before any input it changed nothing (a plain rejection); after the
+    first action began, some input reached the screen, so the outcome is uncertain."""
+    if not executed:
+        return ValueError("Computer action cancelled")
+    return InterruptedError(f"Computer action cancelled after {executed} of {total} actions started")
+
+
 def _validate(actions: Any, item: dict, keyboard_keys: list[str]) -> list[dict]:
     if not isinstance(actions, list) or not 1 <= len(actions) <= 12:
         raise ValueError("Provide 1–12 actions; observe again between batches")
@@ -429,10 +437,12 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
             before = _capture(next_args)[0]
         except Exception:
             before = None
+        executed = 0
         for a in prepared:
             if cancel.is_set():
-                raise ValueError("Computer action cancelled")
+                raise _stopped(executed, len(prepared))
             kind = a["action"]
+            executed += 1  # counted before its input is sent: a cancel after this may follow real input
             if kind in {"click", "double_click", "triple_click", "right_click"}:
                 gui.click(*a["point"], clicks={"double_click": 2, "triple_click": 3}.get(kind, 1),
                           button=a["button"], interval=0.1)
@@ -458,16 +468,16 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
                     gui.moveTo(*a["point"])
                 for key in a["keys"]:
                     if cancel.is_set():
-                        raise ValueError("Computer action cancelled")
+                        raise _stopped(executed, len(prepared))
                     held.add(key)
                     _key(gui, key, True)
                 if cancel.is_set():
-                    raise ValueError("Computer action cancelled")
+                    raise _stopped(executed, len(prepared))
                 if kind == "hold" and "button" in a:
                     mouse.add(a["button"])
                     gui.mouseDown(button=a["button"])
                 if cancel.wait(a["duration"]):
-                    raise ValueError("Computer action cancelled")
+                    raise _stopped(executed, len(prepared))
                 if kind == "hold" and "button" in a:
                     gui.mouseUp(button=a["button"])
                     mouse.discard(a["button"])
@@ -475,11 +485,11 @@ def act(session: str, args: dict, cancel: threading.Event | None = None):
                     _key(gui, key, False)
                     held.discard(key)
             elif cancel.wait(a["duration"]):
-                raise ValueError("Computer action cancelled")
+                raise _stopped(executed, len(prepared))
         # Give the target time to react before observing: a render tick, or a menu's opening animation.
         settle = 0.6 if any(a["action"] in {"click", "double_click", "triple_click", "right_click", "key"} for a in prepared) else 0.1
         if cancel.wait(settle):
-            raise ValueError("Computer action cancelled")
+            raise _stopped(executed, len(prepared))
         # Always observe the actual result, including games and non-accessible canvas UIs.
         item_after = _grab(session, next_args)
         detail, meta = f"Executed {len(prepared)} actions.", {}
