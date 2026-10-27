@@ -57,6 +57,23 @@ hiddenimports = (
     + ["faiss", "onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp", "websockets.sync.client"]
 )
 
+# Bundled skills ship as data files, so PyInstaller never sees their imports (review R6).
+# Calendar needs only its own Google discovery document, not all 97 MB of them.
+hiddenimports += (
+    collect_submodules("googleapiclient")
+    + collect_submodules("google_auth_oauthlib")
+    + collect_submodules("google.oauth2")
+    + collect_submodules("google.auth.transport")
+    + collect_submodules("github")
+    + collect_submodules("notion_client")
+)
+datas += collect_data_files("googleapiclient", includes=["discovery_cache/documents/calendar.v3.json"])
+for distribution in ("google-api-python-client", "google-auth", "google-auth-oauthlib", "PyGithub", "notion-client"):
+    try:
+        datas += copy_metadata(distribution)
+    except Exception:
+        pass
+
 if __import__("sys").platform == "win32":
     hiddenimports += collect_submodules("winpty")
     datas += collect_data_files("winpty")

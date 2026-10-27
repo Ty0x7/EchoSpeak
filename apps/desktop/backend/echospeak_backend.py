@@ -153,6 +153,16 @@ def _self_check() -> int:
     import primp  # noqa: F401
     import lxml.html  # noqa: F401
     from trafilatura import extract  # noqa: F401
+    # Bundled skills ship as data, so their libraries are only bundled by name (review R6).
+    from googleapiclient.discovery import build  # noqa: F401  (Calendar)
+    from google_auth_oauthlib.flow import InstalledAppFlow  # noqa: F401
+    from google.oauth2.credentials import Credentials  # noqa: F401
+    from google.auth.transport.requests import Request  # noqa: F401
+    from github import Github  # noqa: F401
+    from notion_client import Client  # noqa: F401
+    import googleapiclient
+    if not (Path(googleapiclient.__file__).parent / "discovery_cache" / "documents" / "calendar.v3.json").exists():
+        raise RuntimeError("Calendar's Google discovery document is not bundled")
     print("echospeak-backend self-check ok")
     return 0
 

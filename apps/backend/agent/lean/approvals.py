@@ -26,7 +26,13 @@ EXTERNAL_TOOLS = {
     "telegram_send", "whatsapp_send", "slack_send", "twitter_post", "tweet_post",
     "calendar_create", "calendar_delete", "github_create_issue", "github_comment", "ask_remote_agent",
     "notion_create_page", "spotify_control",
+    # The registered names (the short ones above never matched a tool, so these ran unasked).
+    "calendar_create_event", "calendar_delete_event", "github_comment_issue", "notion_append_block",
+    "github_create_pull_request",
 }
+
+# Published under the owner's GitHub identity: asked in every approval mode, like A2A.
+ALWAYS_ASK_TOOLS = {"github_create_pull_request"}
 
 # Tools that rewrite an agent's standing instructions (its soul). Everything in
 # them is obeyed in every later chat, so a bad write persists (Hermes gates its
@@ -48,7 +54,8 @@ _DANGEROUS_COMMAND = re.compile(
         stop-process|kill|taskkill|net\s+user|new-service|sc\s+delete|
         git\s+push|git\s+reset\s+--hard|git\s+clean|git\s+checkout\s+--|git\s+branch\s+-D|
         git\s+rebase|git\s+restore|git\s+stash\s+(?:drop|clear)|git\s+filter-branch|
-        gh\s+pr\s+(?:merge|close)|gh\s+repo\s+delete|gh\s+release\s+(?:create|delete)|gh\s+issue\s+(?:close|delete)|
+        # Any GitHub CLI write publishes under the owner's account; only reads go unasked.
+        gh\s+(?:pr|issue|release|repo|workflow|run|gist|secret|variable|label|ruleset)\s+(?!(?:view|list|status|diff|checks)\b)[a-z-]+|gh\s+api|
         npm\s+publish|pip\s+uninstall|winget\s+uninstall|choco\s+uninstall|
         invoke-webrequest|iwr|invoke-restmethod|irm|curl|wget|start-bitstransfer|certutil|bitsadmin|
         scp|sftp|ftp|ssh|nc|ncat|
@@ -193,6 +200,8 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
     # explicit approval promised by this integration applies in every mode.
     if name in {"ask_remote_agent", "a2a_delegate"}:
         return True, "this sends a task to an independent agent"
+    if name in ALWAYS_ASK_TOOLS:
+        return True, "this opens a pull request under your GitHub account"
     mode = settings.approval_mode()
     if mode == "never":
         return False, ""

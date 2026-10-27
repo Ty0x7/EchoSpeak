@@ -103,7 +103,7 @@ def test_a_tool_that_reports_failure_is_recorded_as_failed(text):
 
 
 # ── R6: GitHub, Calendar and Notion skills can't import in the installed app ──
-@open_finding("R6")
+# Fixed in 11.10.8 (was open review finding R6).
 def test_skill_libraries_are_bundled_into_the_installer():
     spec = (BACKEND.parent / "desktop" / "backend" / "echospeak_backend.spec").read_text(encoding="utf-8")
     for module in ("googleapiclient", "google_auth_oauthlib", "github", "notion_client"):

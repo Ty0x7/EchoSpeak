@@ -8,6 +8,7 @@ When the user asks about:
 - "Create an issue for bug X"
 - "What's the status of PR #42?"
 - "Comment on issue #7"
+- "Fix issue #12 and open a PR"
 - "How many open issues do we have?"
 
 ## Tool reference
@@ -29,6 +30,9 @@ Get details of a specific PR by number — title, body, diff stats, review statu
 
 ### github_comment_issue
 Add a comment to an issue or PR by number. This is an action tool — requires confirmation.
+
+### github_create_pull_request
+Open a pull request from a branch you already pushed (`head`) into `base` (the repo's default branch if empty). Opens as a draft unless asked otherwise. The owner approves every pull request on its own card; an earlier approval never covers the next one. It never merges: merging stays the owner's decision on GitHub. For the whole issue → fix → pull request procedure, follow the `github-issue-to-pr` Agent Skill.
 
 ## Requirements
 
