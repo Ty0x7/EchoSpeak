@@ -1,5 +1,33 @@
 # Changes
 
+## v11.10.8 — Reliability hotfix (source; not yet built)
+
+* Truthful outcomes:
+  * A refused argument is a plain failure, not an unknown effect.
+  * A held resource becomes a "Not run" tool result instead of a crashed turn.
+  * A task's own dev server no longer blocks its next edit.
+  * Legacy failure strings, including every skill's `❌ Failed…`, are recorded as failures.
+  * Webhook bodies reach routines as outside content.
+* Lighter chat:
+  * Questions create no work records.
+  * Plain group questions skip the extra judge call.
+  * Local models get an everyday tool focus (32 → 19 schemas by default).
+  * Your name and Remember conversations take effect.
+  * Finished ledger history ages out after 30 days.
+* GitHub issue → fix → pull request:
+  * New `github_create_pull_request` tool: asks every time, never merges.
+  * New bundled `github-issue-to-pr` skill.
+  * `gh` writes ask in the terminal.
+  * Fixes unasked GitHub comment, Calendar and Notion writes.
+  * The installer bundles the skill libraries.
+* Windows-safe file replacement across all settings writers. Same-tick chat turns keep their order.
+* 11.10.7's update text was corrected; its binaries are unchanged.
+* See [release notes](docs/releases/v11.10.8.md) and the [system review](docs/research/system-review-2026-10-27.md).
+
+## v11.10.7 — 2026-10-27
+
+* Native agent work foundation: durable work, recoverable approvals, resource admission and tracked delivery. See [release notes](docs/releases/v11.10.7.md).
+
 ## v11.10.6 — 2026-10-25
 
 * Keeps the Code composer visible for disconnected Codex, Claude and ACP; adds Chat-style reported-model picking, isolated native model bindings and visible original-harness replies.
