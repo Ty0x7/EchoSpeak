@@ -411,7 +411,7 @@ def decide_approval(approval_id: str, request: ApprovalDecisionRequest) -> dict[
         coordinator = get_state_store().coordination
         record = next((r for r in coordinator.view("approvals") if r["id"] == approval_id), None)
         if record:
-            recovered = approval_id not in {r["id"] for r in get_approval_broker().pending_for("")}
+            recovered = not get_approval_broker().is_live(approval_id)
             if record.get("kind") == "question":
                 decided = coordinator.answer(approval_id, request.decision)
             elif recovered and request.decision not in {"allow", "deny"}:

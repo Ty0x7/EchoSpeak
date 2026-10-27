@@ -6,6 +6,7 @@ never included in a public projection.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import ctypes
 import json
@@ -159,7 +160,7 @@ class CredentialBroker:
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp, self.index_path)
+            atomic_replace(temp, self.index_path)
         finally:
             try:
                 temp.unlink(missing_ok=True)
@@ -197,7 +198,7 @@ class CredentialBroker:
                     handle.write(ciphertext)
                     handle.flush()
                     os.fsync(handle.fileno())
-                os.replace(temp, path)
+                atomic_replace(temp, path)
             finally:
                 try:
                     temp.unlink(missing_ok=True)

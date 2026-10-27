@@ -4,6 +4,7 @@ Completion is durable structured state — never prose-only.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import hashlib
@@ -45,7 +46,7 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         handle.write(serialized)
         handle.flush()
         os.fsync(handle.fileno())
-    os.replace(tmp, path)
+    atomic_replace(tmp, path)
 
 
 def _read_json(path: Path) -> dict[str, Any]:

@@ -3,6 +3,7 @@ Memory module for Echo Speak.
 Provides FAISS-based vector store for conversation memory persistence.
 """
 
+from agent.atomic_replace import replace as atomic_replace
 import os
 import re
 import json
@@ -291,7 +292,7 @@ class AgentMemory:
                     handle.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
                     handle.flush()
                     os.fsync(handle.fileno())
-                os.replace(temp, self._records_path)
+                atomic_replace(temp, self._records_path)
             except Exception:
                 # Restore in-memory truth from the untouched authoritative file so
                 # a later operation cannot persist a partial failed mutation.

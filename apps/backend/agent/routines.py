@@ -3,6 +3,7 @@ Routines module for EchoSpeak.
 Provides scheduled and webhook-triggered automation routines.
 """
 
+from agent.atomic_replace import replace as atomic_replace
 import os
 import json
 import uuid
@@ -306,7 +307,7 @@ class RoutineManager:
                 handle.write(routine.model_dump_json(indent=2) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp, file_path)
+            atomic_replace(temp, file_path)
         except Exception as e:
             logger.error(f"Failed to save routine {routine.id}: {e}")
             raise
@@ -376,18 +377,21 @@ class RoutineManager:
                 logger.error(f"Error checking routine {routine.id}: {e}")
                 self.mark_run(routine.id, success=False, error=str(e))
     
-    def run_routine(self, routine_id: str, *, event_id: str = "") -> bool:
-        """Manually run a routine."""
+    def run_routine(self, routine_id: str, *, event_id: str = "", payload: Optional[dict] = None) -> bool:
+        """Run a routine now: manually, or for an event. ``payload`` is the event's data (a signed
+        webhook's JSON body); it belongs to this occurrence only and is never saved on the routine."""
         routine = self._cache.get(routine_id)
         if not routine:
             return False
-        
+
         # A Routine is a trigger/configuration owner, never an execution owner.
         # Without the API coordinator callback there is no canonical Task/Turn.
         if self._on_run:
             try:
                 occurrence = routine.model_copy(deep=True)
                 occurrence.metadata["event_id"] = event_id or "manual:" + str(uuid.uuid4())
+                if payload is not None:
+                    occurrence.action_config["webhook_body"] = payload
                 result = self._on_run(occurrence)
             except Exception as e:
                 logger.error(f"Failed to run routine {routine_id}: {e}")

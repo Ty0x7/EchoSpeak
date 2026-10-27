@@ -61,6 +61,33 @@ def policy_snapshot() -> dict:
     return {"privacy": privacy.mode(), "flags": {flag: bool(getattr(config, flag.lower(), False)) for flag in sorted(flags)}}
 
 
+def _resource(tool: str, work: dict) -> str:
+    """What a writing action reserves. There is one desktop (mouse, keyboard, focus); writes are
+    scoped to the work's project, or to its own chat when it has none. Review R2: every project-less
+    chat used to share one "project:unscoped" reservation, so one chat's uncertain write blocked all."""
+    if any(k in tool for k in ("computer", "mouse", "keyboard", "browser")):
+        return "desktop"
+    if work.get("project_id"):
+        return "project:" + work["project_id"]
+    return "session:" + (work.get("session_id") or "unscoped")
+
+
+def _process_running(action: dict) -> bool:
+    """Whether a background action's process is still running in this backend. Unknown: assume so."""
+    ids = [e.get("running") for e in action.get("effects", []) if e.get("kind") == "process" and e.get("running")]
+    if not ids:
+        return False
+    try:
+        from agent.lean.terminal import _PROCESSES, _process_alive
+    except Exception:
+        return True
+    for process_id in ids:
+        proc = _PROCESSES.get(str(process_id))
+        if proc is None or _process_alive(proc):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class WorkContext:
     coordinator: Any
@@ -272,9 +299,10 @@ class Coordinator:
                 effective = "unknown"
             elif status == "completed" and any(c.get("parent_id") == row["id"] and c["status"] not in TERMINAL for c in data["works"].values()):
                 effective = "waiting_dependency"
-            elif status == "completed" and any(a["work_id"] == row["id"] and a["status"] == "background" for a in data["actions"].values()):
-                effective = "waiting_dependency"
             else:
+                # A process the work left running (a dev server) doesn't keep the work open: it can
+                # run for days. Its action stays "background" and keeps its reservation against other
+                # work until its exit is observed (review R3).
                 effective = status
             row.update(status=effective, result=str(result)[:16000], verification=verification,
                        evidence=list(evidence)[:200], updated_at=time.time(), revision=row["revision"] + 1)
@@ -339,10 +367,28 @@ class Coordinator:
             # Cooperative resource exclusion, not an OS sandbox. Unknown writes
             # retain their reservation until the owner records reconciliation.
             bookkeeping = tool in {"delegate_to_agent", "spawn_workers", "complete_task", "assign_tasks", "work_status", "agent_notes", "propose_agent_change"}
-            own_process = tool == "process_stop" and any(a["work_id"] == context.work_id and any(e.get("running") == args.get("process_id") for e in a.get("effects", [])) for a in data["actions"].values())
-            resource = "" if read_only or bookkeeping or own_process else ("desktop" if any(k in tool for k in ("computer", "mouse", "keyboard", "browser")) else "project:" + (work.get("project_id") or "unscoped"))
-            if resource and any(a.get("resource") == resource and a["status"] in {"intent", "unknown", "background"} for a in data["actions"].values()):
-                raise PermissionError("Resource is held by another action or an uncertain effect")
+            own_process = tool == "process_stop" and any(any(e.get("running") == args.get("process_id") for e in a.get("effects", [])) for a in data["actions"].values())
+            resource = "" if read_only or bookkeeping or own_process else _resource(tool, work)
+            if resource:
+                blockers = []
+                for other in data["actions"].values():
+                    if other.get("resource") != resource or other["status"] not in {"intent", "unknown", "background"}:
+                        continue
+                    if other["status"] == "background":
+                        if not _process_running(other):
+                            # Its process has exited: the reservation ends (it was only a running process).
+                            other.update(status="completed", ended_at=time.time(), process_receipt=True)
+                            continue
+                        if other["work_id"] == context.work_id:
+                            continue  # review R3: a task's own dev server doesn't block its next edit
+                    blockers.append(other)
+                if blockers:
+                    held = blockers[0]
+                    why = {"intent": "another action is writing to it right now",
+                           "unknown": "an earlier action's outcome is unknown and needs checking",
+                           "background": "a process another task started is still running"}[held["status"]]
+                    raise PermissionError(f"Resource {resource} is held: {why} (work {held['work_id']}, {held['tool']}). "
+                                          "Wait for it, or inspect and reconcile it in Activity › Agent work.")
             data["actions"][action_id] = {"id": action_id, "work_id": context.work_id, "attempt_id": context.attempt_id,
                 "principal": context.principal, "agent_id": context.agent_id, "tool": tool, "snapshot": snapshot,
                 "read_only": read_only or bookkeeping, "resource": resource, "status": "intent", "created_at": time.time()}
@@ -366,9 +412,11 @@ class Coordinator:
         self._tx(change)
 
     def process_observed(self, context, process_id, *, success):
+        # Process IDs are unique per backend run, so a stop seen from any chat of the same owner
+        # ends the reservation of the task that started it.
         def update(data):
             for action in data["actions"].values():
-                if action["work_id"] == context.work_id and action["status"] == "background" and any(e.get("running") == process_id for e in action.get("effects", [])):
+                if action["principal"] == context.principal and action["status"] == "background" and any(e.get("running") == process_id for e in action.get("effects", [])):
                     action.update(status="completed" if success else "failed", ended_at=time.time(), process_receipt=True)
         self._tx(update)
 

@@ -3,6 +3,7 @@ Projects module for EchoSpeak.
 Provides project-scoped memory and context management.
 """
 
+from agent.atomic_replace import replace as atomic_replace
 import json
 import os
 import uuid
@@ -305,7 +306,7 @@ class ProjectManager:
                 handle.write(project.model_dump_json(indent=2) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp, file_path)
+            atomic_replace(temp, file_path)
         except Exception as e:
             logger.error(f"Failed to save project {project.id}: {e}")
             raise

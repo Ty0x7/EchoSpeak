@@ -1119,7 +1119,12 @@ class LeanTurn:
             previous = context.coordinator.previous_effect(context, name, args) if context and not self.toolbox.is_parallel_safe(name) else None
             if previous:
                 return ToolResult(False, f"Not run: this exact action already completed in attempt {previous['attempt_id']}. Inspect its current result; do not repeat the effect. Recorded evidence: {previous.get('effects', [])}", 0, outcome="refused")
-            action_id = context.coordinator.action_intent(context, call.id, name, args, read_only=self.toolbox.is_parallel_safe(name)) if context else ""
+            try:
+                action_id = context.coordinator.action_intent(context, call.id, name, args, read_only=self.toolbox.is_parallel_safe(name)) if context else ""
+            except PermissionError as exc:
+                # The work ledger refused this action (a held resource, the work's grant or budget). That is
+                # a result the agent can read and explain, not a crash of the whole turn (review R2).
+                return ToolResult(False, f"Not run: {exc}", 0, outcome="refused")
             try:
                 with work_scope(context):
                     result = self.toolbox.run(name, args)

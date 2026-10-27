@@ -15,6 +15,7 @@ Nothing is deleted. Each run's report is saved, and Settings shows the latest.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import re
@@ -176,7 +177,7 @@ def tidy(memory: Any, *, now: Optional[datetime] = None, stale_days: int = STALE
     path = _report_path()
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(report, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    atomic_replace(tmp, path)
     return report
 
 

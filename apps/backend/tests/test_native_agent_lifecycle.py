@@ -297,17 +297,24 @@ def test_event_responsibility_uses_authenticated_stable_occurrences(env, monkeyp
     assert len(store.coordination.view("attempts")) == 1
 
 
-def test_background_process_retains_resource_until_exit_is_observed(env):
+def test_background_process_retains_resource_against_other_work_until_exit_is_observed(env):
+    """A running process holds its resource against *other* work; its own work carries on
+    (review R3: "start the dev server, then fix App.tsx" was impossible in one request)."""
     store, _, _ = env
     coord = store.coordination
-    row = coord.create(objective="Run tests", agent_id="echo", tools=["terminal", "process_output"])
+    row = coord.create(objective="Run tests", agent_id="echo", project_id="project", tools=["terminal", "process_output"])
     ctx = coord.claim(row["id"])
     action = coord.action_intent(ctx, "start", "terminal", {"command": "tests"}, read_only=False)
     coord.action_result(action, ok=True, outcome="ok", effects=[{"kind": "process", "running": "p1"}])
-    with pytest.raises(PermissionError, match="Resource"):
-        coord.action_intent(ctx, "again", "terminal", {"command": "other"}, read_only=False)
+    again = coord.action_intent(ctx, "again", "terminal", {"command": "other"}, read_only=False)  # its own work: allowed
+    coord.action_result(again, ok=True, outcome="ok", uncertain=False)
+    other = coord.claim(coord.create(objective="Edit", agent_id="forge", project_id="project", tools=["terminal"])["id"])
+    with pytest.raises(PermissionError, match="still running"):
+        coord.action_intent(other, "elsewhere", "terminal", {"command": "build"}, read_only=False)
     coord.process_observed(ctx, "p1", success=True)
-    coord.action_intent(ctx, "after-exit", "terminal", {"command": "other"}, read_only=False)
+    coord.action_intent(other, "after-exit", "terminal", {"command": "build"}, read_only=False)
+    # The work itself finishes; a long-running process doesn't keep it waiting.
+    assert coord.finish(ctx, status="completed")["status"] == "completed"
 
 
 def test_loop_returns_previous_effect_as_refusal_without_running_it(env):
@@ -345,3 +352,4 @@ def test_specialist_memory_save_cannot_overwrite_account_memory(env):
     tool = next(t for t in session._native_tools(roster.get("scout"), 0) if t.name == "memory_save")
     tool.func({"fact": "The project uses Python.", "key": "language"})
     assert captured[0]["scope"] == "session" and captured[0]["semantic_key"] == "agent:scout:language"
+

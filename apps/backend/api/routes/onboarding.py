@@ -1,4 +1,5 @@
 """Small persistent first-run checklist; capability configuration stays in settings."""
+from agent.atomic_replace import replace as atomic_replace
 import json
 import os
 import threading
@@ -38,7 +39,7 @@ def progress(request: Progress):
         STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
         temp = STATE_PATH.with_suffix(".tmp")
         temp.write_text(json.dumps({**request.model_dump(), "updated_at": time.time(), "version": 1}), encoding="utf-8")
-        os.replace(temp, STATE_PATH)
+        atomic_replace(temp, STATE_PATH)
     return request.model_dump()
 
 

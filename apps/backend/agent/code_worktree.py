@@ -16,6 +16,7 @@ import subprocess
 import threading
 import uuid
 
+from agent.atomic_replace import replace as atomic_replace
 from agent.child_env import child_env
 from agent.code_process import workspace_env
 
@@ -83,10 +84,22 @@ def git(root: Path, *args: str, limit=2 * 1024 * 1024, input_data: bytes | None 
         return output
 
 
+_JSON_LOCKS: dict[str, threading.Lock] = {}
+_JSON_LOCKS_GUARD = threading.Lock()
+
+
 def atomic_json(path: Path, value):
-    temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
-    temporary.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-    temporary.replace(path)
+    """Replace a JSON file whole, one writer per path at a time (see agent/atomic_replace.py)."""
+    with _JSON_LOCKS_GUARD:
+        lock = _JSON_LOCKS.setdefault(str(path.resolve()), threading.Lock())
+    serialized = json.dumps(value, ensure_ascii=False)
+    with lock:
+        temporary = path.with_name(path.name + "." + uuid.uuid4().hex + ".tmp")
+        temporary.write_text(serialized, encoding="utf-8")
+        try:
+            atomic_replace(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def create(root: Path, directory: Path, *, acknowledge_dirty: bool):
@@ -236,7 +249,7 @@ def rollback(root: Path, checkpoint: Path):
             temporary = target.with_name(target.name + ".echo-restore-" + uuid.uuid4().hex)
             temporary.write_bytes(base64.b64decode(original["data"]))
             temporary.chmod(original["mode"])
-            temporary.replace(target)
+            atomic_replace(temporary, target)
     index = index_path(root)
     if base64.b64encode(index.read_bytes()).decode() != current["index"]:
         raise ValueError("Git index changed during rollback; recovery copy retained")

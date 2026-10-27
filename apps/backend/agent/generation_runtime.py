@@ -1,6 +1,7 @@
 """Provider-neutral image/video generation contracts and durable job authority."""
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import hashlib
 import json
@@ -134,7 +135,7 @@ class GenerationJobStore:
                 handle.write(job.model_dump_json(indent=2) + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(tmp, path)
+            atomic_replace(tmp, path)
         return job
 
     def get(self, job_id: str) -> Optional[GenerationJob]:

@@ -3,6 +3,7 @@ Tools module for Echo Speak.
 Provides custom tools for web search, screen analysis, and other utilities.
 """
 
+from agent.atomic_replace import replace as atomic_replace
 import os
 import sys
 import base64
@@ -1000,7 +1001,7 @@ def file_write(path: str, content: str, append: bool = False) -> str:
                 except Exception:
                     pass
                 return denial
-            os.replace(temp_target, target)
+            atomic_replace(temp_target, target)
         finally:
             try:
                 temp_target.unlink(missing_ok=True)
@@ -1084,7 +1085,7 @@ def file_copy(src: str, dst: str, overwrite: bool = False) -> str:
                     shutil.rmtree(dst_p)
                 else:
                     dst_p.unlink()
-            os.replace(temp_dst, dst_p)
+            atomic_replace(temp_dst, dst_p)
         finally:
             try:
                 if temp_dst.is_dir():

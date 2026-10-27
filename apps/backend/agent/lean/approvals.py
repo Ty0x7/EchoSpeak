@@ -7,6 +7,7 @@ of the whole turn ending.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import re
 import threading
@@ -148,7 +149,7 @@ class GrantStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        tmp.replace(path)
+        atomic_replace(tmp, path)
 
     def has(self, key: str) -> bool:
         with self._lock:
@@ -363,11 +364,17 @@ class ApprovalBroker:
             item.event.set()
         return len(waiting)
 
+    def is_live(self, approval_id: str) -> bool:
+        """Whether a running turn is still waiting on this approval or question (decided or not)."""
+        with self._lock:
+            return approval_id in self._pending
+
     def pending_for(self, session_id: str = "") -> list[dict[str, Any]]:
         with self._lock:
+            # A decided item waits only for its turn to wake and collect it; it's no longer pending.
             return [
                 item.public() for item in self._pending.values()
-                if not session_id or item.session_id == session_id
+                if not item.decision and (not session_id or item.session_id == session_id)
             ]
 
 

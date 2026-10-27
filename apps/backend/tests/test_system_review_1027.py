@@ -29,7 +29,7 @@ def _native(name, func):
 
 
 # ── R1: a rejected argument is recorded as an uncertain effect ──────────
-@open_finding("R1")
+# Fixed in 11.10.8 (was open review finding R1).
 def test_an_argument_error_is_not_an_uncertain_effect():
     box = Toolbox(toolsets=["none"], session_id="r1")
 
@@ -42,7 +42,7 @@ def test_an_argument_error_is_not_an_uncertain_effect():
 
 
 # ── R2: an uncertain action in one chat crashes every later turn that needs the resource ──
-@open_finding("R2")
+# Fixed in 11.10.8 (was open review finding R2).
 def test_a_held_resource_is_a_tool_result_not_a_crashed_turn(tmp_path, monkeypatch):
     from agent.coordination import work_scope
     from agent.lean import policy
@@ -68,7 +68,7 @@ def test_a_held_resource_is_a_tool_result_not_a_crashed_turn(tmp_path, monkeypat
 
 
 # ── R3: work blocks its own next write while its dev server runs ────────
-@open_finding("R3")
+# Fixed in 11.10.8 (was open review finding R3).
 def test_a_running_background_process_does_not_block_its_own_work(tmp_path):
     ledger = StateStore(tmp_path).coordination
     ctx = ledger.claim(ledger.create(objective="start the dev server, then edit App.tsx", agent_id="echo",
@@ -87,13 +87,14 @@ def test_ordinary_questions_do_not_count_as_action_requests(question):
 
 
 # ── R5: legacy tool failures recorded as successes ──────────────────────
-@open_finding("R5")
+# Fixed in 11.10.8 (was open review finding R5).
 @pytest.mark.parametrize("text", [
     "Email send failed: SMTP authentication error",
     "Discord bot client not available.",
     "Path not found.",
     "Playwright is not available. Please install playwright and run 'playwright install'.",
     "[WEATHER_LIVE] ok=false error=missing_location",
+    "❌ Failed to create issue: 401 Bad credentials",  # every skill tool's failure marker
 ])
 def test_a_tool_that_reports_failure_is_recorded_as_failed(text):
     box = Toolbox(toolsets=["none"], session_id="r5")

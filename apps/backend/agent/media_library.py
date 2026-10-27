@@ -5,6 +5,7 @@ generation jobs. It is the sole source-file authority for retained assets.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import os
@@ -107,7 +108,7 @@ class MediaLibraryStore:
             asset.updated_at = time.time()
             tmp = path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
             tmp.write_text(json.dumps(asset.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
-            os.replace(tmp, path)
+            atomic_replace(tmp, path)
             return asset
 
     def get(self, asset_id: str) -> Optional[MediaLibraryAsset]:
@@ -130,7 +131,7 @@ class MediaLibraryStore:
             path = self._path(asset_id)
             tmp = path.with_suffix(f".tmp.{time.time_ns()}")
             tmp.write_text(asset.model_dump_json(indent=2), encoding="utf-8")
-            os.replace(tmp, path)
+            atomic_replace(tmp, path)
             return asset
 
     def list(self, *, project_id: str = "", session_id: str = "", limit: int = 200) -> list[MediaLibraryAsset]:

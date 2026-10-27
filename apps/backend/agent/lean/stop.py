@@ -9,6 +9,7 @@ app keep working while paused.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import threading
@@ -48,7 +49,7 @@ def _save(state: dict[str, Any]) -> None:
     path = _path()
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(state), encoding="utf-8")
-    tmp.replace(path)
+    atomic_replace(tmp, path)
 
 
 def paused() -> bool:

@@ -22,6 +22,7 @@ policy (agent/lean/approvals.py, agent/lean/policy.py).
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import json
 import re
@@ -413,7 +414,7 @@ def _save(items: list[dict[str, Any]]) -> None:
     path = _proposals_path()
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps({"proposals": items}, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    atomic_replace(tmp, path)
 
 
 def proposals(status: str = "") -> list[dict[str, Any]]:

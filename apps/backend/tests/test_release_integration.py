@@ -44,6 +44,7 @@ def test_legacy_remote_reply_preserves_text_and_nonterminal_status():
 def test_project_report_bookkeeping_cannot_verify_an_implementation_task(name):
     session = LeanSession.__new__(LeanSession)
     session.results = []
+    session.work_context = None  # LeanSession.__init__ sets it (no durable work for this unit)
     session.job = Job(goal="Fix the application bug")
     task = session.job.open_subtask(owner="Echo", task="Fix the application bug", assigned_by="owner")
     session._active_subtask = task

@@ -257,7 +257,7 @@ def test_heartbeat_discord_route_delivers_only_to_owner(monkeypatch):
 
     calls = []
 
-    def fake_queue(user_id, message):
+    def fake_queue(user_id, message, *, on_receipt=None):  # discord_bot.queue_discord_dm's signature
         calls.append((user_id, message))
         return True
 
@@ -265,10 +265,19 @@ def test_heartbeat_discord_route_delivers_only_to_owner(monkeypatch):
     monkeypatch.setattr(config, "discord_bot_allowed_users", ["123"], raising=False)
     monkeypatch.setattr(discord_bot, "queue_discord_dm", fake_queue, raising=True)
 
+    # Switched off, nothing goes out (the outbox rechecks the channel switch when it sends).
+    monkeypatch.setattr(config, "allow_discord_bot", False, raising=False)
     heartbeat.route_message("hello from routine", ["discord"], label="Routine")
+    assert calls == []
 
+    monkeypatch.setattr(config, "allow_discord_bot", True, raising=False)
+    heartbeat.route_message("hello from routine", ["discord"], label="Routine")
     assert [user for user, _ in calls] == ["999"]
     assert "hello from routine" in calls[0][1]
+
+    # The same text later is a new notice, not a duplicate of the first.
+    heartbeat.route_message("hello from routine", ["discord"], label="Routine")
+    assert [user for user, _ in calls] == ["999", "999"]
 
 
 def test_heartbeat_discord_route_cannot_fall_back_to_allowed_user(monkeypatch):

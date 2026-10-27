@@ -17,6 +17,7 @@ or turning a proven ("established") learning lesson into a draft skill.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import hashlib
 import json
@@ -142,7 +143,7 @@ def _save_trust(trust: dict[str, str]) -> None:
     path = skills_dir() / TRUST_FILE
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(trust, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
+    atomic_replace(tmp, path)
 
 
 def load(folder: Path, trust: Optional[dict[str, str]] = None) -> AgentSkill:
@@ -235,7 +236,7 @@ def _install(name: str, writer, *, overwrite: bool = True) -> AgentSkill:
             shutil.rmtree(target)
         for attempt in range(6):
             try:
-                staging.replace(target)
+                atomic_replace(staging, target)
                 break
             except PermissionError:
                 if attempt == 5:

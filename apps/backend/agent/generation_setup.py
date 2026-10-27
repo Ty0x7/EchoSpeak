@@ -1,5 +1,6 @@
 """Explicit optional local installs. Never install into EchoSpeak's Python environment."""
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import atexit
 import hashlib
@@ -152,7 +153,7 @@ def download(url: str, target: Path, digest: str, size: int, *, state=None, canc
                     raise InterruptedError("Installation cancelled; partial downloads are retained for retry.")
                 hasher.update(chunk)
     if count == size and hasher.hexdigest() == digest:
-        os.replace(temp, target)
+        atomic_replace(temp, target)
         meta.unlink(missing_ok=True)
         return
     if count == size:
@@ -192,7 +193,7 @@ def download(url: str, target: Path, digest: str, size: int, *, state=None, canc
             raise RuntimeError("Download incomplete; retry setup to resume the retained partial file.")
         if count != size or hasher.hexdigest() != digest:
             raise ValueError("Download integrity check failed; file was not installed")
-        os.replace(temp, target)
+        atomic_replace(temp, target)
         meta.unlink(missing_ok=True)
     except ValueError:
         temp.unlink(missing_ok=True)

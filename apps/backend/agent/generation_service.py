@@ -1,5 +1,6 @@
 """Lean generation orchestration using the existing durable job and asset stores."""
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import hashlib
 import io
@@ -81,7 +82,7 @@ def _worker(job: GenerationJob, cancel: threading.Event):
         target = folder / filename
         temp = target.with_suffix(suffix + ".part")
         temp.write_bytes(data)
-        os.replace(temp, target)
+        atomic_replace(temp, target)
         asset = library.register(MediaLibraryAsset(id="asset-" + job.id, project_id=job.project_id,
             session_id=job.session_id, name=filename, media_kind=kind, source_kind="generated",
             storage_scope="library", project_relative_path="files/" + filename,

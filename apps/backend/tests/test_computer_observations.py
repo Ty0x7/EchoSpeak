@@ -206,7 +206,7 @@ def test_cancel_releases_held_keys_and_restores_failsafe(desktop):
         events.append(("keyDown", (key,)))
         cancel.set()
     gui.keyDown = down
-    with pytest.raises(ValueError, match="cancelled"):
+    with pytest.raises(InterruptedError, match="cancelled after 1 of 1"):  # a key was already down: an effect happened
         computer.act("t", {"observation_id": item["id"], "actions": [{"action": "hold", "text": "ctrl+w", "duration": 2}]}, cancel)
     assert ("keyUp", ("ctrl",)) in events and ("keyDown", ("w",)) not in events
     assert gui.FAILSAFE and not computer._desktop_lock.locked()
@@ -297,7 +297,7 @@ def test_cancelling_mouse_hold_releases_mouse_and_keys(desktop):
         cancel.set()
     gui.mouseDown = down
     gui.mouseUp = lambda **kw: events.append(("mouseUp", kw["button"]))
-    with pytest.raises(ValueError, match="cancelled"):
+    with pytest.raises(InterruptedError, match="cancelled after 1 of 1"):
         computer.act("t", {"observation_id": item["id"], "actions": [
             {"action": "hold", "text": "w", "button": "right", "duration": 2}]}, cancel)
     assert ("mouseUp", "right") in events and ("keyUp", ("w",)) in events

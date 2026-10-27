@@ -7,6 +7,7 @@ endpoint and is then rebound to the exact resulting Execution and TaskRun.
 """
 
 from __future__ import annotations
+from agent.atomic_replace import replace as atomic_replace
 
 import hashlib
 import os
@@ -213,7 +214,7 @@ class VoiceTransportStore:
             handle.write(model.model_dump_json(indent=2) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
+        atomic_replace(tmp, path)
 
     def save_turn(self, turn: VoiceTransportTurn) -> VoiceTransportTurn:
         turn.updated_at = time.time()
