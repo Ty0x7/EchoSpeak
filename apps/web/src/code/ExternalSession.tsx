@@ -2,8 +2,9 @@ import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
 import { request } from "../projects/model";
 import { RuntimeMark } from "../components/RuntimeMark";
 import { WorkspacePopover } from "../components/WorkspacePopover";
-import { agentModels, type AgentModel } from "./model";
+import { agentModels, runtimeName, type AgentModel } from "./model";
 import { useWorkbench } from "../workbench/store";
+import { isDesktopRuntime, openDesktopExternalUrl } from "../desktop/bridge";
 
 type Event = { seq: number; kind: string; data: Record<string, any> };
 type Session = {
@@ -24,6 +25,9 @@ export function eventText(event: Event): string {
     if (update.sessionUpdate === "agent_message_chunk") return String(update.content?.text || "");
     if (update.sessionUpdate === "tool_call" || update.sessionUpdate === "tool_call_update") return String(update.title || update.status || "Tool activity");
   }
+  if (event.kind === "claude/text") return String(data.text || "");
+  if (event.kind === "claude/tool") return `\n› ${String(data.tool || "Tool")} ${String(data.detail || "")}\n`;
+  if (event.kind === "claude/result" && data.is_error) return "\nClaude Code reported a failed turn.\n";
   if (event.kind === "sdk/event") {
     if (data.kind === "StreamEvent") return String(data.data?.event?.delta?.text || "");
     if (data.kind === "ResultMessage" && data.data?.is_error) return "\nClaude reported a failed turn.\n";
@@ -60,7 +64,7 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   const alive = useRef(true);
   const base = `${apiBase}/echo-code/external-sessions/${encodeURIComponent(selected)}`;
   const active = Boolean(session?.turn_active) || ["preparing", "running"].includes(session?.state || "");
-  const name = runtimeId === "codex" ? "Codex" : runtimeId === "claude_code" ? "Claude Agent" : "ACP agent";
+  const name = runtimeName(runtimeId);
   const canSend = Boolean(session?.connected && !active && !busy && session.state !== "rolled_back" && (runtimeId !== "codex" || session.account.connected));
   useEffect(() => {
     onState({ sessionId: selected, connected: Boolean(session?.connected), canSend, busy, active,
@@ -131,6 +135,7 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
         <label>Arguments (JSON array)<input value={args} onChange={event => setArgs(event.target.value)} /></label>
         <small>ACP v1 over stdio. Authenticate the agent in its own terminal first. Filesystem and terminal client capabilities are not exposed.</small></> : null}
       {runtimeId === "claude_code" ? <small>Requires the optional official Claude Agent SDK and a separate Anthropic API key. Subscription login is not offered.</small> : null}
+      {runtimeId === "claude_cli" ? <small>Runs your installed Claude Code with your own sign-in and plan. Claude Code keeps its tools; Echo asks you before any action Claude Code would ask about. Edits stay in this worktree.</small> : null}
       <label className="ec-check"><input type="checkbox" checked={acknowledge} onChange={event => setAcknowledge(event.target.checked)} />
         I trust this executable and project. The harness runs tools as my OS account; worktrees do not sandbox it. Command approvals may grant access beyond the worktree.</label>
       <label className="ec-check"><input type="checkbox" checked={dirty} onChange={event => setDirty(event.target.checked)} />Start from committed HEAD even if my source checkout has local changes.</label>
@@ -145,13 +150,19 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
         <button className="es-btn" disabled={busy || !session || session.state === "rolled_back"} onClick={() => void action(async () => {
           await request(`${base}/connect`, { api_key: apiKey }); setApiKey("");
         })}>Connect {name}</button>
+        {runtimeId === "claude_cli" ? <button className="es-btn" disabled={busy} onClick={() => void action(() => request(`${apiBase}/echo-code/runtimes/claude_cli/login`, {}))}
+          title="Opens Claude Code's own sign-in in a separate window">Sign in to Claude Code</button> : null}
       </div> : <div className="ec-session-actions">
         {runtimeId === "codex" && !session.account.connected ? <button className="es-btn" disabled={busy} onClick={() => void action(async () => {
           const result = await request<{ url: string }>(`${base}/login`, {}); setLoginUrl(result.url);
         })}>Sign into Codex</button> : null}
         <button className="es-btn" disabled={busy} onClick={() => void action(() => request(`${base}/stop`, {}))}>Stop runtime</button>
       </div>}
-      {loginUrl && !session?.account.connected ? <a href={loginUrl} target="_blank" rel="noopener noreferrer">Continue official Codex sign-in ↗</a> : null}
+      {loginUrl && !session?.account.connected ? <a href={loginUrl} target="_blank" rel="noopener noreferrer" onClick={event => {
+        if (!isDesktopRuntime()) return;
+        event.preventDefault();
+        void openDesktopExternalUrl(loginUrl);
+      }}>Continue official Codex sign-in ↗</a> : null}
       {session?.state === "rolled_back" ? <p>Files were restored. Start a new session; the original agent history is retained and cannot be resumed against restored files.</p> : null}
       {session?.approvals.map(approval => <div className="ec-approval" key={approval.id} role="group" aria-label="Runtime permission request">
         <strong>{name} requests permission</strong><small>{approval.kind}</small><pre>{JSON.stringify(approval.details, null, 2)}</pre>

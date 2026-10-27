@@ -33,7 +33,7 @@ def workspace(project_id: str):
 
 
 class StartSession(BaseModel):
-    runtime_id: Literal["echo", "codex", "claude_code", "acp"]
+    runtime_id: Literal["echo", "codex", "claude_code", "claude_cli", "acp"]
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
@@ -46,7 +46,7 @@ def create_session(project_id: str, request: StartSession):
 # External runtimes have their own durable native session identities and never
 # become Echo threads. These routes inherit the same owner auth/origin checks.
 class ExternalStart(StartSession):
-    runtime_id: Literal["codex", "claude_code", "acp"]
+    runtime_id: Literal["codex", "claude_code", "claude_cli", "acp"]
     acknowledge_dirty: bool = False
     acknowledge_execution: bool = False
     command: list[str] = Field(default_factory=list, max_length=32)

@@ -32,6 +32,9 @@ def runtime_catalog() -> dict:
     definitions = (
         ("codex", "Codex", "codex-app-server", "codex",
          "Use the official app-server and Codex-owned sign-in. ChatGPT access depends on your account and usage limits."),
+        ("claude_cli", "Claude Code", "claude-code-cli", "claude_cli",
+         "Your installed Claude Code, signed in with your own Claude plan through its own login. Claude Code keeps "
+         "its tools and permissions; EchoSpeak asks you before any action Claude Code would ask about."),
         ("claude_code", "Claude Agent", "claude-agent-sdk", None,
          "Original Claude tools and sessions through the official Agent SDK. Requires a separate Anthropic API key; subscription OAuth is not copied."),
         ("acp", "Other ACP agents", "acp", None,

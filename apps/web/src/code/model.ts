@@ -29,6 +29,11 @@ export function canStartSession(runtime: CodeRuntime | undefined, workspace: Cod
   return Boolean(workspace?.can_start_native && runtime?.id === "echo" && runtime.implemented && runtime.can_start);
 }
 
+/** Each coding agent's display name; the harness itself is always the vendor's own. */
+export function runtimeName(id: string | undefined): string {
+  return ({ echo: "Echo native", codex: "Codex", claude_cli: "Claude Code", claude_code: "Claude Agent", acp: "ACP agent" } as Record<string, string>)[id || "echo"] || "ACP agent";
+}
+
 export function runtimeStatus(runtime: CodeRuntime): string {
   if (runtime.implemented) return runtime.can_start ? "Available · own account" : "Setup required";
   return runtime.installed ? "CLI found · execution planned" : runtime.installed === false ? "CLI not found · execution planned" : "Planned";

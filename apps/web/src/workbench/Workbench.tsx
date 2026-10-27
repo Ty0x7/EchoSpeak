@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { WorkspacePopover } from "../components/WorkspacePopover";
 import { RuntimeMark } from "../components/RuntimeMark";
+import { runtimeName } from "../code/model";
 import { request } from "../projects/model";
 import { isDesktopRuntime, openDesktopExternalUrl } from "../desktop/bridge";
 import { contextKey, previewUrl, surfaceTitle, useWorkbench, workbenchUrl, type SurfaceKind } from "./store";
@@ -71,7 +72,7 @@ export function WorkspaceDetails({ apiBase }: { apiBase: string }) {
     <button disabled={!data?.git.is_git} onClick={() => store.open("pull_requests")}><WorkbenchIcon kind="pull_requests" />Pull requests</button>
     <button disabled={!data?.git.is_git} onClick={() => store.open("diff")}><WorkbenchIcon kind="diff" />Commit &amp; push<span className="wb-row-end">Review</span></button>
     <button disabled={!data?.git.is_git} onClick={() => store.open("diff")}><WorkbenchIcon kind="files" />Changes<span className="wb-row-end">{data?.git.changes.length || 0}</span></button>
-    <hr /><div className="wb-runtime-line"><RuntimeMark runtime={data?.runtime || "echo"} />{data?.runtime === "claude_code" ? "Claude Agent" : data?.runtime === "codex" ? "Codex" : data?.runtime === "acp" ? "ACP agent" : "Echo native"}</div>
+    <hr /><div className="wb-runtime-line"><RuntimeMark runtime={data?.runtime || "echo"} />{runtimeName(data?.runtime)}</div>
     <button onClick={() => store.open("usage")}><WorkbenchIcon kind="usage" />Usage &amp; limits</button>
     {error || notice ? <p className="wb-error" role="alert">{error || notice}</p> : null}
   </div>;
@@ -204,7 +205,7 @@ function Usage({ apiBase }: { apiBase: string }) {
   return <div className="wb-usage"><header><strong>Usage &amp; limits</strong><button aria-label="Refresh usage" onClick={useWorkbench.getState().refresh}>↻</button></header>
     {error ? <p role="alert" className="wb-error">{error}</p> : null}{data?.runtimes.map(row => {
       const windows = row.limits?.rateLimitsByLimitId ? Object.values(row.limits.rateLimitsByLimitId) as any[] : row.limits?.rateLimits ? [row.limits.rateLimits] : [];
-      return <section key={row.session_id}><div className="wb-runtime-line"><RuntimeMark runtime={row.runtime} /><strong>{row.runtime === "claude_code" ? "Claude Agent" : row.runtime === "codex" ? "Codex" : "ACP agent"}</strong><small>{row.session_id.slice(0, 8)}</small></div>
+      return <section key={row.session_id}><div className="wb-runtime-line"><RuntimeMark runtime={row.runtime} /><strong>{runtimeName(row.runtime)}</strong><small>{row.session_id.slice(0, 8)}</small></div>
         {windows.flatMap((limit, index) => ["primary", "secondary"].map(kind => { const window = limit[kind]; return window && typeof window.usedPercent === "number" ? <div key={`${index}:${kind}`} className="wb-limit"><span>{kind === "primary" ? "Session window" : "Longer window"}</span><strong>{Math.max(0, 100 - window.usedPercent).toFixed(0)}% left</strong><progress max={100} value={Math.max(0, 100 - window.usedPercent)} />{window.resetsAt ? <small>Resets {new Date(window.resetsAt * 1000).toLocaleString()}</small> : null}</div> : null; }))}
         {!windows.length ? <p className="wb-muted">{row.unavailable || "Account limits were not reported by this runtime."}</p> : null}
         {row.usage && Object.keys(row.usage).length ? <details><summary>Reported API usage</summary><pre>{JSON.stringify(row.usage, null, 2)}</pre></details> : null}

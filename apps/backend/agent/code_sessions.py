@@ -19,7 +19,11 @@ import time
 import uuid
 
 from agent import code_worktree as wt, privacy, project_workspace
-from agent.code_runtimes import Acp, Claude, Codex
+from agent.code_runtimes import Acp, Claude, ClaudeCli, Codex
+
+
+# The owner's own coding agents, each run in its original harness (never Echo's model router).
+RUNTIMES = {"codex", "claude_code", "claude_cli", "acp"}
 
 
 def sdk_installed():
@@ -228,7 +232,7 @@ class Sessions:
                 continue
             try:
                 row = json.loads((directory / "session.json").read_text(encoding="utf-8"))
-                if row["id"] == directory.name and row["runtime_id"] in {"codex", "claude_code", "acp"}:
+                if row["id"] == directory.name and row["runtime_id"] in RUNTIMES:
                     row["state"] = "stopped"  # never auto-reconnect/replay after restart
                     self.sessions[row["id"]] = Session(self, row)
             except (OSError, ValueError, KeyError):
@@ -253,7 +257,7 @@ class Sessions:
 
     async def create(self, project_id, runtime_id, key, acknowledge_dirty=False, command=None):
         self.admit()
-        if runtime_id not in {"codex", "claude_code", "acp"}:
+        if runtime_id not in RUNTIMES:
             raise ValueError("Select an external runtime")
         item = project_workspace.project(project_id)
         source = project_workspace.root_for(item)
@@ -313,7 +317,7 @@ class Sessions:
             session.lease = None
             raise ValueError("This session was rolled back. Start a new session so native history cannot disagree with restored files.")
         session.row["state"] = "connecting"
-        session.adapter = {"codex": Codex, "claude_code": Claude, "acp": Acp}[runtime](session)
+        session.adapter = {"codex": Codex, "claude_code": Claude, "claude_cli": ClaudeCli, "acp": Acp}[runtime](session)
         try:
             await session.adapter.connect()
             self.admit()
@@ -335,6 +339,8 @@ class Sessions:
             # Authentication may outlive an HTTP request. Expose pending state,
             # retaining a single controlled operation in this session.
             raise ValueError("Authenticate this ACP executable in its own terminal before connecting. Interactive ACP auth is not enabled.")
+        if session.row["runtime_id"] == "claude_cli":
+            raise ValueError("Claude Code signs in with its own `claude auth login`: Settings › Models › Coding agents › Claude Code › Sign in")
         raise ValueError("Claude uses the dedicated API key supplied at connection")
 
     async def prompt(self, session_id, text, model=""):
