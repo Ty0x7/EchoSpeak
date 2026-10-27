@@ -81,10 +81,17 @@ def queue_result(text, channels, *, label, agent_id, session_id, key, work_id=""
     return delivered
 
 
+_last_prune = 0.0
+
+
 def drain(limit=20):
     """Model-free outbox upkeep on the existing scheduler tick."""
     import time
+    global _last_prune
     coord = coordinator()
+    if time.time() - _last_prune > 3600:
+        _last_prune = time.time()
+        coord.prune()  # retention for finished work history (review R10)
     for row in coord.view("deliveries")[-limit:]:
         if row["status"] in {"queued", "failed"}:
             dispatch(row["id"])

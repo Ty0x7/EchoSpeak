@@ -71,6 +71,19 @@ BUILDER_FOCUS = {
     "project_status", "terminal", "process_output", "process_stop",
 }
 
+# What any agent on a local model is shown up front in ordinary chat (review R12): the everyday
+# tools. Always-on tools ride along; the rest (media, shopping, stocks, integrations, proposals…)
+# stay callable by name and load through find_tools. Cloud models keep every schema.
+CHAT_FOCUS = BUILDER_FOCUS | {
+    "calculate", "file_write", "create_artifact", "update_artifact",
+    "set_reminder", "list_reminders", "cancel_reminder",
+    "web_search", "safe_web_fetch", "weather_live", "sports_live",
+    "take_screenshot", "read_image", "vision_qa", "computer_action", "open_application",
+    "memory_save", "memory_search", "chat_search", "document_search",
+    # Offered only when this request asks for deep research, so it stays when present.
+    "spawn_workers",
+}
+
 # Lean-native tools that change this PC, held to the same Settings › Permissions
 # switches as their registry counterparts (file_write, terminal_run in agent/tools.py).
 # Checked when the toolbox is built and again when the tool runs, since settings can

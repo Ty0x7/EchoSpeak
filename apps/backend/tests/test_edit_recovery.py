@@ -182,3 +182,29 @@ def test_a_held_tool_called_by_name_runs_and_stays_listed():
 def test_only_builders_on_local_models_are_focused(persona, provider, focused):
     session = SimpleNamespace(_endpoint_for=lambda p: SimpleNamespace(provider=provider))
     assert LeanSession._small_builder(session, persona) is focused
+
+
+def test_other_agents_on_local_models_get_the_everyday_chat_focus(monkeypatch):
+    """Review R12: a local model in ordinary chat gets everyday tools up front; cloud models keep every schema."""
+    import threading
+
+    from agent.lean import runtime
+    from agent.lean.personas import get_persona_store
+    from agent.lean.provider import Endpoint
+    from agent.lean.toolbox import CHAT_FOCUS
+
+    monkeypatch.setattr(runtime.LeanSession, "_recall", lambda *a, **k: [])
+    sizes = {}
+    for provider, local in (("lmstudio", True), ("openai", False)):
+        monkeypatch.setattr(runtime.LeanSession, "_endpoint_for", lambda *a, provider=provider, local=local, **k: Endpoint(
+            provider=provider, model="m", base_url="http://127.0.0.1:1", api_key="", local=local))
+        session = runtime.LeanSession(agent=SimpleNamespace(memory=None), session_id=f"focus-{provider}", request_id="r",
+                                      emit=lambda _: None, cancel=threading.Event(), source="web")
+        box = session._build_turn(get_persona_store().get("echo"), "What's the capital of Peru?", history=[], depth=0).toolbox
+        sent = {s["function"]["name"] for s in box.schemas()}
+        sizes[provider] = len(sent)
+        if local:
+            always = {n for n, t in box.native.items() if t.always or t.hidden}
+            assert sent <= CHAT_FOCUS | always | {"find_tools"} and "find_tools" in sent
+            assert box.deferred and all(box.entry(n) or n in box.native for n in box.deferred)  # still callable by name
+    assert sizes["lmstudio"] < sizes["openai"]

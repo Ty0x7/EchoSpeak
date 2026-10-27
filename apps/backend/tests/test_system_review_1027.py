@@ -79,7 +79,7 @@ def test_a_running_background_process_does_not_block_its_own_work(tmp_path):
 
 
 # ── R4: ordinary questions become durable work records ──────────────────
-@open_finding("R4")
+# Fixed in 11.10.8 (was open review finding R4).
 @pytest.mark.parametrize("question", ["What should I make for dinner?", "How do I update my resume?",
                                       "Can you add up 12 and 30?"])
 def test_ordinary_questions_do_not_count_as_action_requests(question):
@@ -111,7 +111,7 @@ def test_skill_libraries_are_bundled_into_the_installer():
 
 
 # ── R7: settings that save but change nothing ──────────────────────────
-@open_finding("R7")
+# Fixed in 11.10.8 (was open review finding R7).
 def test_your_name_and_remember_conversations_are_read_somewhere():
     sources = "\n".join(p.read_text(encoding="utf-8", errors="ignore") for p in (BACKEND / "agent").rglob("*.py"))
     assert "user_display_name" in sources, "Settings › General › Your name is saved but no agent reads it"
@@ -119,7 +119,7 @@ def test_your_name_and_remember_conversations_are_read_somewhere():
 
 
 # ── R8: a plain group question costs an extra completion-judge model call ──
-@open_finding("R8")
+# Fixed in 11.10.8 (was open review finding R8).
 def test_a_group_question_without_tools_or_tasks_skips_the_model_judge(monkeypatch):
     from types import SimpleNamespace
 

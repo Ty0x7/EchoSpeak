@@ -558,6 +558,48 @@ class Coordinator:
             return data["notes"].get(key, {}).get("text", "")
         return self._tx(change)
 
+    def prune(self, *, keep_days: float = 30, now: Optional[float] = None) -> int:
+        """Drop finished history older than the retention window (review R10); returns works removed.
+
+        Only finished works go, with their attempts, actions, decided approvals and settled
+        deliveries. Anything unknown, waiting, running, still referenced by live work, or with a
+        delivery whose outcome is unsettled stays until the owner resolves it.
+        """
+        cutoff = (now if now is not None else time.time()) - keep_days * 86400
+
+        def candidates(data) -> set[str]:
+            works = data["works"]
+            old = {i for i, r in works.items() if r["status"] in TERMINAL and float(r.get("updated_at") or 0) < cutoff}
+            kept = set(works) - old
+            old -= {r.get("parent_id") for i, r in works.items() if i in kept}
+            old -= {d for i in kept for d in works[i].get("dependencies", [])}
+            old -= {a["work_id"] for a in data["actions"].values() if a["status"] in {"intent", "unknown", "background"}}
+            old -= {d["work_id"] for d in data["deliveries"].values() if d["status"] in {"queued", "sending", "unknown"}}
+            old -= {a["work_id"] for a in data["approvals"].values() if a["status"] == "pending"}
+            return old
+
+        def settled(row) -> bool:
+            # A delivery without a work (reminders, notices) ages out on its own once its outcome is settled.
+            return (not row.get("work_id") and row["status"] not in {"queued", "sending", "unknown"}
+                    and float(row.get("updated_at") or row.get("created_at") or 0) < cutoff)
+
+        with self.store._lock:
+            if not self.path.exists():
+                return 0
+            data = self._read()
+            if not candidates(data) and not any(settled(r) for r in data["deliveries"].values()):
+                return 0  # nothing to drop: don't rewrite the document
+
+        def change(data):
+            gone = candidates(data)
+            for work_id in gone:
+                del data["works"][work_id]
+            for bucket in ("attempts", "actions", "approvals", "deliveries"):
+                data[bucket] = {k: v for k, v in data[bucket].items() if v.get("work_id") not in gone}
+            data["deliveries"] = {k: v for k, v in data["deliveries"].items() if not settled(v)}
+            return len(gone)
+        return self._tx(change)
+
     def reconcile(self):
         if not self.path.exists():
             return

@@ -353,3 +353,22 @@ def test_specialist_memory_save_cannot_overwrite_account_memory(env):
     tool.func({"fact": "The project uses Python.", "key": "language"})
     assert captured[0]["scope"] == "session" and captured[0]["semantic_key"] == "agent:scout:language"
 
+
+def test_chat_question_creates_no_work_but_a_real_write_does(env, monkeypatch):
+    """Review R4: a work record comes from a state-changing tool call, not from words in the message."""
+    store, _, _ = env
+    native = runtime.LeanSession._native_tools
+    writes = []
+    monkeypatch.setattr(runtime.LeanSession, "_native_tools", lambda self, *a, **k: native(self, *a, **k) + [
+        NativeTool("fixture_read", "read", {"type": "object", "properties": {}}, lambda _: "Lima", parallel_safe=True, always=True),
+        NativeTool("fixture_write", "write", {"type": "object", "properties": {}}, lambda _: writes.append(1) or "saved", always=True)])
+    monkeypatch.setattr(loop, "tool_needs_approval", lambda entry, name, args: (False, ""))
+    install_clients(monkeypatch, {"echo": [ModelTurn(tool_calls=[ToolCall("r1", "fixture_read", "{}")]), ModelTurn(content="Lima.")]})
+    asked = runtime.run_lean_query(SimpleNamespace(memory=None), message="Can you add up how many letters are in Lima?",
+        session_id="ask", request_id="request-ask", emit=lambda _: None, cancel=threading.Event())
+    assert "work" not in asked and store.coordination.view("works") == []
+    install_clients(monkeypatch, {"echo": [ModelTurn(tool_calls=[ToolCall("w1", "fixture_write", "{}")]), ModelTurn(content="Saved.")]})
+    wrote = runtime.run_lean_query(SimpleNamespace(memory=None), message="What do you think? Keep it.",
+        session_id="write", request_id="request-write", emit=lambda _: None, cancel=threading.Event())
+    assert writes == [1] and wrote["work"]["status"] == "completed"
+    assert store.coordination.view("deliveries") == []  # the reply streamed into the chat; no outbox row
