@@ -300,7 +300,8 @@ test in the repository; live and installed behavior is still **Owner**.
 | R10 | Fixed (retention) | `prune()` runs hourly from the delivery tick and drops finished work older than 30 days with its records. Unknown, waiting, unsettled and referenced records stay. The single-document design is unchanged. | Test |
 | R12 | Fixed (local models) | `CHAT_FOCUS` for any agent on a local model: 32 → 19 schemas, about 6.8k → 5.0k tokens at default switches. Cloud is unchanged. Deferred tools load via `find_tools`. | Test; measured with the real `_build_turn` |
 | R17 | Fixed | The webhook body reaches the routine wrapped as untrusted `webhook` content, and the run is tainted. | Test |
-| R11, R13–R15 | Open | Phase 5 (Settings structure, browser runtime, DPI, Codex protocol drift). | — |
+| R11 | Fixed in 11.10.9 | Settings reorganized without a redesign. Coding agents (Codex, Claude Code, Claude Agent, ACP) are in Models with status, Check and Sign in. Approvals moved to Permissions, workers and step budget to Agents, learning to Memory, webhooks to Automations, and Connections has its own page. See [echo-code.md](echo-code.md#11109-codex-you-can-connect-and-claude-code-with-your-own-plan). | Test; browser preview |
+| R13–R15 | Open | Phase 5 (browser runtime, DPI, Codex protocol drift). | — |
 
 **Found while fixing (all Test):**
 - **Answered questions still listed as pending.** This was the real cause of the "order-dependent" approval-restart failure. The broker listed decided items until their waiter collected them.

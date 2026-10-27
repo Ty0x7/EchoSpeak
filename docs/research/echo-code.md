@@ -320,3 +320,92 @@ The 11.10.6 follow-up removes runtime-conditional hiding of the welcome and draf
 Native model selection is a local draft choice until session creation. The page reads that new session's provider revision and updates only its binding before opening the conversation. It does not change another Chat's provider. External send carries the selected model only to the selected owned session; ACP continues to manage its own model. Scope changes clear model overrides, while the shared unsent draft survives agent changes.
 
 `Session.record_model` bounds and redacts known credentials before retaining runtime-reported model identity. Codex derives it from its existing original model/thread/turn responses; Claude from original SDK model fields; ACP from optional session model state. No new sign-in mechanism, fabricated model catalog, ACP model-setting RPC or implicit inference was introduced. The ACP response shape is read only when supplied, consistent with [optional session model/configuration state](https://agentclientprotocol.com/protocol/v1/session-setup).
+
+## 11.10.9: Codex you can connect, and Claude Code with your own plan
+
+### Why Connect Codex failed
+
+Echo looked for `codex` only on the backend's PATH. On the owner's PC, Codex is the **Codex desktop app** (Microsoft Store package `OpenAI.Codex`). It ships the same CLI, `app\resources\codex.exe`, which serves `app-server`, but it doesn't put it on PATH. It also copies the CLI to `%LOCALAPPDATA%\OpenAI\Codex\bin\<build>\codex.exe`. So the runtime catalog reported "not found on the backend's PATH", and Connect could never start.
+
+Verified on this PC on 27 Oct 2026: Echo's own `RpcProcess` ran the bundled `codex.exe app-server` (CLI 0.164.0-alpha) in an empty folder. `account/read` reported a ChatGPT sign-in on the Plus plan, and `model/list` returned 8 models. The CLI shares the desktop app's `~/.codex` login, so no second sign-in is needed.
+
+`agent/code_executables.py` now finds each owner-installed program without running it. It looks, in order:
+
+1. The path set in **Settings › Models › Coding agents**.
+2. PATH. Only a native `.exe` counts, so npm `.cmd`/`.ps1` shims, which need a shell, are skipped.
+3. The vendor's install location: the Store package root through the per-user AppModel registry, then the Codex app's `bin` copy, or Claude Code's native installer at `~/.local/bin/claude.exe`.
+
+The Codex adapter and the runtime catalog both use this lookup, and the catalog stays passive (paths only).
+
+### Using the owner's Claude plan, and why only through the installed Claude Code
+
+The governing documents, as read on 27 Oct 2026:
+
+- **Allowed.** [Claude Code legal and compliance](https://code.claude.com/docs/en/legal-and-compliance) lets an end user sign in "to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code". The binary must not be modified, and no authentication method may be removed or restricted.
+- **Not allowed.** The same page prohibits applications from offering Claude.ai login, routing requests through Free/Pro/Max credentials on users' behalf, or collecting or intermediating Claude.ai credentials or session tokens.
+- **The Agent SDK.** The [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) adds that third-party products built on the SDK use API keys "unless previously approved".
+
+So the two routes stay separate:
+
+- **Claude Code** (new runtime `claude_cli`). Echo runs the owner's installed, unmodified `claude.exe` in the session's worktree, one `claude -p` process per turn with `--output-format stream-json --verbose --include-partial-messages`.
+  - It resumes Claude Code's own session with `--resume`.
+  - Echo passes no API key; `ANTHROPIC_API_KEY` is filtered from child environments. Claude Code therefore uses its own stored sign-in, and the owner's plan pays.
+  - Sign-in is Claude Code's own `claude auth login`, opened in its own console window.
+  - The status check runs `claude auth status --json`, and Echo keeps only *signed in / method / plan*. Email and organization are dropped.
+  - Echo never reads Claude Code's credential store.
+- **Claude Agent** (unchanged). The Agent SDK route remains API-key only.
+
+Settings and the Code surface describe the new runtime in plain text as running the owner's installed Claude Code. EchoSpeak doesn't present it as its own product.
+
+### Claude Code's permissions, answered by the owner
+
+In a `-p` run, any action that would show a permission prompt is denied unless a `PermissionRequest` hook decides it. A request that no hook decides is denied ([hooks reference](https://code.claude.com/docs/en/hooks), [headless](https://code.claude.com/docs/en/headless)). Echo passes `--settings` with one exec-form `PermissionRequest` hook (`command` plus `args`, no shell). The hook is `agent/code_claude_hook.py`, packaged as `echospeak-backend.exe --code-claude-hook`.
+
+The approval path:
+
+1. The hook connects to a loopback server that the adapter opened for this connection. It authenticates with a per-connection token passed in the child environment.
+2. Echo shows the request as an Echo Code approval card. The owner chooses **Approve once** or **Deny**, and an unanswered card is denied after 180 s.
+3. The hook prints the documented decision.
+4. Any error is a denial: the hook can't reach Echo, the token is wrong, or no turn is running. A token that leaks to a command Claude Code runs can only raise approval cards, never approve them.
+
+Other launch settings:
+
+- **`--permission-mode acceptEdits`.** Edits inside the isolated worktree go ahead, where Inspect changes and Roll back cover them. This is the same latitude as Codex's `workspace-write`. Commands outside Claude Code's read-only set, network fetches and everything else Claude Code would ask about go to the owner.
+- **`--setting-sources user --strict-mcp-config`.** The owner's own Claude Code settings apply. Hooks and MCP servers from the repository, which `-p` would otherwise load without a trust prompt, don't.
+- **Process ownership.** Each turn runs in a kill-on-close Windows job, so Stop ends Claude Code and anything it started.
+
+Live verification on this PC, with two minimal Haiku turns on the owner's Pro plan:
+
+- Turns completed, streamed text and reported `claude-haiku-5-5`.
+- The session id was captured and the conversation resumed.
+- `python -c 'print(6*7)'` triggered the PermissionRequest hook. Echo's approval received `claude/Bash` with that exact command; it was approved, ran, and Claude answered 42.
+
+A plain `echo` needed no approval, because it's in Claude Code's own read-only command set.
+
+### Settings reorganization
+
+The look and controls are unchanged; groups moved to where people look for them.
+
+| Setting | Before | Now |
+|---|---|---|
+| Codex, Claude Code (status, Check, Sign in, location), Claude Agent, ACP | Code popovers only | **Models › Coding agents** |
+| Ask before risky actions, separate reader for outside content | General | **Permissions › Approvals** |
+| Research workers, step budget | General | **Agents › How agents work** |
+| Learning from experience | General | **Memory** |
+| Connections, Skills, MCP, A2A (outgoing and incoming) | Advanced › Connections & skills tab | **Connections** (own page under Capabilities) |
+| Webhooks | Advanced | **Automations** |
+| LM Studio only, traces, folders, memories and documents, companion | Advanced | Advanced (low-level only) |
+
+Search words follow each move, and switching sections now opens the new page at its top.
+
+### Tests and limits
+
+- **Tests.**
+  - `tests/test_claude_code_runtime.py` uses a fixture that plays `claude -p` and runs the real hook program. It covers resume, flags, no API key reaching Claude Code, approve and deny round trips, a wrong token or unreachable Echo meaning deny, sign-in required, status keeping only plan fields, desktop-app discovery, a Settings path winning, and checks that run only when asked and stay closed in Private mode.
+  - `test_echo_code.py` now controls discovery instead of depending on what's installed.
+  - Web tests cover the status line, the Coding agents group, runtime names and transcript rendering.
+- **Limits.**
+  - The model list for Claude Code is its aliases (Sonnet, Opus, Haiku) plus a free-form model id. Claude Code doesn't publish a catalog to clients.
+  - Plan usage follows Anthropic's limits for ordinary individual use. Echo doesn't meter it.
+  - Claude Code's interactive-only commands such as `/login` aren't available in `-p`, so sign-in stays in its own window.
+  - The installed-app run is the owner's acceptance step.
