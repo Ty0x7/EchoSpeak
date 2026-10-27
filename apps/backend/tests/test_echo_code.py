@@ -44,7 +44,7 @@ def test_catalog_is_passive_and_never_claims_authentication(env, monkeypatch):
     assert data["runtimes"][0]["id"] == "echo"
     for row in data["runtimes"][1:]:
         assert row["authentication"] == "unverified"
-        assert not row["can_start"] and not row["implemented"]
+        assert row["implemented"]
     assert next(row for row in data["runtimes"] if row["id"] == "codex")["installed"] is True
     assert "installed/" not in json.dumps(data)
 
@@ -98,10 +98,10 @@ def test_transport_retries_and_concurrent_creation_return_one_session(env):
 
 
 @pytest.mark.parametrize("runtime", ["codex", "claude_code", "acp"])
-def test_unimplemented_runtime_never_falls_back_to_native(env, runtime):
+def test_external_runtime_never_falls_back_to_native(env, runtime):
     client, item, _, _, tm, store = env
     response = start(client, item, runtime)
-    assert response.status_code == 409 and "not implemented" in response.json()["detail"]
+    assert response.status_code == 409 and "native query" in response.json()["detail"]
     assert not tm.list_threads() and not store.list_thread_states()
 
 

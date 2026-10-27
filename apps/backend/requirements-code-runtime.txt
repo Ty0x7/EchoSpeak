@@ -1,0 +1,11 @@
+# Optional official Claude harness. Install AFTER requirements.lock.txt:
+# python -m pip install --no-deps --require-hashes -r requirements-code-runtime.txt
+# Other dependencies are pinned by the backend lock; pip check must pass.
+sniffio==1.3.1 \
+    --hash=sha256:2f6da418d1f1e0fddd844478f41680e794e6051915791a034ff65e5f100525a2
+claude-agent-sdk==0.2.174 \
+    --hash=sha256:8be611533b7be210791a39716479d7d692e5e3afe8798529b5262db00f470165 \
+    --hash=sha256:7729458ca2e0031e6d67452dd8fdda4ff07b4fcf40c4bfed867c78ae963bdbdd \
+    --hash=sha256:368699227f4ccb6fff541f4add983854fdd6e95fed5e509264cb079316ae234b \
+    --hash=sha256:0d46be4e858418227d1d455c7787335f4bed073899f48b657c01cc210683803f \
+    --hash=sha256:728592effdfe63e96fbad7ba3b2ddf642e3aad344e73692b429898fbfcb33f12

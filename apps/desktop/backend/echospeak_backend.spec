@@ -57,6 +57,17 @@ hiddenimports = (
     + ["faiss", "onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp", "websockets.sync.client"]
 )
 
+# Optional Claude SDK contains the original harness binary. Ship it only when
+# explicitly installed at the pinned version; never download it during a build.
+import importlib.util
+if importlib.util.find_spec("claude_agent_sdk"):
+    from importlib.metadata import version
+    if version("claude-agent-sdk") != "0.2.174":
+        raise RuntimeError("Install the pinned requirements-code-runtime.txt before bundling Claude Agent")
+    hiddenimports += collect_submodules("claude_agent_sdk")
+    datas += collect_data_files("claude_agent_sdk")
+    datas += copy_metadata("claude-agent-sdk")
+
 a = Analysis(
     [str(desktop_dir / "backend" / "echospeak_backend.py")],
     pathex=[str(backend_root)],

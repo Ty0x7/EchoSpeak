@@ -1,4 +1,28 @@
 .ec-page { height:100%; min-height:0; }
+.echo-root .ec-start.ec-start-external { margin-top:24px; max-width:880px; }
+.ec-start-external .ec-draft-tools { padding-top:12px; padding-bottom:12px; }
+.ec-external { margin-top:26px; min-width:0; }
+.ec-external header,.ec-session-actions,.ec-session-state,.ec-runtime-composer>div { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+.ec-external header select { margin-left:auto; max-width:70%; }
+.ec-external input:not([type=checkbox]),.ec-external select { background:var(--es-surface-1); color:var(--es-text); border:1px solid var(--es-border); padding:8px; border-radius:7px; font:inherit; min-width:0; }
+.ec-runtime-setup { display:grid; gap:16px; padding:22px 0; line-height:1.6; }
+.ec-runtime-setup>label:not(.ec-check),.ec-connect label { display:grid; gap:6px; }
+.ec-check { display:flex; gap:10px; align-items:flex-start; color:var(--es-text-3); }
+.ec-check input { margin-top:5px; flex-shrink:0; }
+.ec-session-state { margin-top:20px; color:var(--es-text-3); }
+.ec-worktree-path { overflow-wrap:anywhere; color:var(--es-text-4); font-size:11px; }
+.ec-connect { display:flex; align-items:end; flex-wrap:wrap; gap:12px; }
+.ec-approval { margin:16px 0; padding:16px; border:1px solid var(--es-border-strong); border-radius:12px; background:var(--es-surface-1); }
+.ec-approval strong,.ec-approval small { display:block; margin-bottom:8px; }
+.ec-external pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:360px; overflow:auto; font:12px/1.7 var(--es-font-mono,monospace); }
+.ec-runtime-stream { min-height:180px; padding:18px 0; color:var(--es-text); }
+.ec-runtime-composer { border:1px solid var(--es-border); border-radius:16px; padding:12px; background:var(--es-surface-1); }
+.ec-runtime-composer textarea { display:block; width:100%; resize:vertical; border:0; background:none; color:var(--es-text); font:inherit; padding:6px; min-height:30px; outline:none; }
+.ec-runtime-composer>div { justify-content:space-between; margin-top:12px; }
+.ec-session-actions { margin:16px 0; }
+.ec-external small { color:var(--es-text-3); line-height:1.6; }
+.ec-runtime-diff { padding:16px 0; border-top:1px solid var(--es-border); }
+@media(max-width:600px) { .ec-external header select { margin-left:0; max-width:100%; width:100%; } }
 .ec-page .es-page { padding:14px 26px 36px; }
 .ec-page .es-page-head { max-width:none; align-items:center; margin:0 0 20px; min-height:28px; }
 .ec-page .es-page-head h1 { font-size:13px; font-weight:550; letter-spacing:0; }

@@ -2,6 +2,8 @@
 
 Research date: **2026-10-25 UTC**. EchoSpeak checkout: `claude/security-audit`, package version `11.10.3`, with unrelated work already present. This is a source implementation and research record, not a release or an installed-app acceptance report. Visual companion: [Echo Code review](../../artifacts/research/echo-code.html).
 
+**Current runtime implementation — 2026-10-25:** phases 2–5 below are implemented on `codex/echo-code-runtimes`, based on the pending UI PR #95. The earlier foundation/package results in this record are historical. Current runtime evidence uses real Git and local protocol fixtures, installed Codex schemas, and the pinned Claude SDK API; it does not establish live account or model acceptance. No new installer has been signed, installed or published.
+
 ## Decision
 
 Keep EchoSpeak's React/Vite frontend, Tauri desktop shell, Python/FastAPI backend, and independent native harness. Add a dedicated **Echo Code** surface with a deterministic runtime control layer beside that harness. Connect directly to each external agent's supported integration API. A runtime is not a model provider, and a runtime selector must never call a local model to supervise another agent.
@@ -228,3 +230,58 @@ The owner's two rounds of annotated screenshots identified inconsistent empty/fi
 The release notes and visual review are [11.10.5](../releases/v11.10.5.md) and [its paired report](../../artifacts/releases/v11.10.5.html). Current verification is recorded separately from the original implementation and package baseline in [the verification record](echo-code-verification.json).
 
 UI screenshots under `artifacts/media/echo-code/ui-11.10.5/` render the real desktop React components with a mocked native bridge and deterministic API responses. The microphone is synthetic. These establish layout and client interactions, not installed WebView2/native frame acceptance, real audio, cloud credentials, model inference or external agent execution. Native runtime launch restrictions and provider permissions are unchanged. A signed 11.10.5 build still needs the owner's signing-key password locally; install/test it before explicitly publishing.
+
+## Phases 2–5: external coding runtimes
+
+### Phase 2 — original Codex harness
+
+`agent/code_runtimes.py` launches the official Codex `app-server` over bounded newline JSON-RPC. It initializes once, reads native account status and models, starts/resumes native threads, starts/interrupts turns and consumes streamed text/tool notifications. ChatGPT sign-in uses `account/login/start`; the user opens the returned official HTTPS URL. Codex owns credential persistence and native history. Echo does not read/copy `auth.json`, export tokens, reuse Echo provider credentials or send tasks through `/query/stream`.
+
+The initial policy is `untrusted`, user-reviewed approvals and `workspace-write`, with command sandbox network access disabled. Once-only command/file approvals are correlated to the exact thread and turn. Native command approval can authorize execution beyond the command sandbox: the creation UI explicitly explains that authority. Additional persistent-permission requests, unsupported dynamic tools, MCP elicitation and unknown client requests fail closed. Missing Windows sandbox support is not worked around by disabling the sandbox. Model listings establish availability reported by the harness, not entitlement or successful inference.
+
+### Phase 3 — worktrees, diffs and rollback
+
+Every external session gets a distinct detached Git worktree under application data. The source project must be trusted and point at the repository root. A dirty source checkout requires an explicit acknowledgement that only committed HEAD is included; owner edits, untracked files and ignored assets stay in that checkout. Provisioning reads raw committed blobs and does not run checkout filters, hooks, LFS downloads or setup scripts. All Echo Git inspections disable configured clean/smudge/process filters, hooks, fsmonitor, external diff and text conversion. Inherited Git root/index overrides are removed from inspections and harness environments.
+
+A per-worktree OS file lock admits one Echo writer. Native sessions never share that checkout with another external session. This separates cooperative agents' edits; it is not an OS security sandbox for an executable running as the owner. There is no automatic commit, merge, source reset, worktree deletion or application of changes back to the source project.
+
+Inspect changes shows tracked HEAD diffs and tracked/untracked status. Before a turn, Echo snapshots tracked and nonignored regular files plus the worktree index (4,000 files / 24 MiB, index 4 MiB). Links and submodules are refused; Git LFS remains committed pointer data. After a turn, a fingerprint binds rollback to the resulting file/index/HEAD state. Rollback requires the runtime to be stopped, retains a separate recovery copy, refuses newer edits or a changed HEAD, restores changed files/index and checks each changed file again before replacing it. Ignored files, external side effects and actions outside this worktree are outside rollback coverage. A mid-rollback conflict may require using the retained recovery copy for partial restoration.
+
+After rollback the old session is retired. Its original harness history is retained but cannot be resumed against restored files; start a new session. This avoids presenting filesystem-only undo as a native conversation rewind.
+
+### Phase 4 — Claude's original tools through the supported SDK
+
+The optional official **Claude Agent SDK 0.2.174** bundles the original Claude harness. Echo's private worker uses the public `ClaudeSDKClient` and `ClaudeAgentOptions` interfaces, native resume, partial events and a `PreToolUse` hook gating every tool, including otherwise auto-approved reads. Decisions are once-only; unknown permission paths deny. The original tool/system-prompt presets are used. User/project settings and MCP servers are not automatically imported (`setting_sources=[]`, strict empty MCP configuration), so project hooks cannot bypass the UI gate.
+
+This product integration is labeled **Claude Agent**. It requires an explicit Anthropic API key supplied to that connection, or the dedicated `ECHOSPEAK_CLAUDE_AGENT_API_KEY` environment variable. It never borrows Echo's configured model-provider key or copies a Claude subscription OAuth token. The key stays in backend/worker memory and the owned child's environment, is redacted from returned events/diffs, and is not saved to session metadata. A local worker connection is not proof the API key works. Redaction values remain in supervisor memory until backend exit so inspection after Stop cannot reveal that supplied key.
+
+Install the optional runtime from the repository root after the normal backend lock:
+
+```powershell
+& .\apps\backend\.venv\Scripts\python.exe -m pip install --no-deps --require-hashes -r .\apps\backend\requirements-code-runtime.txt
+& .\apps\backend\.venv\Scripts\python.exe -m pip check
+```
+
+The optional lock pins SDK/sniffio wheels with official PyPI hashes. The existing backend dependency lock is unchanged. PyInstaller includes the SDK and bundled CLI only when the pinned optional SDK is installed; another installed SDK version fails the build. The packaged entry supports only the exact private worker switch; normal desktop backend startup still requires its authenticated desktop contract. Restart EchoSpeak after installing a runtime.
+
+### Phase 5 — ACP client compatibility
+
+An owner supplies a native executable's absolute path and an array of arguments. Echo negotiates ACP **v1**, provides an empty client capability object, starts/resumes native sessions, sends text prompts, receives text/tool updates and maps permission requests to the exact advertised `allow_once` option ID. Rejection/cancellation returns the protocol's cancelled outcome. No filesystem, terminal or Echo-tool client capabilities are advertised. Unsupported requests receive JSON-RPC errors. Agents must supply their own native tools and be authenticated using their supported terminal flow before connection. Interactive ACP authentication and ACP v2 are not enabled; unsupported native resume is refused instead of silently making a new session.
+
+**Echo as an ACP agent in external clients remains a separate proposed direction and is not implemented.**
+
+### Lifecycle and UI
+
+`agent/code_process.py` bounds frames, pending dispatches and timeouts. On Windows the runtime is created suspended, attached to a kill-on-close Job Object, then resumed. Closing its owned handle terminates the worker and descendants, including a Claude SDK child CLI. Unix uses a process group, not a cgroup sandbox. Startup failure, malformed/oversized frames, EOF and API timeout terminate or cancel owned work. Arbitrary stderr is drained without retaining possible credentials.
+
+`agent/code_sessions.py` maintains independent external identities and native IDs; restart loads sessions stopped and never replays a prompt. The bounded event replay window is memory-only (600 events / 2 MB); native history remains with the original harness. Private/Offline blocks external admission regardless of network overrides. Settings changes stop existing jobs before committing a privacy-mode patch and suspend admission across that transition. A failed privacy save leaves admission closed until a successful privacy update. Stop everything and backend shutdown close jobs and deny waiting approvals. Project rebinding or withdrawn trust prevents reconnection.
+
+`code/ExternalSession.tsx` presents each runtime's own connection, native session, model choice (Codex catalog / Claude explicit default or model), task stream, correlated approvals and worktree diff. Creation and sending are separate actions. The execution acknowledgement describes OS authority. The native Echo composer, model browser, tools and permission system remain independent. APIs live under `/echo-code/projects/{id}/external-sessions` and `/echo-code/external-sessions/{id}` and inherit the application's existing owner authentication and origin checks.
+
+### Verification and acceptance boundary
+
+The [verification record](echo-code-verification.json) contains the current runtime checks and file/media hashes separately from UI/package history. Tests use actual temporary Git repositories and owned Python protocol fixture processes; no real Codex/Claude/ACP account or inference is used. The real optional SDK is imported and its public options, tool hooks and native result types are checked with a fake client. Installed Codex-generated JSON schemas validate the start/resume/turn payloads. The [visual report](../../artifacts/research/echo-code.html#external) contains actual React renders with deterministic API/native-bridge fixtures, not invented product mockups.
+
+Still required before release: owner acceptance of Codex official sign-in, a real streamed task/denial/cancel/resume; a dedicated Claude API key and real SDK tool approval/cancel/resume; a chosen compatible ACP executable's native tools/auth/resume; installed Windows sandbox behavior and signed installer acceptance. No signed runtime-integration installer or live provider test is claimed. Keep this implementation in its separate review until those checks are done.
+
+Official integration references: [Codex app-server](https://learn.chatgpt.com/docs/app-server), [Claude SDK overview and authentication](https://code.claude.com/docs/en/agent-sdk/overview), [Python SDK reference](https://code.claude.com/docs/en/agent-sdk/python), [permissions](https://code.claude.com/docs/en/agent-sdk/permissions), [ACP initialization](https://agentclientprotocol.com/protocol/v1/initialization), [ACP permission options](https://agentclientprotocol.com/protocol/v1/tool-calls).

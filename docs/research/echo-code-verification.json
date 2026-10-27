@@ -1,8 +1,8 @@
 {
   "verified_on_utc": "2026-10-25",
-  "scope": "Current 11.10.5 UI source, desktop component fixtures and preparation checks, with explicitly historical implementation/package baseline; no 11.10.5 signed installer, installed WebView2 or live-provider acceptance claimed",
-  "branch": "codex/echo-code-security",
-  "base_commit": "63fc31ea1b51e3eb092ca2daa3ac3a9c10409c9c",
+  "scope": "Current external-runtime source/fixture checks, with historical UI/package baseline retained; no live login, inference, installed runtime or signed installer acceptance",
+  "branch": "codex/echo-code-runtimes",
+  "base_commit": "748a7646587b1d89b73a46c56dc138d4c2710dab",
   "package_version": "11.10.5",
   "backend": {
     "passed": 168,
@@ -706,5 +706,189 @@
     "ui",
     "reports",
     "packaging"
-  ]
+  ],
+  "external_runtime_validation": {
+    "date_utc": "2026-10-25",
+    "branch": "codex/echo-code-runtimes",
+    "base_commit": "748a7646587b1d89b73a46c56dc138d4c2710dab",
+    "depends_on_pr": 95,
+    "release_state": "Unreleased runtime integration; package version retained from UI base; no publish/build/install claim",
+    "backend": {
+      "passed": 91,
+      "skipped": 0,
+      "files": [
+        "test_code_sessions.py",
+        "test_echo_code.py",
+        "test_privacy.py",
+        "test_settings_cleanup.py",
+        "test_security_policy.py"
+      ],
+      "boundary": "Temporary real Git repositories and owned Python stdio fixture processes. Real SDK API/options/types checked using a fake client. No real agent login or inference."
+    },
+    "frontend": {
+      "passed": 183,
+      "files": 38,
+      "typecheck": "passed",
+      "production_build": "passed",
+      "build_warning": "Existing Vite chunk-size advisory"
+    },
+    "final_worktree_preflight_checks": {
+      "passed": 5,
+      "deselected": 24,
+      "reason": "Repeat real Git/protocol checks after preflighting all blob paths and sizes before creating a worktree"
+    },
+    "desktop_contracts": {
+      "passed": 16,
+      "boundary": "Source/contract checks; not an installed Windows sidecar or signed installer test"
+    },
+    "codex_schema_validation": {
+      "passed": 3,
+      "source": "Installed official codex app-server generate-json-schema with isolated CODEX_HOME",
+      "schemas": {
+        "ThreadStartParams": "e9c6d3cc18d049bfbc0249add3808fb8e5a27e1a0b5a423767aafbc3859a9428",
+        "ThreadResumeParams": "8dceca415b2c16693b55658ea629cba5ffc82ac300dcd403db0ba7455e491496",
+        "TurnStartParams": "835e0d4ca1a0ddc4fb6db1e2b3249dd67f07c50ac2506092ba81543efc92829b"
+      }
+    },
+    "ui_fixture": {
+      "fixture_data": true,
+      "real_models": false,
+      "checks": [
+        "Creation needs explicit execution acknowledgement",
+        "Native Codex identity, models and output render in a separate session surface",
+        "Approval can be denied",
+        "Inspectable diff renders as text",
+        "External sessions never call native query transport",
+        "390px viewport has no horizontal page overflow"
+      ],
+      "page_errors": [],
+      "unexpected_network": []
+    },
+    "visual_report": {
+      "checks": [
+        {
+          "report": "research/echo-code",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "research/echo-code",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "research/security-audit-2026-10-25",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "research/security-audit-2026-10-25",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.5",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.5",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        }
+      ],
+      "scripts_disabled": true,
+      "remote_requests": []
+    },
+    "optional_dependency_checks": {
+      "claude-agent-sdk": "0.2.174",
+      "sniffio": "1.3.1",
+      "pip_check": "passed",
+      "base_lock_check": "passed",
+      "osv_new_packages": {
+        "results": [
+          {},
+          {}
+        ]
+      },
+      "scope": "OSV returned no known advisories for the two newly pinned PyPI package versions. This is not a fresh audit of every vendored native binary or the whole dependency tree."
+    },
+    "files": {
+      "CHANGES.md": "a5ebf5af815c0134fa1f92a26444dbdc59afefaa9d8b6ec6ee5fb6375c12a7d4",
+      "apps/backend/agent/code_claude_worker.py": "48a23d139249bb94bde30e0db70b93a856988cff9b27b50ae8dfa6d4e5ce3185",
+      "apps/backend/agent/code_process.py": "6f2bc049e01638ca7b86d4cc2925efb450b063b7ed8350d8e0713a49b8148895",
+      "apps/backend/agent/code_runtimes.py": "354eb0372cd31b9d4927b3d4621a0c4658b19bd00bc2829391beb45815f0bf27",
+      "apps/backend/agent/code_sessions.py": "7ceda4df39157f3ca3f2d9479af0289da46a4f20d864075a370aa820ec575667",
+      "apps/backend/agent/code_worktree.py": "c9b977e0828b42bae96a88d9a8a19d543b5e7d8b14f19d007d7aae21c1fbdd03",
+      "apps/backend/agent/echo_code.py": "ca621705d2f83c2dd394fa86d0f929ac9bf744acc43d56995a38c8733d249207",
+      "apps/backend/agent/lean/stop.py": "01f8984270df07af86ec847c3ad462278cce516783193911dce8f486c3bb01c9",
+      "apps/backend/api/routes/echo_code.py": "4fc2695c0a07c946d7d05d0b9a529bdada6a1f7315d55d5a2713af3bd8b3bf33",
+      "apps/backend/api/routes/settings.py": "f6f0f47ce41933446517bdd49496206e7a886e921bdd71fb513db15a2968f168",
+      "apps/backend/api/server.py": "54e47ae6403ba8b87482b164b62b7ba151492471aaeabfa0ee668b04b8503439",
+      "apps/backend/requirements-code-runtime.txt": "c46ad783deb349f8fc83fd237b196c9838ee2cf10a308f56d96d6f717e091d47",
+      "apps/backend/tests/fixtures/code_rpc_agent.py": "8972b96a401c7c0d2fc287a4dbb6d96c03ac45dd11a76d9195884e2248a548f0",
+      "apps/backend/tests/test_code_sessions.py": "17f07c8659c07a7037628362e68bdd0f602a6d6453741fe32718ded9c7cf64bf",
+      "apps/backend/tests/test_echo_code.py": "6a301a016a4e5f4431fbd7cab4be56097bfdfecabcfdabcb72a199f5474ad1ae",
+      "apps/desktop/backend/echospeak_backend.py": "48464038076f58754fec44e96a50adf56707c566d3034a17cfcda61e70acd909",
+      "apps/desktop/backend/echospeak_backend.spec": "5631483c8648582fa47b0fbe1a4b0e8035eec2d47678103f0ea75e3bee168489",
+      "apps/web/src/code/EchoCodeWorkspace.tsx": "564e34bc1730162c422d703b0d1f2f5d1686bea880dee5e11b7548130a5896a3",
+      "apps/web/src/code/ExternalSession.test.tsx": "2199240c03651b63474b84c7cc576f6b91be539de6892acc1869e3fc59f43f86",
+      "apps/web/src/code/ExternalSession.tsx": "b79f149dc672bc0aa36e045d4cd74b02018841a953c3a5a7e89a906ae3dd91f6",
+      "apps/web/src/code/code.css": "81f01537a955df19a9cac0008a01c9cdd16155d2aa32c64368817bb90fd6cc3c",
+      "apps/web/src/code/model.ts": "016e2146fa92c69b1f519d89b445e9f1a49fa1d3ab1c976a641193c3895526eb",
+      "artifacts/research/echo-code.html": "f54dc0a1658d5fb591b7714fe45129f1c8d97815eab948a1e83084b74062c2da",
+      "docs/TESTING_GUIDE.md": "27801234b33ca68dd84d22f0ea0a808d3a61850f95b65abdf071eeb4e79dac27",
+      "docs/research/echo-code-sources.json": "81323a7b747a5d02d1a4655636a9f3965973e3867b822f058c771ab355a9ab2e",
+      "docs/research/echo-code.md": "7df34f14d3b97335519397fcd2adc30038dee31c309b80297fd3d471e8c585d9"
+    },
+    "media": [
+      {
+        "path": "artifacts/media/echo-code/external-runtimes/codex-approval-desktop.png",
+        "sha256": "d96956c0c522f16f542f9e5c0a8e48af3e8462da8cd745555c3c02f50671c2e1",
+        "provenance": "Actual React application rendered with deterministic API/native-bridge fixture data; not live account or native runtime proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/external-runtimes/codex-diff-desktop.png",
+        "sha256": "5bc2fb142afbaccad9603c511e2578735c8ddac9dc4a416ae9980a1c722bf7ca",
+        "provenance": "Actual React application rendered with deterministic API/native-bridge fixture data; not live account or native runtime proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/external-runtimes/codex-narrow.png",
+        "sha256": "e338488aaa99a524b164927fe5d1e32f3fff833828d796c7ca4f54e6151d9d92",
+        "provenance": "Actual React application rendered with deterministic API/native-bridge fixture data; not live account or native runtime proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/external-runtimes/codex-setup-desktop.png",
+        "sha256": "9816cb8cc5e164f85a2d209b4a99e7ddb15e30873385192346eacd96b5c089a2",
+        "provenance": "Actual React application rendered with deterministic API/native-bridge fixture data; not live account or native runtime proof"
+      }
+    ],
+    "remaining": [
+      "Real Codex sign-in, streaming/tool denial/cancel/resume and installed sandbox acceptance",
+      "Dedicated Claude API authentication and real tool/cancel/resume acceptance",
+      "Chosen ACP executable auth/native tools/cancel/resume interoperability",
+      "Signed installer build, installation and release acceptance",
+      "Separate proposed Echo ACP export is not implemented"
+    ]
+  },
+  "prior_ui_branch": "codex/echo-code-security",
+  "prior_ui_base_commit": "63fc31ea1b51e3eb092ca2daa3ac3a9c10409c9c"
 }

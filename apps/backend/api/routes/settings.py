@@ -603,6 +603,15 @@ def _current_default_binding() -> tuple[str, str]:
 
 
 def _apply_settings_patch(patch: dict) -> None:
+    if "privacy_mode" in patch:
+        from agent.code_sessions import privacy_transition
+        with privacy_transition():
+            _apply_settings_patch_inner(patch)
+    else:
+        _apply_settings_patch_inner(patch)
+
+
+def _apply_settings_patch_inner(patch: dict) -> None:
     """Persist a settings patch and keep provider, port and open chats consistent."""
     from agent.model_runtime import is_known_local_default_url, local_provider_default_url
 
@@ -620,6 +629,8 @@ def _apply_settings_patch(patch: dict) -> None:
     try:
         config.reload()
     except Exception:
+        if "privacy_mode" in patch:
+            raise
         # Config reload failure shouldn't brick the API; keep serving.
         pass
     new_default = _current_default_binding()

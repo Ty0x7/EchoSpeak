@@ -201,4 +201,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    if sys.argv[1:] == ["--code-sdk-worker"]:
+        from agent.code_claude_worker import main as sdk_worker
+        sdk_worker()
+    else:
+        raise SystemExit(main())
