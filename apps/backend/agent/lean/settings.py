@@ -34,23 +34,36 @@ def max_iterations() -> int:
         return 60
 
 
-def context_tokens() -> int:
-    """Token budget for one request. Defaults to the 64k local context."""
+def context_tokens(endpoint: Any = None) -> int:
+    """Honor exact model metadata/local configuration before a fallback budget.
+
+    A global trim budget may lower a known window, never enlarge it. Unknown
+    cloud windows retain the existing fallback, not an invented model limit.
+    """
     try:
         configured = int(_setting("lean_context_tokens", 0) or 0)
     except (TypeError, ValueError):
         configured = 0
+    if endpoint is not None:
+        registry = dict(getattr(config, "model_capability_profiles", {}) or {})
+        meta = registry.get(f"{endpoint.provider}:{endpoint.model}") or registry.get(endpoint.model) or {}
+        known = int(meta.get("context_limit") or 0)
+        if not known and endpoint.local:
+            known = int(getattr(config.local, "context_length", 0) or 0)
+        if known > 0:
+            return max(512, min(known, configured) if configured > 0 else known)
     if configured > 0:
         return configured
     local = int(getattr(getattr(config, "local", None), "context_length", 0) or 0)
     return max(local, 64000)
 
 
-def max_output_tokens() -> int:
+def max_output_tokens(endpoint: Any = None) -> int:
     try:
-        return max(256, int(_setting("lean_max_output_tokens", 8192)))
+        budget = max(256, int(_setting("lean_max_output_tokens", 8192)))
     except (TypeError, ValueError):
-        return 8192
+        budget = 8192
+    return min(budget, max(256, context_tokens(endpoint) // 2)) if endpoint is not None else budget
 
 
 def approval_mode() -> str:

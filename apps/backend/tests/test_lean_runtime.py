@@ -43,6 +43,19 @@ def test_text_tool_calls_are_recovered():
     assert cleaned == "Sure."
 
 
+def test_liquid_tool_batches_parse_literals_in_order_and_fail_as_a_whole():
+    calls, cleaned = extract_text_tool_calls(
+        '<|tool_call_start|>[lookup(query="echo", options={"limit": 2}), lookup(query="next")]<|tool_call_end|>Checking.',
+        {"lookup"},
+    )
+    assert cleaned == "Checking." and [c.name for c in calls] == ["lookup", "lookup"]
+    assert json.loads(calls[0].arguments) == {"query": "echo", "options": {"limit": 2}}
+    calls, _ = extract_text_tool_calls(
+        '<|tool_call_start|>[lookup(query="ok"), lookup(query=__import__("os").getcwd())]<|tool_call_end|>', {"lookup"})
+    assert len(calls) == 1 and calls[0].parsed_arguments()[1]
+    assert calls[0].name == "invalid_tool_call"
+
+
 def test_loose_json_arguments_are_repaired():
     args, error = ToolCall(id="1", name="x", arguments="{'path': 'a.txt',}").parsed_arguments()
     assert error == ""
@@ -142,6 +155,19 @@ def test_loop_runs_tools_until_the_model_answers():
     assert "reasoning_delta" in kinds and kinds[-1] == "agent_done"
     # Tool results went back to the model as tool messages.
     assert any(m.get("role") == "tool" and m.get("content") == "42" for m in client.calls[2])
+
+
+def test_loop_keeps_opaque_provider_state_out_of_visible_events():
+    state = {"transport": "responses", "items": [{"type": "reasoning", "encrypted_content": "opaque-fixture"}]}
+    client = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("c1", "lookup", "{}")], provider_state=state),
+        ModelTurn(content="Found 42."),
+    ])
+    events = []
+    result = _turn(client, _toolbox({"lookup": lambda args: "42"}), events).run("lookup")
+    assert result.success
+    assert any(m.get("provider_state") == state for m in client.calls[1])
+    assert "opaque-fixture" not in json.dumps(events)
 
 
 def test_tool_failure_is_returned_to_the_model_not_fatal():

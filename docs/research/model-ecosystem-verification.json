@@ -1,0 +1,139 @@
+{
+  "verified_on_utc": "2026-10-26",
+  "branch": "codex/model-compatibility-audit",
+  "base_commit": "70f7122",
+  "scope": "Expanded 20-model priorities, public file metadata, local protocol fixes and existing source audit; no inference",
+  "tests": {
+    "summary": "135 passed across 7 targeted backend test files",
+    "log": ".test-state/model-compatibility-priorities-tests.log",
+    "live_inference": false,
+    "model_downloads": false,
+    "benchmarks": false,
+    "files": [
+      "test_cloud_models.py",
+      "test_model_family_adapters.py",
+      "test_lean_harness.py",
+      "test_privacy.py",
+      "test_lean_runtime.py",
+      "test_lean_summaries.py",
+      "test_chat_polish.py"
+    ]
+  },
+  "source_sha256": {
+    "apps/backend/agent/cloud_providers.py": "334016e14ef9c9fd797da6ca2d4434bdf2943d0a74772c0040903875317572cd",
+    "apps/backend/agent/lean/provider.py": "c364c74d8bdd2bb9980eaf794b1df05a2b72663b748409f4086edba19aebaabd",
+    "apps/backend/agent/lean/responses_stream.py": "4e2a3293eaebe2842706c0ce5b81ac47995ad444fd5d904ef99d3ded57eaee83",
+    "apps/backend/agent/lean/cloud_streams.py": "cf51002cbda9bd21b014a04ff06dd355b8308b949df6334b93ad9743d7cbbbbc",
+    "apps/backend/agent/lean/loop.py": "fb0a4f1366a324ab99ad176f9fb2fde8382f7aa8ad3ff6dc06ee12893972e9b3",
+    "apps/backend/agent/lean/settings.py": "0116bc805a33ff1553f9b7a3b9a37bf977a2110114daaa2c606e65804328d6d4",
+    "apps/backend/agent/model_adapters.py": "ca8aad68646c77c3e1f6857c5d21cfa6cdf2ecc52520848db87f54b45c39e45f",
+    "apps/backend/tests/test_cloud_models.py": "d36d39233bf2a55a14821062c5e4459cdcb4d211b1791eeacdccb592431171d7",
+    "apps/backend/tests/test_model_family_adapters.py": "0f2042d2c89c6bfabe0e9396e7c9706e24621657695aedfedf4cb4a493a095c1",
+    "apps/backend/tests/test_lean_runtime.py": "7b5fa16f7d332f08e568c5c410426ed1e3fccdddee8f696b12771670704f9a49",
+    "scripts/render-model-ecosystem-report.py": "50df4fef64bf582086ba724a8e6c8c8dfb6f88ae66249deb7145ac0d55847c7a",
+    "apps/backend/tests/test_chat_polish.py": "e5bb05a447f35375de421d94963f73fa9edd63cfaaf1c144b007906c86bd44fc"
+  },
+  "visual": {
+    "status": "passed",
+    "method": "Existing headless Chromium with JavaScript disabled; no remote requests",
+    "layouts": [
+      {
+        "width": 1280,
+        "colorScheme": "dark",
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 768,
+        "colorScheme": "dark",
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 390,
+        "colorScheme": "dark",
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 1280,
+        "colorScheme": "light",
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 768,
+        "colorScheme": "light",
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      },
+      {
+        "width": 390,
+        "colorScheme": "light",
+        "rows": 28,
+        "local": 10,
+        "cloud": 10,
+        "overflow": false,
+        "errors": [],
+        "remote": []
+      }
+    ],
+    "inspected_images": [
+      ".test-state/model-ecosystem-priorities.png",
+      ".test-state/model-ecosystem-dark-390.png"
+    ],
+    "local_links": "all local HTML links exist",
+    "priority_rows": 20,
+    "family_rows": 28,
+    "developers": 23
+  },
+  "packaging": {
+    "new_build": false,
+    "published": false,
+    "note": "Existing 11.10.6 bundles predate these source changes; rebuild to include them.",
+    "existing_public_release": {
+      "version": "11.10.6",
+      "published_at": "2026-10-26T03:59:14Z",
+      "url": "https://github.com/Ty0x7/EchoSpeak/releases/tag/v11.10.6",
+      "scope": "Observed only; this task did not publish or inspect contents of those public assets."
+    }
+  },
+  "priorities": {
+    "local": 10,
+    "cloud": 10,
+    "families": 28,
+    "developers": 23,
+    "files": [
+      "docs/research/model-ecosystem-priorities.json",
+      "docs/research/model-ecosystem-downloads.json"
+    ],
+    "weight_downloads": false,
+    "public_file_metadata_only": true
+  },
+  "report_data_sha256": {
+    "docs/research/model-ecosystem-catalog.json": "2f17e9aecf6bb177b5703f282d2aca92b3dc0fde5c2469e7d5e68792a6275fa4",
+    "docs/research/model-ecosystem-priorities.json": "0cd6042919e5d04bd8f075203c8f304e45bcc6bf6a662230c329527895779409",
+    "docs/research/model-ecosystem-downloads.json": "45b75066ff50bd11346ab72e0b8547a8e49e8e24727d8ca8e98e818af02bfe27"
+  },
+  "expanded_audit_parent_commit": "1963d2b4b0975b2360c6094623a3010180814588"
+}

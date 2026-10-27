@@ -58,23 +58,29 @@ def resolve_reasoning_effort(
     config = REASONING_EFFORT_MAP.get(key, REASONING_EFFORT_MAP["medium"])
     provider = str(getattr(family, "value", family) or "generic").casefold()
     m_low = str(model_id or "").lower()
+    from agent.cloud_providers import anthropic_effort_supported
+    if provider == "anthropic" and anthropic_effort_supported(m_low):
+        return {"native_support": True, "control_kind": "anthropic_effort", "effort_level": key,
+                "reasoning_effort": {"extra_high": "xhigh", "max": "max", "ultra": "max"}.get(key, config["openai_effort"]),
+                "budget_tokens": config["budget_tokens"], "supports_disable": False}
     openai_reasoning = provider == "openai" and any(
         marker in m_low
         for marker in ("o1", "o3", "o4", "gpt-5", "gpt-6", "reasoner")
     )
     gemini_thinking = provider == "gemini" and any(
-        marker in m_low for marker in ("gemini-2.5", "gemini-3")
+        marker in m_low for marker in ("gemini-2.5", "gemini-3", "gemini-4-argon")
     )
     if openai_reasoning:
         return {
             "native_support": True,
             "control_kind": "openai_reasoning_effort",
             "effort_level": key,
-            "reasoning_effort": config["openai_effort"],
+            "reasoning_effort": ({"extra_high": "xhigh", "max": "max", "ultra": "max"}.get(key, config["openai_effort"])
+                                 if m_low.startswith(("gpt-6", "gpt-5.6")) else config["openai_effort"]),
             "budget_tokens": config["budget_tokens"],
             # Current OpenAI reasoning-only families do not all accept an off
             # value.  The runtime never represents a low/minimal setting as off.
-            "supports_disable": "gpt-5.1" in m_low or "gpt-5.2" in m_low,
+            "supports_disable": m_low.startswith(("gpt-5.1", "gpt-5.2", "gpt-5.6", "gpt-6-sol", "gpt-6-luna")),
         }
     if gemini_thinking:
         is_flash = "flash" in m_low

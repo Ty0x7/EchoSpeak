@@ -35,6 +35,14 @@ def test_catalog_uses_provider_auth_and_lists_all_models(monkeypatch, provider):
     assert "image-test" not in result["models"]
 
 
+def test_specialized_live_and_media_models_are_not_general_chat_candidates():
+    for provider, model in [("openai", "gpt-live-1"), ("gemini", "gemini-3.5-transcribe"),
+                            ("gemini", "gemini-3.5-live-translate-preview"), ("gemini", "gemini-omni-1.1-flash")]:
+        entry = cloud._model_entry(provider, {"id": model, "supportedGenerationMethods": ["generateContent", "bidiGenerateContent"]})
+        assert not entry["chat"] and cloud.chat_model_issue(provider, model)
+    assert cloud._model_entry("gemini", {"id": "gemini-3.8-live", "supportedGenerationMethods": ["bidiGenerateContent"]})["chat"]
+
+
 @pytest.mark.parametrize("provider", ["gemini", "anthropic"])
 def test_paginated_catalog(monkeypatch, provider):
     def handle(request):
@@ -76,6 +84,97 @@ def _http_client(provider, packets, handle=None):
     return client
 
 
+def test_responses_stateless_tool_roundtrip_and_account_affinity():
+    from agent.lean.responses_stream import response_input
+    from agent.lean.provider import reasoning_effort_for, thinking_controls
+    seen = []
+    output = [
+        {"type": "reasoning", "id": "rs_fixture", "summary": [], "encrypted_content": "opaque-fixture"},
+        {"type": "function_call", "id": "fc_fixture", "call_id": "call_fixture", "name": "read_file", "arguments": '{"path":"README.md"}'},
+    ]
+    def handle(request):
+        body = json.loads(request.content)
+        seen.append(body)
+        assert request.url.path == "/v1/responses"
+        assert body["store"] is False and "previous_response_id" not in body
+        assert "temperature" not in body and "max_tokens" not in body
+        assert body["reasoning"] == {"effort": "max"}
+        assert body["tools"][0]["strict"] is False
+        packets = [
+            {"type": "response.function_call_arguments.delta", "output_index": 1, "item_id": "fc_fixture", "delta": '{"path":'},
+            {"type": "response.completed", "response": {"status": "completed", "output": output,
+                                                        "usage": {"input_tokens": 30, "output_tokens": 10}}},
+        ]
+        return httpx.Response(200, text="\n".join("data: " + json.dumps(p) + "\n" for p in packets))
+    endpoint = Endpoint(cloud.BASE_URLS["openai"], "test-key", "gpt-6.1-sol", "openai", False)
+    client = ChatClient(endpoint, reasoning_effort=reasoning_effort_for(endpoint, True, "ultra"))
+    client._http.close()
+    client._http = httpx.Client(base_url=endpoint.base_url, transport=httpx.MockTransport(handle))
+    tools = [{"type": "function", "function": {"name": "read_file", "parameters": {"type": "object", "properties": {}}}}]
+    messages = [{"role": "system", "content": "Echo permissions apply"}, {"role": "user", "content": "Read"}]
+    try:
+        turn = client.stream_turn(messages, tools=tools, temperature=0.2)
+        assert turn.tool_calls[0].id == "call_fixture" and turn.usage["total"] == 40
+        messages.extend([
+            {"role": "assistant", "content": "", "provider_state": turn.provider_state,
+             "tool_calls": [{"id": "call_fixture", "function": {"name": "read_file", "arguments": output[1]["arguments"]}}]},
+            {"role": "tool", "tool_call_id": "call_fixture", "content": "fixture content"},
+        ])
+        client.stream_turn(messages, tools=tools)
+        assert seen[1]["input"][2:4] == output
+        assert seen[1]["input"][4] == {"type": "function_call_output", "call_id": "call_fixture", "output": "fixture content"}
+        for changed in [Endpoint(endpoint.base_url, "other-account", endpoint.model, "openai", False),
+                        Endpoint(endpoint.base_url, endpoint.api_key, "gpt-6-luna", "openai", False)]:
+            serialized = json.dumps(response_input(messages, changed))
+            assert "opaque-fixture" not in serialized and "function_call_output" in serialized
+        assert cloud._model_entry("openai", {"id": endpoint.model})["transport"] == "responses"
+        assert not thinking_controls("openai", endpoint.model, False)["toggle"]
+        assert thinking_controls("openai", "gpt-6-luna", False)["toggle"]
+        assert thinking_controls("gemini", "gemini-4-argon", False)["supported"]
+        assert not thinking_controls("gemini", "gemini-4-argon", False)["toggle"]
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize("final", [None, {"status": "incomplete", "output": [{"type": "function_call"}]}])
+def test_responses_never_returns_partial_tool_calls(final):
+    client = _http_client("openai", [
+        {"type": "response.function_call_arguments.delta", "item_id": "fc", "output_index": 0, "delta": "{}"},
+        *([{"type": "response.incomplete", "response": final}] if final else []),
+    ])
+    client.endpoint.model = "gpt-6-astra"
+    try:
+        with pytest.raises(ProviderError, match="no tool calls"):
+            client.stream_turn([{"role": "user", "content": "test"}])
+    finally:
+        client.close()
+
+
+def test_responses_text_images_usage_and_internal_state_do_not_leak_to_chat():
+    from agent.lean.responses_stream import response_input
+    endpoint = Endpoint(cloud.BASE_URLS["openai"], "test-key", "gpt-6-astra", "openai", False)
+    adapted = response_input([{"role": "user", "content": [{"type": "text", "text": "look"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,fixture"}}]}], endpoint)
+    assert adapted[0]["content"][1]["type"] == "input_image"
+    deltas = []
+    client = _http_client("openai", [{"type": "response.output_text.delta", "delta": "Hello"},
+        {"type": "response.completed", "response": {"status": "completed", "output": [
+            {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Hello", "annotations": []}]}]}}])
+    client.endpoint.model = endpoint.model
+    try:
+        turn = client.stream_turn([{"role": "user", "content": "test"}], on_content=deltas.append)
+        assert turn.content == "Hello" and deltas == ["Hello"] and turn.finish_reason == "stop"
+    finally:
+        client.close()
+    def check(request):
+        assert "provider_state" not in request.content.decode() and "opaque-fixture" not in request.content.decode()
+    legacy = _http_client("openai", [{"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]}], check)
+    try:
+        legacy.stream_turn([{"role": "assistant", "content": "hello", "provider_state": {"items": ["opaque-fixture"]}}])
+    finally:
+        legacy.close()
+
+
 def test_claude_native_stream_and_tool_history():
     from agent.lean.cloud_streams import anthropic_messages
     def handle(request):
@@ -103,17 +202,108 @@ def test_openai_reasoning_tokens():
         assert "max_tokens" not in body and body["max_completion_tokens"] > 0
         assert "temperature" not in body
     client = _http_client("openai", [{"choices": [{"delta": {"content": "Hi"}, "finish_reason": "stop"}]}], handle)
-    client.endpoint.model = "gpt-6-test"
+    client.endpoint.model = "gpt-5.2"
     try:
         assert client.stream_turn([{"role": "user", "content": "hi"}], temperature=.1).content == "Hi"
     finally:
         client.close()
 
 
+def test_claude_effort_uses_output_config_and_catalog_retains_reported_limits():
+    from agent.lean.provider import reasoning_effort_for, thinking_controls
+    def check(request):
+        body = json.loads(request.content)
+        assert body["output_config"] == {"effort": "xhigh"}
+        assert "reasoning_effort" not in body and "thinking" not in body
+    client = _http_client("anthropic", [{"type": "message_stop"}], check)
+    client.endpoint.model = "claude-sonnet-5-5"
+    client.reasoning_effort = reasoning_effort_for(client.endpoint, True, "extra_high")
+    try:
+        client.stream_turn([{"role": "user", "content": "fixture"}])
+        assert thinking_controls("anthropic", client.endpoint.model, False)["effort"]
+        assert not thinking_controls("anthropic", "claude-unknown", False)["supported"]
+    finally:
+        client.close()
+    entry = cloud._model_entry("gemini", {"name": "models/gemini-4-argon", "supportedGenerationMethods": ["generateContent"],
+                                        "inputTokenLimit": 1048576, "outputTokenLimit": 65536})
+    assert entry["context_limit"] == 1048576 and entry["output_limit"] == 65536 and entry["validated"] is False
+
+
 def test_gemini_tool_signature():
-    client = _http_client("gemini", [{"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "search", "arguments": "{}"}, "extra_content": {"google": {"thought_signature": "sig"}}}]}}]}])
+    client = _http_client("gemini", [{"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1", "function": {"name": "search", "arguments": "{}"}, "extra_content": {"google": {"thought_signature": "sig"}}}]}, "finish_reason": "tool_calls"}]}])
     try:
         assert client.stream_turn([]).tool_calls[0].extra_content["google"]["thought_signature"] == "sig"
+    finally:
+        client.close()
+
+
+def test_opt_in_local_reasoning_history_is_bound_to_the_exact_endpoint(monkeypatch):
+    from agent.lean.provider import _chat_history
+    monkeypatch.setattr(config, "model_capability_profiles", {"lmstudio:fixture-reasoner": {"reasoning_history": "reasoning_content"}})
+    seen = []
+    client = ChatClient(Endpoint("http://localhost:1234/v1", "not-needed", "fixture-reasoner", "lmstudio", True))
+    client._http.close()
+    packets = [{"choices": [{"delta": {"reasoning_content": "retained fixture", "tool_calls": [
+        {"index": 0, "id": "c1", "function": {"name": "lookup", "arguments": "{}"}}]}, "finish_reason": "tool_calls"}]}]
+    def handle(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, text="\n".join("data: " + json.dumps(p) + "\n" for p in packets))
+    client._http = httpx.Client(base_url=client.endpoint.base_url, transport=httpx.MockTransport(handle))
+    messages = [{"role": "user", "content": "fixture"}]
+    try:
+        turn = client.stream_turn(messages)
+        messages.extend([{"role": "assistant", "content": "", "provider_state": turn.provider_state,
+                          "tool_calls": [{"id": "c1", "function": {"name": "lookup", "arguments": "{}"}}]},
+                         {"role": "tool", "tool_call_id": "c1", "content": "OK"}])
+        client.stream_turn(messages)
+        assert seen[1]["messages"][1]["reasoning_content"] == "retained fixture"
+        assert "provider_state" not in json.dumps(seen)
+        changed = Endpoint("http://localhost:9999/v1", "not-needed", "fixture-reasoner", "lmstudio", True)
+        assert "retained fixture" not in json.dumps(_chat_history(messages, changed))
+        monkeypatch.setattr(config, "model_capability_profiles", {})
+        assert "retained fixture" not in json.dumps(_chat_history(messages, client.endpoint))
+    finally:
+        client.close()
+
+
+def test_explicit_local_template_toggle_is_not_an_openai_effort_parameter(monkeypatch):
+    from agent.lean.provider import thinking_controls, reasoning_effort_for
+    meta = {"thinking_control": "chat_template"}
+    monkeypatch.setattr(config, "model_capability_profiles", {"vllm:fixture-template": meta})
+    client = ChatClient(Endpoint("http://localhost:8000/v1", "not-needed", "fixture-template", "vllm", True))
+    client._http.close()
+    seen = []
+    def handle(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(200, text='data: {"choices":[{"delta":{"content":"fixture"},"finish_reason":"stop"}]}\n')
+    client._http = httpx.Client(base_url=client.endpoint.base_url, transport=httpx.MockTransport(handle))
+    try:
+        controls = thinking_controls("vllm", "fixture-template", True, meta)
+        assert controls["supported"] and controls["toggle"] and not controls["effort"]
+        for enabled in (False, True):
+            client.reasoning_effort = reasoning_effort_for(client.endpoint, enabled, "high")
+            client.stream_turn([{"role": "user", "content": "fixture"}])
+            assert seen[-1]["chat_template_kwargs"]["enable_thinking"] is enabled
+            assert "reasoning_effort" not in seen[-1]
+        assert not thinking_controls("lmstudio", "zai-org/GLM-5.3-GGUF", True)["toggle"]
+        monkeypatch.setattr(config, "model_capability_profiles", {"vllm:fixture-template": {
+            "thinking_supported": True, "thinking_toggle_supported": False,
+            "reasoning_effort_map": {"medium": "high", "ultra": "max"}}})
+        assert reasoning_effort_for(client.endpoint, True, "medium") == "high"
+        assert reasoning_effort_for(client.endpoint, True, "ultra") == "max"
+        assert reasoning_effort_for(client.endpoint, False, "ultra") == "low"
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize("finish", [None, "length"])
+def test_truncated_compatible_stream_does_not_return_tool_calls(finish):
+    client = _http_client("gemini", [{"choices": [{"delta": {"tool_calls": [
+        {"id": "c1", "index": 0, "function": {"name": "lookup", "arguments": '{"query":"partial'}}]},
+        "finish_reason": finish}]}])
+    try:
+        with pytest.raises(ProviderError, match="no tool calls"):
+            client.stream_turn([{"role": "user", "content": "fixture"}])
     finally:
         client.close()
 
@@ -151,6 +341,7 @@ def test_indexed_interleaved_fragments_and_unindexed_id_continuation():
          {"index": 0, "function": {"name": "search", "arguments": 'Echo'}}],
         [{"id": "a", "function": {"name": "web_search", "arguments": '"}'}}],
     ]]
+    packets.append({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]})
     client = _http_client("openai", packets)
     try:
         calls = client.stream_turn([]).tool_calls
