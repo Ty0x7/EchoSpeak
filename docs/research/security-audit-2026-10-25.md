@@ -143,6 +143,7 @@ and a test confirms git itself reads it. Updating Git is still recommended (sect
 | tauri-plugin-shell CVE-2025-31477 | Fixed in 2.2.1; EchoSpeak has 2.3.5 |
 | tauri-plugin-fs GHSA-9g54-6x48-9vpw | Plugin not used |
 | `zip` 4.6.1 (RUSTSEC-2026-0367/8/9) | Unix permission and symlink bugs in extraction. On Windows the updater runs the signed NSIS installer, and signatures are checked before anything else. Fixing it needs an updater major version |
+| `block-buffer` 0.10.4 (GHSA-qwgh-2vcv-g2f7, reviewed 27 Oct 2026 for 11.10.8) | A caught panic in a hash callback can corrupt the buffer cursor. Only reached through `sha2` → `tauri-codegen` → `tauri-macros`, a proc-macro that hashes assets inside the compiler; `cargo tree -e normal,no-proc-macro --target x86_64-pc-windows-msvc` shows it isn't linked into the app. The fix is only in 0.12, which `digest` 0.10 can't use; revisit when Tauri moves to `digest` 0.11 |
 | glib, quick-xml 0.39, rkyv, zbus, zvariant | Linux-only (Wayland/GTK); not in the Windows build |
 | `unic-*` (via `urlpattern`), `proc-macro-error` | Unmaintained, with no fix available and no known vulnerability; build-time or low risk |
 | LangChain, LangGraph, langsmith, torch, sentence-transformers, diskcache | In the shared global Python only. Never shipped (EchoSpeak dropped LangChain in 11.8), and absent from the locked build |

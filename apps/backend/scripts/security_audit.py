@@ -40,6 +40,11 @@ REVIEWED = {
     "RUSTSEC-2026-0367": "Unix-only extraction issue; Windows updater installs the signed installer",
     "RUSTSEC-2026-0368": "Unix-only extraction issue; Windows updater installs the signed installer",
     "RUSTSEC-2026-0369": "Unix-only extraction issue; Windows updater installs the signed installer",
+    # block-buffer 0.10.4 via sha2 0.10 -> tauri-codegen -> tauri-macros (a proc-macro): it only hashes
+    # assets inside the compiler, and isn't linked into EchoSpeak.exe (cargo tree -e normal,no-proc-macro
+    # --target x86_64-pc-windows-msvc prints nothing). The bug needs a caught panic in a hash callback.
+    # The fix is only in 0.12, which digest 0.10 can't use; revisit when Tauri moves to digest 0.11.
+    "GHSA-qwgh-2vcv-g2f7": "build-time only (Tauri proc-macro asset hashing); not in the shipped binary",
 }
 
 
