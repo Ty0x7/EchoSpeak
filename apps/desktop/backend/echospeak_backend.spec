@@ -107,6 +107,10 @@ a = Analysis(
     noarchive=False,
     optimize=1,
 )
+# The contrib hook for googleapiclient ships every Google discovery document (~97 MB);
+# only Calendar's is used (skills/calendar).
+a.datas = [entry for entry in a.datas
+           if "discovery_cache" not in entry[0].replace("\\", "/") or entry[0].replace("\\", "/").endswith("/calendar.v3.json")]
 pyz = PYZ(a.pure)
 
 # One-folder build: Python starts straight from the installed files. The old
