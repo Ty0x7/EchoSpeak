@@ -12,7 +12,8 @@ import {
 } from "../desktop/bridge";
 import { ChoiceCards, Group, ListEditor, Row, SecretField, Segmented, Select, Status, TextField, Toggle } from "./controls";
 import { useSettings, type SettingsMap } from "./useSettings";
-import { AdvancedSection, type AdvancedPage } from "./AdvancedSection";
+import { AdvancedSection, ConnectionsPage, InboundA2A, WebhookSettings, type AdvancedPage } from "./AdvancedSection";
+import { CodingAgents } from "./CodingAgents";
 import { SystemCheckSection } from "./SystemCheck";
 import { PrivacySection } from "./PrivacySection";
 import { SmartModelChoice } from "./SmartModelChoice";
@@ -36,6 +37,7 @@ type SectionId =
   | "search"
   | "memory"
   | "skills"
+  | "connections"
   | "automations"
   | "channels"
   | "advanced"
@@ -62,6 +64,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
       { id: "search", label: "Web search", icon: "globe" },
       { id: "memory", label: "Memory", icon: "brain" },
       { id: "skills", label: "Skills", icon: "spark" },
+      { id: "connections", label: "Connections", icon: "link" },
     ],
   },
   {
@@ -84,25 +87,26 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
 
 /** What each section holds, so searching for a setting finds the section it lives in. */
 const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
-  general: "appearance theme light dark mode white black colours colors name setup approvals approval mode step budget iterations learning lessons reviews reflections experience feedback",
-  models: "provider model api key openai gemini claude anthropic grok xai lm studio ollama localai vllm local cloud context temperature creativity custom model id smart model choice routing router suggest auto pick best model",
-  agents: "persona jarvis glados toolsets",
+  general: "appearance theme light dark mode white black colours colors name your name setup tray",
+  models: "provider model api key openai gemini claude anthropic grok xai lm studio ollama localai vllm local cloud context temperature creativity custom model id smart model choice routing router suggest auto pick best model coding agents echo code codex claude code chatgpt plan subscription sign in login harness",
+  agents: "persona jarvis glados toolsets research workers swarm step budget iterations steps",
   personality: "soul personality tone",
-  permissions: "permissions files desktop applications system actions apps allowlist allowed apps launch minecraft",
+  permissions: "permissions approvals approval mode autonomous risky ask before outside content reader quarantine prompt injection files desktop applications system actions apps allowlist allowed apps launch minecraft",
   terminal: "terminal shell commands powershell allowlist",
   voice: "voice whisper speech to text microphone wake word read aloud piper windows speech elevenlabs drama gguf audio.cpp local download tts stt",
   search: "web search brave tavily searxng duckduckgo timeout results blocked sites sports odds live data",
-  memory: "memory documents embeddings recall",
-  automations: "routines heartbeat schedule check-in prompt",
+  memory: "memory documents embeddings recall remember conversations learning lessons reviews reflections experience playbook",
+  automations: "routines heartbeat schedule check-in prompt webhooks signed post",
   channels: "discord telegram twitter x whatsapp email imap smtp tls port trusted users roles changelog",
-  advanced: "lm studio only embeddings memory search webhooks a2a agent-to-agent folders skills workspaces artifacts companion avatar connections mcp obsidian documents rerank upload",
+  advanced: "lm studio only traces opentelemetry folders skills workspaces artifacts companion avatar memories obsidian documents rerank upload",
+  connections: "connections integrations mcp servers sign-ins a2a agent-to-agent other agents remote skills reachable apps",
   about: "version update diagnostics logs",
   skills: "skills skill.md agent skills import review approve instructions lessons",
   system: "system check health doctor broken not working search status diagnose fix problems",
   privacy: "privacy private offline off-grid local only internet network egress connections searxng trusted hosts telemetry cloud data leaves",
 };
 
-type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "mic" | "globe" | "brain" | "clock" | "send" | "info" | "wrench";
+type IconName = "sliders" | "chip" | "people" | "spark" | "shield" | "terminal" | "mic" | "globe" | "brain" | "clock" | "send" | "info" | "wrench" | "link";
 
 function Icon({ name }: { name: IconName }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -119,6 +123,7 @@ function Icon({ name }: { name: IconName }) {
     send: <path d="M4 12l16-8-6 16-2.5-6.5z M11.5 13.5L20 4" />,
     info: <><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5M12 8h0" /></>,
     wrench: <path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L4 16.8V20h3.2l5.3-5.3a4 4 0 0 0 5.2-5.4l-2.4 2.4-2.6-.6-.6-2.6z" />,
+    link: <path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" />,
   };
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -173,7 +178,10 @@ export function SettingsPanel(props: SettingsPanelProps) {
     setAdvancedPage(page);
     setSection("advanced");
   }, []);
+  const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    // Each section opens at its top, not at the previous section's scroll position.
+    scrollRef.current?.scrollTo({ top: 0 });
     try {
       localStorage.setItem("echospeak.settings.section", section);
     } catch {
@@ -256,7 +264,7 @@ export function SettingsPanel(props: SettingsPanelProps) {
               )}
             </div>
           </header>
-          <div className="st-scroll">{body}</div>
+          <div className="st-scroll" ref={scrollRef}>{body}</div>
         </main>
       </div>
     </div>
@@ -291,15 +299,26 @@ function SectionBody({
       return (
         <>
           <ModelsSection s={s} save={save} apiBase={props.apiBase} />
+          <CodingAgents s={s} save={save} apiBase={props.apiBase} />
           <SmartModelChoice s={s} save={save} apiBase={props.apiBase} agents={props.agents} />
         </>
       );
     case "agents":
-      return <AgentsSection agents={props.agents} onEdit={props.onEditAgent} />;
+      return (
+        <>
+          <AgentsSection agents={props.agents} onEdit={props.onEditAgent} />
+          <AgentBehavior s={s} save={save} />
+        </>
+      );
     case "personality":
       return <PersonalitySection apiBase={props.apiBase} />;
     case "permissions":
-      return <PermissionsSection s={s} save={save} apiBase={props.apiBase} />;
+      return (
+        <>
+          <ApprovalSettings s={s} save={save} />
+          <PermissionsSection s={s} save={save} apiBase={props.apiBase} />
+        </>
+      );
     case "terminal":
       return <TerminalSection s={s} save={save} apiBase={props.apiBase} />;
     case "voice":
@@ -307,9 +326,19 @@ function SectionBody({
     case "search":
       return <SearchSection s={s} save={save} />;
     case "memory":
-      return <MemorySection s={s} save={save} openAdvanced={openAdvanced} />;
+      return (
+        <>
+          <MemorySection s={s} save={save} openAdvanced={openAdvanced} />
+          <LearningSettings s={s} save={save} />
+        </>
+      );
     case "automations":
-      return <AutomationsSection s={s} save={save} apiBase={props.apiBase} agents={props.agents} />;
+      return (
+        <>
+          <AutomationsSection s={s} save={save} apiBase={props.apiBase} agents={props.agents} />
+          <WebhookSettings s={s} save={save} />
+        </>
+      );
     case "channels":
       return <ChannelsSection s={s} save={save} />;
     case "advanced":
@@ -327,6 +356,13 @@ function SectionBody({
       );
     case "skills":
       return <AgentSkillsSection apiBase={props.apiBase} />;
+    case "connections":
+      return (
+        <>
+          <ConnectionsPage s={s} save={save} apiBase={props.apiBase} sessionId={props.sessionId || ""} projectId={props.projectId || ""} />
+          <InboundA2A s={s} save={save} />
+        </>
+      );
     case "privacy":
       return <PrivacySection s={s} save={save} apiBase={props.apiBase} />;
     case "system":
@@ -460,73 +496,93 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
           </Row>
         ) : null}
       </Group>
-      <Group title="How agents work" description="These apply to Echo and every agent you create.">
-        <Row label="Ask before risky actions" help="Deleting files, sending messages, controlling the desktop, and dangerous commands.">
-          <Segmented
-            value={String(s.lean_approval_mode || "smart")}
-            onChange={(v) => save({ lean_approval_mode: v })}
-            options={[
-              { value: "smart", label: "Risky only", hint: "Recommended" },
-              { value: "autonomous", label: "Autonomous", hint: "Walk away" },
-              { value: "always", label: "Every action" },
-              { value: "never", label: "Never" },
-            ]}
-          />
-        </Row>
-        {String(s.lean_approval_mode || "smart") === "autonomous" ? (
-          <div className="st-muted" role="status">
-            Autonomous: desktop control and ordinary commands outside the sandbox run without asking, so long tasks keep going while you're away.
-            Deleting, dangerous commands, sending messages, cloud costs and tasks for other agents are never approved for you: the agent skips them
-            and lists them for you at the end. Permissions, Blocked apps, Private mode and Stop still apply.
-          </div>
-        ) : null}
-        <Row label="Research workers" help="For deep research, the agent can send up to 6 read-only workers to look things up at the same time, then writes the answer itself. Used only on Ultra effort or when you ask for in-depth research across many sources. Uses more tokens (Echo bench: --swarm).">
-          <Toggle checked={asBool(s.lean_research_swarm)} onChange={(v) => save({ lean_research_swarm: v })} label="Research workers" />
-        </Row>
-        {asBool(s.lean_research_swarm) ? (
-          <Row label="Workers one at a time" help="Workers normally run all at once, which finishes fastest. Turn this on if your PC runs out of memory or the local model server struggles with several requests at once.">
-            <Toggle checked={asBool(s.lean_swarm_one_at_a_time)} onChange={(v) => save({ lean_swarm_one_at_a_time: v })} label="Workers one at a time" />
-          </Row>
-        ) : null}
-        <Row label="Separate reader for outside content" help="A web page, email or app result goes first to a reader with no tools, and the agent sees only the facts it found. Lowers the chance hidden instructions work, and tells you when content tried. Costs one extra model call per result.">
-          <Segmented
-            value={String(s.lean_quarantine_reader || "messages")}
-            onChange={(v) => save({ lean_quarantine_reader: v })}
-            options={[
-              { value: "off", label: "Off" },
-              { value: "messages", label: "Email and apps", hint: "Recommended" },
-              { value: "all", label: "Also web pages" },
-            ]}
-          />
-        </Row>
-        <Row label="Step budget" help="Most model steps an agent may take on one message before it wraps up. Higher lets it finish bigger jobs.">
-          <Select
-            value={String(s.lean_max_iterations || 60)}
-            onChange={(v) => save({ lean_max_iterations: Number(v) })}
-            options={[20, 40, 60, 100, 150, 250].map((n) => ({ value: String(n), label: `${n} steps` }))}
-          />
-        </Row>
-      </Group>
-      <Group title="Learning from experience" description="Agents keep short lessons from their own checked work and read them before similar tasks. Lessons are advice only: they never change permissions, approvals or tools. Review them on the Learning page.">
-        <Row label="Learn from experience" help="Off: agents don't record new experience or read lessons. What they already learned is kept.">
-          <Toggle checked={s.learning_enabled === undefined ? true : asBool(s.learning_enabled)} onChange={(v) => save({ learning_enabled: v })} label="Learn from experience" />
-        </Row>
-        <Row label="Reviews per day" help="Each review is one short call to the agent's own model, made only when no chat is running.">
-          <Select
-            value={String(s.learning_reflection_daily_cap ?? 30)}
-            onChange={(v) => save({ learning_reflection_daily_cap: Number(v) })}
-            options={[0, 10, 30, 60, 120].map((n) => ({ value: String(n), label: n === 0 ? "None (grade only)" : `${n} a day` }))}
-          />
-        </Row>
-        <Row label="Lessons per task" help="How many lessons an agent reads before it starts a task.">
-          <Select
-            value={String(s.learning_playbook_size ?? 3)}
-            onChange={(v) => save({ learning_playbook_size: Number(v) })}
-            options={[1, 3, 5, 8].map((n) => ({ value: String(n), label: n === 1 ? "1 lesson" : `${n} lessons` }))}
-          />
-        </Row>
-      </Group>
     </>
+  );
+}
+
+/** Settings › Permissions: when agents stop and ask you. */
+function ApprovalSettings({ s, save }: { s: SettingsMap; save: Save }) {
+  return (
+    <Group title="Approvals" description="When agents stop and ask you. These apply to Echo and every agent you create.">
+      <Row label="Ask before risky actions" help="Deleting files, sending messages, controlling the desktop, and dangerous commands.">
+        <Segmented
+          value={String(s.lean_approval_mode || "smart")}
+          onChange={(v) => save({ lean_approval_mode: v })}
+          options={[
+            { value: "smart", label: "Risky only", hint: "Recommended" },
+            { value: "autonomous", label: "Autonomous", hint: "Walk away" },
+            { value: "always", label: "Every action" },
+            { value: "never", label: "Never" },
+          ]}
+        />
+      </Row>
+      {String(s.lean_approval_mode || "smart") === "autonomous" ? (
+        <div className="st-muted" role="status">
+          Autonomous: desktop control and ordinary commands outside the sandbox run without asking, so long tasks keep going while you're away.
+          Deleting, dangerous commands, sending messages, cloud costs and tasks for other agents are never approved for you: the agent skips them
+          and lists them for you at the end. Permissions, Blocked apps, Private mode and Stop still apply.
+        </div>
+      ) : null}
+      <Row label="Separate reader for outside content" help="A web page, email or app result goes first to a reader with no tools, and the agent sees only the facts it found. Lowers the chance hidden instructions work, and tells you when content tried. Costs one extra model call per result.">
+        <Segmented
+          value={String(s.lean_quarantine_reader || "messages")}
+          onChange={(v) => save({ lean_quarantine_reader: v })}
+          options={[
+            { value: "off", label: "Off" },
+            { value: "messages", label: "Email and apps", hint: "Recommended" },
+            { value: "all", label: "Also web pages" },
+          ]}
+        />
+      </Row>
+    </Group>
+  );
+}
+
+/** Settings › Agents: how far an agent may go on one message. */
+function AgentBehavior({ s, save }: { s: SettingsMap; save: Save }) {
+  return (
+    <Group title="How agents work" description="These apply to Echo and every agent you create.">
+      <Row label="Research workers" help="For deep research, the agent can send up to 6 read-only workers to look things up at the same time, then writes the answer itself. Used only on Ultra effort or when you ask for in-depth research across many sources. Uses more tokens (Echo bench: --swarm).">
+        <Toggle checked={asBool(s.lean_research_swarm)} onChange={(v) => save({ lean_research_swarm: v })} label="Research workers" />
+      </Row>
+      {asBool(s.lean_research_swarm) ? (
+        <Row label="Workers one at a time" help="Workers normally run all at once, which finishes fastest. Turn this on if your PC runs out of memory or the local model server struggles with several requests at once.">
+          <Toggle checked={asBool(s.lean_swarm_one_at_a_time)} onChange={(v) => save({ lean_swarm_one_at_a_time: v })} label="Workers one at a time" />
+        </Row>
+      ) : null}
+      <Row label="Step budget" help="Most model steps an agent may take on one message before it wraps up. Higher lets it finish bigger jobs.">
+        <Select
+          value={String(s.lean_max_iterations || 60)}
+          onChange={(v) => save({ lean_max_iterations: Number(v) })}
+          options={[20, 40, 60, 100, 150, 250].map((n) => ({ value: String(n), label: `${n} steps` }))}
+        />
+      </Row>
+    </Group>
+  );
+}
+
+/** Settings › Memory: lessons from experience. */
+function LearningSettings({ s, save }: { s: SettingsMap; save: Save }) {
+  return (
+    <Group title="Learning from experience" description="Agents keep short lessons from their own checked work and read them before similar tasks. Lessons are advice only: they never change permissions, approvals or tools. Review them on the Learning page.">
+      <Row label="Learn from experience" help="Off: agents don't record new experience or read lessons. What they already learned is kept.">
+        <Toggle checked={s.learning_enabled === undefined ? true : asBool(s.learning_enabled)} onChange={(v) => save({ learning_enabled: v })} label="Learn from experience" />
+      </Row>
+      <Row label="Reviews per day" help="Each review is one short call to the agent's own model, made only when no chat is running.">
+        <Select
+          value={String(s.learning_reflection_daily_cap ?? 30)}
+          onChange={(v) => save({ learning_reflection_daily_cap: Number(v) })}
+          options={[0, 10, 30, 60, 120].map((n) => ({ value: String(n), label: n === 0 ? "None (grade only)" : `${n} a day` }))}
+        />
+      </Row>
+      <Row label="Lessons per task" help="How many lessons an agent reads before it starts a task.">
+        <Select
+          value={String(s.learning_playbook_size ?? 3)}
+          onChange={(v) => save({ learning_playbook_size: Number(v) })}
+          options={[1, 3, 5, 8].map((n) => ({ value: String(n), label: n === 1 ? "1 lesson" : `${n} lessons` }))}
+        />
+      </Row>
+    </Group>
   );
 }
 

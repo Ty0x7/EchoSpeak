@@ -12,7 +12,7 @@ import type { SettingsMap } from "./useSettings";
  */
 
 type Save = (patch: SettingsMap) => Promise<void>;
-export type AdvancedPage = "settings" | "memory" | "connections" | "companion";
+export type AdvancedPage = "settings" | "memory" | "companion";
 
 const asBool = (v: any) => v === true || v === "true";
 const asList = (v: any): string[] => (Array.isArray(v) ? v.map(String) : String(v || "").split(/[,\n]/).map((s) => s.trim()).filter(Boolean));
@@ -52,14 +52,12 @@ export function AdvancedSection(props: {
           options={[
             { value: "settings", label: "Settings" },
             { value: "memory", label: "Memory & documents" },
-            { value: "connections", label: "Connections & skills" },
             { value: "companion", label: "Companion" },
           ]}
         />
       </div>
       {props.page === "settings" ? <AdvancedSettings s={props.s} save={props.save} /> : null}
       {props.page === "memory" ? <MemoryPage s={props.s} save={props.save} apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
-      {props.page === "connections" ? <ConnectionsPage s={props.s} save={props.save} apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
       {props.page === "companion" ? (
         <Group title="Echo companion" description="Echo’s shared appearance in voice conversations and the floating companion window.">
           <div className="st-embed">
@@ -89,21 +87,6 @@ function AdvancedSettings({ s, save }: { s: SettingsMap; save: Save }) {
         </Row>
       </Group>
 
-      <Group title="Webhooks" description="Let other apps start a routine with a signed POST to /webhooks/<path>.">
-        <Row label="Enable webhooks" help="Requests must be signed with the secret below.">
-          <Toggle checked={asBool(s.webhook_enabled)} onChange={(v) => save({ webhook_enabled: v })} label="Webhooks" />
-        </Row>
-        <Row label="Signing secret" stack><SecretField isSet={Boolean(s.webhook_secret)} onCommit={(v) => save({ webhook_secret: v })} /></Row>
-        <Row label="Or read the secret from a file"><TextField mono value={s.webhook_secret_path || ""} onCommit={(v) => save({ webhook_secret_path: v })} /></Row>
-      </Group>
-
-      <Group title="Agent-to-agent (A2A)" description="Let other A2A agents send Echo tasks.">
-        <Row label="Enable A2A"><Toggle checked={asBool(s.a2a_enabled)} onChange={(v) => save({ a2a_enabled: v })} label="A2A" /></Row>
-        <Row label="Agent name"><TextField value={s.a2a_agent_name || ""} onCommit={(v) => save({ a2a_agent_name: v })} /></Row>
-        <Row label="Description"><TextField wide value={s.a2a_agent_description || ""} onCommit={(v) => save({ a2a_agent_description: v })} /></Row>
-        <Row label="Auth key" help="Required while A2A is on." stack><SecretField isSet={Boolean(s.a2a_auth_key)} onCommit={(v) => save({ a2a_auth_key: v })} /></Row>
-      </Group>
-
       <Group title="Folders">
         <Row label="Artifacts" help="Where agents save generated files."><TextField mono value={s.artifacts_dir || ""} onCommit={(v) => save({ artifacts_dir: v })} /></Row>
         <Row label="Skills"><TextField mono value={s.skills_dir || ""} onCommit={(v) => save({ skills_dir: v })} /></Row>
@@ -111,6 +94,31 @@ function AdvancedSettings({ s, save }: { s: SettingsMap; save: Save }) {
         <Row label="Default workspace" help="Loads that workspace's skills at start-up. Blank: none."><TextField mono value={s.default_workspace || ""} onCommit={(v) => save({ default_workspace: v })} /></Row>
       </Group>
     </>
+  );
+}
+
+/** Settings › Automations: other apps starting a routine. */
+export function WebhookSettings({ s, save }: { s: SettingsMap; save: Save }) {
+  return (
+    <Group title="Webhooks" description="Let other apps start a routine with a signed POST to /webhooks/<path>.">
+      <Row label="Enable webhooks" help="Requests must be signed with the secret below.">
+        <Toggle checked={asBool(s.webhook_enabled)} onChange={(v) => save({ webhook_enabled: v })} label="Webhooks" />
+      </Row>
+      <Row label="Signing secret" stack><SecretField isSet={Boolean(s.webhook_secret)} onCommit={(v) => save({ webhook_secret: v })} /></Row>
+      <Row label="Or read the secret from a file"><TextField mono value={s.webhook_secret_path || ""} onCommit={(v) => save({ webhook_secret_path: v })} /></Row>
+    </Group>
+  );
+}
+
+/** Settings › Connections: other agents sending Echo tasks. */
+export function InboundA2A({ s, save }: { s: SettingsMap; save: Save }) {
+  return (
+    <Group title="Agent-to-agent (A2A)" description="Let other A2A agents send Echo tasks.">
+      <Row label="Enable A2A"><Toggle checked={asBool(s.a2a_enabled)} onChange={(v) => save({ a2a_enabled: v })} label="A2A" /></Row>
+      <Row label="Agent name"><TextField value={s.a2a_agent_name || ""} onCommit={(v) => save({ a2a_agent_name: v })} /></Row>
+      <Row label="Description"><TextField wide value={s.a2a_agent_description || ""} onCommit={(v) => save({ a2a_agent_description: v })} /></Row>
+      <Row label="Auth key" help="Required while A2A is on." stack><SecretField isSet={Boolean(s.a2a_auth_key)} onCommit={(v) => save({ a2a_auth_key: v })} /></Row>
+    </Group>
   );
 }
 
@@ -718,7 +726,7 @@ function ConnectionSuggestions({ apiBase }: { apiBase: string }) {
   );
 }
 
-function ConnectionsPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap; save: Save; apiBase: string; sessionId: string; projectId: string }) {
+export function ConnectionsPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap; save: Save; apiBase: string; sessionId: string; projectId: string }) {
   const [cards, setCards] = useState<any[] | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
   const [error, setError] = useState("");
