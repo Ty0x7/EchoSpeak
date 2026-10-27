@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — System review, 27 Oct 2026</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+</style></head>
+<body><main>
+<header><h1>EchoSpeak / System review</h1><p>27 October 2026 · main 1a8f4c3 = published v11.10.7 · ordinary Echo Chat first · technical record: docs/research/system-review-2026-10-27.md</p></header>
+<nav aria-label="Report sections"><a href="#chat">Echo Chat path</a><a href="#map">Feature map</a><a href="#groups">Group chats</a><a href="#lock">Work-ledger lock</a><a href="#findings">Findings</a><a href="#integrations">Integrations</a><a href="#windows">Windows control</a><a href="#runtimes">Codex · Claude · ACP</a><a href="#settings">Settings</a><a href="#plan">Plan</a><a href="#check">Checklist</a></nav>
+<p class="lead">One harness, many identities.<br>Make its outcomes truthful before adding more.</p>
+<p class="note"><strong>Evidence:</strong> source reading at main, plus deterministic tests added in this review (14 expected failures that reproduce the open findings), fresh web, desktop and Rust runs, and official docs checked on 27 October. No live model, installed-app run, account or message was used. Items marked <em>owner</em> need your acceptance.</p>
+<div class="legend"><span class="badge current">Holds today</span><span class="badge documented">Defect (reproduced)</span><span class="badge proposed">Proposed</span></div>
+
+<section id="chat"><h2>What happens when you ask Echo something</h2>
+<div class="diagram" role="img" aria-label="A chat message goes through work-record creation, context, model and tool loop with policy and the work ledger, checks, persistence and background follow-ups. Defects sit at the work-record and ledger steps.">
+<div class="spine">
+<div class="node accent"><strong>POST /query/stream → LeanSession</strong><span>per-chat lock · owner or guest · source</span></div><div class="arrow">↓</div>
+<div class="node"><strong>Work record?</strong><span class="documented">keyword match (“make”, “add”, “update”…) or first mutating tool · R4</span></div><div class="arrow">↓</div>
+<div class="node"><strong>Context</strong><span>soul · rules · live capabilities · scoped memory · lessons · skills · AGENTS.md · summary · past chats only when you point back</span></div><div class="arrow">↓</div>
+<div class="node"><strong>Model ⇄ tools</strong><span>policy · approvals/Autonomous · switches · privacy · Blocked apps → <b class="documented">ledger intent + resource lock</b> → tool → outcome + observed effects</span></div><div class="arrow">↓</div>
+<div class="node"><strong>Checks</strong><span>promise guard · unbacked claims · check before done · screen stalls · <b class="documented">group judge on every message (R8)</b></span></div><div class="arrow">↓</div>
+<div class="node"><strong>Saved, then quiet follow-ups</strong><span>timeline · work closes · learning episode · title once · summary past a threshold — one local inference slot, foreground first</span></div>
+</div>
+<div class="rule">Measured today: “What’s the capital of Peru?” sends 32 tool schemas and about 6.8k tokens with default permissions; your 11.10.1 trace sent 64 schemas and about 11.9k (R12). Plain Chat has no extra router call.</div>
+</div></section>
+
+<section id="map"><h2>Who owns what</h2>
+<div class="grid3">
+<div class="box"><h3>Echo Chat · specialists</h3><p>One Lean harness; personas are identity + instructions + model + toolsets. State: StateStore + ThreadManager; work in the coordination ledger. Specialists get project/session memory, not Echo’s account-wide view.</p></div>
+<div class="box"><h3>Groups</h3><p>RoomStore + a request-local Job. Mentions or a routing call pick speakers; a judge decides “done”; work-together uses an owned task board.</p></div>
+<div class="box"><h3>Routines · reminders · responsibilities</h3><p>RoutineManager is the only scheduler. Plain reminders never call a model. Responsibilities are reviewed in Activity, with grants frozen at the first occurrence.</p></div>
+<div class="box"><h3>Echo Code: native</h3><p>A Code-surface thread on the same native route and model binding, with native tools and policy.</p></div>
+<div class="box"><h3>Echo Code: Codex · Claude Agent · ACP</h3><p>The original harness in its own worktree, with its own sign-in, tools and approvals. Echo maps exact approval IDs and fails closed. No Echo memory, keys or tools cross over.</p></div>
+<div class="box"><h3>Workbench</h3><p>Terminal (ConPTY), files, changes, reviewed Git/PR. The Browser tab is a local preview frame, not automation and not your accounts.</p></div>
+</div></section>
+
+<section id="groups"><h2>Group chat protocol</h2>
+<div class="diagram" role="img" aria-label="A group message is routed by mention or a routing model call, speakers answer in turn, then a completion judge decides done or continues, until a stop condition.">
+<div class="grid3"><div class="node"><strong>@mention</strong><span>up to 4 agents</span></div><div class="node"><strong>No mention</strong><span>routing model call picks 1–2 · prefers last speaker</span></div><div class="node"><strong>Work together</strong><span>lead assigns owned tasks on a board</span></div></div>
+<div class="arrow">↓</div><div class="spine"><div class="node"><strong>Speakers answer in turn</strong><span>later speakers add or correct, never repeat</span></div><div class="arrow">↓</div><div class="node accent"><strong>Completion judge</strong><span>tool log + transcript · “a plain question is done when answered” · <b class="documented">a model call even with no tools (R8)</b></span></div></div>
+<div class="rule">Stops when: the judge says done · 8 rounds (work that is making progress may continue) · 2 repeats · stall limit · 60-round ceiling · optional token budget · Stop. There’s no explicit disagreement step; later speakers correct, and the judge reads the evidence.</div>
+</div></section>
+
+<section id="lock"><h2>The work-ledger lock (R1–R3), reproduced</h2>
+<div class="diagram" role="img" aria-label="A rejected click argument is recorded as uncertain, which holds the global desktop resource, so a later click in another chat raises an error that fails the whole turn.">
+<div class="grid3">
+<div class="node"><strong>Chat A: bad coordinate</strong><span>ValueError before anything ran</span></div>
+<div class="node accent"><strong>Recorded “unknown”</strong><span class="documented">uncertain = True on any exception (R1)</span></div>
+<div class="node"><strong>Holds “desktop”</strong><span>one global resource, until you reconcile in Activity</span></div>
+</div><div class="arrow">↓</div>
+<div class="spine"><div class="node"><strong>Chat B: “click the Start button”</strong><span class="documented">PermissionError escapes the tool runner → the whole turn fails (R2)</span></div></div>
+<div class="rule">The same mechanism means a dev server started inside a task blocks that task’s own next edit, and the task never completes (R3). The intended guard still holds and is kept as a test: a write whose outcome is truly unknown after a crash isn’t repeated blindly.</div>
+</div></section>
+
+<section id="findings"><h2>Findings</h2>
+<div class="comparison"><table><thead><tr><th>ID</th><th>Priority · type</th><th>What and why it matters</th><th>Evidence</th></tr></thead><tbody>
+<tr><td>R0</td><td class="documented">P0 · process</td><td>The full backend suite on main isn’t green: 5 deterministic and 3 order-dependent failures (#99 verified 17 files)</td><td>full pytest</td></tr>
+<tr><td>R17</td><td class="documented">P1 · bug</td><td>Signed webhooks run the routine but drop the payload (in every version back to 11.10.1)</td><td>source + history</td></tr>
+<tr><td>R1–R3</td><td class="documented">P0 · bug</td><td>Argument errors become “uncertain”; global resource locks fail later turns; background processes block their own work</td><td>3 tests</td></tr>
+<tr><td>R5</td><td class="documented">P0 · bug</td><td>93 failure messages in 36 legacy tools count as success (“Email send failed…”, “Discord bot client not available”)</td><td>static scan + 5 tests</td></tr>
+<tr><td>R4</td><td class="documented">P1 · bug/UX</td><td>“What should I make for dinner?” opens durable work</td><td>3 tests</td></tr>
+<tr><td>R6</td><td class="documented">P1 · missing</td><td>GitHub, Calendar and Notion skill libraries aren’t in the installer; the tools fail when called</td><td>build module table + test</td></tr>
+<tr><td>R7</td><td class="documented">P1 · UX</td><td>Your name and Remember conversations save but do nothing</td><td>test</td></tr>
+<tr><td>R8</td><td class="documented">P1 · arch</td><td>Every group message calls the judge model; routing allows 1,200 tokens for a name</td><td>test</td></tr>
+<tr><td>R9</td><td>P1 · UX</td><td>The in-app 11.10.7 update text says it “wasn’t published”</td><td>latest.json</td></tr>
+<tr><td>R10</td><td>P1 · arch</td><td>coordination.json is rewritten in full on every transaction and never pruned</td><td>source</td></tr>
+<tr><td>R12</td><td>P1 · arch</td><td>All tool schemas on every local-model chat</td><td>measured</td></tr>
+<tr><td>R11 · R13–R15</td><td>P2</td><td>Settings placement; Chromium missing for browse_task; DPI untested; Codex app-server labelled experimental</td><td>source · docs · owner</td></tr>
+</tbody></table></div></section>
+
+<section id="integrations"><h2>What exists for practical work</h2>
+<div class="comparison"><table><thead><tr><th>Capability</th><th>Usable now</th><th>Partial</th><th>Missing or blocked</th></tr></thead><tbody>
+<tr><td>GitHub</td><td>Code workbench Git, diffs, reviewed commits, gh PRs</td><td>Chat skill not bundled</td><td>One PR flow from Chat</td></tr>
+<tr><td>Documents, PDF</td><td>Read PDF, document search, Markdown/HTML artifacts</td><td>—</td><td>Native DOCX/PDF creation</td></tr>
+<tr><td>Spreadsheets · slides</td><td>CSV read; HTML artifacts</td><td>—</td><td>XLSX and PPTX tools</td></tr>
+<tr><td>Calendar</td><td>Local reminders and routines</td><td>Google skill not bundled</td><td>Microsoft 365 · Google app verification</td></tr>
+<tr><td>Browser</td><td>Safe page reading, research notebook, preview frame</td><td>Headless browse_task without Chromium</td><td>Supervised visible browser; your signed-in accounts need your browser and consent</td></tr>
+<tr><td>Windows apps</td><td>Named controls, coordinate control with change checks and stall notes</td><td>DPI · ledger lock</td><td>App-specific APIs (Office)</td></tr>
+</tbody></table></div>
+<p class="rule">Recommendation: finish GitHub issue → fix → PR from Chat end to end through the Code worktree first. Every new tool must return a real failure outcome.</p></section>
+
+<section id="windows"><h2>Windows controller, proposed</h2>
+<div class="phases">
+<div class="phase"><b>Target identity</b><span>window handle, process and title fixed per task; refuse to act on a changed foreground</span></div>
+<div class="phase"><b>Semantic first</b><span>app API → UIA pattern → keyboard → bounded coordinate click</span></div>
+<div class="phase"><b>Fresh, DPI-aware</b><span>one observation per step; per-monitor DPI declared once</span></div>
+<div class="phase"><b>Verify · scoped lock</b><span>expected change or measured delta; lock desktop:&lt;window&gt;, never on argument errors</span></div>
+</div></section>
+
+<section id="runtimes"><h2>Codex · Claude Agent · ACP, checked 27 October</h2>
+<div class="grid3">
+<div class="box"><h3>Claude Agent</h3><p>The official SDK page says third-party products can’t offer claude.ai login without Anthropic’s approval; use API keys. Echo’s explicit-key “Claude Agent” is the supported path. Running the unmodified Claude Code CLI with your own login is a separate case. Not installed here.</p></div>
+<div class="box"><h3>Codex app-server</h3><p>stdio JSON-RPC, with initialize, thread and turn calls and approval requests. Labelled experimental; thread/rollback removed (Echo doesn’t use it). Echo refuses token requests and fails closed. Not installed here.</p></div>
+<div class="box"><h3>ACP v1</h3><p>initialize, session/new, session/prompt, request_permission and update; load is optional. Echo advertises no filesystem or terminal capabilities and refuses unsupported resume.</p></div>
+</div></section>
+
+<section id="settings"><h2>Settings that match the architecture</h2>
+<div class="grid2">
+<div class="box"><h3>Today</h3><p>Approval mode and workers sit under General. Advanced holds Connections, MCP, A2A, webhooks and folders. Coding runtimes appear only in Code popovers. Two controls do nothing (R7).</p></div>
+<div class="box"><h3>Proposed (no redesign)</h3><p>Models (Chat models + Coding runtimes) · Agents · Permissions (with approvals) · Privacy · Memory &amp; learning · Skills · Automations (incl. responsibilities) · Channels · Connections · Advanced (low-level only).</p></div>
+</div></section>
+
+<section id="plan"><h2>Plan, one workflow at a time</h2>
+<div class="phases">
+<div class="phase"><b>Green suite · truthful outcomes</b><span>R0, R17, R1–R3, R5, R9 · exit: full suite green, tests un-marked, owner A1–A4</span></div>
+<div class="phase"><b>Light ordinary chat</b><span>R4, R7, R8, R10, R12 · exit: tests + a measured prompt bound</span></div>
+<div class="phase"><b>One real workflow</b><span>GitHub issue → PR from Chat + R6 packaging</span></div>
+<div class="phase"><b>Controller v2 · settings · documents</b><span>§7, §9, DOCX/XLSX/PDF with render-and-verify</span></div>
+</div></section>
+
+<section id="check"><h2>Owner checklist (installed 11.10.7, your model)</h2>
+<div class="comparison"><table><thead><tr><th>#</th><th>Try</th><th>Expect</th></tr></thead><tbody>
+<tr><td>A1</td><td>“What’s the capital of Peru?”</td><td>An answer, no tools, no new work row</td></tr>
+<tr><td>A2</td><td>“What should I make for dinner?”</td><td><span class="documented">Today: a work row appears</span></td></tr>
+<tr><td>A3</td><td>“Save a note test.md that says hi”</td><td>Tool done, the file exists, one work row</td></tr>
+<tr><td>A4</td><td>“Click at 9999, 9999”, then in a new chat “take a screenshot and click Start”</td><td><span class="documented">Today the second turn may fail: Resource is held</span></td></tr>
+<tr><td>A5</td><td>Group: “What’s your favourite movie?”</td><td>Short answers; note the time (judge call)</td></tr>
+<tr><td>B1 · C1</td><td>Your name = Ty → “What’s my name?”; GitHub skill → “list my open issues”</td><td><span class="documented">Today: not known; No module named 'github'</span></td></tr>
+<tr><td>D1 · D2</td><td>A Codex task with a denial, stop and resume; a click at 150 % scaling</td><td>Record what happens</td></tr>
+</tbody></table></div></section>
+
+<footer>Verification this review: backend full suite on main 1397 passed, 7 failed, 1 error (R0) · web 192 tests + typecheck · desktop contracts 16 · Rust 4 · new review tests 2 passed, 14 expected failures. No live model, account, message or install. Older records got dated status notes; their history is unchanged.</footer>
+</main></body></html>

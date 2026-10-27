@@ -1,5 +1,7 @@
 # Echo Code: architecture, integration research, and foundation
 
+> **Status, 27 Oct 2026:** everything below shipped through #94–#97 and is in published v11.10.7. Codex (app-server), Claude Agent (SDK, explicit API key) and ACP adapters exist and pass protocol fixtures. No live account session has been accepted, and neither Codex nor Claude Code is installed on the owner's PC yet. The official contracts were rechecked in the [system review](system-review-2026-10-27.md) §8 (the Claude subscription login is not offered to third-party SDK products without Anthropic's approval; the Codex app-server is labelled experimental and `thread/rollback` was removed).
+
 Research date: **2026-10-25 UTC**. EchoSpeak checkout: `claude/security-audit`, package version `11.10.3`, with unrelated work already present. This is a source implementation and research record, not a release or an installed-app acceptance report. Visual companion: [Echo Code review](../../artifacts/research/echo-code.html).
 
 **Current runtime implementation — 2026-10-25:** phases 2–5 below are implemented on `codex/echo-code-runtimes`, based on the pending UI PR #95. The earlier foundation/package results in this record are historical. Current runtime evidence uses real Git and local protocol fixtures, installed Codex schemas, and the pinned Claude SDK API; it does not establish live account or model acceptance. No new installer has been signed, installed or published.

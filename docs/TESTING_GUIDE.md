@@ -19,6 +19,10 @@ Copy-and-paste tests for the real app, grouped by feature. They're written to fi
 
 ---
 
+## Ordinary Echo Chat and system review — 27 Oct 2026
+
+Start with the [system review's owner checklist](research/system-review-2026-10-27.md#11-tests-run-in-this-review-and-the-owner-acceptance-checklist) (A1–D2). It covers a plain question, a false work record, a real file action, the desktop lock after a bad click, group chat cost, the Your name setting, the GitHub skill in the installed app, an Echo Code runtime and display scaling. Items marked *Today* describe known defects; record what you see.
+
 ## Native multi-agent acceptance — 11.10.7
 
 Use the concise [native work checklist](research/multi-agent-review.md#owner-operations-and-acceptance) for durable ownership, delegation, proposal review, routines, approval recovery, channels and learning. These are owner acceptance steps; automated scripted fixtures do not replace them. Build a fresh 11.10.7 installer to include the model audit, centered conversation layout and native work foundation.
@@ -593,9 +597,9 @@ After building and installing 11.10.5, use a normal desktop window and your conf
 6. Enter voice mode. Normal presentation should center Echo with Listen/Pause and Back to chat. Back to chat should restore the transcript. Check real microphone errors and benign approval requests remain actionable. Do not grant unrelated permissions just to exercise the UI.
 7. Check a narrower window, dark/light themes, saved sidebar sizes, file/session browsing, and the existing reminder/tray/Minecraft cases in sections 4.2–4.10. Native window-frame rendering, WebView2 focus, real model behavior and real audio need owner acceptance.
 
-## Echo Code external runtime acceptance (unreleased)
+## Echo Code external runtime acceptance
 
-The source implementation has local protocol/Git fixture evidence, not live acceptance. Use a small disposable repository with committed HEAD, no private data and a trusted project entry. Worktrees separate edits but do not sandbox a trusted executable running as your OS account. Keep this review separate from the pending 11.10.5 UI release until accepted.
+Released in v11.10.7 (27 Oct 2026) but not yet accepted live; the heading said "unreleased" when written. The source implementation has local protocol/Git fixture evidence, not live acceptance. Use a small disposable repository with committed HEAD, no private data and a trusted project entry. Worktrees separate edits but do not sandbox a trusted executable running as your OS account. Keep this review separate from the pending 11.10.5 UI release until accepted.
 
 1. In Echo Code choose Codex, acknowledge its execution authority and create an isolated session. Check a dirty source checkout requires acknowledgement and its local changes stay in the source folder. Connect the official native Codex CLI on the backend PATH. Use the official sign-in link; check the account state and Codex's own model list.
 2. Send a harmless coding task. Check text/tool streaming, Approve once and Deny, cancellation and native session resume after disconnect/restart. Confirm source files remain unchanged and the inspected diff belongs to the worktree.
