@@ -1,5 +1,7 @@
 # EchoSpeak native multi-agent foundation — implementation record
 
+> **Status, 27 Oct 2026:** merged in #99 and published as v11.10.7. Scripted verification only; live acceptance is still owed. The [system review](system-review-2026-10-27.md) found work-ledger defects (R1–R3: argument errors recorded as uncertain effects, global resource locks failing later turns, background processes blocking their own work) and the open items in its §10.
+
 Implementation: **2026-10-26 · 11.10.7 source preparation**. Branch: `codex/native-agent-foundation`, based on `39ec47f` / model-compatibility audit PR #98. [Visual report](../../artifacts/research/multi-agent-review.html). The research specification is preserved below as historical design context; its “proposed” labels describe the baseline before this implementation.
 
 ## What changed
