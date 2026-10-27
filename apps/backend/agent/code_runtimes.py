@@ -31,6 +31,8 @@ class Codex:
         self.session.account = {"connected": bool(account.get("account")),
                                 "type": (account.get("account") or {}).get("type", "none")}
         self.session.models = (await self.rpc.request("model/list", {})).get("data", [])
+        default = next((row for row in self.session.models if isinstance(row, dict) and row.get("isDefault")), {})
+        self.session.record_model(default.get("model"))
 
     async def login(self):
         result = await self.rpc.request("account/login/start", {"type": "chatgpt"})
@@ -50,6 +52,7 @@ class Codex:
         else:
             result = await self.rpc.request("thread/start", policy)
         self.session.row["native_id"] = result["thread"]["id"]
+        self.session.record_model(result.get("model"))
         self.session.save()
 
     async def prompt(self, text, model):
@@ -60,6 +63,8 @@ class Codex:
         if model:
             params["model"] = model
         response = await self.rpc.request("turn/start", params)
+        if model:
+            self.session.record_model(model)
         self.session.turn_id = response["turn"]["id"]
         await self.session.turn_finished.wait()
 
@@ -141,15 +146,22 @@ class Acp:
         return {"authenticated": True}
 
     async def prompt(self, text, model):
+        result = {}
         native = self.session.row.get("native_id")
         if native and not self.loaded:
             if not self.capabilities.get("loadSession"):
                 raise ValueError("This ACP agent cannot resume sessions. Start a new isolated session.")
-            await self.rpc.request("session/load", {"sessionId": native, "cwd": str(self.session.root), "mcpServers": []})
+            result = await self.rpc.request("session/load", {"sessionId": native, "cwd": str(self.session.root), "mcpServers": []})
         elif not native:
             result = await self.rpc.request("session/new", {"cwd": str(self.session.root), "mcpServers": []})
             native = self.session.row["native_id"] = result["sessionId"]
             self.session.save()
+        state = result.get("models")
+        if isinstance(state, dict):
+            self.session.record_model(state.get("currentModelId"))
+            self.session.models = [{"id": row["modelId"], "model": row["modelId"], "displayName": str(row.get("name") or row["modelId"])[:200]}
+                                   for row in (state.get("availableModels") or [])[:200]
+                                   if isinstance(row, dict) and isinstance(row.get("modelId"), str) and 0 < len(row["modelId"]) <= 200]
         self.loaded = True
         result = await self.rpc.request("session/prompt", {"sessionId": native,
                     "prompt": [{"type": "text", "text": text}]}, timeout=1800)
@@ -180,7 +192,7 @@ class Claude:
         self.session, self.rpc = session, None
 
     async def connect(self):
-        argv = [sys.executable, "--code-sdk-worker"] if getattr(sys, "frozen", False) else [sys.executable, "-m", "agent.code_claude_worker"]
+        argv = [sys.executable, "--code-sdk-worker"] if getattr(sys, "frozen", False) else [sys.executable, "-P", "-m", "agent.code_claude_worker"]
         env = child_env({"ANTHROPIC_API_KEY": self.session.api_key})
         # Source builds need our module on sys.path even though cwd is the worktree.
         if not getattr(sys, "frozen", False):
@@ -201,6 +213,10 @@ class Claude:
             return {"allow": await self.session.approval(method, params)}
         if method != "sdk/event":
             raise ValueError("Unsupported SDK worker request")
+        data = params.get("data") or {}
+        if isinstance(data, dict):
+            nested = data.get("data")
+            self.session.record_model(data.get("model") or (nested.get("model") if isinstance(nested, dict) else None))
         self.session.emit(method, params)
         return {}
 

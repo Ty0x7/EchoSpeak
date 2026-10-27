@@ -1,5 +1,15 @@
 # Changes
 
+## v11.10.6 — 2026-10-25
+
+* Keeps the Code composer visible for disconnected Codex, Claude and ACP; adds Chat-style reported-model picking, isolated native model bindings and visible original-harness replies.
+
+* Repairs a packaged startup failure caused by xterm 6 shadowing a frozen inherited property. Keeps prototype protection enabled, adds visible startup recovery, and verifies a real installed Windows launch.
+* Adds titlebar workspace details, bottom-terminal and sidebar controls; scoped file/preview/PR/usage/activity surfaces; real Windows ConPTY terminals with tabs/splits; and reviewed Git actions.
+* Centers and compacts Chat/Code welcome and composer layouts within the remaining workspace.
+* Keeps agent worktrees, writer leases, privacy/process cleanup, credential filtering and selected-file review boundaries.
+* See [technical notes](docs/releases/v11.10.6.md) and [visual walkthrough](artifacts/releases/v11.10.6.html). Local package checks and publication remain separate.
+
 ## Unreleased — Echo Code external runtimes
 
 * Connects Codex through its official app-server with native sign-in, sessions, models, streaming and correlated approvals.

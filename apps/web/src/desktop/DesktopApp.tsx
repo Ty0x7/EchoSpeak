@@ -15,6 +15,7 @@ import { initialDesktopBootState, reduceDesktopBootState } from "./runtimeState"
 import { CompanionApp } from "./CompanionApp";
 import { SetupWindow } from "../setup/SetupWindow";
 import "./desktop.css";
+import { WorkbenchControls } from "../workbench/Workbench";
 
 const WindowControls = () => (
   <div className="desktop-window-controls" role="group" aria-label="Window controls">
@@ -164,7 +165,7 @@ export function DesktopApp() {
         <div className={`desktop-titlebar-status is-${boot.phase}`} data-tauri-drag-region>
           {boot.phase === "ready" ? null : <><i aria-hidden /><span data-tauri-drag-region>{boot.detail}</span></>}
         </div>
-        <WindowControls />
+        <div className="desktop-titlebar-actions">{!settingsWindow && showWorkspace ? <WorkbenchControls apiBase={window.__ECHOSPEAK_DESKTOP_RUNTIME__?.api_base || "http://127.0.0.1:8000"} /> : null}<WindowControls /></div>
       </header>}
 
       <main className="desktop-content">

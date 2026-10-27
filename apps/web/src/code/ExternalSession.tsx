@@ -1,12 +1,17 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
 import { request } from "../projects/model";
 import { RuntimeMark } from "../components/RuntimeMark";
+import { WorkspacePopover } from "../components/WorkspacePopover";
+import { agentModels, type AgentModel } from "./model";
+import { useWorkbench } from "../workbench/store";
 
 type Event = { seq: number; kind: string; data: Record<string, any> };
 type Session = {
+  model?: string;
+  turn_active?: boolean;
   id: string; runtime_id: string; state: string; worktree: string; native_id: string | null;
   created_at: number; connected: boolean; cursor: number; replay_gap: boolean;
-  account: { connected: boolean; type: string }; models: { id: string; model: string; displayName?: string }[];
+  account: { connected: boolean; type: string }; models: AgentModel[];
   approvals: { id: string; kind: string; details: unknown }[]; events: Event[]; rollback_available: boolean;
 };
 
@@ -30,15 +35,17 @@ export function eventText(event: Event): string {
   return "";
 }
 
-export function ExternalSession({ apiBase, projectId, runtimeId, canStart, initialDraft = "" }: {
-  apiBase: string; projectId: string; runtimeId: string; canStart: boolean; initialDraft?: string;
-}) {
+export type ExternalComposerState = { sessionId: string; connected: boolean; canSend: boolean; busy: boolean; active: boolean; models: AgentModel[]; model: string; approvals: number; transcript: string };
+export type ExternalSessionHandle = { send(): void };
+export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
+  apiBase: string; projectId: string; runtimeId: string; canStart: boolean;
+  draft: string; onDraft(value: string): void; model: string; onState(state: ExternalComposerState): void;
+  open: boolean; anchor: React.RefObject<HTMLButtonElement>; onClose(): void;
+}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, draft, onDraft, model, onState, open, anchor, onClose }, ref) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
-  const [text, setText] = useState(initialDraft);
-  const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [acknowledge, setAcknowledge] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -52,8 +59,16 @@ export function ExternalSession({ apiBase, projectId, runtimeId, canStart, initi
   const pending = useRef({ key: crypto.randomUUID(), context: "" });
   const alive = useRef(true);
   const base = `${apiBase}/echo-code/external-sessions/${encodeURIComponent(selected)}`;
-  const active = ["preparing", "running"].includes(session?.state || "");
+  const active = Boolean(session?.turn_active) || ["preparing", "running"].includes(session?.state || "");
   const name = runtimeId === "codex" ? "Codex" : runtimeId === "claude_code" ? "Claude Agent" : "ACP agent";
+  const canSend = Boolean(session?.connected && !active && !busy && session.state !== "rolled_back" && (runtimeId !== "codex" || session.account.connected));
+  useEffect(() => {
+    onState({ sessionId: selected, connected: Boolean(session?.connected), canSend, busy, active,
+      models: agentModels(session?.models), model: session?.model || "", approvals: session?.approvals.length || 0, transcript: events.map(eventText).join("") });
+  }, [selected, session, canSend, busy, active, onState, events]);
+  useEffect(() => {
+    useWorkbench.getState().setContext({ project_id: projectId, external_session_id: selected });
+  }, [projectId, selected]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => {
     let live = true;
@@ -85,6 +100,10 @@ export function ExternalSession({ apiBase, projectId, runtimeId, canStart, initi
     catch (err) { if (alive.current) setError(err instanceof Error ? err.message : "Runtime request failed"); }
     finally { if (alive.current) setBusy(false); }
   };
+  useImperativeHandle(ref, () => ({ send() {
+    if (!canSend || !draft.trim()) return;
+    void action(async () => { await request(`${base}/turns`, { text: draft, model: runtimeId === "acp" ? "" : model }); if (alive.current) onDraft(""); });
+  } }), [canSend, draft, model, base, runtimeId, onDraft]);
   const create = () => action(async () => {
     let command: string[] = [];
     if (runtimeId === "acp") {
@@ -101,7 +120,7 @@ export function ExternalSession({ apiBase, projectId, runtimeId, canStart, initi
     pending.current = { key: crypto.randomUUID(), context: "" };
     setSessions(previous => [result, ...previous.filter(row => row.id !== result.id)]); setSelected(result.id);
   });
-  return <section className="ec-external" aria-label={`${name} sessions`}>
+  return open ? <WorkspacePopover anchor={anchor} label={`${name} connection and session`} width={620} className="ec-connection-popover" onClose={onClose}><section className="ec-external" aria-label={`${name} sessions`}>
     <header><RuntimeMark runtime={runtimeId} /><strong>{name}</strong><select aria-label="External coding session" value={selected} disabled={busy}
       onChange={event => setSelected(event.target.value)}><option value="">New isolated session</option>{sessions.map(row =>
       <option key={row.id} value={row.id}>{new Date(row.created_at * 1000).toLocaleString()} · {row.id.slice(0, 7)}</option>)}</select></header>
@@ -140,19 +159,10 @@ export function ExternalSession({ apiBase, projectId, runtimeId, canStart, initi
         <button className="es-btn" disabled={busy} onClick={() => void action(() => request(`${base}/approvals/${approval.id}`, { allow: true }))}>Approve once</button>
       </div>)}
       <pre className="ec-runtime-stream" role="log" aria-label="Runtime activity">{events.map(eventText).join("") || "Your agent's streamed responses and command output will appear here."}</pre>
-      {session?.connected ? <form className="ec-runtime-composer" onSubmit={event => { event.preventDefault(); void action(async () => {
-        await request(`${base}/turns`, { text, model }); setText("");
-      }); }}>
-        <textarea aria-label="External coding task" rows={1} value={text} onChange={event => setText(event.target.value)} disabled={active || busy} placeholder={`Ask ${name} to work in its isolated worktree`} />
-        <div>{runtimeId === "codex" ? <select aria-label="Codex model" value={model} onChange={event => setModel(event.target.value)} disabled={active || busy}>
-          <option value="">Codex default model</option>{session.models.map(item => <option key={item.id} value={item.model}>{item.displayName || item.model}</option>)}</select>
-          : runtimeId === "claude_code" ? <input aria-label="Claude model" placeholder="Claude default model" value={model} onChange={event => setModel(event.target.value)} disabled={active || busy} /> : <small>Agent's own model and permissions</small>}
-          <button className="es-btn" type="submit" disabled={busy || active || !text.trim() || (runtimeId === "codex" && !session.account.connected)}>Send to {name}</button></div>
-      </form> : null}
       <div className="ec-session-actions"><button className="es-btn" disabled={busy || !session} onClick={() => void action(async () => setDiff(await request(`${base}/diff`)))}>Inspect changes</button>
         <button className="es-btn" disabled={busy || !session?.rollback_available || session?.connected} onClick={() => void action(() => request(`${base}/rollback`, {}))}>Roll back last turn</button>
         <small>Stop before rollback. Newer edits are preserved; a recovery copy is retained.</small></div>
       {diff ? <details className="ec-runtime-diff" open><summary>Worktree changes</summary><pre>{diff.status || "Clean worktree"}</pre><pre>{diff.diff}</pre><small>{diff.note}</small></details> : null}
     </>}
-  </section>;
-}
+  </section></WorkspacePopover> : null;
+});

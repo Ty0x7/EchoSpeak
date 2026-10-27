@@ -1,8 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { canStartSession, CodeRequestError, createCodeSession, runtimeStatus, type CodeRuntime, type CodeWorkspace } from "./model";
+import { agentModels, agentModelName, canStartSession, CodeRequestError, createCodeSession, runtimeStatus, type CodeRuntime, type CodeWorkspace } from "./model";
 
 const native: CodeRuntime = { id: "echo", name: "Echo native", protocol: "native", implemented: true, installed: true, authentication: "existing_model_settings", can_start: true, blockers: [], description: "" };
 const workspace = { can_start_native: true } as CodeWorkspace;
+
+describe("reported coding models", () => {
+  it("keeps valid reported models and excludes malformed catalog entries", () => {
+    expect(agentModels([null, { model: 7 }, { model: "" }, { id: "one", model: "native-model", displayName: "Native model", isDefault: true }]))
+      .toEqual([{ id: "one", model: "native-model", displayName: "Native model", isDefault: true }]);
+    expect(agentModels(null)).toEqual([]);
+  });
+  it("uses selection, then reported model, then the advertised default without inventing one", () => {
+    const models = [{ id: "a", model: "a", displayName: "Model A", isDefault: true }, { id: "b", model: "b", displayName: "Model B" }];
+    expect(agentModelName(models, "b", "a")).toBe("Model B");
+    expect(agentModelName(models, "", "b")).toBe("Model B");
+    expect(agentModelName(models, "", "")).toBe("Model A");
+    expect(agentModelName([], "", "")).toBe("");
+  });
+});
 
 describe("Echo Code runtime admission", () => {
   it("requires a project, its trust gate, and a working native adapter", () => {

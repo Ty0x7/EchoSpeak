@@ -3,6 +3,17 @@ export type CodeRuntime = {
   authentication: string; can_start: boolean; blockers: string[]; description: string;
 };
 export type RuntimeCatalog = { schema_version: number; privacy_mode: string; runtimes: CodeRuntime[] };
+export type AgentModel = { id: string; model: string; displayName?: string; isDefault?: boolean };
+export function agentModels(value: unknown): AgentModel[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Map(value.filter(row => row && typeof row.model === "string" && row.model.length > 0 && row.model.length <= 200)
+    .slice(0, 200).map(row => [row.model, { id: String(row.id || row.model), model: row.model,
+      displayName: typeof row.displayName === "string" ? row.displayName : undefined, isDefault: row.isDefault === true }])).values()];
+}
+export function agentModelName(models: AgentModel[], selected: string, reported: string): string {
+  const id = selected || reported || models.find(row => row.isDefault)?.model || "";
+  return models.find(row => row.model === id)?.displayName || id;
+}
 export type CodeSession = {
   thread_id: string; title: string; project_id: string; surface: string; agent_runtime: string;
   last_active_at: number; message_count: number;

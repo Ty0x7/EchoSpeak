@@ -20,6 +20,7 @@ import { LearningPage } from "./lean/LearningPage";
 import settingsCss from "./settings/settings.css?inline";
 import chatPolishCss from "./dashboard/chatPolish.css?inline";
 import workspaceCss from "./theme/workspace.css?inline";
+import workbenchCss from "./workbench/workbench.css?inline";
 import { CreationsPage } from "./creations/CreationsPage";
 import { FirstRunSetup } from "./setup/FirstRunSetup";
 import { SettingsPanel } from "./settings/SettingsPanel";
@@ -42,6 +43,10 @@ import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
 import { EchoCodeWorkspace } from "./code/EchoCodeWorkspace";
+import { WorkbenchContent, WorkbenchTabs } from "./workbench/Workbench";
+import { TerminalDock } from "./workbench/Terminal";
+import { useWorkbench } from "./workbench/store";
+import { WorkbenchIcon } from "./workbench/icons";
 import { AgentEditor, RoomDialog } from "./lean/Dialogs";
 import type { LeanEvent, LeanPersona, LeanRoom } from "./lean/types";
 import {
@@ -109,6 +114,7 @@ export const Dashboard: React.FC<{
   const [mainPage, setMainPage] = useState<SidebarPage>("chat");
   const [codeConversationOpen, setCodeConversationOpen] = useState(false);
   const [codeProjectId, setCodeProjectId] = useState("");
+  const workbench = useWorkbench();
   /** The artifact shown in the side panel. */
   const [openArtifact, setOpenArtifact] = useState<{ id: string; version?: number } | null>(null);
   const [openObservation, setOpenObservation] = useState<ObservationRef | null>(null);
@@ -1531,7 +1537,24 @@ export const Dashboard: React.FC<{
   const currentObservation = openObservation?.session_id === activeThreadId ? openObservation : null;
   const conversationVisible = mainPage === "chat" || (mainPage === "code" && codeConversationOpen);
   const emptyConversation = !timeline.length && !streaming && !lean.live?.order.length && !voiceConversationMode;
-  const rightOpen = !voiceConversationMode && (conversationVisible ? Boolean(openArtifact || activityOpen || currentObservation) : mainPage === "projects" && Boolean(workspaceProjectId && openArtifact));
+  useEffect(() => {
+    const project_id = mainPage === "code" && !codeConversationOpen ? codeProjectId : mainPage === "projects" ? workspaceProjectId : activeProjectId;
+    workbench.setContext({ project_id, external_session_id: "" });
+  }, [mainPage, codeConversationOpen, codeProjectId, workspaceProjectId, activeProjectId]);
+  useEffect(() => {
+    if (activityOpen) workbench.open(rightTab === "research" ? "research" : "activity");
+  }, [activityOpen, rightTab]);
+  useEffect(() => { if (openArtifact) workbench.open("artifact"); }, [openArtifact?.id]);
+  useEffect(() => { if (currentObservation) workbench.open("screen"); }, [currentObservation?.id]);
+  useEffect(() => {
+    const folder = () => { void attachFolder(); };
+    const key = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.code === "Backquote") { event.preventDefault(); workbench.toggleBottom(); }
+    };
+    window.addEventListener("echospeak:workbench-add-folder", folder); window.addEventListener("keydown", key);
+    return () => { window.removeEventListener("echospeak:workbench-add-folder", folder); window.removeEventListener("keydown", key); };
+  }, [activeThreadId, mainPage]);
+  const rightOpen = !voiceConversationMode && workbench.rightOpen;
   const rightDocked = rightOpen && !narrowLayout;
   const shellColumns = [
     desktopMode
@@ -1700,6 +1723,7 @@ export const Dashboard: React.FC<{
       <style>{settingsCss}</style>
       <style>{chatPolishCss}</style>
       <style>{workspaceCss}</style>
+      <style>{workbenchCss}</style>
       {agentEditor.open ? (
         <AgentEditor
           agent={agentEditor.agent}
@@ -1754,11 +1778,14 @@ export const Dashboard: React.FC<{
           "app-shell" +
           (studioOpen && !desktopMode ? " is-studio-covered" : "") +
           (desktopMode ? " desktop-single-workspace" : "") +
+          (workbench.bottomOpen && !voiceConversationMode ? " has-bottom-terminal" : "") +
           (voiceConversationMode && mainPage === "chat" ? " is-voice-mode" : "")
         }
         style={{
           gridTemplateColumns: shellColumns,
-        }}
+          gridTemplateRows: workbench.bottomOpen && !voiceConversationMode ? `minmax(0, 1fr) ${workbench.bottomHeight}px` : undefined,
+          "--wb-terminal-height": `${workbench.bottomHeight}px`,
+        } as React.CSSProperties}
         aria-hidden={!desktopMode && studioOpen || undefined}
       >
         {showSidebar ? <ProjectSidebar
@@ -1802,7 +1829,7 @@ export const Dashboard: React.FC<{
           onDeleteSession={(id) => void deleteThread(id)}
           onDeleteProject={(id) => void deleteProject(id)}
           onSettings={() => openSettingsAt()}
-          footerExtra={<StopEverythingButton apiBase={apiBase} />}
+          footerExtra={<><div className="wb-sidebar-actions"><button aria-label="Pull requests" title="Pull requests" onClick={() => workbench.open("pull_requests")}><WorkbenchIcon kind="pull_requests" /></button><button aria-label="Usage and limits" title="Usage and limits" onClick={() => workbench.open("usage")}><WorkbenchIcon kind="usage" /></button></div><StopEverythingButton apiBase={apiBase} /></>}
           settingsOpen={studioOpen}
           onView={() => {
             setLeftTab("chat");
@@ -1830,10 +1857,13 @@ export const Dashboard: React.FC<{
         ) : null}
         {rightOpen ? (
           <RightPanel
+            workbench={{ tabs: <WorkbenchTabs nativeAllowed={conversationVisible} onNativeTab={kind => { if (["research", "activity", "artifact", "screen"].includes(kind)) setRightTab(kind as RightTab); }} />,
+              content: <WorkbenchContent apiBase={apiBase} nativeAllowed={conversationVisible} />,
+              native: ["research", "activity", "artifact", "screen"].includes(workbench.tabs.find(tab => tab.id === workbench.active)?.kind || "") && (conversationVisible || Boolean(mainPage === "projects" && openArtifact && workbench.active === "artifact")) }}
             apiBase={apiBase}
             sessionId={activeThreadId}
-            tab={rightTab}
-            resourceOnly={mainPage === "projects"}
+            tab={( ["research", "activity", "artifact", "screen"].includes(workbench.tabs.find(tab => tab.id === workbench.active)?.kind || "") ? workbench.tabs.find(tab => tab.id === workbench.active)!.kind : rightTab) as RightTab}
+            resourceOnly={!conversationVisible}
             onTab={setRightTab}
             artifact={openArtifact}
             observation={currentObservation}
@@ -1850,18 +1880,21 @@ export const Dashboard: React.FC<{
             measureRoom={measurePanelRoom}
             overlay={narrowLayout}
             onClose={() => {
+              useWorkbench.setState({ rightOpen: false });
               setOpenArtifact(null);
               setOpenObservation(null);
               setActivityOpen(false);
             }}
           />
         ) : null}
+        {workbench.bottomOpen && !voiceConversationMode ? <TerminalDock apiBase={apiBase} /> : null}
         {!conversationVisible ? (
           <PageCloseContext.Provider value={closePage}>
           <div className="glow-panel es-page-host" data-testid="sidebar-page">
             {mainPage === "code" ? (
               <WidgetEnvProvider value={widgetEnv}>
                 <EchoCodeWorkspace apiBase={apiBase} projects={projects} projectId={codeProjectId}
+                  nativeInfo={providerInfo} nativeLocked={lmStudioOnly} onConfigureProviders={() => openSettingsAt("models")}
                   onProject={setCodeProjectId} onAddFolder={() => void attachFolder()}
                   onSession={(session, draft) => {
                     setThreads(previous => [{ id: session.thread_id, name: session.title,
@@ -2050,7 +2083,7 @@ export const Dashboard: React.FC<{
                   />
                   </WidgetEnvProvider>
                   {!voiceConversationMode || mainPage !== "chat" ? <div className="input-bar">
-                    {emptyConversation ? <div className="conversation-welcome"><h1>{mainPage === "code" ? "What should we build" : "What can I help you with"}{mainPage === "code" && activeProjectId ? <> in <span>{projects.find(project => project.id === activeProjectId)?.name || "this project"}</span></> : null}?</h1>{mainPage === "code" ? <p>Your project, your model, Echo's own harness.</p> : <WelcomeTypewriter />}</div> : null}
+                    {emptyConversation ? <div className="conversation-welcome"><h1>{mainPage === "code" ? "What should we build" : "What can I help you with"}{mainPage === "code" && activeProjectId ? <> in <span>{projects.find(project => project.id === activeProjectId)?.name || "this project"}</span></> : null}?</h1><WelcomeTypewriter coding={mainPage === "code"} /></div> : null}
                     <LiveStatusPill live={streaming ? lean.live : null} onStop={stopActiveTurn} />
                     {/* One card: session strip, the text box, then tools · context · send */}
                     <ComposerInput

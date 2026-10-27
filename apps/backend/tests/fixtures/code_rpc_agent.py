@@ -22,15 +22,15 @@ for raw in sys.stdin:
     elif method == "account/read":
         result = {"account": {"type": "chatgpt"}}
     elif method == "model/list":
-        result = {"data": [{"id": "fixture-model", "model": "fixture-model"}]}
+        result = {"data": [{"id": "fixture-model", "model": "fixture-model", "isDefault": True}]}
     elif method in {"thread/start", "thread/resume"}:
         assert params["approvalPolicy"] == "untrusted" and params["sandbox"] == "workspace-write"
-        result = {"thread": {"id": "fixture-thread"}}
+        result = {"thread": {"id": "fixture-thread"}, "model": "fixture-model"}
     elif method == "account/login/start":
         result = {"authUrl": "https://auth.openai.com/fixture", "loginId": "fixture-login"}
     elif method in {"session/new", "session/load"}:
         assert params["mcpServers"] == []
-        result = {"sessionId": "fixture-acp"}
+        result = {"sessionId": "fixture-acp", "models": {"currentModelId": "fixture-acp-model", "availableModels": [{"modelId": "fixture-acp-model", "name": "Fixture ACP model"}]}}
     elif method in {"turn/start", "session/prompt"}:
         if method == "turn/start":
             assert params["sandboxPolicy"]["networkAccess"] is False

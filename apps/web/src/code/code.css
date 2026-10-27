@@ -1,4 +1,18 @@
 .ec-page { height:100%; min-height:0; }
+.ec-chat-transcript { max-height:min(42vh,360px); overflow:auto; margin:0 0 22px; padding:10px 4px; white-space:pre-wrap; overflow-wrap:anywhere; color:var(--es-text); font:13px/1.7 var(--es-font); }
+.ec-runtime-picker:focus-visible { outline:2px solid var(--es-accent); outline-offset:3px; border-radius:4px; }
+.ec-model-label { min-width:0; max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ec-connection-trigger { font:11px var(--es-font); padding-left:14px; border-left:1px solid var(--es-border); white-space:nowrap; }
+.ec-connection-popover .ec-external { margin:0; padding:16px; font:12px/1.6 var(--es-font); }
+.ec-connection-popover .ec-runtime-stream { min-height:100px; }
+.ec-model-current { display:flex; align-items:center; gap:9px; padding:10px 9px; border-bottom:1px solid var(--es-border-soft); }
+.ec-model-current>span { min-width:0; display:grid; gap:3px; }
+.ec-model-current strong { overflow-wrap:anywhere; font-size:12px; font-weight:550; }
+.ec-model-current small,.ec-custom-model small { font-size:10px; color:var(--es-text-3); }
+.ec-custom-model { display:grid; gap:9px; margin:10px; }
+.ec-custom-model label { display:grid; gap:5px; font-size:11px; color:var(--es-text-3); }
+.ec-custom-model input { min-width:0; width:100%; box-sizing:border-box; background:var(--es-surface-1); border:1px solid var(--es-border); color:var(--es-text); padding:7px; border-radius:5px; }
+.ec-custom-model button { justify-self:start; padding:6px 10px; border:1px solid var(--es-border); border-radius:5px; color:var(--es-text); background:var(--es-surface-2); }
 .echo-root .ec-start.ec-start-external { margin-top:24px; max-width:880px; }
 .ec-start-external .ec-draft-tools { padding-top:12px; padding-bottom:12px; }
 .ec-external { margin-top:26px; min-width:0; }

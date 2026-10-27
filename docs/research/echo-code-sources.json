@@ -164,5 +164,45 @@
       "https://pypi.org/project/claude-agent-sdk/0.2.174/"
     ],
     "validation_boundary": "No live login, paid inference or signed installer acceptance; original foundation source manifest retained as history."
+  },
+  "workbench_11_10_6": {
+    "date_utc": "2026-10-25",
+    "reference": "Owner supplied nine annotated T3 screenshots; not implementation proof",
+    "t3_commit": "c91626176081618cf82561ca74e7e79d4ccd23ed",
+    "inspected_files": {
+      "chat/ChatRightPanel.tsx": "6acbc6a91c3501d00b128b47f835ef2133cbbe30b1cd4e61e978eee3fe76d509",
+      "RightPanelTabs.tsx": "4da7479c9bb14ca0ccafd61cb67e6956c6a2bcba58e6d2d3584134090b200514",
+      "ThreadTerminalDrawer.tsx": "957192aa87812202fc81de10ccb3f274dd82a6a0b15e52b78d6c143da238d5d0",
+      "ProjectScriptsControl.tsx": "7a3e6456da25fbdf5d26bcd20e8325757292d9688add5aeb87a0b5cc9cd746a1",
+      "chat/ThreadDetailsControl.tsx": "ca154b7cb45411104b4adabcf9bd2ab79f17bad58c3b1eef57d37247b74b4ba6"
+    },
+    "new_dependencies": {
+      "pywinpty": "3.1.0",
+      "@xterm/xterm": "6.0.0",
+      "@xterm/addon-fit": "0.11.0"
+    },
+    "reuse": "Architectural/UI research; no additional T3 source vendored"
+  },
+  "workbench_startup_repair": {
+    "date_utc": "2026-10-25",
+    "source": "Pinned xterm 6.0.0 ESM namespace assignment and installed Tauri freeze_prototype.js",
+    "xterm_esm_sha256": "b336ec65a086c056d4804b3d4c2347da5663d3f23c3f25be866467bd8857ad59",
+    "root_cause": "Assigning namespace.toString inherits a non-writable Object.prototype property; the lazy desktop module failed before its native window-reveal effect.",
+    "adaptation": "Define one own namespace property at build time; upstream file and global prototype remain unchanged; require review on unexpected assignment count.",
+    "validation": "Production-asset frozen-prototype startup, deliberate missing-bundle recovery, full protected workbench fixture, and actual installed Windows startup/relaunch."
+  },
+  "coding_composer_followup": {
+    "date_utc": "2026-10-25",
+    "scope": "Always-visible coding starter, Chat-style runtime/model picker, per-session native binding, original runtime-reported model identity",
+    "source_files": [
+      "apps/web/src/code/CodeModelPicker.tsx",
+      "apps/web/src/code/EchoCodeWorkspace.tsx",
+      "apps/web/src/code/ExternalSession.tsx",
+      "apps/web/src/dashboard/ConnectedModelBrowser.tsx",
+      "apps/backend/agent/code_runtimes.py",
+      "apps/backend/agent/code_sessions.py"
+    ],
+    "reference": "https://agentclientprotocol.com/protocol/v1/session-setup",
+    "boundary": "ACP optional model metadata is read when provided; no model-setting RPC or fabricated catalog is introduced. No live account/model test."
   }
 }

@@ -57,6 +57,11 @@ hiddenimports = (
     + ["faiss", "onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp", "websockets.sync.client"]
 )
 
+if __import__("sys").platform == "win32":
+    hiddenimports += collect_submodules("winpty")
+    datas += collect_data_files("winpty")
+    binaries_extra += collect_dynamic_libs("winpty")
+
 # Optional Claude SDK contains the original harness binary. Ship it only when
 # explicitly installed at the pinned version; never download it during a build.
 import importlib.util

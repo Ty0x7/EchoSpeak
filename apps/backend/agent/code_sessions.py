@@ -91,6 +91,12 @@ class Session:
     def save(self):
         wt.atomic_json(self.directory / "session.json", self.row)
 
+    def record_model(self, value):
+        if isinstance(value, str) and value and len(value) <= 200 and value != self.row.get("model"):
+            from agent.lean.policy import redact_secrets
+            self.row["model"] = redact_secrets(redact_secrets(value), self.redaction_values + ([self.api_key] if self.api_key else []))
+            self.save()
+
     def emit(self, kind, data):
         from agent.lean.policy import redact_payload
         self.sequence += 1
@@ -106,7 +112,7 @@ class Session:
 
     def public(self, cursor=0):
         return {**{key: value for key, value in self.row.items() if key not in {"command", "git_marker", "creation_context", "creation_key"}},
-                "account": self.account, "models": self.models,
+                "account": self.account, "models": self.models, "turn_active": bool(self.task),
                 "events": [event for event in self.events if event["seq"] > cursor], "cursor": self.sequence,
                 "replay_gap": bool(self.events and cursor < self.events[0]["seq"] - 1),
                 "approvals": [{"id": key, "kind": row["kind"], "details": row["details"]} for key, row in self.approvals.items()],
@@ -174,6 +180,8 @@ class Sessions:
         self.sessions = {}
         self.suspended = False
         self.starting = set()
+        self.owned_tools = set()
+        self.tool_loans = {}
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self.loop.run_forever, name="EchoCodeSupervisor", daemon=True)
         self.thread.start()
@@ -186,6 +194,12 @@ class Sessions:
     async def _monitor(self):
         while True:
             await asyncio.sleep(1)
+            for tool in list(self.owned_tools):
+                try:
+                    self.admit()
+                    tool.workbench.validate(tool.context)
+                except (ValueError, OSError, KeyError, PermissionError):
+                    await tool.stop("Workspace admission changed")
             for session in list(self.sessions.values()):
                 if not session.adapter:
                     continue
@@ -276,6 +290,8 @@ class Sessions:
 
     async def connect(self, session_id, api_key=""):
         self.admit()
+        if session_id in self.tool_loans:
+            raise ValueError("Close this worktree's terminals before reconnecting the coding runtime")
         session = self.get(session_id)
         if session.row["state"] == "rolled_back":
             raise ValueError("This session was rolled back. Start a new session so native history cannot disagree with restored files.")
@@ -420,6 +436,8 @@ class Sessions:
 
     async def rollback(self, session_id):
         session = self.get(session_id)
+        if session_id in self.tool_loans:
+            raise ValueError("Close this worktree's terminals before rollback")
         if session.task or session.adapter:
             raise ValueError("Stop this runtime before rolling back its last turn")
         session.acquire()
@@ -436,6 +454,7 @@ class Sessions:
     async def stop_all(self, reason, suspend=False):
         if suspend:
             self.suspended = True
+        await asyncio.gather(*(tool.stop(reason) for tool in list(self.owned_tools)))
         await asyncio.gather(*(session.stop(reason) for session in self.sessions.values()))
 
     async def unsuspend(self):

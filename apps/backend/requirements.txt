@@ -97,3 +97,6 @@ setuptools>=84.1.0     # bundled pkg_resources; path escape in legacy installs (
 httplib2>=0.32.0       # Google Calendar: decompression bomb (CVE-2026-59939)
 oauthlib>=4.0.0        # Google sign-in: PKCE timing and JSONP callback injection (CVE-2026-49264)
 pyasn1>=0.6.4          # google-auth: decoder denial of service (CVE-2026-59884)
+
+# Native Windows ConPTY for the owner workspace terminal.
+pywinpty==3.1.0; sys_platform == "win32"

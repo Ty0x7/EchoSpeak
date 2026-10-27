@@ -1,9 +1,9 @@
 {
   "verified_on_utc": "2026-10-25",
-  "scope": "Current external-runtime source/fixture checks, with historical UI/package baseline retained; no live login, inference, installed runtime or signed installer acceptance",
-  "branch": "codex/echo-code-runtimes",
-  "base_commit": "748a7646587b1d89b73a46c56dc138d4c2710dab",
-  "package_version": "11.10.5",
+  "scope": "Current startup/alignment/coding-model follow-up; previous foundation and workbench evidence retained as history",
+  "branch": "codex/echo-code-workbench",
+  "base_commit": "f61a8315698ca4f8f3a70a62054e9f6d42228660",
+  "package_version": "11.10.6",
   "backend": {
     "passed": 168,
     "skipped": 1,
@@ -890,5 +890,704 @@
     ]
   },
   "prior_ui_branch": "codex/echo-code-security",
-  "prior_ui_base_commit": "63fc31ea1b51e3eb092ca2daa3ac3a9c10409c9c"
+  "prior_ui_base_commit": "63fc31ea1b51e3eb092ca2daa3ac3a9c10409c9c",
+  "current_verification_section": "workbench_11_10_6_followup",
+  "workbench_11_10_6": {
+    "verified_on_utc": "2026-10-25",
+    "versions": {
+      "apps/web/package.json": "11.10.6",
+      "apps/desktop/package.json": "11.10.6",
+      "apps/web/package-lock.json": "11.10.6",
+      "apps/web/package-lock.json:packages.root": "11.10.6",
+      "apps/desktop/package-lock.json": "11.10.6",
+      "apps/desktop/package-lock.json:packages.root": "11.10.6",
+      "apps/backend/version.py": "11.10.6",
+      "apps/desktop/src-tauri/tauri.conf.json": "11.10.6",
+      "apps/desktop/src-tauri/Cargo.toml": "11.10.6",
+      "apps/desktop/src-tauri/Cargo.lock:echospeak-desktop": "11.10.6"
+    },
+    "backend": {
+      "passed": 105,
+      "files": [
+        "test_workbench.py",
+        "test_code_sessions.py",
+        "test_echo_code.py",
+        "test_privacy.py",
+        "test_settings_cleanup.py",
+        "test_security_policy.py"
+      ],
+      "new_workbench_tests": 14,
+      "actual_operations": [
+        "Temporary Git selected-file and untracked commits, preservation of unrelated staged index content, branch creation and stale review refusal",
+        "Actual Windows ConPTY multi-terminal input/resize and both PowerShell child PIDs stopped",
+        "Authenticated origin-checked WebSocket streaming, route-scoped input, rejected origin/key and persistent process after disconnect",
+        "Managed worktree writer conflicts, private/offline launch refusal, session-specific redaction and project module shadowing refusal"
+      ],
+      "earlier_attempt": "One existing session persistence test encountered WinError 5 during concurrent build IO; isolated retry and final full run passed without weakening persistence or test assertions."
+    },
+    "frontend": {
+      "typescript": "passed",
+      "files_passed": 39,
+      "tests_passed": 188,
+      "production_build": "passed",
+      "build_advisory": "Existing large minified chunks warning"
+    },
+    "desktop": {
+      "contracts_passed": 16
+    },
+    "browser_fixture": {
+      "checks": [
+        "Three titlebar controls render",
+        "Chat composer centers in its actual content column (720px visible width at desktop scale)",
+        "Code welcome and composer share the centered layout",
+        "Details show selected workspace and Git branch",
+        "File tree expands and file tabs preview source as text",
+        "Interactive terminal input is sent only to its scoped terminal API",
+        "Two terminal panes split and survive hiding",
+        "Git mutation requires a separate review and confirmation",
+        "PR list renders branch and draft state",
+        "Usage renders runtime values rather than invented zero limits",
+        "Loopback preview is opaque, cannot access parent bridge and clears on privacy update",
+        "Narrow page has no horizontal overflow",
+        "Workbench never invokes native model query transport",
+        "Returning from an external session resets details and resources to the native source workspace"
+      ],
+      "page_errors": [],
+      "unexpected_network": [],
+      "chat_metrics": {
+        "offset": 0,
+        "width": 720,
+        "centerY": 531.375,
+        "columnCenterY": 501
+      },
+      "scope": "Actual React components and built assets; deterministic API/account/native-bridge fixtures, no live accounts or installed WebView2 acceptance"
+    },
+    "reports": {
+      "paired_releases": 38,
+      "checks": [
+        {
+          "report": "research/echo-code",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "research/echo-code",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.6",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.6",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        }
+      ],
+      "scripts_disabled": true,
+      "remote_requests": []
+    },
+    "dependencies": {
+      "new_pins": {
+        "pywinpty": "3.1.0",
+        "@xterm/xterm": "6.0.0",
+        "@xterm/addon-fit": "0.11.0"
+      },
+      "osv_batch_results": {
+        "results": [
+          {},
+          {},
+          {}
+        ]
+      },
+      "scope": "Only these three new versions; not a full binary or vendored CLI audit",
+      "backend_environment": "pip check and check-build-env passed"
+    },
+    "windows_build": {
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-windows.ps1",
+      "status": "Built local EXE and MSI; no updater or Windows publisher signing, installation or publication",
+      "packages": [
+        {
+          "path": "apps/desktop/src-tauri/target/release/bundle/nsis/EchoSpeak_11.10.6_x64-setup.exe",
+          "sha256": "d79c5b9e751e0f76523cbedb10f10a2100ba6cbacf764f71122ba0b41c5b9fb3",
+          "bytes": 270699464,
+          "publisher_signature": "NotSigned",
+          "updater_signature_present": false
+        },
+        {
+          "path": "apps/desktop/src-tauri/target/release/bundle/msi/EchoSpeak_11.10.6_x64_en-US.msi",
+          "sha256": "ae98342a99f3fdcfd52157efb272f62618d48152b981242a4831cb7c182df36e",
+          "bytes": 383775923,
+          "publisher_signature": "NotSigned",
+          "updater_signature_present": false
+        }
+      ],
+      "frozen_worker_smoke": {
+        "frozen_worker": true,
+        "backend_sha256": "eed54821711f306bad5018e4e87184b3c0706d5d7a13e0bc3e57cc814ea26f2d",
+        "backend_size": 26145379,
+        "conpty_start": true,
+        "interactive_input_output": true,
+        "resize": true,
+        "echo_auth_environment_absent": true,
+        "accounts_or_models_used": false,
+        "powershell_child_exited": true
+      }
+    },
+    "remaining": [
+      "Owner installed WebView2/titlebar/VS Code and real dev-server preview acceptance",
+      "Live GitHub CLI authentication, PR views and reviewed push acceptance",
+      "Original Codex, Claude and chosen ACP account/tool/usage acceptance remains as documented for PR 96",
+      "Owner updater signing password, normal release build, install/test and separate authorized publication",
+      "Device is current host metadata; mobile emulation and proposed Echo ACP export are not implemented"
+    ],
+    "media": [
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/changes-review-desktop.png",
+        "sha256": "d3d07fb61c6a38eb7cca27541ca5b3b66dd4e57c25745f2d27df3dc7e65ba1b1",
+        "provenance": "Actual React render with deterministic API/native-bridge fixtures; not installed or live-account proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/chat-centered-desktop.png",
+        "sha256": "61ddf6102242d688e9fb940179eed92ef970f269b7ae787b0658f387f926642c",
+        "provenance": "Actual React render with deterministic API/native-bridge fixtures; not installed or live-account proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/code-centered-desktop.png",
+        "sha256": "16d6d54c53e2258240d2abedb47e2b60d30e0ec07b9c8af7dd2a0b08c97e11e1",
+        "provenance": "Actual React render with deterministic API/native-bridge fixtures; not installed or live-account proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/files-tree-desktop.png",
+        "sha256": "6bda4f134b607cf81adc66aa94a15c3819ae725bbfc32287eabd011340189c8e",
+        "provenance": "Actual React render with deterministic API/native-bridge fixtures; not installed or live-account proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/pull-requests-desktop.png",
+        "sha256": "5a6b2fc1ec92fb955a63f3e72a6b542d996a697c5e21fda6e1576aed882d0444",
+        "provenance": "Actual React render with deterministic API/native-bridge fixtures; not installed or live-account proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/terminal-split-desktop.png",
+        "sha256": "4ce8aa69fc6f53d805cbfa01ce7a9f6a01af7a2b5520930572f75b2e78dd4b34",
+        "provenance": "Actual React render with deterministic API/native-bridge fixtures; not installed or live-account proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/usage-fixture-desktop.png",
+        "sha256": "e9102f1a6e21af29fcc90d3e702d977c2769ae8ef92b5e059f6d0f9fd87b5a60",
+        "provenance": "Actual React render with deterministic API/native-bridge fixtures; not installed or live-account proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/workbench-narrow.png",
+        "sha256": "415e288a53ceddcb6ec939f7588c4ef93128637abed2b141eadf6b6924377da0",
+        "provenance": "Actual React render with deterministic API/native-bridge fixtures; not installed or live-account proof"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/workspace-details.png",
+        "sha256": "e0f9d97c290a9c5bf9b088d53de1eda686655c4f626417b1e1e462893226512d",
+        "provenance": "Actual React render with deterministic API/native-bridge fixtures; not installed or live-account proof"
+      }
+    ],
+    "source_files": [
+      {
+        "path": "apps/backend/agent/workbench.py",
+        "sha256": "c38bff2aedbf7a600e13106a5591aa858dd929a86a5dfbe9fc52fca003136cf1"
+      },
+      {
+        "path": "apps/backend/agent/workbench_worker.py",
+        "sha256": "59d9fbeacb8cabac26044ef6a45645edfcb91d1fd04395af913f64cc174fa04b"
+      },
+      {
+        "path": "apps/backend/api/routes/workbench.py",
+        "sha256": "8f1bcf3d5d80509d424ecaa30a2d24c8927110f62ac440ca6e4509733fc60495"
+      },
+      {
+        "path": "apps/backend/tests/test_workbench.py",
+        "sha256": "873c877bc8c3f6370f43a4250b1a55f7df3ea50d449be9c4481d52d3850fe366"
+      },
+      {
+        "path": "apps/web/src/code/EchoCodeWorkspace.tsx",
+        "sha256": "6fbbd6d19018a5ea66bdfbf23e0a6502a2741a1a9b2da4e239c771d3e2227143"
+      },
+      {
+        "path": "apps/web/src/code/ExternalSession.tsx",
+        "sha256": "50e303e87cf6c9408a5640af4c3cdc609a7d4fbc61da4b1ecbf00bf52ea8ecdf"
+      },
+      {
+        "path": "apps/web/src/index.tsx",
+        "sha256": "61cfbe989380ce01bca4885a85c4b9a913e8cbed05c232f3246d876e257eea3e"
+      },
+      {
+        "path": "apps/web/src/desktop/DesktopApp.tsx",
+        "sha256": "985af1fb7b6d892fb3e23201cd5607917ec5177c6fe94aa700caec020b6cb165"
+      },
+      {
+        "path": "apps/web/src/widgets/RightPanel.tsx",
+        "sha256": "390063601f92733ff6cda822ac22e36e6182b6ac83414e119df1d228161ea55a"
+      },
+      {
+        "path": "apps/backend/agent/code_sessions.py",
+        "sha256": "c96f8bdf0df0d2b9da19a88743f00106175281417d40ea92c79e44cdc6bdcf97"
+      },
+      {
+        "path": "apps/backend/agent/code_runtimes.py",
+        "sha256": "2de2dd465a43fadb07bd1058b7440cd029edc1cb31e77c14e29f0ec6be29ccc7"
+      },
+      {
+        "path": "apps/desktop/backend/echospeak_backend.py",
+        "sha256": "8fe7a325825ea6898f10db52a6a650393f25f167a60aefeaa509880f9f1b14e3"
+      },
+      {
+        "path": "apps/desktop/backend/echospeak_backend.spec",
+        "sha256": "ae4875a061936ed267cc36f743999579344bb5dd7f1f62fd8559642f5703c321"
+      },
+      {
+        "path": "apps/desktop/src-tauri/tauri.conf.json",
+        "sha256": "f551fdd423ecc54c0fc19d36ed2d78824c8d0834cbb97b37f42657e8bf051512"
+      },
+      {
+        "path": "apps/web/src/workbench/icons.tsx",
+        "sha256": "c64253d3d3af070639492b8493e5b41f3cad198e2da8ea903bdca4c9e30422b1"
+      },
+      {
+        "path": "apps/web/src/workbench/store.test.ts",
+        "sha256": "7168ac8d530dbdf7f9ce9bdb320a30a578384e742e276d254974b3a2eb6d630d"
+      },
+      {
+        "path": "apps/web/src/workbench/store.ts",
+        "sha256": "e4c6fca256e38a28ab0072dbebdbc316d03a9161de10afb24e7a5360ee7ead7a"
+      },
+      {
+        "path": "apps/web/src/workbench/Terminal.tsx",
+        "sha256": "524a4aa4560302307746432e4340312ec5bd000251b03413d19621831785b7c1"
+      },
+      {
+        "path": "apps/web/src/workbench/workbench.css",
+        "sha256": "c7610db94eeaf3ef0a4eef51acc2a925b9b1ab5487fc33f2dc3c0fc8d65f738e"
+      },
+      {
+        "path": "apps/web/src/workbench/Workbench.tsx",
+        "sha256": "13c7e91ebc9f72f826f25f8ffd6656a6b436b13e01cc51e833471e521c943f72"
+      }
+    ],
+    "source_ref": "c8f224675f588ec527497f169d2d507771d6c64a"
+  },
+  "workbench_11_10_6_followup": {
+    "recorded_utc": "2026-10-26",
+    "parent_commit": "c8f224675f588ec527497f169d2d507771d6c64a",
+    "version": "11.10.6",
+    "backend_tests_passed": 107,
+    "frontend": {
+      "typescript": "passed",
+      "tests_passed": 192,
+      "files_passed": 40,
+      "production_build": "passed"
+    },
+    "desktop_contracts_passed": 16,
+    "protected_browser": {
+      "fixture_data": true,
+      "real_models": false,
+      "checks": [
+        "Three titlebar controls render",
+        "Chat composer centers in its actual content column (same bounded width as Code at desktop scale)",
+        "Code welcome and composer share the centered layout",
+        "Details show selected workspace and Git branch",
+        "File tree expands and file tabs preview source as text",
+        "Interactive terminal input is sent only to its scoped terminal API",
+        "Two terminal panes split and survive hiding",
+        "Git mutation requires a separate review and confirmation",
+        "PR list renders branch and draft state",
+        "Usage renders runtime values rather than invented zero limits",
+        "Loopback preview is opaque, cannot access parent bridge and clears on privacy update",
+        "Narrow page has no horizontal overflow",
+        "Workbench never invokes native model query transport",
+        "New Chat title and composer align with unchanged Code at both desktop sizes",
+        "Returning from an external session resets details and resources to the native source workspace",
+        "All disconnected agents retain the same centered welcome and unsent draft",
+        "Code model picker uses Chat rows and only reported or connected models",
+        "Model selection does not mutate another Chat session",
+        "Native Code selection binds only the newly created coding session",
+        "An explicit send reaches only the chosen original harness with its selected model",
+        "Original harness replies remain visible in the main coding conversation"
+      ],
+      "page_errors": [],
+      "unexpected_network": [],
+      "chat_code_alignment": [
+        {
+          "size": {
+            "width": 1354,
+            "height": 801
+          },
+          "heading_delta": 0,
+          "composer_delta": -0.015625
+        },
+        {
+          "size": {
+            "width": 1400,
+            "height": 960
+          },
+          "heading_delta": 0,
+          "composer_delta": -0.015625
+        }
+      ],
+      "layout_metrics": {
+        "rows": "556px 260px",
+        "inline": "grid-template-columns: 216px minmax(0px, 1fr) 440px; --wb-terminal-height: 260px; grid-template-rows: minmax(0px, 1fr) 260px;",
+        "bottom": {
+          "x": 243,
+          "y": 667.5,
+          "width": 662,
+          "height": 292.5,
+          "top": 667.5,
+          "right": 905,
+          "bottom": 960,
+          "left": 243
+        },
+        "tabs": [
+          {
+            "text": "Files\u00d7",
+            "rect": {
+              "x": 915,
+              "y": 51,
+              "width": 98.78125,
+              "height": 31.5,
+              "top": 51,
+              "right": 1013.78125,
+              "bottom": 82.5,
+              "left": 915
+            },
+            "display": "flex",
+            "span": [
+              {
+                "text": "Files",
+                "width": 29.765625,
+                "font": "10px",
+                "display": "block"
+              }
+            ]
+          },
+          {
+            "text": "app.ts\u00d7",
+            "rect": {
+              "x": 1016.03125,
+              "y": 51,
+              "width": 107.078125,
+              "height": 31.5,
+              "top": 51,
+              "right": 1123.109375,
+              "bottom": 82.5,
+              "left": 1016.03125
+            },
+            "display": "flex",
+            "span": [
+              {
+                "text": "app.ts",
+                "width": 38.0625,
+                "font": "10px",
+                "display": "block"
+              }
+            ]
+          }
+        ]
+      },
+      "chat_metrics": {
+        "offset": 0,
+        "width": 765,
+        "centerY": 531.375,
+        "columnCenterY": 501
+      }
+    },
+    "startup_browser": {
+      "frozen_prototype_startup": "passed",
+      "missing_bundle_recovery": "passed",
+      "window_reveal_requested_in_both_cases": true,
+      "real_accounts_or_installed_app": false
+    },
+    "installed_startup": {
+      "verified": true,
+      "backed_up": true,
+      "desktop_binary_sha256": "3c75a18b86f04d78ef524ae3c5f2afc67c56a3b7e031947c8900764b239defd2",
+      "real_windows_webview2_chat_rendered": true,
+      "normal_relaunch_visible_windows": 1,
+      "owned_backend_processes": 1,
+      "scope": "Initial startup repair only, confirmed by owner. Later alignment/picker changes tested in fixtures and packaged, not automatically installed after computer control stopped. App data and backend preserved."
+    },
+    "windows_build": {
+      "status": "Final unsigned local EXE/MSI; no updater signing, installation of latest picker or public publication",
+      "packages": [
+        {
+          "path": "apps/desktop/src-tauri/target/release/bundle/nsis/EchoSpeak_11.10.6_x64-setup.exe",
+          "sha256": "adb828848b1f8711665bb62bf52bd0f91d48ecc1345043ddb9e4b586c7dbf1db",
+          "bytes": 270735768,
+          "publisher_signature": "NotSigned",
+          "updater_signature_present": false
+        },
+        {
+          "path": "apps/desktop/src-tauri/target/release/bundle/msi/EchoSpeak_11.10.6_x64_en-US.msi",
+          "sha256": "b54299a6768ee802fc1da79142e51bc0babaa83c62ae6e38e239d18ab8babc25",
+          "bytes": 383771827,
+          "publisher_signature": "NotSigned",
+          "updater_signature_present": false
+        }
+      ],
+      "frozen_backend": {
+        "frozen_worker": true,
+        "backend_sha256": "9fe4775f136c70015900efdf8515676d85e5286ea2b2e99ac7dc494310ba554f",
+        "backend_size": 26146686,
+        "conpty_start": true,
+        "interactive_input_output": true,
+        "resize": true,
+        "echo_auth_environment_absent": true,
+        "accounts_or_models_used": false,
+        "powershell_child_exited": true
+      }
+    },
+    "reports": {
+      "checks": [
+        {
+          "report": "research/echo-code",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "research/echo-code",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.6",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/v11.10.6",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 1400,
+          "theme": "dark",
+          "overflow": false
+        },
+        {
+          "report": "releases/index",
+          "width": 390,
+          "theme": "light",
+          "overflow": false
+        }
+      ],
+      "scripts_disabled": true,
+      "remote_requests": []
+    },
+    "source_files": [
+      {
+        "path": "apps/backend/agent/code_runtimes.py",
+        "sha256": "eb43b1a060a3d09b666ff9949a0727576f947d909664bc0c193652ad22c7c030"
+      },
+      {
+        "path": "apps/backend/agent/code_sessions.py",
+        "sha256": "07aa511fad531e6a0761f23784a8e93553db6cce159170c1d21b940e6a0cf387"
+      },
+      {
+        "path": "apps/backend/tests/fixtures/code_rpc_agent.py",
+        "sha256": "b2126bf6c97a63ae6ae7a91d521ec67278ccd061876d20dd3506f90fa6eb2738"
+      },
+      {
+        "path": "apps/backend/tests/test_code_sessions.py",
+        "sha256": "440eda08d721b601c7c9facb16ead21640ef97361cacd18cc5b4322992b583c2"
+      },
+      {
+        "path": "apps/desktop/scripts/check-startup-browser.cjs",
+        "sha256": "046bbe8f27a6ffa7a991ab4b6b0bd6d45fab871e76dcfed4532a1e6dbcfb1a74"
+      },
+      {
+        "path": "apps/desktop/scripts/check-workbench-browser.cjs",
+        "sha256": "d520fa168bcab18daa9f49160db218281f0a36e16226cbea0c26377219a479e4"
+      },
+      {
+        "path": "apps/desktop/src-tauri/tauri.conf.json",
+        "sha256": "f551fdd423ecc54c0fc19d36ed2d78824c8d0834cbb97b37f42657e8bf051512"
+      },
+      {
+        "path": "apps/desktop/tests/desktop-contracts.test.mjs",
+        "sha256": "d793855f51ab51d782f470ddecaab56142cd6578fea00ffc062c783f13c60f97"
+      },
+      {
+        "path": "apps/web/public/splash.css",
+        "sha256": "3b5f64eb53d54e1e0cb1fa4bb3d02dcfe0686f47a65ed488efeb4f6cbb5547cb"
+      },
+      {
+        "path": "apps/web/src/App.tsx",
+        "sha256": "6c97e58311ad7dae39cb5b0653c17d38777dce0568ac089e51b134b948fc8cf5"
+      },
+      {
+        "path": "apps/web/src/code/CodeModelPicker.tsx",
+        "sha256": "b0c6fd43abebf19d706054fae690f898941ebf6e28cd7e9c5766724c7f2a9c30"
+      },
+      {
+        "path": "apps/web/src/code/EchoCodeWorkspace.tsx",
+        "sha256": "dd59e4225eb388c4dc2f4b77a16dac99669dbdfa10610d29784ea4f19ba530b1"
+      },
+      {
+        "path": "apps/web/src/code/ExternalSession.tsx",
+        "sha256": "9221b283b2d100b83992c30cc0988a090759eecd3c48445589cd11221efc0d6a"
+      },
+      {
+        "path": "apps/web/src/code/code.css",
+        "sha256": "9b2a81c8f8bc176952d354448f53d083ff4a2ee79598dc8e05dcb28465c3d2e8"
+      },
+      {
+        "path": "apps/web/src/code/model.test.ts",
+        "sha256": "0cfeb9c5e4b8bea96c6ab94e5399154efa1ed7dc7147596b79362b03218a3026"
+      },
+      {
+        "path": "apps/web/src/code/model.ts",
+        "sha256": "5c9a16e5bdebc14306fdc4843d051c3de9fd1a8bd6e69c795ed2e055fe2addd5"
+      },
+      {
+        "path": "apps/web/src/dashboard/ConnectedModelBrowser.tsx",
+        "sha256": "a13a416d4a10ebc11998c0e4ff016ea90f6273d8d9fd2b62cbb54e9114fe7770"
+      },
+      {
+        "path": "apps/web/src/index.tsx",
+        "sha256": "3bc35f5c2494c1ac79db26c0ea4e464ac1b8b27c81e98522308b06280ca6e774"
+      },
+      {
+        "path": "apps/web/src/workbench/workbench.css",
+        "sha256": "9ad797fabbebdea710154e40b3d71c76c3abf9ae22c820b33188548cec076e80"
+      },
+      {
+        "path": "apps/web/src/workbench/xtermCompatibility.test.ts",
+        "sha256": "ff57b37776427e8940856e95ab106247a7b9489ea130a9260e35d7d402b91015"
+      },
+      {
+        "path": "apps/web/tooling/xtermCompatibility.d.mts",
+        "sha256": "ec0549de425f88bf21e3a0b3bab59cd9f505f026301c1772e2d9fe87f866a777"
+      },
+      {
+        "path": "apps/web/tooling/xtermCompatibility.mjs",
+        "sha256": "6a5b7f594669d46f81091b04b2437097a910f80251d82123057417d31299fb6d"
+      },
+      {
+        "path": "apps/web/vite.config.ts",
+        "sha256": "2140b76c0cfd369430a58c77fae32737f419ace97e03b4455fe9d90b6331c510"
+      }
+    ],
+    "media": [
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/acp-disconnected-composer.png",
+        "sha256": "409efc7eedd665aa79280120360d805ed441cd6629ad751ba60a6b671f14fb10",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/changes-review-desktop.png",
+        "sha256": "014dfdf5a4fa4eee91eea86e0736d2910b2a5df3efcc156e671d7061001c6788",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/chat-centered-desktop.png",
+        "sha256": "455947f5848ec9b47cfdf0cddc5c2e8471966ed65b1b65a92e0cb988b17fe945",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/claude_code-disconnected-composer.png",
+        "sha256": "15a85e436338030bb1a503c813543d577e7ce2f7bd32c1a076f6aeea329ce8a6",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/code-centered-desktop.png",
+        "sha256": "cea25bb5a3fa26bfa9ac5da6ea631ae347d7f9bc6beb9fa465bc63ca6f8a5a24",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/code-harness-conversation.png",
+        "sha256": "1e8b852ab16de763b65cd803dcda56fae05aa985b07491a239443aba5fd738fd",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/code-model-picker-codex.png",
+        "sha256": "a108f19b42cf71bfa29e45dc278f80bcc7aea61158b99d519ee8a11f7a0016d0",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/code-model-picker-native.png",
+        "sha256": "3cdf9b848395e82a00d7d0735ddd59f09a51b2893638b5391c1d3d16b54c8fbc",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/codex-disconnected-composer.png",
+        "sha256": "e6b9e58d630bd2cc38c3b251f3adf601aa77426e8a6148028add9ce1a08c8c47",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/files-tree-desktop.png",
+        "sha256": "d36a8d036dc2d88f4ff15662a9f9a5410f1679aecacac3dd3c2f666b1b9b8c83",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/pull-requests-desktop.png",
+        "sha256": "8196333f9d3ef95d010199fa6087ca2d737b02b0fdeeb429392a8f3086d18a6f",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/startup-error-fixture.png",
+        "sha256": "1c15841428a0e0ac8ed7cbd139483fc0b70aa1abf5a3addf7b889ad061f08946",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/startup-shell-fixture.png",
+        "sha256": "e093daa146279e0735c9eac2419328ba54d6c6e0533cf709e424330c83c578ae",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/terminal-split-desktop.png",
+        "sha256": "24768276e2485ee5be2f707bd938587df90efd36d3f92154fa922008a1275ef6",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/usage-fixture-desktop.png",
+        "sha256": "df16269106cf1595500ad61fa08a18a4bd151564928c0514bc3920c80fd0eb7d",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/workbench-narrow.png",
+        "sha256": "c735fc5904faccd098676794574d118adc8ddf9dfb0a0fb8a86d1dcf66413386",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      },
+      {
+        "path": "artifacts/media/echo-code/workbench-11.10.6/workspace-details.png",
+        "sha256": "c2bab86c36f405239d40313ba841f0ef03bd438337a399799135e8bec93dabe5",
+        "provenance": "Production React render with deterministic fixtures, not private owner screenshots"
+      }
+    ],
+    "remaining": [
+      "Owner installation and acceptance of final alignment/picker build",
+      "Live original Codex/Claude/ACP auth/model/tool acceptance",
+      "Full installed workbench, VS Code and live preview/GitHub checks",
+      "Owner updater signing and separately authorized publication"
+    ]
+  }
 }

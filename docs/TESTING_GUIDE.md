@@ -600,3 +600,26 @@ The source implementation has local protocol/Git fixture evidence, not live acce
 5. Configure an already authenticated native ACP v1 executable and arguments. Test its native tools, streaming, once-only permission choice, cancel and resume (if advertised). Clients requiring Echo-provided filesystem/terminal capabilities, interactive ACP login or ACP v2 are outside this implementation. Echo export as an ACP agent remains proposed.
 6. While idle and during a harmless pending approval, switch to Private/Offline, withdraw project trust and use Stop everything. Owned processes and children must stop, pending approvals must not execute and external reconnect must be blocked as applicable. Choose Resume before starting after Stop everything. Check the installed Windows sandbox and runtime Job Object cleanup independently of browser fixture results.
 7. Build/sign/install only after the review is accepted and a release version is chosen. This change does not publish an installer or replace previous reminder/tray/Minecraft acceptance.
+
+## 11.10.6 workbench acceptance
+
+Build and install using [11.10.6 instructions](releases/v11.10.6.md#local-build-and-test). Use disposable repositories for Git mutation tests.
+
+1. Check the three titlebar controls, native window controls, menu keyboard/Escape behavior, panel resize/expand/close and narrow overlay. Verify Chat and Code remain centered as the sidebar and bottom terminal open/resize.
+2. Choose a trusted project. Expand folders, open/close file tabs, search expanded folders, refresh and Open in VS Code. Private/generated/linked paths should remain unavailable.
+3. Open PowerShell, type a harmless command, test Unicode, resize, Ctrl+C, a second tab, split panes, moving side/bottom, hiding and explicit stop. Saving a project script must not execute it; Run must open its scoped terminal. Confirm Stop everything, trust withdrawal and Private/Offline close actual processes.
+4. Select a stopped external runtime session. Confirm the workbench targets its isolated worktree, and agent reconnect/rollback is refused while terminals borrow its writer lease. Other projects and session activity must remain separate.
+5. In a disposable Git project, review a selected-file/new-file commit and branch creation. Other staged/untracked work must stay uncommitted. Change a file after review and confirm the action is refused. Review push separately; no force push or automatic merge should occur. Detached worktrees must not push/switch branches directly.
+6. Test GitHub CLI PR listing/filtering, branch-linked PRs and runtime-reported usage with real owner authentication. Missing limits must say unavailable rather than zero remaining. Verify native Chat research/activity still work and original external-session activity remains scoped.
+7. Run a local dev server and test the sandboxed loopback preview, API-port/credential-URL refusal, Standard/Private/Offline behavior and external-browser fallback. Confirm Device identifies the actual local host without claiming new capture/emulation permissions.
+8. Re-run existing reminder/tray/Minecraft and native/voice cases. Source/browser/ConPTY checks do not replace installed WebView2, real provider or updater-signed acceptance. Publish only after reviewing and testing the final signed build.
+
+
+### 11.10.6 startup and coding-model follow-up
+
+- Launch the repaired installer and confirm Chat appears. Launch again: one window and one owned backend should remain. The new Chat heading/composer should align with the unchanged Code starter.
+- Type a draft and switch Echo/Codex/Claude/ACP with and without a project or connection. The welcome/input must stay visible and the draft must survive. Unavailable sending must remain disabled.
+- Open the model picker. Echo should list only connected providers; external agents should show their original reported catalog/current model or an honest unavailable state. Claude explicit IDs use its own API key; ACP model selection remains agent managed.
+- Select a native model and create a coding session. Verify only that new session receives the selection. Reopen an unrelated Chat and confirm its binding is unchanged.
+- Connect a disposable original-harness session, choose its model where supported, send explicitly and verify central reply text. Tool approvals must open the original once-only permission controls. No model calls should happen merely by switching agents or opening pickers.
+- Reproducible browser scripts: `apps/desktop/scripts/check-startup-browser.cjs` and `check-workbench-browser.cjs`, after a production web build. Supply an existing Playwright module via `ECHOSPEAK_PLAYWRIGHT_MODULE` (or standard module resolution) and optionally `ECHOSPEAK_CHROMIUM_PATH`. Tests use deterministic fixtures and frozen Object.prototype. Optional output directories preserve fixture screenshots; no live account is exercised.
