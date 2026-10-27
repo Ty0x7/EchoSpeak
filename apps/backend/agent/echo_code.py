@@ -37,14 +37,16 @@ def runtime_catalog() -> dict:
         ("acp", "Other ACP agents", "acp", None,
          "Connect compatible agents through their own ACP sessions and capability negotiation."),
     )
+    from agent.code_executables import locate
+    from agent.code_sessions import sdk_installed
     for runtime_id, name, protocol, command, description in definitions:
-        # No --version or auth probes: even a health-check process can run hooks.
-        found = shutil.which(command) if command else None
-        from agent.code_sessions import sdk_installed
-        installed = sdk_installed() if runtime_id == "claude_code" else bool(found) if command else None
+        # Paths only. No --version or auth probes here: even a health-check process can run hooks.
+        # The owner checks sign-in explicitly from Settings › Models › Coding agents.
+        found = locate(command) if command else None
+        installed = sdk_installed() if runtime_id == "claude_code" else bool(found["path"]) if found else None
         blockers = []
         if installed is False:
-            blockers.append(f"{name} was not found on the backend's PATH.")
+            blockers.append(found["problem"] if found else f"{name} was not found.")
         if runtime_id == "claude_code" and not installed:
             blockers = ["The optional Claude Agent SDK is not installed in this backend."]
         if current_mode != "standard":

@@ -21,10 +21,8 @@ class Codex:
         self.rpc = None
 
     async def connect(self):
-        executable = shutil.which("codex")
-        if not executable:
-            raise ValueError("Install Codex CLI and restart EchoSpeak so it is on the backend PATH")
-        self.rpc = RpcProcess([executable, "app-server"], self.session.root, child_env(), self.event)
+        from agent.code_executables import executable
+        self.rpc = RpcProcess([executable("codex"), "app-server"], self.session.root, child_env(), self.event)
         await self.rpc.request("initialize", {"clientInfo": {"name": "echospeak", "title": "Echo Code", "version": "1.0.0"}})
         await self.rpc.notify("initialized")
         account = await self.rpc.request("account/read", {"refreshToken": False})

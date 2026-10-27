@@ -1054,6 +1054,10 @@ class Config:
         # same-size unrelated notes instead of lessons, so gains can't come from prompt length.
         self.learning_mode = os.getenv("LEARNING_MODE", "on").strip().lower() or "on"
         self.user_display_name = os.getenv("USER_DISPLAY_NAME", "").strip()
+        # Echo Code: the owner's own Codex / Claude Code executables, when not found automatically
+        # (agent/code_executables.py). Paths only; EchoSpeak never ships or modifies either program.
+        self.codex_executable = os.getenv("CODEX_EXECUTABLE", "").strip()
+        self.claude_code_executable = os.getenv("CLAUDE_CODE_EXECUTABLE", "").strip()
         # Voice and generated-media work is opt-in even when the host action
         # gate is enabled. Provider credentials never imply permission.
         self.allow_voice_actions = os.getenv("ALLOW_VOICE_ACTIONS", "false").lower() == "true"
@@ -1592,6 +1596,8 @@ class Config:
             "routing_allow_cloud",
             "routing_daily_cloud_tokens",
             "user_display_name",
+            "codex_executable",
+            "claude_code_executable",
             "allow_voice_actions",
             "allow_generation_actions",
             "voice_local_provider",

@@ -123,3 +123,28 @@ def external_diff(session_id: str):
 @router.post("/external-sessions/{session_id}/rollback")
 def external_rollback(session_id: str):
     return _external("rollback", session_id)
+
+
+# Settings › Models › Coding agents: explicit owner checks and the vendors' own sign-in.
+@router.post("/runtimes/{runtime_id}/check")
+def check_runtime(runtime_id: Literal["codex", "claude_cli"]):
+    from agent import code_accounts
+    from agent.code_sessions import manager
+    def run():
+        manager().admit()
+        if runtime_id == "codex":
+            return manager().call(code_accounts.codex_status())
+        return code_accounts.claude_status()
+    return _call(run)
+
+
+@router.post("/runtimes/{runtime_id}/login")
+def login_runtime(runtime_id: Literal["codex", "claude_cli"]):
+    from agent import code_accounts
+    from agent.code_sessions import manager
+    def run():
+        manager().admit()
+        if runtime_id == "codex":
+            return manager().call(code_accounts.codex_login())
+        return code_accounts.claude_login()
+    return _call(run)
