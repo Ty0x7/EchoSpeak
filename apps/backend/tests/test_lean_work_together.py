@@ -26,6 +26,9 @@ from tests.test_lean_runtime import ScriptedClient
 def _permissions_on(monkeypatch):
     """Group coding work: the owner has allowed file edits and the terminal."""
     from config import config
+    from agent.lean import terminal
+    monkeypatch.setattr(terminal, "resolved_mode", lambda: "host")
+    monkeypatch.setattr(terminal, "execution_mode", lambda: "host")
 
     for name in ("enable_system_actions", "allow_file_write", "allow_terminal_commands"):
         monkeypatch.setattr(config, name, True)

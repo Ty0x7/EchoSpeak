@@ -111,30 +111,29 @@ class TelegramBotManager:
     # ------------------------------------------------------------------
 
     def send_heartbeat(self, text: str) -> None:
-        """Send a heartbeat message to all allowed users."""
+        """Personal updates go only to the explicitly configured owner."""
+        self.send_owner(text)
+
+    def send_owner(self, text: str, *, on_receipt=None) -> bool:
         if not self._application or not self._loop:
-            return
+            return False
         try:
             from config import config
-            allowed = getattr(config, "telegram_allowed_users", [])
-            if not allowed:
-                return
+            owner = str(getattr(config, "telegram_owner_id", "") or "").strip()
+            if not owner:
+                return False
 
             async def _send():
                 bot = self._application.bot
-                for user_id in allowed:
-                    try:
-                        await bot.send_message(
-                            chat_id=user_id,
-                            text=f"🫀 **EchoSpeak Heartbeat**\n{text}",
-                            parse_mode="Markdown",
-                        )
-                    except Exception as exc:
-                        logger.debug(f"Telegram heartbeat send to {user_id} failed: {exc}")
+                return await bot.send_message(chat_id=owner, text=text)
 
-            asyncio.run_coroutine_threadsafe(_send(), self._loop)
+            future = asyncio.run_coroutine_threadsafe(_send(), self._loop)
+            if on_receipt:
+                future.add_done_callback(on_receipt)
+            return True
         except Exception as exc:
             logger.debug(f"TelegramBotManager: send_heartbeat error — {exc}")
+            return False
 
     # ------------------------------------------------------------------
     # Internal
@@ -175,11 +174,11 @@ class TelegramBotManager:
             user = update.effective_user
             if user is None:
                 return False
-            username = (user.username or "").lower()
             user_id_str = str(user.id)
+            if user_id_str == str(getattr(config, "telegram_owner_id", "")):
+                return True
             for allowed in self._allowed_users:
-                allowed_lower = allowed.strip().lower()
-                if allowed_lower == username or allowed_lower == user_id_str:
+                if allowed.strip() == user_id_str:
                     return True
             return False
 
@@ -255,9 +254,10 @@ class TelegramBotManager:
                 response_text, _ = self._agent.process_query(
                     text,
                     source="telegram",
-                    thread_id=f"telegram_{username}",
-                    # Only allow-listed users count as the owner; an open bot talks to guests.
-                    caller_role="owner" if self._allowed_users else "public",
+                    thread_id=f"telegram_{update.effective_chat.id}_{user.id}",
+                    # Stable authenticated IDs; allow-list membership is not owner authority.
+                    caller_role=("owner" if str(user.id) == str(getattr(config, "telegram_owner_id", "")) and update.effective_chat.type == "private"
+                                 else "trusted" if str(user.id) in self._allowed_users else "public"),
                 )
             except Exception as exc:
                 logger.error(f"Telegram agent error: {exc}")

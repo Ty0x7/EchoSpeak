@@ -38,40 +38,9 @@ def deliver(text: str, channels: list[str], label: str, *, session_id: str = "",
     "desktop" queues a Windows notification (agent/notifications.py; the desktop shell shows it, even
     with the window in the tray). Discord and Telegram go to the owner.
     """
-    from agent.lean import outbound, stop
-
-    sent: list[str] = []
-    if stop.paused():
-        return sent
-    body = f"{label}\n\n{text}".strip()
-    for channel in {str(c).strip().lower() for c in channels or []}:
-        if channel == "desktop":
-            from agent import notifications
-
-            notifications.push(label, text, session_id=session_id, ref=ref)
-            sent.append("desktop")
-            continue
-        if outbound.take(channel):
-            logger.warning("Routine result not sent to {}: outbound limit reached", channel)
-            continue
-        try:
-            if channel == "discord":
-                owner = str(getattr(config, "discord_bot_owner_id", "") or "").strip()
-                if owner:
-                    from discord_bot import queue_discord_dm
-
-                    if queue_discord_dm(owner, body[:1990]):
-                        sent.append("discord")
-            elif channel == "telegram":
-                from telegram_bot import get_telegram_bot
-
-                bot = get_telegram_bot()
-                if bot is not None:
-                    bot.send_heartbeat(body[:3900])
-                    sent.append("telegram")
-        except Exception as exc:
-            logger.warning("Automation delivery to {} failed: {}", channel, exc)
-    return sent
+    from agent.delivery import queue_result
+    return queue_result(text, channels, label=label, agent_id="echo", session_id=session_id,
+                        key=ref or f"notice:{session_id}:{label}:{text}")
 
 
 def _ensure_chat(title: str) -> str:
@@ -89,7 +58,30 @@ def run_automation(
     agent_id: str = "",
     channels: Optional[list[str]] = None,
     source: str = "routine",
+    occurrence: str = "",
+    project_id: str = "",
+    budget: Optional[dict] = None,
+    responsibility_id: str = "",
 ) -> dict[str, Any]:
+    from agent.state import get_state_store
+    from agent.lean.personas import get_persona_store
+    from agent.delivery import queue_result
+    store = get_state_store()
+    if project_id:
+        store.update_thread_state(session_id, active_project_id=project_id)
+    owner = get_persona_store().get(agent_id) if agent_id else get_persona_store().default()
+    if owner is None:
+        return {"success": False, "error": "Routine owner no longer exists"}
+    work = store.coordination.create(objective=AUTOMATION_PREFIX.format(name=name) + prompt,
+        agent_id=owner.id, session_id=session_id, project_id=project_id,
+        key=occurrence or f"automation:{uuid.uuid4().hex}", budget=budget,
+        provenance={"source": source, "occurrence": occurrence, "responsibility_id": responsibility_id})
+    if work["status"] not in {"ready", "completed", "failed", "cancelled"}:
+        return {"deferred": True, "work_id": work["id"], "status": work["status"]}
+    if work["status"] in {"completed", "failed", "cancelled"}:
+        delivered = queue_result(work["result"], channels or [], label=name, agent_id=owner.id,
+            session_id=session_id, key=work["id"], work_id=work["id"])
+        return {"success": work["status"] == "completed", "response": work["result"], "work_id": work["id"], "delivered": delivered}
     agent = agent_factory(session_id)
     result = run_lean_query(
         agent,
@@ -100,11 +92,17 @@ def run_automation(
         cancel=threading.Event(),
         source=source,
         persona_id=agent_id,
+        work_id=work["id"],
     )
     text = str(result.get("response") or "").strip()
-    delivered = deliver(text, list(channels or []), f"{name}", session_id=session_id) if text else []
+    state = result.get("work", {}).get("status", "failed")
+    if state in {"waiting_approval", "waiting_input", "blocked", "unknown", "interrupted", "paused"}:
+        return {"deferred": True, "work_id": work["id"], "status": state, "response": text}
+    delivered = queue_result(text, channels or [], label=name, agent_id=owner.id, session_id=session_id,
+                             key=work["id"], work_id=work["id"]) if text else []
     return {
         "success": bool(result.get("success")),
+        "work_id": work["id"],
         "task_id": str(result.get("execution_id") or ""),
         "execution_id": str(result.get("execution_id") or ""),
         "session_id": session_id,
@@ -129,11 +127,10 @@ def routine_runner(agent_factory: AgentFactory) -> Callable[[Any], dict[str, Any
             except Exception as exc:
                 logger.exception("Reminder {} failed", routine.name)
                 return {"success": False, "error": str(exc)}
-        if routine.trigger_type == "once":
-            from agent.lean import stop
+        from agent.lean import stop
 
-            if stop.paused():
-                return {"deferred": True}  # a one-time run would otherwise be lost to Stop everything
+        if stop.paused():
+            return {"deferred": True}
         query = str(routine.action_config.get("query") or routine.action_config.get("message") or routine.description or routine.name).strip()
         session_id = str(getattr(routine, "session_id", "") or "").strip()
         if not session_id or not _thread_exists(session_id):
@@ -147,6 +144,9 @@ def routine_runner(agent_factory: AgentFactory) -> Callable[[Any], dict[str, Any
                 session_id=session_id,
                 agent_id=str((routine.metadata or {}).get("agent_id") or ""),
                 channels=[c for c in (routine.delivery_channels or []) if c != "web"],
+                occurrence=f"routine:{routine.id}:{(routine.metadata or {}).get('event_id') or routine.next_run or routine.last_run or 'manual'}",
+                project_id=str(routine.project_id or ""), budget=(routine.metadata or {}).get("budget"),
+                responsibility_id=str((routine.metadata or {}).get("responsibility_id", "")),
             )
         except Exception as exc:
             logger.exception("Routine {} failed", routine.name)

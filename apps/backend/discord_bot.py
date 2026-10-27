@@ -128,7 +128,7 @@ async def _resolve_target_channel(bot: "EchoSpeakDiscordBot", channel: str, serv
     return None, None
 
 
-def queue_discord_dm(user_id: str | int, message: str) -> bool:
+def queue_discord_dm(user_id: str | int, message: str, *, on_receipt=None) -> bool:
     try:
         bot, loop = _get_live_bot_and_loop()
         if bot is None:
@@ -141,9 +141,11 @@ def queue_discord_dm(user_id: str | int, message: str) -> bool:
             if target is None:
                 return
             dm = await target.create_dm()
-            await dm.send(str(message or "")[:2000])
+            return await dm.send(str(message or "")[:2000])
 
-        asyncio.run_coroutine_threadsafe(_send(), loop)
+        future = asyncio.run_coroutine_threadsafe(_send(), loop)
+        if on_receipt:
+            future.add_done_callback(on_receipt)
         return True
     except Exception:
         return False

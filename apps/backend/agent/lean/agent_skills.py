@@ -23,6 +23,7 @@ import json
 import re
 import shutil
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -232,7 +233,14 @@ def _install(name: str, writer, *, overwrite: bool = True) -> AgentSkill:
         target = root / name
         if target.exists():
             shutil.rmtree(target)
-        staging.replace(target)
+        for attempt in range(6):
+            try:
+                staging.replace(target)
+                break
+            except PermissionError:
+                if attempt == 5:
+                    raise
+                time.sleep(.05 * (attempt + 1))  # transient Windows scanner/sharing lock
     return load(target)
 
 

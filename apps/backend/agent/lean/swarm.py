@@ -192,6 +192,8 @@ class Swarm:
         self.deadline = 0.0
         self.stop_reason = ""
         self._lock = threading.Lock()
+        from agent.coordination import current
+        self.work_context = current()
 
     # ── setup ───────────────────────────────────────────────────────────
     def worker_toolbox(self) -> Toolbox:
@@ -265,9 +267,22 @@ class Swarm:
         prompt = WORKER_PROMPT.format(lead=self.persona.name, today=datetime.now().strftime("%A, %B %d, %Y"))
         brief = worker.goal + (f"\n\nWhat the lead needs back: {worker.expected}" if worker.expected else "")
         stack = ExitStack()
+        child_context = None
         # One span per worker on the lead's trace (Activity › Timing); each worker also saves its own trace.
         span = stack.enter_context(self.spans("swarm.worker", worker=worker.index, goal=worker.goal[:200])) if self.spans else None
         try:
+            if self.work_context:
+                from agent.coordination import work_scope
+                parent = self.work_context
+                box = self.worker_toolbox()
+                work = parent.coordinator.create(objective=worker.goal, agent_id=f"worker:{parent.attempt_id}:{worker.index}",
+                    principal=parent.principal, parent_id=parent.work_id, session_id=self.session.session_id,
+                    tools=list(box.names), key=f"worker:{parent.attempt_id}:{worker.index}",
+                    budget={"tokens": min(self.budget, 16000), "seconds": 300, "children": 0}, taint=self.session._taint)
+                child_context = parent.coordinator.claim(work["id"], principal=parent.principal, session_id=self.session.session_id)
+                parent.coordinator.bind(child_context, list(box.names), execution_id=self.session.execution_id,
+                    model={"model": str(getattr(endpoint, "model", "")), "kind": "temporary_worker"})
+                stack.enter_context(work_scope(child_context))
             for attempt in (1, 2):  # one retry when the model call itself fails
                 turn = LeanTurn(
                     client=client,
@@ -293,6 +308,10 @@ class Swarm:
             logger.warning("Research worker failed: {}", exc)
             worker.status, worker.note = "failed", f"{type(exc).__name__}: {exc}"[:200]
         finally:
+            if child_context:
+                child_context.coordinator.finish(child_context,
+                    status="completed" if worker.status == "done" else "cancelled" if worker.status == "cancelled" else "failed",
+                    result=worker.answer, evidence=worker.sources, verification="sources_opened" if worker.status == "done" else "unverified")
             if span is not None:
                 span.set(status=worker.status, tokens=worker.tokens, steps=worker.steps, tools=worker.tools,
                          sources=sum(1 for s in worker.sources if s.get("opened")))

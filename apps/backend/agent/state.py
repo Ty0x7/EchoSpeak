@@ -583,6 +583,8 @@ class StateStore:
         self._events_saved = 0
         self._open_db()
         self._load_all()
+        from agent.coordination import Coordinator
+        self.coordination = Coordinator(self)
 
     def _backup_legacy_state_once(self) -> None:
         """Back up durable records before the first ownership-schema migration."""
@@ -1016,13 +1018,20 @@ class StateStore:
 
     def add_item(self, *, turn_id: str, item_type: str, status: str = "pending",
                  payload: Optional[dict[str, Any]] = None, session_id: str = "default",
-                 project_id: str = "", tool_run_id: str = "", model_id: str = "") -> RuntimeItem:
+                 project_id: str = "", tool_run_id: str = "", model_id: str = "", item_id: str = "") -> RuntimeItem:
         if status not in ITEM_STATUSES:
             status = "failed"
         item = RuntimeItem(turn_id=turn_id, item_type=item_type, status=status, payload=payload or {},
                            session_id=session_id or "default", project_id=project_id,
                            tool_run_id=tool_run_id, model_id=model_id)
         with self._lock:
+            if item_id:
+                existing = self._items.get(item_id)
+                if existing:
+                    if existing.session_id != session_id or existing.turn_id != turn_id:
+                        raise PermissionError("Item identity belongs to another turn")
+                    return RuntimeItem(**existing.model_dump())
+                item.id = item_id
             self._items[item.id] = item
             self._events.append(RuntimeEvent(project_id=project_id, session_id=item.session_id,
                                              turn_id=turn_id, item_id=item.id, tool_run_id=tool_run_id,
@@ -2177,10 +2186,15 @@ class StateStore:
 
 
 _state_store: Optional[StateStore] = None
+_state_store_lock = threading.RLock()
 
 
 def get_state_store() -> StateStore:
     global _state_store
     if _state_store is None:
-        _state_store = StateStore()
+        with _state_store_lock:
+            if _state_store is None:
+                initialized = StateStore()
+                if _state_store is None:
+                    _state_store = initialized
     return _state_store

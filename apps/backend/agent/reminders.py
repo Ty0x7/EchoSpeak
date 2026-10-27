@@ -198,7 +198,7 @@ def _chat_busy(session_id: str) -> bool:
     return bool(active and active.status not in {"completed", "failed", "canceled", "superseded"})
 
 
-def post_to_chat(session_id: str, text: str, *, ref: str = "") -> Optional[str]:
+def post_to_chat(session_id: str, text: str, *, ref: str = "", agent_id: str = "echo") -> Optional[str]:
     """Add one finished Echo message to a chat, with no model call. None while that chat is mid-reply."""
     from agent.state import get_state_store
     from agent.threads import get_thread_manager
@@ -206,15 +206,22 @@ def post_to_chat(session_id: str, text: str, *, ref: str = "") -> Optional[str]:
     if _chat_busy(session_id):
         return None  # creating a turn now would supersede the one running; the scheduler retries
     store = get_state_store()
+    from agent.coordination import digest
+    from agent.lean.personas import get_persona_store
+    identity = "reminder_" + digest([session_id, ref])[:24] if ref else ""
     state = store.get_thread_state(session_id)
-    execution = store.create_execution(
+    execution = store.get_execution(identity) if identity else None
+    execution = execution or store.create_execution(
+        **({"id": identity} if identity else {}),
         thread_id=session_id, kind="reminder", source="reminder", status="completed", query="",
         record_user_message=False, workspace_id=str(state.workspace_id or ""),
         active_project_id=str(state.active_project_id or ""), metadata={"reminder_id": ref},
     )
+    owner = get_persona_store().get(agent_id)
     store.add_item(turn_id=execution.id, item_type="assistant_message", status="complete", session_id=session_id,
+                   item_id="item_" + digest([session_id, ref])[:24] if ref else "",
                    project_id=str(state.active_project_id or ""),
-                   payload={"text": text, "agent_id": "echo", "agent_name": "Echo",
+                   payload={"text": text, "agent_id": agent_id, "agent_name": owner.name if owner else agent_id,
                             "message_id": f"msg_{uuid.uuid4().hex[:12]}", "timeline": [], "backend_success": True,
                             "role": "reminder"})
     store.update_execution(execution.id, status="completed", success=True, response_preview=text[:200])
@@ -250,11 +257,14 @@ def fire(routine: Any, now: Optional[datetime] = None) -> dict[str, Any]:
     due = _when_of(routine)
     late = f"\n\n(This was due {describe(due, now)}; EchoSpeak wasn't running then.)" if due and now - due > LATE_AFTER else ""
     session_id = _session_for(routine)
-    posted = post_to_chat(session_id, f"⏰ Reminder: {message}{late}", ref=routine.id)
+    occurrence = f"{routine.id}:{routine.next_run or routine.run_at or routine.last_run or 'once'}"
+    agent_id = str((routine.metadata or {}).get("agent_id") or "echo")
+    posted = post_to_chat(session_id, f"⏰ Reminder: {message}{late}", ref=occurrence, agent_id=agent_id)
     if posted is None:
         return {"deferred": True}
     channels = [c for c in (routine.delivery_channels or []) if c != "web"]
-    sent = deliver(message + late, channels, "⏰ Reminder", session_id=session_id, ref=routine.id) if channels else []
+    from agent.delivery import queue_result
+    sent = queue_result(message + late, channels, label="⏰ Reminder", session_id=session_id, key=occurrence, agent_id=agent_id) if channels else []
     return {"success": True, "task_id": posted, "session_id": session_id, "delivered": sent}
 
 

@@ -91,7 +91,8 @@ async def webhook_trigger(path: str, request: Request):
     action_config = {**routine.action_config, "webhook_body": body}
     
     # Run the routine
-    manager.run_routine(routine.id)
+    from agent.coordination import digest
+    manager.run_routine(routine.id, event_id="signed-webhook:" + digest([routine.id, body]))
     
     return {"ok": True, "triggered": routine.name}
 

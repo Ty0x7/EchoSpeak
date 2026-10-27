@@ -19,6 +19,10 @@ Copy-and-paste tests for the real app, grouped by feature. They're written to fi
 
 ---
 
+## Native multi-agent acceptance — 11.10.7
+
+Use the concise [native work checklist](research/multi-agent-review.md#owner-operations-and-acceptance) for durable ownership, delegation, proposal review, routines, approval recovery, channels and learning. These are owner acceptance steps; automated scripted fixtures do not replace them. Build a fresh 11.10.7 installer to include the model audit, centered conversation layout and native work foundation.
+
 ## 1. Identity, version and harness knowledge
 
 **1.1 Version** [local ok]

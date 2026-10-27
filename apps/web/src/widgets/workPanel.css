@@ -1,0 +1,16 @@
+.native-work { padding: 14px 16px; border-bottom: 1px solid var(--es-border, #242424); font-size: 12px; min-width: 0; }
+.nw-heading, .nw-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nw-heading { justify-content: space-between; margin-bottom: 10px; }
+.nw-heading label { display: flex; gap: 6px; align-items: center; color: var(--es-text-muted, #999); }
+.native-work details { padding: 10px 0; border-top: 1px solid var(--es-border, #242424); min-width: 0; }
+.native-work summary { cursor: pointer; overflow-wrap: anywhere; }
+.native-work small { display: block; color: var(--es-text-muted, #999); margin: 5px 0; }
+.native-work pre { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; }
+.nw-result { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.nw-muted { color: var(--es-text-muted, #999); line-height: 1.5; }
+.native-work button, .native-work select { border: 1px solid var(--es-border, #333); border-radius: 6px; background: var(--es-bg, #111); color: inherit; font: inherit; padding: 5px 8px; cursor: pointer; }
+.native-work textarea, .native-work input:not([type=checkbox]) { display: block; box-sizing: border-box; width: 100%; margin: 8px 0; padding: 7px; color: inherit; background: var(--es-bg, #111); border: 1px solid var(--es-border, #333); border-radius: 6px; font: inherit; }
+.native-work button:disabled { opacity: .45; cursor: default; }
+.native-work dl { display: grid; grid-template-columns: minmax(70px, .7fr) minmax(0, 1.4fr); gap: 7px 12px; line-height: 1.5; }
+.native-work dt { color: var(--es-text-muted, #999); text-transform: capitalize; }
+.native-work dd { margin: 0; overflow-wrap: anywhere; }
