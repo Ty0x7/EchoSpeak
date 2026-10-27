@@ -25,7 +25,14 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(threads, "get_thread_manager", lambda: tm)
     monkeypatch.setattr(state, "get_state_store", lambda: store)
     monkeypatch.setattr(config, "privacy_mode", "standard")
-    monkeypatch.setattr(echo_code.shutil, "which", lambda command: f"/installed/{command}")
+    # Only this fake install counts, whatever is installed on the machine running the tests.
+    from agent import code_executables
+    fake_codex = tmp_path / "installed" / "codex.exe"
+    fake_codex.parent.mkdir()
+    fake_codex.write_bytes(b"")
+    monkeypatch.setattr(code_executables, "_codex_candidates", lambda: iter([str(fake_codex)]))
+    monkeypatch.setattr(code_executables, "_claude_candidates", lambda: iter([]))
+    monkeypatch.setattr(config, "codex_executable", "")
     from agent.lean import git_context
     monkeypatch.setattr(git_context, "summary", lambda root: "git: branch main · clean")
     app = FastAPI()
@@ -60,9 +67,11 @@ def test_private_and_offline_fail_closed_for_external_processes(env, monkeypatch
 
 def test_missing_cli_is_not_an_auth_failure(env, monkeypatch):
     client, *_ = env
-    monkeypatch.setattr(echo_code.shutil, "which", lambda _: None)
+    from agent import code_executables
+    monkeypatch.setattr(code_executables, "_codex_candidates", lambda: iter([None]))
     codex = client.get("/echo-code/runtimes").json()["runtimes"][1]
     assert codex["installed"] is False and codex["authentication"] == "unverified"
+    assert "Settings" in codex["blockers"][0]  # says where to set the path
 
 
 def start(client, item, runtime="echo", key="creation-key-1"):

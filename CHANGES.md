@@ -1,6 +1,22 @@
 # Changes
 
-## v11.10.8 — Reliability hotfix (source; not yet built)
+## v11.10.9 — Your Codex and Claude plans in Echo Code (source; not yet built)
+
+* Codex connects again: Echo finds the CLI inside the Codex desktop app (and on PATH or a path you set) instead of PATH only.
+* New Claude Code runtime: your installed, unmodified Claude Code with your own sign-in and plan.
+  * Echo passes no API key and never reads its credentials.
+  * Claude Code's permission prompts become Echo approval cards.
+* Settings › Models › Coding agents shows status, Check, Sign in (the vendor's own flow) and location for each agent.
+* Settings reorganized without a redesign:
+  * Approvals moved to Permissions.
+  * Research workers and step budget moved to Agents.
+  * Learning moved to Memory.
+  * Connections has its own page.
+  * Webhooks moved to Automations.
+* Includes 11.10.8, which was not published on its own.
+* See [release notes](docs/releases/v11.10.9.md) and the [Echo Code record](docs/research/echo-code.md#11109-codex-you-can-connect-and-claude-code-with-your-own-plan).
+
+## v11.10.8 — Reliability hotfix (source; shipped in 11.10.9)
 
 * Truthful outcomes:
   * A refused argument is a plain failure, not an unknown effect.

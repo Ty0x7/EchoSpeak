@@ -35,9 +35,9 @@ export function CodeModelPicker(p: {
     </div></div>)}
       {!rows.length ? <p role="status">{search ? "No matching models." : p.connected ? "This harness has not reported a model catalog." : "Connect this agent to see the models it reports. Your draft stays visible."}</p> : null}
       {p.runtimeId !== "acp" ? <button className="es-model-choice" onClick={() => p.onModel("")}><strong>Use harness default</strong><small>The actual model appears when reported.</small></button> : null}
-      {p.runtimeId === "claude_code" ? <form className="ec-custom-model" onSubmit={event => { event.preventDefault(); if (custom.trim()) p.onModel(custom.trim()); }}>
+      {p.runtimeId === "claude_code" || p.runtimeId === "claude_cli" ? <form className="ec-custom-model" onSubmit={event => { event.preventDefault(); if (custom.trim()) p.onModel(custom.trim()); }}>
         <label>Model ID<input aria-label="Claude model ID" placeholder="Enter an available Claude model ID" maxLength={200} value={custom} onChange={event => setCustom(event.target.value)} /></label>
-        <button type="submit" disabled={!custom.trim()}>Select model</button><small>Uses this harness's API account. Availability is checked by the harness when you send.</small>
+        <button type="submit" disabled={!custom.trim()}>Select model</button><small>{p.runtimeId === "claude_cli" ? "Uses your Claude Code sign-in and plan." : "Uses this harness's API account."} Availability is checked by the harness when you send.</small>
       </form> : null}
       {p.runtimeId === "acp" ? <p>The ACP agent manages its model. Reported model information is shown here.</p> : null}
     </div></div></div><footer><span>{runtime?.name} · separate harness</span><button onClick={p.onConfigureRuntime}>Connection &amp; session ↗</button></footer></>;

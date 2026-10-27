@@ -33,7 +33,7 @@ def workspace(project_id: str):
 
 
 class StartSession(BaseModel):
-    runtime_id: Literal["echo", "codex", "claude_code", "acp"]
+    runtime_id: Literal["echo", "codex", "claude_code", "claude_cli", "acp"]
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
@@ -46,7 +46,7 @@ def create_session(project_id: str, request: StartSession):
 # External runtimes have their own durable native session identities and never
 # become Echo threads. These routes inherit the same owner auth/origin checks.
 class ExternalStart(StartSession):
-    runtime_id: Literal["codex", "claude_code", "acp"]
+    runtime_id: Literal["codex", "claude_code", "claude_cli", "acp"]
     acknowledge_dirty: bool = False
     acknowledge_execution: bool = False
     command: list[str] = Field(default_factory=list, max_length=32)
@@ -123,3 +123,28 @@ def external_diff(session_id: str):
 @router.post("/external-sessions/{session_id}/rollback")
 def external_rollback(session_id: str):
     return _external("rollback", session_id)
+
+
+# Settings › Models › Coding agents: explicit owner checks and the vendors' own sign-in.
+@router.post("/runtimes/{runtime_id}/check")
+def check_runtime(runtime_id: Literal["codex", "claude_cli"]):
+    from agent import code_accounts
+    from agent.code_sessions import manager
+    def run():
+        manager().admit()
+        if runtime_id == "codex":
+            return manager().call(code_accounts.codex_status())
+        return code_accounts.claude_status()
+    return _call(run)
+
+
+@router.post("/runtimes/{runtime_id}/login")
+def login_runtime(runtime_id: Literal["codex", "claude_cli"]):
+    from agent import code_accounts
+    from agent.code_sessions import manager
+    def run():
+        manager().admit()
+        if runtime_id == "codex":
+            return manager().call(code_accounts.codex_login())
+        return code_accounts.claude_login()
+    return _call(run)
