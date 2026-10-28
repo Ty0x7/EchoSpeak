@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — Search and research engine</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}.shot img{display:block;width:100%;height:auto}.shot figcaption{padding:10px 14px;margin:0}.phone{max-width:240px}
+.mono{font:12px Consolas,monospace}.bad{color:var(--warn)}.big{font-size:30px;font-weight:550;letter-spacing:-.02em;display:block;margin:4px 0}.metric{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:16px}.metric small{display:block}
+</style>
+<body><main>
+<header><h1>EchoSpeak / Search and research engine overhaul</h1><p>28 October 2026 · technical record: docs/research/research-engine.md</p></header>
+<nav aria-label="Report sections"><a href="#failure">The failure</a><a href="#causes">Five causes</a><a href="#numbers">Measured</a><a href="#pipeline">New pipeline</a><a href="#grounding">Grounding</a><a href="#limits">Limits</a></nav>
+<p class="lead">The search harness was the weak link, not the model.<br>Now it reads the right source, checks it, and knows evidence from noise.</p>
+<p class="note"><strong>Evidence:</strong> numbers come from deterministic fixtures in the repository, running real tools, the real Chat loop and real ranking. The network, search providers and model turns are recorded shapes. No model was called. Diagrams here are architecture, not screenshots.</p>
+<div class="legend"><span class="badge current">Built and measured</span><span class="badge documented">Was broken</span><span class="badge proposed">Next opportunity</span></div>
+
+<section id="failure"><h2>The reproduced failure</h2>
+<div class="grid2">
+<div class="box"><h3 class="bad">Before (Gemma 4B)</h3><p>"What's EchoSpeak's latest updates? github.com/Ty0x7/EchoSpeak/pulls" → a broad web search → read the <span class="mono">github.com/Ty0x7</span> profile → cited it → "I can't access the pull requests."</p></div>
+<div class="box"><h3 class="current">Now</h3><p>The link is read before the model's first call, through GitHub's API: PRs #106, #105, #104 with titles, states, dates and links are in context. One API request, no scraping, no search. The cited PRs are checked against what was read.</p></div>
+</div></section>
+
+<section id="causes"><h2>Five structural causes</h2>
+<div class="comparison"><table><thead><tr><th>What went wrong</th><th>Fix</th></tr></thead><tbody>
+<tr><td class="documented">Queries were rewritten into different queries: <span class="mono">python 3.14 release notes</span> → <span class="mono">14 release notes</span>; <span class="mono">site:github.com</span> → <span class="mono">com</span>; a World Cup final question became "matches today". The supplied URL was deleted.</td><td>The model's query is kept as written (only "search for" and typos are cleaned)</td></tr>
+<tr><td class="documented">Results were never ranked: the first N results were read, whatever they were</td><td>Field-weighted BM25 + Reciprocal Rank Fusion + authority, update intent and freshness; canonical dedupe</td></tr>
+<tr><td class="documented">A supplied link depended on a 4B model noticing it</td><td>Read deterministically before the first model call, through the normal safety path</td></tr>
+<tr><td class="documented">GitHub, PyPI and npm were scraped as HTML; fetches carried hundreds of navigation links</td><td>Official APIs first, falling back to the page; only the 20 most relevant links kept</td></tr>
+<tr><td class="documented">"Loaded" counted as "read": sign-in walls, JavaScript shells, 404s and off-topic pages were evidence; search results showed as sources</td><td>Every page graded; chips only for usable, on-topic pages; evidence graded in the answer check</td></tr>
+</tbody></table></div></section>
+
+<section id="numbers"><h2>Measured on labelled fixtures</h2>
+<div class="grid3">
+<div class="metric"><small>Top result answers the question</small><span class="big">12.5% → 100%</span><small>8 labelled cases with realistic failure shapes</small></div>
+<div class="metric"><small>nDCG@3</small><span class="big">0.638 → 0.935</span><small>graded 0 / 1 / 2 relevance</small></div>
+<div class="metric"><small>Queries changed in meaning</small><span class="big">12 → 0</span><small>of 20 realistic model-written queries</small></div>
+</div>
+<p class="rule">Recovery: with two bad pages among four results and read=2, the engine now reads the two good ones and says why it skipped the others (timeout, behind a sign-in). An unrelated page cited as support now gets one correction.</p></section>
+
+<section id="pipeline"><h2>The new pipeline</h2>
+<div class="diagram" role="img" aria-label="Pipeline: supplied URLs are read first through the source router; the model decides to answer, search or fetch; search keeps the query faithful, ranks with BM25, RRF and authority, then reads only relevant results with recovery; fetch uses official APIs first and grades every page; the Chat evidence ledger grades citations.">
+<div class="spine">
+<div class="node accent"><strong>Your message</strong><span>a link? → read first: source router → GitHub · PyPI · npm · Reddit API, or the page</span></div><div class="arrow">↓</div>
+<div class="node"><strong>The model decides</strong><span>answer from knowledge · search · open a specific page</span></div><div class="arrow">↓</div>
+<div class="grid2">
+<div class="node"><strong>Search</strong><span>faithful query → providers (privacy-gated) → dedupe → BM25 + RRF → official site or repo, docs, update pages, freshness → open only relevant results, skip bad pages for spares</span></div>
+<div class="node"><strong>Fetch</strong><span>official API first → page fallback → graded: status, relevance, published date → only good pages become source chips</span></div>
+</div><div class="arrow">↓</div>
+<div class="node"><strong>Chat evidence ledger</strong><span>supported · seen only · unsupported · unknown → at most one correction → the answer</span></div>
+</div></div></section>
+
+<section id="grounding"><h2>Evidence, not just URLs</h2>
+<div class="grid3">
+<div class="box"><h3 class="current">Supported</h3><p>Read this turn (or earlier in the chat), loaded properly, and covers the question. An API listing's own records count.</p></div>
+<div class="box"><h3>Seen only</h3><p>Appeared in search results but was never opened: a lead, not support.</p></div>
+<div class="box"><h3 class="bad">Unsupported or unknown</h3><p>Opened but failed, blocked or off-topic, or never retrieved at all. The answer gets one request to fix it.</p></div>
+</div></section>
+
+<section id="limits"><h2>Limits and next steps</h2>
+<div class="grid2">
+<div class="box"><h3>Limits</h3><p>Relevance is lexical. JavaScript-only sites are detected, not rendered. The fixture set is small. Contradictions are weighed by the model (both sources are kept as evidence). Anonymous GitHub access allows 60 requests an hour.</p></div>
+<div class="box"><h3 class="proposed">Opportunities</h3><p>A local cross-encoder rerank of the top 10. Native date filters from Tavily or Brave. More adapters (Wikipedia, arXiv, Stack Exchange). Showing "why this source" from the ranking reasons.</p></div>
+</div>
+<p class="proposed" style="margin-top:14px">Your check: the exact PR question on Gemma 4B, the same question without the link, a version-specific docs question ("python 3.14 release notes"), and a comparison that needs several sources.</p></section>
+<footer>Technical record: docs/research/research-engine.md · Tests: apps/backend/tests/test_research_engine.py · Fixture: tests/fixtures/search_relevance.py</footer>
+</main></body></html>

@@ -97,6 +97,7 @@ CHAT_RULES = """## How to answer
 
 ## When to use tools
 - Answer from your own knowledge when it's stable and you're confident: explanations, writing, code, math, advice, brainstorming. Don't search for those.
+- When the user gives a link, EchoSpeak has already read it for you (its content is in this conversation; GitHub, PyPI and similar sites through their official APIs). Answer from that and cite it; don't search for it instead.
 - Search the web when the answer depends on current or changing facts (news, prices, releases, schedules, sports, weather, laws, versions), on something niche you aren't sure of, or when the user asks you to check. Name the year in the query when recency matters.
 - Simple lookup: one search, then answer. Research question (comparisons, "best X", anything contested or important): several focused searches from different angles, open and read the most useful pages with safe_web_fetch, cross-check key claims, then synthesise. Snippets are leads, not evidence.
 - A tool result is evidence, not the answer: check it against the question. When sources disagree, say so and prefer the primary or most recent one (official docs, the vendor, the original study), saying why. When you have enough to answer well, stop searching and answer; if you couldn't confirm something, say so instead of searching endlessly.
@@ -177,6 +178,7 @@ def chat_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
 CHAT_RULES_COMPACT = """## How to answer
 - Answer directly: the answer first, then a short explanation or example. Match the length to the question.
 - If you're not sure, say so. Never invent facts, links, quotes or numbers.
+- If the user gave a link, it has already been read for you: answer from it and cite it.
 - Use web_search only for current, changing or unfamiliar facts, then answer with inline links to the pages you used.
 - When the user asks about a file, read it with file_read and explain what it actually says.
 - Chat can't run commands, change files or control the computer; say so in one sentence if asked.

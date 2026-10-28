@@ -1,5 +1,25 @@
 # Changes
 
+## v11.11.3 — A search engine that reads the right source (source; not yet built)
+
+* Model-written queries reach providers as written (`search_rank.prepare_query`). The old sentence normaliser changed 12 of 20 realistic queries: versions, dotted names, `site:`, intent.
+* Ranking (`agent/search_rank.py`):
+  * Canonical dedupe, field-weighted BM25, Reciprocal Rank Fusion across variants and providers.
+  * Official domain or repository, docs hosts, update pages and freshness.
+  * Fixture top-1 relevance 12.5% → 100%; nDCG@3 0.638 → 0.935.
+* Source-aware retrieval (`agent/source_router.py`):
+  * GitHub (PRs, issues, releases, commits, repo, files), PyPI, npm and Reddit through their APIs, with page fallback.
+  * Page grading: JavaScript-only, login wall, blocked, not found, thin, relevance, age.
+  * Same SSRF and privacy path as pages.
+* `web_search(read=N)`:
+  * Reads URLs in the query directly and opens only relevant results.
+  * Skips failed or unusable pages for spares, with reasons.
+  * Search results are no longer shown as source chips.
+* Chat:
+  * Supplied URLs are prefetched before the first model call (new `LeanTurn.prefetch` hook).
+  * Graded evidence in the answer check (`unsupported_links`).
+* See [release notes](docs/releases/v11.11.3.md).
+
 ## v11.11.2 — Chat answers from evidence (source; not yet built)
 
 * Chat execution layer over the shared Lean loop (`agent/lean/chat_run.py`):

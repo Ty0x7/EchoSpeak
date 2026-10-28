@@ -763,12 +763,17 @@ class Toolbox:
         return self._run_entry(name, args)
 
     def _search_and_read(self, args: dict[str, Any]) -> ToolResult:
-        """web_search, then (for comparisons, prices, 'best X', or when asked) read the top results.
+        """web_search, then read the best results, recovering when a page can't answer.
 
-        Snippets are leads; reading two or three pages is what makes a comparison or a price
-        trustworthy, and small models rarely open them on their own. Each page goes through
-        safe_web_fetch, so it is fetched safely and kept in the chat's research notebook.
+        - A URL in the query is read directly (source-aware: GitHub, PyPI, … through their
+          APIs), not replaced by a generic search for its words.
+        - Results arrive ranked (agent/search_rank.py). Off-topic results aren't opened.
+        - Each page is graded (agent/source_router.py). A failed, blocked, JavaScript-only,
+          sign-in or off-topic page is skipped and the next candidate is read instead, so
+          the requested number of usable pages is reached when it exists.
+        Snippets are leads; pages read here are inspected evidence, kept in the research notebook.
         """
+        from agent import search_rank
         from agent.lean import progress, steps
 
         started = time.perf_counter()
@@ -779,27 +784,63 @@ class Toolbox:
             read = steps.default_reads(query) if raw_read in (None, "") else int(raw_read)
         except (TypeError, ValueError):
             read = 0
-        read = max(0, min(3, read)) if "safe_web_fetch" in self.entries else 0
+        can_read = "safe_web_fetch" in self.entries
+        read = max(0, min(3, read)) if can_read else 0
+        given = search_rank.urls_in(query) if can_read else []
+        pages: list[str] = []
+        skipped: list[str] = []
+        widgets: list[dict[str, Any]] = []
+
+        def open_page(url: str) -> bool:
+            progress.report(f"Reading {steps.short_url(url)}")
+            page = self._run_entry("safe_web_fetch", {"url": url, "objective": query, "max_text_chars": 3500})
+            # The specific reason (timeout, blocked, sign-in, off-topic) beats a generic "couldn't be read".
+            reason = steps.page_problem(page.output) or ("" if page.ok else "couldn't be read")
+            if reason:
+                skipped.append(f"- {url}: {reason}")
+                return False
+            pages.append(f"### {url}\n{page.output.strip()}")
+            widgets.extend(page.widgets)
+            return True
+
+        for url in given[:3]:
+            open_page(url)
+        rest = search_rank.urls_in(query) and re.sub(r"https?://\S+", " ", query).strip(" ?")
+        if given and (not rest or len(rest.split()) < 2):
+            # The question was the URL: what it says is the answer, no generic search needed.
+            result = ToolResult(True, "", 0, widgets=widgets)
+            result.output = (f"Read the address given directly instead of searching.\n\n## Pages read (inspected, not just snippets)\n\n"
+                             + "\n\n".join(pages) if pages else "The address given couldn't be read:\n" + "\n".join(skipped))
+            result.ok = bool(pages)
+            result.meta = {"results": 0, "pages": len(pages), "skipped": len(skipped), "direct": len(given)}
+            result.duration_ms = int((time.perf_counter() - started) * 1000)
+            return result
+
         progress.report(f"Searching for “{query[:70]}”")
         result = self._run_entry("web_search", args)
-        urls = steps.result_urls(result.output) if result.ok else []
-        result.meta = {"results": len(urls)}
-        if not urls or not read:
-            return result
-        targets = urls[:read]
-        progress.report(f"{len(urls)} results · reading the top {len(targets)}")
-        pages: list[str] = []
-        widgets = list(result.widgets)
-        for index, url in enumerate(targets, 1):
-            progress.report(f"Reading {steps.short_url(url)} ({index} of {len(targets)})")
-            page = self._run_entry("safe_web_fetch", {"url": url, "objective": query, "max_text_chars": 3500})
-            if page.ok and "safe_fetch_error" not in page.output:
-                pages.append(f"### {url}\n{page.output.strip()}")
-                widgets.extend(page.widgets)
-        result.meta["pages"] = len(pages)
+        blocks = steps.result_blocks(result.output) if result.ok else []
+        result.meta = {"results": len(blocks)}
+        widgets = list(result.widgets) + widgets
+        wanted = read
+        if blocks and wanted:
+            candidates = [url for url, text in blocks if search_rank.coverage(query, text) > 0 and url not in given]
+            progress.report(f"{len(blocks)} results · reading the best {min(wanted, len(candidates))}")
+            reads = 0
+            for url in candidates[:wanted + 2]:  # two spares, for pages that fail or don't answer
+                if reads >= wanted:
+                    break
+                reads += open_page(url)
+            off_topic = len(blocks) - len(candidates)
+            if off_topic:
+                skipped.append(f"- {off_topic} result(s) didn't mention the question's terms and weren't opened")
+        result.meta.update({"pages": len(pages), "skipped": len(skipped), "direct": len(given)})
         if pages:
-            result.output += ("\n\n## Pages read from the top results (inspected, not just snippets)\n\n"
-                              + "\n\n".join(pages))
+            result.output += ("\n\n## Pages read (inspected, not just snippets)\n\n" + "\n\n".join(pages))
+        if skipped:
+            result.output += "\n\n## Not used\n" + "\n".join(skipped)
+        if wanted and not pages and blocks:
+            result.output += ("\n\nNone of the results could be read as evidence. Try a more specific query, "
+                              "a source you know is authoritative (safe_web_fetch), or say what you couldn't confirm.")
         result.widgets = widgets
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         return result
