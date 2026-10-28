@@ -691,9 +691,8 @@ def integration_proposals() -> dict[str, Any]:
     return {"items": integrations.proposals("waiting")}
 
 
-@router.post("/integrations/proposals/{proposal_id}/approve")
-def approve_integration(proposal_id: str, request: ProposalApproveRequest) -> dict[str, Any]:
-    """Add a suggested connection as an MCP server, pin it, and start it.
+def _approve_proposal(proposal_id: str, values: dict[str, str]) -> dict[str, Any]:
+    """Add a reviewed connection as an MCP server, pin it, and start it.
 
     Keys go through the settings path that stores MCP env and headers with DPAPI.
     """
@@ -709,7 +708,7 @@ def approve_integration(proposal_id: str, request: ProposalApproveRequest) -> di
     if name in dict(getattr(config, "mcp_servers", None) or {}):
         raise HTTPException(status_code=409, detail=f"A connection called {name} already exists")
     try:
-        server = integrations.server_config(proposal, request.values)
+        server = integrations.server_config(proposal, values)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     _apply_settings_patch(_sanitize_incoming_settings({"mcp_servers": {name: server}}))
@@ -722,6 +721,83 @@ def approve_integration(proposal_id: str, request: ProposalApproveRequest) -> di
     integrations.mark(proposal_id, "approved", approved_at=time.time())
     row = next((r for r in status.get("servers") or [] if r.get("name") == name), {})
     return {"ok": True, "name": name, "server": {k: row.get(k) for k in ("running", "tool_count", "last_error")}}
+
+
+@router.post("/integrations/proposals/{proposal_id}/approve")
+def approve_integration(proposal_id: str, request: ProposalApproveRequest) -> dict[str, Any]:
+    """Approve a connection an agent suggested (agent/integrations.py)."""
+    return _approve_proposal(proposal_id, request.values)
+
+
+# ── Settings › Connections: the connector gallery (agent/connector_gallery.py) ──
+@router.get("/integrations/gallery")
+def connector_gallery() -> dict[str, Any]:
+    """Every connector EchoSpeak has a guide for, with what it needs and where it stands."""
+    from agent import connector_gallery as gallery
+    return {"items": gallery.gallery()}
+
+
+def _start_sign_in(name: str) -> dict[str, Any]:
+    from agent import mcp_oauth, privacy
+    from agent.mcp_client import get_mcp_manager
+
+    raw_servers, raw = _hosted_server(name)
+    try:
+        return mcp_oauth.start_sign_in(name, str(raw.get("url") or raw.get("endpoint")).strip(),
+                                       on_done=lambda: get_mcp_manager().initialize_servers(raw_servers))
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.post("/integrations/gallery/{guide_id}/connect")
+def connect_connector(guide_id: str, request: ProposalApproveRequest) -> dict[str, Any]:
+    """One click: the owner's Connect is the approval. Then the vendor's sign-in where it has one."""
+    from agent import connector_gallery as gallery, integration_guides, integrations
+    from config import config
+
+    item = integration_guides.guide(guide_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="No connector with that id")
+    if gallery.server_for(guide_id):
+        raise HTTPException(status_code=409, detail=f"{item['app']} is already connected")
+    summary = integrations._guide_summary(item)
+    if summary["unsupported"]:
+        raise HTTPException(status_code=400, detail=f"{item['app']} doesn't connect here: {summary['unsupported']}.")
+    if summary["missing"]:
+        raise HTTPException(status_code=400, detail=f"{item['app']} needs {', '.join(summary['missing'])} on this PC first.")
+    try:
+        proposal = integrations.propose(f"guide:{guide_id}", reason="Connected from Settings › Connections",
+                                        configured=dict(getattr(config, "mcp_servers", None) or {}))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    result = _approve_proposal(proposal["id"], request.values)
+    if summary["sign_in"]:
+        result["auth"] = _start_sign_in(result["name"])
+    return result
+
+
+@router.post("/integrations/gallery/{guide_id}/signin")
+def sign_in_connector(guide_id: str) -> dict[str, Any]:
+    from agent import connector_gallery as gallery
+    name = gallery.server_for(guide_id)
+    if not name:
+        raise HTTPException(status_code=404, detail="Connect it first")
+    return {"ok": True, "auth": _start_sign_in(name)}
+
+
+@router.post("/integrations/gallery/{guide_id}/disconnect")
+def disconnect_connector(guide_id: str) -> dict[str, Any]:
+    """Remove the connector: sign out, unpin, take it out of settings, stop its server."""
+    from agent import connector_gallery as gallery
+    from agent.mcp_client import get_mcp_manager
+    from config import config
+
+    name = gallery.server_for(guide_id)
+    if not name:
+        raise HTTPException(status_code=404, detail="It isn't connected")
+    gallery.remove_server(name)
+    get_mcp_manager().initialize_servers(dict(getattr(config, "mcp_servers", None) or {}))
+    return {"ok": True, "removed": name}
 
 
 @router.post("/integrations/proposals/{proposal_id}/dismiss")

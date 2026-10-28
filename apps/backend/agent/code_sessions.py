@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
-import importlib.util
-from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -19,18 +17,12 @@ import time
 import uuid
 
 from agent import code_worktree as wt, privacy, project_workspace
-from agent.code_runtimes import Acp, Claude, ClaudeCli, Codex
+from agent.code_runtimes import Acp, ClaudeCli, Codex
 
 
-# The owner's own coding agents, each run in its original harness (never Echo's model router).
-RUNTIMES = {"codex", "claude_code", "claude_cli", "acp"}
-
-
-def sdk_installed():
-    try:
-        return importlib.util.find_spec("claude_agent_sdk") is not None and metadata.version("claude-agent-sdk") == "0.2.174"
-    except metadata.PackageNotFoundError:
-        return False
+# The owner's own coding agents, each run in its original harness with the owner's own plan
+# (never Echo's model router, never an API key). API-key models belong to Chat.
+RUNTIMES = {"codex", "claude_cli", "acp"}
 
 
 class Session:
@@ -49,7 +41,6 @@ class Session:
         self.turn_id = None
         self.turn_finished = asyncio.Event()
         self.result = "failed"
-        self.api_key = ""
         self.redaction_values = []
         self.stop_lock = asyncio.Lock()
 
@@ -98,7 +89,7 @@ class Session:
     def record_model(self, value):
         if isinstance(value, str) and value and len(value) <= 200 and value != self.row.get("model"):
             from agent.lean.policy import redact_secrets
-            self.row["model"] = redact_secrets(redact_secrets(value), self.redaction_values + ([self.api_key] if self.api_key else []))
+            self.row["model"] = redact_secrets(redact_secrets(value), self.redaction_values)
             self.save()
 
     def emit(self, kind, data):
@@ -106,7 +97,7 @@ class Session:
         self.sequence += 1
         # Bound individual events and the replay window. Auth responses never use
         # this channel. Native transcript remains owned by the original harness.
-        safe = redact_payload(redact_payload(data), self.redaction_values + ([self.api_key] if self.api_key else []))
+        safe = redact_payload(redact_payload(data), self.redaction_values)
         raw = json.dumps(safe, ensure_ascii=False, default=str)
         if len(raw) > 64_000:
             safe = {"notice": "Large runtime event omitted; inspect native history and worktree", "preview": raw[:4000]}
@@ -127,7 +118,7 @@ class Session:
         if self.manager.suspended or privacy.mode() != "standard" or not self.task or len(self.approvals) >= 8:
             return False
         from agent.lean.policy import contains_secret, redact_payload
-        if len(json.dumps(details)) > 32_000 or contains_secret(details) or (self.api_key and contains_secret(details, [self.api_key])):
+        if len(json.dumps(details)) > 32_000 or contains_secret(details) or (self.redaction_values and contains_secret(details, self.redaction_values)):
             self.emit("permission_denied", {"reason": "Request is too large or contains a stored secret"})
             return False
         request_id = uuid.uuid4().hex
@@ -168,7 +159,6 @@ class Session:
                 pass
         self.task = None
         self.adapter = None
-        self.api_key = ""
         self.row["state"] = "stopped"
         self.save()
         if self.lease:
@@ -292,7 +282,7 @@ class Sessions:
         finally:
             self.starting.discard(key)
 
-    async def connect(self, session_id, api_key=""):
+    async def connect(self, session_id):
         self.admit()
         if session_id in self.tool_loans:
             raise ValueError("Close this worktree's terminals before reconnecting the coding runtime")
@@ -304,20 +294,13 @@ class Sessions:
         if session.adapter and session.adapter.rpc and not session.adapter.rpc.closed:
             return session.public()
         runtime = session.row["runtime_id"]
-        if runtime == "claude_code":
-            if not sdk_installed():
-                raise ValueError("Install the optional Claude Agent SDK runtime before connecting")
-            session.api_key = api_key or os.environ.get("ECHOSPEAK_CLAUDE_AGENT_API_KEY", "")
-            if not session.api_key:
-                raise ValueError("Supply this harness's Anthropic API key. Subscription OAuth tokens are not supported.")
-            session.redaction_values = list(set(session.redaction_values + [session.api_key]))
         session.acquire()
         if session.row["state"] == "rolled_back":
             session.lease.close()
             session.lease = None
             raise ValueError("This session was rolled back. Start a new session so native history cannot disagree with restored files.")
         session.row["state"] = "connecting"
-        session.adapter = {"codex": Codex, "claude_code": Claude, "claude_cli": ClaudeCli, "acp": Acp}[runtime](session)
+        session.adapter = {"codex": Codex, "claude_cli": ClaudeCli, "acp": Acp}[runtime](session)
         try:
             await session.adapter.connect()
             self.admit()
@@ -339,9 +322,7 @@ class Sessions:
             # Authentication may outlive an HTTP request. Expose pending state,
             # retaining a single controlled operation in this session.
             raise ValueError("Authenticate this ACP executable in its own terminal before connecting. Interactive ACP auth is not enabled.")
-        if session.row["runtime_id"] == "claude_cli":
-            raise ValueError("Claude Code signs in with its own `claude auth login`: Settings › Models › Coding agents › Claude Code › Sign in")
-        raise ValueError("Claude uses the dedicated API key supplied at connection")
+        raise ValueError("Claude Code signs in with its own `claude auth login`: Settings › Models › Coding agents › Claude Code › Sign in")
 
     async def prompt(self, session_id, text, model=""):
         self.admit()

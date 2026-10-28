@@ -50,6 +50,11 @@ def test_heartbeat_tick_runs_one_lean_turn_with_the_pulse_and_routes_the_reply(m
         session_id="session-a",
     )
     monkeypatch.setattr(manager, "_gather_system_pulse", lambda: "all systems nominal")
+    # Daytime, and the owner isn't mid-conversation (the gates have their own test below).
+    from agent import checkins
+    monkeypatch.setattr(checkins, "quiet", lambda now=None: False)
+    monkeypatch.setattr(HeartbeatManager, "_owner_active", staticmethod(lambda window_seconds=1800: False))
+    monkeypatch.setattr("agent.state.get_state_store", lambda: SimpleNamespace(discard_turn=lambda turn_id: True))
     manager._tick()
 
     assert len(turns) == 1
@@ -61,6 +66,20 @@ def test_heartbeat_tick_runs_one_lean_turn_with_the_pulse_and_routes_the_reply(m
     manager._tick()  # the agent said there is nothing to report
     assert len(turns) == 2
     assert len(routed) == 1
+
+
+@pytest.mark.parametrize("quiet, active", [(True, False), (False, True)])
+def test_a_friendly_check_in_waits_for_quiet_hours_to_end_and_never_interrupts(monkeypatch, quiet, active) -> None:
+    from agent import checkins
+    from agent.heartbeat import HeartbeatManager
+    import agent.lean.runtime as lean_runtime
+
+    monkeypatch.setattr(lean_runtime, "run_lean_query", lambda *a, **k: pytest.fail("no model call during quiet hours or chat"))
+    monkeypatch.setattr(checkins, "quiet", lambda now=None: quiet)
+    monkeypatch.setattr(HeartbeatManager, "_owner_active", staticmethod(lambda window_seconds=1800: active))
+    manager = HeartbeatManager(agent=object(), interval_minutes=30, prompt="Check now", channels=["web"])
+    monkeypatch.setattr(manager, "_gather_system_pulse", lambda: "")
+    manager._tick()
 
 
 def test_background_channel_router_never_calls_legacy_external_senders(monkeypatch) -> None:

@@ -13,10 +13,11 @@ describe("coding agents in Settings › Models", () => {
     expect(accountLine({ installed: true, signed_in: false }, "codex")).toBe("Not signed in");
   });
 
-  it("lists Codex and Claude Code with their own sign-in, plus the API-key and ACP options", () => {
+  it("lists Codex and Claude Code with their own sign-in, and points API keys to Chat", () => {
     const html = renderToStaticMarkup(<CodingAgents s={{ codex_executable: "" }} save={async () => {}} apiBase="http://localhost" />);
     expect(html.includes("Coding agents")).toBe(true);
-    for (const text of ["Codex", "Claude Code", "Claude Agent", "Other ACP agents", "Codex location", "Claude Code location"]) expect(html.includes(text)).toBe(true);
+    for (const text of ["Codex", "Claude Code", "ChatGPT and Claude by API key", "Other ACP agents", "Codex location", "Claude Code location"]) expect(html.includes(text)).toBe(true);
+    expect(html.includes("Claude Agent")).toBe(false);
     expect(html.includes("never sees your sign-in")).toBe(true);
   });
 });
@@ -24,7 +25,6 @@ describe("coding agents in Settings › Models", () => {
 describe("Claude Code runtime in Echo Code", () => {
   it("has one name everywhere", () => {
     expect(runtimeName("claude_cli")).toBe("Claude Code");
-    expect(runtimeName("claude_code")).toBe("Claude Agent");
     expect(runtimeName("codex")).toBe("Codex");
     expect(runtimeName(undefined)).toBe("Echo native");
   });

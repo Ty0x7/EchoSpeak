@@ -79,17 +79,6 @@ if __import__("sys").platform == "win32":
     datas += collect_data_files("winpty")
     binaries_extra += collect_dynamic_libs("winpty")
 
-# Optional Claude SDK contains the original harness binary. Ship it only when
-# explicitly installed at the pinned version; never download it during a build.
-import importlib.util
-if importlib.util.find_spec("claude_agent_sdk"):
-    from importlib.metadata import version
-    if version("claude-agent-sdk") != "0.2.174":
-        raise RuntimeError("Install the pinned requirements-code-runtime.txt before bundling Claude Agent")
-    hiddenimports += collect_submodules("claude_agent_sdk")
-    datas += collect_data_files("claude_agent_sdk")
-    datas += copy_metadata("claude-agent-sdk")
-
 a = Analysis(
     [str(desktop_dir / "backend" / "echospeak_backend.py")],
     pathex=[str(backend_root)],
@@ -101,7 +90,7 @@ a = Analysis(
     runtime_hooks=[],
     # PyTorch is not used: embeddings run on onnxruntime. Excluding it keeps a dev
     # venv that happens to have torch installed from adding ~1 GB to the bundle.
-    excludes=["pytest", "mcp.cli", "torch", "torchvision", "torchaudio", "transformers", "sentence_transformers",
+    excludes=["pytest", "mcp.cli", "claude_agent_sdk", "torch", "torchvision", "torchaudio", "transformers", "sentence_transformers",
               "langchain", "langchain_core", "langchain_community", "langchain_openai",
               "langchain_google_genai", "langchain_ollama", "langchain_text_splitters"],
     noarchive=False,

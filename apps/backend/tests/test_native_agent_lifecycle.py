@@ -372,3 +372,15 @@ def test_chat_question_creates_no_work_but_a_real_write_does(env, monkeypatch):
         session_id="write", request_id="request-write", emit=lambda _: None, cancel=threading.Event())
     assert writes == [1] and wrote["work"]["status"] == "completed"
     assert store.coordination.view("deliveries") == []  # the reply streamed into the chat; no outbox row
+
+
+def test_a_check_in_prompt_is_not_shown_as_something_the_owner_said(env, monkeypatch):
+    store, _, _ = env
+    install_clients(monkeypatch, {"echo": [ModelTurn(content="Hey! Your Codex sign-in expired; want me to walk you through it?")]})
+    run(session="checkins", source="heartbeat")
+    install_clients(monkeypatch, {"echo": [ModelTurn(content="Sure.")]})
+    run(session="owner-chat")
+    def roles(session):
+        return [m.get("role") for turn in store.session_timeline(session)["turns"] for m in turn["messages"]]
+    assert "user" not in roles("checkins") and roles("checkins")
+    assert "user" in roles("owner-chat")

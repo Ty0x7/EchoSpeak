@@ -28,7 +28,7 @@ describe("Echo Code runtime admission", () => {
     expect(canStartSession({ ...native, can_start: false }, workspace)).toBe(false);
   });
   it("cannot route an external runtime through the native query path", () => {
-    for (const id of ["codex", "claude_code", "acp"]) expect(canStartSession({ ...native, id }, workspace)).toBe(false);
+    for (const id of ["codex", "claude_cli", "acp"]) expect(canStartSession({ ...native, id }, workspace)).toBe(false);
   });
   it("does not turn a discovered CLI into an authenticated or executable integration", () => {
     expect(runtimeStatus({ ...native, id: "codex", implemented: false })).toBe("CLI found · execution planned");

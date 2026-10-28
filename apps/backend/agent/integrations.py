@@ -205,7 +205,7 @@ def _candidate_from_registry(entry: dict[str, Any]) -> dict[str, Any]:
     repo = str((server.get("repository") or {}).get("url") or server.get("websiteUrl") or "")
     watch_out = ["Listed in the MCP registry; nobody has reviewed what it does. Read its page before approving."]
     if launch.get("url"):
-        watch_out.append("If the service wants a browser sign-in, EchoSpeak can't do that yet.")
+        watch_out.append("If the service wants a browser sign-in, choose Sign in for it in Settings › Connections.")
     return {
         "id": name,
         "title": str(server.get("title") or name.split("/")[-1]),
@@ -236,10 +236,9 @@ def _guide_summary(item: dict[str, Any]) -> dict[str, Any]:
         launch = {"command": "npx", "args": ["-y", how["package"]]}
     elif how["kind"] == "pypi":
         launch = {"command": "uvx", "args": [how["package"]]}
-    elif how["kind"] == "http":
+    elif how["kind"] in {"http", "signin"}:
+        # "signin": hosted with OAuth; EchoSpeak signs in through the owner's browser (agent/mcp_oauth.py).
         launch = {"transport": "streamable_http", "url": how["url"]}
-    elif how["kind"] == "signin":
-        unsupported = "it needs a browser sign-in, which EchoSpeak can't do yet"
     elif how["kind"] == "builtin":
         unsupported = f"EchoSpeak already has this: {how['where']}"
     _, missing = _runner_state(str(launch.get("command") or ""))
@@ -262,6 +261,7 @@ def _guide_summary(item: dict[str, Any]) -> dict[str, Any]:
         "options": {k: item[k] for k in ("timeout_s", "accept_server_read_only_hints") if k in item},
         "homepage": item.get("homepage", ""),
         "field": item["field"],
+        "sign_in": how["kind"] == "signin",
         "source": "guide",
     }
 

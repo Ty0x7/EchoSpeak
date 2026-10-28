@@ -3,12 +3,23 @@ export type CodeRuntime = {
   authentication: string; can_start: boolean; blockers: string[]; description: string;
 };
 export type RuntimeCatalog = { schema_version: number; privacy_mode: string; runtimes: CodeRuntime[] };
-export type AgentModel = { id: string; model: string; displayName?: string; isDefault?: boolean };
+export type AgentModel = { id: string; model: string; displayName?: string; isDefault?: boolean; description?: string };
+/** What Echo last saw of a coding agent's own sign-in (no secrets): GET /echo-code/runtimes/{id}/account. */
+export type AgentAccount = {
+  installed?: boolean; signed_in?: boolean; method?: string; plan?: string; models?: AgentModel[];
+  problem?: string; checked_at?: number; stale?: boolean;
+};
+/** "Plus plan", "Pro plan", or "" when the agent didn't report one. */
+export function planLabel(account: AgentAccount | null | undefined): string {
+  const plan = String(account?.plan || "").trim();
+  return plan ? `${plan[0].toUpperCase()}${plan.slice(1)} plan` : "";
+}
 export function agentModels(value: unknown): AgentModel[] {
   if (!Array.isArray(value)) return [];
   return [...new Map(value.filter(row => row && typeof row.model === "string" && row.model.length > 0 && row.model.length <= 200)
     .slice(0, 200).map(row => [row.model, { id: String(row.id || row.model), model: row.model,
-      displayName: typeof row.displayName === "string" ? row.displayName : undefined, isDefault: row.isDefault === true }])).values()];
+      displayName: typeof row.displayName === "string" ? row.displayName : undefined, isDefault: row.isDefault === true,
+      description: typeof row.description === "string" ? row.description : undefined }])).values()];
 }
 export function agentModelName(models: AgentModel[], selected: string, reported: string): string {
   const id = selected || reported || models.find(row => row.isDefault)?.model || "";
@@ -31,7 +42,7 @@ export function canStartSession(runtime: CodeRuntime | undefined, workspace: Cod
 
 /** Each coding agent's display name; the harness itself is always the vendor's own. */
 export function runtimeName(id: string | undefined): string {
-  return ({ echo: "Echo native", codex: "Codex", claude_cli: "Claude Code", claude_code: "Claude Agent", acp: "ACP agent" } as Record<string, string>)[id || "echo"] || "ACP agent";
+  return ({ echo: "Echo native", codex: "Codex", claude_cli: "Claude Code", acp: "ACP agent" } as Record<string, string>)[id || "echo"] || "ACP agent";
 }
 
 export function runtimeStatus(runtime: CodeRuntime): string {

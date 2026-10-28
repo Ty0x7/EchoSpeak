@@ -20,7 +20,7 @@ const project = { id:'fixture-project', name:'Echo Code sample', workspace_root:
 const runtimes = {schema_version:1,privacy_mode:'standard',runtimes:[
   {id:'echo',name:'Echo native',protocol:'native',implemented:true,installed:true,authentication:'existing_model_settings',can_start:true,blockers:[],description:"Echo's own tools, skills, memory, learning, and approval policies. Choose a local or cloud model in the conversation."},
   {id:'codex',name:'Codex',protocol:'codex-app-server',implemented:true,installed:true,authentication:'unverified',can_start:false,blockers:['Fixture account is not connected.'],description:'Use the official app-server and Codex-owned sign-in. ChatGPT access depends on your account and usage limits.'},
-  {id:'claude_code',name:'Claude Code',protocol:'claude-agent-sdk',implemented:true,installed:true,authentication:'unverified',can_start:false,blockers:['Fixture account is not connected.','Fixture API authentication is unavailable.'],description:'Run the original Claude Code binary with its own sign-in.'},
+  {id:'claude_cli',name:'Claude Code',protocol:'claude-code-cli',implemented:true,installed:true,authentication:'unverified',can_start:false,blockers:['Fixture account is not connected.'],description:'Run the original Claude Code binary with its own sign-in.'},
   {id:'acp',name:'Other ACP agents',protocol:'acp',implemented:true,installed:null,authentication:'unverified',can_start:false,blockers:['Fixture account is not connected.'],description:'Connect compatible agents through their own ACP sessions and capability negotiation.'}
 ]};
 let terminalCounter=0;const terminalBuffers={};const writes=[];const providerSwitches=[];const harnessTurns=[];let reportedModel="fixture-gpt-a";let applied=0;let privacyMode='standard';
@@ -128,7 +128,7 @@ const summary={name:'Echo Code sample',root:'C:/Fixture/sample',source_root:'C:/
     await page.getByRole('switch',{name:'Echo Code',exact:true}).click();
     await page.getByLabel('Coding task draft',{exact:true}).fill('Keep this draft while switching agents');
     const starter=await page.locator('.ec-welcome').boundingBox();
-    for(const [name,id] of [['Codex','codex'],['Claude Code','claude_code'],['Other ACP agents','acp']]) {
+    for(const [name,id] of [['Codex','codex'],['Claude Code','claude_cli'],['Other ACP agents','acp']]) {
       await page.getByRole('button',{name:'Agent runtime',exact:true}).click();
       await page.getByRole('button',{name:`${name} models`,exact:true}).click();
       await page.keyboard.press('Escape');

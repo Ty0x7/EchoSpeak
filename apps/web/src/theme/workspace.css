@@ -89,6 +89,16 @@
 .es-model-choice strong { font-size:12px; font-weight:550; overflow-wrap:anywhere; }
 .es-model-choice small { color:var(--es-text-3); font-size:10px; }
 .es-model-star { flex-shrink:0; border:0; background:none; color:var(--es-text-4); width:27px; height:30px; padding:0; }
+/* Chat › ChatGPT / Claude: connect with an API key without leaving the picker. */
+.es-api-connect { display:grid; gap:8px; margin:4px 2px 8px; padding:10px; border:1px solid var(--es-border); border-radius:6px; background:var(--es-surface-2); }
+.es-api-connect-head { display:flex; align-items:center; gap:8px; font-size:12px; }
+.es-api-connect p { margin:0; color:var(--es-text-3); font-size:10.5px; line-height:1.6; }
+.es-api-connect label { display:grid; gap:4px; color:var(--es-text-2); font-size:10.5px; }
+.es-api-connect input { min-width:0; height:28px; padding:0 8px; border:1px solid var(--es-border); border-radius:4px; background:var(--es-bg-0); color:var(--es-text); font-size:12px; }
+.es-api-connect-actions { display:flex; align-items:center; gap:10px; }
+.es-api-connect-actions a { color:var(--es-text-2); font-size:10.5px; }
+.es-api-connect small { color:var(--es-text-3); font-size:10px; }
+.es-api-connect small[role=alert] { color:var(--es-err); }
 .es-model-star[aria-pressed=true] { color:var(--es-text); }
 .es-floating-popover footer { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:10px 12px; border-top:1px solid var(--es-border); color:var(--es-text-3); font-size:10px; }
 .es-floating-popover footer button { border:0; padding:0; background:none; color:var(--es-text-2); font-size:10px; }

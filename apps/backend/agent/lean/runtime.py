@@ -327,7 +327,8 @@ class LeanSession:
             source=self.source,
             status="running",
             query=message[:4000],
-            record_user_message=True,
+            # A check-in's prompt is Echo's own context, not something the owner said.
+            record_user_message=self.source != "heartbeat",
             workspace_id=str(state.workspace_id or ""),
             active_project_id=str(state.active_project_id or ""),
             runtime_provider=endpoint.provider,
@@ -335,7 +336,8 @@ class LeanSession:
             intent="lean",
             mode="agent",
             phase="running",
-            metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else ""},
+            metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else "",
+                      "hidden_prompt": self.source == "heartbeat"},
         )
         self.execution_id = execution.id
         self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else "",
@@ -1655,13 +1657,20 @@ class LeanSession:
 
     def _endpoint_for(self, persona: AgentPersona):
         if persona.id in self._route_overrides:  # auto mode picked another listed model for this request
-            return resolve_endpoint(*self._route_overrides[persona.id])
-        provider = persona.model.provider or str(getattr(getattr(self.agent, "llm_provider", None), "value", "") or "lmstudio")
-        model_id = persona.model.model_id if persona.model.provider or persona.model.model_id else ""
-        if not model_id:
-            runtime = getattr(self.agent, "model_runtime", None)
-            model_id = str(getattr(runtime, "model_id", "") or "")
-        return resolve_endpoint(provider, model_id)
+            endpoint = resolve_endpoint(*self._route_overrides[persona.id])
+        else:
+            provider = persona.model.provider or str(getattr(getattr(self.agent, "llm_provider", None), "value", "") or "lmstudio")
+            model_id = persona.model.model_id if persona.model.provider or persona.model.model_id else ""
+            if not model_id:
+                runtime = getattr(self.agent, "model_runtime", None)
+                model_id = str(getattr(runtime, "model_id", "") or "")
+            endpoint = resolve_endpoint(provider, model_id)
+        # Plans for code, APIs for chat: whatever chose the model (the conversation, an agent's own
+        # model, smart model choice), an Echo Code conversation never calls an API-key provider.
+        from agent.echo_code import code_provider_problem
+        if problem := code_provider_problem(self.session_id, str(getattr(endpoint, "provider", "") or "")):
+            raise PermissionError(problem)
+        return endpoint
 
     def _client_for(self, persona: AgentPersona, *, routing: bool = False) -> ChatClient:
         endpoint = self._endpoint_for(persona)

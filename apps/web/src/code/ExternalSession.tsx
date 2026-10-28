@@ -2,7 +2,7 @@ import React, { useEffect, useImperativeHandle, useRef, useState } from "react";
 import { request } from "../projects/model";
 import { RuntimeMark } from "../components/RuntimeMark";
 import { WorkspacePopover } from "../components/WorkspacePopover";
-import { agentModels, runtimeName, type AgentModel } from "./model";
+import { agentModels, planLabel, runtimeName, type AgentAccount, type AgentModel } from "./model";
 import { useWorkbench } from "../workbench/store";
 import { isDesktopRuntime, openDesktopExternalUrl } from "../desktop/bridge";
 
@@ -28,10 +28,6 @@ export function eventText(event: Event): string {
   if (event.kind === "claude/text") return String(data.text || "");
   if (event.kind === "claude/tool") return `\n› ${String(data.tool || "Tool")} ${String(data.detail || "")}\n`;
   if (event.kind === "claude/result" && data.is_error) return "\nClaude Code reported a failed turn.\n";
-  if (event.kind === "sdk/event") {
-    if (data.kind === "StreamEvent") return String(data.data?.event?.delta?.text || "");
-    if (data.kind === "ResultMessage" && data.data?.is_error) return "\nClaude reported a failed turn.\n";
-  }
   if (event.kind === "user/message") return `\nYou: ${String(data.text || "")}\n\n`;
   if (event.kind === "session/error") return `\n${String(data.message || "Runtime failed")}\n`;
   if (event.kind === "turn/finished") return `\n\n[${String(data.state || "finished")}]\n`;
@@ -39,19 +35,30 @@ export function eventText(event: Event): string {
   return "";
 }
 
-export type ExternalComposerState = { sessionId: string; connected: boolean; canSend: boolean; busy: boolean; active: boolean; models: AgentModel[]; model: string; approvals: number; transcript: string };
+/** One confirmation per project and agent lets Echo Code create its isolated worktree sessions. */
+const trustKey = (projectId: string, runtimeId: string) => `echospeak.code.trusted.${projectId}.${runtimeId}`;
+export function trustedFor(projectId: string, runtimeId: string): boolean {
+  try { return localStorage.getItem(trustKey(projectId, runtimeId)) === "1"; } catch { return false; }
+}
+function rememberTrust(projectId: string, runtimeId: string) {
+  try { localStorage.setItem(trustKey(projectId, runtimeId), "1"); } catch { /* Ask again next time. */ }
+}
+
+export type ExternalComposerState = {
+  sessionId: string; connected: boolean; signedIn: boolean; canSend: boolean; busy: boolean; active: boolean;
+  models: AgentModel[]; model: string; approvals: number; transcript: string; account: string;
+};
 export type ExternalSessionHandle = { send(): void };
 export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
-  apiBase: string; projectId: string; runtimeId: string; canStart: boolean;
+  apiBase: string; projectId: string; runtimeId: string; canStart: boolean; account: AgentAccount | null;
   draft: string; onDraft(value: string): void; model: string; onState(state: ExternalComposerState): void;
-  open: boolean; anchor: React.RefObject<HTMLButtonElement>; onClose(): void;
-}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, draft, onDraft, model, onState, open, anchor, onClose }, ref) {
+  open: boolean; anchor: React.RefObject<HTMLButtonElement>; onClose(): void; onNeedSetup(): void; onAccountChanged(): void;
+}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, account, draft, onDraft, model, onState, open, anchor, onClose, onNeedSetup, onAccountChanged }, ref) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
-  const [apiKey, setApiKey] = useState("");
-  const [acknowledge, setAcknowledge] = useState(false);
+  const [acknowledge, setAcknowledge] = useState(() => trustedFor(projectId, runtimeId));
   const [dirty, setDirty] = useState(false);
   const [executable, setExecutable] = useState("");
   const [args, setArgs] = useState("[]");
@@ -62,14 +69,21 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   const cursor = useRef(0);
   const pending = useRef({ key: crypto.randomUUID(), context: "" });
   const alive = useRef(true);
-  const base = `${apiBase}/echo-code/external-sessions/${encodeURIComponent(selected)}`;
+  const baseFor = (id: string) => `${apiBase}/echo-code/external-sessions/${encodeURIComponent(id)}`;
+  const base = baseFor(selected);
   const active = Boolean(session?.turn_active) || ["preparing", "running"].includes(session?.state || "");
   const name = runtimeName(runtimeId);
-  const canSend = Boolean(session?.connected && !active && !busy && session.state !== "rolled_back" && (runtimeId !== "codex" || session.account.connected));
+  const signedIn = runtimeId === "acp" ? Boolean(session?.connected) : Boolean(session?.connected ? session.account.connected : account?.signed_in);
+  // Sending creates and connects a session when needed; ACP still needs its executable chosen first.
+  const ready = session?.connected ? (runtimeId !== "codex" || session.account.connected)
+    : runtimeId !== "acp" && canStart && signedIn && session?.state !== "rolled_back";
+  const canSend = Boolean(ready && !active && !busy && draft.trim());
+  const models = session?.connected && session.models?.length ? agentModels(session.models) : agentModels(account?.models);
   useEffect(() => {
-    onState({ sessionId: selected, connected: Boolean(session?.connected), canSend, busy, active,
-      models: agentModels(session?.models), model: session?.model || "", approvals: session?.approvals.length || 0, transcript: events.map(eventText).join("") });
-  }, [selected, session, canSend, busy, active, onState, events]);
+    onState({ sessionId: selected, connected: Boolean(session?.connected), signedIn, canSend, busy, active, models,
+      model: session?.model || "", approvals: session?.approvals.length || 0, transcript: events.map(eventText).join(""),
+      account: session?.connected ? session.account.type : planLabel(account) });
+  }, [selected, session, signedIn, canSend, busy, active, onState, events, account]);
   useEffect(() => {
     useWorkbench.getState().setContext({ project_id: projectId, external_session_id: selected });
   }, [projectId, selected]);
@@ -77,7 +91,13 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   useEffect(() => {
     let live = true;
     request<Session[]>(`${apiBase}/echo-code/projects/${encodeURIComponent(projectId)}/external-sessions`)
-      .then(rows => { if (live) setSessions(rows.filter(row => row.runtime_id === runtimeId)); })
+      .then(rows => {
+        if (!live) return;
+        const mine = rows.filter(row => row.runtime_id === runtimeId).sort((a, b) => b.created_at - a.created_at);
+        setSessions(mine);
+        // Continue where you left off: the newest session that wasn't rolled back.
+        setSelected(current => current || mine.find(row => row.state !== "rolled_back")?.id || "");
+      })
       .catch(err => { if (live) setError(err.message); });
     return () => { live = false; };
   }, [apiBase, projectId, runtimeId]);
@@ -104,11 +124,7 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
     catch (err) { if (alive.current) setError(err instanceof Error ? err.message : "Runtime request failed"); }
     finally { if (alive.current) setBusy(false); }
   };
-  useImperativeHandle(ref, () => ({ send() {
-    if (!canSend || !draft.trim()) return;
-    void action(async () => { await request(`${base}/turns`, { text: draft, model: runtimeId === "acp" ? "" : model }); if (alive.current) onDraft(""); });
-  } }), [canSend, draft, model, base, runtimeId, onDraft]);
-  const create = () => action(async () => {
+  const createSession = async (): Promise<string> => {
     let command: string[] = [];
     if (runtimeId === "acp") {
       const values: unknown = JSON.parse(args);
@@ -118,26 +134,55 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
     const context = JSON.stringify({ command, dirty, projectId, runtimeId });
     if (pending.current.context !== context) pending.current = { context, key: crypto.randomUUID() };
     const result = await request<Session>(`${apiBase}/echo-code/projects/${encodeURIComponent(projectId)}/external-sessions`, {
-      runtime_id: runtimeId, idempotency_key: pending.current.key, command, acknowledge_dirty: dirty, acknowledge_execution: acknowledge,
+      runtime_id: runtimeId, idempotency_key: pending.current.key, command, acknowledge_dirty: dirty, acknowledge_execution: true,
     });
-    if (!alive.current) return;
+    rememberTrust(projectId, runtimeId);
     pending.current = { key: crypto.randomUUID(), context: "" };
-    setSessions(previous => [result, ...previous.filter(row => row.id !== result.id)]); setSelected(result.id);
-  });
+    if (alive.current) { setSessions(previous => [result, ...previous.filter(row => row.id !== result.id)]); setSelected(result.id); }
+    return result.id;
+  };
+  useImperativeHandle(ref, () => ({ send() {
+    if (!canSend) return;
+    const text = draft;
+    if (!selected && !trustedFor(projectId, runtimeId)) { onNeedSetup(); return; }
+    void action(async () => {
+      // Signed in is enough: Echo starts (or reconnects) the isolated session, then sends.
+      const id = selected || await createSession();
+      if (!session?.connected || session.id !== id) await request(`${baseFor(id)}/connect`, {});
+      await request(`${baseFor(id)}/turns`, { text, model: runtimeId === "acp" ? "" : model });
+      if (alive.current) onDraft("");
+    });
+  } }), [canSend, draft, model, selected, session, runtimeId, projectId, onDraft, onNeedSetup]);
+  const create = () => action(async () => { if (!acknowledge) throw new Error("Confirm you trust this agent with this project first"); await createSession(); });
+  const openLogin = (url: string) => {
+    setLoginUrl(url);
+    if (isDesktopRuntime()) void openDesktopExternalUrl(url); else window.open(url, "_blank", "noopener,noreferrer");
+  };
   return open ? <WorkspacePopover anchor={anchor} label={`${name} connection and session`} width={620} className="ec-connection-popover" onClose={onClose}><section className="ec-external" aria-label={`${name} sessions`}>
     <header><RuntimeMark runtime={runtimeId} /><strong>{name}</strong><select aria-label="External coding session" value={selected} disabled={busy}
       onChange={event => setSelected(event.target.value)}><option value="">New isolated session</option>{sessions.map(row =>
       <option key={row.id} value={row.id}>{new Date(row.created_at * 1000).toLocaleString()} · {row.id.slice(0, 7)}</option>)}</select></header>
     {error ? <p role="alert" className="ec-notice">{error}</p> : null}
+    {runtimeId !== "acp" ? <p className="ec-account-line">{signedIn ? `Signed in${planLabel(account) ? ` · ${planLabel(account)}` : ""} · ${name} uses its own harness and your plan.`
+      : `${name} isn't signed in. Sign in with ${name}'s own login, then send your task.`}
+      {!signedIn ? <button className="es-btn es-btn-sm" disabled={busy} onClick={() => void action(async () => {
+        const result = await request<{ url?: string }>(`${apiBase}/echo-code/runtimes/${runtimeId}/login`, {});
+        if (result.url) openLogin(result.url);
+        onAccountChanged();
+      })}>Sign in to {name}</button> : null}</p> : null}
+    {loginUrl && !signedIn ? <a href={loginUrl} target="_blank" rel="noopener noreferrer" onClick={event => {
+      if (!isDesktopRuntime()) return;
+      event.preventDefault();
+      void openDesktopExternalUrl(loginUrl);
+    }}>Continue official {name} sign-in ↗</a> : null}
     {!selected ? <div className="ec-runtime-setup">
-      <p>Start in a separate Git worktree from committed HEAD. Your current checkout and local changes stay where they are.</p>
+      <p>{name} works in a separate Git worktree from committed HEAD. Your current checkout and local changes stay where they are.</p>
       {runtimeId === "acp" ? <><label>ACP executable<input value={executable} onChange={event => setExecutable(event.target.value)} placeholder="Absolute path to a native executable" /></label>
         <label>Arguments (JSON array)<input value={args} onChange={event => setArgs(event.target.value)} /></label>
         <small>ACP v1 over stdio. Authenticate the agent in its own terminal first. Filesystem and terminal client capabilities are not exposed.</small></> : null}
-      {runtimeId === "claude_code" ? <small>Requires the optional official Claude Agent SDK and a separate Anthropic API key. Subscription login is not offered.</small> : null}
-      {runtimeId === "claude_cli" ? <small>Runs your installed Claude Code with your own sign-in and plan. Claude Code keeps its tools; Echo asks you before any action Claude Code would ask about. Edits stay in this worktree.</small> : null}
+      {runtimeId === "claude_cli" ? <small>Runs your installed Claude Code with your own sign-in and plan. Claude Code keeps its tools; Echo asks you before any action Claude Code would ask about. Edits stay in the worktree.</small> : null}
       <label className="ec-check"><input type="checkbox" checked={acknowledge} onChange={event => setAcknowledge(event.target.checked)} />
-        I trust this executable and project. The harness runs tools as my OS account; worktrees do not sandbox it. Command approvals may grant access beyond the worktree.</label>
+        I trust {name} with this project. It runs tools as my Windows account; worktrees don't sandbox it, and approved commands can reach beyond the worktree. Remembered for this project.</label>
       <label className="ec-check"><input type="checkbox" checked={dirty} onChange={event => setDirty(event.target.checked)} />Start from committed HEAD even if my source checkout has local changes.</label>
       <button className="es-btn es-btn-primary" disabled={busy || !canStart || !acknowledge} onClick={() => void create()}>Create isolated session</button>
     </div> : <>
@@ -145,24 +190,13 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
         {session?.native_id ? <small title={session.native_id}>Session {session.native_id.slice(0, 12)}</small> : null}</div>
       <p className="ec-worktree-path">{session?.worktree}</p>
       {!session?.connected ? <div className="ec-connect">
-        {runtimeId === "claude_code" ? <label>Anthropic API key (this connection only)<input type="password" autoComplete="off" value={apiKey}
-          onChange={event => setApiKey(event.target.value)} placeholder="Separate Claude harness key" /></label> : null}
-        <button className="es-btn" disabled={busy || !session || session.state === "rolled_back"} onClick={() => void action(async () => {
-          await request(`${base}/connect`, { api_key: apiKey }); setApiKey("");
-        })}>Connect {name}</button>
-        {runtimeId === "claude_cli" ? <button className="es-btn" disabled={busy} onClick={() => void action(() => request(`${apiBase}/echo-code/runtimes/claude_cli/login`, {}))}
-          title="Opens Claude Code's own sign-in in a separate window">Sign in to Claude Code</button> : null}
+        <button className="es-btn" disabled={busy || !session || session.state === "rolled_back"} onClick={() => void action(() => request(`${base}/connect`, {}))}>Connect {name}</button>
       </div> : <div className="ec-session-actions">
         {runtimeId === "codex" && !session.account.connected ? <button className="es-btn" disabled={busy} onClick={() => void action(async () => {
-          const result = await request<{ url: string }>(`${base}/login`, {}); setLoginUrl(result.url);
-        })}>Sign into Codex</button> : null}
+          const result = await request<{ url: string }>(`${base}/login`, {}); openLogin(result.url);
+        })}>Sign in to Codex</button> : null}
         <button className="es-btn" disabled={busy} onClick={() => void action(() => request(`${base}/stop`, {}))}>Stop runtime</button>
       </div>}
-      {loginUrl && !session?.account.connected ? <a href={loginUrl} target="_blank" rel="noopener noreferrer" onClick={event => {
-        if (!isDesktopRuntime()) return;
-        event.preventDefault();
-        void openDesktopExternalUrl(loginUrl);
-      }}>Continue official Codex sign-in ↗</a> : null}
       {session?.state === "rolled_back" ? <p>Files were restored. Start a new session; the original agent history is retained and cannot be resumed against restored files.</p> : null}
       {session?.approvals.map(approval => <div className="ec-approval" key={approval.id} role="group" aria-label="Runtime permission request">
         <strong>{name} requests permission</strong><small>{approval.kind}</small><pre>{JSON.stringify(approval.details, null, 2)}</pre>

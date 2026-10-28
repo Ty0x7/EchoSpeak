@@ -96,7 +96,7 @@ const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
   voice: "voice whisper speech to text microphone wake word read aloud piper windows speech elevenlabs drama gguf audio.cpp local download tts stt",
   search: "web search brave tavily searxng duckduckgo timeout results blocked sites sports odds live data",
   memory: "memory documents embeddings recall remember conversations learning lessons reviews reflections experience playbook",
-  automations: "routines heartbeat schedule check-in prompt webhooks signed post",
+  automations: "routines heartbeat schedule check-in check in proactive notify notices quiet hours webhooks signed post",
   channels: "discord telegram twitter x whatsapp email imap smtp tls port trusted users roles changelog",
   advanced: "lm studio only traces opentelemetry folders skills workspaces artifacts companion avatar memories obsidian documents rerank upload",
   connections: "connections integrations mcp servers sign-ins a2a agent-to-agent other agents remote skills reachable apps",
@@ -1397,21 +1397,59 @@ function AutomationsSection({ s, save, apiBase, agents }: { s: SettingsMap; save
   return (
     <>
       <RoutinesGroup apiBase={apiBase} agents={agents} />
-      <Group title="Heartbeat" description="A periodic check-in where Echo looks at your todos, projects, and activity and only speaks up if something matters.">
-        <Row label="Enable heartbeat">
-          <Toggle checked={asBool(s.heartbeat_enabled)} onChange={(v) => save({ heartbeat_enabled: v })} label="Enable heartbeat" />
-        </Row>
-        <Row label="Check every" disabled={!asBool(s.heartbeat_enabled)}>
-          <Select value={String(s.heartbeat_interval || 30)} onChange={(v) => save({ heartbeat_interval: Number(v) })} options={[15, 30, 60, 120, 240].map((n) => ({ value: String(n), label: n < 60 ? `${n} minutes` : `${n / 60} hour${n > 60 ? "s" : ""}` }))} />
-        </Row>
-        <Row label="What it asks" help="Blank uses Echo's default check-in." disabled={!asBool(s.heartbeat_enabled)} stack>
-          <TextField wide value={s.heartbeat_prompt || ""} onCommit={(v) => save({ heartbeat_prompt: v })} />
-        </Row>
-        <Row label="Also send to" disabled={!asBool(s.heartbeat_enabled)}>
-          <ChannelPicks value={asList(s.heartbeat_channels).filter((c) => c !== "web")} onChange={(v) => save({ heartbeat_channels: ["web", ...v] })} />
-        </Row>
-      </Group>
+      <EchoChecksIn s={s} save={save} />
     </>
+  );
+}
+
+const HOURS = Array.from({ length: 24 }, (_, hour) => ({ value: String(hour), label: new Date(2000, 0, 1, hour).toLocaleTimeString([], { hour: "numeric" }) }));
+
+/** Settings › Automations: Echo reaching out on its own (agent/checkins.py, agent/heartbeat.py). */
+export function checkInMode(s: SettingsMap): "off" | "important" | "friendly" {
+  if (asBool(s.heartbeat_enabled)) return "friendly";
+  const mode = String(s.checkin_mode || "important");
+  return mode === "off" ? "off" : "important";
+}
+
+function EchoChecksIn({ s, save }: { s: SettingsMap; save: Save }) {
+  const mode = checkInMode(s);
+  const interval = Number(s.heartbeat_interval || 240);
+  const intervals = [...new Set([60, 120, 240, 480, 1440, interval])].sort((a, b) => a - b);
+  return (
+    <Group title="Echo checks in" description="Echo can come to you: about approvals waiting, tasks that stopped or failed, reminders coming up, apps that need you to sign in again and model or API errors. It posts in the “Check-ins with Echo” chat, where you can reply, and as a notification.">
+      <Row label="Check in with me">
+        <Segmented
+          value={mode}
+          onChange={(v) => save({ checkin_mode: v, heartbeat_enabled: v === "friendly" })}
+          options={[
+            { value: "off", label: "Off" },
+            { value: "important", label: "What needs me", hint: "No model use" },
+            { value: "friendly", label: "Also friendly check-ins" },
+          ]}
+        />
+      </Row>
+      {mode === "friendly" ? (
+        <>
+          <Row label="Friendly check-in every" help="Echo writes a short note from what it knows, or asks what you're up to. It stays quiet when there's nothing worth saying and never interrupts while you're chatting. Each one is a model call.">
+            <Select value={String(interval)} onChange={(v) => save({ heartbeat_interval: Number(v) })}
+              options={intervals.map((n) => ({ value: String(n), label: n < 60 ? `${n} minutes` : n === 1440 ? "Once a day" : `${n / 60} hour${n > 60 ? "s" : ""}` }))} />
+          </Row>
+          <Row label="What Echo asks itself" help="Blank uses Echo's default check-in." stack>
+            <TextField wide value={s.heartbeat_prompt || ""} onCommit={(v) => save({ heartbeat_prompt: v })} />
+          </Row>
+        </>
+      ) : null}
+      <Row label="Quiet hours" help="No check-ins or notices between these times. Anything new waits until they end." disabled={mode === "off"}>
+        <span className="st-picks">
+          <Select value={String(s.checkin_quiet_start ?? 22)} onChange={(v) => save({ checkin_quiet_start: Number(v) })} options={HOURS} />
+          <span className="st-muted">to</span>
+          <Select value={String(s.checkin_quiet_end ?? 8)} onChange={(v) => save({ checkin_quiet_end: Number(v) })} options={HOURS} />
+        </span>
+      </Row>
+      <Row label="Also send to" disabled={mode === "off"}>
+        <ChannelPicks value={asList(s.heartbeat_channels).filter((c) => c !== "web")} onChange={(v) => save({ heartbeat_channels: ["web", ...v] })} />
+      </Row>
+    </Group>
   );
 }
 

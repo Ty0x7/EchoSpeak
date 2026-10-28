@@ -1,6 +1,24 @@
 # Changes
 
-## v11.10.9 — Your Codex and Claude plans in Echo Code (source; not yet built)
+## v11.10.10 — Plans for code, APIs for chat, and an Echo that checks in (source; not yet built)
+
+* Echo Code remembers each coding agent's sign-in, plan and models, so Codex and Claude Code show as signed in, with every model the plan offers, before any session connects. Sending creates and connects the isolated session automatically.
+* Plans for code, APIs for chat:
+  * Echo Code runs ChatGPT models in Codex and Claude in Claude Code with your plan.
+  * The backend refuses API-key models in Echo Code.
+  * The Claude Agent (SDK + API key) runtime is removed.
+  * Chat's picker adds ChatGPT and Claude by API key, with an inline key panel.
+* Settings › Connections › Add apps:
+  * One-click, reviewed connect with logos.
+  * Hosted sign-in works, including Notion, Linear and Atlassian.
+  * 10 new official apps: Todoist, Zapier, Airtable, Canva, monday.com, Sentry, Vercel, Supabase, Hugging Face and Context7.
+* Echo checks in:
+  * Model-free notices about what needs you (approvals, stuck or failed tasks, apps to sign in to, signed-out coding agents, model or API errors) in a chat you can reply to.
+  * Optional friendly check-ins. The heartbeat switch now actually starts.
+* The Autonomous label is white. Release notes are read as UTF-8, so update text keeps its characters.
+* See [release notes](docs/releases/v11.10.10.md).
+
+## v11.10.9 — Your Codex and Claude plans in Echo Code — 2026-10-27
 
 * Codex connects again: Echo finds the CLI inside the Codex desktop app (and on PATH or a path you set) instead of PATH only.
 * New Claude Code runtime: your installed, unmodified Claude Code with your own sign-in and plan.
@@ -13,10 +31,10 @@
   * Learning moved to Memory.
   * Connections has its own page.
   * Webhooks moved to Automations.
-* Includes 11.10.8, which was not published on its own.
+* Includes 11.10.8.
 * See [release notes](docs/releases/v11.10.9.md) and the [Echo Code record](docs/research/echo-code.md#11109-codex-you-can-connect-and-claude-code-with-your-own-plan).
 
-## v11.10.8 — Reliability hotfix (source; shipped in 11.10.9)
+## v11.10.8 — Reliability hotfix — 2026-10-27
 
 * Truthful outcomes:
   * A refused argument is a plain failure, not an unknown effect.

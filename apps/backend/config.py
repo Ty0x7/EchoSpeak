@@ -1102,6 +1102,12 @@ class Config:
         self.webhook_secret = os.getenv("WEBHOOK_SECRET", "").strip()
         self.webhook_secret_path = os.getenv("WEBHOOK_SECRET_PATH", str(WEBHOOK_SECRET_PATH)).strip() or str(WEBHOOK_SECRET_PATH)
 
+        # --- Echo checks in (agent/checkins.py) ---
+        # "important" (default): model-free notices about things that need the owner. "friendly" adds
+        # the heartbeat's periodic check-in. "off": neither. Quiet hours are local, start to end.
+        self.checkin_mode = os.getenv("CHECKIN_MODE", "important").strip().lower() or "important"
+        self.checkin_quiet_start = int(os.getenv("CHECKIN_QUIET_START", "22") or 22)
+        self.checkin_quiet_end = int(os.getenv("CHECKIN_QUIET_END", "8") or 8)
         # --- Heartbeat (v5.4.0 - Proactive Mode) ---
         self.heartbeat_enabled = os.getenv("HEARTBEAT_ENABLED", "false").lower() == "true"
         self.heartbeat_interval = int(os.getenv("HEARTBEAT_INTERVAL", "30") or 30)
@@ -1109,14 +1115,15 @@ class Config:
         self.heartbeat_session_id = os.getenv("HEARTBEAT_SESSION_ID", "").strip()
         self.heartbeat_prompt = os.getenv(
             "HEARTBEAT_PROMPT",
-            "You are Echo, running a system pulse check. Review the SYSTEM PULSE data above and decide if anything is worth reporting. "
-            "Things worth reporting: high-priority todos that are stale or overdue, a pending tweet awaiting approval, notable new git commits the owner should know about, "
-            "interesting patterns in recent activity, or a brief status nudge if things have been quiet for a while. "
-            "Keep it short (1-3 sentences max), casual, in your normal voice. "
+            "You are Echo, checking in with the owner on your own, the way a good assistant who knows their week would. "
+            "Read the SYSTEM PULSE above and what you remember about them. Worth saying: something that needs them (an approval, a stuck "
+            "or failed task, an app to sign in to again, model errors to fix), a reminder or routine coming up, a follow-up on something "
+            "they told you they were working on, or, if it's been quiet, simply asking how they're doing or what they're up to. "
+            "Offer to help with what you mention. Keep it short (1-3 sentences), warm and casual, in your normal voice. "
             "IMPORTANT: Reply with ONLY your message text. Do NOT use tools. Do NOT plan actions. Do NOT suggest posting to Discord or any channel. "
             "Do NOT include 'Plan:', bullet lists of steps, or 'confirm'/'cancel' prompts. "
             "Message delivery is handled automatically - just write what you want to say. "
-            "Do not fabricate details. Only reference data from the SYSTEM PULSE. "
+            "Do not fabricate details. Only reference the SYSTEM PULSE and what you actually remember. "
             "If there is genuinely nothing interesting or actionable, reply with exactly: NO_HEARTBEAT",
         ).strip()
         raw_heartbeat_channels = os.getenv("HEARTBEAT_CHANNELS", "web")
@@ -1490,6 +1497,9 @@ class Config:
             "heartbeat_interval",
             "heartbeat_prompt",
             "heartbeat_channels",
+            "checkin_mode",
+            "checkin_quiet_start",
+            "checkin_quiet_end",
             # Email
             "allow_email",
             "email_imap_host",
