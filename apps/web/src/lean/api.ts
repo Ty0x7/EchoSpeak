@@ -169,6 +169,9 @@ export const leanApi = (apiBase: string) => ({
   async pauseLearning(agentId: string, paused: boolean): Promise<void> {
     await json(await fetch(`${apiBase}/lean/learning/agents/${encodeURIComponent(agentId)}/pause`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ paused }) }));
   },
+  async resetLearning(): Promise<void> {
+    await json(await fetch(`${apiBase}/lean/learning/reset`, { method: "POST" }));
+  },
   async reflectNow(): Promise<{ pending: number }> {
     return json(await fetch(`${apiBase}/lean/learning/reflect`, { method: "POST" }));
   },

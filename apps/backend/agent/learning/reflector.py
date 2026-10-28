@@ -129,9 +129,30 @@ def prompt_for(episode: Episode, contrast: Optional[Episode]) -> str:
         "- is never about permissions, approvals, safety rules, secrets, or changing tests or checks;\n"
         "- has a title under 80 characters and text under 300 characters.\n"
         "If there is nothing general to learn, return no lessons.\n"
-        'Answer with JSON only: {"lessons": [{"title": "...", "text": "...", "kind": "do" or "avoid"}]}'
+        + ('- set "scope" to "project" only when it is true of this project alone (its tooling or conventions); '
+           'otherwise "general".\n' if episode.project_id else "")
+        + 'Answer with JSON only: {"lessons": [{"title": "...", "text": "...", "kind": "do" or "avoid"'
+        + (', "scope": "general" or "project"' if episode.project_id else "") + "}]}"
     )
     return "\n\n".join(parts)
+
+
+def priority(episode: Episode) -> int:
+    """Which queued reviews teach most, first (lower is sooner): a bounded daily budget goes where it counts.
+
+    Checks that missed something and contradicted claims first, then recoveries (a strategy that turned
+    a failing check into a passing one), then the owner's word, then other checked work.
+    """
+    cause = episode.effective_cause
+    if cause in {"verifier_gap", "false_success"}:
+        return 0
+    if (episode.verification or {}).get("recovered"):
+        return 1
+    if episode.feedback:
+        return 2
+    if cause == "effective":
+        return 3
+    return 4
 
 
 def _default_client(episode: Episode) -> Any:
@@ -179,10 +200,14 @@ def run_pending(*, limit: int = 3, cap: Optional[int] = None,
     factory = client_factory or _default_client
     paused = store.paused_agents()
     done: list[dict[str, Any]] = []
-    for row in store.pending_reflections(limit=limit * 3):
+    rows = store.pending_reflections(limit=limit * 6)
+    episodes = {row["episode_id"]: store.get_episode(row["episode_id"]) for row in rows}
+    rows.sort(key=lambda row: (priority(episodes[row["episode_id"]]) if episodes[row["episode_id"]] else 9,
+                               float(row["created_at"])))
+    for row in rows:
         if len(done) >= limit:
             break
-        episode = store.get_episode(row["episode_id"])
+        episode = episodes[row["episode_id"]]
         if episode is None:
             store.finish_reflection(row["episode_id"], "skipped", "episode no longer exists")
             continue

@@ -7,11 +7,23 @@ Same rule as agent/memory_curator.py. A proposal is refused when it:
 - reads like an injected instruction ("ignore previous instructions");
 - is too short to be a strategy or too long to be one.
 
-What passes is stored as advisory text, never as a setting. It becomes
-"unproven" (probation) when it came from a trusted, untampered episode,
-and waits for the owner's review otherwise: when the request read outside
-content, changed tests or EchoSpeak's own files, or mentions sending things
-out. Near-duplicates join the existing lesson as more evidence instead.
+A fact about the user ("the user prefers…") is refused too: that is personal
+memory, kept by agent/memory.py, not a strategy.
+
+What passes is stored as advisory text, never as a setting, and starts
+"unproven" (probation): agents read it, and the results decide whether it
+stays. Learning doesn't wait on the owner for routine lessons. Curation is
+risk-based:
+- From a request that read outside content: admitted, but marked untrusted
+  (never shared with other agents, retired faster) and only when it also
+  passes a stricter check (no site or domain names, nothing about which
+  sources to trust). The reflector only ever sees the tool log, never the
+  page text, so a page can't write a lesson; this is defence in depth.
+- Still waits for the owner: lessons from a task that changed tests or
+  EchoSpeak's own files, lessons about sending or posting things, and
+  untrusted lessons that fail the stricter check. Unreviewed ones are set
+  aside after 30 days (playbook.retire_stale).
+Near-duplicates join the existing lesson as more evidence instead.
 """
 
 from __future__ import annotations
@@ -64,6 +76,27 @@ _EXTERNAL_WORDS = re.compile(
 )
 
 
+# Facts about the user belong in personal memory, not in behavioural lessons.
+_PERSONAL = re.compile(
+    r"(?i)\b(the\s+)?(user|owner)('s)?\s+(name|birthday|age|address|e-?mail|phone|family|wife|husband|partner|"
+    r"kids?|children|job|employer|salary|health|diet)\b|"
+    r"\b(the\s+)?(user|owner)\s+(likes|loves|hates|dislikes|prefers|wants|lives|works\s+at|is\s+(a|an|from|allergic|married))\b"
+)
+# Untrusted origin: nothing that steers which sources to believe, and no site names at all.
+_SITE_NAME = re.compile(r"(?i)\b[a-z0-9-]+\.(com|net|org|io|dev|ai|co|xyz|ru|cn|gov|edu|info|app|me|uk|ca|de)\b")
+_SOURCE_STEERING = re.compile(r"(?i)\b(trust\w*|believe|credible|reliable\s+source|only\s+use|always\s+use|rely\s+on|prefer\s+(the\s+)?(site|source|page))\b")
+
+
+def untrusted_risk(title: str, text: str) -> str:
+    """Why a lesson learned while reading outside content still needs the owner, or ''."""
+    body = f"{title} {text}"
+    if _SITE_NAME.search(body):
+        return "names a site, learned while reading outside content"
+    if _SOURCE_STEERING.search(body):
+        return "says which sources to trust, learned while reading outside content"
+    return ""
+
+
 # Lessons must transfer: overly specific heuristics are why self-generated skills made agents
 # worse in SkillsBench (-1.3 pp, via the 2026 skills SoK). A named file is the clearest sign.
 _FILE_NAME = re.compile(r"(?i)\b[\w-]+\.(py|js|jsx|ts|tsx|mjs|json|csv|md|txt|html|css|rs|go|java|sh|ps1|ya?ml|toml|ini|log|xlsx?|docx?|pdf)\b")
@@ -94,6 +127,8 @@ def vet(title: str, text: str) -> str:
         return "too specific: names a file"
     if _INJECTION.search(body):
         return "reads like an injected instruction"
+    if _PERSONAL.search(body):
+        return "a fact about the user: that belongs in memory, not in a lesson"
     match = _FORBIDDEN.search(body)
     if match:
         return f"about permissions, safety or secrets (\"{match.group(0)[:40]}\")"
@@ -111,7 +146,9 @@ def _clean(value: Any, limit: int) -> str:
 def _review_reason(episode: Episode, title: str, text: str) -> str:
     """Why a lesson must wait for the owner before any agent reads it, or ''."""
     if not episode.trusted:
-        return "learned while reading outside content (" + ", ".join(episode.taint[:3]) + ")"
+        risk = untrusted_risk(title, text)
+        if risk:
+            return risk + " (" + ", ".join(episode.taint[:3]) + ")"
     unexpected = [t for t in episode.tamper if not t.get("expected")]
     if unexpected:
         return f"learned from a task that changed {unexpected[0].get('what', 'protected files')}"
@@ -135,11 +172,14 @@ def admit(episode: Episode, proposals: list[dict[str, Any]]) -> dict[str, list[s
         title = _clean(raw.get("title"), TITLE_RANGE[1])
         text = _clean(raw.get("text") or raw.get("strategy"), TEXT_RANGE[1])
         kind = "avoid" if str(raw.get("kind") or "").strip().lower() == "avoid" else "do"
+        # "project": true only for this project (its tooling, its conventions); otherwise a general strategy.
+        project = episode.project_id if str(raw.get("scope") or "").strip().lower() == "project" else ""
         problem = vet(title, text)
         if problem:
             out["refused"].append(problem)
             continue
-        twin = next((lesson for lesson in existing if same_lesson(f"{lesson.title} {lesson.text}", f"{title} {text}")), None)
+        twin = next((lesson for lesson in existing if lesson.project_id == project
+                     and same_lesson(f"{lesson.title} {lesson.text}", f"{title} {text}")), None)
         if twin is not None:
             if episode.id not in twin.source_episodes:
                 before = Lesson.from_dict(twin.to_dict())
@@ -163,7 +203,10 @@ def admit(episode: Episode, proposals: list[dict[str, Any]]) -> dict[str, list[s
             trusted=episode.trusted,
             source_episodes=[episode.id],
             level=episode.level,
-            note=("waiting for your review: " + review) if review else "new: unproven until it helps in checked tasks",
+            project_id=project,
+            note=("waiting for review: " + review) if review
+            else ("new, learned while reading outside content: unproven, never shared, retired quickly if it fails"
+                  if not episode.trusted else "new: unproven until it helps in checked tasks"),
         )
         store.add_lesson(lesson, actor="curator", reason=lesson.note)
         existing.append(lesson)

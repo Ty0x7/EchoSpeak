@@ -363,6 +363,9 @@
 
 /* Advanced: page switcher and memory rows */
 .st-advanced-pages { margin: 0 0 18px; }
+/* Learning diagnostics, shown inside Settings rather than as a page of its own. */
+.st-learning .es-page { height: auto; overflow: visible; padding: 0; }
+.st-learning .es-page-head { margin: 0 0 16px; max-width: none; }
 .st-memory-text {
   display: block;
   width: 100%;

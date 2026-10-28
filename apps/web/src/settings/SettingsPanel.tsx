@@ -329,7 +329,7 @@ function SectionBody({
       return (
         <>
           <MemorySection s={s} save={save} openAdvanced={openAdvanced} />
-          <LearningSettings s={s} save={save} />
+          <LearningSettings s={s} save={save} openAdvanced={openAdvanced} />
         </>
       );
     case "automations":
@@ -561,26 +561,15 @@ function AgentBehavior({ s, save }: { s: SettingsMap; save: Save }) {
   );
 }
 
-/** Settings › Memory: lessons from experience. */
-function LearningSettings({ s, save }: { s: SettingsMap; save: Save }) {
+/** Settings › Memory: learning runs on its own; this is the off switch and the way to its diagnostics. */
+function LearningSettings({ s, save, openAdvanced }: { s: SettingsMap; save: Save; openAdvanced(page: AdvancedPage): void }) {
   return (
-    <Group title="Learning from experience" description="Agents keep short lessons from their own checked work and read them before similar tasks. Lessons are advice only: they never change permissions, approvals or tools. Review them on the Learning page.">
-      <Row label="Learn from experience" help="Off: agents don't record new experience or read lessons. What they already learned is kept.">
+    <Group title="Learning from experience" description="Echo learns on its own from checked work in Chat, Agents and Code: what worked, what didn't, and your corrections. Lessons are advice only; they never change permissions, approvals or tools, and they're kept apart from memory.">
+      <Row label="Learn from experience" help="Off: nothing new is recorded and no lessons are used. What was already learned is kept; reset it in diagnostics.">
         <Toggle checked={s.learning_enabled === undefined ? true : asBool(s.learning_enabled)} onChange={(v) => save({ learning_enabled: v })} label="Learn from experience" />
       </Row>
-      <Row label="Reviews per day" help="Each review is one short call to the agent's own model, made only when no chat is running.">
-        <Select
-          value={String(s.learning_reflection_daily_cap ?? 30)}
-          onChange={(v) => save({ learning_reflection_daily_cap: Number(v) })}
-          options={[0, 10, 30, 60, 120].map((n) => ({ value: String(n), label: n === 0 ? "None (grade only)" : `${n} a day` }))}
-        />
-      </Row>
-      <Row label="Lessons per task" help="How many lessons an agent reads before it starts a task.">
-        <Select
-          value={String(s.learning_playbook_size ?? 3)}
-          onChange={(v) => save({ learning_playbook_size: Number(v) })}
-          options={[1, 3, 5, 8].map((n) => ({ value: String(n), label: n === 1 ? "1 lesson" : `${n} lessons` }))}
-        />
+      <Row label="Diagnostics" help="What was learned and how it's doing, the rare lessons that need your review, and reset.">
+        <button type="button" className="es-btn es-btn-sm" onClick={() => openAdvanced("learning")}>Open learning diagnostics</button>
       </Row>
     </Group>
   );

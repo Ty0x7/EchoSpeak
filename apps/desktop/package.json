@@ -1,7 +1,7 @@
 {
   "name": "echospeak-desktop",
   "private": true,
-  "version": "11.11.5",
+  "version": "11.11.6",
   "type": "module",
   "scripts": {
     "tauri": "tauri",

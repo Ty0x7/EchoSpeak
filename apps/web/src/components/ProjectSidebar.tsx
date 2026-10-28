@@ -57,7 +57,8 @@ type SidebarProps = {
   codeTree?: React.ReactNode;
 };
 
-export type SidebarPage = "chat" | "code" | "agents" | "groups" | "projects" | "artifacts" | "routines" | "creations" | "learning";
+// Learning isn't a page: it runs on its own; its diagnostics are in Settings › Advanced.
+export type SidebarPage = "chat" | "code" | "agents" | "groups" | "projects" | "artifacts" | "routines" | "creations";
 
 const SECTION_TITLES: Record<SectionKey, string> = { agents: "Agents", chats: "Chats", projects: "Projects" };
 /** In Agents the second list holds groups and conversations agents started (routines, check-ins, channels). */
@@ -70,7 +71,6 @@ const NAV_ITEMS: { id: Exclude<SidebarPage, "chat" | "code" | "agents">; label: 
   { id: "artifacts", label: "Artifacts", hint: "Apps, documents and diagrams your agents made" },
   { id: "routines", label: "Routines", hint: "Tasks that run on a schedule" },
   { id: "creations", label: "Creations", hint: "Your generated images and videos" },
-  { id: "learning", label: "Learning", hint: "What your agents learned from checked work" },
 ];
 
 function NavIcon({ name }: { name: Exclude<SidebarPage, "chat"> }) {
@@ -80,8 +80,6 @@ function NavIcon({ name }: { name: Exclude<SidebarPage, "chat"> }) {
       return <svg {...common}><path d="m8 7-5 5 5 5m8-10 5 5-5 5M14 4l-4 16" /></svg>;
     case "agents":
       return <svg {...common}><circle cx="9" cy="8.5" r="3.2" /><path d="M3.5 19c.7-3 2.9-4.8 5.5-4.8s4.8 1.8 5.5 4.8" /><path d="M15 5.5a3 3 0 0 1 0 6M17 14.5c1.9.6 3 2.2 3.4 4.5" /></svg>;
-    case "learning":
-      return <svg {...common}><path d="M3 9l9-5 9 5-9 5z" /><path d="M7 11.2V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.8M21 9v6" /></svg>;
     case "creations":
       return <svg {...common}><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8" cy="8" r="1.5" /><path d="m3 17 6-6 5 5 3-3 4 4" /></svg>;
     case "groups":

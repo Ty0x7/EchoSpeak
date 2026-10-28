@@ -27,6 +27,8 @@ describe("Chat, Agents and Code", () => {
     expect(environmentForPage("groups")).toBe("agents");
     expect(environmentForPage("artifacts")).toBe("chat");
     expect(environmentForPage("code")).toBe("code");
+    // Learning is a harness mechanic, not a page: its diagnostics live in Settings › Advanced.
+    expect((pages as string[]).includes("learning")).toBe(false);
   });
 
   it("remembers the environment, and survives broken storage", () => {

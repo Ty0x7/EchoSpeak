@@ -1,7 +1,10 @@
 """Learning from verified experience (EchoSpeak 11.0).
 
 Agents get better at their work without retraining the model and without
-rewriting their own rules. The loop, end to end:
+rewriting their own rules. It runs on its own as a consequence of normal work in
+Chat, Agents and Code (one system, in the shared Lean harness), with whichever model
+the user picked: nothing has to be approved for routine learning to happen.
+The loop, end to end:
 
     finished request -> episodes.py   grade what each agent actually did (V0..V4), spot tampering
                      -> reliability.py count how each tool and search provider is doing
@@ -9,7 +12,8 @@ rewriting their own rules. The loop, end to end:
                      -> reflector.py   (background, agent's own model) propose lessons
                      -> curator.py     code decides what is kept, and what waits for the owner
                      -> playbook.py    lessons read before similar tasks; promoted or retired by results
-    owner            -> feedback here  Worked / Didn't work (V4), corrects the counts
+    owner            -> feedback here  Worked / Didn't work (V4), corrects the counts;
+                                       "that worked" / "that's wrong" in the next message counts too (implicit)
 
 What learning can write: advisory lesson text and statistics, in its own
 database (store.py). What it can never write: permissions, approvals,
@@ -47,8 +51,8 @@ from agent.learning.store import (
 __all__ = [
     "ACTIVE_STATUSES", "LESSON_STATUSES", "Episode", "ExperienceStore", "Lesson", "TurnLearning",
     "get_experience_store", "set_experience_store", "record_request", "prepare_turn", "track_record",
-    "record_feedback", "worker_tick", "lesson_action", "edit_lesson", "rollback_lesson", "delete_lesson",
-    "set_paused", "status",
+    "record_feedback", "implicit_feedback", "worker_tick", "lesson_action", "edit_lesson", "rollback_lesson",
+    "delete_lesson", "set_paused", "status", "reset",
 ]
 
 _MAINTENANCE_EVERY = 3600.0
@@ -62,6 +66,7 @@ class TurnLearning:
     section: str = ""  # the "Lessons from your past work" prompt section
     lesson_ids: list[str] = field(default_factory=list)
     withheld_ids: list[str] = field(default_factory=list)  # matched but held back: the control group
+    shared_ids: list[str] = field(default_factory=list)  # proven lessons from another agent (transfer)
     notes: list[str] = field(default_factory=list)  # tool reliability notes
 
 
@@ -73,8 +78,12 @@ def _mode() -> str:
 
 # ── during a request ────────────────────────────────────────────────────
 
-def prepare_turn(agent_id: str, goal: str, tool_names: Iterable[str]) -> TurnLearning:
-    """Lessons and tool notes for an agent about to work on ``goal``."""
+def prepare_turn(agent_id: str, goal: str, tool_names: Iterable[str], *, limit: Optional[int] = None,
+                 project_id: str = "") -> TurnLearning:
+    """Lessons and tool notes for an agent about to work on ``goal``.
+
+    ``limit`` lowers the number of lessons (Chat on a small model); ``project_id`` scopes project lessons.
+    """
     try:
         from agent.lean import settings
         from agent.learning import playbook, reliability
@@ -82,12 +91,15 @@ def prepare_turn(agent_id: str, goal: str, tool_names: Iterable[str]) -> TurnLea
         mode = _mode()
         if mode == "off" or agent_id in get_experience_store().paused_agents():
             return TurnLearning()
-        lessons = playbook.select(agent_id, goal, settings.playbook_size())
+        size = settings.playbook_size() if limit is None else max(0, min(limit, settings.playbook_size()))
+        lessons = playbook.select(agent_id, goal, size, project_id=project_id)
+        shared = playbook.transferable(agent_id, goal, project_id, taken=lessons) if size and len(lessons) < size else []
         if mode == "control":
-            return TurnLearning(section=playbook.control_section(lessons))
+            return TurnLearning(section=playbook.control_section(lessons + shared))
         used, withheld = playbook.holdout(lessons)
-        return TurnLearning(section=playbook.section(used), lesson_ids=[l.id for l in used],
-                            withheld_ids=[l.id for l in withheld], notes=reliability.tool_notes(tool_names))
+        return TurnLearning(section=playbook.section(used, shared), lesson_ids=[l.id for l in used],
+                            withheld_ids=[l.id for l in withheld], shared_ids=[l.id for l in shared],
+                            notes=reliability.tool_notes(tool_names))
     except Exception:
         logger.warning("Learning: could not prepare lessons", exc_info=True)
         return TurnLearning()
@@ -126,6 +138,9 @@ def record_request(
     lead: str = "",
     routed: Optional[dict[str, str]] = None,
     lessons_withheld: Optional[dict[str, list[str]]] = None,
+    lessons_shared: Optional[dict[str, list[str]]] = None,
+    environment: str = "",
+    project_id: str = "",
 ) -> list[Episode]:
     """Grade and keep a finished request. Only the owner's, never a cancelled one."""
     try:
@@ -143,6 +158,8 @@ def record_request(
                                       lead=lead, routed=routed, lessons_withheld=lessons_withheld):
             if episode.agent_id in paused:
                 continue
+            episode.environment, episode.project_id = environment, project_id
+            episode.lessons_shared = list(dict.fromkeys((lessons_shared or {}).get(episode.agent_id, [])))
             playbook.attribute(episode)
             store.add_episode(episode)
             reliability.record_episode(episode)
@@ -158,8 +175,13 @@ def record_request(
         return []
 
 
-def record_feedback(execution_id: str, value: int, note: str = "", agent_id: str = "") -> list[Episode]:
-    """The owner's Worked (+1) / Didn't work (-1) / cleared (0) on a reply."""
+def record_feedback(execution_id: str, value: int, note: str = "", agent_id: str = "",
+                    source: str = "owner") -> list[Episode]:
+    """The owner's Worked (+1) / Didn't work (-1) / cleared (0) on a reply.
+
+    ``source`` "implicit" is the same signal read from the owner's next message; it never overrides
+    what the owner said with the buttons.
+    """
     from agent.lean.policy import redact_secrets
     from agent.learning import playbook, profiles, reflector
     from agent.learning.episodes import feedback_cause
@@ -170,12 +192,15 @@ def record_feedback(execution_id: str, value: int, note: str = "", agent_id: str
     for episode in store.episodes(execution_id=execution_id, limit=20):
         if agent_id and episode.agent_id != agent_id:
             continue
+        if source == "implicit" and (episode.feedback_source == "owner" or episode.outcome == "error"):
+            continue
         previous = episode.attribution or "none"
         episode.feedback = value
         episode.feedback_note = redact_secrets(" ".join(str(note or "").split()))[:500] if value else ""
         # Reclassifies the episode (a misunderstanding, an environment problem, checks that missed something);
         # the note itself only reaches a reflection, whose lessons still have to prove themselves.
         episode.feedback_cause = feedback_cause(episode, value, episode.feedback_note)
+        episode.feedback_source = source if value else ""
         playbook.attribute(episode, previous=previous)
         store.update_episode(episode)
         if value and not reflector.skip_reason(episode):
@@ -185,6 +210,46 @@ def record_feedback(execution_id: str, value: int, note: str = "", agent_id: str
     from agent.learning import routing
     routing.forget_profiles()
     return changed
+
+
+IMPLICIT_WINDOW_SECONDS = 6 * 3600
+
+
+def implicit_feedback(session_id: str, message: str) -> list[Episode]:
+    """Read the owner's next message as feedback on the reply before it ("that worked", "that's wrong").
+
+    No model call: a short list of unambiguous phrases (episodes.implicit_signal). Applied only to the most
+    recent request in this conversation, within a few hours, and never over the owner's own button.
+    """
+    try:
+        if _mode() != "on" or not session_id:
+            return []
+        from agent.learning.episodes import implicit_signal
+
+        value = implicit_signal(message)
+        if not value:
+            return []
+        recent = get_experience_store().episodes(session_id=session_id, since=time.time() - IMPLICIT_WINDOW_SECONDS,
+                                                 limit=10, role="own")
+        if not recent:
+            return []
+        latest = recent[0].execution_id
+        if not latest:
+            return []
+        return record_feedback(latest, value, " ".join(str(message).split())[:300], source="implicit")
+    except Exception:
+        logger.debug("Learning: implicit feedback failed", exc_info=True)
+        return []
+
+
+def reset() -> None:
+    """Forget everything learned (the owner's Reset in diagnostics). Memory is a separate store, untouched."""
+    get_experience_store().reset()
+    from agent.learning import routing
+    from agent.learning.profiles import forget_cache
+
+    forget_cache()
+    routing.forget_profiles()
 
 
 def worker_tick(*, client_factory: Any = None) -> list[dict[str, Any]]:

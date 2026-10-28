@@ -16,7 +16,6 @@ import type {
 import { canApplySessionHistory, ownsStreamCleanup } from "./desktop/sessionProjection";
 import leanCss from "./lean/lean.css?inline";
 import learningCss from "./lean/learning.css?inline";
-import { LearningPage } from "./lean/LearningPage";
 import settingsCss from "./settings/settings.css?inline";
 import chatPolishCss from "./dashboard/chatPolish.css?inline";
 import workspaceCss from "./theme/workspace.css?inline";
@@ -2023,8 +2022,6 @@ export const Dashboard: React.FC<{
               />
             ) : mainPage === "creations" ? (
               <CreationsPage apiBase={apiBase} sessionId={activeThreadId} onChat={id => { setMainPage("chat"); switchThread(id); }} onEdit={asset => { setMainPage("chat"); switchThread(asset.session_id); setInput(`Edit this image using input_asset_ids ["${asset.id}"]. Keep the composition and change the lighting to soft morning light.`); }} />
-            ) : mainPage === "learning" ? (
-              <LearningPage apiBase={apiBase} />
             ) : mainPage === "artifacts" ? (
               <ArtifactsPage apiBase={apiBase} onOpen={openArtifactFromPage} />
             ) : (

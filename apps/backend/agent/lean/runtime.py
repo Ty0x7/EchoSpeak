@@ -194,6 +194,7 @@ class LeanSession:
         # For learning (agent/learning): which lessons each agent read, and which model it ran on.
         self._lessons_used: dict[str, list[str]] = {}
         self._lessons_withheld: dict[str, list[str]] = {}  # matched but held back at random (the control)
+        self._lessons_shared: dict[str, list[str]] = {}  # proven lessons from other agents (transfer)
         self._endpoints: dict[str, tuple[str, str]] = {}
         # Each agent's verification ledger for this request (agent/lean/verification.py): one per agent,
         # so a reply that continues after a handoff keeps its baseline and best result.
@@ -273,6 +274,10 @@ class LeanSession:
     def _run_locked(self, message: str, *, persona_id: str) -> dict[str, Any]:
         from agent.state import get_state_store
         coordinator = get_state_store().coordination
+        if self.caller_role == "owner" and self.source in INTERACTIVE_SOURCES:
+            # "That worked" / "that's wrong" about the last reply is feedback too (agent/learning).
+            from agent.learning import implicit_feedback
+            implicit_feedback(self.session_id, message)
         persona = self.personas.get(persona_id) if persona_id else None
         persona = persona or (self._members()[0] if self._members() else self.personas.default())
         if self.model_first:
@@ -485,6 +490,9 @@ class LeanSession:
             endpoints=dict(self._endpoints),
             lessons_used={k: list(v) for k, v in self._lessons_used.items()},
             lessons_withheld={k: list(v) for k, v in self._lessons_withheld.items()},
+            lessons_shared={k: list(v) for k, v in self._lessons_shared.items()},
+            environment=self._environment_name(),
+            project_id=self._active_project(),
             team=self._job_needs_closing(),
             cancelled=cancelled,
             lead=self._lead_id,
@@ -1116,11 +1124,15 @@ class LeanSession:
         project_brief, project_evidence = ("", "") if guest else context_for_session(self.session_id)
         # Lessons from this agent's own checked past work, and tools that keep failing lately.
         from agent.learning import TurnLearning, prepare_turn
-        learned = TurnLearning() if guest else prepare_turn(persona.id, goal, toolbox.names)
-        if learned.lesson_ids or learned.withheld_ids:
+        # Chat on a small model reads fewer lessons: its prompt budget is tight (agent/lean/chat_run.py).
+        compact_chat = chat_run is not None and chat_run.profile == "compact"
+        learned = TurnLearning() if guest else prepare_turn(persona.id, goal, toolbox.names, limit=2 if compact_chat else None,
+                                                            project_id=self._active_project())
+        if learned.lesson_ids or learned.withheld_ids or learned.shared_ids:
             with self._state_lock:
                 self._lessons_used.setdefault(persona.id, []).extend(learned.lesson_ids)
                 self._lessons_withheld.setdefault(persona.id, []).extend(learned.withheld_ids)
+                self._lessons_shared.setdefault(persona.id, []).extend(learned.shared_ids)
         # Where the repo stands (branch, ahead/behind, changes), like a coding agent's git status.
         repo_note = git_context.summary(self.project_root) if self.project_root and "terminal" in toolbox.names else ""
         if self.model_first:
@@ -1141,6 +1153,8 @@ class LeanSession:
                 profile=chat_run.profile if chat_run is not None else "full",
                 earlier_sources=chat_run_mod.earlier_sources_section(chat_run.earlier_sources) if chat_run is not None else "",
                 sizes=sections,
+                # The lessons prepare_turn counted as used are the ones Chat actually reads.
+                playbook=learned.section,
             )
             if chat_run is not None:
                 chat_run.user_message = goal
@@ -1698,6 +1712,26 @@ class LeanSession:
     def _owner_side(persona: AgentPersona) -> bool:
         """Echo and Chat both speak for the owner: account memory and past chats are theirs."""
         return persona.id in {"echo", CHAT_AGENT_ID}
+
+    def _active_project(self) -> str:
+        """The project this conversation is about, for project-scoped lessons ('' when none)."""
+        if not hasattr(self, "_project_cache"):
+            try:
+                from agent.state import get_state_store
+                self._project_cache = str(get_state_store().get_thread_state(self.session_id).active_project_id or "")
+            except Exception:
+                self._project_cache = ""
+        return self._project_cache
+
+    def _environment_name(self) -> str:
+        """chat | code | agents: where this request ran, for learning's per-environment measures."""
+        if self.model_first:
+            return "chat"
+        try:
+            from agent import environments
+            return "code" if environments.environment_of(self.session_id) == "code" else "agents"
+        except Exception:
+            return "agents"
 
     def _verifier_for(self, persona: AgentPersona) -> verification.VerificationLedger:
         """This agent's ledger for the request; resumed work starts from the one its last attempt saved."""

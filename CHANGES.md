@@ -1,5 +1,26 @@
 # Changes
 
+## v11.11.6 — Echo learns as it works (source; not yet built)
+
+* Learning is a harness mechanic across Chat, Agents and Code: one learner in `agent/learning`, wired through the shared `LeanSession` hooks.
+* **Fix:** Chat's prompt now includes the lessons `prepare_turn` counted as used. Before, they were credited but never shown, which corrupted their holdouts. Compact Chat reads at most 2.
+* Risk-based curation:
+  * Generic lessons learned while reading outside content are admitted as untrusted: never transferred, retired after 2 losses without a win.
+  * Site names, source-trust steering, outward actions and tampered work still wait.
+  * Unreviewed lessons are quarantined after 30 days.
+  * Facts about the user are refused (memory, not behaviour).
+* `learning.implicit_feedback`: "that worked" or "that's wrong" in the owner's next message is feedback on the last request (`feedback_source="implicit"`), with no model call. It never overrides the buttons.
+* Scope and transfer:
+  * Project-scoped lessons (`Lesson.project_id`; the reflector may mark `"scope": "project"`).
+  * Proven, trusted lessons can transfer to other agents for the same task kind, one per prompt. That use is counted in `shared_*`, apart from the home record, and transfer switches off after it fails.
+* Episodes record `environment` (chat, agents, code) and `project_id`. The evaluation adds `by_environment` and `transfer`. Reflections are ordered by value. `POST /lean/learning/reset` added.
+* UI:
+  * The Learning page is removed from the navigation.
+  * Settings › Memory has a single switch and a link to diagnostics.
+  * Diagnostics (the former page, with Reset learning) are in Settings › Advanced › Learning.
+  * The "reviews per day" and "lessons per task" controls are removed.
+* See [release notes](docs/releases/v11.11.6.md) and the [report](docs/research/autonomous-learning.md).
+
 ## v11.11.5 — Verified engineering: measured progress, honest completion (source; not yet built)
 
 * Echo Native (Agents and Code) measures engineering work with a verification ledger (`agent/lean/verification.py`). It's deterministic and makes no model calls; Chat, guests, read-only turns and external harnesses don't get it.

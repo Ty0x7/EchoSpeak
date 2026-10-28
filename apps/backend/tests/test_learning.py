@@ -377,19 +377,22 @@ def test_the_curator_keeps_lessons_that_protect_checks(store):
     assert result["created"] == [lesson.id] and lesson.status == "probation" and lesson.task_kind == "coding"
 
 
-def test_lessons_from_untrusted_or_tampered_work_wait_for_review(store):
+def test_lessons_from_tampered_or_outward_work_wait_and_untrusted_ones_are_admitted_with_care(store):
+    # 11.11.6: routine lessons learned while reading the web no longer wait for the owner (risk-based curation).
     text = "When a guide lists several options, compare at least two before recommending one to the user."
     curator.admit(_episode(trusted=False, taint=["safe_web_fetch"]), [{"title": "Compare options", "text": text}])
     tampered = _episode(tamper=[{"what": "tests or checks", "target": "tests/x.py", "expected": False}])
     curator.admit(tampered, [{"title": "Fix the root cause", "text": "Look for the root cause of a failing check before changing code."}])
     outward = "After drafting a reply, send it to the team chat so everyone sees the update quickly."
     curator.admit(_episode(), [{"title": "Share drafts", "text": outward}])
-    statuses = {l.title: (l.status, l.note) for l in store.lessons()}
-    assert all(status == "pending_review" for status, _ in statuses.values())
+    statuses = {l.title: (l.status, l.note, l.trusted) for l in store.lessons()}
+    assert statuses["Compare options"][0] == "probation" and not statuses["Compare options"][2]
     assert "outside content" in statuses["Compare options"][1]
+    assert statuses["Fix the root cause"][0] == statuses["Share drafts"][0] == "pending_review"
     assert "sending or posting" in statuses["Share drafts"][1]
     # Waiting lessons are never read by an agent.
-    assert playbook.select("echo", "compare options and recommend one", 5) == []
+    assert [l.title for l in playbook.select("echo", "compare options and recommend one", 5)] == ["Compare options"]
+    assert playbook.select("echo", "share drafts with the team chat", 5) == []
 
 
 def test_near_duplicates_add_evidence_instead_of_new_lessons(store):

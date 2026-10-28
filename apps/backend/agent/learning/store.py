@@ -87,6 +87,13 @@ class Episode:
     # feedback reclassified it (episodes.feedback_cause); the owner's word wins while it stands.
     cause: str = ""
     feedback_cause: str = ""
+    # owner: pressed Worked / Didn't work. implicit: their next message said so ("that worked", "that's wrong").
+    feedback_source: str = ""
+    # Where the work happened: chat | agents | code, and the project it was about (for project-scoped lessons).
+    environment: str = ""
+    project_id: str = ""
+    # Proven lessons from another agent read on this task (transfer; counted apart from the home agent's results).
+    lessons_shared: list[str] = field(default_factory=list)
 
     @property
     def effective_cause(self) -> str:
@@ -140,6 +147,14 @@ class Lesson:
     updated_at: float = field(default_factory=time.time)
     edited: bool = False
     note: str = ""  # why it has its status (shown to the owner)
+    # Set when it was learned about one project: only read in that project.
+    project_id: str = ""
+    # Uses by other agents once proven (transfer), counted apart from its home results. Transfer stops
+    # when it fails there (negative transfer), without touching the lesson's standing with its own agent.
+    shared_uses: int = 0
+    shared_wins: int = 0
+    shared_losses: int = 0
+    transfer: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -196,9 +211,10 @@ class ExperienceStore:
         return _episode_from(row) if row else None
 
     def _episode_filter(self, agent_id: str, task_kind: str, since: float, execution_id: str,
-                        role: str) -> tuple[str, list[Any]]:
+                        role: str, session_id: str = "") -> tuple[str, list[Any]]:
         clauses, params = ["created_at >= ?"], [since]
-        for column, value in (("agent_id", agent_id), ("task_kind", task_kind), ("execution_id", execution_id)):
+        for column, value in (("agent_id", agent_id), ("task_kind", task_kind), ("execution_id", execution_id),
+                              ("session_id", session_id)):
             if value:
                 clauses.append(f"{column} = ?")
                 params.append(value)
@@ -209,8 +225,8 @@ class ExperienceStore:
         return " AND ".join(clauses), params
 
     def episodes(self, *, agent_id: str = "", task_kind: str = "", since: float = 0.0, limit: int = 50,
-                 execution_id: str = "", offset: int = 0, role: str = "") -> list[Episode]:
-        where, params = self._episode_filter(agent_id, task_kind, since, execution_id, role)
+                 execution_id: str = "", offset: int = 0, role: str = "", session_id: str = "") -> list[Episode]:
+        where, params = self._episode_filter(agent_id, task_kind, since, execution_id, role, session_id)
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT body FROM episodes WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -222,6 +238,15 @@ class ExperienceStore:
         where, params = self._episode_filter(agent_id, "", 0.0, "", role)
         with self._lock:
             return int(self._conn.execute(f"SELECT COUNT(*) FROM episodes WHERE {where}", params).fetchone()[0])
+
+    def reset(self) -> None:
+        """Forget everything learned: episodes, lessons and their history, statistics, queued reviews.
+
+        Per-agent pauses are kept: they are the owner's settings, not something learned.
+        """
+        with self._lock, self._conn:
+            for table in ("episodes", "lessons", "lesson_events", "reliability", "reflections"):
+                self._conn.execute(f"DELETE FROM {table}")
 
     def prune(self, keep: int = MAX_EPISODES) -> int:
         """Drop the oldest episodes beyond ``keep``. Lessons keep their ids as provenance."""

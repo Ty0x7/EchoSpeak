@@ -5,6 +5,7 @@ import { AvatarEditor } from "../components/AvatarEditor";
 import { isDesktopRuntime, pickDesktopConnectionFolder } from "../desktop/bridge";
 import { Group, ListEditor, Row, SecretField, Segmented, Select, Status, TextField, Toggle } from "./controls";
 import { SearchModelCard } from "./SearchModelCard";
+import { LearningPage } from "../lean/LearningPage";
 import type { SettingsMap } from "./useSettings";
 
 /**
@@ -14,7 +15,7 @@ import type { SettingsMap } from "./useSettings";
  */
 
 type Save = (patch: SettingsMap) => Promise<void>;
-export type AdvancedPage = "settings" | "memory" | "companion";
+export type AdvancedPage = "settings" | "memory" | "learning" | "companion";
 
 const asBool = (v: any) => v === true || v === "true";
 const asList = (v: any): string[] => (Array.isArray(v) ? v.map(String) : String(v || "").split(/[,\n]/).map((s) => s.trim()).filter(Boolean));
@@ -54,11 +55,13 @@ export function AdvancedSection(props: {
           options={[
             { value: "settings", label: "Settings" },
             { value: "memory", label: "Memory & documents" },
+            { value: "learning", label: "Learning" },
             { value: "companion", label: "Companion" },
           ]}
         />
       </div>
       {props.page === "settings" ? <AdvancedSettings s={props.s} save={props.save} /> : null}
+      {props.page === "learning" ? <div className="st-learning"><LearningPage apiBase={props.apiBase} /></div> : null}
       {props.page === "memory" ? <MemoryPage s={props.s} save={props.save} apiBase={props.apiBase} sessionId={props.sessionId} projectId={props.projectId} /> : null}
       {props.page === "companion" ? (
         <Group title="Echo companion" description="Echo’s shared appearance in voice conversations and the floating companion window.">
