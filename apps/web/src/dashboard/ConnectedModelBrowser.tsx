@@ -82,7 +82,8 @@ export function ConnectedModelBrowser({ apiBase, info, provider, model, locked, 
     finally { setSaving(false); }
   };
   const showRail = !rail && !localOnly && !locked;
-  const needsKey = Boolean(agent && !loading && !reachable[agent.provider]);
+  // As soon as this provider's own check answers; local servers that are slow to answer don't hold it up.
+  const needsKey = Boolean(agent && (agent.provider in reachable || !loading) && !reachable[agent.provider]);
   return <>
     <div className="es-model-browser">
       {rail || <nav className="es-provider-rail" aria-label="Model catalog">

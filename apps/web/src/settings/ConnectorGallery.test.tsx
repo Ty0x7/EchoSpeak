@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { BrandMark } from "../components/BrandMark";
 import { API_AGENTS, ConnectedModelBrowser } from "../dashboard/ConnectedModelBrowser";
-import { filterConnectors, isOfficial, type Connector } from "./ConnectorGallery";
+import { filterConnectors, isOfficial, publisherLine, type Connector } from "./ConnectorGallery";
 
 const connector = (over: Partial<Connector>): Connector => ({
   id: "x", app: "X", field: "things", category: "Work and productivity", publisher: "official (X)", kind: "signin", sign_in: true,
@@ -27,6 +27,9 @@ describe("Settings › Connections › Add apps", () => {
   it("marks an app's own server as official and anything else as community", () => {
     expect(isOfficial({ publisher: "official (Doist)" })).toBe(true);
     expect(isOfficial({ publisher: "community (someone)" })).toBe(false);
+    expect(publisherLine("official (Doist)")).toBe("Made by Doist");
+    expect(publisherLine("community (someone/repo)")).toBe("Made by the community (someone/repo)");
+    expect(publisherLine("built into EchoSpeak")).toBe("Built into EchoSpeak");
   });
 
   it("draws logos, keeping dark brands visible and falling back to a letter", () => {

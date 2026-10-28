@@ -18,6 +18,12 @@ const STATE_LABEL: Record<Connector["state"], [string, "ok" | "warn" | "err" | "
 /** "Official" when the app's own maker publishes the server; anything else is community-made. */
 export const isOfficial = (connector: Pick<Connector, "publisher">) => connector.publisher.toLowerCase().startsWith("official") || connector.publisher.startsWith("built into");
 
+/** "official (Doist)" → "Made by Doist"; community servers say who made them. */
+export const publisherLine = (publisher: string) => {
+  const official = /^official \((.+)\)$/i.exec(publisher.trim());
+  return official ? `Made by ${official[1]}` : publisher.startsWith("built into") ? "Built into EchoSpeak" : `Made by the ${publisher}`;
+};
+
 /** Connectors matching a search, in gallery order: connected first, then by name. */
 export function filterConnectors(items: Connector[], search: string, category: string): Connector[] {
   const words = search.toLowerCase().split(/\s+/).filter(Boolean);
@@ -120,7 +126,7 @@ export function ConnectorGallery({ apiBase }: { apiBase: string }) {
                       {busy === item.id ? "Connecting…" : item.sign_in ? `Connect and sign in to ${item.app}` : `Connect ${item.app}`}</button>
                     {item.homepage ? <a href={item.homepage} target="_blank" rel="noopener noreferrer">Details ↗</a> : null}
                   </div>
-                  <small className="st-muted">By {item.publisher}. Agents ask you before anything that changes data in {item.app}.</small>
+                  <small className="st-muted">{publisherLine(item.publisher)}. Agents ask you before anything that changes data in {item.app}.</small>
                 </form>
               ) : null}
             </div>
