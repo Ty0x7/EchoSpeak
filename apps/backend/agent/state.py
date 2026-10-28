@@ -1483,6 +1483,7 @@ class StateStore:
                         messages[-1].update({
                             "agent_id": str(item.payload.get("agent_id") or ""),
                             "agent_name": str(item.payload.get("agent_name") or ""),
+                            "provider": str(item.payload.get("provider") or ""),
                             "message_id": str(item.payload.get("message_id") or ""),
                             "timeline": list(item.payload.get("timeline") or []),
                             "delegated_by": item.payload.get("delegated_by") or None,

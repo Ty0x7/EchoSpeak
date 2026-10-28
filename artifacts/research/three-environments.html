@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — Chat, Agents and Code</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}.shot img{display:block;width:100%;height:auto}.shot figcaption{padding:10px 14px;margin:0}.phone{max-width:240px}
+</style>
+<body><main>
+<header><h1>EchoSpeak / Chat, Agents and Code</h1><p>28 October 2026 · technical record: docs/research/three-environments.md</p></header>
+<nav aria-label="Report sections"><a href="#look">What it looks like</a><a href="#rule">One rule</a><a href="#chat">Chat</a><a href="#agents">Agents</a><a href="#code">Code</a><a href="#bridge">Chat → Agents</a><a href="#check">Your check</a></nav>
+<p class="lead">One app, one sidebar, three environments.<br>APIs and local models in Chat, teammates in Agents, projects in Code.</p>
+<p class="note"><strong>Evidence:</strong> the screenshots below are from a browser preview on the owner's PC with a throwaway data folder and no model calls. Behaviour rules are covered by deterministic tests. A live model reply and the installed app are the owner's checks.</p>
+<div class="legend"><span class="badge current">Built and tested</span><span class="badge documented">Changed behaviour</span><span class="badge proposed">Your check</span></div>
+
+<section id="look"><h2>Same sidebar, different content</h2>
+<div class="grid3">
+<figure class="shot"><img src="../media/three-environments/chat.jpg" alt="Chat: the sidebar shows New chat, Projects, Artifacts, Creations and the chat list; the welcome asks what it can help with."><figcaption><b>Chat</b> · your model, your history, projects, artifacts, creations</figcaption></figure>
+<figure class="shot"><img src="../media/three-environments/agents-home.jpg" alt="Agents home: Echo listed as coordinator; Jarvis and Glados as specialists with Profile buttons; the sidebar lists the agents and Conversations."><figcaption><b>Agents</b> · contacts: Echo coordinates, specialists below</figcaption></figure>
+<figure class="shot"><img src="../media/three-environments/code-tree.png" alt="Code: the sidebar shows Projects with Demo app holding a session and Demo site with no sessions yet."><figcaption><b>Code</b> · projects with their coding sessions</figcaption></figure>
+</div>
+<div class="grid2" style="margin-top:14px">
+<figure class="shot"><img src="../media/three-environments/agent-conversation.jpg" alt="Jarvis's conversation: breadcrumb Agents / Jarvis, a Jarvis's profile button and the prompt What should Jarvis work on?"><figcaption>An agent's own conversation, with its profile one click away</figcaption></figure>
+<figure class="shot phone"><img src="../media/three-environments/phone-rail.jpg" alt="At phone width the sidebar collapses to a rail with the three environment icons and agent faces."><figcaption>Phone width: the rail keeps the switcher</figcaption></figure>
+</div></section>
+
+<section id="rule"><h2>One rule decides where a conversation lives</h2>
+<div class="diagram" role="img" aria-label="Each conversation is classified once by agent/environments.py: code surface goes to Code, rooms and agent-started threads go to Agents, everything else the owner started goes to Chat. The runtime and the session list both use this rule.">
+<div class="spine">
+<div class="node accent"><strong>agent/environments.py</strong><span>reads fields every thread already has · nothing migrated</span></div><div class="arrow">↓</div>
+<div class="grid3">
+<div class="node"><strong>Code</strong><span>surface = code<br>Echo native or the runtime's own harness</span></div>
+<div class="node"><strong>Agents</strong><span>a room, or a thread an agent or channel started<br>the agents answer as themselves</span></div>
+<div class="node"><strong>Chat</strong><span>everything else the owner started<br>the chosen model answers</span></div>
+</div></div>
+<div class="rule">The runtime (who answers) and <code>GET /threads</code> (where it shows) read the same function, so they can't disagree.</div>
+</div></section>
+
+<section id="chat"><h2>Chat is the model, in the same harness</h2>
+<div class="comparison"><table><thead><tr><th></th><th>Chat (model-first)</th><th>Agents (Echo and specialists)</th></tr></thead><tbody>
+<tr><td>Who speaks</td><td>The model, named and marked as itself (GPT-5.5, Claude Sonnet 5.5, a local model)</td><td>The agent, with its own soul and face</td></tr>
+<tr><td>Tools</td><td>Web, files, terminal, vision, memory, skills, reminders, approvals</td><td>The same, plus its team</td></tr>
+<tr><td>Delegation, agent work tools, workers, editing a persona</td><td class="documented">Not in Chat</td><td>Yes</td></tr>
+<tr><td>Memory and past chats</td><td>Yours, as before</td><td>Scoped per agent</td></tr>
+<tr><td>Safety spine</td><td colspan="2">The same approvals, receipts and first-write work record (R4) in both</td></tr>
+</tbody></table></div></section>
+
+<section id="agents"><h2>Agents message you, like contacts</h2>
+<div class="grid3">
+<div class="box"><h3>Tier 1 · Echo</h3><p>The coordinator, always first. It now has its own conversation, and that's where it checks in.</p></div>
+<div class="box"><h3>Tier 2 · specialists</h3><p>Jarvis, GLaDOS and yours. Each has one conversation, shows its last message, and keeps its instructions, memory and work history.</p></div>
+<div class="box"><h3>Tier 3 · workers</h3><p>Temporary and bounded. They appear inside the turn that started them, unchanged.</p></div>
+</div>
+<p class="rule"><span class="documented">Changed:</span> check-ins move from the “Check-ins with Echo” chat into Echo's conversation. Routine and reminder chats are now listed under Agents › Conversations.</p></section>
+
+<section id="code"><h2>Code: projects you can organize</h2>
+<div class="phases">
+<div class="phase"><b>Projects in the sidebar</b><span>Each with its Echo, Codex, Claude Code and ACP sessions</span></div>
+<div class="phase"><b>Drag to move</b><span>Echo sessions move to another trusted project, or use Move to…</span></div>
+<div class="phase"><b>Unorganized</b><span>Sessions whose project was removed stay reachable</span></div>
+<div class="phase"><b>Harnesses untouched</b><span>External sessions keep their own worktree, sign-in and tools, and never move</span></div>
+</div></section>
+
+<section id="bridge"><h2>Chat → Agents, without copying the chat</h2>
+<div class="diagram" role="img" aria-label="A Chat reply's Send to an agent action opens the agent's conversation with a quoted draft. Only what you send reaches the agent.">
+<div class="spine">
+<div class="node"><strong>A reply in Chat</strong><span>Send to an agent</span></div><div class="arrow">↓</div>
+<div class="node accent"><strong>Draft in the agent's conversation</strong><span>quoted, at most 4,000 characters, editable</span></div><div class="arrow">↓</div>
+<div class="node"><strong>You send it</strong><span>no history copied · no permission granted · the agent's own grants apply</span></div>
+</div></div></section>
+
+<section id="check"><h2>Your check</h2>
+<p class="proposed">In the installed app: send a Chat message and see the model's name and mark on the reply. Open Echo in Agents and wait for a check-in. Drag an Echo coding session onto another project.</p></section>
+<footer>Technical record: docs/research/three-environments.md · Screenshots: browser preview with a throwaway data folder.</footer>
+</main></body></html>

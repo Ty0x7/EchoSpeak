@@ -141,10 +141,18 @@
 .echo-root .es-side-search-row { display:flex; align-items:center; gap:3px; }
 .echo-root .es-side-search-row .es-chat-search { flex:1; min-width:0; }
 .echo-root .es-side-search-row input { min-width:0; }
-.es-code-switch { display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; width:28px; height:28px; border:0; border-radius:5px; background:transparent; color:var(--es-text-3); cursor:pointer; }
-.echo-root .es-code-switch,.echo-root .es-code-switch[aria-checked=true] { background:var(--es-bg-0); color:var(--es-text-3); border:1px solid var(--es-border-soft); }
-.echo-root .es-code-switch[aria-checked=true] { color:var(--es-text); border-color:var(--es-border-strong); }
-.es-code-switch:focus-visible { outline:2px solid var(--es-accent); outline-offset:2px; }
+/* Chat · Agents · Code: one sidebar, three environments. Same shell, width and tokens in each. */
+.echo-root .es-env-switch { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:2px; padding:2px; margin:6px 0 2px; border:1px solid var(--es-border-soft); border-radius:8px; background:var(--es-bg-0); }
+.echo-root .es-env-switch button { display:inline-flex; align-items:center; justify-content:center; gap:5px; min-width:0; height:27px; padding:0 4px; border:0; border-radius:6px; background:transparent; color:var(--es-text-3); font:inherit; font-size:11.5px; cursor:pointer; transition:background .14s ease,color .14s ease; }
+.echo-root .es-env-switch button span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* Labels alone when open (the segments are narrow); icons alone in the collapsed rail. */
+.echo-root .es-env-switch:not(.is-rail) svg { display:none; }
+.echo-root .es-env-switch button:hover { color:var(--es-text); }
+.echo-root .es-env-switch button.is-active { background:var(--es-surface-3); color:var(--es-text); font-weight:600; }
+.echo-root .es-env-switch button:focus-visible { outline:2px solid var(--es-accent); outline-offset:1px; }
+.echo-root .es-env-switch.is-rail { grid-template-columns:1fr; margin:4px 0; }
+.echo-root .es-env-switch.is-rail button { height:34px; }
+.echo-root .es-code-tree-host { flex:1 1 auto; min-height:0; overflow-y:auto; overflow-x:hidden; padding-right:6px; scrollbar-width:thin; }
 .echo-root .is-empty-conversation { position:relative; }
 .echo-root .ec-conversation-bar { position:relative; min-height:40px; padding:7px 20px; flex-wrap:nowrap; gap:10px; }
 .workspace-header-actions { display:flex; align-items:center; gap:8px; margin-left:auto; flex-shrink:0; }

@@ -24,6 +24,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(routines, "_routine_manager", manager)
     chats = threads.ThreadManager(tmp_path / "threads.json")
     monkeypatch.setattr(threads, "get_thread_manager", lambda: chats)
+    from agent.lean import rooms
+    room_store = rooms.RoomStore(tmp_path / "rooms.json")
+    monkeypatch.setattr(rooms, "get_room_store", lambda: room_store)
     monkeypatch.setattr(checkins, "_path", lambda: tmp_path / "checkins.json")
     monkeypatch.setattr(code_accounts, "_cache_path", lambda: tmp_path / "agent-status.json")
     monkeypatch.setattr(config, "checkin_mode", "important")
@@ -38,8 +41,14 @@ def env(tmp_path, monkeypatch):
 
 
 def _texts(store, chats):
-    session = next(t for t in chats.list_threads(include_archived=True) if t.title == checkins.CHAT_TITLE)
-    return [m["text"] for turn in store.session_timeline(session.thread_id)["turns"] for m in turn["messages"]]
+    from agent import environments
+    from agent.lean.rooms import get_room_store
+    session = checkins.session()
+    # Check-ins arrive in Echo's own conversation in Agents, the same one every time.
+    room = get_room_store().by_thread(session)
+    assert room and room.kind == "direct" and room.agent_ids == ["echo"] and checkins.session() == session
+    assert environments.environment_of(session) == "agents"
+    return [m["text"] for turn in store.session_timeline(session)["turns"] for m in turn["messages"]]
 
 
 def test_echo_tells_you_what_needs_you_once_in_a_chat_you_can_reply_to(env):

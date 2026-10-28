@@ -1,5 +1,15 @@
 # Changes
 
+## v11.11.0 — Chat, Agents and Code (source; not yet built)
+
+* Three environments in one app, with one sidebar and a Chat · Agents · Code switcher. One backend rule (`agent/environments.py`) decides where each conversation lives and who answers.
+* Chat is model-first: the chosen model answers as itself (name and maker's mark) in Echo's harness, with tools, memory and approvals, but without delegation, team, workers or persona editing.
+* Agents: every agent, Echo included, has its own conversation, listed like a contact with its last message. Check-ins, routine results and reminders arrive there.
+* Code: projects with their Echo, Codex, Claude Code and ACP sessions in the sidebar. Drag an Echo session to another trusted project. Sessions whose project is gone show as Unorganized. External sessions keep their worktree and harness.
+* Send to an agent: a Chat reply becomes an editable draft in an agent's conversation, without copying history or changing permissions.
+* A coding test no longer depends on whether Docker is running.
+* See [release notes](docs/releases/v11.11.0.md).
+
 ## v11.10.10 — Plans for code, APIs for chat, and an Echo that checks in (source; not yet built)
 
 * Echo Code remembers each coding agent's sign-in, plan and models, so Codex and Claude Code show as signed in, with every model the plan offers, before any session connects. Sending creates and connects the isolated session automatically.

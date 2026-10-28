@@ -75,6 +75,7 @@ const summary={name:'Echo Code sample',root:'C:/Fixture/sample',source_root:'C:/
       else if (p === '/projects') data={items:[project]};
       else if (p === '/threads' && request.method()==='GET') data=sessions;
       else if (p === '/echo-code/runtimes') data=runtimes;
+      else if (p === '/echo-code/overview') data={schema_version:1,projects:[{...project,sessions:sessions.filter(s=>s.surface==='code'),external:[]}],unorganized:[]};
       else if (p === '/echo-code/projects/fixture-project') data={schema_version:1,project,git_summary:'git: branch feature/compiler · 2 changed files',sessions:sessions.filter(s=>s.surface==='code'),can_start_native:true,native_blocker:''};
       else if (p === '/echo-code/projects/fixture-project/sessions') {
         assert.equal(request.postDataJSON().runtime_id,'echo');
@@ -112,20 +113,20 @@ const summary={name:'Echo Code sample',root:'C:/Fixture/sample',source_root:'C:/
     for(const size of [{width:1354,height:801},{width:1400,height:960}]) {
       await page.setViewportSize(size);
       const chat=await page.evaluate(()=>({heading:document.querySelector('.conversation-welcome h1').getBoundingClientRect().y,composer:document.querySelector('.composer-card').getBoundingClientRect().y}));
-      await page.getByRole('switch',{name:'Echo Code',exact:true}).click();
+      await page.getByRole('tab',{name:'Code',exact:true}).click();
       await page.getByRole('heading',{name:/What should we build/}).waitFor();
       const code=await page.evaluate(()=>({heading:document.querySelector('.ec-welcome h2').getBoundingClientRect().y,composer:document.querySelector('.ec-draft-card').getBoundingClientRect().y}));
       assert.ok(Math.abs(chat.heading-code.heading)<2,JSON.stringify({size,chat,code}));
       assert.ok(Math.abs(chat.composer-code.composer)<2,JSON.stringify({size,chat,code}));
       alignment.push({size,heading_delta:chat.heading-code.heading,composer_delta:chat.composer-code.composer});
-      await page.getByRole('switch',{name:'Echo Code',exact:true}).click();
+      await page.getByRole('tab',{name:'Chat',exact:true}).click();
       await page.getByRole('heading',{name:'What can I help you with?',exact:true}).waitFor();
     }
     report.chat_code_alignment=alignment;
     await page.screenshot({path:path.join(out,'chat-centered-desktop.png'),fullPage:true});
     const chatMetrics=await page.evaluate(()=>{const r=document.querySelector('.input-bar').getBoundingClientRect(),card=document.querySelector('.composer-card').getBoundingClientRect(),c=document.querySelector('.desktop-chat-workspace').getBoundingClientRect();return {offset:Math.abs((r.left+r.right)/2-(c.left+c.right)/2),width:card.width,centerY:(r.top+r.bottom)/2,columnCenterY:(c.top+c.bottom)/2}});
     assert.ok(chatMetrics.offset<3,JSON.stringify(chatMetrics));assert.ok(chatMetrics.width<=766,JSON.stringify(chatMetrics));
-    await page.getByRole('switch',{name:'Echo Code',exact:true}).click();
+    await page.getByRole('tab',{name:'Code',exact:true}).click();
     await page.getByLabel('Coding task draft',{exact:true}).fill('Keep this draft while switching agents');
     const starter=await page.locator('.ec-welcome').boundingBox();
     for(const [name,id] of [['Codex','codex'],['Claude Code','claude_cli'],['Other ACP agents','acp']]) {

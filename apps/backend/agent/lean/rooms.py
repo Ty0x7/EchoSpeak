@@ -112,6 +112,19 @@ class RoomStore:
             self._save()
         return room.model_copy()
 
+    def direct(self, agent_id: str, name: str) -> Room:
+        """An agent's one-to-one conversation with the owner, created the first time it's needed.
+
+        This is the agent's "contact" in Agents: where the owner messages it and where it
+        messages the owner (check-ins, reminders).
+        """
+        with self._lock:
+            found = next((room for room in self._rooms.values()
+                          if room.kind == "direct" and room.agent_ids == [agent_id]), None)
+            if found is not None:
+                return found.model_copy()
+            return self.create(name=name, agent_ids=[agent_id], kind="direct")
+
     def update(
         self,
         room_id: str,

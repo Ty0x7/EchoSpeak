@@ -4,7 +4,7 @@ Two layers, set in Settings › Automations › Echo checks in:
 
 - "Things that need me" (the default): on the scheduler tick, agent/attention.py looks at
   EchoSpeak's own state with no model call. Anything new and important becomes one short
-  message from Echo in the "Check-ins with Echo" chat, where you can reply and Echo picks
+  message from Echo in Echo's conversation in Agents, where you can reply and Echo picks
   it up like any conversation. It also appears as a desktop notification and on any channel
   you chose. The same thing isn't announced again for 12 hours, notices are at least 10
   minutes apart, and nothing is sent during quiet hours or while Stop everything is on.
@@ -24,7 +24,6 @@ from loguru import logger
 
 from agent import attention
 
-CHAT_TITLE = "Check-ins with Echo"
 REPEAT_SECONDS = 12 * 3600  # don't announce the same thing again sooner
 MIN_GAP_SECONDS = 10 * 60   # at least this long between two notices
 FORGET_SECONDS = 7 * 24 * 3600
@@ -50,16 +49,15 @@ def quiet(now: Optional[datetime] = None) -> bool:
 
 
 def session() -> str:
-    """The one chat check-ins live in (reusing the older Heartbeat chat if there is one)."""
-    from agent.lean.automations import _ensure_chat
-    from agent.threads import get_thread_manager
+    """Where check-ins go: Echo's own conversation in Agents, like a message from a contact.
 
-    threads = get_thread_manager().list_threads(include_archived=True, limit=500)
-    for title in (CHAT_TITLE, "Heartbeat"):
-        found = next((t for t in threads if str(getattr(t, "title", "")) == title), None)
-        if found:
-            return found.thread_id
-    return _ensure_chat(CHAT_TITLE)
+    Older versions used a "Check-ins with Echo" chat; it stays as history.
+    """
+    from agent.lean.personas import get_persona_store
+    from agent.lean.rooms import get_room_store
+
+    echo = get_persona_store().default()
+    return get_room_store().direct(echo.id, echo.name).thread_id
 
 
 def _path() -> Path:

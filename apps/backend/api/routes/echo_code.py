@@ -28,6 +28,27 @@ def runtimes():
     return echo_code.runtime_catalog()
 
 
+@router.get("/overview")
+def overview():
+    """Code's sidebar: projects with their native and external coding sessions, plus unorganized ones."""
+    data = echo_code.overview()
+    for project in data["projects"]:
+        try:
+            project["external"] = _external("list", project["id"])
+        except HTTPException:
+            project["external"] = []
+    return data
+
+
+class MoveSession(BaseModel):
+    project_id: str = Field(min_length=1, max_length=128)
+
+
+@router.post("/sessions/{thread_id}/project")
+def move_session(thread_id: str, request: MoveSession):
+    return _call(echo_code.move_session, thread_id, request.project_id)
+
+
 @router.get("/projects/{project_id}")
 def workspace(project_id: str):
     return _call(echo_code.workspace, project_id)

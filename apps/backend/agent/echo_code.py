@@ -151,3 +151,57 @@ def create_session(project_id: str, *, runtime_id: str, idempotency_key: str) ->
             store.update_thread_state(thread.thread_id, active_project_id=item.id,
                                       workspace_root=str(root), project_path=str(root))
         return {**thread.to_dict(), "project_id": item.id}
+
+
+def overview() -> dict:
+    """Echo Code's sidebar: each usable project with its native coding sessions, and the rest.
+
+    A session whose project was removed, archived or detached is "unorganized": still
+    reachable, and movable into a project. External runtimes' sessions are listed by the
+    route, since they live in their own session store with their own worktrees.
+    """
+    from agent.projects import get_project_manager
+    from agent.state import get_state_store
+    from agent.threads import get_thread_manager
+    projects = [item for item in get_project_manager().list_projects() if not item.archived and item.workspace_root]
+    known = {item.id for item in projects}
+    states = {row.thread_id: row for row in get_state_store().list_thread_states()}
+    grouped: dict[str, list[dict]] = {item.id: [] for item in projects}
+    unorganized: list[dict] = []
+    for thread in get_thread_manager().list_threads(limit=2000):
+        if thread.surface != "code":
+            continue
+        project_id = str(getattr(states.get(thread.thread_id), "active_project_id", "") or "")
+        row = {**thread.to_dict(), "project_id": project_id if project_id in known else ""}
+        (grouped[project_id] if project_id in known else unorganized).append(row)
+    return {
+        "schema_version": 1,
+        "projects": [{"id": item.id, "name": item.name, "workspace_root": item.workspace_root,
+                      "trust_state": item.trust_state, "sessions": grouped[item.id][:100]} for item in projects],
+        "unorganized": unorganized[:100],
+    }
+
+
+def move_session(thread_id: str, project_id: str) -> dict:
+    """Move a native coding session into another project (drag and drop in Code's sidebar).
+
+    Only Echo's own sessions move: they work in the project folder itself, so moving one
+    re-scopes its next turn to the new folder. History stays with the session. External
+    runtimes' sessions own a worktree inside their project and never move.
+    """
+    from agent.state import get_state_store
+    from agent.threads import get_thread_manager
+    thread = get_thread_manager().get_thread(str(thread_id or ""))
+    if thread is None or thread.surface != "code":
+        raise KeyError("Coding session unavailable")
+    item = project_workspace.project(project_id)
+    root = project_workspace.root_for(item)
+    if item.trust_state != "trusted":
+        raise PermissionError("This project is not marked trusted. Coding sessions are unavailable for this folder.")
+    store = get_state_store()
+    state = store.get_thread_state(thread.thread_id)
+    if state.current_execution_id or state.active_turn_id:
+        raise RuntimeUnavailable("This session is working. Move it when its turn has finished.")
+    if state.active_project_id != item.id:
+        store.update_thread_state(thread.thread_id, active_project_id=item.id, workspace_root=str(root), project_path=str(root))
+    return {**thread.to_dict(), "project_id": item.id}

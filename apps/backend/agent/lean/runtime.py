@@ -20,7 +20,7 @@ from agent.lean import agent_skills, capabilities, git_context, memory_quality, 
 from agent.lean.job import (ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, is_promise_without_action,
                             needs_action, parse_review)
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
-from agent.lean.personas import AgentPersona, get_persona_store
+from agent.lean.personas import CHAT_AGENT_ID, AgentPersona, chat_persona, get_persona_store
 from agent.lean.prompt import build_system_prompt
 from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoint
 from agent.lean.rooms import Room, get_room_store, mentioned_agents
@@ -131,6 +131,10 @@ def is_busy(quiet_seconds: float = 30.0) -> bool:
 class LeanSession:
     """Runs one user message through one or more agents in a Session."""
 
+    # Chat's model-first mode (set per session in __init__); off unless the conversation is Chat.
+    model_first = False
+    _chat: Optional[AgentPersona] = None
+
     def __init__(
         self,
         *,
@@ -162,6 +166,11 @@ class LeanSession:
         self.work_context = None
         self.room = room
         self.personas = get_persona_store()
+        # Chat is model-first (agent/environments.py): the selected model answers as itself.
+        from agent import environments
+        self.model_first = room is None and environments.model_first(
+            session_id, source=source, caller_role=self.caller_role, work_id=work_id)
+        self._chat = None
         self.project_root = project_root_for_session(session_id)
         self.execution_id = ""
         self.results: list[TurnResult] = []
@@ -260,6 +269,9 @@ class LeanSession:
         coordinator = get_state_store().coordination
         persona = self.personas.get(persona_id) if persona_id else None
         persona = persona or (self._members()[0] if self._members() else self.personas.default())
+        if self.model_first:
+            # Not Echo, not a mention: Chat is the owner and the model they chose.
+            persona = self._chat_persona()
         if self.work_id:
             if self.caller_role != "owner":
                 raise PermissionError("Only an authenticated owner may resume private work")
@@ -314,7 +326,7 @@ class LeanSession:
 
         store = get_state_store()
         state = store.get_thread_state(self.session_id)
-        default_persona = self.personas.get(persona_id) if persona_id else None
+        default_persona = self._chat_persona() if self.model_first else self.personas.get(persona_id) if persona_id else None
         if default_persona is None:
             members = self._members()
             default_persona = members[0] if members else self.personas.default()
@@ -337,7 +349,8 @@ class LeanSession:
             mode="agent",
             phase="running",
             metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else "",
-                      "hidden_prompt": self.source == "heartbeat"},
+                      "hidden_prompt": self.source == "heartbeat",
+                      "environment": "chat" if self.model_first else "agents" if self.room else ""},
         )
         self.execution_id = execution.id
         self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else "",
@@ -991,8 +1004,8 @@ class LeanSession:
         if delegated_by is not None:
             meta["delegated_by"] = {"id": delegated_by.id, "name": delegated_by.name}
         guest = self.caller_role != "owner"
-        can_hand_off = allow_handoff and depth < MAX_DELEGATION_DEPTH and not guest
-        teammates = self._members() if self.room else [p for p in self.personas.list() if p.id != persona.id]
+        can_hand_off = allow_handoff and depth < MAX_DELEGATION_DEPTH and not guest and not self.model_first
+        teammates = [] if self.model_first else self._members() if self.room else [p for p in self.personas.list() if p.id != persona.id]
         if guest:
             toolbox = Toolbox(toolsets=GUEST_TOOLS[self.caller_role], extra_tools=rich_tools(), session_id=self.session_id)
         else:
@@ -1066,7 +1079,7 @@ class LeanSession:
         if route_note:
             meta["model_route"] = route_note
         memories = [] if guest else self._recall(goal)
-        if persona.id != "echo" or (work_context and work_context.coordinator.get(work_context.work_id, principal=work_context.principal).get("parent_id")):
+        if not self._owner_side(persona) or (work_context and work_context.coordinator.get(work_context.work_id, principal=work_context.principal).get("parent_id")):
             memories = [m for m in memories if m.get("scope") in ({"session"} if persona.context_scope == "session" else {"project", "session"})]
         from agent.project_context import context_for_session
         project_brief, project_evidence = ("", "") if guest else context_for_session(self.session_id)
@@ -1095,7 +1108,7 @@ class LeanSession:
             # Teammates start with a clean history, not without the story so far.
             chat_summary=summaries.summary_text(self.session_id),
             caller_note=caller_note(self.source, self.caller_role, _owner_name()),
-            past_chats=[] if guest or persona.id != "echo" or delegated_by or not _remembers_chats() else self._past_chats(),
+            past_chats=[] if guest or not self._owner_side(persona) or delegated_by or not _remembers_chats() else self._past_chats(),
             project_brief=project_brief,
             project_evidence=project_evidence,
             playbook=learned.section,
@@ -1185,6 +1198,8 @@ class LeanSession:
                     "attempt_id": (current_work() or self.work_context).attempt_id if (current_work() or self.work_context) else "",
                     "agent_id": persona.id,
                     "agent_name": persona.name,
+                    # Which model spoke: Chat shows the model's own identity, not an agent's.
+                    "provider": self._endpoints.get(persona.id, ("", ""))[0],
                     "message_id": result.message_id,
                     "timeline": _bounded_timeline(result.timeline),
                     "backend_success": result.success,
@@ -1211,7 +1226,8 @@ class LeanSession:
     ) -> list[NativeTool]:
         memory = getattr(self.agent, "memory", None)
         tools: list[NativeTool] = []
-        if self.caller_role == "owner":
+        if self.caller_role == "owner" and not self.model_first:
+            # Agent work, notes and proposals belong to persistent agents, not to Chat.
             from agent.coordination_service import tools as coordination_tools
             tools.extend(coordination_tools(persona, self))
         from agent.research_notebook import research_tools
@@ -1220,7 +1236,7 @@ class LeanSession:
         tools.extend(generation_tools(self.session_id, self.execution_id))
         # Research swarm (agent/lean/swarm.py): only the agent answering the user leads workers;
         # workers and teammates never spawn more. Off unless Settings › Agent › Research workers is on.
-        if depth == 0 and settings.research_swarm() and self.caller_role == "owner":
+        if depth == 0 and settings.research_swarm() and self.caller_role == "owner" and not self.model_first:
             from agent.lean import swarm
             tools.append(swarm.tool(self, persona))
         # Reminders (agent/reminders.py), on Routines: the owner's, in this chat. A routine's own run can't
@@ -1312,7 +1328,7 @@ class LeanSession:
                 if problem:
                     return problem
                 key = memory_quality.normalize_key(str(args.get("key") or ""))
-                if not key and persona.id == "echo":
+                if not key and self._owner_side(persona):
                     # A reworded copy of something already saved: keep the one we have.
                     owner_of = getattr(memory, "_owner_id", None)
                     owner = owner_of() if callable(owner_of) else ""
@@ -1329,12 +1345,12 @@ class LeanSession:
                     pinned=bool(args.get("pinned", False)),
                     thread_id=self.session_id,
                     source="agent",
-                    scope="account" if persona.id == "echo" else "project" if self.project_root and persona.context_scope != "session" else "session",
+                    scope="account" if self._owner_side(persona) else "project" if self.project_root and persona.context_scope != "session" else "session",
                     project_path=self.project_root or None,
                     project_id=str(get_state_store().get_thread_state(self.session_id).active_project_id or ""),
                     source_execution_id=self.execution_id,
                     # Same key, new value: the old memory is superseded, not kept alongside.
-                    semantic_key=key if persona.id == "echo" or not key else f"agent:{persona.id}:{key}",
+                    semantic_key=key if self._owner_side(persona) or not key else f"agent:{persona.id}:{key}",
                 )
                 if not memory_id:
                     return "Failed: that could not be saved (empty, duplicate, or looks like a secret)."
@@ -1350,7 +1366,7 @@ class LeanSession:
             def memory_search(args: dict[str, Any]) -> str:
                 query = str(args.get("query") or "").strip()
                 rows = self._recall(query, limit=10)
-                if persona.id != "echo" or delegated_by:
+                if not self._owner_side(persona) or delegated_by:
                     scopes = {"session"} if persona.context_scope == "session" else {"project", "session"}
                     return "\n".join("- " + str(r.get("content", "")) for r in rows if r.get("scope") in scopes) or "No matching scoped memories."
                 try:
@@ -1394,17 +1410,18 @@ class LeanSession:
                 parallel_safe=True,
             ))
 
-        tools.append(NativeTool(
-            name="soul_update",
-            description=soul.DESCRIPTION,
-            parameters=soul.PARAMETERS,
-            func=lambda args: self._update_soul(persona, args),
-        ))
+        if not self.model_first:  # Chat has no persona to edit.
+            tools.append(NativeTool(
+                name="soul_update",
+                description=soul.DESCRIPTION,
+                parameters=soul.PARAMETERS,
+                func=lambda args: self._update_soul(persona, args),
+            ))
 
         def chat_search(args: dict[str, Any]) -> str:
             from agent.state import get_state_store
 
-            scoped = persona.id != "echo" or bool(current_work() and current_work().coordinator.get(current_work().work_id, principal=current_work().principal).get("parent_id"))
+            scoped = not self._owner_side(persona) or bool(current_work() and current_work().coordinator.get(current_work().work_id, principal=current_work().principal).get("parent_id"))
             hits = get_state_store().search_messages(str(args.get("query") or ""), limit=8, session_id=self.session_id if scoped else "")
             context = current_work()
             if context and context.coordinator.get(context.work_id, principal=context.principal).get("parent_id"):
@@ -1594,7 +1611,26 @@ class LeanSession:
         return message
 
     # ── helpers ─────────────────────────────────────────────────────────
+    @staticmethod
+    def _owner_side(persona: AgentPersona) -> bool:
+        """Echo and Chat both speak for the owner: account memory and past chats are theirs."""
+        return persona.id in {"echo", CHAT_AGENT_ID}
+
+    def _chat_persona(self) -> AgentPersona:
+        """Chat's answerer, named after the model this conversation uses."""
+        if self._chat is None:
+            try:
+                model = str(getattr(self._endpoint_for(chat_persona()), "model", "") or "")
+            except PermissionError:
+                raise
+            except Exception:
+                model = ""
+            self._chat = chat_persona(model.rsplit("/", 1)[-1])
+        return self._chat
+
     def _name_of(self, agent_id: str) -> str:
+        if agent_id == CHAT_AGENT_ID and self._chat is not None:
+            return self._chat.name
         persona = self.personas.get(agent_id)
         return persona.name if persona else agent_id
 
@@ -1826,7 +1862,7 @@ class LeanSession:
 
     def _remember_async(self, message: str, answer: str) -> None:
         memory = getattr(self.agent, "memory", None)
-        if memory is None or not answer or self._lead_id != "echo" or self.source in {"routine", "heartbeat", "proactive"}:
+        if memory is None or not answer or self._lead_id not in {"echo", CHAT_AGENT_ID} or self.source in {"routine", "heartbeat", "proactive"}:
             return
         if self.caller_role != "owner":
             return

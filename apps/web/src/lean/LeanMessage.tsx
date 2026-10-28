@@ -1,4 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ModelMark } from "../components/ModelMark";
+import { modelDisplayName } from "../app/environments";
 import ReactMarkdown from "react-markdown";
 import { safeMarkdownComponents } from "../widgets/SafeImage";
 import remarkGfm from "remark-gfm";
@@ -13,7 +15,17 @@ import type { LeanMessageData, LeanSegment } from "./types";
  * every teammate is dark with white eyes. `initials` is kept for callers but
  * no longer drawn.
  */
-export function AgentAvatar({ id, name, size = 26 }: { id?: string; name?: string; initials?: string; size?: number }) {
+/** The agent id of Chat's answerer: the model itself (backend: agent/lean/personas.py). */
+export const CHAT_AGENT_ID = "chat";
+
+/** Who's speaking: an agent's name, or in Chat the model's name. */
+export function speakerName(agent: { id: string; name: string }): string {
+  return agent.id === CHAT_AGENT_ID ? modelDisplayName(agent.name) : agent.name || "Echo";
+}
+
+export function AgentAvatar({ id, name, size = 26, provider }: { id?: string; name?: string; initials?: string; size?: number; provider?: string }) {
+  // Chat is model-first: the model's own mark, never an agent's face.
+  if (id === CHAT_AGENT_ID) return <ModelMark provider={provider} size={size} />;
   const key = String(id || name || "");
   // Spread the blinks so a group of faces never blinks in unison.
   const blinkDelay = `${(Array.from(key).reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 47) / 10}s`;
@@ -337,9 +349,9 @@ export function LeanMessage({
     <article className="lm" data-status={data.status} data-live={streaming ? "true" : "false"} data-role={data.role || undefined}>
       {showHeader ? (
         <header className="lm-head">
-          <AgentAvatar id={data.agent.id} name={data.agent.name} initials={data.agent.initials} />
-          <span className="lm-name">{data.agent.name || "Echo"}</span>
-          {data.agent.title ? <span className="lm-title">{data.agent.title}</span> : null}
+          <AgentAvatar id={data.agent.id} name={data.agent.name} initials={data.agent.initials} provider={data.agent.provider} />
+          <span className="lm-name">{speakerName(data.agent)}</span>
+          {data.agent.title && data.agent.id !== CHAT_AGENT_ID ? <span className="lm-title">{data.agent.title}</span> : null}
           {data.role === "merge" ? <span className="lm-tag">Summary</span> : null}
           {data.delegatedBy ? <span className="lm-via" title={`${data.delegatedBy} handed this to ${data.agent.name}`}>via {data.delegatedBy}</span> : null}
           {at ? <time className="lm-time">{new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</time> : null}
@@ -361,7 +373,7 @@ export function LeanMessage({
           if (seg.kind === "thinking") return <ThinkingBlock key={`t${index}`} seg={seg} live={streaming} />;
           if (seg.kind === "approval")
             return seg.question
-              ? <QuestionCard key={`q${seg.id}`} seg={seg} agentName={data.agent.name || "Echo"} onDecide={onDecide} />
+              ? <QuestionCard key={`q${seg.id}`} seg={seg} agentName={speakerName(data.agent)} onDecide={onDecide} />
               : <ApprovalCard key={`a${seg.id}`} seg={seg} onDecide={onDecide} />;
           if (seg.kind === "note") return <div key={`n${index}`} className="lm-note">{seg.text}</div>;
           if (seg.kind !== "text" || !seg.text.trim()) return null;

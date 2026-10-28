@@ -37,9 +37,17 @@ export function AgentRows({
         return (
           <div key={agent.id} className={`es-agent-row${active ? " is-active" : ""}`}>
             <button type="button" className="es-agent-main" onClick={() => onOpenAgent(agent)} title={details ? `${agent.name} · ${details}` : agent.name}>
-              <AgentAvatar id={agent.id} name={agent.name} initials={agent.initials} size={18} />
-              <span className="es-agent-name">{agent.name}</span>
-              {agent.title ? <span className="es-agent-hint">{agent.title}</span> : null}
+              <AgentAvatar id={agent.id} name={agent.name} initials={agent.initials} size={direct?.last_preview ? 24 : 18} />
+              {direct?.last_preview ? (
+                // Messaging style: the agent's last message under its name.
+                <span className="es-agent-text">
+                  <span className="es-agent-name">{agent.name}</span>
+                  <span className="es-agent-preview">{direct.last_preview}</span>
+                </span>
+              ) : <>
+                <span className="es-agent-name">{agent.name}</span>
+                {agent.title ? <span className="es-agent-hint">{agent.title}</span> : null}
+              </>}
             </button>
             <button type="button" className="es-icon-btn es-agent-edit" title={`Edit ${agent.name}`} aria-label={`Edit ${agent.name}`} onClick={() => onEditAgent(agent)}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4zM14 6l4 4" /></svg>

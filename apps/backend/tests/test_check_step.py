@@ -21,6 +21,10 @@ def _permissions_on(monkeypatch):
 
     for name in ("enable_system_actions", "allow_file_write", "allow_terminal_commands"):
         monkeypatch.setattr(config, name, True)
+    # Commands here run in the sandbox, so they don't ask. Without this pin the result depended on whether
+    # Docker happened to be running on the test machine (auto mode falls back to the host, which asks).
+    from agent.lean import terminal
+    monkeypatch.setattr(terminal, "resolved_mode", lambda: "docker")
     # The fake file tools here don't touch disk; the on-disk check has its own tests (test_execution_evidence.py).
     from agent.lean import evidence
 
