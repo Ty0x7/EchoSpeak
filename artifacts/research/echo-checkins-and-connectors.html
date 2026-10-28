@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — Echo checks in, and one-click connectors</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+</style>
+<body><main>
+<header><h1>EchoSpeak / Echo checks in, and one-click connectors</h1><p>28 October 2026 · 11.10.10 · technical record: docs/research/echo-checkins-and-connectors.md</p></header>
+<nav aria-label="Report sections"><a href="#checkins">Echo checks in</a><a href="#signals">What it notices</a><a href="#connectors">Add apps</a><a href="#new">10 new apps</a><a href="#check">Try it</a></nav>
+<p class="lead">Echo isn't only a reply.<br>It tells you what needs you, and connects your apps in one click.</p>
+<p class="note"><strong>Evidence:</strong> source changes with deterministic tests, a browser preview on the owner's PC with a throwaway data folder, and a live OAuth probe of every new hosted app. Signing in to an app and receiving a real check-in are the owner's checks in the installed app.</p>
+<div class="legend"><span class="badge current">Built and tested</span><span class="badge documented">Was broken</span><span class="badge proposed">Your check</span></div>
+
+<section id="checkins"><h2>Two layers, one source of truth</h2>
+<div class="diagram" role="img" aria-label="EchoSpeak's own state feeds an attention list with no model call. New urgent items become one message in the check-ins chat and a notification. Optionally, a friendly check-in uses the same list to write a note.">
+<div class="spine">
+<div class="node accent"><strong>EchoSpeak's own state</strong><span>approvals · tasks · deliveries · routines · apps · coding agents · recent errors</span></div><div class="arrow">↓</div>
+<div class="node"><strong>agent/attention.py</strong><span>no model call · each source read on its own · stable keys</span></div><div class="arrow">↓</div>
+<div class="grid2">
+<div class="node"><strong>What needs me</strong><span class="current">default · every scheduler tick · one bundled message, once per 12 h</span></div>
+<div class="node"><strong>Friendly check-ins</strong><span class="proposed">opt-in · Echo writes a short note or asks what's up</span></div>
+</div><div class="arrow">↓</div>
+<div class="node"><strong>“Check-ins with Echo” chat + notification</strong><span>reply there and Echo carries on · Discord/Telegram if chosen · quiet hours 10 PM–8 AM</span></div>
+</div>
+<div class="rule"><span class="documented">The old heartbeat never started from the app:</span> it required two settings nothing sets. It now starts, skips quiet hours, never interrupts a conversation, hides its own prompt and leaves no trace when it has nothing to say.</div>
+</div></section>
+
+<section id="signals"><h2>What Echo notices</h2>
+<div class="comparison"><table><thead><tr><th>Signal</th><th>When it speaks up</th></tr></thead><tbody>
+<tr><td>Approvals and questions waiting</td><td>Now</td></tr>
+<tr><td>Tasks that stopped, are blocked, wait for you, or failed today</td><td>Now or soon</td></tr>
+<tr><td>A message that may not have arrived</td><td>Soon</td></tr>
+<tr><td>A routine that failed · one coming up within the hour</td><td>Soon · context for friendly check-ins</td></tr>
+<tr><td>An app that needs sign-in again, changed how it starts, or keeps failing</td><td>Soon</td></tr>
+<tr><td>Codex or Claude Code signed out</td><td>Soon</td></tr>
+<tr><td>Replies failing with model or API errors (bad key, quota, can't reach)</td><td>Soon</td></tr>
+</tbody></table></div></section>
+
+<section id="connectors"><h2>Add apps: one click, still reviewed</h2>
+<div class="grid3">
+<div class="box"><h3>Find it</h3><p>Every app with its logo, what it does, Official or Community and its live state. Search and kind-of-work chips.</p></div>
+<div class="box"><h3>See what you approve</h3><p>Connect shows the steps, cautions and any field it needs. Your click is the approval, the same path as an agent's suggestion.</p></div>
+<div class="box"><h3>Sign in where it lives</h3><p>Hosted apps open their own sign-in page; tokens stay encrypted on this PC. Disconnect signs out and forgets the app.</p></div>
+</div>
+<p class="rule"><span class="documented">Before:</span> 9 of 10 account cards said sign-in “isn't available yet”, and Notion, Linear and Jira/Confluence were marked unsupported although EchoSpeak could already sign in. All three connect now.</p></section>
+
+<section id="new"><h2>10 new apps, each checked live</h2>
+<div class="comparison"><table><thead><tr><th>App</th><th>For</th><th>Sign-in</th></tr></thead><tbody>
+<tr><td>Todoist</td><td>tasks and reminders</td><td>OAuth</td></tr>
+<tr><td>Zapier</td><td>thousands of other apps</td><td>OAuth</td></tr>
+<tr><td>Airtable</td><td>bases and records</td><td>OAuth</td></tr>
+<tr><td>Canva</td><td>designs and presentations</td><td>OAuth</td></tr>
+<tr><td>monday.com</td><td>boards and projects</td><td>OAuth</td></tr>
+<tr><td>Sentry</td><td>app errors</td><td>OAuth</td></tr>
+<tr><td>Vercel</td><td>deployments</td><td>OAuth</td></tr>
+<tr><td>Supabase</td><td>databases (SQL asks first)</td><td>OAuth</td></tr>
+<tr><td>Hugging Face</td><td>models, datasets, Spaces</td><td>none needed</td></tr>
+<tr><td>Context7</td><td>current library docs for coding</td><td>none needed</td></tr>
+</tbody></table></div>
+<p class="rule">Each is the maker's own server in the official MCP registry; an unsigned request got its OAuth challenge and client registration was offered. Zoom was dropped because it doesn't offer registration.</p></section>
+
+<section id="check"><h2>Try it in the installed app</h2>
+<div class="comparison"><table><thead><tr><th>#</th><th>Try</th><th>Expect</th></tr></thead><tbody>
+<tr><td>1</td><td>Settings › Connections › Add apps › Todoist › Connect</td><td>Todoist's sign-in opens; the card turns Connected with its tools</td></tr>
+<tr><td>2</td><td>Leave an approval waiting, then wait a minute</td><td>A notice in “Check-ins with Echo”; reply there</td></tr>
+<tr><td>3</td><td>Settings › Automations › Also friendly check-ins, every hour</td><td>A short note, or silence if there's nothing worth saying; nothing in quiet hours</td></tr>
+</tbody></table></div></section>
+
+<footer>Verification: backend, web, desktop-contract and Rust suites; end-to-end connect/disconnect with a local MCP server; check-in notices, repeats, quiet hours and Stop; browser preview of the gallery (31 apps, 23 logos) and the check-in settings. No app sign-in was completed during development.</footer>
+</main></body></html>

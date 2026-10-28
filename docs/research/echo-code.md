@@ -353,7 +353,7 @@ So the two routes stay separate:
   - Sign-in is Claude Code's own `claude auth login`, opened in its own console window.
   - The status check runs `claude auth status --json`, and Echo keeps only *signed in / method / plan*. Email and organization are dropped.
   - Echo never reads Claude Code's credential store.
-- **Claude Agent** (unchanged). The Agent SDK route remains API-key only.
+- **Claude Agent** (unchanged in 11.10.9). The Agent SDK route remained API-key only. 11.10.10 removed it from Echo Code; see below.
 
 Settings and the Code surface describe the new runtime in plain text as running the owner's installed Claude Code. EchoSpeak doesn't present it as its own product.
 
@@ -409,3 +409,58 @@ Search words follow each move, and switching sections now opens the new page at 
   - Plan usage follows Anthropic's limits for ordinary individual use. Echo doesn't meter it.
   - Claude Code's interactive-only commands such as `/login` aren't available in `-p`, so sign-in stays in its own window.
   - The installed-app run is the owner's acceptance step.
+
+## 11.10.10: plans for code, APIs for chat
+
+The owner's rule, now enforced. **Echo Code** runs the owner's plans, each in its own harness: ChatGPT models in Codex, Claude models in Claude Code. Echo native in Echo Code uses models on this PC. **Chat** uses API keys, with Echo's own harness calling ChatGPT, Claude, Gemini or Grok.
+
+### Signed in, without a session
+
+Before, Echo Code knew an agent was "connected" only through a live per-project session, and sessions are stopped after every restart. So the composer said "Connect Codex" and the picker listed no models while Codex and Claude Code were both signed in.
+
+`agent/code_accounts.py` now remembers each agent's last check in `echo-code/agent-status.json`: installed, signed in, method, plan and models, never a token, email or organization.
+
+- `GET /echo-code/runtimes/{id}/account` reads it without running anything and reports `stale` after ten minutes. Echo Code then re-checks with `POST …/check`.
+- The composer label reads "Codex · Plus plan" or "Claude Code · Pro plan", and the picker lists the plan's models before any session exists.
+- Sending once signed in:
+  1. Echo selects the newest session for the project and agent.
+  2. If there's none, it creates the isolated worktree session. That needs a trust confirmation once per project and agent; it's stored locally, and the backend still requires `acknowledge_execution`.
+  3. It connects, then starts the turn.
+- Sign in is offered only after a check shows the agent signed out, so a second login never replaces a working one.
+
+### Models
+
+- **Codex.** `codex_models()` keeps every model the app-server's `model/list` reports for the account, with display name, description, default flag and reasoning efforts. It skips those marked `hidden`; on this PC that left 8 of 10 (`gpt-reserve` and `codex-auto-review` are internal).
+- **Claude Code** publishes no list to clients. Echo offers the choices its [model configuration page](https://code.claude.com/docs/en/model-config) documents:
+  - `default` (Opus on Pro and Max), `opus`, `sonnet`, `haiku` and `opusplan`.
+  - `opus[1m]` and `sonnet[1m]`, with their usage-credit notes.
+  - `fable`, which can bill usage credits instead of the plan.
+  - A free model id.
+
+### Enforcement
+
+`echo_code.code_provider_problem(session_id, provider)` refuses `openai`, `anthropic`, `gemini` and `xai` for a conversation whose thread surface is `code`. It's checked in two places:
+
+- `POST /provider/switch` returns 403 before touching the binding.
+- `LeanSession._endpoint_for` raises for every model source: the conversation's binding, an agent's own model, and smart-model-choice overrides.
+
+Echo Code's native picker lists local providers only (`ConnectedModelBrowser localOnly`).
+
+### Claude Agent removed from Echo Code
+
+The Agent SDK runtime (`claude_code`) ran Claude with an API key inside Echo Code, which is the opposite of the rule. Removed:
+
+- its adapter and worker
+- the `--code-sdk-worker` mode
+- `requirements-code-runtime.txt`
+- the spec's bundling; `claude_agent_sdk` is now in the spec's excludes
+
+New sessions can't use it, and sessions saved earlier with it are no longer loaded. Their worktree folders stay on disk. Claude by API key is in Chat.
+
+### Chat
+
+The model picker's rail is Echo (all connected models), ChatGPT (OpenAI) and Claude (Anthropic).
+
+- Choosing one without a key shows a panel to paste it. It's saved through `PUT /settings` and stored encrypted.
+- The panel says API use is billed to the API account, not the plan, and that the plan works in Echo Code through Codex or Claude Code.
+
