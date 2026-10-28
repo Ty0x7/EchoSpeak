@@ -327,7 +327,8 @@ class LeanSession:
             source=self.source,
             status="running",
             query=message[:4000],
-            record_user_message=True,
+            # A check-in's prompt is Echo's own context, not something the owner said.
+            record_user_message=self.source != "heartbeat",
             workspace_id=str(state.workspace_id or ""),
             active_project_id=str(state.active_project_id or ""),
             runtime_provider=endpoint.provider,
@@ -335,7 +336,8 @@ class LeanSession:
             intent="lean",
             mode="agent",
             phase="running",
-            metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else ""},
+            metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else "",
+                      "hidden_prompt": self.source == "heartbeat"},
         )
         self.execution_id = execution.id
         self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else "",

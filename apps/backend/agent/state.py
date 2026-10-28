@@ -1040,6 +1040,29 @@ class StateStore:
             self._persist_runtime_activity(item_ids=[item.id], tool_run_ids=[])
         return RuntimeItem(**item.model_dump())
 
+    def discard_turn(self, turn_id: str) -> bool:
+        """Remove one finished turn and what it recorded (an Echo check-in that had nothing to say).
+
+        Only finished turns go; the chat's search index follows the removed items.
+        """
+        with self._lock:
+            record = self._executions.get(turn_id)
+            if record is None or record.status not in {"completed", "failed", "canceled", "superseded"}:
+                return False
+            self._executions.pop(turn_id, None)
+            for key in [key for key, item in self._items.items() if item.turn_id == turn_id]:
+                self._items.pop(key, None)
+            for key in [key for key, run in self._tool_runs.items() if run.turn_id == turn_id]:
+                self._tool_runs.pop(key, None)
+            state = self._thread_state.get(record.thread_id)
+            if state is not None and turn_id in {state.current_execution_id, state.active_turn_id}:
+                state.current_execution_id = state.active_turn_id = ""
+                self._persist_records("thread_state", self._thread_state, [record.thread_id])
+            self._persist_records("executions", self._executions)
+            self._persist_records("items", self._items)
+            self._persist_records("tool_runs", self._tool_runs)
+        return True
+
     # Terminal ToolRun statuses — once set, finish_tool_run is idempotent.
     TOOL_RUN_TERMINAL = frozenset({
         "complete", "completed", "success", "failed", "error",
@@ -1466,7 +1489,9 @@ class StateStore:
                             "agent_role": str(item.payload.get("role") or ""),
                             "stop_reason": str(item.payload.get("stop_reason") or ""),
                         })
-        if not any(m["role"] == "user" for m in messages) and execution.query:
+        # Older turns kept no user item, so their query stands in. A check-in's prompt is Echo's own
+        # context, marked hidden_prompt, and never shown as something the owner said.
+        if not any(m["role"] == "user" for m in messages) and execution.query and not (execution.metadata or {}).get("hidden_prompt"):
             messages.insert(0, {
                 "role": "user",
                 "text": execution.query,

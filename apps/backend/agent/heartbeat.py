@@ -256,6 +256,18 @@ class HeartbeatManager:
     # System pulse — deterministic context gathering
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _owner_active(window_seconds: float = 30 * 60) -> bool:
+        """Whether the owner sent a message in the last half hour (then a check-in would interrupt)."""
+        try:
+            from agent.state import get_state_store
+            now = time.time()
+            return any(row.source in {"web", "desktop", "voice", "chat"} and row.kind != "reminder"
+                       and now - float(row.created_at or 0) < window_seconds
+                       for row in get_state_store().list_executions(limit=20))
+        except Exception:
+            return False
+
     def _gather_system_pulse(self) -> str:
         """Gather real system state to enrich the heartbeat prompt.
 
@@ -272,6 +284,17 @@ class HeartbeatManager:
             sections.append(f"Current time: {local_now.strftime('%A, %B %d %Y %I:%M %p')} (local) / {now.strftime('%H:%M UTC')}")
         except Exception:
             sections.append(f"Current time: {now.strftime('%A, %B %d %Y %H:%M UTC')}")
+
+        # -- What needs the owner, from EchoSpeak's own state (agent/attention.py) --
+        try:
+            from agent import attention
+            items = attention.collect()
+            if items:
+                sections.append("Things that need the owner or are coming up:\n" + attention.digest(items[:12]))
+            else:
+                sections.append("Nothing is waiting on the owner: no approvals, stuck tasks, failing apps or reminders in the next hour.")
+        except Exception as exc:
+            logger.debug(f"HeartbeatManager: attention gather error — {exc}")
 
         # -- Todos --
         try:
@@ -420,7 +443,13 @@ class HeartbeatManager:
         else:
             enriched_prompt = self._prompt
 
-        # Run on the lean loop in the dedicated Heartbeat chat (or a configured one).
+        # Not during quiet hours, and not while the owner is in the middle of chatting.
+        from agent import checkins
+        if checkins.quiet() or self._owner_active():
+            logger.debug("HeartbeatManager: quiet hours or the owner is active; skipping this check-in")
+            return
+
+        # Run on the lean loop in the dedicated check-ins chat (or a configured one).
         from agent.lean.automations import heartbeat_session
 
         session_id = self._session_id or heartbeat_session()
@@ -462,7 +491,14 @@ class HeartbeatManager:
                 self._history = self._history[-self._history_max :]
 
         if is_silent:
-            logger.debug("HeartbeatManager: silent tick — nothing to report")
+            # Nothing worth saying: leave no trace in the check-ins chat.
+            if result.task_id:
+                try:
+                    from agent.state import get_state_store
+                    get_state_store().discard_turn(result.task_id)
+                except Exception:
+                    logger.debug("HeartbeatManager: couldn't discard a silent check-in", exc_info=True)
+            logger.debug("HeartbeatManager: silent tick, nothing to report")
             return
 
         logger.info(f"HeartbeatManager: active tick — routing to {self._channels}")

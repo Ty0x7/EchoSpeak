@@ -348,6 +348,12 @@ class RoutineManager:
         drain()
         from agent.coordination_service import recover_reviews
         recover_reviews()
+        try:
+            # Echo checks in about things that need the owner (agent/checkins.py; no model call).
+            from agent import checkins
+            checkins.tick()
+        except Exception as exc:
+            logger.warning(f"Check-in skipped: {exc}")
         if not self._on_run:
             return
         

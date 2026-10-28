@@ -310,9 +310,9 @@ async def _reconcile_heartbeat_runtime() -> None:
     desired_enabled = bool(getattr(config, "heartbeat_enabled", False))
     heartbeat_project_id = str(getattr(config, "heartbeat_project_id", "") or "").strip()
     heartbeat_session_id = str(getattr(config, "heartbeat_session_id", "") or "").strip()
-    if desired_enabled and (not heartbeat_project_id or not heartbeat_session_id):
-        logger.error("Heartbeat requires HEARTBEAT_PROJECT_ID and HEARTBEAT_SESSION_ID")
-        desired_enabled = False
+    # A project and chat are optional: without them check-ins use the "Check-ins with Echo" chat.
+    # (This used to refuse to start without both, which nothing in the app sets, so turning the
+    # heartbeat on in Settings did nothing.)
 
     with _heartbeat_runtime_lock:
         hb = get_heartbeat_manager()

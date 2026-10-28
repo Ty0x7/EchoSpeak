@@ -181,11 +181,7 @@ def _thread_exists(thread_id: str) -> bool:
 
 
 def heartbeat_session() -> str:
-    """The heartbeat posts into one dedicated chat."""
-    from agent.threads import get_thread_manager
+    """Friendly check-ins and notices share one chat, where the owner can reply (agent/checkins.py)."""
+    from agent import checkins
 
-    manager = get_thread_manager()
-    for thread in manager.list_threads(include_archived=True, limit=500):
-        if str(getattr(thread, "title", "")) == "Heartbeat":
-            return thread.thread_id
-    return _ensure_chat("Heartbeat")
+    return checkins.session()
