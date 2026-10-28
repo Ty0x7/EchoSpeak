@@ -174,6 +174,13 @@ class LeanTurn:
         self.client = client
         # Set by the session for environments with their own boundary (Chat); returns why a call is refused.
         self.call_guard: Optional[Callable[[str, dict[str, Any], Any], str]] = None
+        # Environment hooks (Chat: agent/lean/chat_run.py). tool_observer sees every finished call
+        # (name, args, ok, output, step, duration_ms, meta); final_check may ask for one correction
+        # before an answer is accepted (an output guardrail); grace_prompt asks for the best answer
+        # when the step budget runs out.
+        self.tool_observer: Optional[Callable[..., None]] = None
+        self.final_check: Optional[Callable[[str], str]] = None
+        self.grace_prompt = ""
         self.persona = persona
         self.system_prompt = system_prompt
         self.history = history
@@ -411,6 +418,12 @@ class LeanTurn:
                         continue
                     if self._absorb_steering(messages, step):
                         # The user added something while this answer was written: keep going with it.
+                        self._retract_text(step)
+                        continue
+                    correction = self.final_check(content) if self.final_check is not None and not stop_reason else ""
+                    if correction and step < max_steps:
+                        messages.append({"role": "user", "content": correction})
+                        self.emit({"type": "answer_check", "step": step, "note": correction[:300]})
                         self._retract_text(step)
                         continue
                     final_text = content.strip()
@@ -905,8 +918,9 @@ class LeanTurn:
         """
         if self.cancel.is_set():
             return ""
-        ask = ("[EchoSpeak]: Your step budget is used up. Reply now, without tools, with your findings in the "
-               "required format, using only what you actually found. Say what you couldn't confirm.")
+        ask = self.grace_prompt or (
+            "[EchoSpeak]: Your step budget is used up. Reply now, without tools, with your findings in the "
+            "required format, using only what you actually found. Say what you couldn't confirm.")
         last = messages[-1] if messages else {}
         if last.get("role") in {"tool", "user"}:
             last["content"] = f"{last.get('content') or ''}\n\n{ask}"  # keep strict role alternation
@@ -1191,6 +1205,11 @@ class LeanTurn:
 
         # Execution evidence (agent/lean/evidence.py): the outcome is set where it's known, not read back from text.
         outcome = outcome or ("ok" if ok else "failed")
+        if self.tool_observer is not None:
+            try:
+                self.tool_observer(name, args, ok, output, step, duration_ms, meta)
+            except Exception:
+                logger.debug("Tool observer failed", exc_info=True)
         effects = list(effects or [])
         self._outcomes_by_call[call.id] = outcome
         facts = {**steps.widget_counts(widgets), **(meta or {})}

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — Chat orchestration</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}.shot img{display:block;width:100%;height:auto}.shot figcaption{padding:10px 14px;margin:0}.phone{max-width:240px}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0}.flow .node{flex:1 1 120px}.flow .arrow{flex:0 0 auto;margin:0}.mono{font:12px Consolas,monospace}.bad{color:var(--warn)}
+</style>
+<body><main>
+<header><h1>EchoSpeak / Chat orchestration: an evidence-grounded execution layer</h1><p>28 October 2026 · technical record: docs/research/chat-orchestration.md</p></header>
+<nav aria-label="Report sections"><a href="#turn">One turn</a><a href="#paths">Five paths</a><a href="#evidence">Evidence and citations</a><a href="#gap">Gap analysis</a><a href="#context">Context</a><a href="#status">Verified vs limited</a></nav>
+<p class="lead">Chat now keeps track of what it actually read,<br>checks its answer against it, and always finishes with an answer.</p>
+<p class="note"><strong>Evidence:</strong> architecture diagrams, not product screenshots. The paths and traces below come from deterministic tests running the real Chat loop with a scripted model. ChatGPT's internal harness isn't public. OpenAI's documented patterns were the reference.</p>
+<div class="legend"><span class="badge current">Built and tested</span><span class="badge documented">Was missing</span><span class="badge proposed">Depends on the model</span></div>
+
+<section id="turn"><h2>What one Chat turn does</h2>
+<div class="diagram" role="img" aria-label="A Chat turn: ChatRun sets a profile, budget and earlier sources; the toolbox is Chat's allowlist; the prompt is ordered for caching; the shared loop calls the model, guards and runs tools, records evidence, audits the answer's citations with at most one correction, and answers from findings when the budget runs out; the run trace is saved.">
+<div class="spine">
+<div class="node accent"><strong>ChatRun</strong><span>model profile (compact for small local models, full otherwise) · step budget · pages read earlier in this chat</span></div><div class="arrow">↓</div>
+<div class="grid3">
+<div class="node"><strong>Tools</strong><span>Chat's allowlist, focused for local models; the rest behind find_tools</span></div>
+<div class="node"><strong>Prompt</strong><span>stable sections first, chat context next, the clock last so the prefix can be cached</span></div>
+<div class="node"><strong>Selected model</strong><span>never swapped</span></div>
+</div><div class="arrow">↓</div>
+<div class="node"><strong>Shared Lean loop</strong><span>model → tool calls → Chat guard → approvals → results → model … until it answers</span></div><div class="arrow">↓</div>
+<div class="grid3">
+<div class="node"><strong>Evidence ledger</strong><span class="current">every search, result, page read, file and memory lookup</span></div>
+<div class="node"><strong>Answer check</strong><span class="current">links checked against the evidence; one correction for invented links or uncited research</span></div>
+<div class="node"><strong>Budget</strong><span class="current">out of steps → one tool-free answer from what was found</span></div>
+</div><div class="arrow">↓</div>
+<div class="node"><strong>Run trace on the execution</strong><span>path, context sizes, calls, evidence, citations, stop reason, tokens · no prompts, replies or reasoning</span></div>
+</div></div></section>
+
+<section id="paths"><h2>Five paths, decided by the model, checked by the app</h2>
+<div class="comparison"><table><thead><tr><th>You ask</th><th>What happens</th><th>Trace</th></tr></thead><tbody>
+<tr><td>"What's the capital of France?"</td><td>One model call, no tools</td><td class="mono">direct · 1 step</td></tr>
+<tr><td>"When does version 5 come out?"</td><td>Search → read the best page → answer linking it</td><td class="mono">search · 3 steps · cited: the page read</td></tr>
+<tr><td>"Is product X worth buying?"</td><td>2 searches, 2 pages read; an invented link is caught and replaced with the pages actually read</td><td class="mono">research · 6 steps · 1 correction · unknown links: 0</td></tr>
+<tr><td>"Does it include offline mode?" (follow-up)</td><td>No new search: memories, the chat summary and the pages read earlier are in context and citable</td><td class="mono">direct · cited: an earlier page</td></tr>
+<tr><td>"What does src/math.py do?"</td><td>Read the file, then explain what's actually there</td><td class="mono">files · 2 steps</td></tr>
+</tbody></table></div>
+<p class="rule">No keyword router picks the path. As in OpenAI's documented <span class="mono">tool_choice: auto</span>, the model decides. Chat bounds it (allowlist and budget) and checks the result (evidence).</p></section>
+
+<section id="evidence"><h2>A tool result isn't the answer: evidence and citations</h2>
+<div class="grid3">
+<div class="box"><h3>Read</h3><p>The page was opened and read this turn (or earlier in this chat). The strongest citation.</p></div>
+<div class="box"><h3>Seen only</h3><p>It appeared in search results but was never opened. Allowed, and traced as weaker.</p></div>
+<div class="box"><h3 class="bad">Unknown</h3><p>Nothing retrieved it, so it's likely invented. After research, Chat is asked once to replace or remove it.</p></div>
+</div>
+<p class="rule">An answer that read pages but cites none of them is asked once to cite them. Links in an answer that did no research are left alone (and traced), because citing well-known documentation from knowledge is normal.</p></section>
+
+<section id="gap"><h2>Gap analysis in brief</h2>
+<div class="comparison"><table><thead><tr><th>Documented pattern</th><th>Before</th><th>Now</th></tr></thead><tbody>
+<tr><td>Turn limit with a fallback output (<span class="mono">max_turns</span> handler)</td><td class="documented">"I ran out of steps… press Continue"</td><td>Answer from findings, budget by model</td></tr>
+<tr><td>Inline, verifiable citations and a source list</td><td class="documented">Any link accepted</td><td>Links audited against evidence; one correction</td></tr>
+<tr><td>Output checks (guardrails)</td><td class="documented">Agent-only guards</td><td>Chat answer check</td></tr>
+<tr><td>Stable prefix for prompt caching</td><td class="documented">Clock mid-prompt, changing every minute</td><td>Clock last</td></tr>
+<tr><td>Fewer tools up front; defer the rest</td><td class="documented">One focus set for all</td><td>A compact set for small local models</td></tr>
+<tr><td>Conversation state across turns</td><td class="documented">The turn's sources were forgotten</td><td>Pages read earlier carried and citable</td></tr>
+<tr><td>Traces per run, grouped by conversation</td><td class="documented">No Chat run record</td><td><span class="mono">chat_run</span> on every execution</td></tr>
+</tbody></table></div></section>
+
+<section id="context"><h2>Context, ordered for the model and the cache</h2>
+<div class="phases">
+<div class="phase"><b>Stable</b><span>Identity, rules, formatting, capabilities, environment: the same every turn</span></div>
+<div class="phase"><b>This chat</b><span>Your facts, the chat summary, pages read earlier, past chats when you point back</span></div>
+<div class="phase"><b>The turn</b><span>The last 30 messages verbatim; older tool output trimmed as the context fills</span></div>
+<div class="phase"><b>Clock</b><span>Last, so the cached prefix survives the minute changing</span></div>
+</div>
+<p class="rule">Small local models (about 9B or fewer) get the same contract in fewer words, a shorter tool list and 6 steps; larger and API models get the full Chat instructions and 10 steps.</p></section>
+
+<section id="status"><h2>Verified, approximated or limited by the model</h2>
+<div class="grid3">
+<div class="box"><h3 class="current">Verified by tests</h3><p>Loop and budget fallback, Chat guard, evidence ledger, citation audit and correction, profiles, prompt order, earlier sources, saved trace.</p></div>
+<div class="box"><h3>Approximated</h3><p>Citations are audited links, not offset annotations. Compaction is a local summary, not provider compaction items. find-in-page is notebook reading.</p></div>
+<div class="box"><h3 class="proposed">Model-limited</h3><p>When evidence is enough, how well queries are refined, how contradictions are weighed. Your live test decides how close it feels to ChatGPT.</p></div>
+</div></section>
+<footer>Technical record: docs/research/chat-orchestration.md · Paths and traces: apps/backend/tests/test_chat_paths.py.</footer>
+</main></body></html>

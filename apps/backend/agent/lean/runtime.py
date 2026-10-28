@@ -22,6 +22,7 @@ from agent.lean.job import (ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION,
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import CHAT_AGENT_ID, AgentPersona, chat_persona, get_persona_store
 from agent.lean import chat_mode
+from agent.lean import chat_run as chat_run_mod
 from agent.lean.prompt import build_system_prompt
 from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoint
 from agent.lean.rooms import Room, get_room_store, mentioned_agents
@@ -135,6 +136,7 @@ class LeanSession:
     # Chat's model-first mode (set per session in __init__); off unless the conversation is Chat.
     model_first = False
     _chat: Optional[AgentPersona] = None
+    _chat_run: Optional["chat_run_mod.ChatRun"] = None
 
     def __init__(
         self,
@@ -421,7 +423,8 @@ class LeanSession:
             phase="cancelled" if cancelled else "complete",
             response_preview=final_text[:500],
             error=error[:1000],
-            metadata={**dict(execution.metadata or {}), **({"outcome": outcome} if outcome else {})},
+            metadata={**dict(execution.metadata or {}), **({"outcome": outcome} if outcome else {}),
+                      **({"chat_run": self._chat_trace(final_text)} if self._chat_run is not None else {})},
         )
         self._learn(cancelled)
         store.update_thread_state(
@@ -1029,9 +1032,12 @@ class LeanSession:
                 session_id=self.session_id,
                 project_root=self.project_root,
             )
+        chat_run = None
         if self.model_first:
             # Chat's capability boundary, in trusted code: what it may not use is never offered.
             chat_mode.restrict(toolbox)
+            # Chat's execution layer for the answer the user sees (agent/lean/chat_run.py).
+            chat_run = self._new_chat_run(persona) if depth == 0 else None
         original_names = set(toolbox.names)
         if self._is_discussion():
             original_names.update({"assign_tasks", "complete_task"})
@@ -1043,7 +1049,7 @@ class LeanSession:
             toolbox.focus(BUILDER_FOCUS)
         elif not guest and self._local_model(persona):
             # Any other agent on a local model: everyday tools up front, the rest through find_tools (R12).
-            toolbox.focus(CHAT_FOCUS)
+            toolbox.focus(chat_mode.COMPACT_FOCUS if chat_run is not None and chat_run.profile == "compact" else CHAT_FOCUS)
         if "spawn_workers" in toolbox.native:
             # Workers get a subset of exactly this toolbox: never more than their lead.
             toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]
@@ -1099,6 +1105,7 @@ class LeanSession:
         # Where the repo stands (branch, ahead/behind, changes), like a coding agent's git status.
         repo_note = git_context.summary(self.project_root) if self.project_root and "terminal" in toolbox.names else ""
         if self.model_first:
+            sections: dict[str, int] = {}
             prompt = chat_mode.build_prompt(
                 persona=persona,
                 model=self._endpoint_label(),
@@ -1112,7 +1119,21 @@ class LeanSession:
                 skills=agent_skills.prompt_section(),
                 tool_names=set(toolbox.names),
                 has_external=any(str(getattr(toolbox.entry(n), "origin", "")) in chat_mode.ALLOWED_ORIGINS for n in toolbox.names),
+                profile=chat_run.profile if chat_run is not None else "full",
+                earlier_sources=chat_run_mod.earlier_sources_section(chat_run.earlier_sources) if chat_run is not None else "",
+                sizes=sections,
             )
+            if chat_run is not None:
+                chat_run.user_message = goal
+                chat_run.context = {
+                    "prompt_chars": len(prompt),
+                    "sections": sections,
+                    "history_messages": len(history),
+                    "memories": len(memories),
+                    "past_chats": len(self._past_chat_lines or []),
+                    "tools_offered": len([n for n in toolbox.names if n not in toolbox.deferred]),
+                    "tools_deferred": len(toolbox.deferred),
+                }
         else:
             prompt = build_system_prompt(
                 persona=persona,
@@ -1164,6 +1185,15 @@ class LeanSession:
         turn.steerable = depth == 0
         if self.model_first:
             turn.call_guard = chat_mode.call_problem
+        if chat_run is not None:
+            # A budget sized to the model that still ends in an answer, an evidence ledger,
+            # and one citation correction before an answer is accepted.
+            turn.tool_observer = chat_run.observe
+            turn.final_check = chat_run.check_answer
+            turn.max_steps_override = chat_run.budget
+            turn.final_grace = True
+            turn.grace_prompt = chat_run_mod.GRACE_PROMPT
+            self._chat_run = chat_run
         turn.work_context = work_context
         turn.ensure_work = lambda: self._ensure_work(persona, tools=list(toolbox.names))
         if work_context:
@@ -1641,6 +1671,31 @@ class LeanSession:
     def _owner_side(persona: AgentPersona) -> bool:
         """Echo and Chat both speak for the owner: account memory and past chats are theirs."""
         return persona.id in {"echo", CHAT_AGENT_ID}
+
+    def _new_chat_run(self, persona: AgentPersona) -> "chat_run_mod.ChatRun":
+        try:
+            endpoint = self._endpoint_for(persona)
+            model, provider, local = str(endpoint.model or ""), str(endpoint.provider or ""), bool(endpoint.local)
+        except PermissionError:
+            raise
+        except Exception:
+            model, provider, local = "", "", True
+        return chat_run_mod.ChatRun(
+            session_id=self.session_id, model=model, provider=provider,
+            profile=chat_run_mod.profile_for(model, local=local),
+            earlier_sources=chat_run_mod.earlier_sources(self.session_id),
+        )
+
+    def _chat_trace(self, answer: str) -> dict[str, Any]:
+        """The Chat run record saved on the execution (chat_run.ChatRun.trace)."""
+        last = next((r for r in reversed(self.results) if r.agent_id == CHAT_AGENT_ID), None)
+        steps = max([int(item.get("step") or 0) for item in (last.timeline if last else [])] or [0])
+        try:
+            return self._chat_run.trace(steps=steps, stop_reason=last.stop_reason if last else "",
+                                        usage=last.usage if last else {}, answer=answer)
+        except Exception:
+            logger.debug("Chat trace failed", exc_info=True)
+            return {}
 
     def _endpoint_label(self) -> str:
         try:

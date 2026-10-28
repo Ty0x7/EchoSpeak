@@ -1,5 +1,18 @@
 # Changes
 
+## v11.11.2 — Chat answers from evidence (source; not yet built)
+
+* Chat execution layer over the shared Lean loop (`agent/lean/chat_run.py`):
+  * An evidence ledger of searches, results, pages read, files and memory.
+  * Citation audit: links classed as read, seen-only or unknown, with one correction for invented links or uncited research.
+  * A per-model step budget that ends in a grace answer from evidence.
+  * Compact or full profile by model size, with the model never swapped.
+  * Pages read earlier in the chat carried into follow-ups.
+  * A run trace on each execution (refs and sizes only).
+* Generic loop hooks: `tool_observer`, `final_check` and `grace_prompt`. They're off unless set; Agents and Code are unchanged.
+* Chat prompt ordered for prefix caching (clock last). Research rules now cover contradictions and when to stop.
+* See [release notes](docs/releases/v11.11.2.md).
+
 ## v11.11.1 — A better Chat: diagrams that draw, sharper answers (source; not yet built)
 
 * Mermaid draws reliably:
