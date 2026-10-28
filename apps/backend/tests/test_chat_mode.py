@@ -54,12 +54,12 @@ def env(tmp_path, monkeypatch):
     return chats, room_store, store
 
 
-def _chat_session(monkeypatch, chats, recalled=()):
+def _chat_session(monkeypatch, chats, recalled=(), model="qwen/qwen3-8b"):
     monkeypatch.setattr(lean_runtime.LeanSession, "_recall", lambda self, query, limit=8: list(recalled))
     thread = chats.create_thread(title="Chat", source="web")
     return lean_runtime.LeanSession(
         agent=SimpleNamespace(memory=None, llm_provider=SimpleNamespace(value="lmstudio"),
-                              model_runtime=SimpleNamespace(model_id="qwen/qwen3-8b")),
+                              model_runtime=SimpleNamespace(model_id=model)),
         session_id=thread.thread_id, request_id="req-chat", emit=lambda _e: None, cancel=threading.Event(), source="web")
 
 
@@ -120,9 +120,9 @@ def test_chat_refuses_agent_tools_at_run_time_even_by_alias():
 
 def test_chat_prompt_is_an_assistant_not_an_agent(env, monkeypatch):
     chats, _, _ = env
-    session = _chat_session(monkeypatch, chats)
+    session = _chat_session(monkeypatch, chats, model="qwen/qwen3-32b")  # a larger model: the full prompt
     prompt = session._build_turn(session._chat_persona(), "explain monads", history=[], depth=0).system_prompt
-    assert prompt.startswith("You are qwen3-8b, answering the user directly in EchoSpeak's Chat.")
+    assert prompt.startswith("You are qwen3-32b, answering the user directly in EchoSpeak's Chat.")
     for section in ("## How to answer", "## When to use tools", "## Formatting", "## What you can use in Chat"):
         assert section in prompt
     # None of Echo's agent instructions, team or computer-control guidance.

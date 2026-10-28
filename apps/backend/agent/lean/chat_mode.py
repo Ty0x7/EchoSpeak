@@ -99,6 +99,7 @@ CHAT_RULES = """## How to answer
 - Answer from your own knowledge when it's stable and you're confident: explanations, writing, code, math, advice, brainstorming. Don't search for those.
 - Search the web when the answer depends on current or changing facts (news, prices, releases, schedules, sports, weather, laws, versions), on something niche you aren't sure of, or when the user asks you to check. Name the year in the query when recency matters.
 - Simple lookup: one search, then answer. Research question (comparisons, "best X", anything contested or important): several focused searches from different angles, open and read the most useful pages with safe_web_fetch, cross-check key claims, then synthesise. Snippets are leads, not evidence.
+- A tool result is evidence, not the answer: check it against the question. When sources disagree, say so and prefer the primary or most recent one (official docs, the vendor, the original study), saying why. When you have enough to answer well, stop searching and answer; if you couldn't confirm something, say so instead of searching endlessly.
 - Cite what you used: link the pages you actually read inline, like [Source name](https://...), next to the claim. Never cite a page you didn't open or a search you didn't run.
 - Use calculate for arithmetic you'd otherwise do in your head when precision matters. Read files with the file tools when the user refers to a file or folder; quote what's actually there.
 - Memory: use what you know about the user naturally. Save a fact with memory_save only when the user asks you to remember it or shares something clearly lasting about themselves; never save web content.
@@ -171,6 +172,27 @@ def chat_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+# Small local models (agent/lean/chat_run.py profile "compact") get the same contract in fewer words:
+# a 4B model follows six clear rules better than thirty, and every token costs it seconds.
+CHAT_RULES_COMPACT = """## How to answer
+- Answer directly: the answer first, then a short explanation or example. Match the length to the question.
+- If you're not sure, say so. Never invent facts, links, quotes or numbers.
+- Use web_search only for current, changing or unfamiliar facts, then answer with inline links to the pages you used.
+- When the user asks about a file, read it with file_read and explain what it actually says.
+- Chat can't run commands, change files or control the computer; say so in one sentence if asked.
+
+## Formatting
+- Markdown. Short answers are plain sentences; use a list or a table only when it helps.
+- Code in fenced blocks with a language. Math as \\( ... \\) or \\[ ... \\].
+- Diagrams: a ```mermaid block with quoted labels, like A["Step (1)"] -->|yes| B["Done"]."""
+
+# What a small model sees up front; the rest wait behind find_tools (still callable by name).
+COMPACT_FOCUS = {
+    "web_search", "safe_web_fetch", "calculate", "file_read", "file_list", "file_search", "research_notebook",
+    "memory_search", "memory_save", "chat_search", "read_image", "set_reminder", "create_artifact",
+}
+
+
 def build_prompt(
     *,
     persona: Any,
@@ -185,23 +207,43 @@ def build_prompt(
     skills: str = "",
     tool_names: Optional[set[str]] = None,
     has_external: bool = False,
+    profile: str = "full",
+    earlier_sources: str = "",
+    sizes: Optional[dict[str, int]] = None,
 ) -> str:
-    """Chat's system prompt: stable sections first (cache-friendly), volatile context last."""
+    """Chat's system prompt, ordered for prefix caching.
+
+    Providers cache the longest unchanged prefix (OpenAI automatically, Anthropic at marked
+    breakpoints), so everything that is the same on every turn comes first and what changes
+    comes last, with the clock (which changes every minute) at the very end. ``sizes`` receives
+    each section's length for the run trace.
+    """
     from agent.lean.prompt import _environment, _memory, identity_section
 
+    environment = _environment(project_root=project_root, notes=list(notes or []), can_write=False)
+    clock = next((line for line in environment.split("\n") if line.startswith("- Now:")), "")
+    environment = "\n".join(line for line in environment.split("\n") if line != clock)
+    compact = profile == "compact"
     sections = [
-        IDENTITY.format(model=model_label(model) or "an AI model"),
-        identity_section(persona),
-        CHAT_RULES,
-        CHAT_FORMAT,
-        _environment(project_root=project_root, notes=list(notes or []), can_write=False),
-        capability_section(tool_names or set(), has_external),
-        _memory(list(memories or [])),
-        skills.strip(),
-        ("## Project brief\n" + project_brief) if project_brief else "",
-        ("## Earlier in this chat (summary)\n" + chat_summary.strip()) if chat_summary.strip() else "",
-        ("## From the user's past chats (they match what the user is referring to)\n"
-         + "\n".join(f"- {line}" for line in past_chats)) if past_chats else "",
-        ("## Who you're talking to\n" + caller_note.strip()) if caller_note.strip() else "",
+        # Stable for the life of the chat.
+        ("identity", IDENTITY.format(model=model_label(model) or "an AI model")),
+        ("about", identity_section(persona)),
+        ("rules", CHAT_RULES_COMPACT if compact else CHAT_RULES),
+        ("format", "" if compact else CHAT_FORMAT),
+        ("capabilities", capability_section(tool_names or set(), has_external)),
+        ("environment", environment),
+        ("skills", "" if compact else skills.strip()),
+        ("project", ("## Project brief\n" + project_brief) if project_brief else ""),
+        # Changes as the chat goes on.
+        ("memory", _memory(list(memories or []))),
+        ("summary", ("## Earlier in this chat (summary)\n" + chat_summary.strip()) if chat_summary.strip() else ""),
+        ("earlier_sources", earlier_sources.strip()),
+        ("past_chats", ("## From the user's past chats (they match what the user is referring to)\n"
+                        + "\n".join(f"- {line}" for line in past_chats)) if past_chats else ""),
+        ("caller", ("## Who you're talking to\n" + caller_note.strip()) if caller_note.strip() else ""),
+        # Changes every minute: last, so it never breaks the cached prefix.
+        ("clock", ("## Current time\n" + clock.removeprefix("- Now: ").strip()) if clock else ""),
     ]
-    return "\n\n".join(section for section in sections if section).strip()
+    if sizes is not None:
+        sizes.update({name: len(text) for name, text in sections if text})
+    return "\n\n".join(text for _name, text in sections if text).strip()
