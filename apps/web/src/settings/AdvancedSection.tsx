@@ -1,3 +1,5 @@
+import { BrandMark } from "../components/BrandMark";
+import { ConnectorGallery } from "./ConnectorGallery";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { AvatarEditor } from "../components/AvatarEditor";
 import { isDesktopRuntime, pickDesktopConnectionFolder } from "../desktop/bridge";
@@ -726,6 +728,11 @@ function ConnectionSuggestions({ apiBase }: { apiBase: string }) {
   );
 }
 
+/** The logo id for a settings card: "connection:github" → "github", "mcp:Notion" → "notion". */
+function brandId(card: any): string {
+  return String(card?.id || card?.name || "").replace(/^(connection|mcp|skill):/, "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+}
+
 export function ConnectionsPage({ s, save, apiBase, sessionId, projectId }: { s: SettingsMap; save: Save; apiBase: string; sessionId: string; projectId: string }) {
   const [cards, setCards] = useState<any[] | null>(null);
   const [providers, setProviders] = useState<any[]>([]);
@@ -812,14 +819,20 @@ export function ConnectionsPage({ s, save, apiBase, sessionId, projectId }: { s:
     { key: "skills", label: "Skills", noun: "ready" },
     { key: "mcp", label: "MCP servers", noun: "running" },
   ].map((kind) => ({ ...kind, total: byCategory(kind.key).length, ready: byCategory(kind.key).filter((c) => c.ready).length }));
-  /** A tile with the first letter, tinted by status, then the name and its status. */
+  /** The app's logo (or a letter tile), then the name and its status. */
   const nameOf = (card: any) => (
     <span className="st-conn-name">
-      <span className={`st-conn-tile is-${tone(card)}`} aria-hidden>{String(card.name || "?").trim().charAt(0).toUpperCase()}</span>
+      <BrandMark id={brandId(card)} name={String(card.name || "?")} size={24} />
       <span>{card.name}</span>
       <Status tone={tone(card)}>{card.status_label}</Status>
     </span>
   );
+  // Accounts that are connected, plus Obsidian (a local folder). Apps without a working
+  // sign-in here are added from "Add apps" above instead.
+  const accountCards = byCategory("connections").filter((card) => {
+    const provider = providers.find((p) => `connection:${p.id}` === card.id || p.id === card.id);
+    return provider?.connection || provider?.id === "obsidian";
+  });
 
   return (
     <>
@@ -833,13 +846,15 @@ export function ConnectionsPage({ s, save, apiBase, sessionId, projectId }: { s:
           </div>
         ))}
       </div>
+      <ConnectorGallery apiBase={apiBase} />
       <Group
-        title="Connections"
-        description={projectId ? "Accounts and apps agents can use in this project." : "Open a chat in a project to connect accounts and apps to it."}
+        title="Accounts and folders"
+        description={projectId ? "Accounts and local folders agents can use in this project." : "Open a chat in a project to connect a local folder, such as an Obsidian vault, to it."}
         action={<button type="button" className="es-btn es-btn-sm es-btn-quiet" onClick={() => void load()}>Refresh</button>}
       >
         {cards === null ? <Row label="Loading…" /> : null}
-        {byCategory("connections").map((card) => {
+        {cards !== null && !accountCards.length ? <Row label={<span className="st-muted">Nothing connected to this project yet.</span>} /> : null}
+        {accountCards.map((card) => {
           const provider = providers.find((p) => `connection:${p.id}` === card.id || p.id === card.id);
           const connection = provider?.connection;
           const key = String(connection?.id || provider?.id || card.id);

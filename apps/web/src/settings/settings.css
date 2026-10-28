@@ -433,3 +433,34 @@
 .st-suggestion + .st-suggestion, .st-suggestion + .st-row { border-top: 1px solid var(--es-line); }
 .st-suggestion .st-row-help ol { margin: 4px 0; padding-left: 18px; }
 .st-suggestion .st-row-help .is-mono { overflow-wrap: anywhere; }
+
+/* Settings › Connections › Add apps (ConnectorGallery.tsx) */
+.st-gallery-tools { display: grid; gap: 10px; padding: 12px 16px 4px; }
+.st-gallery-tools input { height: 32px; padding: 0 10px; border: 1px solid var(--es-line-2); border-radius: 8px; background: var(--es-glass); color: var(--es-text); font: 13px var(--es-font); }
+.st-gallery-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-gallery-chips button { height: 26px; padding: 0 10px; border: 1px solid var(--es-line-2); border-radius: 999px; background: none; color: var(--es-dim); font: 12px var(--es-font); cursor: pointer; }
+.st-gallery-chips button[aria-pressed="true"] { border-color: var(--es-text-strong); color: var(--es-text-strong); }
+.st-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; padding: 12px 16px 16px; }
+.st-gallery-card { display: grid; gap: 10px; align-content: start; min-width: 0; padding: 12px; border: 1px solid var(--es-line-2); border-radius: 10px; background: var(--es-glass); }
+.st-gallery-card.is-open { grid-column: 1 / -1; }
+.st-gallery-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.st-gallery-name { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.st-gallery-name strong { font-size: 13px; font-weight: 600; color: var(--es-text-strong); }
+.st-gallery-name small { color: var(--es-dim); font-size: 11.5px; line-height: 1.4; }
+.st-gallery-badge { flex: 0 0 auto; padding: 2px 6px; border-radius: 4px; background: var(--es-glass-2); color: var(--es-dim); font: 600 10px var(--es-font); }
+.st-gallery-badge.is-official { color: var(--es-text-strong); }
+.st-gallery-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+.st-gallery-actions { display: inline-flex; gap: 6px; }
+.st-gallery-problem { color: var(--es-err-text); font-size: 11.5px; line-height: 1.5; }
+.st-gallery-setup { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--es-line-2); font-size: 12.5px; color: var(--es-dim); }
+.st-gallery-setup ol, .st-gallery-watch { margin: 0; padding-left: 18px; display: grid; gap: 4px; line-height: 1.55; }
+.st-gallery-watch { color: var(--es-faint); }
+.st-gallery-setup label { display: grid; gap: 4px; color: var(--es-text); }
+.st-gallery-setup input { height: 30px; padding: 0 9px; border: 1px solid var(--es-line-2); border-radius: 7px; background: var(--es-glass); color: var(--es-text); font: 12.5px var(--es-font); }
+.st-gallery-setup label small { color: var(--es-faint); font-size: 11px; }
+.st-gallery-confirm { display: flex; align-items: center; gap: 12px; }
+.st-gallery-confirm a { color: var(--es-dim); font-size: 12px; }
+
+/* Connector logos (components/BrandMark.tsx) */
+.brand-mark { flex: 0 0 auto; display: block; }
+.brand-mark-letter { display: grid; place-items: center; border-radius: 7px; background: var(--es-glass-2); color: var(--es-dim); font-family: var(--es-font); font-weight: 650; }

@@ -168,8 +168,12 @@ def test_registry_backed_guides_add_the_packages_own_settings(offline):
 
 
 def test_proposals_that_cannot_work_are_refused(offline):
-    with pytest.raises(ValueError, match="browser sign-in"):
-        integrations.propose("guide:notion")
+    # Hosted servers that use browser sign-in now connect (agent/mcp_oauth.py) ...
+    notion = integrations.propose("guide:notion")
+    assert notion["launch"] == {"transport": "streamable_http", "url": "https://mcp.notion.com/mcp"}
+    # ... and a hosted server that's already set up is still refused.
+    with pytest.raises(ValueError, match="already set up"):
+        integrations.propose("guide:notion", configured={"notion": {"url": "https://mcp.notion.com/mcp"}})
     with pytest.raises(ValueError, match="already has this"):
         integrations.propose("guide:obsidian")
     with pytest.raises(ValueError, match="already set up"):
