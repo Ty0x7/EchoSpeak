@@ -1,5 +1,20 @@
 # Changes
 
+## v11.11.1 — A better Chat: diagrams that draw, sharper answers (source; not yet built)
+
+* Mermaid draws reliably:
+  * Common syntax slips are repaired and marked.
+  * Diagrams draw as soon as their block closes, even mid-stream (renderers no longer remount on every token).
+  * One renderer is used for every assistant message.
+  * Light and dark palettes, redrawn on theme change, with drawn diagrams cached.
+  * A real diagnostic replaces raw source, and a wide diagram scrolls instead of shrinking past legibility.
+* `\( \)` and `\[ \]` math renders.
+* Chat has its own instructions (answer, tools, formatting) instead of Echo's agent rules. Smart model choice never swaps Chat's model.
+* Chat's capability boundary is enforced in code: an allowlist plus a run-time guard. No terminal, file changes, desktop input, screen capture, browser driving or email. Opening an app is optional, with no arguments and no shells.
+* Chat memory scope: the owner's facts without specialist-private notes; past-chat recall limited to Chat conversations.
+* New real-browser check: `apps/desktop/scripts/check-chat-render-browser.cjs`.
+* See [release notes](docs/releases/v11.11.1.md).
+
 ## v11.11.0 — Chat, Agents and Code (source; not yet built)
 
 * Three environments in one app, with one sidebar and a Chat · Agents · Code switcher. One backend rule (`agent/environments.py`) decides where each conversation lives and who answers.

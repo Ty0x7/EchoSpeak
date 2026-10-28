@@ -21,6 +21,7 @@ from agent.lean.job import (ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION,
                             needs_action, parse_review)
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import CHAT_AGENT_ID, AgentPersona, chat_persona, get_persona_store
+from agent.lean import chat_mode
 from agent.lean.prompt import build_system_prompt
 from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoint
 from agent.lean.rooms import Room, get_room_store, mentioned_agents
@@ -1028,6 +1029,9 @@ class LeanSession:
                 session_id=self.session_id,
                 project_root=self.project_root,
             )
+        if self.model_first:
+            # Chat's capability boundary, in trusted code: what it may not use is never offered.
+            chat_mode.restrict(toolbox)
         original_names = set(toolbox.names)
         if self._is_discussion():
             original_names.update({"assign_tasks", "complete_task"})
@@ -1079,6 +1083,8 @@ class LeanSession:
         if route_note:
             meta["model_route"] = route_note
         memories = [] if guest else self._recall(goal)
+        if self.model_first:
+            memories = chat_mode.visible_memories(memories)
         if not self._owner_side(persona) or (work_context and work_context.coordinator.get(work_context.work_id, principal=work_context.principal).get("parent_id")):
             memories = [m for m in memories if m.get("scope") in ({"session"} if persona.context_scope == "session" else {"project", "session"})]
         from agent.project_context import context_for_session
@@ -1092,33 +1098,49 @@ class LeanSession:
                 self._lessons_withheld.setdefault(persona.id, []).extend(learned.withheld_ids)
         # Where the repo stands (branch, ahead/behind, changes), like a coding agent's git status.
         repo_note = git_context.summary(self.project_root) if self.project_root and "terminal" in toolbox.names else ""
-        prompt = build_system_prompt(
-            persona=persona,
-            soul_text=self._soul() if persona.id == "echo" else "",
-            project_root=self.project_root,
-            notes=list(toolbox.notes) + learned.notes + ([] if guest else [n for n in [mcp_apps.context_note(self.session_id)] if n]),
-            terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
-            computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox), goal=goal),
-            git_note=repo_note,
-            git_rules="terminal" in toolbox.names and git_context.wants_rules(goal, repo_note),
-            project_overview=project_overview(self.project_root) if self.project_root else "",
-            teammates=teammates if can_hand_off else [],
-            room_name=self.room.name if self.room and self.room.kind == "group" else "",
-            memories=memories,
-            # Teammates start with a clean history, not without the story so far.
-            chat_summary=summaries.summary_text(self.session_id),
-            caller_note=caller_note(self.source, self.caller_role, _owner_name()),
-            past_chats=[] if guest or not self._owner_side(persona) or delegated_by or not _remembers_chats() else self._past_chats(),
-            project_brief=project_brief,
-            project_evidence=project_evidence,
-            playbook=learned.section,
-            skills="" if guest else agent_skills.prompt_section(),
-            instructions="" if guest else home.instructions_section(self.project_root),
-            # Guests get no description of the owner's settings.
-            capabilities="" if guest else capabilities.report(toolbox),
-            tool_names=set(toolbox.names),
-            can_write=capabilities.can_write_files(toolbox),
-        )
+        if self.model_first:
+            prompt = chat_mode.build_prompt(
+                persona=persona,
+                model=self._endpoint_label(),
+                project_root=self.project_root,
+                notes=list(toolbox.notes) + learned.notes + [n for n in [mcp_apps.context_note(self.session_id)] if n],
+                memories=memories,
+                chat_summary=summaries.summary_text(self.session_id),
+                caller_note=caller_note(self.source, self.caller_role, _owner_name()),
+                past_chats=[] if guest or not _remembers_chats() else self._past_chats(),
+                project_brief=project_brief,
+                skills=agent_skills.prompt_section(),
+                tool_names=set(toolbox.names),
+                has_external=any(str(getattr(toolbox.entry(n), "origin", "")) in chat_mode.ALLOWED_ORIGINS for n in toolbox.names),
+            )
+        else:
+            prompt = build_system_prompt(
+                persona=persona,
+                soul_text=self._soul() if persona.id == "echo" else "",
+                project_root=self.project_root,
+                notes=list(toolbox.notes) + learned.notes + ([] if guest else [n for n in [mcp_apps.context_note(self.session_id)] if n]),
+                terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
+                computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox), goal=goal),
+                git_note=repo_note,
+                git_rules="terminal" in toolbox.names and git_context.wants_rules(goal, repo_note),
+                project_overview=project_overview(self.project_root) if self.project_root else "",
+                teammates=teammates if can_hand_off else [],
+                room_name=self.room.name if self.room and self.room.kind == "group" else "",
+                memories=memories,
+                # Teammates start with a clean history, not without the story so far.
+                chat_summary=summaries.summary_text(self.session_id),
+                caller_note=caller_note(self.source, self.caller_role, _owner_name()),
+                past_chats=[] if guest or not self._owner_side(persona) or delegated_by or not _remembers_chats() else self._past_chats(),
+                project_brief=project_brief,
+                project_evidence=project_evidence,
+                playbook=learned.section,
+                skills="" if guest else agent_skills.prompt_section(),
+                instructions="" if guest else home.instructions_section(self.project_root),
+                # Guests get no description of the owner's settings.
+                capabilities="" if guest else capabilities.report(toolbox),
+                tool_names=set(toolbox.names),
+                can_write=capabilities.can_write_files(toolbox),
+            )
         turn = LeanTurn(
             client=self._client_for(persona),
             persona=persona,
@@ -1140,6 +1162,8 @@ class LeanSession:
         )
         # Only the agent the user is talking to reads steering; a teammate doing delegated work doesn't.
         turn.steerable = depth == 0
+        if self.model_first:
+            turn.call_guard = chat_mode.call_problem
         turn.work_context = work_context
         turn.ensure_work = lambda: self._ensure_work(persona, tools=list(toolbox.names))
         if work_context:
@@ -1427,6 +1451,8 @@ class LeanSession:
             if context and context.coordinator.get(context.work_id, principal=context.principal).get("parent_id"):
                 hits = [hit for hit in hits if hit["session_id"] == self.session_id]
             hits = [hit for hit in hits if hit["turn_id"] != self.execution_id]
+            if self.model_first:
+                hits = chat_mode.chat_hits(hits)
             if not hits:
                 return "No past messages match."
             lines = []
@@ -1616,6 +1642,12 @@ class LeanSession:
         """Echo and Chat both speak for the owner: account memory and past chats are theirs."""
         return persona.id in {"echo", CHAT_AGENT_ID}
 
+    def _endpoint_label(self) -> str:
+        try:
+            return str(getattr(self._endpoint_for(self._chat or chat_persona()), "model", "") or "")
+        except Exception:
+            return ""
+
     def _chat_persona(self) -> AgentPersona:
         """Chat's answerer, named after the model this conversation uses."""
         if self._chat is None:
@@ -1649,8 +1681,8 @@ class LeanSession:
         Only the owner's requests, never voice (its live audio model is chosen on purpose).
         Auto mode switches only agents the user opted in, only to models they listed.
         """
-        if persona.id in self._routes or self.source == "voice":
-            return ""
+        if persona.id in self._routes or self.source == "voice" or self.model_first:
+            return ""  # Chat is the model the owner chose: never swapped
         try:
             from agent.learning import routing
 
@@ -1770,6 +1802,8 @@ class LeanSession:
             from agent.state import get_state_store
 
             hits = get_state_store().search_messages(" ".join(terms), limit=12, any_term=True)
+            if self.model_first:
+                hits = chat_mode.chat_hits(hits)  # Chat recalls Chat, not Agents rooms or Code sessions
         except Exception:
             logger.debug("Past-chat lookup failed", exc_info=True)
             return self._past_chat_lines
