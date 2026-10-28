@@ -1,5 +1,19 @@
 # Changes
 
+## v11.11.4 — Chat answers once, and stands by it (source; not yet built)
+
+* Double thinking fixed at its causes in the Lean loop:
+  * Chat's citation and claim checks no longer erase a streamed answer and regenerate it. A new `answer_review` hook de-links unverified links in place and adds notes, and `claim_nudge_limit` is 0 in Chat.
+  * At the output limit, the answer continues with thinking off; if reasoning used the whole budget, the model answers from the reasoning's end instead of restarting.
+* Loop-injected instructions are wrapped as `<echospeak-note>` (Chat and Agents rules say they're from the app). `add_note` keeps user/assistant alternation.
+* Chat review adds a figure check: numbers not found in what was read are noted as unverified.
+* Retrieval:
+  * Government and regulator sources rank first for regulatory, tax, rate and time questions.
+  * "What's new in EchoSpeak" prefetches the app's own pulls and releases.
+* Capabilities name the real tools. Chat states truthfully that it has no PDF or Office generation. Live app facts give the roster and environments.
+* Recalled memories show their saved date and scope; sports times carry the local zone name; Mermaid renderer crashes are told apart from syntax errors.
+* See [release notes](docs/releases/v11.11.4.md).
+
 ## v11.11.3 — A search engine that reads the right source (source; not yet built)
 
 * Model-written queries reach providers as written (`search_rank.prepare_query`). The old sentence normaliser changed 12 of 20 realistic queries: versions, dotted names, `site:`, intent.

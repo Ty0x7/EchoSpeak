@@ -38,6 +38,13 @@ _TRACKING = re.compile(r"^(utm_[a-z]+|fbclid|gclid|mc_[a-z]+|ref|ref_src|igshid|
 _DOC_HOSTS = re.compile(r"(^|\.)(docs|developer|developers|learn|support|help|api|reference)\.|readthedocs\.io$|\.dev$")
 _THIN = re.compile(r"(^|\.)(pinterest\.[a-z.]+|quora\.com|answers\.com|ask\.com|scribd\.com|slideshare\.net)$")
 _YEAR = re.compile(r"\b(20\d\d)\b")
+# Governments and regulators are the governing source for rules, laws, taxes, rates and time changes.
+_OFFICIAL = re.compile(r"(^|\.)(gov|gc\.ca|gov\.[a-z]{2}|gouv\.[a-z]{2}|gob\.[a-z]{2}|europa\.eu|mil|int)$|"
+                       r"(^|\.)(alberta|ontario|quebec|bc|manitoba|saskatchewan|novascotia|canada)\.ca$|"
+                       r"(^|\.)(sec\.gov|fca\.org\.uk|bankofcanada\.ca|federalreserve\.gov|ecb\.europa\.eu|osc\.ca|cra-arc\.gc\.ca)$")
+_REGULATORY = re.compile(r"(?i)\b(law|laws|legal|regulat\w*|rule|rules|policy|act|bill|tax(?:es)?|rate|rates|interest|inflation|"
+                         r"filing|deadline|permit|licen[cs]e|daylight saving|time change|dst|official|government|minimum wage|"
+                         r"benefit|pension|tariff|sanction|compliance|securities)\b")
 _CODE_HOSTS = {"github.com", "gitlab.com", "codeberg.org", "bitbucket.org", "pypi.org", "npmjs.com", "crates.io"}
 _UPDATES_ASKED = re.compile(r"(?i)\b(latest|newest|recent|new|updates?|changes?|changelog|release(?:s|d)?|what'?s new|news)\b")
 _UPDATE_PAGE = re.compile(r"(?i)(releases?|changelog|change-log|whats-?new|what's new|release-notes|news|blog|pulls|commits|announc)")
@@ -198,6 +205,10 @@ def rank_hits(query: str, lists: Iterable[Sequence[Any]], *, context: str = "", 
         elif mentioned:
             score += 0.25
             reasons.append("mentions " + ", ".join(mentioned[:2]))
+        if _OFFICIAL.search(host):
+            boost = 0.6 if _REGULATORY.search(question) else 0.15
+            score += boost
+            reasons.append("official source")
         if _UPDATES_ASKED.search(question) and _UPDATE_PAGE.search(f"{path} {doc['title']}"):
             score += 0.35
             reasons.append("release or changelog page")

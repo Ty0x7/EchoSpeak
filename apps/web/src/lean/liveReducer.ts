@@ -9,6 +9,8 @@ export const LEAN_EVENT_TYPES = new Set([
   "reasoning_delta",
   "agent_token",
   "text_replace",
+  "answer_note",
+  "answer_continue",
   "tool_start",
   "tool_end",
   "tool_progress",
@@ -145,6 +147,13 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
       return patchMessage(state, id, (m) => ({
         ...m,
         segments: [...m.segments, { kind: "note", step: Number(evt.step || 0), text: String(evt.note || "Outside content contained instructions; they were left out."), at }],
+      }));
+    case "answer_note":
+      // The answer was checked once it was written (unverified links, figures not in the sources): a note
+      // under it, never a rewrite.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [...m.segments, { kind: "note", step: Number(evt.step || 0), text: String(evt.note || ""), at }],
       }));
     case "claim_unverified":
       // The agent kept claiming something no tool did: say so under its message.

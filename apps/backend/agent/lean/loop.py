@@ -47,6 +47,32 @@ NUDGE_EMPTY = (
     "otherwise write your answer."
 )
 NUDGE_TRUNCATED = "Your last reply was cut off by the output limit. Continue from where you stopped, concisely."
+# Output limit reached mid-answer: the same answer continues (thinking off), it isn't rewritten.
+NUDGE_CONTINUE = ("Your answer was cut off by the output limit. Continue it exactly where it stopped, without repeating "
+                  "anything already written and without starting over.")
+# All of the output went to reasoning: answer from it instead of reasoning again from scratch.
+NUDGE_REASONING_SPENT = ("Your reasoning used the whole output budget before you wrote the answer. Write the answer now, "
+                         "directly and concisely, from what you already worked out. Don't deliberate again.")
+CONTINUATIONS = 2
+
+
+def app_note(text: str) -> str:
+    """An instruction from EchoSpeak inside the conversation, marked so the model never takes it for the user.
+
+    Corrections sent as plain user messages ("You wrote… but…") read as the user criticising the
+    model, which then apologised for things the user never said (live test, 11.11.3).
+    """
+    return f"<echospeak-note>{text}</echospeak-note>"
+
+
+def add_note(messages: list[dict[str, Any]], text: str) -> None:
+    """Add an app note without breaking user/assistant alternation (Gemma-style templates require it)."""
+    note = app_note(text)
+    last = messages[-1] if messages else {}
+    if last.get("role") in {"user", "tool"}:
+        last["content"] = f"{last.get('content') or ''}\n\n{note}"
+    else:
+        messages.append({"role": "user", "content": note})
 # Failures in a row of one tool (any arguments) before the agent is told to change approach.
 FAIL_STREAK_NOTE = 3
 # Refused or blocked actions (denied, policy, privacy, switched off, held): a firm note after
@@ -179,6 +205,12 @@ class LeanTurn:
         # before an answer is accepted (an output guardrail); grace_prompt asks for the best answer
         # when the step budget runs out.
         self.tool_observer: Optional[Callable[..., None]] = None
+        # Reviews a finished answer without regenerating it: returns (notes to show under it,
+        # replacement text or ""). Chat uses it for citation and figure checks.
+        self.answer_review: Optional[Callable[[str], tuple[list[str], str]]] = None
+        # How many times an untrue "I did it" claim is sent back for a rewrite before it's just noted.
+        self.claim_nudge_limit = 1
+        self._no_think_next = False
         # Calls to run before the model's first turn, through the normal tool path ([(name, args)]):
         # Chat reads addresses the user gave without waiting for a small model to notice them.
         self.prefetch: Optional[Callable[[], list[tuple[str, dict[str, Any]]]]] = None
@@ -217,6 +249,32 @@ class LeanTurn:
                 self._emit(payload)
             except Exception:
                 logger.exception("Lean event emit failed")
+
+    def _reasoning_tail(self, step: int, limit: int = 1200) -> str:
+        """The end of this step's reasoning, for answering from it instead of reasoning again."""
+        text = " ".join(item.get("text", "") for item in self.timeline if item.get("kind") == "thinking" and item.get("step") == step)
+        text = " ".join(text.split())
+        return text[-limit:]
+
+    def _review_answer(self, step: int) -> None:
+        """Annotate the finished answer (answer_review): notes under it, and at most a light in-place fix.
+
+        Never erases the answer and never calls the model again: a visible final answer stays the
+        final answer (the live-test double-thinking came from regenerating after streaming).
+        """
+        try:
+            notes, replacement = self.answer_review(self._visible_text())
+        except Exception:
+            logger.debug("Answer review failed", exc_info=True)
+            return
+        if replacement and replacement != self._visible_text():
+            texts = [item for item in self.timeline if item.get("kind") == "text"]
+            if len(texts) == 1:
+                texts[0]["text"] = replacement
+                self.emit({"type": "text_replace", "step": texts[0].get("step", step), "text": replacement})
+        for note in notes:
+            self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
+            self.emit({"type": "answer_note", "step": step, "note": note})
 
     def _retract_text(self, step: int) -> None:
         """Take back text streamed in this step (a claim that turned out to be untrue)."""
@@ -327,6 +385,7 @@ class LeanTurn:
         error = ""
         success = True
         overflow_retries = 0
+        continuations = 0
         step = 0
         planned = self.prefetch() if self.prefetch is not None else []
         if planned and not self.cancel.is_set():
@@ -395,13 +454,21 @@ class LeanTurn:
             messages.append(assistant)
 
             if not calls:
+                if content.strip() and turn.finish_reason == "length" and continuations < CONTINUATIONS and step < max_steps:
+                    # Cut off by the output limit mid-answer: carry on with the same answer, thinking off,
+                    # instead of accepting half an answer or starting a new one.
+                    continuations += 1
+                    add_note(messages, NUDGE_CONTINUE)
+                    self._no_think_next = True
+                    self.emit({"type": "answer_continue", "step": step, "count": continuations})
+                    continue
                 if content.strip():
                     if self.promise_guard and self.toolbox.names and is_promise_without_action(content):
                         # "Sure, I'll do that" is not the work. Ask for the action
                         # (twice at most) instead of ending the turn on a promise.
                         if promise_nudges < 2:
                             promise_nudges += 1
-                            messages.append({"role": "user", "content": promise_nudge(self.toolbox.names)})
+                            add_note(messages, promise_nudge(self.toolbox.names))
                             self.emit({"type": "promise_nudge", "step": step, "count": promise_nudges})
                             continue
                         stop_reason = "promise_unfulfilled"
@@ -410,9 +477,9 @@ class LeanTurn:
                              if self.promise_guard and self.toolbox.names else "")
                     if claim and not stop_reason:
                         # "I've saved it" with nothing saved: ask once for the tool call or the truth.
-                        if claim_nudges < 1:
+                        if claim_nudges < self.claim_nudge_limit:
                             claim_nudges += 1
-                            messages.append({"role": "user", "content": claim_nudge(claim)})
+                            add_note(messages, claim_nudge(claim))
                             self.emit({"type": "claim_nudge", "step": step, "claim": claim[:200]})
                             self._retract_text(step)
                             continue
@@ -424,7 +491,7 @@ class LeanTurn:
                             and any(name in self.toolbox.names for name in CHECK_TOOLS)):
                         # Code changed and nothing ran since: check it before calling it done (once).
                         check_nudges += 1
-                        messages.append({"role": "user", "content": check_nudge(list(self._unchecked))})
+                        add_note(messages, check_nudge(list(self._unchecked)))
                         self.emit({"type": "check_nudge", "step": step, "files": list(self._unchecked)[:5]})
                         self._retract_text(step)
                         continue
@@ -434,7 +501,7 @@ class LeanTurn:
                         continue
                     correction = self.final_check(content) if self.final_check is not None and not stop_reason else ""
                     if correction and step < max_steps:
-                        messages.append({"role": "user", "content": correction})
+                        add_note(messages, correction)
                         self.emit({"type": "answer_check", "step": step, "note": correction[:300]})
                         self._retract_text(step)
                         continue
@@ -447,10 +514,13 @@ class LeanTurn:
                 if nudges < 2:
                     nudges += 1
                     messages.pop()
-                    messages.append({
-                        "role": "user",
-                        "content": NUDGE_TRUNCATED if turn.finish_reason == "length" else NUDGE_EMPTY,
-                    })
+                    if turn.finish_reason == "length":
+                        # Reasoning used the whole budget: answer from it (thinking off), don't reason again.
+                        tail = self._reasoning_tail(step)
+                        add_note(messages, NUDGE_REASONING_SPENT + (f" Your reasoning ended with: \"{tail}\"" if tail else ""))
+                        self._no_think_next = True
+                    else:
+                        add_note(messages, NUDGE_EMPTY)
                     continue
                 final_text = ""
                 break
@@ -475,7 +545,7 @@ class LeanTurn:
                 # Appended to the tool result, not sent as its own message: some chat
                 # templates (Gemma) require strict user/assistant alternation.
                 messages[-1]["content"] = (str(messages[-1].get("content") or "") + "\n\n"
-                                           + reminder(self.goal, step, self._outcomes[-REMIND_EVERY:]))
+                                           + app_note(reminder(self.goal, step, self._outcomes[-REMIND_EVERY:])))
                 self.emit({"type": "goal_reminder", "step": step})
             completed = self._completion_from(calls, messages)
             if completed is not None:
@@ -495,6 +565,8 @@ class LeanTurn:
                 self._append_text("text", step, note)
                 self.emit({"type": "agent_token", "step": step, "data": note})
 
+        if self.answer_review is not None and success and not error and self._visible_text():
+            self._review_answer(step)
         visible = self._visible_text()
         if not visible:
             visible = final_text
@@ -565,6 +637,15 @@ class LeanTurn:
     # ── model ───────────────────────────────────────────────────────────
     def _call_model(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], step: int) -> ModelTurn:
         self.client.on_audio = lambda packet: self.emit({"type": "voice_audio", **packet})
+        if self._no_think_next:
+            # A continuation or an answer-from-reasoning: one call without a new thinking phase.
+            self._no_think_next = False
+            saved = getattr(self.client, "reasoning_effort", "")
+            try:
+                self.client.reasoning_effort = "none"
+                return self._call_model(messages, tools, step)
+            finally:
+                self.client.reasoning_effort = saved
         def on_reasoning(text: str) -> None:
             self._append_text("thinking", step, text)
             self.emit({"type": "reasoning_delta", "step": step, "text": text})
@@ -933,11 +1014,7 @@ class LeanTurn:
         ask = self.grace_prompt or (
             "[EchoSpeak]: Your step budget is used up. Reply now, without tools, with your findings in the "
             "required format, using only what you actually found. Say what you couldn't confirm.")
-        last = messages[-1] if messages else {}
-        if last.get("role") in {"tool", "user"}:
-            last["content"] = f"{last.get('content') or ''}\n\n{ask}"  # keep strict role alternation
-        else:
-            messages.append({"role": "user", "content": ask})
+        add_note(messages, ask.removeprefix("[EchoSpeak]: "))  # keeps strict role alternation
         try:
             turn = self._call_model(messages, [], step)
         except Exception:

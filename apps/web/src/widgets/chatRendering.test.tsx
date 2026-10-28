@@ -27,6 +27,13 @@ describe("Mermaid repair: the mistakes models make most", () => {
     expect(repairMermaid('flowchart TD\n  A["Already (quoted)"] -->|yes: ok| B')).toBe('flowchart TD\n  A["Already (quoted)"] -->|yes: ok| B');
   });
 
+  it("tells a renderer crash on valid input apart from a syntax mistake", () => {
+    // Live test: "Cannot read properties of undefined (reading 'valueOf')" was shown as a syntax error.
+    const crash = Object.assign(new TypeError("Cannot read properties of undefined (reading 'valueOf')"), { mermaidKind: "render" });
+    expect(mermaidErrorDetail(crash).kind).toBe("render");
+    expect(mermaidErrorDetail(Object.assign(new Error("Parse error on line 2:"), { mermaidKind: "syntax" })).kind).toBe("syntax");
+  });
+
   it("keeps the useful part of Mermaid's multi-line parse errors", () => {
     const detail = mermaidErrorDetail(new Error("Parse error on line 2:\n...A[[[ -->\n-----^\nExpecting 'TAGEND', got 'SQS'\nmore"));
     expect(detail.summary).toBe("Parse error on line 2:");

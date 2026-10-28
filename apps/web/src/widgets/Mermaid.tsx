@@ -13,7 +13,7 @@ let queue: Promise<unknown> = Promise.resolve();
 let renderCount = 0;
 // Drawn results by theme and source. A diagram that remounts (a reply finishing, scrolling back,
 // reopening a chat) shows at once instead of drawing again. Failures are kept too.
-type Drawn = { svg: string; repaired: boolean } | { error: { summary: string; detail: string } };
+type Drawn = { svg: string; repaired: boolean } | { error: { summary: string; detail: string; kind?: "syntax" | "render" } };
 const drawn = new Map<string, Drawn>();
 const DRAWN_LIMIT = 60;
 const drawnKey = (theme: Theme, code: string) => `${theme}\u0000${code.trim()}`;
@@ -60,9 +60,18 @@ export function renderMermaid(id: string, source: string, theme: Theme = current
     const mermaid = await loadMermaid();
     configure(mermaid, theme);
     const renderId = `${id}-${++renderCount}`;
+    // Parse first: a syntax mistake is the model's; an exception after a clean parse (the live test's
+    // "Cannot read properties of undefined (reading 'valueOf')") is Mermaid failing to draw valid input.
+    try {
+      await mermaid.parse(source);
+    } catch (error) {
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { mermaidKind: "syntax" });
+    }
     try {
       const { svg } = await mermaid.render(renderId, source);
       return svg;
+    } catch (error) {
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { mermaidKind: "render" });
     } finally {
       // A failed render can leave its scratch element behind.
       document.getElementById(`d${renderId}`)?.remove();
@@ -82,7 +91,8 @@ export async function drawMermaid(id: string, source: string, theme: Theme = cur
     return { svg: await renderMermaid(id, original, theme), repaired: false };
   } catch (error) {
     const fixed = repairMermaid(original);
-    if (fixed === original) throw error;
+    // Repair addresses syntax only; rewriting valid input doesn't fix a renderer crash.
+    if (fixed === original || (error as { mermaidKind?: string })?.mermaidKind === "render") throw error;
     try {
       return { svg: await renderMermaid(`${id}r`, fixed, theme), repaired: true };
     } catch {
@@ -110,7 +120,7 @@ export function MermaidDiagram({ code, streaming = false }: { code: string; stre
   const cached = streaming ? undefined : drawn.get(drawnKey(theme, code));
   const [svg, setSvg] = useState(cached && "svg" in cached ? cached.svg : "");
   const [repaired, setRepaired] = useState(Boolean(cached && "svg" in cached && cached.repaired));
-  const [error, setError] = useState<{ summary: string; detail: string } | null>(cached && "error" in cached ? cached.error : null);
+  const [error, setError] = useState<{ summary: string; detail: string; kind?: "syntax" | "render" } | null>(cached && "error" in cached ? cached.error : null);
   const [showSource, setShowSource] = useState(false);
   useEffect(() => {
     if (streaming) return; // a half-written diagram doesn't parse; draw once its fence closes
@@ -155,7 +165,9 @@ export function MermaidDiagram({ code, streaming = false }: { code: string; stre
         <div className="wg-diagram-error" role="note">
           <strong>{error.summary}</strong>
           {error.detail ? <pre>{error.detail}</pre> : null}
-          <small>The Mermaid source below has a syntax error. Ask to fix the diagram, or copy it into a Mermaid editor.</small>
+          <small>{error.kind === "render"
+            ? "The source is valid Mermaid, but Mermaid hit an internal error drawing it. Ask for a simpler diagram, or copy the source into a Mermaid editor."
+            : "The Mermaid source below has a syntax error. Ask to fix the diagram, or copy it into a Mermaid editor."}</small>
         </div>
         <CodeBlock code={code} lang="mermaid" />
       </figure>

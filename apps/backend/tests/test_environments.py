@@ -74,7 +74,7 @@ def test_chat_is_the_model_not_echo(env, monkeypatch):
     assert not names & _TEAM_TOOLS
     prompt = turn.system_prompt
     assert "not Echo" in prompt and "qwen3-8b" in prompt
-    assert "## Your team" not in prompt and "Jarvis" not in prompt
+    assert "## Your team" not in prompt and "delegate_to_agent" not in prompt  # the roster is described (app facts), never offered as a team
     # Chat isn't a contact: the roster never lists it, but its messages still have a name.
     assert CHAT_AGENT_ID not in {agent.id for agent in get_persona_store().list()}
     assert get_persona_store().get(CHAT_AGENT_ID).id == CHAT_AGENT_ID

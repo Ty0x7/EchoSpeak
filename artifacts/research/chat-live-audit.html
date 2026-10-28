@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — Chat live-test audit</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}.shot img{display:block;width:100%;height:auto}.shot figcaption{padding:10px 14px;margin:0}.phone{max-width:240px}
+.mono{font:12px Consolas,monospace}.bad{color:var(--warn)}.timeline{display:grid;gap:6px}.tl{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:start;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:var(--bg);font-size:13px}.tl b{font-weight:550}@media(max-width:560px){.tl{grid-template-columns:1fr}}
+</style>
+<body><main>
+<header><h1>EchoSpeak / Chat live-test audit</h1><p>28 October 2026 · technical record: docs/research/chat-live-audit.md</p></header>
+<nav aria-label="Report sections"><a href="#double">Double thinking</a><a href="#fix">The fix</a><a href="#areas">Other findings</a><a href="#kept">What still works</a><a href="#test">Your test</a></nav>
+<p class="lead">The "second thinking" was EchoSpeak, not the model:<br>a check erased the answer and asked again, as if you had complained.</p>
+<p class="note"><strong>Evidence:</strong> the transcript didn't reach this session, so the findings come from your observations, the code, and deterministic reproductions with the real loop and a scripted model. The diagrams show the event sequence, not screenshots.</p>
+<div class="legend"><span class="badge current">Fixed and tested</span><span class="badge documented">Cause found</span><span class="badge proposed">Model-limited or yours to test</span></div>
+
+<section id="double"><h2>What the double thinking actually was</h2>
+<div class="grid2">
+<div class="box"><h3 class="bad">Before</h3>
+<div class="timeline">
+<div class="tl"><b>Model call 1</b><span>Thinks, then streams the answer with a link it didn't read</span></div>
+<div class="tl"><b>Citation check</b><span>Erases the visible answer (<span class="mono">text_replace ""</span>)</span></div>
+<div class="tl"><b>Message to model</b><span>"These links in your answer weren't…" <span class="bad">sent as the user</span></span></div>
+<div class="tl"><b>Model call 2</b><span>Thinks again, apologises to you, rewrites everything</span></div>
+</div></div>
+<div class="box"><h3 class="current">Now</h3>
+<div class="timeline">
+<div class="tl"><b>Model call 1</b><span>Thinks, then streams the answer</span></div>
+<div class="tl"><b>Review</b><span>The answer stays. The bad link loses its target; a note goes under the answer</span></div>
+<div class="tl"><b>Model calls</b><span>None. No second thinking, no apology, no rewrite</span></div>
+</div></div>
+</div>
+<div class="comparison" style="margin-top:14px"><table><thead><tr><th>Trigger</th><th>Before</th><th>Now</th></tr></thead><tbody>
+<tr><td>Citation check found a bad link</td><td class="documented">Erase, a correction as the user, regenerate</td><td>De-link in place, a note under the answer</td></tr>
+<tr><td>"I've saved it" with nothing saved</td><td class="documented">Erase, "You wrote… isn't true", regenerate</td><td>A "Not verified" note under the answer</td></tr>
+<tr><td>Answer cut off by the output limit</td><td class="documented">Accepted half-finished</td><td>Continues the same answer, thinking off</td></tr>
+<tr><td>Reasoning used the whole output budget</td><td class="documented">Thrown away, reasoned again from scratch</td><td>Answers from where the reasoning ended, thinking off</td></tr>
+<tr><td>Any instruction the app adds</td><td class="documented">Looked like you talking</td><td>Marked <span class="mono">&lt;echospeak-note&gt;</span>: "from EchoSpeak, not the user"</td></tr>
+</tbody></table></div></section>
+
+<section id="areas"><h2>The other findings</h2>
+<div class="comparison"><table><thead><tr><th>Area</th><th>Cause</th><th>Fix</th></tr></thead><tbody>
+<tr><td>Made-up numbers</td><td class="documented">Nothing compared figures with the sources</td><td>Figures not found in what was read are listed as unverified</td></tr>
+<tr><td>Daylight saving and other rules</td><td class="documented">Blogs could outrank the government</td><td>Government and regulator sites rank first for rule, tax, rate and time questions</td></tr>
+<tr><td>"EchoSpeak" without a link</td><td class="documented">The search found other apps with the name</td><td>Reads EchoSpeak's own pull requests and releases</td></tr>
+<tr><td>Weather tried a "skill"</td><td class="documented">"Live data cards" read like a skill name</td><td>Capabilities name the real tools</td></tr>
+<tr><td>Sports times</td><td class="documented">Local, but unlabelled</td><td>"7:00 PM Alberta Daylight Time (your time)"</td></tr>
+<tr><td>Agent roster</td><td class="documented">Chat had to guess</td><td>Live "About this app" facts</td></tr>
+<tr><td>Memory</td><td class="documented">Facts had no date or scope</td><td>"(saved 2026-10-20, this project)"</td></tr>
+<tr><td>Mermaid valueOf</td><td class="documented">A Mermaid crash was called a syntax error</td><td>Parse first; a crash is reported as Mermaid's failure</td></tr>
+<tr><td>PDF and Excel</td><td class="documented">No such generator; HTML was given silently</td><td>Says so plainly, offers CSV, Markdown or HTML</td></tr>
+</tbody></table></div></section>
+
+<section id="kept"><h2>What worked, and still does</h2>
+<p>GitHub links read through the API, searches in every category, follow-ups that reuse sources, memory saves, recovery through find_tools, tables, artifacts and diagrams, and Chat, Agents and Code kept apart. Each has tests that still pass.</p></section>
+
+<section id="test"><h2>Your test on Gemma 4B</h2>
+<div class="phases">
+<div class="phase"><b>A long question, thinking on</b><span>One thinking phase, one answer; any doubts appear as a note</span></div>
+<div class="phase"><b>"What's new in EchoSpeak?"</b><span>Its own pull requests and releases, no namesakes</span></div>
+<div class="phase"><b>Alberta daylight saving</b><span>alberta.ca cited</span></div>
+<div class="phase"><b>"Make a PDF and Excel sheet"</b><span>Says what's possible and offers CSV or Markdown</span></div>
+</div>
+<p class="proposed" style="margin-top:12px">Still model-limited: how long a 4B model reasons, and how it weighs conflicting sources. Repeated reasoning is fixed.</p></section>
+<footer>Technical record: docs/research/chat-live-audit.md · Tests: apps/backend/tests/test_chat_lifecycle.py</footer>
+</main></body></html>

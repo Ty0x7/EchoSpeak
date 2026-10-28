@@ -58,8 +58,10 @@ export function repairMermaid(source: string): string {
 }
 
 /** Mermaid's parse errors are multi-line (message, the line, a caret, what it expected): keep the useful part. */
-export function mermaidErrorDetail(error: unknown): { summary: string; detail: string } {
+export function mermaidErrorDetail(error: unknown): { summary: string; detail: string; kind: "syntax" | "render" } {
   const text = String((error as { message?: string })?.message || error || "Mermaid couldn't parse this diagram.").trim();
   const lines = text.split("\n").filter(Boolean);
-  return { summary: lines[0].slice(0, 200), detail: lines.slice(1, 4).join("\n").slice(0, 600) };
+  // "render": parsed fine, then Mermaid itself threw (not the model's mistake).
+  const kind = (error as { mermaidKind?: string })?.mermaidKind === "render" ? "render" : "syntax";
+  return { summary: lines[0].slice(0, 200), detail: lines.slice(1, 4).join("\n").slice(0, 600), kind };
 }
