@@ -1416,7 +1416,7 @@ function EchoChecksIn({ s, save }: { s: SettingsMap; save: Save }) {
   const interval = Number(s.heartbeat_interval || 240);
   const intervals = [...new Set([60, 120, 240, 480, 1440, interval])].sort((a, b) => a - b);
   return (
-    <Group title="Echo checks in" description="Echo can come to you: about approvals waiting, tasks that stopped or failed, reminders coming up, apps that need you to sign in again and model or API errors. It posts in the “Check-ins with Echo” chat, where you can reply, and as a notification.">
+    <Group title="Echo checks in" description="Echo can come to you: about approvals waiting, tasks that stopped or failed, reminders coming up, apps that need you to sign in again and model or API errors. It messages you in its conversation in Agents, where you can reply, and as a notification.">
       <Row label="Check in with me">
         <Segmented
           value={mode}

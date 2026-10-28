@@ -13,6 +13,7 @@ import {
 } from "./sidebarSections";
 import { SplitHandle, type SplitGeometry } from "./SplitHandle";
 import { useDesktopUpdate } from "../dashboard/useDesktopUpdate";
+import { ENVIRONMENTS, ENVIRONMENT_PAGES, NEW_LABEL, type Environment } from "../app/environments";
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any> };
 type Session = { id: string; name: string; at: number; projectId?: string };
@@ -49,13 +50,21 @@ type SidebarProps = {
   pageCounts?: Partial<Record<SidebarPage, number>>;
   /** Full-text search over past chats. */
   onSearchChats?(query: string): Promise<ChatSearchHit[]>;
+  /** Chat, Agents or Code: the same sidebar, with that environment's content. */
+  environment?: Environment;
+  onEnvironment?(environment: Environment): void;
+  /** Code's projects and sessions, shown in place of the lists in Code. */
+  codeTree?: React.ReactNode;
 };
 
-export type SidebarPage = "chat" | "code" | "groups" | "projects" | "artifacts" | "routines" | "creations" | "learning";
+export type SidebarPage = "chat" | "code" | "agents" | "groups" | "projects" | "artifacts" | "routines" | "creations" | "learning";
 
 const SECTION_TITLES: Record<SectionKey, string> = { agents: "Agents", chats: "Chats", projects: "Projects" };
+/** In Agents the second list holds groups and conversations agents started (routines, check-ins, channels). */
+const sectionTitle = (key: SectionKey, environment: Environment) =>
+  key === "chats" && environment === "agents" ? "Conversations" : SECTION_TITLES[key];
 
-const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string }[] = [
+const NAV_ITEMS: { id: Exclude<SidebarPage, "chat" | "code" | "agents">; label: string; hint: string }[] = [
   { id: "groups", label: "Group chats", hint: "Chats with several agents" },
   { id: "projects", label: "Projects", hint: "Your project folders" },
   { id: "artifacts", label: "Artifacts", hint: "Apps, documents and diagrams your agents made" },
@@ -64,19 +73,13 @@ const NAV_ITEMS: { id: Exclude<SidebarPage, "chat">; label: string; hint: string
   { id: "learning", label: "Learning", hint: "What your agents learned from checked work" },
 ];
 
-/** How many pages show before "More". */
-const NAV_PRIMARY = 3;
-const NAV_MORE_KEY = "echospeak.sidebar.more";
-
-function readNavMore(): boolean {
-  try { return window.localStorage.getItem(NAV_MORE_KEY) === "1"; } catch { return false; }
-}
-
 function NavIcon({ name }: { name: Exclude<SidebarPage, "chat"> }) {
   const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
   switch (name) {
     case "code":
       return <svg {...common}><path d="m8 7-5 5 5 5m8-10 5 5-5 5M14 4l-4 16" /></svg>;
+    case "agents":
+      return <svg {...common}><circle cx="9" cy="8.5" r="3.2" /><path d="M3.5 19c.7-3 2.9-4.8 5.5-4.8s4.8 1.8 5.5 4.8" /><path d="M15 5.5a3 3 0 0 1 0 6M17 14.5c1.9.6 3 2.2 3.4 4.5" /></svg>;
     case "learning":
       return <svg {...common}><path d="M3 9l9-5 9 5-9 5z" /><path d="M7 11.2V16c0 1.5 2.2 3 5 3s5-1.5 5-3v-4.8M21 9v6" /></svg>;
     case "creations":
@@ -290,15 +293,21 @@ export function ProjectSidebar(props: SidebarProps) {
     };
   }, [query, searching, onSearchChats]);
   const iconOnly = props.collapsed;
-  // Three pages show by default; More reveals the rest. A hidden page that is open stays visible.
-  const [navMore, setNavMore] = useState(readNavMore);
-  useEffect(() => {
-    try { window.localStorage.setItem(NAV_MORE_KEY, navMore ? "1" : "0"); } catch { /* storage unavailable */ }
-  }, [navMore]);
-  const hiddenActive = NAV_ITEMS.slice(NAV_PRIMARY).some((item) => item.id === props.page);
-  const moreOpen = navMore || hiddenActive;
-  const shownNav = moreOpen ? NAV_ITEMS : NAV_ITEMS.slice(0, NAV_PRIMARY);
+  const environment: Environment = props.environment || "chat";
+  // Each environment lists its own pages; the shell stays the same.
+  const shownNav = NAV_ITEMS.filter((item) => ENVIRONMENT_PAGES[environment].includes(item.id));
   const sessions = props.sessions;
+  const switcher = props.onEnvironment ? (
+    <div className={`es-env-switch${iconOnly ? " is-rail" : ""}`} role="tablist" aria-label="Environment" aria-orientation={iconOnly ? "vertical" : "horizontal"}>
+      {ENVIRONMENTS.map((item) => (
+        <button key={item.id} type="button" role="tab" aria-selected={environment === item.id} title={item.hint}
+          aria-label={item.label} className={environment === item.id ? "is-active" : ""} onClick={() => props.onEnvironment?.(item.id)}>
+          {item.id === "chat" ? <Icon name="chat" size={15} active={environment === "chat"} /> : <NavIcon name={item.id} />}
+          {!iconOnly ? <span>{item.label}</span> : null}
+        </button>
+      ))}
+    </div>
+  ) : null;
 
   const railButton = (active = false): React.CSSProperties => ({
     // Do not force width:100% here — row items share space with fixed action buttons.
@@ -410,7 +419,7 @@ export function ProjectSidebar(props: SidebarProps) {
   // space by flex-grow, so the browser sizes them and changes animate; only a
   // drag needs to measure.
   const SECTION_HEAD_PX = 30;
-  const present: SectionKey[] = props.agents ? ["chats", "agents"] : ["chats"];
+  const present: SectionKey[] = environment === "agents" && props.agents ? ["agents", "chats"] : ["chats"];
   const listArea = Math.max(0, splitHeight - SECTION_HEAD_PX * present.length - 9 * (present.length - 1));
   const effective = fitLayout(layout, props.agents?.count || 0, listArea);
   const fractions = sectionFractions(effective, present);
@@ -437,7 +446,7 @@ export function ProjectSidebar(props: SidebarProps) {
         onClick={() => setLayout((value) => toggleSection(value, key))}
       >
         <span className="es-sec-chev" aria-hidden><Icon name="chevron" size={12} /></span>
-        <span className="es-sec-title">{SECTION_TITLES[key]}</span>
+        <span className="es-sec-title">{sectionTitle(key, environment)}</span>
         <span className="es-sec-count">{count}</span>
       </button>
       {actions}
@@ -446,7 +455,7 @@ export function ProjectSidebar(props: SidebarProps) {
   const renderSection = (key: SectionKey) => {
     const sectionProps = {
       className: "es-sec",
-      "aria-label": SECTION_TITLES[key],
+      "aria-label": sectionTitle(key, environment),
       "data-open": layout.open[key] ? "true" : "false",
       "data-section": key,
       style: sectionFlex(key),
@@ -473,9 +482,9 @@ export function ProjectSidebar(props: SidebarProps) {
         <section {...sectionProps}>
           {sectionHead("chats", sessions.length, (
             <>
-              <button className="es-sec-action" type="button" onClick={() => { props.onPage?.("chat"); props.onNewSession(); }} title="Start new chat" aria-label="Start new chat">
+              {environment === "chat" ? <button className="es-sec-action" type="button" onClick={() => { props.onPage?.("chat"); props.onNewSession(); }} title="Start new chat" aria-label="Start new chat">
                 <Icon name="plus" size={14} />
-              </button>
+              </button> : null}
 
             </>
           ))}
@@ -485,7 +494,7 @@ export function ProjectSidebar(props: SidebarProps) {
             ) : sessions.length ? (
               sessions.map((session) => sessionRow(session))
             ) : (
-              <div className="es-sec-empty">No chats yet. Start one with +.</div>
+              <div className="es-sec-empty">{environment === "agents" ? "Group chats and conversations your agents start appear here." : "No chats yet. Start one with +."}</div>
             )}
           </div>
         </section>
@@ -650,30 +659,32 @@ export function ProjectSidebar(props: SidebarProps) {
                   onKeyDown={(event) => {
                     if (event.key === "Escape") setQuery("");
                   }}
-                  placeholder="Search chats"
-                  aria-label="Search chats"
+                  placeholder={environment === "agents" ? "Search messages" : "Search chats"}
+                  aria-label={environment === "agents" ? "Search messages" : "Search chats"}
                 />
               </label>
             ) : null}
-            {props.onPage ? <button type="button" role="switch" className="es-code-switch" aria-label="Echo Code" aria-checked={props.page === "code"} title="Switch between Chat and Echo Code" onClick={() => props.onPage?.(props.page === "code" ? "chat" : "code")}><NavIcon name="code" /></button> : null}
             <button type="button" className="es-side-collapse" onClick={props.onToggleCollapsed} aria-label="Collapse sidebar" title="Collapse sidebar">
               <Icon name="collapse" size={14} />
             </button>
             </div>
+            {switcher}
             {props.onPage ? (
               <nav className="es-nav" aria-label="Pages">
                 <button
                   type="button"
                   className="es-nav-item es-nav-new"
                   onClick={() => {
-                    props.onView("chat");
-                    props.onPage?.("chat");
+                    if (environment === "chat") {
+                      props.onView("chat");
+                      props.onPage?.("chat");
+                    }
                     props.onNewSession();
                   }}
-                  title="Start a new chat"
+                  title={NEW_LABEL[environment]}
                 >
                   <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
-                  <span>New chat</span>
+                  <span>{NEW_LABEL[environment]}</span>
                 </button>
                 {shownNav.map((item) => {
                   const active = props.page === item.id;
@@ -684,7 +695,7 @@ export function ProjectSidebar(props: SidebarProps) {
                       type="button"
                       className={`es-nav-item${active ? " is-active" : ""}`}
                       aria-current={active ? "page" : undefined}
-                      onClick={() => props.onPage?.(active ? "chat" : item.id)}
+                      onClick={() => props.onPage?.(active ? (environment === "agents" ? "agents" : "chat") : item.id)}
                       title={item.hint}
                     >
                       <NavIcon name={item.id} />
@@ -693,21 +704,6 @@ export function ProjectSidebar(props: SidebarProps) {
                     </button>
                   );
                 })}
-                <button
-                  type="button"
-                  className="es-nav-more"
-                  aria-expanded={moreOpen}
-                  onClick={() => setNavMore(!navMore)}
-                  disabled={hiddenActive}
-                  title={moreOpen ? "Show fewer pages" : "Show Routines, Creations and Learning"}
-                >
-                  <span className="es-nav-more-icon" aria-hidden>
-                    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d={moreOpen ? "m6 15 6-6 6 6" : "m6 9 6 6 6-6"} />
-                    </svg>
-                  </span>
-                  <span>{moreOpen ? "Less" : "More"}</span>
-                </button>
               </nav>
             ) : null}
           </div>
@@ -724,7 +720,6 @@ export function ProjectSidebar(props: SidebarProps) {
                     className={`es-search-hit${props.activeSessionId === hit.session_id ? " is-active" : ""}`}
                     onClick={() => {
                       props.onView("chat");
-                      props.onPage?.("chat");
                       props.onSelectSession(hit.session_id);
                       setQuery("");
                     }}
@@ -743,7 +738,8 @@ export function ProjectSidebar(props: SidebarProps) {
               )}
             </section>
           ) : null}
-          <div className="es-split" ref={splitRef} data-dragging={dragging ? "true" : "false"} hidden={searching}>
+          {environment === "code" && props.codeTree ? <div className="es-code-tree-host" hidden={searching}>{props.codeTree}</div> : null}
+          <div className="es-split" ref={splitRef} data-dragging={dragging ? "true" : "false"} hidden={searching || (environment === "code" && Boolean(props.codeTree))}>
             {present.map((key, index) => {
               const next = present[index + 1];
               const handle = next && layout.open[key] && layout.open[next] ? (
@@ -785,29 +781,26 @@ export function ProjectSidebar(props: SidebarProps) {
               props.onView("chat");
               props.onNewSession();
             }}
-            title="New chat"
-            aria-label="New chat"
+            title={NEW_LABEL[environment]}
+            aria-label={NEW_LABEL[environment]}
           >
             <span style={iconSlot(false)}>
               <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden>
                 <path d="M12 5v14M5 12h14" />
               </svg>
             </span>
-            {!iconOnly && <span style={titleEllipsis}>New chat</span>}
+            {!iconOnly && <span style={titleEllipsis}>{NEW_LABEL[environment]}</span>}
           </button>
-          {props.onPage ? <button type="button" className={`echo-side-button${props.page === "code" ? " is-active" : ""}`}
-            style={railButton(props.page === "code")} title="Echo Code" aria-label="Echo Code"
-            aria-current={props.page === "code" ? "page" : undefined} onClick={() => props.onPage?.("code")}>
-            <span style={iconSlot(props.page === "code")}><NavIcon name="code" /></span>
-          </button> : null}
+          {switcher}
         </nav>
 
         <div className="echo-rail-divider" />
 
-        <section aria-label="Chats" style={{ padding: "0 1px", display: "grid", gap: 2, flex: "0 0 auto" }}>
-          {!props.hydrating && sessions.map((session) => sessionRow(session))}
-        </section>
-        {props.collapsedRoster ? <><div className="echo-rail-divider" />{props.collapsedRoster}</> : null}
+        {environment === "agents" && props.collapsedRoster ? props.collapsedRoster : environment === "code" ? null : (
+          <section aria-label="Chats" style={{ padding: "0 1px", display: "grid", gap: 2, flex: "0 0 auto" }}>
+            {!props.hydrating && sessions.map((session) => sessionRow(session))}
+          </section>
+        )}
 
       </div>
       )}

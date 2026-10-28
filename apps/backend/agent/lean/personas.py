@@ -82,6 +82,36 @@ def _seed() -> list[AgentPersona]:
     ]
 
 
+# Chat is model-first (agent/environments.py): the selected model answers as itself, in Echo's
+# harness, without Echo's persona or team. It is not a roster agent: list() never shows it,
+# and nothing can delegate to it, but get() resolves it so its messages have a name.
+CHAT_AGENT_ID = "chat"
+CHAT_TOOLSETS = ["core", "web", "live", "terminal", "vision", "memory", "skills"]
+CHAT_SOUL = (
+    "You are an AI assistant answering the user directly in EchoSpeak's Chat. Be accurate, clear and "
+    "helpful, like a good general-purpose assistant. You are not Echo or any of the user's agents: "
+    "don't adopt their names or personalities, and don't hand work to them. Use your tools when they "
+    "help (search, read files, run commands), and keep things simple: answer the question asked."
+)
+
+
+def chat_persona(model_label: str = "") -> AgentPersona:
+    """The model itself, for a Chat conversation. Named after the model when it's known."""
+    label = " ".join(str(model_label or "").split())[:60]
+    return AgentPersona(
+        id=CHAT_AGENT_ID,
+        name=label or "Assistant",
+        title="Chat",
+        soul=CHAT_SOUL + (f" You are running on {label}." if label else ""),
+        avatar="",
+        toolsets=list(CHAT_TOOLSETS),
+        context_scope="project",
+        builtin=True,
+        created_at=0.0,
+        updated_at=0.0,
+    )
+
+
 _SOULS = {
     "scout": (
         "You are Jarvis, a meticulous researcher on Echo's team. You search widely, read the "
@@ -191,6 +221,8 @@ class PersonaStore:
         return [agent.model_copy() for agent in agents]
 
     def get(self, agent_id: str) -> Optional[AgentPersona]:
+        if str(agent_id or "").strip() == CHAT_AGENT_ID:
+            return chat_persona()
         with self._lock:
             agent = self._agents.get(str(agent_id or "").strip())
             return agent.model_copy() if agent else None

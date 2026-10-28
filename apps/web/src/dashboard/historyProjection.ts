@@ -179,6 +179,7 @@ export function projectSessionHistory(
               agentName: String(leanPersona?.name || msg.agent_name || "Echo"),
               initials: leanPersona?.initials,
               title: leanPersona?.title,
+              provider: msg.provider ? String(msg.provider) : undefined,
               text,
               timeline: Array.isArray(msg.timeline) ? msg.timeline : [],
               at: atMs,

@@ -30,7 +30,7 @@ A heartbeat (`agent/heartbeat.py`) existed but never ran from the app:
 
 **Layer 1, "What needs me"** (the default). `agent/checkins.py:tick` runs on the routine scheduler's existing tick, next to the delivery outbox upkeep. New items with urgency *now* or *soon* become one message from Echo:
 
-- It's posted with `reminders.post_to_chat` in the **Check-ins with Echo** chat, so the owner can reply and Echo continues like any conversation.
+- It's posted with `reminders.post_to_chat` in the **Check-ins with Echo** chat, so the owner can reply and Echo continues like any conversation. Since 11.11.0 it goes to **Echo's own conversation in Agents** instead (`RoomStore.direct`); see [Chat, Agents and Code](three-environments.md).
 - It also goes out through `automations.deliver`: a desktop notification, plus Discord or Telegram if chosen.
 
 Guards, all **Test**:

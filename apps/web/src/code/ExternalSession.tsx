@@ -53,7 +53,9 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   apiBase: string; projectId: string; runtimeId: string; canStart: boolean; account: AgentAccount | null;
   draft: string; onDraft(value: string): void; model: string; onState(state: ExternalComposerState): void;
   open: boolean; anchor: React.RefObject<HTMLButtonElement>; onClose(): void; onNeedSetup(): void; onAccountChanged(): void;
-}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, account, draft, onDraft, model, onState, open, anchor, onClose, onNeedSetup, onAccountChanged }, ref) {
+  /** A session picked in Code's sidebar; otherwise the newest one. */
+  initialSessionId?: string;
+}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, account, draft, onDraft, model, onState, open, anchor, onClose, onNeedSetup, onAccountChanged, initialSessionId = "" }, ref) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState("");
   const [session, setSession] = useState<Session | null>(null);
@@ -96,11 +98,12 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
         const mine = rows.filter(row => row.runtime_id === runtimeId).sort((a, b) => b.created_at - a.created_at);
         setSessions(mine);
         // Continue where you left off: the newest session that wasn't rolled back.
-        setSelected(current => current || mine.find(row => row.state !== "rolled_back")?.id || "");
+        const picked = mine.find(row => row.id === initialSessionId)?.id;
+        setSelected(current => current || picked || mine.find(row => row.state !== "rolled_back")?.id || "");
       })
       .catch(err => { if (live) setError(err.message); });
     return () => { live = false; };
-  }, [apiBase, projectId, runtimeId]);
+  }, [apiBase, projectId, runtimeId, initialSessionId]);
   useEffect(() => {
     let live = true;
     let timer: ReturnType<typeof setTimeout>;

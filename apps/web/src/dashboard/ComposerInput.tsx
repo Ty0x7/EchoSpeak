@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { modelDisplayName } from "../app/environments";
 import { ContextMeter } from "../app/chatComponents";
 import type { Message, ProviderInfo, ThreadSessionState } from "../app/types";
 import { MentionMenu, activeMention, mentionMatches } from "../lean/Dialogs";
@@ -40,7 +41,8 @@ export function ComposerInput({ threads, projects, activeThreadId, activeProject
   providerError, folderPathFromDrop, attachFolder, onRemoveFolder, textareaRef, input, onInput, onSend,
   activeRoom, roomMembers, mention, setMention, messages, providerInfo, toolbar, busy, onSteer, queue, coding }: ComposerInputProps) {
   const [folderDropActive, setFolderDropActive] = useState(false);
-  const agentName = activeRoom?.kind === "group" ? "The team" : roomMembers[0]?.name || "Echo";
+  // Chat is model-first: outside a room (and outside Code, where Echo works) the model is who's working.
+  const agentName = activeRoom?.kind === "group" ? "The team" : roomMembers[0]?.name || (coding ? "Echo" : modelDisplayName(providerInfo?.model || ""));
   return (
                     <>
                     {/* Above the row, never inside it: .input-row is a no-wrap flex row and would squeeze the card. */}

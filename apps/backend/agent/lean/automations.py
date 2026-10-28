@@ -47,9 +47,10 @@ def deliver(text: str, channels: list[str], label: str, *, session_id: str = "",
 
 
 def _ensure_chat(title: str) -> str:
+    """A conversation an agent starts (a routine's results, reminders). It belongs to Agents, not Chat."""
     from agent.threads import get_thread_manager
 
-    return get_thread_manager().create_thread(title=title[:60], source="web").thread_id
+    return get_thread_manager().create_thread(title=title[:60], source="agent").thread_id
 
 
 def run_automation(

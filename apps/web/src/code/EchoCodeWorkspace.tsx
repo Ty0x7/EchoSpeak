@@ -17,16 +17,21 @@ import "./code.css";
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean };
 type Entry = { name: string; path: string; directory: boolean };
 
-export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onAddFolder, onSession, nativeInfo, nativeLocked, onConfigureProviders }: {
+/** What Code's sidebar asked to open: a runtime, and for external runtimes one of its sessions. */
+export type CodeOpenRequest = { runtimeId: string; sessionId: string; nonce: number };
+
+export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onAddFolder, onSession, nativeInfo, nativeLocked, onConfigureProviders, openRequest, onSessionsChanged }: {
   apiBase: string; projects: Project[]; projectId: string; onProject(id: string): void;
   onAddFolder(): void; onSession(session: CodeSession, draft?: string): void;
   nativeInfo: ProviderInfo | null; nativeLocked: boolean; onConfigureProviders(): void;
+  openRequest?: CodeOpenRequest | null; onSessionsChanged?(): void;
 }) {
   const available = projects.filter(project => !project.archived && project.workspace_root);
   const [catalog, setCatalog] = useState<RuntimeCatalog | null>(null);
   const [loaded, setLoaded] = useState<CodeWorkspace | null>(null);
   const workspace = loaded?.project.id === projectId ? loaded : null;
-  const [runtimeId, setRuntime] = useState("echo");
+  const [runtimeId, setRuntime] = useState(openRequest?.runtimeId || "echo");
+  useEffect(() => { if (openRequest) setRuntime(openRequest.runtimeId); }, [openRequest]);
   const [revision, setRevision] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -48,11 +53,13 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
   const [accounts, setAccounts] = useState<Record<string, AgentAccount>>({});
   const [accountRevision, setAccountRevision] = useState(0);
   const modelScope = useRef("");
+  const seenSession = useRef("");
   const externalStatus = useCallback((state: ExternalComposerState) => {
     const scope = `${runtimeId}:${projectId}:${state.sessionId}`;
     if (modelScope.current !== scope) { modelScope.current = scope; setModel(""); }
     setExternalState(state); if (state.approvals) setConnectionOpen(true);
-  }, [runtimeId, projectId]);
+    if (state.sessionId && seenSession.current !== state.sessionId) { seenSession.current = state.sessionId; onSessionsChanged?.(); }
+  }, [runtimeId, projectId, onSessionsChanged]);
   useEffect(() => { setExternalState(null); setModel(""); setConnectionOpen(false); }, [runtimeId, projectId]);
   // Each coding agent's own sign-in and plan models, independent of any session: what Echo last
   // saw (instant, survives restarts), then a fresh check when that's older than ten minutes.
@@ -138,7 +145,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
   const signedIn = Boolean(externalState?.signedIn || account?.signed_in);
   const connectionLabel = externalState?.connected ? "Session & permissions"
     : signedIn ? `${runtimeName(runtimeId)} · ${planLabel(account) || "Signed in"}` : runtimeId === "acp" ? "Connect agent" : `Sign in to ${runtimeName(runtimeId)}`;
-  return <div className="ec-page"><PageShell title="Echo Code" lead=""
+  return <div className="ec-page"><PageShell title="Code" lead=""
     action={<><button className="es-btn es-btn-quiet es-btn-sm" aria-expanded={showFiles} onClick={() => setShowFiles(value => !value)}>Files &amp; sessions</button><button className="es-btn es-btn-quiet es-btn-sm" onClick={onAddFolder}>Add folder</button></>}>
     <div className="ec-workspace">
       {error ? <p role="alert" className="ec-notice">{error}</p> : null}
@@ -190,7 +197,8 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
           {catalog && catalog.privacy_mode !== "standard" ? <small>{catalog.privacy_mode} mode · External runtimes remain blocked.</small> : null}
         </div>
       </div>
-      {runtimeId !== "echo" && projectId ? <ExternalSession key={`${projectId}:${runtimeId}`} ref={external} apiBase={apiBase} projectId={projectId} runtimeId={runtimeId}
+      {runtimeId !== "echo" && projectId ? <ExternalSession key={`${projectId}:${runtimeId}:${openRequest?.runtimeId === runtimeId ? openRequest.sessionId : ""}`} ref={external} apiBase={apiBase} projectId={projectId} runtimeId={runtimeId}
+        initialSessionId={openRequest?.runtimeId === runtimeId ? openRequest.sessionId : ""}
         canStart={Boolean(workspace?.can_start_native && selected?.can_start)} account={account} draft={draft} onDraft={setDraft} model={model} onState={externalStatus}
         open={connectionOpen} anchor={connectionButton} onClose={() => setConnectionOpen(false)}
         onNeedSetup={() => setConnectionOpen(true)} onAccountChanged={recheckAccount} /> : null}

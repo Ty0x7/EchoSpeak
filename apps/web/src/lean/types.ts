@@ -5,6 +5,8 @@ export type LeanAgentRef = {
   name: string;
   title?: string;
   initials?: string;
+  /** Which provider answered. Chat (agent id "chat") shows the model, not an agent. */
+  provider?: string;
 };
 
 export type LeanSegment =

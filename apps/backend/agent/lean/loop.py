@@ -238,6 +238,7 @@ class LeanTurn:
                 "name": self.persona.name,
                 "title": self.persona.title,
                 "initials": self.persona.initials(),
+                "provider": str(getattr(getattr(self.client, "endpoint", None), "provider", "") or ""),
             },
             **extra,
         })

@@ -60,7 +60,7 @@ export function PageShell({ title, lead, action, children }: { title: string; le
   );
 }
 
-const ago = (ms: number) => {
+export const ago = (ms: number) => {
   if (!ms) return "";
   const s = Math.max(0, (Date.now() - ms) / 1000);
   if (s < 60) return "just now";
