@@ -86,13 +86,8 @@ def _seed() -> list[AgentPersona]:
 # harness, without Echo's persona or team. It is not a roster agent: list() never shows it,
 # and nothing can delegate to it, but get() resolves it so its messages have a name.
 CHAT_AGENT_ID = "chat"
-CHAT_TOOLSETS = ["core", "web", "live", "terminal", "vision", "memory", "skills"]
-CHAT_SOUL = (
-    "You are an AI assistant answering the user directly in EchoSpeak's Chat. Be accurate, clear and "
-    "helpful, like a good general-purpose assistant. You are not Echo or any of the user's agents: "
-    "don't adopt their names or personalities, and don't hand work to them. Use your tools when they "
-    "help (search, read files, run commands), and keep things simple: answer the question asked."
-)
+# Broad on purpose: agent/lean/chat_mode.py keeps only Chat's allowlist (no terminal, no desktop input).
+CHAT_TOOLSETS = ["core", "web", "live", "vision", "desktop", "memory", "skills"]
 
 
 def chat_persona(model_label: str = "") -> AgentPersona:
@@ -102,7 +97,8 @@ def chat_persona(model_label: str = "") -> AgentPersona:
         id=CHAT_AGENT_ID,
         name=label or "Assistant",
         title="Chat",
-        soul=CHAT_SOUL + (f" You are running on {label}." if label else ""),
+        # Chat's instructions live in agent/lean/chat_mode.py, not in a persona soul.
+        soul="",
         avatar="",
         toolsets=list(CHAT_TOOLSETS),
         context_scope="project",

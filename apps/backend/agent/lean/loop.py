@@ -172,6 +172,8 @@ class LeanTurn:
         # Extra fields on agent_start, e.g. who handed this work over.
         self.meta = dict(meta or {})
         self.client = client
+        # Set by the session for environments with their own boundary (Chat); returns why a call is refused.
+        self.call_guard: Optional[Callable[[str, dict[str, Any], Any], str]] = None
         self.persona = persona
         self.system_prompt = system_prompt
         self.history = history
@@ -626,6 +628,13 @@ class LeanTurn:
             problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} | computer_names else "repeat")
             if not problem and signature in self._refused:
                 problem = "refused"
+            if not problem and self.call_guard is not None:
+                # The environment's own boundary (Chat: agent/lean/chat_mode.py), after alias resolution.
+                if reason := self.call_guard(name, args, self.toolbox.entry(name)):
+                    policy.audit(policy.Decision("deny", reason, "environment"), name=name, args=args,
+                                 session_id=self.session_id, agent=self.persona.id, outcome="blocked")
+                    self._policy_reasons[call.id] = reason
+                    problem = "policy"
             if not problem:
                 # Checked for every call, parallel read-only ones included.
                 decision = policy.evaluate(name, args, entry=self.toolbox.entry(name), tainted_by=self.taint,

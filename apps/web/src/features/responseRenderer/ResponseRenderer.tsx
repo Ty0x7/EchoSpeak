@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { safeMarkdownComponents } from "../../widgets/SafeImage";
 import remarkGfm from "remark-gfm";
 import type { ResponseRenderBlock, ResponseRenderPlan } from "./types";
+import { RichMarkdown } from "../../widgets/RichMarkdown";
 import { safeUrl } from "../../widgets/validate";
 
 type Palette = {
@@ -198,8 +199,10 @@ export const ResponseRenderer: React.FC<{ plan?: ResponseRenderPlan; fallbackTex
   return (
     <>
       {text ? (
-        <div className="chat-markdown chat-line-assistant">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>{text}</ReactMarkdown>
+        // The same renderer as live replies (diagrams, math, tables, code), so a message shown
+        // from its final text or older history looks exactly like one that streamed in.
+        <div className="chat-line-assistant">
+          <RichMarkdown text={text} streaming={stillTyping} />
         </div>
       ) : null}
       {blocks.length ? (

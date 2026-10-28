@@ -148,8 +148,16 @@
 
 /* Diagrams */
 .wg-diagram-svg { display: grid; place-items: center; overflow-x: auto; }
-.wg-diagram-svg svg { max-width: 100%; height: auto; }
+/* Keep a small chart readable, not page-filling: cap the height and keep the aspect ratio. */
+.wg-diagram-svg svg { max-width: 100%; height: auto; max-height: min(460px, 62vh); width: auto; }
 .wg-diagram-wait { margin: 10px 0; padding: 14px; border: 1px dashed var(--wg-line-2, rgba(var(--es-edge-rgb), calc(0.14 * var(--es-edge-k)))); border-radius: 12px; color: rgba(var(--es-ink-rgb), 0.42); font-size: 12px; max-width: 720px; }
+.wg-diagram-note { color: rgba(var(--es-ink-rgb), 0.5); font-weight: 400; }
+/* Too wide to shrink legibly: readable size, scrolling sideways inside the card. */
+.wg-diagram-svg.is-scroll { place-items: start; justify-items: start; overscroll-behavior-x: contain; }
+.wg-diagram-svg.is-scroll:focus-visible { outline: 2px solid var(--es-accent); outline-offset: 2px; }
+.wg-diagram-error { padding: 2px 2px 8px; }
+.wg-diagram-error strong { display: block; font-size: 12.5px; font-weight: 600; }
+.wg-diagram-error pre { margin: 6px 0 0; padding: 8px 10px; overflow-x: auto; border-radius: 8px; background: rgba(var(--es-wash-rgb), calc(0.05 * var(--es-wash-k))); font: 11.5px/1.45 "JetBrains Mono", ui-monospace, monospace; white-space: pre; }
 .wg-diagram-error small { display: block; margin-top: 8px; color: rgba(var(--es-ink-rgb), 0.5); font-size: 11.5px; }
 
 /* Products */
