@@ -2382,25 +2382,19 @@ def web_search(
                 ]
                 search_results = [future.result() for future in futures]
 
+        lists = []
         for res in search_results:
             if res.provider:
                 providers_used.append(res.provider)
             errors.extend(res.errors or [])
-            for h in res.hits:
-                if _url_is_blocked(h.url):
-                    continue
-                merged_hits.append(h)
+            kept = [h for h in res.hits if not _url_is_blocked(h.url)]
+            merged_hits.extend(kept)
+            lists.append(kept)
 
-        seen = set()
-        deduped = []
-        for h in merged_hits:
-            key = (h.url or h.title).lower()
-            if not key or key in seen:
-                continue
-            seen.add(key)
-            deduped.append(h)
-            if len(deduped) >= 12:
-                break
+        # Several queries: fuse and rank their results together (agent/search_rank.py) instead of
+        # listing the first query's results first.
+        from agent.search_rank import rank_hits
+        deduped = rank_hits(query, lists, limit=12) if len(lists) > 1 else [h for h in lists[0]][:12] if lists else []
 
         if not deduped:
             if errors:
@@ -2424,14 +2418,8 @@ def web_search(
                         text=hit.snippet + "\n" + hit.extract, metadata={"query": hit.query, "date": hit.date}))
                 except (ValueError, SafeWebRetrievalError):
                     source_ids.append("")
-        try:
-            from agent.lean.widgets import attach
-
-            attach({"type": "citations", "data": {"items": [
-                {"title": h.title, "url": h.url, "snippet": h.snippet} for h in result.hits[:8]
-            ]}})
-        except Exception:
-            logger.debug("citation widget skipped", exc_info=True)
+        # No source chips for search results: they're leads, not support. Chips come from pages
+        # actually read and judged usable (safe_web_fetch).
         return format_hits_for_tool(result, multi_query=len(queries) > 1) + (
             "\nNotebook source IDs (search leads, not inspected pages): " + ", ".join(source_ids) if source_ids else "")
     except Exception as e:
@@ -2697,26 +2685,70 @@ class SafeWebFetchArgs(BaseModel):
     ),
 )
 def safe_web_fetch(url: str, objective: str = "", max_text_chars: int = 24000) -> str:
-    try:
-        from agent.safe_web_retrieval import SafeWebRetrievalError, fetch_public_page
+    """Read one public source, the way it's meant to be read (agent/source_router.py).
 
-        result = fetch_public_page(url, max_text_chars=100000)
+    A source with an official API (GitHub pull requests, issues, releases, commits, files;
+    PyPI; npm; Reddit threads) is read through that API; anything else is fetched as a page.
+    Either way the result is graded (JavaScript-only, login wall, blocked, not found, thin,
+    stale, off-topic for the objective), so a page that loaded isn't mistaken for evidence.
+    """
+    import json as _json
+
+    from agent import source_router
+    from agent.safe_web_retrieval import SafePageResult, SafeWebRetrievalError, fetch_public_page
+
+    try:
+        plan = source_router.resolve(url)
+        fallback_note = ""
+        result = None
+        if plan.kind != "page":
+            try:
+                doc = source_router.fetch_structured(plan)
+                result = SafePageResult(
+                    url=url, final_url=doc.url, title=doc.title, text=doc.text,
+                    links=[{"url": item["url"], "title": item["title"]} for item in doc.items if item.get("url")][:30],
+                    metadata={"source": doc.source, "published": doc.published}, content_type="application/json",
+                    status_code=200,
+                )
+                published = doc.published
+            except source_router.StructuredUnavailable as exc:
+                fallback_note = f"The {plan.kind.replace('_', ' ')} API couldn't answer ({exc}), so the page itself was read."
+        if result is None:
+            result = fetch_public_page(url, max_text_chars=100000)
+            published = source_router.published_date(metadata=result.metadata, json_ld=result.json_ld,
+                                                      last_modified=result.last_modified)
+        quality = source_router.assess(title=result.title, text=result.text, objective=objective, published=published,
+                                       structured=result.metadata.get("source", "page") != "page")
+        quality["source"] = result.metadata.get("source", "page")
+        usable = quality["status"] == "ok" and (not objective or quality.get("relevance", 1.0) >= 0.2)
         from agent.research_notebook import ResearchNotebook, current_session
         source_id = ""
         if current_session():
             source_id = ResearchNotebook().retain(current_session(), url=result.final_url, title=result.title,
-                text=result.text, inspected=True, metadata={"links": result.links, "objective": objective,
-                    "retrieved_at": result.retrieved_at, "content_type": result.content_type})
+                text=result.text, inspected=quality["status"] == "ok", metadata={"links": result.links[:60], "objective": objective,
+                    "retrieved_at": result.retrieved_at, "content_type": result.content_type, "quality": quality})
         total_chars = len(result.text)
-        result = result.model_copy(update={"text": result.text[:max_text_chars]})
-        try:
-            from agent.lean.widgets import attach
+        # Hundreds of navigation links drown a small model; keep the ones that match the objective.
+        links = result.links
+        if len(links) > 20:
+            from agent.search_rank import coverage
+            links = sorted(links, key=lambda link: -coverage(objective, f"{link.get('title', '')} {link.get('url', '')}"))[:20] \
+                if objective else links[:20]
+        result = result.model_copy(update={"text": result.text[:max_text_chars], "links": links})
+        if usable:
+            try:
+                from agent.lean.widgets import attach
 
-            attach({"type": "citations", "data": {"items": [{"title": result.title, "url": result.final_url or result.url}]}})
-        except Exception:
-            logger.debug("citation widget skipped", exc_info=True)
-        return result.tool_text() + (f"\nsource_id={source_id}; total_chars={total_chars}. "
-            "Use research_notebook read with offset to read later passages." if source_id else "")
+                # Source chips show pages that can support the answer, not every page that was opened.
+                attach({"type": "citations", "data": {"items": [{"title": result.title, "url": result.final_url or result.url}]}})
+            except Exception:
+                logger.debug("citation widget skipped", exc_info=True)
+        note = " ".join(part for part in (fallback_note, source_router.retrieval_note(quality)) if part)
+        return (result.tool_text()
+                + f"\nquality={_json.dumps(quality, sort_keys=True)}"
+                + (f"\nnote={note}" if note else "")
+                + (f"\nsource_id={source_id}; total_chars={total_chars}. "
+                   "Use research_notebook read with offset to read later passages." if source_id else ""))
     except SafeWebRetrievalError as exc:
         return (
             "execution_status=error\nresult_state=insufficient_evidence\n"

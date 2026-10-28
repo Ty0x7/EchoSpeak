@@ -199,3 +199,39 @@ _RESULT_URL = re.compile(r"^\s*URL:\s*(\S+)", re.MULTILINE)
 def result_urls(search_output: str) -> list[str]:
     """Result links in web_search's own order, without duplicates."""
     return list(dict.fromkeys(_RESULT_URL.findall(search_output or "")))
+
+
+_RESULT_BLOCK = re.compile(r"^\d+\.\s.*?(?=^\d+\.\s|\Z)", re.MULTILINE | re.DOTALL)
+
+
+def result_blocks(search_output: str) -> list[tuple[str, str]]:
+    """(url, the result's title, snippet and extract) per web_search result, in ranked order."""
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for block in _RESULT_BLOCK.findall(search_output or ""):
+        match = _RESULT_URL.search(block)
+        if match and match.group(1) not in seen:
+            seen.add(match.group(1))
+            out.append((match.group(1), block))
+    return out
+
+
+def page_problem(fetch_output: str) -> str:
+    """Why a safe_web_fetch result can't serve as evidence, or "" when it can."""
+    text = fetch_output or ""
+    if "safe_fetch_error=" in text:
+        return text.split("safe_fetch_error=", 1)[1].split("\n", 1)[0][:160]
+    match = re.search(r"^quality=(\{.*\})$", text, re.MULTILINE)
+    if not match:
+        return ""
+    try:
+        import json
+        quality = json.loads(match.group(1))
+    except ValueError:
+        return ""
+    if quality.get("status", "ok") != "ok":
+        return {"js_required": "needs JavaScript", "login_wall": "behind a sign-in", "blocked": "blocked automated access",
+                "not_found": "page not found", "thin": "almost no text"}.get(quality["status"], quality["status"])
+    if quality.get("relevance", 1.0) < 0.2:
+        return "doesn't discuss the question"
+    return ""

@@ -37,7 +37,7 @@ from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_n
                             unbacked_screen_claim, written_names)
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
-from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
+from agent.lean.provider import ChatClient, ModelTurn, ProviderError, ToolCall, extract_text_tool_calls
 from agent.lean.toolbox import Toolbox, ToolResult, call_target, describe_call, safe_args_preview
 
 Emit = Callable[[dict[str, Any]], None]
@@ -179,6 +179,9 @@ class LeanTurn:
         # before an answer is accepted (an output guardrail); grace_prompt asks for the best answer
         # when the step budget runs out.
         self.tool_observer: Optional[Callable[..., None]] = None
+        # Calls to run before the model's first turn, through the normal tool path ([(name, args)]):
+        # Chat reads addresses the user gave without waiting for a small model to notice them.
+        self.prefetch: Optional[Callable[[], list[tuple[str, dict[str, Any]]]]] = None
         self.final_check: Optional[Callable[[str], str]] = None
         self.grace_prompt = ""
         self.persona = persona
@@ -325,6 +328,15 @@ class LeanTurn:
         success = True
         overflow_retries = 0
         step = 0
+        planned = self.prefetch() if self.prefetch is not None else []
+        if planned and not self.cancel.is_set():
+            # Deterministic retrieval as the turn's first step, recorded like the model's own calls.
+            step = 1
+            self.emit({"type": "step_start", "step": step})
+            calls = [ToolCall(f"prefetch_{index}", name, json.dumps(args)) for index, (name, args) in enumerate(planned)]
+            messages.append({"role": "assistant", "content": "", "tool_calls": [
+                {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}} for call in calls]})
+            self._run_tools(calls, messages, step, call_counts)
 
         while step < max_steps:
             if self.cancel.is_set():

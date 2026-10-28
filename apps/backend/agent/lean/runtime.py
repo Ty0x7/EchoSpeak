@@ -1189,6 +1189,8 @@ class LeanSession:
             # A budget sized to the model that still ends in an answer, an evidence ledger,
             # and one citation correction before an answer is accepted.
             turn.tool_observer = chat_run.observe
+            if "safe_web_fetch" in toolbox.names:
+                turn.prefetch = chat_run.prefetch
             turn.final_check = chat_run.check_answer
             turn.max_steps_override = chat_run.budget
             turn.final_grace = True

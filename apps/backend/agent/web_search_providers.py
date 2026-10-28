@@ -42,6 +42,7 @@ class SearchHit:
     provider: str = ""
     query: str = ""
     score_hint: float = 0.0
+    rank_reason: str = ""
 
     def as_dict(self) -> dict:
         return {
@@ -594,7 +595,11 @@ def run_web_search(
     if config is None:
         from config import config as config  # noqa: A001
 
-    normalized_query = normalize_provider_query(query)
+    # The model wrote this query: keep it as written (versions, dotted names, operators, intent).
+    # normalize_provider_query was built for raw user sentences and corrupted 13 of 20 real queries.
+    from agent.search_rank import prepare_query, rank_hits
+
+    normalized_query = prepare_query(query)
     if is_vague_search_query(normalized_query):
         return SearchProviderResult(
             provider="none",
@@ -612,6 +617,7 @@ def run_web_search(
         order = provider_order(order)
     variants = build_query_variants(normalized_query, max_variants=3)
     all_hits: List[SearchHit] = []
+    ranked_lists: List[List[SearchHit]] = []  # one per provider/variant, for rank fusion
     all_errors: List[str] = []
     queries_used: List[str] = []
     used_provider = ""
@@ -641,6 +647,7 @@ def run_web_search(
             if res.hits:
                 used_provider = used_provider or pname
                 all_hits.extend(res.hits)
+                ranked_lists.append(list(res.hits))
             if len(_dedupe_hits(all_hits)) >= max_hits:
                 break
         from agent.learning.reliability import record_search
@@ -651,7 +658,9 @@ def run_web_search(
             break
         # else try next provider
 
-    hits = _dedupe_hits(all_hits)[:max_hits]
+    # Rank instead of trusting arrival order: canonical dedupe, field-weighted BM25, rank fusion
+    # across variants and providers, authority and freshness (agent/search_rank.py).
+    hits = rank_hits(normalized_query, ranked_lists, limit=max_hits) if ranked_lists else []
 
     # Thin-snippet extract upgrade (paid Firecrawl equivalent on free path)
     if enrich_extract and hits and privacy.decide("web_pages").allowed:
