@@ -1,4 +1,5 @@
 """Owner-facing Echo Code foundation; protected by the normal API auth middleware."""
+import time
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
@@ -33,7 +34,7 @@ def workspace(project_id: str):
 
 
 class StartSession(BaseModel):
-    runtime_id: Literal["echo", "codex", "claude_code", "claude_cli", "acp"]
+    runtime_id: Literal["echo", "codex", "claude_cli", "acp"]
     idempotency_key: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
@@ -46,7 +47,7 @@ def create_session(project_id: str, request: StartSession):
 # External runtimes have their own durable native session identities and never
 # become Echo threads. These routes inherit the same owner auth/origin checks.
 class ExternalStart(StartSession):
-    runtime_id: Literal["codex", "claude_code", "claude_cli", "acp"]
+    runtime_id: Literal["codex", "claude_cli", "acp"]
     acknowledge_dirty: bool = False
     acknowledge_execution: bool = False
     command: list[str] = Field(default_factory=list, max_length=32)
@@ -77,13 +78,10 @@ def external_poll(session_id: str, cursor: int = 0):
     return _external("poll", session_id, max(0, cursor))
 
 
-class Connection(BaseModel):
-    api_key: str = Field(default="", max_length=1000)
-
-
 @router.post("/external-sessions/{session_id}/connect")
-def external_connect(session_id: str, request: Connection):
-    return _external("connect", session_id, request.api_key)
+def external_connect(session_id: str):
+    # Coding agents use the owner's own sign-in; no API key is accepted here.
+    return _external("connect", session_id)
 
 
 @router.post("/external-sessions/{session_id}/login")
@@ -126,6 +124,14 @@ def external_rollback(session_id: str):
 
 
 # Settings › Models › Coding agents: explicit owner checks and the vendors' own sign-in.
+@router.get("/runtimes/{runtime_id}/account")
+def runtime_account(runtime_id: Literal["codex", "claude_cli"]):
+    """The last status Echo saw (signed in, plan, models; no secrets). Runs nothing."""
+    from agent import code_accounts
+    status = code_accounts.remembered(runtime_id)
+    return {**status, "stale": not status or time.time() - float(status.get("checked_at") or 0) > code_accounts.STALE_SECONDS}
+
+
 @router.post("/runtimes/{runtime_id}/check")
 def check_runtime(runtime_id: Literal["codex", "claude_cli"]):
     from agent import code_accounts

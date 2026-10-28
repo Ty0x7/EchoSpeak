@@ -20,6 +20,29 @@ class RuntimeUnavailable(ValueError):
     pass
 
 
+CODE_MODEL_RULE = ("In Echo Code, ChatGPT models run in Codex and Claude models in Claude Code with your own plan, "
+                   "and Echo uses a model on this PC. API-key models are for Chat.")
+
+
+def is_code_thread(session_id: str) -> bool:
+    """Whether this conversation belongs to Echo Code (not Chat)."""
+    try:
+        from agent.threads import get_thread_manager
+        thread = get_thread_manager().get_thread(str(session_id or ""))
+        return bool(thread and getattr(thread, "surface", "chat") == "code")
+    except Exception:
+        return False
+
+
+def code_provider_problem(session_id: str, provider: str) -> str:
+    """Plans for code, APIs for chat: an Echo Code conversation never runs an API-key provider.
+
+    Returns the reason to refuse, or "" when the provider is allowed here.
+    """
+    from agent.cloud_providers import CLOUD_PROVIDERS
+    return CODE_MODEL_RULE if str(provider or "") in CLOUD_PROVIDERS and is_code_thread(session_id) else ""
+
+
 def runtime_catalog() -> dict:
     """Passive availability only. Finding a CLI proves neither login nor compatibility."""
     current_mode = privacy.mode()
@@ -27,7 +50,8 @@ def runtime_catalog() -> dict:
         "id": "echo", "name": "Echo native", "protocol": "native",
         "implemented": True, "installed": True, "authentication": "existing_model_settings",
         "can_start": True, "blockers": [],
-        "description": "Echo's own tools, skills, memory, learning, and approval policies. Choose a local or cloud model in the conversation.",
+        "description": "Echo's own tools, skills, memory, learning, and approval policies, with a model on this PC. "
+                       "API-key models are for Chat; in Echo Code, ChatGPT runs in Codex and Claude in Claude Code.",
     }]
     definitions = (
         ("codex", "Codex", "codex-app-server", "codex",
@@ -35,23 +59,18 @@ def runtime_catalog() -> dict:
         ("claude_cli", "Claude Code", "claude-code-cli", "claude_cli",
          "Your installed Claude Code, signed in with your own Claude plan through its own login. Claude Code keeps "
          "its tools and permissions; EchoSpeak asks you before any action Claude Code would ask about."),
-        ("claude_code", "Claude Agent", "claude-agent-sdk", None,
-         "Original Claude tools and sessions through the official Agent SDK. Requires a separate Anthropic API key; subscription OAuth is not copied."),
         ("acp", "Other ACP agents", "acp", None,
          "Connect compatible agents through their own ACP sessions and capability negotiation."),
     )
     from agent.code_executables import locate
-    from agent.code_sessions import sdk_installed
     for runtime_id, name, protocol, command, description in definitions:
         # Paths only. No --version or auth probes here: even a health-check process can run hooks.
         # The owner checks sign-in explicitly from Settings › Models › Coding agents.
         found = locate(command) if command else None
-        installed = sdk_installed() if runtime_id == "claude_code" else bool(found["path"]) if found else None
+        installed = bool(found["path"]) if found else None
         blockers = []
         if installed is False:
             blockers.append(found["problem"] if found else f"{name} was not found.")
-        if runtime_id == "claude_code" and not installed:
-            blockers = ["The optional Claude Agent SDK is not installed in this backend."]
         if current_mode != "standard":
             blockers.append("External runtimes are blocked in Private/Offline mode until their process network access can be enforced.")
         rows.append({

@@ -1,10 +1,14 @@
-"""Sign-in status and sign-in for the owner's own coding agents, from Settings.
+"""Sign-in status, plan models and sign-in for the owner's own coding agents.
 
-Each check runs the vendor's unmodified program in an empty folder and keeps only
-"signed in, how, which plan". Sign-in always completes in the vendor's own flow
-(ChatGPT's page for Codex, Anthropic's for Claude Code), and EchoSpeak never sees,
-copies or stores a token, email or session. These run only when the owner asks:
-the runtime catalog stays passive.
+Each check runs the vendor's unmodified program in an empty folder and keeps only "signed
+in, how, which plan" and the models that harness offers. Sign-in always completes in the
+vendor's own flow (ChatGPT's page for Codex, Anthropic's for Claude Code), and EchoSpeak
+never sees, copies or stores a token, email or session.
+
+The last check is remembered (agent status, no secrets) so Echo Code knows an agent is
+signed in and which models it offers right after a restart, before any session connects.
+Checks run only when the owner asks or Echo Code needs a fresh answer; the runtime catalog
+stays passive.
 """
 from __future__ import annotations
 
@@ -13,19 +17,75 @@ import json
 import os
 from pathlib import Path
 import subprocess
-import tempfile
+import threading
+import time
 from urllib.parse import urlsplit
 
 from agent.child_env import child_env
 from agent.code_executables import executable, locate
 
 LOGIN_SECONDS = 600
+STALE_SECONDS = 600  # Echo Code re-checks a remembered status older than this
 _codex_login = None  # (process, task) while an official Codex sign-in is open
+_cache_lock = threading.Lock()
+
+# Claude Code doesn't publish a model list to other programs; these are the choices its
+# documentation gives every plan (code.claude.com/docs/en/model-config, 27 Oct 2026).
+# Claude Code resolves each alias to the current model for the owner's account.
+CLAUDE_MODELS = [
+    {"id": "default", "model": "default", "displayName": "Default", "isDefault": True,
+     "description": "Your plan's recommended model (Opus on Pro and Max)."},
+    {"id": "opus", "model": "opus", "displayName": "Opus", "description": "The latest Opus, for complex work."},
+    {"id": "sonnet", "model": "sonnet", "displayName": "Sonnet", "description": "The latest Sonnet, for everyday coding."},
+    {"id": "haiku", "model": "haiku", "displayName": "Haiku", "description": "Fast and light, for simple tasks."},
+    {"id": "opusplan", "model": "opusplan", "displayName": "Opus plan, Sonnet build",
+     "description": "Opus while planning, then Sonnet to make the changes."},
+    {"id": "opus[1m]", "model": "opus[1m]", "displayName": "Opus · 1M context",
+     "description": "Long sessions. May use usage credits on Pro."},
+    {"id": "sonnet[1m]", "model": "sonnet[1m]", "displayName": "Sonnet · 1M context",
+     "description": "Long sessions. Uses usage credits on every plan."},
+    {"id": "fable", "model": "fable", "displayName": "Fable",
+     "description": "For the hardest, longest tasks. Can bill usage credits instead of your plan."},
+]
 
 
 def _scratch() -> str:
     # Neither program gets a project: no hooks, instructions or files of the owner's in reach.
-    return tempfile.mkdtemp(prefix="echo-code-account-")
+    from config import DATA_DIR
+    folder = Path(DATA_DIR) / "echo-code" / "account-check"
+    folder.mkdir(parents=True, exist_ok=True)
+    return str(folder)
+
+
+def _cache_path() -> Path:
+    from config import DATA_DIR
+    return Path(DATA_DIR) / "echo-code" / "agent-status.json"
+
+
+def remembered(runtime: str) -> dict:
+    """The last status Echo saw for this agent (no secrets), or {} if never checked."""
+    try:
+        with _cache_lock:
+            return dict(json.loads(_cache_path().read_text(encoding="utf-8")).get(runtime) or {})
+    except (OSError, ValueError):
+        return {}
+
+
+def _remember(runtime: str, status: dict) -> dict:
+    from agent.atomic_replace import replace as atomic_replace
+    status = {**status, "checked_at": time.time()}
+    path = _cache_path()
+    with _cache_lock:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            data = {}
+        data[runtime] = status
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        atomic_replace(temporary, path)
+    return status
 
 
 def _found(runtime: str) -> dict:
@@ -49,20 +109,38 @@ async def _codex_server(on_event=None):
     return rpc
 
 
+def codex_models(rows) -> list[dict]:
+    """The models Codex offers this account, as Echo Code lists them. Codex marks internal
+    models hidden; those aren't offered (it leaves them out of its own list too)."""
+    models = []
+    for row in rows if isinstance(rows, list) else []:
+        if not isinstance(row, dict) or row.get("hidden") or not isinstance(row.get("model"), str):
+            continue
+        name = row["model"].strip()
+        if not 0 < len(name) <= 200:
+            continue
+        efforts = [str(e.get("reasoningEffort") if isinstance(e, dict) else e)[:20]
+                   for e in (row.get("supportedReasoningEfforts") or [])[:8]]
+        models.append({"id": str(row.get("id") or name)[:200], "model": name,
+                       "displayName": str(row.get("displayName") or name)[:120],
+                       "description": str(row.get("description") or "")[:240],
+                       "isDefault": row.get("isDefault") is True, "efforts": efforts})
+    return models[:60]
+
+
 async def codex_status() -> dict:
     found = _found("codex")
     if not found["installed"]:
-        return {**found, "signed_in": False}
+        return _remember("codex", {**found, "signed_in": False, "models": []})
     rpc = await _codex_server()
     try:
         account = (await rpc.request("account/read", {"refreshToken": False})).get("account") or {}
-        models = (await rpc.request("model/list", {})).get("data", [])
+        models = codex_models((await rpc.request("model/list", {})).get("data", []))
     finally:
         await rpc.close()
-    return {**found, "signed_in": bool(account), "method": str(account.get("type") or ""),
-            "plan": str(account.get("planType") or ""),
-            "models": [str(m.get("displayName") or m.get("model"))[:80] for m in models[:20] if isinstance(m, dict)],
-            "login_open": bool(_codex_login and not _codex_login[1].done())}
+    return _remember("codex", {**found, "signed_in": bool(account), "method": str(account.get("type") or ""),
+                               "plan": str(account.get("planType") or ""), "models": models,
+                               "login_open": bool(_codex_login and not _codex_login[1].done())})
 
 
 async def codex_login() -> dict:
@@ -109,7 +187,7 @@ def _claude(*args, timeout=30) -> subprocess.CompletedProcess:
 def claude_status() -> dict:
     found = _found("claude_cli")
     if not found["installed"]:
-        return {**found, "signed_in": False}
+        return _remember("claude_cli", {**found, "signed_in": False, "models": []})
     done = _claude("auth", "status", "--json")
     try:
         data = json.loads(done.stdout or "{}")
@@ -117,9 +195,11 @@ def claude_status() -> dict:
         data = {}
     # Kept: signed in, how, which plan. Dropped: email, organization and anything else.
     method = str(data.get("authMethod") or "")
-    return {**found, "signed_in": bool(data.get("loggedIn")), "method": method,
-            "plan": str(data.get("subscriptionType") or "") if method == "claude.ai" else "",
-            "uses_plan": bool(data.get("loggedIn")) and method == "claude.ai"}
+    signed_in = bool(data.get("loggedIn"))
+    return _remember("claude_cli", {**found, "signed_in": signed_in, "method": method,
+                                    "plan": str(data.get("subscriptionType") or "") if method == "claude.ai" else "",
+                                    "uses_plan": signed_in and method == "claude.ai",
+                                    "models": list(CLAUDE_MODELS) if signed_in else []})
 
 
 def claude_login() -> dict:

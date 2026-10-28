@@ -1029,6 +1029,9 @@ async def switch_provider(request: SwitchProviderRequest):
             )
         _assert_provider_available(provider)
         session_id = _normalize_thread_id(request.session_id)
+        from agent.echo_code import code_provider_problem
+        if problem := code_provider_problem(session_id, provider.value):
+            raise HTTPException(status_code=403, detail=problem)
         current_binding = _ensure_session_model_binding(session_id)
         if current_binding.binding_revision != request.expected_revision:
             raise HTTPException(

@@ -9,7 +9,7 @@ import type { SettingsMap } from "./useSettings";
 type Save = (patch: SettingsMap) => Promise<void>;
 export type Account = {
   installed: boolean; source?: string; problem?: string; signed_in: boolean;
-  method?: string; plan?: string; models?: string[]; login_open?: boolean;
+  method?: string; plan?: string; models?: unknown[]; login_open?: boolean;
 };
 
 const AGENTS = [
@@ -44,6 +44,21 @@ export function CodingAgents({ s, save, apiBase }: { s: SettingsMap; save: Save;
 
   const load = useCallback(() => request<RuntimeCatalog>(`${apiBase}/echo-code/runtimes`).then(setCatalog).catch(() => setCatalog(null)), [apiBase]);
   useEffect(() => { void load(); }, [load]);
+  const describe = (agent: string, account: Account) => account.installed
+    ? { tone: account.signed_in ? "ok" as const : "warn" as const, text: accountLine(account, agent) + (account.models?.length ? ` · ${account.models.length} models` : "") }
+    : { tone: "err" as const, text: account.problem || "Not found" };
+  // What Echo last saw, without running anything: shows "signed in" right after a restart.
+  useEffect(() => {
+    let live = true;
+    for (const agent of AGENTS) {
+      request<Account & { checked_at?: number }>(`${apiBase}/echo-code/runtimes/${agent.id}/account`).then(account => {
+        if (!live || !account.checked_at) return;
+        setAccounts(a => ({ ...a, [agent.id]: account }));
+        setNotes(n => ({ ...n, [agent.id]: describe(agent.id, account) }));
+      }).catch(() => undefined);
+    }
+    return () => { live = false; };
+  }, [apiBase]);
 
   const run = async (agent: string, work: () => Promise<void>) => {
     setBusy(agent);
@@ -54,9 +69,7 @@ export function CodingAgents({ s, save, apiBase }: { s: SettingsMap; save: Save;
   const check = (agent: string) => run(agent, async () => {
     const account = await request<Account>(`${apiBase}/echo-code/runtimes/${agent}/check`, {});
     setAccounts(a => ({ ...a, [agent]: account }));
-    setNotes(n => ({ ...n, [agent]: account.installed
-      ? { tone: account.signed_in ? "ok" : "warn", text: accountLine(account, agent) + (account.models?.length ? ` · ${account.models.length} models` : "") }
-      : { tone: "err", text: account.problem || "Not found" } }));
+    setNotes(n => ({ ...n, [agent]: describe(agent, account) }));
   });
   const signIn = (agent: string) => run(agent, async () => {
     const result = await request<{ url?: string; started?: boolean }>(`${apiBase}/echo-code/runtimes/${agent}/login`, {});
@@ -70,7 +83,7 @@ export function CodingAgents({ s, save, apiBase }: { s: SettingsMap; save: Save;
   const row = (id: string) => catalog?.runtimes.find(r => r.id === id);
   const blocked = catalog && catalog.privacy_mode !== "standard";
   return (
-    <Group title="Coding agents" description="Echo Code can hand a task to Codex or Claude Code in an isolated worktree. Each runs in its own harness with its own sign-in, tools and plan; Echo asks you before anything they would ask about.">
+    <Group title="Coding agents" description="Plans for code: Echo Code hands a task to Codex (your ChatGPT plan) or Claude Code (your Claude plan) in an isolated worktree. Each runs in its own harness with its own sign-in and tools; Echo asks you before anything they would ask about.">
       {blocked ? <div className="st-muted" role="status">Private and Offline modes block coding agents, because their network use can't be limited.</div> : null}
       {AGENTS.map(agent => {
         const runtime = row(agent.id);
@@ -83,7 +96,9 @@ export function CodingAgents({ s, save, apiBase }: { s: SettingsMap; save: Save;
               <small>{!catalog ? "Checking…" : found ? "Installed" : "Not found"}</small></span></span>} help={agent.about}>
               <button type="button" className="es-btn es-btn-sm" disabled={!found || Boolean(busy) || Boolean(blocked)} onClick={() => void check(agent.id)}>
                 {busy === agent.id ? "Checking…" : "Check"}</button>
-              <button type="button" className="es-btn es-btn-sm" disabled={!found || Boolean(busy) || Boolean(blocked) || account?.signed_in === true}
+              {/* Only once a check shows it's signed out: a second sign-in never replaces a working one. */}
+              <button type="button" className="es-btn es-btn-sm" disabled={!found || Boolean(busy) || Boolean(blocked) || account?.signed_in !== false}
+                title={account?.signed_in === false ? undefined : "Check first; Sign in is offered when the agent isn't signed in"}
                 onClick={() => void signIn(agent.id)}>Sign in</button>
             </Row>
             {note ? <Row label="" help={<Status tone={note.tone}>{note.text}</Status>} /> : null}
@@ -94,8 +109,8 @@ export function CodingAgents({ s, save, apiBase }: { s: SettingsMap; save: Save;
           </React.Fragment>
         );
       })}
-      <Row label={<span className="st-agent-label"><RuntimeMark runtime="claude_code" /><span><strong>Claude Agent</strong><small>API key</small></span></span>}
-        help="Claude through the Agent SDK, billed to an Anthropic API key you enter in Echo Code when you connect. It can't use a Claude plan." />
+      <Row label={<span className="st-agent-label"><RuntimeMark runtime="claude_cli" /><span><strong>ChatGPT and Claude by API key</strong><small>In Chat</small></span></span>}
+        help="API keys are for Chat, where Echo's own harness calls the model. Pick ChatGPT or Claude in Chat's model picker, or add keys under Cloud model above. Echo Code uses your plans instead." />
       <Row label={<span className="st-agent-label"><RuntimeMark runtime="acp" /><span><strong>Other ACP agents</strong><small>Per session</small></span></span>}
         help="Choose the agent's executable when you start a session in Echo Code." />
     </Group>

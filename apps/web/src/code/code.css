@@ -19,6 +19,7 @@
 .ec-external header,.ec-session-actions,.ec-session-state,.ec-runtime-composer>div { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
 .ec-external header select { margin-left:auto; max-width:70%; }
 .ec-external input:not([type=checkbox]),.ec-external select { background:var(--es-surface-1); color:var(--es-text); border:1px solid var(--es-border); padding:8px; border-radius:7px; font:inherit; min-width:0; }
+.ec-account-line { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:12px 0 0; color:var(--es-text-2); font-size:12px; line-height:1.6; }
 .ec-runtime-setup { display:grid; gap:16px; padding:22px 0; line-height:1.6; }
 .ec-runtime-setup>label:not(.ec-check),.ec-connect label { display:grid; gap:6px; }
 .ec-check { display:flex; gap:10px; align-items:flex-start; color:var(--es-text-3); }

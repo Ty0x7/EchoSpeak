@@ -30,8 +30,9 @@ class Codex:
         account = await self.rpc.request("account/read", {"refreshToken": False})
         self.session.account = {"connected": bool(account.get("account")),
                                 "type": (account.get("account") or {}).get("type", "none")}
-        self.session.models = (await self.rpc.request("model/list", {})).get("data", [])
-        default = next((row for row in self.session.models if isinstance(row, dict) and row.get("isDefault")), {})
+        from agent.code_accounts import codex_models
+        self.session.models = codex_models((await self.rpc.request("model/list", {})).get("data", []))
+        default = next((row for row in self.session.models if row.get("isDefault")), {})
         self.session.record_model(default.get("model"))
 
     async def login(self):
@@ -186,45 +187,6 @@ class Acp:
             await self.rpc.notify("session/cancel", {"sessionId": self.session.row["native_id"]})
 
 
-class Claude:
-    """Private worker wrapping the official SDK, not Claude's internal control protocol."""
-    def __init__(self, session):
-        self.session, self.rpc = session, None
-
-    async def connect(self):
-        argv = [sys.executable, "--code-sdk-worker"] if getattr(sys, "frozen", False) else [sys.executable, "-P", "-m", "agent.code_claude_worker"]
-        env = child_env({"ANTHROPIC_API_KEY": self.session.api_key})
-        # Source builds need our module on sys.path even though cwd is the worktree.
-        if not getattr(sys, "frozen", False):
-            env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
-        self.rpc = RpcProcess(argv, self.session.root, env, self.event)
-        await self.rpc.request("initialize", {})
-        self.session.account = {"connected": True, "type": "anthropic-api-key-unverified"}
-
-    async def prompt(self, text, model):
-        result = await self.rpc.request("prompt", {"text": text, "model": model or None,
-                    "resume": self.session.row.get("native_id")}, timeout=1800)
-        self.session.row["native_id"] = result.get("session_id")
-        self.session.save()
-        self.session.result = "completed" if not result.get("is_error", True) else "failed"
-
-    async def event(self, method, params, request=False):
-        if method == "permission":
-            return {"allow": await self.session.approval(method, params)}
-        if method != "sdk/event":
-            raise ValueError("Unsupported SDK worker request")
-        data = params.get("data") or {}
-        if isinstance(data, dict):
-            nested = data.get("data")
-            self.session.record_model(data.get("model") or (nested.get("model") if isinstance(nested, dict) else None))
-        self.session.emit(method, params)
-        return {}
-
-    async def cancel(self):
-        # The supervisor closes the owned job, including the SDK's original CLI.
-        return
-
-
 class _TurnHandle:
     """Stands in for a long-lived RPC connection: Claude Code runs one process per turn."""
     def __init__(self, adapter):
@@ -246,9 +208,6 @@ class ClaudeCli:
     documented PermissionRequest hook (agent/code_claude_hook.py) with the owner's decision.
     Sign-in stays in Claude Code's own `claude auth login`.
     """
-    MODELS = [{"id": alias, "model": alias, "displayName": label} for alias, label in
-              (("sonnet", "Sonnet"), ("opus", "Opus"), ("haiku", "Haiku"))]
-
     def __init__(self, session):
         self.session, self.rpc = session, None
         self.server = None
@@ -267,7 +226,7 @@ class ClaudeCli:
         plan = str(status.get("plan") or "")
         self.session.account = {"connected": True,
                                 "type": f"Your Claude {plan.title()} plan" if plan else f"Claude Code · {status.get('method') or 'signed in'}"}
-        self.session.models = list(self.MODELS)
+        self.session.models = list(code_accounts.CLAUDE_MODELS)
         self.token = secrets.token_urlsafe(32)
         self.server = await asyncio.start_server(self._hook, "127.0.0.1", 0)
         self.rpc = _TurnHandle(self)

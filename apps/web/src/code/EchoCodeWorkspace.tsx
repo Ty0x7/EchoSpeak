@@ -9,7 +9,8 @@ import { WelcomeTypewriter } from "../dashboard/WelcomeTypewriter";
 import { useWorkbench } from "../workbench/store";
 import { ProjectFile } from "../projects/ProjectDocument";
 import { request } from "../projects/model";
-import { agentModelName, canStartSession, CodeRequestError, createCodeSession, runtimeStatus, type CodeSession, type CodeWorkspace, type RuntimeCatalog } from "./model";
+import { agentModelName, agentModels, canStartSession, CodeRequestError, createCodeSession, planLabel, runtimeName, runtimeStatus,
+  type AgentAccount, type CodeSession, type CodeWorkspace, type RuntimeCatalog } from "./model";
 import "../projects/workspace.css";
 import "./code.css";
 
@@ -44,6 +45,8 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
   const [model, setModel] = useState("");
   const [externalState, setExternalState] = useState<ExternalComposerState | null>(null);
   const [connectionOpen, setConnectionOpen] = useState(false);
+  const [accounts, setAccounts] = useState<Record<string, AgentAccount>>({});
+  const [accountRevision, setAccountRevision] = useState(0);
   const modelScope = useRef("");
   const externalStatus = useCallback((state: ExternalComposerState) => {
     const scope = `${runtimeId}:${projectId}:${state.sessionId}`;
@@ -51,6 +54,20 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
     setExternalState(state); if (state.approvals) setConnectionOpen(true);
   }, [runtimeId, projectId]);
   useEffect(() => { setExternalState(null); setModel(""); setConnectionOpen(false); }, [runtimeId, projectId]);
+  // Each coding agent's own sign-in and plan models, independent of any session: what Echo last
+  // saw (instant, survives restarts), then a fresh check when that's older than ten minutes.
+  useEffect(() => {
+    if (runtimeId !== "codex" && runtimeId !== "claude_cli") return;
+    let live = true;
+    const url = `${apiBase}/echo-code/runtimes/${runtimeId}`;
+    request<AgentAccount>(`${url}/account`).then(remembered => {
+      if (!live) return;
+      setAccounts(previous => ({ ...previous, [runtimeId]: remembered }));
+      if (remembered.stale || accountRevision) return request<AgentAccount>(`${url}/check`, {}).then(fresh => { if (live) setAccounts(previous => ({ ...previous, [runtimeId]: fresh })); });
+    }).catch(() => undefined);
+    return () => { live = false; };
+  }, [apiBase, runtimeId, accountRevision]);
+  const recheckAccount = useCallback(() => { window.setTimeout(() => setAccountRevision(value => value + 1), 15000); }, []);
   // Keep a creation identity after a lost response, scoped to the exact request.
   const pending = useRef<{ scope: string; key: string } | null>(null);
   const activeProject = useRef(projectId);
@@ -97,13 +114,13 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
     if (pending.current?.scope !== scope) pending.current = { scope, key: crypto.randomUUID() };
     setBusy(true); setError("");
     const requestedProject = projectId;
+    // Plans for code, APIs for chat: Echo native in Echo Code uses a model on this PC.
+    const choice = nativeChoice || (nativeInfo?.local && nativeInfo.provider && nativeInfo.model ? { provider: nativeInfo.provider, model: nativeInfo.model } : null);
+    if (!choice) { setError("Choose a model on this PC for Echo. ChatGPT runs in Codex and Claude in Claude Code with your plan."); return; }
     try {
       const session = await createCodeSession(apiBase, projectId, runtimeId, pending.current.key);
-      const choice = nativeChoice || (nativeInfo?.provider && nativeInfo.model ? { provider: nativeInfo.provider, model: nativeInfo.model } : null);
-      if (choice) {
-        const binding = await request<ProviderInfo>(`${apiBase}/provider?session_id=${encodeURIComponent(session.thread_id)}`);
-        await request(`${apiBase}/provider/switch`, { ...choice, session_id: session.thread_id, expected_revision: binding.binding_revision || 1 });
-      }
+      const binding = await request<ProviderInfo>(`${apiBase}/provider?session_id=${encodeURIComponent(session.thread_id)}`);
+      await request(`${apiBase}/provider/switch`, { ...choice, session_id: session.thread_id, expected_revision: binding.binding_revision || 1 });
       pending.current = null;
       if (mounted.current && activeProject.current === requestedProject) onSession(session, draft.trim());
     } catch (err) {
@@ -114,8 +131,13 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
 
   const projectName = available.find(project => project.id === projectId)?.name;
   const working = busy || Boolean(externalState?.busy || externalState?.active);
-  const modelName = runtimeId === "echo" ? nativeChoice?.model || nativeInfo?.model || "Choose model"
-    : agentModelName(externalState?.models || [], model, externalState?.model || "") || `${selected?.name || "Agent"} · Choose model`;
+  const account = accounts[runtimeId] || null;
+  const agentList = externalState?.models.length ? externalState.models : agentModels(account?.models);
+  const modelName = runtimeId === "echo" ? nativeChoice?.model || (nativeInfo?.local ? nativeInfo.model : "") || "Choose a model on this PC"
+    : agentModelName(agentList, model, externalState?.model || "") || `${selected?.name || "Agent"} · Choose model`;
+  const signedIn = Boolean(externalState?.signedIn || account?.signed_in);
+  const connectionLabel = externalState?.connected ? "Session & permissions"
+    : signedIn ? `${runtimeName(runtimeId)} · ${planLabel(account) || "Signed in"}` : runtimeId === "acp" ? "Connect agent" : `Sign in to ${runtimeName(runtimeId)}`;
   return <div className="ec-page"><PageShell title="Echo Code" lead=""
     action={<><button className="es-btn es-btn-quiet es-btn-sm" aria-expanded={showFiles} onClick={() => setShowFiles(value => !value)}>Files &amp; sessions</button><button className="es-btn es-btn-quiet es-btn-sm" onClick={onAddFolder}>Add folder</button></>}>
     <div className="ec-workspace">
@@ -138,13 +160,14 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
                 nativeInfo={nativeInfo} nativeChoice={nativeChoice} nativeLocked={nativeLocked}
                 onNative={choice => { setNativeChoice(choice); setRuntimeOpen(false); runtimeButton.current?.focus(); }}
                 onConfigureNative={() => { setRuntimeOpen(false); onConfigureProviders(); }}
-                models={externalState?.models || []} model={model} reportedModel={externalState?.model || ""} connected={Boolean(externalState?.connected)}
+                models={agentList} model={model} reportedModel={externalState?.model || ""} connected={Boolean(externalState?.connected)} signedIn={signedIn}
+                account={account}
                 onModel={value => { setModel(value); setRuntimeOpen(false); runtimeButton.current?.focus(); }}
                 onConfigureRuntime={() => { setRuntimeOpen(false); if (projectId) setConnectionOpen(true); else setError("Choose a project below to connect this coding agent. Your draft stays here."); }} />
             </WorkspacePopover> : null}
             {runtimeId === "echo" ? <span className="ec-native-policy" title="Your existing Echo permission rules apply.">Echo permissions</span>
               : <button ref={connectionButton} type="button" className="ec-link ec-connection-trigger" disabled={!projectId || busy}
-                  aria-label="Coding agent connection" aria-expanded={connectionOpen} onClick={() => setConnectionOpen(value => !value)}>{externalState?.connected ? "Session & permissions" : `Connect ${selected?.name || "agent"}`}</button>}
+                  aria-label="Coding agent connection" aria-expanded={connectionOpen} onClick={() => setConnectionOpen(value => !value)}>{connectionLabel}</button>}
             <button className="ec-continue" disabled={working || (runtimeId === "echo" ? !canStartSession(selected, workspace) : !externalState?.canSend || !draft.trim())}
               onClick={() => runtimeId === "echo" ? void start() : external.current?.send()}
               aria-label={runtimeId === "echo" ? "New native coding session" : `Send to ${selected?.name || "agent"}`}>
@@ -161,14 +184,16 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
         </div>
         <div className="ec-start-note" role="status">
           {selected && !externalState?.connected && (!selected.implemented || !selected.can_start) ? <><strong>{runtimeStatus(selected)}</strong><p>{selected.blockers.join(" ")}</p></>
+            : runtimeId !== "echo" && runtimeId !== "acp" && projectId && !signedIn && account ? <p>{runtimeName(runtimeId)} isn't signed in. Choose “Sign in to {runtimeName(runtimeId)}” to use your plan.</p>
             : workspace?.native_blocker ? <p>{workspace.native_blocker}</p>
             : null}
           {catalog && catalog.privacy_mode !== "standard" ? <small>{catalog.privacy_mode} mode · External runtimes remain blocked.</small> : null}
         </div>
       </div>
       {runtimeId !== "echo" && projectId ? <ExternalSession key={`${projectId}:${runtimeId}`} ref={external} apiBase={apiBase} projectId={projectId} runtimeId={runtimeId}
-        canStart={Boolean(workspace?.can_start_native && selected?.can_start)} draft={draft} onDraft={setDraft} model={model} onState={externalStatus}
-        open={connectionOpen} anchor={connectionButton} onClose={() => setConnectionOpen(false)} /> : null}
+        canStart={Boolean(workspace?.can_start_native && selected?.can_start)} account={account} draft={draft} onDraft={setDraft} model={model} onState={externalStatus}
+        open={connectionOpen} anchor={connectionButton} onClose={() => setConnectionOpen(false)}
+        onNeedSetup={() => setConnectionOpen(true)} onAccountChanged={recheckAccount} /> : null}
       {showFiles ? <div className="ec-columns">
         <section className="ec-files" aria-label="Coding project files">
           <header><h2>Files</h2>{folder ? <button className="ec-link" onClick={() => setFolder(folder.split("/").slice(0, -1).join("/"))}>Up one folder</button> : null}</header>
