@@ -42,6 +42,9 @@ _SIZE = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d)?)\s*b(?![a-z0-9])", re.I)
 _LINK = re.compile(r"\[([^\]]{1,300})\]\((https?://[^)\s]+)\)|(?<![(\[<])\b(https?://[^\s)<>\]]+)")
 _URL = re.compile(r"https?://[^\s)<>\]\"'`]+")
 _TRACKING = re.compile(r"^(utm_[a-z]+|fbclid|gclid|ref|ref_src)$", re.I)
+SELF_REPO = "https://github.com/Ty0x7/EchoSpeak"
+_SELF = re.compile(r"(?i)\becho ?speak\b")
+_SELF_UPDATES = re.compile(r"(?i)\b(latest|newest|recent|new|updates?|changes?|changelog|releases?|version|pull requests?|prs?|what'?s new)\b")
 # A page that covers less than this share of the question's terms doesn't support an answer to it.
 RELEVANT = 0.34
 SEARCH_TOOLS = {"web_search", "image_search", "video_search", "product_search"}
@@ -73,6 +76,52 @@ def normalize_url(url: str) -> str:
     query = "&".join(p for p in parts.query.split("&") if p and not _TRACKING.match(p.split("=", 1)[0]))
     host = parts.netloc.lower().removeprefix("www.")
     return urlunsplit(("https", host, parts.path.rstrip("/") or "", query, ""))
+
+
+CORPUS_LIMIT = 400_000
+_FIGURE = re.compile(r"(?<![\w.])(?:[$€£¥]\s?)?\d[\d,]*(?:\.\d+)?(?:\s?(?:%|percent\b|per cent\b|bps\b|[kKmMbBtT]\b|"
+                     r"thousand\b|million\b|billion\b|trillion\b))?")
+
+
+def _digits(value: str) -> str:
+    return re.sub(r"[^\d.]", "", value.replace(",", "")).strip(".")
+
+
+def unsupported_figures(text: str, corpus: list[str], user_message: str = "") -> list[str]:
+    """Figures in the answer (money, percentages, decimals, large or scaled numbers) that appear in nothing retrieved.
+
+    Years, list numbers and small counts aren't figures; numbers the user gave are theirs. A figure is
+    supported when its digits occur in any retrieved text (a page or a search result).
+    """
+    haystack = re.sub(r"(?<=\d),(?=\d)", "", " ".join(corpus))
+    given = {_digits(m.group(0)) for m in _FIGURE.finditer(user_message or "")}
+    out: list[str] = []
+    for match in _FIGURE.finditer(re.sub(r"\]\([^)]*\)", "]", text or "")):  # link targets aren't claims
+        raw = match.group(0).strip()
+        digits = _digits(raw)
+        if not digits or digits in given:
+            continue
+        figure_like = (bool(re.search(r"[$€£¥%]|percent|per cent|bps|[kKmMbBtT]$|thousand|million|billion|trillion", raw))
+                       or "." in digits or (len(digits) >= 4 and not re.fullmatch(r"(19|20)\d\d", digits)))
+        if not figure_like:
+            continue
+        if digits not in haystack and raw not in out:
+            out.append(raw)
+    return out
+
+
+def unlink(text: str, urls: set[str]) -> str:
+    """The answer with links to these URLs turned into plain words (Markdown links keep their label)."""
+    def markdown(match: re.Match) -> str:
+        return match.group(1) if normalize_url(match.group(2)) in urls else match.group(0)
+
+    out = re.sub(r"\[([^\]]{1,300})\]\((https?://[^)\s]+)\)", markdown, text or "")
+
+    def bare(match: re.Match) -> str:
+        url = match.group(0).rstrip(".,;:!?")
+        return f"`{url}`" + match.group(0)[len(url):] if normalize_url(url) in urls else match.group(0)
+
+    return re.sub(r"(?<![(\[<`])\bhttps?://[^\s)<>\]`]+", bare, out)
 
 
 def _quality(block: str) -> dict[str, Any]:
@@ -121,6 +170,8 @@ class ChatRun:
     calls: list[dict[str, Any]] = field(default_factory=list)
     nudges: list[str] = field(default_factory=list)
     pages: dict[str, dict[str, Any]] = field(default_factory=dict)  # URL -> quality (status, relevance, age)
+    corpus: list[str] = field(default_factory=list)  # text of what was retrieved this turn, for checking figures
+    reviewed: dict[str, Any] = field(default_factory=dict)
     context: dict[str, Any] = field(default_factory=dict)
     audit: dict[str, Any] = field(default_factory=dict)
     started: float = field(default_factory=time.time)
@@ -139,6 +190,10 @@ class ChatRun:
         """
         from agent.search_rank import urls_in
         urls = urls_in(self.user_message)[:3]
+        if not urls and _SELF.search(self.user_message) and _SELF_UPDATES.search(self.user_message):
+            # "What's new in EchoSpeak?": the app knows its own source. Other apps share the name, and a
+            # web search for it found them (live test, 11.11.3).
+            urls = [f"{SELF_REPO}/pulls", f"{SELF_REPO}/releases"]
         objective = re.sub(r"https?://\S+", " ", self.user_message).strip() or self.user_message
         return [("safe_web_fetch", {"url": url, "objective": objective[:300], "max_text_chars": 12000}) for url in urls]
 
@@ -156,6 +211,7 @@ class ChatRun:
         self.evidence.append(Evidence("page", key, tool, step, usable))
         if not usable:
             return
+        self._keep(block)
         self.read.add(key)
         self.seen.add(key)
         if quality.get("source", "page") != "page":
@@ -180,6 +236,7 @@ class ChatRun:
                 # Seen = the results' own links, not every URL that appears inside a page.
                 head = text.split("\n## Pages read", 1)[0]
                 self.seen.update(u for u in (normalize_url(x) for x in result_urls(head)) if u)
+                self._keep(head)
                 row["results"] = int(meta.get("results") or 0)
                 # web_search(read=N) opens results in the same step; each page is headed "### <url>".
                 for match in re.finditer(r"^### (https?://\S+)\n(.*?)(?=^### https?://|^## Not used|\Z)", text, re.M | re.S):
@@ -205,6 +262,34 @@ class ChatRun:
             row["query"] = str(args.get("query") or "")[:200]
             self.evidence.append(Evidence("memory", row["query"], name, step, ok))
         self.calls.append(row)
+
+    def _keep(self, text: str) -> None:
+        if sum(len(t) for t in self.corpus) < CORPUS_LIMIT:
+            self.corpus.append(str(text or "")[:60000])
+
+    # ── review of the finished answer (no regeneration) ─────────────────
+    def review(self, text: str) -> tuple[list[str], str]:
+        """Check a finished answer against this turn's evidence (LeanTurn.answer_review).
+
+        Returns notes to show under the answer and, when links must go, the same answer with them
+        de-linked (their words stay). It never asks the model to rewrite: the 11.11.2/11.11.3 check
+        did, which erased a streaming answer, started a second thinking phase and, because the
+        request arrived as a user message, made the model apologise for criticism nobody gave.
+        """
+        audit = self.cite_audit(text)
+        notes: list[str] = []
+        replacement = ""
+        bad = (audit["unknown"] + audit["unsupported"]) if self.researched else []
+        if bad:
+            replacement = unlink(text, set(bad))
+            hosts = ", ".join(dict.fromkeys(urlsplit(u).netloc for u in bad))
+            notes.append(f"Unverified links removed ({hosts}): they pointed to pages that weren't retrieved "
+                         "or couldn't support the answer.")
+        figures = unsupported_figures(replacement or text, self.corpus, self.user_message) if self.researched and self.corpus else []
+        if figures:
+            notes.append("Not found in the sources read: " + ", ".join(figures[:6]) + ". Treat these figures as unverified.")
+        self.reviewed = {"links_removed": len(bad), "figures_unverified": figures[:12]}
+        return notes, replacement
 
     def _known(self) -> set[str]:
         """Every URL this answer may honestly cite: retrieved now, read earlier in this chat, or given by the user."""
@@ -313,6 +398,7 @@ class ChatRun:
             },
             "citations": {key: (value[:20] if isinstance(value, list) else value) for key, value in self.audit.items()},
             "corrections": list(self.nudges),
+            "review": dict(self.reviewed),
             "usage": {k: int(v) for k, v in dict(usage or {}).items() if isinstance(v, (int, float))},
             "seconds": round(time.time() - self.started, 2),
         }

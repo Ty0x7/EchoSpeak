@@ -76,7 +76,7 @@ def test_unrun_code_gets_one_check_before_done():
     assert ran == ["pytest -q"]
     assert result.text.endswith("Done, and the tests pass (3 passed).") and "calc.py is ready" not in result.text
     nudge = client.calls[2][-1]["content"]
-    assert nudge.startswith("You changed calc.py but haven't run anything to check it since.")
+    assert "<echospeak-note>You changed calc.py but haven't run anything to check it since." in nudge  # from the app, not the user
     assert any(e["type"] == "check_nudge" and e["files"] == ["calc.py"] for e in events)
 
 

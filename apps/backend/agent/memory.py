@@ -1790,6 +1790,7 @@ class AgentMemory:
                     "content": content,
                     "source_session_id": str(record.get("source_session_id") or ""),
                     "semantic_key": str(record.get("semantic_key") or ""),
+                    "saved_at": str(record.get("updated_at") or record.get("created_at") or "")[:10],
                     "provenance": "MemoryManager.records.json",
                 },
             ))

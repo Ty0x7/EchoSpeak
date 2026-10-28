@@ -1191,7 +1191,9 @@ class LeanSession:
             turn.tool_observer = chat_run.observe
             if "safe_web_fetch" in toolbox.names:
                 turn.prefetch = chat_run.prefetch
-            turn.final_check = chat_run.check_answer
+            # Reviewed once it's written, never regenerated (no second thinking phase, no erased answer).
+            turn.answer_review = chat_run.review
+            turn.claim_nudge_limit = 0  # an untrue "I did it" is noted under the answer, not rewritten
             turn.max_steps_override = chat_run.budget
             turn.final_grace = True
             turn.grace_prompt = chat_run_mod.GRACE_PROMPT

@@ -175,17 +175,24 @@ def _event_row(event: dict[str, Any], league_label: str = "") -> dict[str, Any]:
     }
 
 
-def _local_time(iso: str) -> str:
+def _local_time(iso: str, *, zone: bool = False) -> str:
+    """The start time on this PC's clock. ``zone`` adds the zone ("MDT, your time") for the model's text,
+    so it neither converts it again nor calls it Eastern; cards stay short."""
     try:
         moment = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
     except ValueError:
         return iso
-    return moment.strftime("%a %b %d, %I:%M %p").replace(" 0", " ")
+    text = moment.strftime("%a %b %d, %I:%M %p").replace(" 0", " ")
+    if zone:
+        # The full name: initials are ambiguous ("ADT" is Alberta here, Atlantic elsewhere).
+        name = moment.tzname() or ""
+        text += f" {name} (your time)" if name else " (your time)"
+    return text
 
 
 def _line(row: dict[str, Any]) -> str:
     if row["state"] == "pre":
-        text = f"{row['away']} at {row['home']}, {_local_time(row['start'])}"
+        text = f"{row['away']} at {row['home']}, {_local_time(row['start'], zone=True)}"
     else:
         text = f"{row['away']} {row['away_score'] or 0}, {row['home']} {row['home_score'] or 0} ({row['status']})"
     if row.get("odds"):

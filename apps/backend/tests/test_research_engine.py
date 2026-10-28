@@ -160,21 +160,30 @@ def test_the_supplied_github_url_is_read_through_the_api_before_the_model_answer
     assert result.text == answer
 
 
-def test_same_question_without_a_url_ranks_the_repository_over_the_profile_and_reads_it(net, monkeypatch):
-    _provider(monkeypatch, {"echospeak": relevance_fixture.CASES[0]["hits"]})
+def test_same_question_without_a_url_reads_echospeaks_own_repository_not_a_namesake(net):
+    # Live test (11.11.3): with no link, a search found other apps called EchoSpeak. The app knows its own source.
     release = "https://github.com/Ty0x7/EchoSpeak/releases/tag/v11.10.9"
-    answer = f"The latest release is [EchoSpeak 11.10.9]({release}): Codex and Claude plans in Echo Code."
-    script = Script([_call("web_search", query="EchoSpeak latest updates", read=1), ModelTurn(content=answer)])
+    answer = (f"The newest pull request is [#106](https://github.com/Ty0x7/EchoSpeak/pull/106); the latest release is "
+              f"[EchoSpeak 11.10.9]({release}).")
+    script = Script([ModelTurn(content=answer)])
     turn, run = _chat(script, "What's EchoSpeak's latest updates?")
     result = turn.run("What's EchoSpeak's latest updates?")
-    tool_output = next(str(m.get("content")) for m in script.calls[1]["messages"] if m.get("role") == "tool")
-    order = search_rank.urls_in(tool_output.split("## Pages read")[0])
+    first = "\n".join(str(m.get("content") or "") for m in script.calls[0]["messages"])
+    assert "Pull requests in Ty0x7/EchoSpeak" in first and "Releases of Ty0x7/EchoSpeak" in first
+    assert net.page_calls == [] and len(script.calls) == 1  # no web search, no namesakes
+    trace = run.trace(steps=2, stop_reason=result.stop_reason, answer=result.text)
+    assert sorted(trace["citations"]["supported"]) == sorted(["https://github.com/Ty0x7/EchoSpeak/pull/106", release])
+
+
+def test_searching_for_the_project_ranks_the_repository_over_the_profile_and_reads_it(net, monkeypatch):
+    _provider(monkeypatch, {"echospeak": relevance_fixture.CASES[0]["hits"]})
+    box = Toolbox(toolsets=["web"], session_id="t")
+    result = box.run("web_search", {"query": "EchoSpeak latest updates", "read": 1})
+    order = search_rank.urls_in(result.output.split("## Pages read")[0])
     assert order.index("https://github.com/Ty0x7/EchoSpeak") < order.index("https://github.com/Ty0x7")
     # The project's own repository or releases, read through the GitHub API; never the profile or the namesake shop.
     assert net.api_calls[0] in {"https://api.github.com/repos/Ty0x7/EchoSpeak", "https://api.github.com/repos/Ty0x7/EchoSpeak/releases?per_page=10"}
-    assert net.page_calls == []
-    trace = run.trace(steps=3, stop_reason=result.stop_reason, answer=result.text)
-    assert trace["citations"]["supported"] == [release] and trace["corrections"] == []
+    assert net.page_calls == [] and result.meta["pages"] == 1
 
 
 # ── 2. Official sources and alternative extraction ───────────────────────────
@@ -338,5 +347,5 @@ def test_small_model_budget_counts_the_prefetch_and_needs_no_url_noticing(net):
     result = turn.run(REQUEST)
     assert run.budget == 6 and len(script.calls) == 1  # one model call: the reading was done for it
     assert result.stop_reason in {"", "answered"}
-    no_url = chat_run.ChatRun(session_id="t", user_message="What's EchoSpeak's latest updates?")
+    no_url = chat_run.ChatRun(session_id="t", user_message="What's new in Python 3.14?")
     assert no_url.prefetch() == []  # nothing is fetched unless the user gave an address
