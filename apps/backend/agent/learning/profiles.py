@@ -12,7 +12,7 @@ import threading
 import time
 from typing import Any
 
-from agent.learning.store import Episode, get_experience_store
+from agent.learning.store import LOSS_CAUSES, NOT_ATTRIBUTABLE, Episode, get_experience_store
 
 WINDOW_DAYS = 90
 # A kind needs this many decided tasks before it says anything about the agent.
@@ -25,10 +25,10 @@ _cache_lock = threading.Lock()
 
 
 def _verdict(episode: Episode) -> str:
-    """win | loss | '' (answered, a failed model call, or nothing to judge)."""
-    if episode.outcome == "error":
+    """win | loss | '' (answered, a failed model call, a blocker that wasn't the agent's, or nothing to judge)."""
+    if episode.outcome == "error" or episode.effective_cause in NOT_ATTRIBUTABLE:
         return ""
-    if episode.feedback < 0 or episode.outcome in {"failure", "stopped"}:
+    if episode.feedback < 0 or episode.outcome in {"failure", "stopped"} or episode.effective_cause in LOSS_CAUSES:
         return "loss"
     if episode.outcome == "success":
         return "win"
@@ -61,7 +61,7 @@ def profile(agent_id: str) -> dict[str, Any]:
             row["confirmed"] += 1
         # Said it was done when it wasn't: a false claim caught in the turn, or the owner said it didn't work.
         if "unverified_claim" in ep.stop_reason or "promise_unfulfilled" in ep.stop_reason \
-                or (ep.feedback < 0 and ep.outcome == "success"):
+                or ep.effective_cause == "false_success" or (ep.feedback < 0 and ep.outcome == "success"):
             false_success += 1
     strengths, weaknesses = [], []
     for kind, row in kinds.items():

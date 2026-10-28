@@ -27,6 +27,13 @@ MAX_EPISODES = 5000
 # Outcomes kept per tool or search provider for "how is it doing lately".
 RECENT_WINDOW = 20
 
+# Why an episode turned out as it did (agent/learning/episodes.py classify_cause). Some causes aren't the
+# agent's strategy at work, so they never count for or against a lesson or an agent: a missing dependency or
+# an outage says nothing about whether "reproduce the bug first" helps, and counting it would retire good
+# lessons (negative transfer). The owner's feedback can reclassify an episode (feedback_cause).
+NOT_ATTRIBUTABLE = frozenset({"environment", "authorization", "tool_failure", "information_gap", "model_error", "misunderstood"})
+LOSS_CAUSES = frozenset({"failed_check", "false_success", "action_failed", "stalled", "verifier_gap", "owner_failed"})
+
 LESSON_STATUSES = ("pending_review", "probation", "established", "retired", "quarantined")
 # Lessons an agent may read: approved ones only. pending_review waits for the owner.
 ACTIVE_STATUSES = ("probation", "established")
@@ -74,6 +81,16 @@ class Episode:
     tokens: int = 0  # new tokens: input added plus replies (agent/lean/loop.py "fresh")
     role: str = "solo"  # solo | lead | worker
     routed: str = "user"  # who picked the model: the user's setting, or the router (auto mode)
+    # The verification ledger's completion record (agent/lean/verification.py), for measured engineering work.
+    verification: dict[str, Any] = field(default_factory=dict)
+    # Why it turned out this way, from the evidence (episodes.classify_cause), and as the owner's
+    # feedback reclassified it (episodes.feedback_cause); the owner's word wins while it stands.
+    cause: str = ""
+    feedback_cause: str = ""
+
+    @property
+    def effective_cause(self) -> str:
+        return self.feedback_cause or self.cause
 
     @property
     def verified_success(self) -> bool:
@@ -82,17 +99,20 @@ class Episode:
             return False
         if self.feedback > 0:
             return self.outcome in {"success", "answered"}
+        if self.effective_cause in LOSS_CAUSES or self.effective_cause in NOT_ATTRIBUTABLE:
+            return False  # a passing read-back doesn't outweigh a test that still fails
         return self.outcome == "success" and self.level >= 2
 
     @property
     def failed(self) -> bool:
-        """The agent's work fell short. A failed model call is nobody's lesson."""
-        if self.outcome == "error":
+        """The agent's work fell short. A failed model call, a broken environment or a refusal is nobody's lesson."""
+        if self.outcome == "error" or self.effective_cause in NOT_ATTRIBUTABLE:
             return False
-        return self.feedback < 0 or self.outcome in {"failure", "stopped"}
+        return self.feedback < 0 or self.outcome in {"failure", "stopped"} or self.effective_cause in LOSS_CAUSES
 
     def to_dict(self) -> dict[str, Any]:
-        return {**asdict(self), "verified_success": self.verified_success, "failed": self.failed}
+        return {**asdict(self), "verified_success": self.verified_success, "failed": self.failed,
+                "effective_cause": self.effective_cause}
 
 
 @dataclass
