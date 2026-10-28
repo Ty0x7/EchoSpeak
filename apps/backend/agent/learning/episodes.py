@@ -16,6 +16,15 @@ Tampering is watched too. Editing a test, a CI workflow, an eval script or
 EchoSpeak's own settings files makes later "checks" worthless (the Verification
 Horizon and Darwin Gödel Machine papers both show agents doing exactly this), so
 such episodes are capped and anything learned from them waits for the owner.
+
+Each episode also gets a cause (classify_cause): why it turned out the way it did.
+"effective" is a checked success. The losses are failed_check, false_success
+(said done, evidence disagrees), action_failed and stalled. The rest are
+blockers that aren't the strategy's doing: environment, authorization,
+tool_failure, information_gap and model_error. Those never count for or against
+a lesson (store.NOT_ATTRIBUTABLE). The owner's feedback can reclassify an episode
+(feedback_cause): "misunderstood", or "verifier_gap" when the checks passed but
+the owner says it didn't work.
 """
 
 from __future__ import annotations
@@ -29,7 +38,7 @@ from agent.lean.job import READ_ONLY_TOOLS, Job
 from agent.lean.policy import redact_secrets
 from agent.learning.store import Episode
 
-BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "project_workspace", "save_project_image", "save_project_report"}  # Preserve historical classification.
+BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "project_workspace", "save_project_image", "save_project_report", "set_objective"}  # Preserve historical classification.
 
 # Results the loop wrote itself because the tool never ran (refused, denied,
 # repeated, bad arguments). They say nothing about the tool or the task.
@@ -217,8 +226,21 @@ def _domain(url: str) -> str:
     return host.lower().removeprefix("www.")
 
 
-def grade(goal: str, tools: list[dict[str, Any]], *, outcome: str, claim_failed: bool) -> tuple[int, list[str], list[dict[str, Any]]]:
+def grade(goal: str, tools: list[dict[str, Any]], *, outcome: str, claim_failed: bool,
+          verification: Optional[dict[str, Any]] = None) -> tuple[int, list[str], list[dict[str, Any]]]:
     """(level, reasons, tampering) for one agent's work. See the module docstring for the ladder."""
+    level, reasons, tamper = _grade(goal, tools, outcome=outcome, claim_failed=claim_failed)
+    measured = verification or {}
+    if measured.get("status") == "failing" and level > 1:
+        level = 1
+        reasons.append(f"the last check failed ({str(measured.get('last') or '')[:120]})")
+    if measured.get("tamper_after_fail") and level > 1:
+        level = 1
+        reasons.append("tests were changed after they failed, so passing them doesn't count")
+    return level, reasons, tamper
+
+
+def _grade(goal: str, tools: list[dict[str, Any]], *, outcome: str, claim_failed: bool) -> tuple[int, list[str], list[dict[str, Any]]]:
     ran = [t for t in tools if not t.get("not_run")]
     worked = [t for t in ran if t.get("ok")]
     tamper = tampering(goal, ran)
@@ -314,6 +336,79 @@ def classify_error(text: str) -> str:
     return "other" if text else ""
 
 
+_TERMINAL_TOOLS = {"terminal", "terminal_run", "process_output", "process_start"}
+_LOOKUP_TOOLS = {"file_read", "file_find", "file_search", "file_list", "self_read", "self_grep", "web_search",
+                 "safe_web_fetch", "browse_task", "memory_search", "chat_search"}
+_MISSED = re.compile(r"(?i)^(error: )?(no (matches|results|files?)\b|nothing (found|matches)|file not found|not found\b|no such file)")
+_TOOL_BROKE = re.compile(r"(?i)(timed? ?out|internal (server )?error|unexpected error|service unavailable|\b50[0234]\b|"
+                         r"\b429\b|rate limit|crashed)")
+# Only explicit words for a misunderstood request: "wrong file" alone is just as likely a strategy that failed,
+# and excusing it would shield a bad lesson from retirement.
+_MISUNDERSTOOD = re.compile(r"(?i)(misunderst|misread|misinterpret|not what i (asked|meant|wanted)|that'?s not what i|"
+                            r"\bi (meant|wanted|asked for)\b)")
+_ENVIRONMENT_NOTE = re.compile(r"(?i)(my (machine|computer|pc|setup|environment|network|internet|connection)|"
+                               r"(was|were|is) (down|offline)|(not|wasn'?t|isn'?t) installed|missing (dependency|package|module)|no internet)")
+
+
+def _missing_info(ran: list[dict[str, Any]], run: int = 3) -> bool:
+    tail = ran[-run:]
+    return len(tail) == run and all(t["name"] in _LOOKUP_TOOLS and _MISSED.search(str(t.get("output") or "")) for t in tail)
+
+
+def classify_cause(*, outcome: str, stops: set[str], tools: list[dict[str, Any]], verification: dict[str, Any],
+                   text: str, level: int) -> str:
+    """Why an episode turned out the way it did, from evidence. See the module docstring for the causes."""
+    from agent.lean.verification import DONE_CLAIM, ENVIRONMENT_ERROR
+
+    status, bottleneck = str(verification.get("status") or ""), str(verification.get("bottleneck") or "")
+    if outcome == "error":
+        return "model_error"
+    if stops & {"unverified_claim", "promise_unfulfilled"}:
+        return "false_success"
+    if status == "blocked":
+        return "authorization" if bottleneck == "authorization" else "environment"
+    claims_done = bool(DONE_CLAIM.search(text or ""))
+    if status == "failing":
+        return "false_success" if claims_done else "stalled" if outcome == "stopped" else "failed_check"
+    if status == "unverified" and verification.get("tamper_after_fail"):
+        return "false_success" if claims_done else "unverified"
+    if "refusals" in stops:
+        return "authorization"
+    ran = [t for t in tools if not t.get("not_run")]
+    if outcome == "stopped":
+        if bottleneck == "environment":
+            return "environment"
+        return "information_gap" if bottleneck == "information" or _missing_info(ran) else "stalled"
+    if outcome == "failure":
+        last = ran[-1] if ran else {}
+        output = str(last.get("output") or "")
+        if bottleneck == "environment" or ENVIRONMENT_ERROR.search(output):
+            return "environment"
+        if last.get("name") not in _TERMINAL_TOOLS and _TOOL_BROKE.search(output):
+            return "tool_failure"  # the tool broke; the agent's command didn't fail
+        return "information_gap" if _missing_info(ran) else "action_failed"
+    if outcome == "success":
+        if status in {"verified", "checks_pass"} or (level >= 2 and status != "partial"):
+            return "effective"
+        return "partial" if status == "partial" else "unverified"
+    return ""
+
+
+def feedback_cause(episode: Episode, value: int, note: str = "") -> str:
+    """The owner's Worked / Didn't work, as a cause. Reclassifies; never becomes an instruction by itself."""
+    if value > 0:
+        return "confirmed"
+    if value == 0:
+        return ""
+    if _MISUNDERSTOOD.search(note or ""):
+        return "misunderstood"  # about this request, not the strategy: no lesson loses for it
+    if _ENVIRONMENT_NOTE.search(note or ""):
+        return "environment"
+    if str((episode.verification or {}).get("status") or "") in {"verified", "checks_pass"} or episode.level >= 2:
+        return "verifier_gap"  # the checks passed and it still didn't work: they missed something
+    return "owner_failed"
+
+
 def _duration(results: list[Any]) -> float:
     stamps = [float(item.get("at") or 0) for r in results for item in (r.timeline or []) if item.get("at")]
     ends = [float(item.get("ended_at") or 0) for r in results for item in (r.timeline or []) if item.get("ended_at")]
@@ -376,7 +471,9 @@ def build_episodes(
             summary = completed or (str(job_outcome.get("summary") or "") if team else "") or _first_sentence(text)
         else:
             outcome, summary = "answered", _first_sentence(text)
-        level, reasons, tamper = grade(goal, tools, outcome=outcome, claim_failed=claim_failed)
+        measured = next((dict(r.verification) for r in reversed(mine) if getattr(r, "verification", None)), {})
+        level, reasons, tamper = grade(goal, tools, outcome=outcome, claim_failed=claim_failed, verification=measured)
+        cause = classify_cause(outcome=outcome, stops=stops, tools=tools, verification=measured, text=text, level=level)
         provider, model = endpoints.get(agent_id, ("", ""))
         episodes.append(Episode(
             agent_id=agent_id,
@@ -406,5 +503,7 @@ def build_episodes(
             tokens=sum(int((r.usage or {}).get("fresh", (r.usage or {}).get("total", 0)) or 0) for r in mine),
             role="solo" if not team else ("lead" if agent_id == lead else "worker"),
             routed=(routed or {}).get(agent_id, "user"),
+            verification={k: v for k, v in measured.items() if k != "ledger"},
+            cause=cause,
         ))
     return episodes

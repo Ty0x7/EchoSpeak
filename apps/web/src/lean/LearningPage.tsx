@@ -92,6 +92,9 @@ function outcomeOf(ep: LearningEpisode): { label: string; tone: "ok" | "warn" | 
   if (ep.feedback > 0) return { label: "You said it worked", tone: "ok" };
   if (ep.feedback < 0) return { label: "You said it didn't work", tone: "bad" };
   if (ep.outcome === "error") return { label: "The model failed", tone: "neutral" };
+  const blocked = BLOCKED[ep.effective_cause || ""];
+  if (blocked) return { label: blocked, tone: "neutral" };
+  if (ep.effective_cause === "false_success") return { label: "Said done, but the checks disagreed", tone: "bad" };
   if (ep.failed) return { label: ep.outcome === "stopped" ? "Stopped before finishing" : "Didn't work", tone: "bad" };
   if (ep.verified_success) return { label: "Checked and worked", tone: "ok" };
   return { label: "Done, but not checked", tone: "warn" };
@@ -103,6 +106,24 @@ const whoOf = (ep: LearningEpisode) => `${ep.agent_name || ep.agent_id}${isWorke
 /** Unchecked replies where your Worked / Didn't work is the only evidence there will be. */
 const wantsFeedback = (ep: LearningEpisode) =>
   !isWorker(ep) && !ep.feedback && Boolean(ep.execution_id) && ep.outcome !== "error" && !ep.failed && !ep.verified_success;
+
+/** Causes that weren't the agent's strategy at work: never counted for or against a lesson. */
+const BLOCKED: Record<string, string> = {
+  environment: "Blocked by the setup",
+  authorization: "Needed your permission",
+  tool_failure: "A tool broke",
+  information_gap: "Couldn't find what it needed",
+  misunderstood: "You said it misunderstood",
+};
+
+const VERIFIED_TEXT: Record<string, string> = {
+  verified: "Verified against the task's own acceptance check.",
+  checks_pass: "The checks after the last change pass.",
+  partial: "Partly verified.",
+  failing: "The last check failed.",
+  unverified: "Not verified.",
+  blocked: "Blocked before it could be verified.",
+};
 
 const LEVEL_TEXT = [
   "Echo said it was done, but nothing it ran shows that.",
@@ -600,7 +621,12 @@ function ExperienceDetail({ episode, lessonById, api, act, go, back }: {
       <section className="es-lx-block" aria-label="What was checked">
         <h4>What was checked</h4>
         <p>{LEVEL_TEXT[level]}</p>
-        {ep.reasons.length ? <ul className="es-learn-reasons">{ep.reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
+        {ep.verification?.status && VERIFIED_TEXT[ep.verification.status] ? (
+          <p>{VERIFIED_TEXT[ep.verification.status]}{ep.verification.detail || ep.verification.last ? ` ${ep.verification.detail || ep.verification.last}` : ""}
+            {ep.verification.attempts ? ` (${plural(ep.verification.attempts, "attempt")})` : ""}</p>
+        ) : null}
+        {BLOCKED[ep.effective_cause || ""] ? <p className="es-lx-muted">This wasn't the approach's fault, so it doesn't count for or against any lesson.</p> : null}
+        {ep.reasons.length ?<ul className="es-learn-reasons">{ep.reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
         {!ep.trusted ? <p className="es-lx-muted">It read outside content ({ep.taint.join(", ")}), so anything learned from it waits for your review.</p> : null}
         {ep.feedback_note ? <p className="es-lx-muted">Your note: "{ep.feedback_note}"</p> : null}
       </section>

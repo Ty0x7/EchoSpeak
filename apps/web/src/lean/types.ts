@@ -220,6 +220,10 @@ export type LearningEpisode = {
   role?: string;
   /** "swarm" for research workers. */
   source?: string;
+  /** Why it turned out this way, from the evidence or as your feedback reclassified it. */
+  effective_cause?: string;
+  /** The verification ledger's record, when checks measured the work. */
+  verification?: { status?: string; detail?: string; last?: string; attempts?: number; bottleneck?: string };
 };
 
 export type LearningKindStats = { wins: number; losses: number; checked: number; answered: number; confirmed: number; decided: number; rate: number };

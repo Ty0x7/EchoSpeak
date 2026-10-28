@@ -30,7 +30,7 @@ from agent.lean.coding import coding_tools, project_overview
 from agent.integrations import integration_tools
 from agent.lean.computer import tools as computer_tools
 from agent.project_workspace import tools as workspace_tools
-from agent.lean import tool_outputs
+from agent.lean import tool_outputs, verification
 from agent import a2a_trust, home, mcp_apps
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
@@ -48,7 +48,7 @@ MAX_HANDOFFS_PER_MESSAGE = 6
 MAX_DISCUSS_TURNS = 3
 DEFAULT_WORK_TURNS = 30
 # Bookkeeping tools: calling them is not evidence that work got done.
-_BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "project_workspace", "save_project_image", "save_project_report"}  # Preserve historical report-write classification too.
+_BOOKKEEPING_TOOLS = {"complete_task", "assign_tasks", "delegate_to_agent", "project_workspace", "save_project_image", "save_project_report", "set_objective"}  # Preserve historical report-write classification too.
 # "On this PC", "on my computer": the user picked where a terminal command runs.
 _ON_THIS_PC = re.compile(r"(?i)\b(?:on|in)\s+(?:this|my)\s+(?:pc|computer|machine|laptop|desktop\s+pc)\b|\bon\s+the\s+host\b")
 # Sources with a live UI that can show an approval card.
@@ -195,6 +195,9 @@ class LeanSession:
         self._lessons_used: dict[str, list[str]] = {}
         self._lessons_withheld: dict[str, list[str]] = {}  # matched but held back at random (the control)
         self._endpoints: dict[str, tuple[str, str]] = {}
+        # Each agent's verification ledger for this request (agent/lean/verification.py): one per agent,
+        # so a reply that continues after a handoff keeps its baseline and best result.
+        self._verifiers: dict[str, verification.VerificationLedger] = {}
         # Smart model choice (agent/learning/routing.py): decisions per agent for this request, the
         # models auto mode switched to, and who picked each agent's model (for learning's records).
         self._routes: dict[str, Any] = {}
@@ -300,9 +303,17 @@ class LeanSession:
                          "tools": [{"name": item.get("name"), "status": item.get("status"), "outcome": item.get("outcome")}
                                    for item in r.timeline if item.get("kind") == "tool"]} for r in self.results]
             checked = any(tool.get("status") == "done" for row in evidence for tool in row["tools"])
+            measured = self._verification_record()
+            for agent_id, ledger in self._verifiers.items():
+                if ledger.active():
+                    # Saved whole, so a resumed attempt continues from the same objective, baseline and best result.
+                    evidence.append({"agent_id": agent_id, "execution_id": self.execution_id, "tools": [],
+                                     "verification": {**measured.get(agent_id, {}), "ledger": ledger.to_dict()}})
             status = "cancelled" if self.cancel.is_set() else "completed" if result.get("success") else "failed"
+            lead = measured.get(self._lead_id) or next(iter(measured.values()), {})
             work = coordinator.finish(self.work_context, status=status, result=result.get("response", ""), evidence=evidence,
-                                      verification="observed" if checked else "unverified")
+                                      verification=(verification.STATUS_LABELS[lead["status"]].lower() if lead
+                                                    else "observed" if checked else "unverified"))
             result["work"] = work
             if work["status"] == "completed" and self.source not in INTERACTIVE_SOURCES:
                 # An interactive reply already streamed into its chat; only unattended runs need an outbox row.
@@ -424,7 +435,8 @@ class LeanSession:
             response_preview=final_text[:500],
             error=error[:1000],
             metadata={**dict(execution.metadata or {}), **({"outcome": outcome} if outcome else {}),
-                      **({"chat_run": self._chat_trace(final_text)} if self._chat_run is not None else {})},
+                      **({"chat_run": self._chat_trace(final_text)} if self._chat_run is not None else {}),
+                      **({"verification": measured} if (measured := self._verification_record()) else {})},
         )
         self._learn(cancelled)
         store.update_thread_state(
@@ -1038,6 +1050,13 @@ class LeanSession:
             chat_mode.restrict(toolbox)
             # Chat's execution layer for the answer the user sees (agent/lean/chat_run.py).
             chat_run = self._new_chat_run(persona) if depth == 0 else None
+        ledger = None
+        if chat_run is None and not guest and not read_only and "terminal" in toolbox.names:
+            # Echo-native engineering (Agents and Code): checks are measured against the objective, with progress,
+            # regressions and blockers fed back on each check's result. External harnesses aren't touched.
+            # Added before the work grant is taken, so set_objective is part of it.
+            ledger = self._verifier_for(persona)
+            toolbox.native.setdefault("set_objective", verification.objective_tool(ledger))
         original_names = set(toolbox.names)
         if self._is_discussion():
             original_names.update({"assign_tasks", "complete_task"})
@@ -1198,6 +1217,10 @@ class LeanSession:
             turn.final_grace = True
             turn.grace_prompt = chat_run_mod.GRACE_PROMPT
             self._chat_run = chat_run
+        if ledger is not None:
+            turn.verifier = ledger
+            if ledger.resumed and ledger.active():
+                turn.system_prompt += "\n\n" + verification.resume_brief(ledger)
         turn.work_context = work_context
         turn.ensure_work = lambda: self._ensure_work(persona, tools=list(toolbox.names))
         if work_context:
@@ -1675,6 +1698,23 @@ class LeanSession:
     def _owner_side(persona: AgentPersona) -> bool:
         """Echo and Chat both speak for the owner: account memory and past chats are theirs."""
         return persona.id in {"echo", CHAT_AGENT_ID}
+
+    def _verifier_for(self, persona: AgentPersona) -> verification.VerificationLedger:
+        """This agent's ledger for the request; resumed work starts from the one its last attempt saved."""
+        ledger = self._verifiers.get(persona.id)
+        if ledger is None:
+            if self.work_id and self.work_context:
+                try:
+                    row = self.work_context.coordinator.get(self.work_id, principal=self.principal_id)
+                    ledger = verification.restore([e for e in row.get("evidence", []) if e.get("agent_id") == persona.id])
+                except Exception:
+                    logger.debug("Could not restore the verification ledger", exc_info=True)
+            ledger = self._verifiers[persona.id] = ledger or verification.VerificationLedger()
+        return ledger
+
+    def _verification_record(self) -> dict[str, dict[str, Any]]:
+        """Each agent's completion record, for agents whose work was measured."""
+        return {agent_id: ledger.completion() for agent_id, ledger in self._verifiers.items() if ledger.active()}
 
     def _new_chat_run(self, persona: AgentPersona) -> "chat_run_mod.ChatRun":
         try:

@@ -1,5 +1,21 @@
 # Changes
 
+## v11.11.5 — Verified engineering: measured progress, honest completion (source; not yet built)
+
+* Echo Native (Agents and Code) measures engineering work with a verification ledger (`agent/lean/verification.py`). It's deterministic and makes no model calls; Chat, guests, read-only turns and external harnesses don't get it.
+  * Checks are parsed from what ran: tests, builds, type checks, linters and benchmarks across the common runners. Each gives counts, failing tests, the first error, the exit code and a metric. Background runs count when they finish.
+  * Each check's result carries an `<echospeak-note>`: progress against the baseline and the best result, the regression or stall, the bottleneck and the next action.
+  * `set_objective` records acceptance criteria, the check, and an optional metric with a direction and target.
+  * A success claim over a failing or unverified check is sent back once. Completion (verified, checks pass, partly verified, failing, unverified, blocked) is shown under the answer and saved on the turn, the work row and the execution.
+  * Tests edited after they failed don't count as verification. The best result is reported even when the final one is worse.
+  * Interrupted work saves the ledger, and a resumed attempt restores it with a brief.
+* Learning attributes outcomes from evidence (`episodes.classify_cause`).
+  * Blockers (environment, authorization, a broken tool, missing information, a model outage, a misunderstood request) never count for or against lessons or agents.
+  * False success and failing checks count as losses, and a failing final check caps the grade at V1.
+  * Owner feedback reclassifies an episode (`feedback_cause`): a verifier gap when checks passed but it didn't work, a misunderstanding, or an environment problem. Reflection is skipped for blockers and misunderstandings.
+* `GET /lean/learning/evaluation` reports verified completion, false success, recovery, stalls, cost per verified task, and each lesson against its random holdout. The Learning page shows each experience's cause and verification status.
+* A reusable engineering prompt template for Claude Code, Codex and Echo is in [docs/engineering-prompt.md](docs/engineering-prompt.md). See [release notes](docs/releases/v11.11.5.md) and the [report](docs/research/verified-engineering.md).
+
 ## v11.11.4 — Chat answers once, and stands by it (source; not yet built)
 
 * Double thinking fixed at its causes in the Lean loop:

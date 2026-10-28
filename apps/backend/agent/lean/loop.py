@@ -116,6 +116,8 @@ class TurnResult:
     # The summary passed to complete_task, if the agent marked its work done.
     completed: str = ""
     usage: dict[str, int] = field(default_factory=dict)
+    # The verification ledger's completion record (agent/lean/verification.py), when checks ran.
+    verification: dict[str, Any] = field(default_factory=dict)
 
 
 def _estimate_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
@@ -215,6 +217,9 @@ class LeanTurn:
         # Chat reads addresses the user gave without waiting for a small model to notice them.
         self.prefetch: Optional[Callable[[], list[tuple[str, dict[str, Any]]]]] = None
         self.final_check: Optional[Callable[[str], str]] = None
+        # Measures engineering work against its objective (agent/lean/verification.py): sees every finished
+        # call, adds structured feedback to check results, and states completion under the answer.
+        self.verifier: Optional[Any] = None
         self.grace_prompt = ""
         self.persona = persona
         self.system_prompt = system_prompt
@@ -381,6 +386,7 @@ class LeanTurn:
         promise_nudges = 0
         claim_nudges = 0
         check_nudges = 0
+        verify_nudges = 0
         final_text = ""
         error = ""
         success = True
@@ -495,6 +501,15 @@ class LeanTurn:
                         self.emit({"type": "check_nudge", "step": step, "files": list(self._unchecked)[:5]})
                         self._retract_text(step)
                         continue
+                    problem = (self.verifier.unfinished(content) if self.verifier is not None and not stop_reason
+                               and verify_nudges < 1 and step < max_steps else "")
+                    if problem:
+                        # "All tests pass" while the last check failed: back to the work once, with the evidence.
+                        verify_nudges += 1
+                        add_note(messages, problem)
+                        self.emit({"type": "verification_nudge", "step": step, "note": problem[:300]})
+                        self._retract_text(step)
+                        continue
                     if self._absorb_steering(messages, step):
                         # The user added something while this answer was written: keep going with it.
                         self._retract_text(step)
@@ -567,6 +582,12 @@ class LeanTurn:
 
         if self.answer_review is not None and success and not error and self._visible_text():
             self._review_answer(step)
+        verification = self.verifier.completion() if self.verifier is not None and self.verifier.active() else {}
+        if verification and error != "cancelled":
+            note = self.verifier.summary_note()
+            if note:
+                self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
+                self.emit({"type": "answer_note", "step": step, "note": note, "verification": verification["status"]})
         visible = self._visible_text()
         if not visible:
             visible = final_text
@@ -609,6 +630,7 @@ class LeanTurn:
             stop_reason=stop_reason,
             completed=self.completed_summary or "",
             usage=dict(self.usage),
+            verification=verification,
         )
 
     def _completion_from(self, calls: list[Any], messages: list[dict[str, Any]]) -> Optional[str]:
@@ -908,6 +930,11 @@ class LeanTurn:
                 self.emit({"type": "fail_streak", "step": step, "tool": name, "count": streak})
             if not refused:
                 text += self._screen_progress(name, ok, outcome, step)
+            measured = self.verifier.feedback(call.id) if self.verifier is not None else ""
+            if measured:
+                # Expected vs actual, progress against the best result, and the bottleneck, on the check's own result.
+                text += "\n\n" + app_note(measured)
+                self.emit({"type": "verification", "step": step, "tool": name, "note": measured[:600]})
             messages.append({"role": "tool", "tool_call_id": call.id, "name": name, "content": text or "(empty result)"})
             if visual_results.get(call.id):
                 messages[-1]["observations"] = visual_results[call.id]
@@ -1299,6 +1326,11 @@ class LeanTurn:
                 self.tool_observer(name, args, ok, output, step, duration_ms, meta)
             except Exception:
                 logger.debug("Tool observer failed", exc_info=True)
+        if self.verifier is not None:
+            try:
+                self.verifier.observe(name, args, ok, output, step, duration_ms, meta, call_id=call.id)
+            except Exception:
+                logger.debug("Verification ledger failed", exc_info=True)
         effects = list(effects or [])
         self._outcomes_by_call[call.id] = outcome
         facts = {**steps.widget_counts(widgets), **(meta or {})}

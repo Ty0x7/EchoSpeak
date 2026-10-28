@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — Verification-driven engineering</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}.shot img{display:block;width:100%;height:auto}.shot figcaption{padding:10px 14px;margin:0}.phone{max-width:240px}
+.mono{font:12px/1.55 Consolas,monospace;overflow-wrap:anywhere}.bad{color:var(--warn)}.ok{color:var(--good)}
+.term{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:12px 14px;font:12px/1.6 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted)}
+.term .n{display:block;margin-top:8px;padding:8px 10px;border-left:2px solid var(--accent);background:var(--soft);color:var(--ink)}
+.loopwrap{overflow-x:auto}.loop{display:block;width:100%;min-width:600px;height:auto;max-width:860px;margin:0 auto}
+.loop text{font:16px "Segoe UI Variable","Segoe UI",system-ui,sans-serif;fill:var(--ink)}.loop .s{font-size:12.5px;fill:var(--muted)}
+.loop rect{fill:var(--bg);stroke:var(--line)}.loop rect.a{stroke:var(--accent)}.loop rect.g{stroke:var(--good)}.loop rect.w{stroke:var(--warn)}
+.loop path{fill:none;stroke:var(--muted);stroke-width:1.3}.loop .head{fill:var(--muted)}
+.stages{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}.stage{min-width:0;padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--bg);font-size:12px;color:var(--muted)}.stage b{display:block;color:var(--ink);font-size:13px;font-weight:550;margin-bottom:5px}.stage.new{border-color:var(--accent)}
+.causes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.causes ul{margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--muted)}.causes li{margin:3px 0}
+.status{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 4px}.status span{font-size:12px;border:1px solid var(--line);border-radius:6px;padding:4px 9px}
+@media(max-width:900px){.stages{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:760px){.causes{grid-template-columns:1fr}}@media(max-width:440px){.stages{grid-template-columns:1fr 1fr}}
+</style>
+<body><main>
+<header><h1>EchoSpeak / Verification-driven engineering</h1><p>28 October 2026 · EchoSpeak 11.11.5 · technical record: docs/research/verified-engineering.md · prompt template: docs/engineering-prompt.md</p></header>
+<nav aria-label="Report sections"><a href="#workflow">The workflow</a><a href="#loop">Hill climbing</a><a href="#sees">What the model sees</a><a href="#done">Completion</a><a href="#bottlenecks">Bottlenecks</a><a href="#learning">Learning</a><a href="#test">Your test</a></nav>
+<p class="lead">A command that succeeded isn't a task that's done.<br>Echo now measures engineering work against its objective, and learning only counts what the strategy actually caused.</p>
+<p class="note"><strong>Evidence:</strong> the diagrams show the design and the real text EchoSpeak produced in the focused tests: real loop and runtime, scripted model and terminal. They're not screenshots of a live model run; that's the owner's test at the end.</p>
+<div class="legend"><span class="badge current">New in 11.11.5</span><span class="badge documented">Existing, now connected</span><span class="badge proposed">Owner tests on a real model</span></div>
+
+<section id="workflow"><h2>Six stages, one loop, no new engine</h2>
+<p class="muted">The stages are a workflow inside Echo's existing loop, not six model calls. Each maps onto a part that already existed. The one new piece is a deterministic ledger that watches what runs.</p>
+<div class="stages">
+<div class="stage new"><b>Objective</b>set_objective: criteria, the check, an optional metric with a direction and target</div>
+<div class="stage"><b>Research</b>Code reads, search and sources (11.11.3), as before</div>
+<div class="stage new"><b>Environment</b>Missing packages, programs, permissions and services recognised as the setup's fault</div>
+<div class="stage new"><b>Verification</b>Test, build, type, lint and benchmark output parsed into counts, failing tests and the first error</div>
+<div class="stage new"><b>Adaptation</b>Progress against the best result, regressions, stalls and the bottleneck, on each check's result</div>
+<div class="stage new"><b>Completion</b>A status computed from evidence, under the answer, in the work record and the episode</div>
+</div>
+<p class="rule">Chat stays light: no ledger, no set_objective. Codex, Claude Code and ACP keep their own loops; nothing in them changed.</p></section>
+
+<section id="loop"><h2>Hill climbing, bounded</h2>
+<figure class="diagram">
+<div class="loopwrap"><svg class="loop" viewBox="0 0 860 236" role="img" aria-labelledby="loopt">
+<title id="loopt">Baseline, attempt, verify, compare with the best; improved continues, worse reverts toward the best, three flat attempts or a blocker stops</title>
+<defs><marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L8,4 L0,8 z" class="head"/></marker></defs>
+<rect x="20" y="30" width="150" height="62" rx="9" class="a"/><text x="95" y="57" text-anchor="middle">Baseline</text><text x="95" y="76" text-anchor="middle" class="s">run the check first</text>
+<rect x="230" y="30" width="150" height="62" rx="9"/><text x="305" y="57" text-anchor="middle">Attempt</text><text x="305" y="76" text-anchor="middle" class="s">change the code</text>
+<rect x="440" y="30" width="150" height="62" rx="9"/><text x="515" y="57" text-anchor="middle">Verify</text><text x="515" y="76" text-anchor="middle" class="s">re-run, parse the result</text>
+<rect x="650" y="30" width="190" height="62" rx="9" class="a"/><text x="745" y="57" text-anchor="middle">Compare with the best</text><text x="745" y="76" text-anchor="middle" class="s">score, then the metric</text>
+<path d="M170,61 H226" marker-end="url(#ah)"/><path d="M380,61 H436" marker-end="url(#ah)"/><path d="M590,61 H646" marker-end="url(#ah)"/>
+<rect x="650" y="160" width="190" height="56" rx="9" class="g"/><text x="745" y="184" text-anchor="middle">Passes, target met</text><text x="745" y="202" text-anchor="middle" class="s">verified: finish with evidence</text>
+<path d="M745,92 V156" marker-end="url(#ah)"/>
+<rect x="390" y="160" width="230" height="56" rx="9"/><text x="505" y="184" text-anchor="middle">Improved / worse</text><text x="505" y="202" text-anchor="middle" class="s">keep going / undo back to the best</text>
+<path d="M690,92 C660,130 600,140 600,156" marker-end="url(#ah)"/><path d="M420,160 C380,130 330,120 310,96" marker-end="url(#ah)"/>
+<rect x="20" y="160" width="330" height="56" rx="9" class="w"/><text x="185" y="184" text-anchor="middle">3 attempts with no gain, or a blocker</text><text x="185" y="202" text-anchor="middle" class="s">change hypothesis, fix the setup, or tell the owner</text>
+<path d="M390,188 H354" marker-end="url(#ah)"/>
+</svg></div>
+<figcaption>Hard limits stay as they were: the step budget, the work budget (tokens and time), cancellation and the refusal breaker. The ledger adds no loop of its own. Hill climbing doesn't promise the optimum. It measures progress, keeps the best result, notices setbacks and knows when to stop or ask.</figcaption>
+</figure></section>
+
+<section id="sees"><h2>What the model sees after a check</h2>
+<div class="grid2">
+<div class="box"><h3 class="bad">Before</h3>
+<div class="term">[exit code 1 · 0.4s · sandbox · /w]
+FAILED tests/test_dates.py::test_leap_year - AssertionError
+E       assert 28 == 29
+1 failed, 4 passed in 0.21s</div>
+<p>Raw output only. A failing run still cleared "check before you say it's done", so "All tests pass now!" went through.</p></div>
+<div class="box"><h3 class="ok">Now</h3>
+<div class="term">[exit code 1 · 0.4s · sandbox · /w]
+…
+1 failed, 4 passed in 0.21s<span class="n">Verification, before any change: test `pytest -q tests/test_dates.py`: 1 failed, 4 passed, exit 1. Progress: first run of this check (the baseline). Failing: tests/test_dates.py::test_leap_year. First error: assert 28 == 29 Fix the implementation for these failures; don't change the tests to make them pass.</span></div>
+<p>The same result, plus a structured record as an app note. No extra model call: the write, test, answer run is still exactly 3 calls.</p></div>
+</div>
+<p class="rule">Later checks add: improved on, or worse than, the best result (naming the step and how many file changes back it is), the baseline, the target status and the bottleneck with its next action.</p></section>
+
+<section id="done"><h2>Completion is computed, not claimed</h2>
+<div class="status"><span class="ok">Verified</span><span class="ok">Checks pass</span><span>Partly verified</span><span class="bad">Not verified: the last check failed</span><span class="bad">Not verified</span><span class="bad">Blocked</span></div>
+<div class="comparison"><table><thead><tr><th>Evidence</th><th>Status under the answer</th></tr></thead><tbody>
+<tr><td>The objective's check passes after the last change; target met</td><td>Verified — test `pytest -q`: 0 failed, 5 passed, exit 0 · 1 attempt</td></tr>
+<tr><td>No objective declared; the checks after the last change pass</td><td>Checks pass — …</td></tr>
+<tr><td>Faster, but the tests now fail; or the target isn't met</td><td>Partly verified — … still fails</td></tr>
+<tr><td>Files changed after the last check, or tests edited after they failed</td><td>Not verified — tests were changed after they failed</td></tr>
+<tr><td>A missing package or program stopped the check</td><td>Blocked — environment: No module named 'requests'</td></tr>
+</tbody></table></div>
+<div class="grid2" style="margin-top:14px">
+<div class="box"><h3>"All tests pass" over a red run</h3><p>Sent back once with the evidence, as an app note, never as you. If the claim stands, the note says what the evidence shows, and the episode is recorded as a false success.</p></div>
+<div class="box"><h3>The best result is never hidden</h3><p>A worse final state still reports "best was step N". Interrupted work saves the whole ledger, and the resumed attempt re-runs the check and compares with the earlier baseline.</p></div>
+</div></section>
+
+<section id="bottlenecks"><h2>Telling bottlenecks apart</h2>
+<div class="comparison"><table><thead><tr><th>Bottleneck</th><th>Detected from</th><th>Next action given</th><th>Counts against the strategy?</th></tr></thead><tbody>
+<tr><td>Environment</td><td>Missing package or program, permissions, disk, network or service, with no test failures</td><td>Fix the setup if allowed, otherwise say exactly what's needed and stop</td><td class="ok">No</td></tr>
+<tr><td>Authorization</td><td>Refused, held or switched off</td><td>Existing refusal handling; status blocked</td><td class="ok">No</td></tr>
+<tr><td>Verification</td><td>"no tests ran", or 8 changes with no check</td><td>Find or write the check that actually verifies it</td><td>Unverified</td></tr>
+<tr><td>Information</td><td>4 lookups in a row found nothing</td><td>Recorded; the existing fail-streak note applies</td><td class="ok">No</td></tr>
+<tr><td>Implementation</td><td>3 attempts without beating the best, or a regression</td><td>New hypothesis, undo back to the best, or report the blocker</td><td class="bad">Yes</td></tr>
+<tr><td>Model</td><td>3 malformed or unknown calls in a row</td><td>Recorded for the owner and routing</td><td>Shown in the record</td></tr>
+</tbody></table></div></section>
+
+<section id="learning"><h2>Learning counts what the strategy caused</h2>
+<div class="causes">
+<div class="box"><h3 class="ok">Counts as a win</h3><ul><li>effective: checked and it worked</li><li>confirmed by you</li></ul></div>
+<div class="box"><h3 class="bad">Counts as a loss</h3><ul><li>checks still failing</li><li>false success: said done, but the evidence disagrees</li><li>the last action failed, or it stalled</li><li>verifier gap: checks passed, but you said it didn't work</li></ul></div>
+<div class="box"><h3>Never counted</h3><ul><li>environment, authorization</li><li>a tool that broke, a model outage</li><li>information it couldn't find</li><li>you said it misunderstood</li></ul></div>
+</div>
+<div class="grid2" style="margin-top:14px">
+<div class="box"><h3>Your feedback reclassifies</h3><p>"The file was generated, but it doesn't open in Excel" on a checked task is a verifier gap: a loss, and worth learning a better check from. "You misunderstood, I meant…" takes the blame off the lessons, and nothing is learned from it. The note is never turned into an instruction.</p></div>
+<div class="box"><h3>Is it helping?</h3><p>Verified completion, false success, recovery, stalls, attempts and tokens per verified task, and each lesson against its random holdout: helps, no effect, or negative transfer. From <span class="mono">GET /lean/learning/evaluation</span>.</p></div>
+</div></section>
+
+<section id="test"><h2>Your test on a real model</h2>
+<div class="phases">
+<div class="phase"><b>A known failing test</b><span>Baseline, fix, re-run, then "Checks pass" or "Verified" under the answer</span></div>
+<div class="phase"><b>A missing package</b><span>The setup named, an allowed install or a clear stop: "Blocked — environment"</span></div>
+<div class="phase"><b>A hard task</b><span>A change of approach after flat attempts; never "all tests pass" over a red run</span></div>
+<div class="phase"><b>Interrupt, then resume</b><span>Re-runs the check first and continues from the earlier best</span></div>
+</div>
+<p class="proposed" style="margin-top:12px">Measured here by 20 focused tests and the existing suites for the changed parts. How often a given model reaches Verified is for the evaluation endpoint to show over real use.</p></section>
+<footer>Technical record: docs/research/verified-engineering.md · Prompt template: docs/engineering-prompt.md · Tests: apps/backend/tests/test_verified_engineering.py</footer>
+</main></body></html>

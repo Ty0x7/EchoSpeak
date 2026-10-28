@@ -40,6 +40,11 @@ def skip_reason(episode: Episode) -> str:
     """Why an episode isn't worth a reflection, or ''."""
     if episode.outcome == "error":
         return "the model request failed, so there is no work to learn from"
+    cause = episode.effective_cause
+    if cause == "misunderstood":
+        return "the owner said the request was misunderstood: that's about this request, not a strategy"
+    if cause in {"environment", "authorization", "tool_failure"}:
+        return f"blocked by {cause.replace('_', ' ')}, so the strategy itself wasn't tested"
     if episode.feedback:
         return ""
     ran = [t for t in episode.tools if not t.get("not_run")]
@@ -68,15 +73,30 @@ def _tool_log(episode: Episode, limit: int = 25) -> str:
     return "\n".join(lines) or "(no tool calls)"
 
 
+_CAUSES = {
+    "effective": "checked, and it worked",
+    "failed_check": "the checks still failed at the end",
+    "false_success": "it said the work was done, but the evidence showed otherwise",
+    "action_failed": "its last action failed",
+    "stalled": "it stopped improving and ran out of steps",
+    "information_gap": "it couldn't find what it needed",
+    "verifier_gap": "the checks passed, but the owner says it didn't work, so the checks missed something",
+    "owner_failed": "the owner says it didn't work",
+    "confirmed": "the owner says it worked",
+}
+
+
 def _describe(episode: Episode, label: str) -> str:
     feedback = {1: "The owner said it worked.", -1: "The owner said it didn't work."}.get(episode.feedback, "")
     if feedback and episode.feedback_note:
         feedback += f' Their note: "{episode.feedback_note[:300]}"'
+    cause = _CAUSES.get(episode.effective_cause, "")
     return (
         f"{label}\nThe user asked: {episode.goal[:800]}\n"
         f"What ran (tool log):\n{wrap_untrusted('tool log', _tool_log(episode))}\n"
         f"Result: {episode.outcome} ({episode.summary[:300] or 'no summary'}). "
         f"How well it was checked: V{episode.level}, {'; '.join(episode.reasons)[:300]}.\n"
+        + (f"Why, from the evidence: {cause}.\n" if cause else "")
         + (feedback + "\n" if feedback else "")
     )
 

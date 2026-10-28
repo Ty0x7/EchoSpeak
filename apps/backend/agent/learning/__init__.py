@@ -161,7 +161,8 @@ def record_request(
 def record_feedback(execution_id: str, value: int, note: str = "", agent_id: str = "") -> list[Episode]:
     """The owner's Worked (+1) / Didn't work (-1) / cleared (0) on a reply."""
     from agent.lean.policy import redact_secrets
-    from agent.learning import playbook, profiles
+    from agent.learning import playbook, profiles, reflector
+    from agent.learning.episodes import feedback_cause
 
     value = max(-1, min(1, int(value)))
     store = get_experience_store()
@@ -172,9 +173,12 @@ def record_feedback(execution_id: str, value: int, note: str = "", agent_id: str
         previous = episode.attribution or "none"
         episode.feedback = value
         episode.feedback_note = redact_secrets(" ".join(str(note or "").split()))[:500] if value else ""
+        # Reclassifies the episode (a misunderstanding, an environment problem, checks that missed something);
+        # the note itself only reaches a reflection, whose lessons still have to prove themselves.
+        episode.feedback_cause = feedback_cause(episode, value, episode.feedback_note)
         playbook.attribute(episode, previous=previous)
         store.update_episode(episode)
-        if value:
+        if value and not reflector.skip_reason(episode):
             store.queue_reflection(episode.id, episode.agent_id)
         changed.append(episode)
     profiles.forget_cache()
