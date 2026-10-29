@@ -1,5 +1,31 @@
 # Changes
 
+## v11.12.0 — Quieter, clearer, and easier to follow (source; not yet built)
+
+* Activity, as Claude and ChatGPT show it:
+  * Steps are plain lines, with a shimmer on the running one.
+  * Thinking and steps between parts of the answer form an activity (`steps.groupActivity`) that folds into "Worked for Xs · …" once finished and stays open while live.
+  * Notes get status marks, and `calculate` gets labels.
+* Following new content:
+  * A callback ref keeps the observers on the live scroller; it was keyed per conversation, so they were left on a detached element.
+  * `innerScrollerTakes()` stops wheel movement inside the thinking box from releasing the chat.
+  * There's a jump-to-latest button.
+* Code reasoning effort (`CodeEffortPicker`): Echo native shares the composer's effort, Codex sends `turn/start effort` (only levels from `model/list`), Claude Code gets `--effort`, and ACP has none. `Task.effort` flows through `code_sessions` to the adapters.
+* Harness compliance reviewed against Anthropic's legal and compliance page and OpenAI's app-server docs. Runtime logos are replaced with neutral monograms.
+* Workspace details are rebuilt into sections: Environment, Context (`workbench.setMeter`), Outputs (artifacts), Changes (`diffStat`, PRs) and Servers & scripts.
+* Deletes:
+  * stay in the same environment
+  * build the new list from the current one (`setThreads` updater)
+  * record deleted IDs
+  * refreshes no longer auto-open a Session after the first load
+* The project delete clears Code's selection. Room deletes clear the open room.
+* Agents: switching in reopens the last agent conversation. The start screen replaces the roster showcase.
+* Code:
+  * "Files & sessions" is removed.
+  * "Opening project…" shows only while loading, and "No git repository" otherwise.
+* Sidebar: 248 px wide; a "Working" indicator for in-flight Sessions in Chat, Agents and Code's tree.
+* See [release notes](docs/releases/v11.12.0.md) and the [report](docs/research/interface-11-12.md).
+
 ## v11.11.8 — Code is a coding assistant (source; not yet built)
 
 * `environments.turn_environment` returns chat, code or agents. A live owner turn in a Code conversation is now model-first, with its own `code` persona (`personas.code_persona`) named after the selected model. Routines, guests and resumed work stay with their agent.

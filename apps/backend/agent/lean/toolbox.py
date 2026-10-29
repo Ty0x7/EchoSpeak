@@ -929,6 +929,8 @@ def describe_call(name: str, args: dict[str, Any]) -> str:
         from agent.lean.steps import short_url
 
         return f"Reading {short_url(pick('url', 'link'))}"
+    if name == "calculate":
+        return f"Calculating {pick('expression', 'expr', 'query')[:80]}".rstrip()
     if name in {"file_read", "file_list"}:
         return f"{'Reading' if name == 'file_read' else 'Listing'} {pick('path') or '.'}"
     if name == "file_write":

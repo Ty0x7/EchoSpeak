@@ -53,6 +53,8 @@ type SidebarProps = {
   /** Chat, Agents or Code: the same sidebar, with that environment's content. */
   environment?: Environment;
   onEnvironment?(environment: Environment): void;
+  /** Sessions with a turn running right now: shown with a live indicator, so you can see what's being worked on. */
+  workingSessionIds?: Set<string>;
   /** Code's projects and sessions, shown in place of the lists in Code. */
   codeTree?: React.ReactNode;
 };
@@ -384,6 +386,8 @@ export function ProjectSidebar(props: SidebarProps) {
           <Icon name="session" size={iconOnly ? 16 : 15} active={props.activeSessionId === session.id} />
         </span>
         {!iconOnly && <span style={titleEllipsis}>{session.name}</span>}
+        {props.workingSessionIds?.has(session.id) ? <span className="echo-side-working" role="status" aria-label="Working">
+          <span className="echo-side-working-dot" aria-hidden />{!iconOnly ? <span className="echo-side-working-text">Working</span> : null}</span> : null}
       </button>
       {!iconOnly && (
         <div className="echo-row-actions" aria-label="Session actions">

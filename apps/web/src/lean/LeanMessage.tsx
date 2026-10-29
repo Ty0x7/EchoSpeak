@@ -7,7 +7,8 @@ import remarkGfm from "remark-gfm";
 import { RichMarkdown } from "../widgets/RichMarkdown";
 import { WidgetView } from "../widgets/WidgetView";
 import { WorkersCard } from "./WorkersCard";
-import { groupSteps, phaseOf, stepsSummary, type ToolSeg } from "./steps";
+import { activityHeadline, activityRunning, activityTools, groupActivity, groupSteps, phaseOf, stepsSummary,
+  type StepItem, type ToolSeg } from "./steps";
 import type { LeanMessageData, LeanSegment } from "./types";
 
 /**
@@ -124,6 +125,47 @@ function ThinkingBlock({ seg, live }: { seg: Extract<LeanSegment, { kind: "think
   );
 }
 
+/**
+ * A finished stretch of work (thinking and tool steps between parts of the answer) folds into one quiet
+ * line, the way Claude and ChatGPT present it: "Worked for 42s · Read 3 files · Ran 2 commands". While it's
+ * going, everything shows live; once done, the detail is one click away. Cards a step produced stay visible.
+ */
+function ActivityRun({ parts, live, renderPart }: { parts: StepItem[]; live: boolean; renderPart(part: StepItem): React.ReactNode }) {
+  const running = live && activityRunning(parts);
+  const [open, setOpen] = useState(false);
+  useTicker(running);
+  // Live (the stretch of work still at the end of a streaming reply) shows everything; one thing (a thought,
+  // or a single step or group of steps) already folds itself.
+  if (live || parts.length === 1) return <>{parts.map(renderPart)}</>;
+  const { title, detail } = activityHeadline(parts, fmtSeconds);
+  const failed = activityTools(parts).some((t) => t.status === "failed");
+  return (
+    <div className="lm-activity" data-open={open ? "true" : "false"}>
+      <button type="button" className="lm-activity-head" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
+        <span className="lm-activity-title">{title}</span>
+        {detail ? <span className="lm-activity-detail" data-failed={failed ? "true" : undefined}>{detail}</span> : null}
+        <Chevron open={open} />
+      </button>
+      {open ? <div className="lm-activity-body">{parts.map(renderPart)}</div> : null}
+    </div>
+  );
+}
+
+/** A note under the answer: the verification status gets its own quiet mark; anything else is plain. */
+function NoteLine({ text }: { text: string }) {
+  const tone = /^(Verified|Checks pass)\b/.test(text) ? "ok" : /^(Not verified|Blocked|Partly verified)\b/.test(text) ? "warn" : "info";
+  return (
+    <div className="lm-note" data-tone={tone}>
+      <span className="lm-note-mark" aria-hidden>
+        {tone === "ok" ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+          : tone === "warn" ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 8v5M12 16.5v.5" /><circle cx="12" cy="12" r="9" /></svg>
+          : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M12 11v5M12 7.5v.5" /><circle cx="12" cy="12" r="9" /></svg>}
+      </span>
+      <span>{text}</span>
+    </div>
+  );
+}
+
 function StateMark({ status }: { status: "running" | "done" | "failed" }) {
   return (
     <span className="lm-tool-state" aria-hidden>
@@ -149,7 +191,7 @@ function ToolRow({ seg }: { seg: ToolSeg }) {
       <button type="button" className="lm-tool-head" onClick={() => setOpen((v) => !v)} aria-expanded={open} disabled={!seg.output}>
         <StateMark status={seg.status} />
         <span className="lm-tool-text">
-          <span className="lm-tool-label">{label}</span>
+          <span className={`lm-tool-label${seg.status === "running" ? " lm-shimmer" : ""}`}>{label}</span>
           {sub ? <span className="lm-tool-sub" key={seg.status === "running" ? sub : "summary"}>{sub}</span> : null}
         </span>
         {elapsed > 400 ? <span className="lm-tool-time">{fmtSeconds(elapsed)}</span> : null}
@@ -343,7 +385,7 @@ export function LeanMessage({
   const segments = data.segments;
   const lastText = [...segments].reverse().find((s) => s.kind === "text");
   const phase = live ? phaseOf(data) : "";
-  const items = React.useMemo(() => groupSteps(segments), [segments]);
+  const items = React.useMemo(() => groupActivity(groupSteps(segments)), [segments]);
   const sources = React.useMemo(() => mergedCitations(segments), [segments]);
   return (
     <article className="lm" data-status={data.status} data-live={streaming ? "true" : "false"} data-role={data.role || undefined}>
@@ -358,24 +400,31 @@ export function LeanMessage({
         </header>
       ) : null}
       <div className="lm-body">
-        {items.map((item) => {
-          if (item.kind === "steps") {
-            const cards = item.tools.flatMap((tool) => (tool.widgets || []).filter((w) => (w as { type?: string })?.type !== "citations"));
+        {items.map((item, position) => {
+          if (item.kind === "activity") {
+            const tools = activityTools(item.parts);
+            const cards = tools.flatMap((tool) => (tool.widgets || []).filter((w) => (w as { type?: string })?.type !== "citations"));
+            const renderPart = (part: StepItem) => part.kind === "steps" ? (
+              <React.Fragment key={part.key}>
+                {part.tools.length > 1 ? <StepGroup tools={part.tools} /> : <ToolRow seg={part.tools[0]} />}
+                {part.tools.map((tool) => (tool.state?.kind === "workers" ? <WorkersCard key={`w${tool.id}`} state={tool.state} /> : null))}
+              </React.Fragment>
+            ) : part.seg.kind === "thinking" ? <ThinkingBlock key={`t${part.index}`} seg={part.seg} live={streaming} /> : null;
             return (
               <React.Fragment key={item.key}>
-                {item.tools.length > 1 ? <StepGroup tools={item.tools} /> : <ToolRow seg={item.tools[0]} />}
+                <ActivityRun parts={item.parts} live={streaming && position === items.length - 1} renderPart={renderPart} />
                 {cards.map((widget, k) => <WidgetView key={k} widget={widget} />)}
-                {item.tools.map((tool) => (tool.state?.kind === "workers" ? <WorkersCard key={`w${tool.id}`} state={tool.state} /> : null))}
               </React.Fragment>
             );
           }
+          if (item.kind === "steps") return null;  // always inside an activity item
           const { seg, index } = item;
           if (seg.kind === "thinking") return <ThinkingBlock key={`t${index}`} seg={seg} live={streaming} />;
           if (seg.kind === "approval")
             return seg.question
               ? <QuestionCard key={`q${seg.id}`} seg={seg} agentName={speakerName(data.agent)} onDecide={onDecide} />
               : <ApprovalCard key={`a${seg.id}`} seg={seg} onDecide={onDecide} />;
-          if (seg.kind === "note") return <div key={`n${index}`} className="lm-note">{seg.text}</div>;
+          if (seg.kind === "note") return <NoteLine key={`n${index}`} text={seg.text} />;
           if (seg.kind !== "text" || !seg.text.trim()) return null;
           const isTail = seg === lastText && streaming;
           return (

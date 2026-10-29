@@ -3,7 +3,9 @@ export type CodeRuntime = {
   authentication: string; can_start: boolean; blockers: string[]; description: string;
 };
 export type RuntimeCatalog = { schema_version: number; privacy_mode: string; runtimes: CodeRuntime[] };
-export type AgentModel = { id: string; model: string; displayName?: string; isDefault?: boolean; description?: string };
+export type AgentModel = { id: string; model: string; displayName?: string; isDefault?: boolean; description?: string;
+  /** The agent's own effort levels for this model (Codex model/list; Claude Code --effort), and its default. */
+  efforts?: string[]; defaultEffort?: string };
 /** What Echo last saw of a coding agent's own sign-in (no secrets): GET /echo-code/runtimes/{id}/account. */
 export type AgentAccount = {
   installed?: boolean; signed_in?: boolean; method?: string; plan?: string; models?: AgentModel[];
@@ -19,7 +21,14 @@ export function agentModels(value: unknown): AgentModel[] {
   return [...new Map(value.filter(row => row && typeof row.model === "string" && row.model.length > 0 && row.model.length <= 200)
     .slice(0, 200).map(row => [row.model, { id: String(row.id || row.model), model: row.model,
       displayName: typeof row.displayName === "string" ? row.displayName : undefined, isDefault: row.isDefault === true,
-      description: typeof row.description === "string" ? row.description : undefined }])).values()];
+      description: typeof row.description === "string" ? row.description : undefined,
+      efforts: Array.isArray(row.efforts) ? row.efforts.filter((e: unknown) => typeof e === "string" && /^[a-z_]{1,20}$/.test(e)).slice(0, 8) : [],
+      defaultEffort: typeof row.defaultEffort === "string" ? row.defaultEffort : "" }])).values()];
+}
+/** The model a session will use: the one chosen, the one the agent reported, or its default. */
+export function agentModelRow(models: AgentModel[], selected: string, reported: string): AgentModel | undefined {
+  const id = selected || reported || models.find(row => row.isDefault)?.model || "";
+  return models.find(row => row.model === id) || models.find(row => row.isDefault);
 }
 export function agentModelName(models: AgentModel[], selected: string, reported: string): string {
   const id = selected || reported || models.find(row => row.isDefault)?.model || "";

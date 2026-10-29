@@ -49,7 +49,7 @@ def signed_in(monkeypatch):
     monkeypatch.setattr(code_accounts, "claude_status", lambda: {"installed": True, "signed_in": True, "method": "claude.ai", "plan": "pro"})
     monkeypatch.setattr(code_executables, "executable", lambda runtime: sys.executable)
     real_argv = ClaudeCli.argv
-    monkeypatch.setattr(ClaudeCli, "argv", lambda self, model: [sys.executable, str(FIXTURE), *real_argv(self, model)[1:]])
+    monkeypatch.setattr(ClaudeCli, "argv", lambda self, model, effort="": [sys.executable, str(FIXTURE), *real_argv(self, model, effort)[1:]])
 
 
 def run(coroutine):
@@ -261,3 +261,35 @@ def test_settings_checks_run_only_when_asked_and_stay_closed_in_private_mode(mon
     blocked["value"] = True
     assert client.post("/echo-code/runtimes/codex/check").status_code == 403
     assert calls == ["codex", "claude-login"]
+
+
+def test_effort_reaches_claude_code_as_its_own_flag_and_codex_as_turn_effort(tmp_path, signed_in):
+    """11.12: Code's effort control uses each agent's documented control, nothing else."""
+    from agent.code_runtimes import Codex
+
+    session = Stub(tmp_path)
+    adapter = ClaudeCli(session)
+    argv = adapter.argv("opus", "xhigh")
+    assert argv[argv.index("--effort") + 1] == "xhigh"
+    assert "--effort" not in adapter.argv("opus", "") and "--effort" not in adapter.argv("opus", "ludicrous")
+
+    sent = {}
+
+    class Rpc:
+        closed = False
+
+        async def request(self, method, params, timeout=None):
+            sent[method] = params
+            if method in {"thread/start", "thread/resume"}:
+                return {"thread": {"id": "t1"}, "model": "gpt-x"}
+            return {"turn": {"id": "turn-1"}}
+
+    codex_session = Stub(tmp_path)
+    codex_session.models = [{"model": "gpt-x", "isDefault": True, "efforts": ["low", "medium", "high"]}]
+    codex_session.turn_finished.set()
+    codex = Codex(codex_session)
+    codex.rpc = Rpc()
+    run(codex.prompt("fix it", "gpt-x", "high"))
+    assert sent["turn/start"]["effort"] == "high"
+    run(codex.prompt("again", "gpt-x", "max"))  # not one of this model's efforts: Codex's default applies
+    assert "effort" not in sent["turn/start"]

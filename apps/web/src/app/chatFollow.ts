@@ -25,6 +25,21 @@ function scrollable(box: ScrollBox): boolean {
   return box.scrollHeight - box.clientHeight > 1;
 }
 
+/**
+ * Whether a wheel over ``target`` is taken by a scrollable box inside the chat (the thinking box, a tool's
+ * output) rather than by the chat itself: it can still scroll that way, so the chat doesn't move.
+ */
+export function innerScrollerTakes(target: Element | null, chat: Element, deltaY: number): boolean {
+  for (let node = target; node && node !== chat; node = node.parentElement) {
+    const box = node as HTMLElement;
+    if (box.scrollHeight - box.clientHeight <= 1) continue;
+    const overflow = typeof window !== "undefined" ? window.getComputedStyle(box).overflowY : "";
+    if (overflow !== "auto" && overflow !== "scroll") continue;
+    if (deltaY < 0 ? box.scrollTop > 0 : box.scrollTop + box.clientHeight < box.scrollHeight - 1) return true;
+  }
+  return false;
+}
+
 export class ChatFollower {
   following = true;
   private lastTop = 0;

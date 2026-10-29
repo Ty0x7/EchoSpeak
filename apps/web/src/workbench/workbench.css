@@ -75,3 +75,36 @@
 .echo-root .is-empty-conversation .conversation-welcome h1 { line-height:1.3; }
 .echo-root .is-empty-conversation .conversation-welcome .welcome-typewriter { min-height:0; margin:10px auto 0; font-size:12px; line-height:1.3333333333; }
 @media(max-width:650px) { .wb-layout-controls { padding:0 3px; }.wb-layout-controls>button { width:25px; }.desktop-titlebar-brand small { display:none; }.desktop-window .desktop-titlebar { grid-template-columns:minmax(100px,1fr) auto; }.desktop-titlebar-status { display:none; }.echo-root .conversation-welcome h1,.echo-root .ec-welcome h2 { font-size:23px; }.wb-terminal-panes.is-split { flex-direction:column; }.echo-root.echo-root .is-empty-conversation .input-bar { width:calc(100% - 28px); }.wb-sidebar-actions { justify-content:center; } }
+
+/* 11.12 Workspace details: sections like a details sidebar, in EchoSpeak's own style. */
+.wb-details-v2 { display:grid; gap:8px; padding:8px; max-height:min(76vh, 760px); overflow-y:auto; }
+.wb-dsec { border:1px solid var(--es-border); border-radius:12px; background:var(--es-surface-1); }
+.wb-dsec-head { width:100%; display:flex; align-items:center; gap:7px; padding:10px 12px; border:0; background:transparent; color:var(--es-text); font:600 12.5px var(--es-font); text-align:left; cursor:pointer; }
+.wb-dsec-caret { color:var(--es-text-3); transition:transform .15s ease; }
+.wb-dsec[data-open="false"] .wb-dsec-caret { transform:rotate(-90deg); }
+.wb-dsec-meta { margin-left:auto; display:inline-flex; align-items:center; gap:8px; color:var(--es-text-3); font:500 11.5px var(--es-font); }
+.wb-dsec-body { display:grid; gap:1px; padding:0 6px 8px; }
+.wb-drow { display:flex; align-items:center; gap:10px; min-height:32px; padding:4px 6px; border-radius:8px; color:var(--es-text); font:500 12.5px var(--es-font); }
+.wb-drow > svg, .wb-drow > .runtime-mark, .wb-drow > img { flex:0 0 auto; color:var(--es-text-3); }
+.wb-drow-btn { width:100%; border:0; background:transparent; text-align:left; cursor:pointer; }
+.wb-drow-btn:hover { background:var(--es-surface-3); }
+.wb-dtrunc { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.wb-dtrunc b { font-weight:600; }
+.wb-dtrunc small, .wb-dmuted { color:var(--es-text-3); font-size:11.5px; white-space:nowrap; }
+.wb-drow > .wb-dmuted { margin-left:auto; }
+.wb-dlink { margin-left:auto; flex:0 0 auto; border:0; background:transparent; color:var(--es-text-2); font:500 11.5px var(--es-font); cursor:pointer; text-decoration:underline; text-underline-offset:3px; }
+.wb-dlink:hover:not(:disabled) { color:var(--es-text); }
+.wb-dlink:disabled { opacity:.4; cursor:default; }
+.wb-dnote { margin:2px 6px 4px; padding:0; color:var(--es-text-3); font:500 12px/1.5 var(--es-font); }
+.wb-dmore { justify-self:start; margin:2px 6px 0; padding:4px 0; border:0; background:transparent; color:var(--es-text-3); font:500 12px var(--es-font); cursor:pointer; }
+.wb-dmore:hover:not(:disabled) { color:var(--es-text); }
+.wb-dmeter { display:inline-block; width:34px; height:5px; border-radius:99px; background:var(--es-surface-3); overflow:hidden; }
+.wb-dmeter > i { display:block; height:100%; border-radius:99px; background:var(--es-accent); }
+.wb-dmeter > i[data-level="filling"] { background:var(--es-warn, #d4a017); }
+.wb-dmeter > i[data-level="full"] { background:var(--es-err, #e5484d); }
+.wb-dadd { color:var(--es-ok, #41c77a); }
+.wb-ddel { color:var(--es-err, #e5484d); }
+.wb-dstate { margin-left:auto; color:var(--es-text-3); font-size:11px; text-transform:capitalize; }
+.wb-dstate[data-state="OPEN"] { color:var(--es-ok, #41c77a); }
+.wb-dstate[data-state="MERGED"] { color:#a371f7; }
+.wb-dlive { margin-left:auto; color:var(--es-ok, #41c77a); font-size:11px; }

@@ -51,11 +51,11 @@ export type ExternalComposerState = {
 export type ExternalSessionHandle = { send(): void };
 export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   apiBase: string; projectId: string; runtimeId: string; canStart: boolean; account: AgentAccount | null;
-  draft: string; onDraft(value: string): void; model: string; onState(state: ExternalComposerState): void;
+  draft: string; onDraft(value: string): void; model: string; effort?: string; onState(state: ExternalComposerState): void;
   open: boolean; anchor: React.RefObject<HTMLButtonElement>; onClose(): void; onNeedSetup(): void; onAccountChanged(): void;
   /** A session picked in Code's sidebar; otherwise the newest one. */
   initialSessionId?: string;
-}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, account, draft, onDraft, model, onState, open, anchor, onClose, onNeedSetup, onAccountChanged, initialSessionId = "" }, ref) {
+}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, account, draft, onDraft, model, effort = "", onState, open, anchor, onClose, onNeedSetup, onAccountChanged, initialSessionId = "" }, ref) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState("");
   const [session, setSession] = useState<Session | null>(null);
@@ -152,10 +152,10 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
       // Signed in is enough: Echo starts (or reconnects) the isolated session, then sends.
       const id = selected || await createSession();
       if (!session?.connected || session.id !== id) await request(`${baseFor(id)}/connect`, {});
-      await request(`${baseFor(id)}/turns`, { text, model: runtimeId === "acp" ? "" : model });
+      await request(`${baseFor(id)}/turns`, { text, model: runtimeId === "acp" ? "" : model, effort: runtimeId === "acp" ? "" : effort });
       if (alive.current) onDraft("");
     });
-  } }), [canSend, draft, model, selected, session, runtimeId, projectId, onDraft, onNeedSetup]);
+  } }), [canSend, draft, model, effort, selected, session, runtimeId, projectId, onDraft, onNeedSetup]);
   const create = () => action(async () => { if (!acknowledge) throw new Error("Confirm you trust this agent with this project first"); await createSession(); });
   const openLogin = (url: string) => {
     setLoginUrl(url);

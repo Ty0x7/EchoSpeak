@@ -30,8 +30,10 @@ export function externalTitle(row: ExternalRow): string {
  * Code's sidebar: projects, each with its coding sessions, and the sessions whose project is gone.
  * Drag an Echo session onto a project to move it there (or use Move to…).
  */
-export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, onOpenNative, onOpenExternal, onNewSession, onAddFolder }: {
+export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, onOpenNative, onOpenExternal, onNewSession, onAddFolder, workingSessionIds }: {
   apiBase: string; revision: number; activeThreadId: string; activeExternalId: string;
+  /** Native sessions with a turn running now: a live indicator on their row. */
+  workingSessionIds?: Set<string>;
   onOpenNative(session: CodeSession): void; onOpenExternal(projectId: string, runtimeId: string, sessionId: string): void;
   onNewSession(projectId: string): void; onAddFolder(): void;
 }) {
@@ -72,6 +74,7 @@ export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, 
       onDragStart={event => { event.dataTransfer.setData(DRAG_TYPE, session.thread_id); event.dataTransfer.setData("text/plain", session.title); event.dataTransfer.effectAllowed = "move"; }}>
       <button type="button" className="ec-tree-open" aria-current={active ? "true" : undefined} title={session.title} onClick={() => onOpenNative(session)}>
         <RuntimeMark runtime="echo" /><span>{session.title.replace(/^Code · /, "") || "Coding session"}</span>
+        {workingSessionIds?.has(session.thread_id) ? <span className="echo-side-working" role="status" aria-label="Working"><span className="echo-side-working-dot" aria-hidden /></span> : null}
       </button>
       {targets.length ? (moving === session.thread_id
         ? <select autoFocus aria-label={`Move ${session.title} to project`} defaultValue="" onBlur={() => setMoving("")}

@@ -58,6 +58,12 @@
 .ec-runtime-picker { display:flex; align-items:center; gap:7px; min-width:0; color:var(--es-text-2); }
 .ec-runtime-picker select,.ec-checkout-bar select { appearance:auto; color:inherit; background:transparent; border:0; max-width:210px; min-height:28px; font:12px var(--es-font); cursor:pointer; }
 .ec-runtime-picker option,.ec-checkout-bar option { background:var(--es-surface-2); color:var(--es-text); }
+.ec-effort-picker { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:0 8px; border:0; border-radius:8px; background:transparent; color:var(--es-text-2); font:12px var(--es-font); cursor:pointer; white-space:nowrap; }
+.ec-effort-picker:hover:not(:disabled) { background:var(--es-glass); color:var(--es-text); }
+.ec-effort-picker:disabled { opacity:.55; cursor:default; }
+.ec-effort-picker:focus-visible { outline:2px solid var(--es-accent); outline-offset:2px; }
+/* Codex and Claude Code: neutral monograms, never the vendors' logos. */
+.runtime-monogram { display:inline-grid; place-items:center; width:17px; height:17px; flex:0 0 17px; border:1px solid var(--es-border); border-radius:5px; color:var(--es-text-2); font:600 8.5px/1 var(--es-font); letter-spacing:-.02em; }
 .ec-native-policy { font-size:11px; color:var(--es-text-3); padding-left:14px; border-left:1px solid var(--es-border); white-space:nowrap; }
 .ec-continue { display:grid; place-items:center; flex-shrink:0; margin-left:auto; width:32px; height:32px; padding:0; border:0; border-radius:50%; color:white; background:var(--es-accent); cursor:pointer; }
 .ec-continue:disabled { opacity:.4; cursor:default; }
