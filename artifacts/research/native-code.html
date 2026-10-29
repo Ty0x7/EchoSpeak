@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — Chat, Code and Agents</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}.shot img{display:block;width:100%;height:auto}.shot figcaption{padding:10px 14px;margin:0}.phone{max-width:240px}
+.ok{color:var(--good)}.bad{color:var(--warn)}
+.envs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.env{min-width:0;padding:16px;border:1px solid var(--line);border-radius:11px;background:var(--panel)}.env.a{border-color:var(--accent)}.env h3{margin-bottom:4px}.env dl{margin:10px 0 0;font-size:13px}.env dt{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-top:10px}.env dd{margin:2px 0 0}
+.flow{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px}.fstep{min-width:0;padding:10px 8px;border:1px solid var(--line);border-radius:9px;background:var(--bg);font-size:12px;color:var(--muted);text-align:center}.fstep b{display:block;color:var(--ink);font-size:13px;font-weight:550;margin-bottom:3px}
+.timeline{display:grid;gap:6px;max-width:640px}.tl{display:flex;justify-content:space-between;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);font-size:13px}.tl code{font-size:12px}.tl span{color:var(--muted);font-size:12px;white-space:nowrap}.tl.note{border-left:2px solid var(--good)}
+@media(max-width:900px){.flow{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:760px){.envs{grid-template-columns:1fr}.flow{grid-template-columns:repeat(2,minmax(0,1fr))}.tl{flex-direction:column;gap:2px}}
+</style>
+<body><main>
+<header><h1>EchoSpeak / Chat, Code and Agents</h1><p>29 October 2026 · EchoSpeak 11.11.8 · technical record: docs/research/native-code.md</p></header>
+<nav aria-label="Report sections"><a href="#three">Three environments</a><a href="#before">What changed</a><a href="#flow">Code's workflow</a><a href="#shared">What's shared</a><a href="#test">Your test</a></nav>
+<p class="lead">Chat is an assistant. Code is a coding assistant. Agents are persistent agents.<br>One harness underneath all three.</p>
+<p class="note"><strong>Evidence:</strong> the timeline below is the step sequence the focused end-to-end test produces with a scripted model and terminal. It's not a screenshot of a live model run; that's your test at the end.</p>
+
+<section id="three"><h2>Three environments</h2>
+<div class="envs">
+<div class="env"><h3>Chat</h3><p class="muted">The model you picked, as itself.</p><dl><dt>For</dt><dd>Conversation, research, explanations, artifacts</dd><dt>Tools</dt><dd>Search and reading, live cards, artifacts, memory</dd><dt>Checks</dt><dd>Sources and figures checked under the answer</dd></dl></div>
+<div class="env a"><h3>Code <span class="badge current">changed</span></h3><p class="muted">The model you picked, as a coding assistant.</p><dl><dt>For</dt><dd>Repositories: read, edit, run, debug, test</dd><dt>Tools</dt><dd>Files, terminal, docs search, memory, skills</dd><dt>Checks</dt><dd>Tests and builds measured; Verified / Checks pass / Not verified under the answer</dd></dl></div>
+<div class="env"><h3>Agents</h3><p class="muted">Echo and your other agents.</p><dl><dt>For</dt><dd>Ongoing responsibilities, routines, teams</dd><dt>Tools</dt><dd>Each agent's own, plus delegation, work and notes</dd><dt>Checks</dt><dd>The same ledger, plus job completion for teams</dd></dl></div>
+</div></section>
+
+<section id="before"><h2>What changed in Code</h2>
+<div class="comparison"><table><thead><tr><th></th><th>Before</th><th>Now</th></tr></thead><tbody>
+<tr><td>Who answers</td><td class="bad">Echo, the agent (persona, soul)</td><td>The model you picked, named after it</td></tr>
+<tr><td>Team and delegation</td><td class="bad">Echo's roster; could hand off to Jarvis or Glados</td><td>None: Code is one coding assistant</td></tr>
+<tr><td>Tools</td><td class="bad">Everything Echo has: reminders, media, shopping, live cards, desktop control, agent work</td><td>Engineering tools only; small models see the essentials first</td></tr>
+<tr><td>Prompt</td><td class="bad">Echo's personality, chart and card rules</td><td>The engineering workflow, project instructions, git status and git rules</td></tr>
+<tr><td>A failing test in the timeline</td><td class="bad">"Running `pytest`" forever</td><td>"Ran `pytest`" · "Tests: 1 failed"</td></tr>
+<tr><td>Learning</td><td class="bad">Counted as Echo's</td><td>Code's own record; can use Echo's proven coding lessons (measured)</td></tr>
+<tr><td>Models</td><td colspan="2">Unchanged: a model on this PC. ChatGPT in Codex and Claude in Claude Code use your plans; API-key models are for Chat.</td></tr>
+</tbody></table></div></section>
+
+<section id="flow"><h2>Code's workflow, as it shows up</h2>
+<div class="flow">
+<div class="fstep"><b>Understand</b>the request</div><div class="fstep"><b>Inspect</b>the project</div><div class="fstep"><b>Plan</b>when it isn't trivial</div><div class="fstep"><b>Edit</b>files</div>
+<div class="fstep"><b>Run</b>commands</div><div class="fstep"><b>Verify</b>the check that matters</div><div class="fstep"><b>Adapt</b>from the error</div><div class="fstep"><b>Report</b>files, checks, gaps</div>
+</div>
+<div class="timeline" style="margin-top:16px" aria-label="Example timeline from the end-to-end test">
+<div class="tl"><code>Ran `pytest -q tests/test_dates.py`</code><span>Tests: 4 passed, 1 failed</span></div>
+<div class="tl"><code>Wrote dates.py</code><span>checkpointed</span></div>
+<div class="tl"><code>Ran `pytest -q tests/test_dates.py`</code><span>Tests: 5 passed</span></div>
+<div class="tl note"><span class="ok">Checks pass — test `pytest -q tests/test_dates.py`: 0 failed, 5 passed, exit 0 · 1 attempt.</span></div>
+</div>
+<p class="muted" style="margin-top:10px">These are steps in one coding session, not messages from different agents.</p></section>
+
+<section id="shared"><h2>What all three share</h2>
+<div class="grid3">
+<div class="box"><h3>One loop</h3><p>Tool calling, steering, cancellation, compaction and saved long outputs.</p></div>
+<div class="box"><h3>One safety model</h3><p>Permissions, approvals, policy, checkpoints and project isolation.</p></div>
+<div class="box"><h3>One learning system</h3><p>Episodes, lessons with holdouts, and measured transfer between learners.</p></div>
+</div>
+<p class="rule">Codex, Claude Code and ACP sessions keep their own loops, models and sign-ins. Nothing in them changed.</p></section>
+
+<section id="test"><h2>Your test</h2>
+<div class="phases">
+<div class="phase"><b>Fix a failing test</b><span>The model's name on messages; read, edit, ran steps; "Checks pass" under the answer</span></div>
+<div class="phase"><b>A feature in a git repo</b><span>Inspects status and diff; doesn't commit unless asked</span></div>
+<div class="phase"><b>A small local model</b><span>Only engineering tools listed up front</span></div>
+<div class="phase"><b>Agents and Chat</b><span>Echo still Echo; Chat still Chat</span></div>
+</div></section>
+<footer>Technical record: docs/research/native-code.md · Tests: apps/backend/tests/test_native_code.py</footer>
+</main></body></html>

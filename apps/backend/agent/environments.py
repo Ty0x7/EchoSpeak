@@ -2,7 +2,8 @@
 
 One rule, used by the runtime (who answers) and by the session list (where it shows):
 
-- **Code**: an Echo Code conversation (thread surface "code").
+- **Code**: an Echo Code conversation (thread surface "code"). Native Code is model-first like
+  Chat, but for software engineering (agent/lean/code_mode.py); external runtimes have their own sessions.
 - **Agents**: a conversation with a persistent agent. That's a room (a direct chat with
   one agent, or a group), or a conversation an agent started itself: check-ins, routine
   results, reminders, Discord and Telegram.
@@ -51,6 +52,18 @@ def environment_of(session_id: str, *, rooms: Optional[set[str]] = None) -> str:
     except Exception:
         thread = None
     return classify(thread, in_room=session_id in (room_threads() if rooms is None else rooms))
+
+
+def turn_environment(session_id: str, *, source: str, caller_role: str = "owner", work_id: str = "") -> str:
+    """Who answers this turn: "chat" or "code" (the selected model, model-first) or "agents" (a persistent agent).
+
+    Only the owner, live, and not resuming an agent's durable work: routines, channels and resumed
+    work stay with their agent wherever the conversation shows.
+    """
+    if caller_role != "owner" or work_id or source not in MODEL_FIRST_TURNS:
+        return "agents"
+    environment = environment_of(session_id)
+    return environment if environment in {"chat", "code"} else "agents"
 
 
 def model_first(session_id: str, *, source: str, caller_role: str = "owner", work_id: str = "") -> bool:

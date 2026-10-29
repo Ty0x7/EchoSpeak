@@ -56,6 +56,12 @@ NUDGE_REASONING_SPENT = ("Your reasoning used the whole output budget before you
 CONTINUATIONS = 2
 
 
+def exit_code_known(output: str) -> bool:
+    """The terminal reported how the command ended (agent/lean/terminal.py result header)."""
+    from agent.lean.verification import exit_code
+    return exit_code(output) is not None
+
+
 def app_note(text: str) -> str:
     """An instruction from EchoSpeak inside the conversation, marked so the model never takes it for the user.
 
@@ -1341,7 +1347,10 @@ class LeanTurn:
             if changed:
                 self._unchecked[changed] = True
         label = describe_call(name, args)
-        done = steps.done_label(label) if ok else label
+        # A command that ran and exited non-zero did run ("Ran `pytest`" · "Tests: 1 failed"); a refused or
+        # failed file write didn't happen, so it keeps its present-tense label.
+        ran_command = name in {"terminal", "terminal_run"} and evidence.ran(outcome) and exit_code_known(output)
+        done = steps.done_label(label) if ok or ran_command else label
         summary = steps.summarize(name, args, ok, output, facts)
         if outcome == "no_effect":
             summary = "No visible change on screen"  # the row says what the screen showed, whatever the reply claims

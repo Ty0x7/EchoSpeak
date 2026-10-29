@@ -50,7 +50,8 @@ def runtime_catalog() -> dict:
         "id": "echo", "name": "Echo native", "protocol": "native",
         "implemented": True, "installed": True, "authentication": "existing_model_settings",
         "can_start": True, "blockers": [],
-        "description": "Echo's own tools, skills, memory, learning, and approval policies, with a model on this PC. "
+        "description": "The model you pick on this PC as a coding assistant, in EchoSpeak's own harness: files, "
+                       "terminal, checks that verify the work, learning, and your approval rules. "
                        "API-key models are for Chat; in Echo Code, ChatGPT runs in Codex and Claude in Claude Code.",
     }]
     definitions = (

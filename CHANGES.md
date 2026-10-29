@@ -1,5 +1,23 @@
 # Changes
 
+## v11.11.8 — Code is a coding assistant (source; not yet built)
+
+* `environments.turn_environment` returns chat, code or agents. A live owner turn in a Code conversation is now model-first, with its own `code` persona (`personas.code_persona`) named after the selected model. Routines, guests and resumed work stay with their agent.
+* New `agent/lean/code_mode.py`:
+  * Code's identity and engineering workflow rules
+  * toolsets and a tool boundary (no reminders, media, live cards, shopping or desktop control)
+  * `CODE_FOCUS` for local models
+* Runtime:
+  * Code gets no hand-off, teammates, coordination tools, research workers, soul editing, smart routing or cross-environment past chats.
+  * Git rules are always on in a repo.
+  * Code learns as its own learner (`code`).
+* Prompt: `build_system_prompt(environment="code")` adds the workflow and drops the rich-answer and team sections.
+* Loop: a terminal command that ran and exited non-zero gets the past-tense label ("Ran `pytest`").
+* Kept:
+  * "Plans for code, APIs for chat": native Code never calls an API-key provider.
+  * External Codex, Claude Code and ACP sessions are untouched.
+* See [release notes](docs/releases/v11.11.8.md) and the [report](docs/research/native-code.md).
+
 ## v11.11.7 — Learning that has to earn its place (source; not yet built)
 
 * Research audit against ReasoningBank, ACE, Reflexion, AlphaEvolve, Claude Code, Letta, LangMem, Codex, SkillsBench and MINJA ([report](docs/research/learning-research.md)).
