@@ -108,6 +108,29 @@ def chat_persona(model_label: str = "") -> AgentPersona:
     )
 
 
+CODE_AGENT_ID = "code"
+
+
+def code_persona(model_label: str = "") -> AgentPersona:
+    """The model itself, for a native Echo Code session: a coding assistant, not one of the agents."""
+    from agent.lean import code_mode
+
+    label = " ".join(str(model_label or "").split())[:60]
+    return AgentPersona(
+        id=CODE_AGENT_ID,
+        name=label or "Code",
+        title="Code",
+        # The engineering workflow lives in agent/lean/code_mode.py; the identity names the model.
+        soul=code_mode.identity(label),
+        avatar="",
+        toolsets=list(code_mode.CODE_TOOLSETS),
+        context_scope="project",
+        builtin=True,
+        created_at=0.0,
+        updated_at=0.0,
+    )
+
+
 _SOULS = {
     "scout": (
         "You are Jarvis, a meticulous researcher on Echo's team. You search widely, read the "
@@ -219,6 +242,8 @@ class PersonaStore:
     def get(self, agent_id: str) -> Optional[AgentPersona]:
         if str(agent_id or "").strip() == CHAT_AGENT_ID:
             return chat_persona()
+        if str(agent_id or "").strip() == CODE_AGENT_ID:
+            return code_persona()
         with self._lock:
             agent = self._agents.get(str(agent_id or "").strip())
             return agent.model_copy() if agent else None

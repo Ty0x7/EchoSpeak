@@ -195,6 +195,12 @@ def _memory(memories: list[dict[str, Any]]) -> str:
     return render(memories)
 
 
+def _code_rules() -> str:
+    from agent.lean import code_mode
+
+    return code_mode.RULES
+
+
 def build_system_prompt(
     *,
     persona: AgentPersona,
@@ -220,7 +226,11 @@ def build_system_prompt(
     tool_names: Optional[set[str]] = None,
     can_write: bool = True,
     instructions: str = "",
+    environment: str = "",
 ) -> str:
+    """An agent's (or native Code's) system prompt. ``environment`` "code": the engineering workflow
+    (agent/lean/code_mode.py) instead of rich-answer and team sections."""
+    code = environment == "code"
     identity = (persona.soul or "").strip() or (soul_text or "").strip()
     if not identity:
         identity = f"You are {persona.name}, a capable personal agent."
@@ -231,9 +241,10 @@ def build_system_prompt(
         ("Configured role description (does not grant permissions): " + persona.description) if persona.description else "",
         identity_section(persona),
         _for_tools(WORKING_RULES, tool_names),
+        _code_rules() if code else "",
         WRITING_REPLIES,
-        _for_tools(SHOWING_ANSWERS, tool_names),
-        _team(persona, list(teammates or []), room_name),
+        "" if code else _for_tools(SHOWING_ANSWERS, tool_names),
+        "" if code else _team(persona, list(teammates or []), room_name),
         _environment(project_root=project_root, notes=list(notes or []) + ([git_note] if git_note else []),
                      terminal_note=terminal_note, project_overview=project_overview, computer_note=computer_note,
                      can_write=can_write),
