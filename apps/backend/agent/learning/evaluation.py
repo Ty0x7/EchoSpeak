@@ -134,6 +134,11 @@ def report(agent_id: str = "", days: int = 30) -> dict[str, Any]:
         **summarize(episodes),
         # One learning system, measured where the work happened: Chat, Agents and Code.
         "by_environment": {env: summarize([ep for ep in episodes if ep.environment == env]) for env in environments},
+        # Learning on vs control (Settings: learning_mode=control puts same-size unrelated notes where lessons go):
+        # the comparison that says whether learning helps at all, with token and time cost alongside.
+        "by_mode": {mode: {**summarize([ep for ep in episodes if (ep.learning_mode or "on") == mode]),
+                           "lesson_chars_per_task": _mean(ep.lesson_chars for ep in episodes if (ep.learning_mode or "on") == mode)}
+                    for mode in sorted({ep.learning_mode or "on" for ep in episodes})},
         "transfer": [transfer_effect(lesson) for lesson in lessons if lesson.shared_uses],
         "lessons": with_and_without_lessons(episodes),
         "lesson_effects": sorted(effects, key=lambda row: (row["verdict"] != "negative transfer", row["title"])),

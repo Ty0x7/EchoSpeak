@@ -195,6 +195,8 @@ class LeanSession:
         self._lessons_used: dict[str, list[str]] = {}
         self._lessons_withheld: dict[str, list[str]] = {}  # matched but held back at random (the control)
         self._lessons_shared: dict[str, list[str]] = {}  # proven lessons from other agents (transfer)
+        self._lessons_shared_withheld: dict[str, list[str]] = {}  # transferable, held back (transfer's control)
+        self._lesson_chars: dict[str, int] = {}  # prompt characters lessons cost each agent
         self._endpoints: dict[str, tuple[str, str]] = {}
         # Each agent's verification ledger for this request (agent/lean/verification.py): one per agent,
         # so a reply that continues after a handoff keeps its baseline and best result.
@@ -491,6 +493,8 @@ class LeanSession:
             lessons_used={k: list(v) for k, v in self._lessons_used.items()},
             lessons_withheld={k: list(v) for k, v in self._lessons_withheld.items()},
             lessons_shared={k: list(v) for k, v in self._lessons_shared.items()},
+            lessons_shared_withheld={k: list(v) for k, v in self._lessons_shared_withheld.items()},
+            lesson_chars=dict(self._lesson_chars),
             environment=self._environment_name(),
             project_id=self._active_project(),
             team=self._job_needs_closing(),
@@ -1128,8 +1132,10 @@ class LeanSession:
         compact_chat = chat_run is not None and chat_run.profile == "compact"
         learned = TurnLearning() if guest else prepare_turn(persona.id, goal, toolbox.names, limit=2 if compact_chat else None,
                                                             project_id=self._active_project())
-        if learned.lesson_ids or learned.withheld_ids or learned.shared_ids:
+        if learned.lesson_ids or learned.withheld_ids or learned.shared_ids or learned.shared_withheld_ids or learned.chars:
             with self._state_lock:
+                self._lessons_shared_withheld.setdefault(persona.id, []).extend(learned.shared_withheld_ids)
+                self._lesson_chars[persona.id] = self._lesson_chars.get(persona.id, 0) + learned.chars
                 self._lessons_used.setdefault(persona.id, []).extend(learned.lesson_ids)
                 self._lessons_withheld.setdefault(persona.id, []).extend(learned.withheld_ids)
                 self._lessons_shared.setdefault(persona.id, []).extend(learned.shared_ids)

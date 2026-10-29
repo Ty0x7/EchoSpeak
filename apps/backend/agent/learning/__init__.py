@@ -67,6 +67,8 @@ class TurnLearning:
     lesson_ids: list[str] = field(default_factory=list)
     withheld_ids: list[str] = field(default_factory=list)  # matched but held back: the control group
     shared_ids: list[str] = field(default_factory=list)  # proven lessons from another agent (transfer)
+    shared_withheld_ids: list[str] = field(default_factory=list)  # transferable but held back: transfer's control
+    chars: int = 0  # prompt characters the lessons cost
     notes: list[str] = field(default_factory=list)  # tool reliability notes
 
 
@@ -91,14 +93,24 @@ def prepare_turn(agent_id: str, goal: str, tool_names: Iterable[str], *, limit: 
         mode = _mode()
         if mode == "off" or agent_id in get_experience_store().paused_agents():
             return TurnLearning()
+        if not playbook.worth_lessons(goal):
+            # Small talk and one-line requests: lessons would only cost context (ACE: not every task needs one).
+            return TurnLearning(notes=reliability.tool_notes(tool_names) if mode == "on" else [])
         size = settings.playbook_size() if limit is None else max(0, min(limit, settings.playbook_size()))
-        lessons = playbook.select(agent_id, goal, size, project_id=project_id)
-        shared = playbook.transferable(agent_id, goal, project_id, taken=lessons) if size and len(lessons) < size else []
+        budget = playbook.COMPACT_CHARS if limit is not None and limit <= 2 else playbook.FULL_CHARS
+        lessons = playbook.fit(playbook.select(agent_id, goal, size, project_id=project_id), budget)
+        room = budget - sum(playbook.cost(l) for l in lessons)
+        shared = (playbook.fit(playbook.transferable(agent_id, goal, project_id, taken=lessons), room)
+                  if size and len(lessons) < size else [])
         if mode == "control":
-            return TurnLearning(section=playbook.control_section(lessons + shared))
+            section = playbook.control_section(lessons + shared)
+            return TurnLearning(section=section, chars=len(section))
         used, withheld = playbook.holdout(lessons)
-        return TurnLearning(section=playbook.section(used, shared), lesson_ids=[l.id for l in used],
-                            withheld_ids=[l.id for l in withheld], shared_ids=[l.id for l in shared],
+        shared_used, shared_withheld = playbook.holdout(shared, rate=playbook.HOLDOUT_SHARED)
+        section = playbook.section(used, shared_used)
+        return TurnLearning(section=section, lesson_ids=[l.id for l in used],
+                            withheld_ids=[l.id for l in withheld], shared_ids=[l.id for l in shared_used],
+                            shared_withheld_ids=[l.id for l in shared_withheld], chars=len(section),
                             notes=reliability.tool_notes(tool_names))
     except Exception:
         logger.warning("Learning: could not prepare lessons", exc_info=True)
@@ -141,10 +153,17 @@ def record_request(
     lessons_shared: Optional[dict[str, list[str]]] = None,
     environment: str = "",
     project_id: str = "",
+    lessons_shared_withheld: Optional[dict[str, list[str]]] = None,
+    lesson_chars: Optional[dict[str, int]] = None,
 ) -> list[Episode]:
-    """Grade and keep a finished request. Only the owner's, never a cancelled one."""
+    """Grade and keep a finished request. Only the owner's, never a cancelled one.
+
+    In "control" mode (evaluation) episodes are still recorded, tagged, so learning-on and learning-off
+    periods can be compared; nothing is credited to lessons and nothing is reflected on.
+    """
     try:
-        if _mode() != "on" or caller_role != "owner" or cancelled or not results:
+        mode = _mode()
+        if mode == "off" or caller_role != "owner" or cancelled or not results:
             return []
         from agent.learning import playbook, profiles, reflector, reliability
         from agent.learning.episodes import build_episodes
@@ -158,13 +177,22 @@ def record_request(
                                       lead=lead, routed=routed, lessons_withheld=lessons_withheld):
             if episode.agent_id in paused:
                 continue
-            episode.environment, episode.project_id = environment, project_id
+            episode.environment, episode.project_id, episode.learning_mode = environment, project_id, mode
             episode.lessons_shared = list(dict.fromkeys((lessons_shared or {}).get(episode.agent_id, [])))
+            episode.lessons_shared_withheld = [i for i in dict.fromkeys((lessons_shared_withheld or {}).get(episode.agent_id, []))
+                                               if i not in episode.lessons_shared]
+            episode.lesson_chars = int((lesson_chars or {}).get(episode.agent_id, 0))
+            if mode == "control":
+                episode.lessons_used, episode.lessons_withheld, episode.lessons_shared = [], [], []
+                episode.lessons_shared_withheld = []
+                store.add_episode(episode)
+                kept.append(episode)
+                continue
             playbook.attribute(episode)
             store.add_episode(episode)
             reliability.record_episode(episode)
             if not reflector.skip_reason(episode):
-                store.queue_reflection(episode.id, episode.agent_id)
+                store.queue_reflection(episode.id, episode.agent_id, reflector.priority(episode))
             kept.append(episode)
         profiles.forget_cache()
         from agent.learning import routing
@@ -199,12 +227,14 @@ def record_feedback(execution_id: str, value: int, note: str = "", agent_id: str
         episode.feedback_note = redact_secrets(" ".join(str(note or "").split()))[:500] if value else ""
         # Reclassifies the episode (a misunderstanding, an environment problem, checks that missed something);
         # the note itself only reaches a reflection, whose lessons still have to prove themselves.
-        episode.feedback_cause = feedback_cause(episode, value, episode.feedback_note)
         episode.feedback_source = source if value else ""
+        # A casual "thanks, that worked" is recorded but proves nothing: the evidence keeps deciding.
+        weak = source == "implicit" and value > 0
+        episode.feedback_cause = "" if weak else feedback_cause(episode, value, episode.feedback_note)
         playbook.attribute(episode, previous=previous)
         store.update_episode(episode)
         if value and not reflector.skip_reason(episode):
-            store.queue_reflection(episode.id, episode.agent_id)
+            store.queue_reflection(episode.id, episode.agent_id, reflector.priority(episode))
         changed.append(episode)
     profiles.forget_cache()
     from agent.learning import routing
@@ -231,12 +261,15 @@ def implicit_feedback(session_id: str, message: str) -> list[Episode]:
             return []
         recent = get_experience_store().episodes(session_id=session_id, since=time.time() - IMPLICIT_WINDOW_SECONDS,
                                                  limit=10, role="own")
-        if not recent:
+        if not recent or not recent[0].execution_id:
             return []
-        latest = recent[0].execution_id
-        if not latest:
+        latest = [ep for ep in recent if ep.execution_id == recent[0].execution_id]
+        # The reply the user is answering: the lead's (or the only agent's), never every agent in a group.
+        lead = next((ep for ep in latest if ep.role == "lead"), None) or (latest[0] if len({ep.agent_id for ep in latest}) == 1 else None)
+        if lead is None:
             return []
-        return record_feedback(latest, value, " ".join(str(message).split())[:300], source="implicit")
+        return record_feedback(lead.execution_id, value, " ".join(str(message).split())[:300],
+                               agent_id=lead.agent_id, source="implicit")
     except Exception:
         logger.debug("Learning: implicit feedback failed", exc_info=True)
         return []
@@ -266,6 +299,7 @@ def worker_tick(*, client_factory: Any = None) -> list[dict[str, Any]]:
                 _last_maintenance["at"] = time.time()
         if due:
             playbook.retire_stale()
+            playbook.consolidate()  # twins admitted apart are merged (deterministic, no model call)
             get_experience_store().prune()
         if is_busy():
             return []  # the model is serving a chat; reflection waits

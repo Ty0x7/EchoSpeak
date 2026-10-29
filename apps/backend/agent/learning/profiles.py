@@ -32,7 +32,7 @@ def _verdict(episode: Episode) -> str:
         return "loss"
     if episode.outcome == "success":
         return "win"
-    return "win" if episode.feedback > 0 else ""
+    return "win" if episode.confirmed else ""
 
 
 def profile(agent_id: str) -> dict[str, Any]:
@@ -57,7 +57,7 @@ def profile(agent_id: str) -> dict[str, Any]:
             row["answered"] += 1
         if ep.verified_success:
             row["checked"] += 1
-        if ep.feedback > 0:
+        if ep.confirmed:
             row["confirmed"] += 1
         # Said it was done when it wasn't: a false claim caught in the turn, or the owner said it didn't work.
         if "unverified_claim" in ep.stop_reason or "promise_unfulfilled" in ep.stop_reason \
