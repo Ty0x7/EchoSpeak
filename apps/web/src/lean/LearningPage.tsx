@@ -176,8 +176,8 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
 
   return (
     <PageShell
-      title="Learning"
-      lead="What Echo learns from finished tasks: short lessons it may use next time. Lessons are advice only; they never change permissions, tools or settings."
+      title="Learning diagnostics"
+      lead="Echo learns on its own from checked work in Chat, Agents and Code; you don't need to manage it. This shows what it learned and whether it's helping. Lessons are advice only; they never change permissions, tools or settings."
       action={<button type="button" className="es-btn" aria-pressed={view.kind === "guide"} onClick={() => go(view.kind === "guide" ? { kind: "overview" } : { kind: "guide" })}>How learning works</button>}
     >
       <div className="es-lx">
@@ -216,7 +216,7 @@ function Overview({ data, names, go, api, act }: { data: Data; names: Map<string
         <div className="es-learn-callout" role="note">
           {data.status.mode === "control"
             ? "Learning is in test mode: agents read unrelated notes instead of lessons, and nothing new is recorded."
-            : "Learning is off, so Echo isn't recording experiences or using lessons. Turn it on in Settings › General."}
+            : "Learning is off, so Echo isn't recording experiences or using lessons. Turn it on in Settings › Memory."}
         </div>
       ) : null}
       <Improvement data={data} inUse={inUse} />
@@ -686,7 +686,7 @@ function Guide({ data, lessonById, go, back }: { data: Data; lessonById: Map<str
         </li>
         <li>
           <strong>Give feedback where it helps.</strong>
-          <span>Under a reply, or on an unchecked experience here, press Worked or Didn't work. Lessons learned while reading web pages or email wait for your review in {link("Needs your feedback", { kind: "review" })}.</span>
+          <span>Under a reply, press Worked or Didn't work, or just say "that worked" or "that's wrong" in your next message. A few risky lessons (about sending things, or naming sites learned from the web) wait in {link("Needs your feedback", { kind: "review" })}; unreviewed ones are set aside after 30 days.</span>
         </li>
         <li>
           <strong>See whether a lesson came out of it.</strong>
@@ -701,7 +701,7 @@ function Guide({ data, lessonById, go, back }: { data: Data; lessonById: Map<str
         <span className="es-lx-badge">Example, not your data</span>
         <p>A lesson "Run a script once after writing it" is used on 4 coding tasks (3 worked) and left out on 3 (1 worked). That's evidence it helps, so it becomes <b>Proven</b>. If the tasks without it had gone just as well, it would stay <b>Being tested</b>; clearly better without it, and it's retired.</p>
       </div>
-      {lessonById.size === 0 && !data.recent.length ? <p className="es-lx-muted">Learning needs to be on: Settings › General › Learning from experience.</p> : null}
+      {lessonById.size === 0 && !data.recent.length ? <p className="es-lx-muted">Learning needs to be on: Settings › Memory › Learning from experience.</p> : null}
     </article>
   );
 }
@@ -720,6 +720,12 @@ function Advanced({ data, api, act }: { data: Data; api: Api; act: Act }) {
         Reviews happen when no chat is running.{" "}
         <button type="button" className="es-lx-link" disabled={!data.status.enabled || !data.status.reflections_pending}
           onClick={() => void act(() => api.reflectNow(), "Reviewing finished tasks in the background. Check back in a minute.")}>Review now</button>
+      </p>
+      <p className="es-lx-muted">
+        Reset forgets every lesson, experience and statistic. Memory is separate and isn't touched.{" "}
+        <button type="button" className="es-lx-link" onClick={() => {
+          if (window.confirm("Forget everything Echo learned? Memory isn't affected.")) void act(() => api.resetLearning(), "Learning was reset.");
+        }}>Reset learning</button>
       </p>
       <div className="es-page-list">
         {data.profiles.map((profile) => <AgentRow key={profile.agent_id} profile={profile} onPause={(paused) => void act(() => api.pauseLearning(profile.agent_id, paused))} />)}

@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — Autonomous learning</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}.shot img{display:block;width:100%;height:auto}.shot figcaption{padding:10px 14px;margin:0}.phone{max-width:240px}
+.mono{font:12px/1.55 Consolas,monospace;overflow-wrap:anywhere}.bad{color:var(--warn)}.ok{color:var(--good)}
+.envs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.env{min-width:0;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--bg);font-size:13px;color:var(--muted)}.env b{display:block;color:var(--ink);font-weight:550;margin-bottom:6px}
+.cycle{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;margin-top:14px}.step{min-width:0;padding:10px;border:1px solid var(--line);border-radius:9px;background:var(--bg);font-size:12px;color:var(--muted);text-align:center}.step b{display:block;color:var(--ink);font-size:13px;font-weight:550;margin-bottom:4px}.step.a{border-color:var(--accent)}
+.quote{font-size:13px;padding:10px 12px;border-radius:9px;background:var(--soft);margin:6px 0}.quote span{float:right;font-size:12px}
+@media(max-width:900px){.cycle{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:760px){.envs{grid-template-columns:1fr}.cycle{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
+<body><main>
+<header><h1>EchoSpeak / Autonomous learning</h1><p>28 October 2026 · EchoSpeak 11.11.6 · technical record: docs/research/autonomous-learning.md</p></header>
+<nav aria-label="Report sections"><a href="#one">One learner</a><a href="#cycle">The cycle</a><a href="#curation">What waits for you</a><a href="#feedback">Feedback</a><a href="#transfer">Sharing</a><a href="#ui">What you see</a><a href="#test">Your test</a></nav>
+<p class="lead">Echo learns as a consequence of doing work.<br>You don't manage it; you see the improvement.</p>
+<p class="note"><strong>Evidence:</strong> the diagrams describe the design. The behaviour shown is what the focused tests check with the real harness and scripted models. Real-model quality is for your live test.</p>
+<div class="legend"><span class="badge current">New in 11.11.6</span><span class="badge documented">Existing, now connected</span><span class="badge proposed">Your live test</span></div>
+
+<section id="one"><h2>One learner, three environments</h2>
+<div class="envs">
+<div class="env"><b>Chat</b>Learns from grounded research, your corrections and feedback. No coding loops and no extra model calls. <span class="ok">Now reads the lessons it's credited with</span>; before, they were counted but never shown.</div>
+<div class="env"><b>Agents</b>Learns from tool results, finished and failed tasks, delegation and research. Echo here and in Code is the same learner.</div>
+<div class="env"><b>Code</b>Learns from tests, builds, errors and benchmarks through the 11.11.5 verification ledger. Lessons can be scoped to one project.</div>
+</div>
+<p class="rule">All three go through the same harness hooks and the same store. Personal memory is separate, and so are external Codex, Claude Code and ACP sessions.</p></section>
+
+<section id="cycle"><h2>The cycle runs on its own</h2>
+<div class="cycle">
+<div class="step"><b>Execute</b>normal work</div>
+<div class="step"><b>Observe</b>what ran</div>
+<div class="step"><b>Verify</b>V0–V4, ledger, cause</div>
+<div class="step a"><b>Understand</b>reflect when idle, most informative first</div>
+<div class="step a"><b>Adapt</b>risk-based curation, no routine approvals</div>
+<div class="step"><b>Retain</b>agent, project or shared scope</div>
+<div class="step a"><b>Apply</b>next similar task, measured against holdouts</div>
+</div>
+<p class="muted" style="margin-top:12px">Bounded: reviews only when no chat is running, 30 a day, with each agent's own model. Chat on a small model reads at most 2 lessons. Nothing here adds a model call to your conversation.</p></section>
+
+<section id="curation"><h2>What still waits for you, and what doesn't</h2>
+<div class="comparison"><table><thead><tr><th>Lesson</th><th>Before</th><th>Now</th></tr></thead><tbody>
+<tr><td>From checked work</td><td>Tried automatically</td><td>Tried automatically</td></tr>
+<tr><td>Learned while reading the web, generic</td><td class="documented">Waited for you, so Chat almost never learned</td><td>Tried automatically, marked untrusted: never shared, retired after 2 failures</td></tr>
+<tr><td>Names a site, or says which sources to trust</td><td>Waited</td><td>Waits (memory-poisoning guard)</td></tr>
+<tr><td>About sending or posting things, or from work that changed tests</td><td>Waited</td><td>Waits</td></tr>
+<tr><td>A fact about you ("prefers short answers")</td><td class="documented">Could become a lesson</td><td>Refused: that's memory</td></tr>
+<tr><td>Nobody reviews it for 30 days</td><td class="documented">Waited forever</td><td>Set aside, never used</td></tr>
+</tbody></table></div></section>
+
+<section id="feedback"><h2>Your next message is feedback</h2>
+<div class="grid2">
+<div class="box"><h3>Counted</h3>
+<div class="quote">"That worked, thanks!" <span class="ok">worked</span></div>
+<div class="quote">"It still doesn't work" <span class="bad">didn't work</span></div>
+<div class="quote">"You misunderstood, I meant the CSV" <span class="bad">misunderstood, so the lessons aren't blamed</span></div></div>
+<div class="box"><h3>Ignored</h3>
+<div class="quote">"Let me see if it works"</div>
+<div class="quote">"Does it work?"</div>
+<div class="quote">"No thanks"</div>
+<p>No model call. Applied to the last reply in that chat, and never over the Worked / Didn't work buttons.</p></div>
+</div></section>
+
+<section id="transfer"><h2>Sharing what's proven, carefully</h2>
+<div class="grid3">
+<div class="box"><h3>Agent</h3><p>The default. Echo's lessons serve it in both Agents and Code.</p></div>
+<div class="box"><h3>Project</h3><p>"In this project, run the linter first." Read only in that project.</p></div>
+<div class="box"><h3>Shared</h3><p>A proven, trusted lesson can be offered to another agent for the same kind of task, one per prompt. Its results there are counted separately. If it fails twice, it stops being shared, but keeps its place at home.</p></div>
+</div></section>
+
+<section id="ui"><h2>What you see</h2>
+<div class="grid2">
+<div class="box"><h3 class="bad">Before</h3><p>A Learning page in the navigation, review queues, and settings for reviews per day and lessons per task.</p></div>
+<div class="box"><h3 class="ok">Now</h3><p>Nothing in the navigation. Settings › Memory has one switch. Settings › Advanced › Learning holds the diagnostics: what was learned and whether it helps, the rare lessons needing review, pause per agent, and Reset learning (memory untouched).</p></div>
+</div></section>
+
+<section id="test"><h2>Your live test</h2>
+<div class="phases">
+<div class="phase"><b>Chat research, then "that worked"</b><span>A checked experience; later, a similar question uses what was learned</span></div>
+<div class="phase"><b>Fix a failing test twice in one project</b><span>A lesson, possibly scoped to that project</span></div>
+<div class="phase"><b>Say "that's wrong"</b><span>Recorded as "didn't work", with your words as the note</span></div>
+<div class="phase"><b>Turn learning off</b><span>No new experiences are recorded</span></div>
+</div>
+<p class="proposed" style="margin-top:12px">Lesson quality depends on the model that reflects; holdouts decide whether a lesson is kept.</p></section>
+<footer>Technical record: docs/research/autonomous-learning.md · Tests: apps/backend/tests/test_autonomous_learning.py</footer>
+</main></body></html>

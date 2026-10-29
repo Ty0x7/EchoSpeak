@@ -238,6 +238,7 @@ def build_prompt(
     profile: str = "full",
     earlier_sources: str = "",
     sizes: Optional[dict[str, int]] = None,
+    playbook: str = "",
 ) -> str:
     """Chat's system prompt, ordered for prefix caching.
 
@@ -264,6 +265,8 @@ def build_prompt(
         ("project", ("## Project brief\n" + project_brief) if project_brief else ""),
         # Changes as the chat goes on.
         ("memory", _memory(list(memories or []))),
+        # Strategies from checked past work (agent/learning), chosen for this request.
+        ("lessons", playbook.strip()),
         ("summary", ("## Earlier in this chat (summary)\n" + chat_summary.strip()) if chat_summary.strip() else ""),
         ("earlier_sources", earlier_sources.strip()),
         ("past_chats", ("## From the user's past chats (they match what the user is referring to)\n"

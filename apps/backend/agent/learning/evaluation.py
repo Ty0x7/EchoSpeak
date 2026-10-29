@@ -98,6 +98,15 @@ def lesson_effect(lesson: Lesson) -> dict[str, Any]:
             "verdict": verdict}
 
 
+def transfer_effect(lesson: Lesson) -> dict[str, Any]:
+    """How a proven lesson does in other agents' work, beside its home record."""
+    home, away = lesson.wins + lesson.losses, lesson.shared_wins + lesson.shared_losses
+    return {"id": lesson.id, "agent_id": lesson.agent_id, "title": lesson.title, "transfer": lesson.transfer,
+            "home": {"wins": lesson.wins, "decided": home, "rate": _rate(lesson.wins, home)},
+            "elsewhere": {"uses": lesson.shared_uses, "wins": lesson.shared_wins, "decided": away,
+                          "rate": _rate(lesson.shared_wins, away)}}
+
+
 def with_and_without_lessons(episodes: Iterable[Episode]) -> dict[str, Any]:
     """Checked success on tasks that read lessons against matching tasks whose lessons were all held back."""
     rows = {"with": [0, 0], "held_back": [0, 0]}
@@ -118,10 +127,14 @@ def report(agent_id: str = "", days: int = 30) -> dict[str, Any]:
     episodes = store.episodes(agent_id=agent_id, since=since, limit=2000)
     lessons = store.lessons(agent_id=agent_id)
     effects = [lesson_effect(lesson) for lesson in lessons if lesson.uses or lesson.held_wins + lesson.held_losses]
+    environments = sorted({ep.environment for ep in episodes if ep.environment})
     return {
         "agent_id": agent_id,
         "days": days,
         **summarize(episodes),
+        # One learning system, measured where the work happened: Chat, Agents and Code.
+        "by_environment": {env: summarize([ep for ep in episodes if ep.environment == env]) for env in environments},
+        "transfer": [transfer_effect(lesson) for lesson in lessons if lesson.shared_uses],
         "lessons": with_and_without_lessons(episodes),
         "lesson_effects": sorted(effects, key=lambda row: (row["verdict"] != "negative transfer", row["title"])),
     }

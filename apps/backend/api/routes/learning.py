@@ -171,6 +171,13 @@ def learning_pause(agent_id: str, payload: PausePayload) -> dict[str, Any]:
     return {"agent_id": agent_id, "paused": payload.paused}
 
 
+@router.post("/learning/reset")
+def learning_reset() -> dict[str, Any]:
+    """Forget everything learned (lessons, experiences, statistics). Personal memory is separate and untouched."""
+    learning.reset()
+    return {"ok": True}
+
+
 @router.post("/learning/reflect")
 def learning_reflect_now() -> dict[str, Any]:
     """Reflect on queued episodes now (in the background, within the daily cap)."""

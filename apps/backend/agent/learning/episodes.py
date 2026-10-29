@@ -394,6 +394,32 @@ def classify_cause(*, outcome: str, stops: set[str], tools: list[dict[str, Any]]
     return ""
 
 
+# The owner's next message, read as feedback on the reply before it. Unambiguous phrases only: a missed
+# signal costs nothing, a misread one would credit or blame the wrong strategy.
+_SAID_WRONG = re.compile(
+    r"(?i)\b((that|this|it)('?s| is| was) (wrong|incorrect|not (right|correct|true|what i (asked|meant|wanted))))\b|"
+    r"\b(that|it|this) (didn'?t|doesn'?t|did not|does not) work\b|\bstill (doesn'?t work|broken|failing|fails|wrong)\b|"
+    r"\bnot what i (asked|meant|wanted)\b|\byou misunderstood\b|\byou got (it|that) wrong\b|\bthat'?s not (it|true|right)\b")
+_SAID_WORKED = re.compile(
+    r"(?i)\b(that|it|this) (worked|works( now| perfectly| great)?)\b|\bworks now\b|\b(that|this|it) fixed it\b|"
+    r"\bperfect,? (thanks|thank you)\b|\bexactly what i (wanted|needed)\b")
+_HEDGED = re.compile(r"(?i)\b(if|whether|once|until|hope|make sure|check that|see if|unless)\b[^.!?]{0,30}$")
+
+
+def implicit_signal(message: str) -> int:
+    """+1 / -1 when the owner's message plainly says the last reply worked or was wrong; 0 otherwise."""
+    text = " ".join(str(message or "").split())[:240]
+    if not text:
+        return 0
+    wrong = _SAID_WRONG.search(text)
+    if wrong and not _HEDGED.search(text[:wrong.start()]):
+        return -1
+    worked = _SAID_WORKED.search(text)
+    if worked and "?" not in text[:worked.end() + 2] and not _HEDGED.search(text[:worked.start()]):
+        return 1
+    return 0
+
+
 def feedback_cause(episode: Episode, value: int, note: str = "") -> str:
     """The owner's Worked / Didn't work, as a cause. Reclassifies; never becomes an instruction by itself."""
     if value > 0:
