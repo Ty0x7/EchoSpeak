@@ -94,17 +94,27 @@ class Episode:
     project_id: str = ""
     # Proven lessons from another agent read on this task (transfer; counted apart from the home agent's results).
     lessons_shared: list[str] = field(default_factory=list)
+    # Transferable lessons held back at random on this task: the control group for transfer.
+    lessons_shared_withheld: list[str] = field(default_factory=list)
+    # on | control (evaluation: placebo notes instead of lessons), and how many characters of lessons it read.
+    learning_mode: str = "on"
+    lesson_chars: int = 0
 
     @property
     def effective_cause(self) -> str:
         return self.feedback_cause or self.cause
 
     @property
+    def confirmed(self) -> bool:
+        """The owner said it worked with the button. A casual "thanks, that worked" isn't proof (implicit)."""
+        return self.feedback > 0 and self.feedback_source != "implicit"
+
+    @property
     def verified_success(self) -> bool:
         """Success backed by a check after the work (V2+), or the owner said it worked."""
         if self.feedback < 0 or self.outcome == "error":
             return False
-        if self.feedback > 0:
+        if self.confirmed:
             return self.outcome in {"success", "answered"}
         if self.effective_cause in LOSS_CAUSES or self.effective_cause in NOT_ATTRIBUTABLE:
             return False  # a passing read-back doesn't outweigh a test that still fails
@@ -155,6 +165,12 @@ class Lesson:
     shared_wins: int = 0
     shared_losses: int = 0
     transfer: bool = True
+    # Matching tasks in other agents' work where it was held back at random: transfer's control group.
+    shared_held_wins: int = 0
+    shared_held_losses: int = 0
+    # What a waiting lesson waits for: "owner" (risky: only the owner releases it) or "confirmation"
+    # (learned while reading outside content: released when work in another conversation independently teaches it).
+    awaiting: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -185,6 +201,9 @@ class ExperienceStore:
         with self._lock, self._conn:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(_SCHEMA)
+            columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(reflections)")}
+            if "priority" not in columns:  # databases from before 11.11.7
+                self._conn.execute("ALTER TABLE reflections ADD COLUMN priority INTEGER NOT NULL DEFAULT 4")
             self._conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', ?)", (str(SCHEMA_VERSION),))
 
     def close(self) -> None:
@@ -359,19 +378,20 @@ class ExperienceStore:
         return [dict(row) for row in rows]
 
     # ── reflection queue ────────────────────────────────────────────────
-    def queue_reflection(self, episode_id: str, agent_id: str) -> None:
+    def queue_reflection(self, episode_id: str, agent_id: str, priority: int = 4) -> None:
+        """Queue (or re-queue) a review. Lower ``priority`` is reviewed sooner (reflector.priority)."""
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO reflections(episode_id, agent_id, status, created_at) VALUES (?,?, 'pending', ?)"
-                " ON CONFLICT(episode_id) DO UPDATE SET status = 'pending'"
-                " WHERE reflections.status IN ('done', 'skipped')",
-                (episode_id, agent_id, time.time()),
+                "INSERT INTO reflections(episode_id, agent_id, status, created_at, priority) VALUES (?,?, 'pending', ?, ?)"
+                " ON CONFLICT(episode_id) DO UPDATE SET status = 'pending', priority = MIN(reflections.priority, excluded.priority)"
+                " WHERE reflections.status IN ('done', 'skipped', 'pending')",
+                (episode_id, agent_id, time.time(), int(priority)),
             )
 
     def pending_reflections(self, limit: int = 5) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM reflections WHERE status = 'pending' ORDER BY created_at LIMIT ?", (max(1, limit),)
+                "SELECT * FROM reflections WHERE status = 'pending' ORDER BY priority, created_at LIMIT ?", (max(1, limit),)
             ).fetchall()
         return [dict(row) for row in rows]
 

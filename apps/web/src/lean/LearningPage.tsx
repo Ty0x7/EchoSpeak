@@ -73,7 +73,8 @@ function evidenceOf(lesson: LearningLesson) {
 
 function lessonLine(lesson: LearningLesson): string {
   const e = evidenceOf(lesson);
-  if (lesson.status === "pending_review") return "Learned while reading outside content or from an unusual task, so Echo won't use it until you decide.";
+  if (lesson.status === "pending_review" && lesson.awaiting === "confirmation") return "Learned while reading outside content: Echo uses it once work in another conversation teaches the same thing, or you approve it.";
+  if (lesson.status === "pending_review") return "Risky (it names sites, sends things, or came from a task that changed tests), so Echo won't use it until you decide.";
   if (lesson.status === "retired") return lesson.note ? sentence(lesson.note) : "No longer used.";
   if (lesson.status === "quarantined") return "You rejected it. Echo never uses it.";
   if (!lesson.uses) return "New: Echo hasn't used it on a task yet.";
@@ -200,8 +201,11 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
 
 // ── overview ─────────────────────────────────────────────────────────────
 
+/** Waiting lessons only the owner can release; ones waiting for confirmation release themselves. */
+const needsOwner = (l: LearningLesson) => l.status === "pending_review" && l.awaiting !== "confirmation";
+
 function Overview({ data, names, go, api, act }: { data: Data; names: Map<string, string>; go(v: View): void; api: Api; act: Act }) {
-  const pending = data.lessons.filter((l) => l.status === "pending_review");
+  const pending = data.lessons.filter(needsOwner);
   const inUse = data.lessons
     .filter((l) => l.status === "established" || l.status === "probation")
     .sort((a, b) => (b.last_used_at || b.updated_at) - (a.last_used_at || a.updated_at));
@@ -438,7 +442,7 @@ function ExperienceList({ api, profiles, go, back }: { api: Api; profiles: Learn
 }
 
 function ReviewList({ data, go, back }: { data: Data; go(v: View): void; back(): void }) {
-  const pending = data.lessons.filter((l) => l.status === "pending_review");
+  const pending = data.lessons.filter(needsOwner);
   const feedback = data.recent.filter(wantsFeedback);
   return (
     <>

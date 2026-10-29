@@ -156,6 +156,8 @@ export type LeanApproval = {
 export type LessonStatus = "pending_review" | "probation" | "established" | "retired" | "quarantined";
 
 export type LearningLesson = {
+  /** For a waiting lesson: "owner" (only you release it) or "confirmation" (released when other work teaches it too). */
+  awaiting?: string;
   id: string;
   agent_id: string;
   agent_name?: string;

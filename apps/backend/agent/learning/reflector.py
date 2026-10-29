@@ -31,6 +31,8 @@ from agent.learning.store import Episode, get_experience_store
 
 MAX_ATTEMPTS = 3
 MAX_AGE_DAYS = 7
+# The most informative experiences (priority 0-2) wait longer for a review than routine ones.
+MAX_AGE_DAYS_VALUABLE = 30
 CONTRAST_DAYS = 90
 
 ClientFactory = Callable[[Episode], Any]
@@ -45,8 +47,8 @@ def skip_reason(episode: Episode) -> str:
         return "the owner said the request was misunderstood: that's about this request, not a strategy"
     if cause in {"environment", "authorization", "tool_failure"}:
         return f"blocked by {cause.replace('_', ' ')}, so the strategy itself wasn't tested"
-    if episode.feedback:
-        return ""
+    if episode.feedback and not (episode.feedback > 0 and episode.feedback_source == "implicit"):
+        return ""  # the owner's word (or their correction) is worth a review; a casual "thanks" alone isn't
     ran = [t for t in episode.tools if not t.get("not_run")]
     if not ran:
         return "nothing ran"
@@ -54,6 +56,9 @@ def skip_reason(episode: Episode) -> str:
         return "a plain answer"
     if episode.outcome == "success" and episode.level < 2:
         return "succeeded, but nothing checked it"
+    if (episode.effective_cause == "effective" and episode.lessons_used and episode.attribution == "win"
+            and not episode.feedback and not (episode.verification or {}).get("recovered")):
+        return "a routine success already covered by the lessons it used"
     return ""
 
 
@@ -88,6 +93,9 @@ _CAUSES = {
 
 def _describe(episode: Episode, label: str) -> str:
     feedback = {1: "The owner said it worked.", -1: "The owner said it didn't work."}.get(episode.feedback, "")
+    if episode.feedback_source == "implicit" and feedback:
+        feedback = {1: "The owner's next message suggested it worked (a casual remark, not a check).",
+                    -1: "The owner's next message said it was wrong."}[episode.feedback]
     if feedback and episode.feedback_note:
         feedback += f' Their note: "{episode.feedback_note[:300]}"'
     cause = _CAUSES.get(episode.effective_cause, "")
@@ -148,7 +156,7 @@ def priority(episode: Episode) -> int:
         return 0
     if (episode.verification or {}).get("recovered"):
         return 1
-    if episode.feedback:
+    if episode.feedback < 0 or episode.confirmed:
         return 2
     if cause == "effective":
         return 3
@@ -214,7 +222,8 @@ def run_pending(*, limit: int = 3, cap: Optional[int] = None,
         if episode.agent_id in paused:
             store.finish_reflection(episode.id, "skipped", "learning is paused for this agent")
             continue
-        if time.time() - float(row["created_at"]) > MAX_AGE_DAYS * 86400 or int(row["attempts"]) >= MAX_ATTEMPTS:
+        max_age = MAX_AGE_DAYS_VALUABLE if int(row.get("priority", 4)) <= 2 else MAX_AGE_DAYS
+        if time.time() - float(row["created_at"]) > max_age * 86400 or int(row["attempts"]) >= MAX_ATTEMPTS:
             store.finish_reflection(episode.id, "skipped", "too old or failed too often")
             continue
         reason = skip_reason(episode)

@@ -1,5 +1,21 @@
 # Changes
 
+## v11.11.7 — Learning that has to earn its place (source; not yet built)
+
+* Research audit against ReasoningBank, ACE, Reflexion, AlphaEvolve, Claude Code, Letta, LangMem, Codex, SkillsBench and MINJA ([report](docs/research/learning-research.md)).
+* Untrusted (web-read) lessons wait for **confirmation**: a lesson taught by work in a different conversation is released (untrusted, never shared). `Lesson.awaiting` distinguishes "confirmation" from "owner"; diagnostics list only owner-gated lessons.
+* Implicit feedback:
+  * A positive message is recorded but isn't proof: `Episode.confirmed` means the button only.
+  * Feedback goes to the lead agent's episode only, or none when that's ambiguous.
+  * Only the message opening counts.
+* Transfer gets its own random holdout (`HOLDOUT_SHARED`, `shared_held_*`); `transfer_harm` compares against it.
+* Lessons are credited only on the kind of work they're about (`playbook.applies`).
+* Reflection queue: a `priority` column (migrated in place) orders the queue in SQL, and valuable experiences have a 30-day window. Covered routine successes are skipped.
+* Context: no lessons for requests under 3 content words, and a size budget (900 characters, or 420 compact). Semantic matching is used when the embedding model is installed.
+* Hourly deterministic `playbook.consolidate()` merges twins.
+* Control mode records tagged episodes, and the evaluation adds `by_mode` with lesson characters per task.
+* See [release notes](docs/releases/v11.11.7.md).
+
 ## v11.11.6 — Echo learns as it works (source; not yet built)
 
 * Learning is a harness mechanic across Chat, Agents and Code: one learner in `agent/learning`, wired through the shared `LeanSession` hooks.

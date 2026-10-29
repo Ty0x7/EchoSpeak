@@ -14,7 +14,7 @@ figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:h
 @media(max-width:900px){.cycle{grid-template-columns:repeat(4,minmax(0,1fr))}}@media(max-width:760px){.envs{grid-template-columns:1fr}.cycle{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 <body><main>
-<header><h1>EchoSpeak / Autonomous learning</h1><p>28 October 2026 · EchoSpeak 11.11.6 · technical record: docs/research/autonomous-learning.md</p></header>
+<header><h1>EchoSpeak / Autonomous learning</h1><p>29 October 2026 · EchoSpeak 11.11.7 · technical records: docs/research/autonomous-learning.md, docs/research/learning-research.md</p></header>
 <nav aria-label="Report sections"><a href="#one">One learner</a><a href="#cycle">The cycle</a><a href="#curation">What waits for you</a><a href="#feedback">Feedback</a><a href="#transfer">Sharing</a><a href="#ui">What you see</a><a href="#test">Your test</a></nav>
 <p class="lead">Echo learns as a consequence of doing work.<br>You don't manage it; you see the improvement.</p>
 <p class="note"><strong>Evidence:</strong> the diagrams describe the design. The behaviour shown is what the focused tests check with the real harness and scripted models. Real-model quality is for your live test.</p>
@@ -38,12 +38,12 @@ figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:h
 <div class="step"><b>Retain</b>agent, project or shared scope</div>
 <div class="step a"><b>Apply</b>next similar task, measured against holdouts</div>
 </div>
-<p class="muted" style="margin-top:12px">Bounded: reviews only when no chat is running, 30 a day, with each agent's own model. Chat on a small model reads at most 2 lessons. Nothing here adds a model call to your conversation.</p></section>
+<p class="muted" style="margin-top:12px">Bounded: reviews only when no chat is running, 30 a day, with each agent's own model, most informative first. No lessons for small talk; at most 900 characters of them (420 for a small model). Twins are merged without a model call. Nothing here adds a model call to your conversation.</p></section>
 
 <section id="curation"><h2>What still waits for you, and what doesn't</h2>
 <div class="comparison"><table><thead><tr><th>Lesson</th><th>Before</th><th>Now</th></tr></thead><tbody>
 <tr><td>From checked work</td><td>Tried automatically</td><td>Tried automatically</td></tr>
-<tr><td>Learned while reading the web, generic</td><td class="documented">Waited for you, so Chat almost never learned</td><td>Tried automatically, marked untrusted: never shared, retired after 2 failures</td></tr>
+<tr><td>Learned while reading the web, generic</td><td class="documented">Waited for you, so Chat almost never learned</td><td>Waits until work in another conversation teaches the same thing (a single web page can't plant it), then tried as untrusted: never shared, retired after 2 failures. Not your job to review.</td></tr>
 <tr><td>Names a site, or says which sources to trust</td><td>Waited</td><td>Waits (memory-poisoning guard)</td></tr>
 <tr><td>About sending or posting things, or from work that changed tests</td><td>Waited</td><td>Waits</td></tr>
 <tr><td>A fact about you ("prefers short answers")</td><td class="documented">Could become a lesson</td><td>Refused: that's memory</td></tr>
@@ -60,14 +60,14 @@ figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:h
 <div class="quote">"Let me see if it works"</div>
 <div class="quote">"Does it work?"</div>
 <div class="quote">"No thanks"</div>
-<p>No model call. Applied to the last reply in that chat, and never over the Worked / Didn't work buttons.</p></div>
+<p>No model call. Applied to the reply you're answering (the lead agent's), only from the start of your message, and never over the buttons. A casual "that worked" is noted but isn't proof; the checks still decide.</p></div>
 </div></section>
 
 <section id="transfer"><h2>Sharing what's proven, carefully</h2>
 <div class="grid3">
 <div class="box"><h3>Agent</h3><p>The default. Echo's lessons serve it in both Agents and Code.</p></div>
 <div class="box"><h3>Project</h3><p>"In this project, run the linter first." Read only in that project.</p></div>
-<div class="box"><h3>Shared</h3><p>A proven, trusted lesson can be offered to another agent for the same kind of task, one per prompt. Its results there are counted separately. If it fails twice, it stops being shared, but keeps its place at home.</p></div>
+<div class="box"><h3>Shared</h3><p>A proven, trusted lesson can be offered to another agent for the same kind of task, one per prompt. Like every lesson, it's sometimes held back at random, so its effect there is measured against a control. If tasks go better without it, it stops being shared, but keeps its place at home.</p></div>
 </div></section>
 
 <section id="ui"><h2>What you see</h2>

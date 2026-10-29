@@ -411,10 +411,13 @@ def implicit_signal(message: str) -> int:
     text = " ".join(str(message or "").split())[:240]
     if not text:
         return 0
-    wrong = _SAID_WRONG.search(text)
+    # Only the opening counts: "that's wrong" further on is usually about something else
+    # ("…and the article says that's wrong of them").
+    opening = re.split(r"(?<=[.!?])\s", text, maxsplit=1)[0][:100]
+    wrong = _SAID_WRONG.search(opening)
     if wrong and not _HEDGED.search(text[:wrong.start()]):
         return -1
-    worked = _SAID_WORKED.search(text)
+    worked = _SAID_WORKED.search(opening)
     if worked and "?" not in text[:worked.end() + 2] and not _HEDGED.search(text[:worked.start()]):
         return 1
     return 0

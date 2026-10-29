@@ -2,7 +2,7 @@
 
 EchoSpeak 11.11.6 makes learning a mechanic of the shared harness instead of a page you manage. Echo learns from ordinary work in Chat, Agents and Code, with whichever local or API model you picked. Routine lessons no longer wait for your approval, and a correction in your next message counts as feedback. Proven lessons can be shared between agents, measured apart from their home results. The Learning page left the navigation and is now diagnostics under Settings › Advanced.
 
-It builds on [verified engineering](verified-engineering.md) (11.11.5). [Visual explanation](../../artifacts/research/autonomous-learning.html).
+It builds on [verified engineering](verified-engineering.md) (11.11.5). **Revised in 11.11.7** after a research audit: web-learned lessons now wait for confirmation from other work, implicit praise isn't proof, transfer has a control group, and more. See [learning-research.md](learning-research.md). [Visual explanation](../../artifacts/research/autonomous-learning.html).
 
 ## 1. Audit: what already happened automatically, and what didn't
 
