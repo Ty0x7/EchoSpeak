@@ -324,7 +324,7 @@ class Sessions:
             raise ValueError("Authenticate this ACP executable in its own terminal before connecting. Interactive ACP auth is not enabled.")
         raise ValueError("Claude Code signs in with its own `claude auth login`: Settings › Models › Coding agents › Claude Code › Sign in")
 
-    async def prompt(self, session_id, text, model=""):
+    async def prompt(self, session_id, text, model="", effort=""):
         self.admit()
         session = self.get(session_id)
         if session.task or session.row["state"] == "connecting" or not session.adapter or session.adapter.rpc.closed:
@@ -336,10 +336,10 @@ class Sessions:
         session.row["state"] = "preparing"
         # Set the writer task BEFORE awaiting a checkpoint: simultaneous requests
         # cannot both start a turn in the same worktree.
-        session.task = asyncio.create_task(self._turn(session, text, model))
+        session.task = asyncio.create_task(self._turn(session, text, model, effort))
         return session.public()
 
-    async def _turn(self, session, text, model):
+    async def _turn(self, session, text, model, effort=""):
         before = None
         try:
             before = await asyncio.to_thread(wt.snapshot, session.root)
@@ -351,7 +351,7 @@ class Sessions:
             session.row["state"] = "running"
             session.emit("user/message", {"text": text})
             session.save()
-            task = asyncio.create_task(session.adapter.prompt(text, model))
+            task = asyncio.create_task(session.adapter.prompt(text, model, effort))
             try:
                 while not task.done():
                     await asyncio.sleep(0.15)

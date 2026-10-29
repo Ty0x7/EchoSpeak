@@ -26,7 +26,7 @@ import { SettingsPanel } from "./settings/SettingsPanel";
 import { SystemCheckNotice } from "./settings/SystemCheck";
 import { PausedNotice, StopEverythingButton } from "./dashboard/StopEverything";
 import { LeanMessage } from "./lean/LeanMessage";
-import { ChatFollower } from "./app/chatFollow";
+import { ChatFollower, distanceFromBottom, innerScrollerTakes } from "./app/chatFollow";
 import { isLeanEvent } from "./lean/liveReducer";
 import { useLeanLive } from "./lean/useLeanLive";
 import { FollowUpQueue, useFollowUps } from "./lean/FollowUps";
@@ -57,7 +57,7 @@ import {
 } from "./desktop/workspaceState";
 import { isStreamThreadCurrent } from "./agentActivity";
 import { type ActivityItem, type AgentStreamEvent, type Message, type Role, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse } from "./app/types";
-import { buildMessageUsage } from "./app/toolDisplay";
+import { buildMessageUsage, estimateTokens } from "./app/toolDisplay";
 import { colors, fetchWithTimeout, isEmptySessionDraft, normalizeTimestampMs, stopTts, useAppStore } from "./app/runtime";
 import { applyFeed, browserNotify } from "./app/reminderFeed";
 import { ComposerToolbar, type ReasoningEffort } from "./dashboard/ComposerToolbar";
@@ -460,6 +460,7 @@ export const Dashboard: React.FC<{
   };
 
   const refreshThreads = async () => {
+    const firstLoad = !threadsHydratedRef.current;
     try {
       const resp = await fetchWithTimeout(`${apiBase}/threads?limit=50`, undefined, 6000);
       if (!resp.ok) throw new Error(`Threads failed (${resp.status})`);
@@ -476,7 +477,7 @@ export const Dashboard: React.FC<{
         agentRuntime: String(item.agent_runtime || "echo"),
         environment: String(item.environment || ""),
       })).filter((item: any) => {
-        if (!item.id) return false;
+        if (!item.id || deletedThreadIdsRef.current.has(item.id)) return false;
         const placeholder = isEmptySessionDraft(item);
         if (!placeholder) return true;
         // A zero-message Session is a draft. Show it only while it is the
@@ -486,11 +487,18 @@ export const Dashboard: React.FC<{
         item.name = "New Session";
         return true;
       });
+      threadsHydratedRef.current = true;
       if (mapped.length) {
         setThreads(mapped);
-        const nextId = mapped.some((item: any) => item.id === selectedId) ? selectedId : mapped[0].id;
+        // Only the first load opens the most recent Session. Later, a Session that's gone (deleted here or
+        // elsewhere) leaves the user on the new-chat screen of the same environment, not in another one.
+        const nextId = mapped.some((item: any) => item.id === selectedId) ? selectedId : firstLoad && !selectedId ? mapped[0].id : "";
         activeThreadIdRef.current = nextId;
         setActiveThreadId(nextId);
+        if (!nextId) {
+          useAppStore.setState({ messages: [] });
+          setActivities([]);
+        }
       } else {
         // Session creation belongs exclusively to explicit New Session/+ UI.
         activeThreadIdRef.current = "";
@@ -633,26 +641,41 @@ export const Dashboard: React.FC<{
   };
 
   const deleteThread = async (id: string) => {
+    // Decided before anything changes: which environment this Session was in, and whether it was open.
+    const env = threadEnvironment(id);
+    const wasOpen = id === activeThreadIdRef.current;
+    const deleted = threads.find((t) => t.id === id);
     try {
       const response = await fetch(`${apiBase}/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!response.ok) throw new Error(`Delete Session failed (${response.status})`);
     } catch (e2) {
+      // Not deleted: keep it in the list instead of hiding a Session that still exists.
       console.error("Failed to delete thread:", e2);
+      return;
     }
-    const nextThreads = threads.filter((t) => t.id !== id);
-    setThreads(nextThreads);
-    if (id === activeThreadId) {
-      if (nextThreads[0]) switchThread(nextThreads[0].id);
-      else {
-        cancelSessionTurn(id);
-        activeThreadIdRef.current = "";
-        setActiveThreadId("");
-        useAppStore.setState({ messages: [] });
-        setActivities([]);
-        setThreadState(null);
-        setActiveProjectId("");
-      }
+    deletedThreadIdsRef.current.add(id);
+    sessionProjectionRef.current.delete(id);
+    setThreads((prev) => prev.filter((t) => t.id !== id));
+    if (!wasOpen) return;
+    cancelSessionTurn(id);
+    // Stay in the same environment: its most recent Session (Code: in the same project), or its new-chat screen.
+    const next = threads
+      .filter((t) => t.id !== id && !deletedThreadIdsRef.current.has(t.id) && !isEmptySessionDraft(t)
+        && environmentOf(t, roomThreadIds) === env && (env !== "code" || (t.projectId || "") === (deleted?.projectId || "")))
+      .sort((a, b) => (b.at || 0) - (a.at || 0))[0];
+    setEnvironment(env);
+    if (next) {
+      switchThread(next.id);
+      return;
     }
+    activeThreadIdRef.current = "";
+    setActiveThreadId("");
+    useAppStore.setState({ messages: [] });
+    setActivities([]);
+    setThreadState(null);
+    if (env === "code") { setCodeConversationOpen(false); setMainPage("code"); }
+    else if (env === "agents") setMainPage("agents");
+    else { setActiveProjectId(""); setMainPage("chat"); }
   };
 
   const attachFolder = async (candidatePath: string = "") => {
@@ -721,10 +744,19 @@ export const Dashboard: React.FC<{
   }, [reasoningEffort]);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  // The scroller is keyed by conversation, so it's replaced on every switch: observers follow the element
+  // itself (a callback ref), not whatever chatScrollRef held when an effect last ran.
+  const [chatScrollEl, setChatScrollEl] = useState<HTMLDivElement | null>(null);
+  const attachChatScroll = useCallback((el: HTMLDivElement | null) => { chatScrollRef.current = el; setChatScrollEl(el); }, []);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   /** Follow new messages while the user is at the bottom; leave the view alone once they scroll up (app/chatFollow.ts). */
   const followerRef = useRef(new ChatFollower());
   const sessionScrollRef = useRef<Map<string, { top: number; atBottom: boolean }>>(new Map());
+  /** Sessions deleted here: a list refresh racing the delete never brings one back. */
+  const deletedThreadIdsRef = useRef<Set<string>>(new Set());
+  /** After the first Session list load, refreshes never open a Session on their own. */
+  const threadsHydratedRef = useRef(false);
   const pinBottomRafRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -813,11 +845,21 @@ export const Dashboard: React.FC<{
     const el = chatScrollRef.current;
     if (!el) return;
     followerRef.current.onScroll(el);
+    const away = !followerRef.current.following && distanceFromBottom(el) > 240;
+    setShowJumpToLatest(previous => (previous === away ? previous : away));
     const sessionId = String(activeThreadIdRef.current || "");
     if (sessionId) sessionScrollRef.current.set(sessionId, { top: el.scrollTop, atBottom: followerRef.current.following });
   };
   const onChatWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    if (chatScrollRef.current) followerRef.current.onWheel(event.deltaY, chatScrollRef.current);
+    const el = chatScrollRef.current;
+    // A wheel an inner scroller takes (the thinking box, a long tool output) scrolls that box, not the chat:
+    // reading back inside the thinking box mustn't stop the chat following what comes below it.
+    if (el && !innerScrollerTakes(event.target as Element | null, el, event.deltaY)) followerRef.current.onWheel(event.deltaY, el);
+  };
+  const jumpToLatest = () => {
+    followerRef.current.reset(true, chatScrollRef.current || undefined);
+    setShowJumpToLatest(false);
+    scrollChatToBottom(true);
   };
   const onChatKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (chatScrollRef.current) followerRef.current.onKey(event.key, chatScrollRef.current);
@@ -874,7 +916,7 @@ export const Dashboard: React.FC<{
 
   // When message/tool nodes resize (markdown, embeds, ops card), stay at true bottom.
   useEffect(() => {
-    const el = chatScrollRef.current;
+    const el = chatScrollEl;
     if (!el || typeof ResizeObserver === "undefined") return;
 
     const pinIfStuck = () => {
@@ -898,7 +940,7 @@ export const Dashboard: React.FC<{
       ro.disconnect();
       mo.disconnect();
     };
-  }, [scrollChatToBottom, leftTab]);
+  }, [scrollChatToBottom, chatScrollEl]);
 
 
   const sendText = async (overrideText?: string, voiceTranscript?: VoiceTranscript, recovery?: { id: string; session: string }) => {
@@ -1561,9 +1603,21 @@ export const Dashboard: React.FC<{
     const key = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.code === "Backquote") { event.preventDefault(); workbench.toggleBottom(); }
     };
+    // Workspace details › Outputs opens an artifact in the side panel.
+    const artifact = (event: Event) => {
+      const id = String((event as CustomEvent<{ id?: string }>).detail?.id || "");
+      if (id) { setOpenArtifact({ id }); setRightTab("artifact"); }
+    };
     window.addEventListener("echospeak:workbench-add-folder", folder); window.addEventListener("keydown", key);
-    return () => { window.removeEventListener("echospeak:workbench-add-folder", folder); window.removeEventListener("keydown", key); };
+    window.addEventListener("echospeak:open-artifact", artifact);
+    return () => { window.removeEventListener("echospeak:workbench-add-folder", folder); window.removeEventListener("keydown", key); window.removeEventListener("echospeak:open-artifact", artifact); };
   }, [activeThreadId, mainPage]);
+  // Workspace details › Context: how much of the model's context the open conversation uses (same count as the composer's meter).
+  useEffect(() => {
+    const window_ = Number(providerInfo?.context_window || 0);
+    const used = messages.reduce((sum, m) => sum + (m.usage?.tokens ?? estimateTokens(m.text)), 0);
+    workbench.setMeter({ session_id: activeThreadId || "", used, window: window_, model: String(providerInfo?.model || "") });
+  }, [messages, providerInfo?.context_window, providerInfo?.model, activeThreadId]);
   const rightOpen = !voiceConversationMode && workbench.rightOpen;
   const rightDocked = rightOpen && !narrowLayout;
   const shellColumns = [
@@ -1600,6 +1654,11 @@ export const Dashboard: React.FC<{
     setMainPage(coding ? "code" : "chat");
     if (coding) setCodeProjectId(thread.projectId || "");
   }, [activeThreadId, threads, roomThreadIds]);
+  // Remember the agent conversation you were in, so coming back to Agents opens it again.
+  useEffect(() => {
+    if (!activeThreadId || environment !== "agents") return;
+    try { window.localStorage.setItem("echospeak.agents.last_thread", activeThreadId); } catch { /* per-viewer convenience */ }
+  }, [activeThreadId, environment]);
   const sidebarWidthPx = showSidebar ? (sidebarCollapsed || narrowLayout ? 56 : SIDEBAR_WIDTH) : 0;
   /** Room chat + side panel share (the shell minus the left sidebar). */
   const measurePanelRoom = useCallback(() => {
@@ -1702,7 +1761,18 @@ export const Dashboard: React.FC<{
     const current = activeThreadId ? threadEnvironment(activeThreadId) : null;
     setEnvironment(next);
     if (next === "code") { setCodeConversationOpen(current === "code"); setMainPage("code"); return; }
-    if (next === "agents") { setMainPage(current === "agents" ? "chat" : "agents"); return; }
+    if (next === "agents") {
+      if (current === "agents") { setMainPage("chat"); return; }
+      // Back where you left off: the last agent conversation, else the most recent one, else the start screen.
+      let remembered = "";
+      try { remembered = window.localStorage.getItem("echospeak.agents.last_thread") || ""; } catch { /* storage may be unavailable */ }
+      const isAgents = (id: string) => Boolean(id) && !deletedThreadIdsRef.current.has(id) && (roomThreadIds.has(id) || threadEnvironment(id) === "agents") && threads.some(t => t.id === id);
+      const recent = isAgents(remembered) ? remembered
+        : threads.filter(t => isAgents(t.id)).sort((a, b) => (b.at || 0) - (a.at || 0))[0]?.id || "";
+      if (recent) { setMainPage("chat"); switchThread(recent); return; }
+      setMainPage("agents");
+      return;
+    }
     setMainPage("chat");
     if (current !== "chat") {
       const recent = threads.find(thread => environmentOf(thread, roomThreadIds) === "chat" && !isEmptySessionDraft(thread));
@@ -1716,12 +1786,15 @@ export const Dashboard: React.FC<{
     setThreads((prev) => (prev.some((t) => t.id === room.thread_id) ? prev : [{ id: room.thread_id, name: room.name, at: Date.now(), environment: "agents" }, ...prev]));
     switchThread(room.thread_id);
   };
-  /** Removes a project; its chats stay and become ordinary chats. */
+  /** Removes a project; its chats stay and become ordinary chats. The page you're on doesn't change. */
   const deleteProject = async (id: string) => {
     const response = await fetch(`${apiBase}/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
     if (!response.ok) return;
     setThreads(items => items.map(item => item.projectId === id ? { ...item, projectId: "" } : item));
     if (activeProjectId === id) { setActiveProjectId(""); await refreshThreadState(activeThreadId); }
+    // Nothing keeps pointing at the removed project (Code's picker, the open project page).
+    if (codeProjectId === id) setCodeProjectId("");
+    if (workspaceProjectId === id) setWorkspaceProjectId("");
     await refreshProjects();
   };
 
@@ -1834,7 +1907,7 @@ export const Dashboard: React.FC<{
             : threads.filter((thread) => environmentOf(thread, roomThreadIds) === "chat")}
           environment={environment}
           onEnvironment={switchEnvironment}
-          codeTree={<CodeTree apiBase={apiBase} revision={codeTreeRevision + threads.filter(thread => thread.surface === "code").length}
+          codeTree={<CodeTree apiBase={apiBase} revision={codeTreeRevision + threads.filter(thread => thread.surface === "code").length} workingSessionIds={inFlightSessionIds}
             activeThreadId={mainPage === "code" && codeConversationOpen ? activeThreadId : ""}
             activeExternalId={mainPage === "code" && !codeConversationOpen ? codeOpen?.sessionId || "" : ""}
             onOpenNative={(session) => { setCodeProjectId(session.project_id); setThreads(previous => previous.some(thread => thread.id === session.thread_id) ? previous : [{ id: session.thread_id, name: session.title, at: normalizeTimestampMs(session.last_active_at), projectId: session.project_id, messageCount: session.message_count, surface: "code", agentRuntime: session.agent_runtime, environment: "code" }, ...previous]); switchThread(session.thread_id); setCodeConversationOpen(true); setMainPage("code"); }}
@@ -1882,6 +1955,7 @@ export const Dashboard: React.FC<{
           onSearchChats={searchChats}
           onRenameSession={(id, title) => void renameThread(id, title)}
           onDeleteSession={(id) => void deleteThread(id)}
+          workingSessionIds={inFlightSessionIds}
           onDeleteProject={(id) => void deleteProject(id)}
           onSettings={() => openSettingsAt()}
           footerExtra={<><div className="wb-sidebar-actions"><button aria-label="Pull requests" title="Pull requests" onClick={() => workbench.open("pull_requests")}><WorkbenchIcon kind="pull_requests" /></button><button aria-label="Usage and limits" title="Usage and limits" onClick={() => workbench.open("usage")}><WorkbenchIcon kind="usage" /></button></div><StopEverythingButton apiBase={apiBase} /></>}
@@ -1951,6 +2025,7 @@ export const Dashboard: React.FC<{
                 <EchoCodeWorkspace apiBase={apiBase} projects={projects} projectId={codeProjectId}
                   openRequest={codeOpen} onSessionsChanged={() => setCodeTreeRevision(value => value + 1)}
                   nativeInfo={providerInfo} nativeLocked={lmStudioOnly} onConfigureProviders={() => openSettingsAt("models")}
+                  nativeEffort={reasoningEffort} onNativeEffort={(value) => setReasoningEffort(value as ReasoningEffort)}
                   onProject={setCodeProjectId} onAddFolder={() => void attachFolder()}
                   onSession={(session, draft) => {
                     setThreads(previous => [{ id: session.thread_id, name: session.title,
@@ -1983,6 +2058,15 @@ export const Dashboard: React.FC<{
                     await leanClient.deleteRoom(room.id);
                   } catch (error) {
                     console.warn("Delete room failed", error);
+                    return;
+                  }
+                  deletedThreadIdsRef.current.add(room.thread_id);
+                  setThreads((prev) => prev.filter((t) => t.id !== room.thread_id));
+                  if (activeThreadIdRef.current === room.thread_id) {
+                    activeThreadIdRef.current = "";
+                    setActiveThreadId("");
+                    useAppStore.setState({ messages: [] });
+                    setActivities([]);
                   }
                   await refreshRoster();
                   await refreshThreads();
@@ -2131,7 +2215,8 @@ export const Dashboard: React.FC<{
                       <small>{activityItems.length}</small>
                     </button>
                   ) : null}</div></div>}
-                    activeThreadId={activeThreadId} streaming={streaming} scrollRef={chatScrollRef}
+                    activeThreadId={activeThreadId} streaming={streaming} scrollRef={attachChatScroll}
+                    showJumpToLatest={showJumpToLatest} onJumpToLatest={jumpToLatest}
                     onScroll={onChatScroll} onWheel={onChatWheel} onKeyDown={onChatKeyDown}
                     onTouchStart={onChatTouchStart} onTouchEnd={onChatTouchEnd}
                     activeRoom={activeRoom} agents={agents}

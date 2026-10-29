@@ -32,19 +32,22 @@ _cache_lock = threading.Lock()
 # Claude Code doesn't publish a model list to other programs; these are the choices its
 # documentation gives every plan (code.claude.com/docs/en/model-config, 27 Oct 2026).
 # Claude Code resolves each alias to the current model for the owner's account.
+# Every alias resolves to a current model that takes all five effort levels (model-config, Oct 2026);
+# Claude Code falls back to the highest supported level by itself for older pinned models.
+_CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 CLAUDE_MODELS = [
-    {"id": "default", "model": "default", "displayName": "Default", "isDefault": True,
+    {"id": "default", "model": "default", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "", "displayName": "Default", "isDefault": True,
      "description": "Your plan's recommended model (Opus on Pro and Max)."},
-    {"id": "opus", "model": "opus", "displayName": "Opus", "description": "The latest Opus, for complex work."},
-    {"id": "sonnet", "model": "sonnet", "displayName": "Sonnet", "description": "The latest Sonnet, for everyday coding."},
-    {"id": "haiku", "model": "haiku", "displayName": "Haiku", "description": "Fast and light, for simple tasks."},
-    {"id": "opusplan", "model": "opusplan", "displayName": "Opus plan, Sonnet build",
+    {"id": "opus", "model": "opus", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Opus", "description": "The latest Opus, for complex work."},
+    {"id": "sonnet", "model": "sonnet", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Sonnet", "description": "The latest Sonnet, for everyday coding."},
+    {"id": "haiku", "model": "haiku", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Haiku", "description": "Fast and light, for simple tasks."},
+    {"id": "opusplan", "model": "opusplan", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Opus plan, Sonnet build",
      "description": "Opus while planning, then Sonnet to make the changes."},
-    {"id": "opus[1m]", "model": "opus[1m]", "displayName": "Opus · 1M context",
+    {"id": "opus[1m]", "model": "opus[1m]", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Opus · 1M context",
      "description": "Long sessions. May use usage credits on Pro."},
-    {"id": "sonnet[1m]", "model": "sonnet[1m]", "displayName": "Sonnet · 1M context",
+    {"id": "sonnet[1m]", "model": "sonnet[1m]", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Sonnet · 1M context",
      "description": "Long sessions. Uses usage credits on every plan."},
-    {"id": "fable", "model": "fable", "displayName": "Fable",
+    {"id": "fable", "model": "fable", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "high", "displayName": "Fable",
      "description": "For the hardest, longest tasks. Can bill usage credits instead of your plan."},
 ]
 
@@ -124,7 +127,8 @@ def codex_models(rows) -> list[dict]:
         models.append({"id": str(row.get("id") or name)[:200], "model": name,
                        "displayName": str(row.get("displayName") or name)[:120],
                        "description": str(row.get("description") or "")[:240],
-                       "isDefault": row.get("isDefault") is True, "efforts": efforts})
+                       "isDefault": row.get("isDefault") is True, "efforts": efforts,
+                       "defaultEffort": str(row.get("defaultReasoningEffort") or "")[:20]})
     return models[:60]
 
 

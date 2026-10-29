@@ -113,11 +113,13 @@ def external_login(session_id: str):
 class Task(BaseModel):
     text: str = Field(min_length=1, max_length=60_000)
     model: str = Field(default="", max_length=200)
+    # The coding agent's own effort control (Codex turn/start effort, Claude Code --effort); "" = its default.
+    effort: str = Field(default="", max_length=20, pattern=r"^[a-z_]*$")
 
 
 @router.post("/external-sessions/{session_id}/turns")
 def external_turn(session_id: str, request: Task):
-    return _external("prompt", session_id, request.text, request.model)
+    return _external("prompt", session_id, request.text, request.model, request.effort)
 
 
 class Decision(BaseModel):

@@ -12,6 +12,11 @@ from agent.child_env import child_env
 from agent.code_process import RpcProcess
 
 
+# Claude Code's effort levels (code.claude.com/docs/en/model-config, "Adjust effort level"). A level the
+# model doesn't support falls back to the highest one it does, inside Claude Code itself.
+CLAUDE_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+
+
 def codex_policy(root):
     return {"cwd": str(root), "approvalPolicy": "untrusted", "approvalsReviewer": "user",
             "sandbox": "workspace-write", "config": {"sandbox_workspace_write.network_access": False}}
@@ -56,13 +61,16 @@ class Codex:
         self.session.record_model(result.get("model"))
         self.session.save()
 
-    async def prompt(self, text, model):
+    async def prompt(self, text, model, effort=""):
         await self.ensure_thread()
         params = {"threadId": self.session.row["native_id"], "input": [{"type": "text", "text": text}],
                   "approvalPolicy": "untrusted", "approvalsReviewer": "user",
                   "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [str(self.session.root)], "networkAccess": False}}
         if model:
             params["model"] = model
+        if effort and effort in self._efforts(model):
+            # turn/start's own per-turn override; the efforts each model supports come from model/list.
+            params["effort"] = effort
         response = await self.rpc.request("turn/start", params)
         if model:
             self.session.record_model(model)
@@ -114,6 +122,11 @@ class Codex:
         self.session.emit(method, params)
         return {}
 
+    def _efforts(self, model):
+        rows = self.session.models or []
+        row = next((r for r in rows if r.get("model") == model), None) or next((r for r in rows if r.get("isDefault")), {})
+        return set(row.get("efforts") or [])
+
     async def cancel(self):
         if self.session.turn_id and self.session.row.get("native_id"):
             await self.rpc.request("turn/interrupt", {"threadId": self.session.row["native_id"], "turnId": self.session.turn_id}, timeout=5)
@@ -146,8 +159,8 @@ class Acp:
         self.session.account["connected"] = True
         return {"authenticated": True}
 
-    async def prompt(self, text, model):
-        result = {}
+    async def prompt(self, text, model, effort=""):
+        result = {}  # ACP has no standard effort control: it's left to the agent
         native = self.session.row.get("native_id")
         if native and not self.loaded:
             if not self.capabilities.get("loadSession"):
@@ -237,7 +250,7 @@ class ClaudeCli:
             return sys.executable, ["--code-claude-hook"]
         return sys.executable, ["-P", "-m", "agent.code_claude_hook"]
 
-    def argv(self, model):
+    def argv(self, model, effort=""):
         from agent.code_executables import executable
         command, args = self.hook_command()
         settings = {"hooks": {"PermissionRequest": [{"matcher": "*", "hooks": [
@@ -251,6 +264,8 @@ class ClaudeCli:
                 "--settings", json.dumps(settings)]
         if model:
             argv += ["--model", model]
+        if effort in CLAUDE_EFFORTS:
+            argv += ["--effort", effort]  # for this session only; the owner's saved setting is untouched
         if self.session.row.get("native_id"):
             argv += ["--resume", self.session.row["native_id"]]
         return argv
@@ -273,7 +288,7 @@ class ClaudeCli:
         finally:
             writer.close()
 
-    async def prompt(self, text, model):
+    async def prompt(self, text, model, effort=""):
         import subprocess
         from agent.code_process import _windows_job, workspace_env
         port = self.server.sockets[0].getsockname()[1]
@@ -283,7 +298,7 @@ class ClaudeCli:
         if not getattr(sys, "frozen", False):
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
         flags = (0x4 | subprocess.CREATE_NO_WINDOW) if os.name == "nt" else 0
-        process = self.process = subprocess.Popen(self.argv(model), cwd=self.session.root, env=workspace_env(env), stdin=subprocess.PIPE,
+        process = self.process = subprocess.Popen(self.argv(model, effort), cwd=self.session.root, env=workspace_env(env), stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=flags,
                                         start_new_session=os.name != "nt")
         if os.name == "nt":

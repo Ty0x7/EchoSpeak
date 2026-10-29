@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — 11.12 interface</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}.shot img{display:block;width:100%;height:auto}.shot figcaption{padding:10px 14px;margin:0}.phone{max-width:240px}
+.ok{color:var(--good)}.bad{color:var(--warn)}
+.mock{display:grid;gap:6px;padding:16px;border:1px solid var(--line);border-radius:12px;background:var(--bg);font-size:13px}
+.boxed{display:flex;gap:9px;align-items:center;padding:7px 10px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
+.boxed i{width:18px;height:18px;border:1px solid var(--line);border-radius:6px;display:inline-block}
+.quiet{display:flex;gap:8px;align-items:baseline;color:var(--muted)}.quiet b{font-weight:500;color:var(--ink)}
+.think{padding:8px 10px;border:1px solid var(--line);border-radius:10px;color:var(--muted)}
+.answer{color:var(--ink);margin-top:4px}
+.panel{display:grid;gap:8px}.sec{border:1px solid var(--line);border-radius:11px;padding:10px 12px;background:var(--panel)}
+.sec strong{display:flex;justify-content:space-between;font-size:13px}.sec div{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px;margin-top:6px}
+.add{color:var(--good)}.del{color:var(--warn)}
+</style>
+<body><main>
+<header><h1>EchoSpeak / 11.12.0 interface</h1><p>29 October 2026 · technical record: docs/research/interface-11-12.md</p></header>
+<nav aria-label="Report sections"><a href="#work">Showing work</a><a href="#follow">Following</a><a href="#code">Code</a><a href="#rules">Harness rules</a><a href="#details">Workspace details</a><a href="#fixes">Fixes</a></nav>
+<p class="lead">Less chrome, more clarity.<br>Work reads as quiet lines and folds away once the answer is written.</p>
+<p class="note"><strong>Evidence:</strong> the mock-ups below reproduce the layout the dev build rendered with a scripted model (thinking, a tool step, a long answer). They're diagrams, not screenshots.</p>
+
+<section id="work"><h2>Showing work</h2>
+<div class="grid2">
+<div class="box"><h3 class="bad">Before</h3><div class="mock">
+<div class="boxed"><i></i>Searched “budget mic” <small class="muted">· 14 results</small></div>
+<div class="boxed"><i></i>Read 2 pages</div>
+<div class="boxed"><i></i>Ran `pytest`</div>
+<div class="answer">Here's the answer…</div></div><p>Every step was a card with a boxed icon, even after the answer.</p></div>
+<div class="box"><h3 class="ok">Now</h3><div class="mock">
+<div class="quiet"><b>Worked for 42s</b> · Searched the web · Read 2 pages · Ran 1 command ›</div>
+<div class="answer">Here's the answer…</div></div><p>One quiet line, opened with a click. While it runs: the thinking box live, steps as plain lines with a shimmer on the current one.</p></div>
+</div>
+<div class="mock" style="margin-top:12px"><div class="think">◔ Thinking · 4s</div><div class="quiet">✓ Calculated 21*2</div><div class="quiet"><b>Reading dates.py</b> · …</div></div>
+<p class="rule">Only the thinking box keeps a frame, as in Claude and ChatGPT. Result cards (weather, charts) always stay visible.</p></section>
+
+<section id="follow"><h2>Following new content</h2>
+<div class="grid3">
+<div class="box"><h3>It follows again</h3><p>The scroller was replaced on every chat switch while the watchers stayed on the old one. They now follow the element itself.</p></div>
+<div class="box"><h3>Thinking box and below</h3><p>Scrolling inside the thinking box no longer tells the chat you scrolled up, so new steps and the answer below stay in view.</p></div>
+<div class="box"><h3>Jump to latest</h3><p>Scroll up to read and the view stays put; a small ↓ button brings you back.</p></div>
+</div></section>
+
+<section id="code"><h2>Reasoning effort in Code</h2>
+<div class="comparison"><table><thead><tr><th>Runtime</th><th>Uses</th><th>Levels</th></tr></thead><tbody>
+<tr><td>Echo native</td><td>Echo's reasoning effort</td><td>When the model has a reasoning control</td></tr>
+<tr><td>Codex</td><td><span class="mono">turn/start effort</span></td><td>Exactly what the model reports</td></tr>
+<tr><td>Claude Code</td><td><span class="mono">--effort</span></td><td>low · medium · high · xhigh · max</td></tr>
+<tr><td>ACP</td><td>—</td><td>The agent's own</td></tr>
+</tbody></table></div></section>
+
+<section id="rules"><h2>Claude Code and Codex: within their rules</h2>
+<div class="grid2">
+<div class="box"><h3>Anthropic</h3><p>Allowed: you signing in to the unmodified Claude Code with your own plan. EchoSpeak runs your install, sign-in stays in <span class="mono">claude auth login</span>, and no credentials are read or passed. <span class="ok">Fixed:</span> the Claude logo is no longer used as an icon (logos need permission; names don't).</p></div>
+<div class="box"><h3>OpenAI</h3><p>Codex's app-server is documented for product integrations. EchoSpeak identifies itself, and ChatGPT sign-in only ever opens OpenAI's own page. The app-server is marked experimental.</p></div>
+</div>
+<p class="proposed" style="margin-top:10px">For you: if EchoSpeak is distributed commercially, confirm with Anthropic whether its Commercial Terms apply.</p></section>
+
+<section id="details"><h2>Workspace details</h2>
+<div class="panel" style="max-width:420px">
+<div class="sec"><strong>Environment ▾</strong><div><span>This computer</span><span>Open in VS Code</span></div><div><span>EchoSpeak · C:\…\EchoSpeak</span><span>Add folder</span></div><div><span>claude/v11.12 · a1b2c3d</span></div><div><span>Echo native</span><span>Usage &amp; limits</span></div></div>
+<div class="sec"><strong>Context ▾ <span class="muted">42%</span></strong></div>
+<div class="sec"><strong>Outputs ▾ <span class="muted">3</span></strong><div><span>Release checklist</span><span>Document</span></div></div>
+<div class="sec"><strong>Changes ▾ <span><span class="add">+4,189</span> <span class="del">−639</span></span></strong><div><span>12 changed files</span><span>Review &amp; commit</span></div><div><span>#112 Code is a coding assistant</span><span class="ok">open</span></div></div>
+<div class="sec"><strong>Servers &amp; scripts ▾</strong><div><span>Terminal 1</span><span class="ok">running</span></div><div><span>dev</span><span>Run</span></div></div>
+</div>
+<figcaption>Illustrative values. Each section folds away and remembers its state.</figcaption></section>
+
+<section id="fixes"><h2>Fixes</h2>
+<div class="comparison"><table><thead><tr><th>Problem</th><th>Now</th></tr></thead><tbody>
+<tr><td>Deleting a chat jumped to another environment</td><td>Moves to the newest chat in the same environment, or its new-chat screen</td></tr>
+<tr><td>A deleted chat came back</td><td>Deletes use the current list; refreshes never reopen or resurrect a chat</td></tr>
+<tr><td>"Opening project…" forever without Git</td><td>"No git repository" once loaded; an error says so</td></tr>
+<tr><td>Agents showed a second roster</td><td>Reopens your last agent conversation, or a short "New agent" screen</td></tr>
+<tr><td>Code's "Files &amp; sessions"</td><td>Removed</td></tr>
+<tr><td>Hard to see what's running</td><td>A "Working" pulse on running conversations; the sidebar is wider</td></tr>
+</tbody></table></div></section>
+<footer>Technical record: docs/research/interface-11-12.md · Tests: apps/web/src/lean/activity.test.tsx, apps/backend/tests/test_claude_code_runtime.py</footer>
+</main></body></html>

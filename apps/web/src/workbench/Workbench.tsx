@@ -37,43 +37,118 @@ export function WorkbenchControls({ apiBase }: { apiBase: string }) {
     <button ref={anchor} aria-label="Workspace details" title="Workspace details" aria-expanded={store.detailsOpen} onClick={store.toggleDetails}><WorkbenchIcon kind="details" /></button>
     <button aria-label="Toggle bottom terminal" title="Toggle terminal (Ctrl+`)" aria-pressed={store.bottomOpen} onClick={store.toggleBottom}><WorkbenchIcon kind="bottom" /></button>
     <button aria-label="Toggle workspace sidebar" title="Toggle workspace sidebar" aria-pressed={store.rightOpen} onClick={store.toggleRight}><WorkbenchIcon kind="right" /></button>
-    {store.detailsOpen ? <WorkspacePopover anchor={anchor} label="Workspace details" width={340} onClose={() => useWorkbench.setState({ detailsOpen: false })}>
+    {store.detailsOpen ? <WorkspacePopover anchor={anchor} label="Workspace details" width={380} onClose={() => useWorkbench.setState({ detailsOpen: false })}>
       <WorkspaceDetails apiBase={apiBase} />
     </WorkspacePopover> : null}
   </div>;
 }
 
+/** One collapsible section of Workspace details; open or closed is remembered per section. */
+function DetailSection({ id, title, meta, children }: { id: string; title: string; meta?: React.ReactNode; children: React.ReactNode }) {
+  const key = `echospeak.workbench.details.${id}`;
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem(key) !== "closed"; } catch { return true; } });
+  const toggle = () => setOpen(value => { try { localStorage.setItem(key, value ? "closed" : "open"); } catch { /* optional */ } return !value; });
+  return <section className="wb-dsec" data-open={open ? "true" : "false"}>
+    <button type="button" className="wb-dsec-head" aria-expanded={open} onClick={toggle}>
+      <strong>{title}</strong><svg className="wb-dsec-caret" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M6 9h12l-6 7z" /></svg>
+      {meta ? <span className="wb-dsec-meta">{meta}</span> : null}
+    </button>
+    {open ? <div className="wb-dsec-body">{children}</div> : null}
+  </section>;
+}
+
+/** "+128 −40" from a unified diff. */
+export function diffStat(diff: string): { added: number; removed: number } {
+  let added = 0, removed = 0;
+  for (const line of String(diff || "").split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) added += 1;
+    else if (line.startsWith("-") && !line.startsWith("---")) removed += 1;
+  }
+  return { added, removed };
+}
+
+type ArtifactRow = { id: string; title?: string; kind?: string; updated_at?: number };
+
+/**
+ * Workspace details: where the work is happening and what it produced, at a glance.
+ * Environment (computer, project, branch, runtime) · Context (how full the conversation is) · Outputs
+ * (artifacts) · Changes (diff and pull requests) · Servers & scripts. Each section folds away.
+ */
 export function WorkspaceDetails({ apiBase }: { apiBase: string }) {
   const store = useWorkbench();
   const { data, error } = useResource<Summary>(apiBase, "summary");
+  const git = Boolean(data?.git.is_git);
+  const { data: diff } = useResource<{ files: Change[]; diff: string }>(apiBase, git ? "diff" : "summary");
+  const { data: prs } = useResource<{ available: boolean; items: { number: number; title: string; url: string; state: string; isDraft: boolean }[] }>(apiBase, git ? "pull-requests" : "summary");
+  const meter = store.meter;
+  const [artifacts, setArtifacts] = useState<ArtifactRow[]>([]);
+  const [showAll, setShowAll] = useState(false);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   const [notice, setNotice] = useState("");
+  useEffect(() => {
+    let live = true;
+    if (!meter.session_id) { setArtifacts([]); return; }
+    request<{ items: ArtifactRow[] }>(`${apiBase}/lean/artifacts?session_id=${encodeURIComponent(meter.session_id)}`)
+      .then(value => { if (live) setArtifacts((value.items || []).slice().sort((a, b) => (b.updated_at || 0) - (a.updated_at || 0))); })
+      .catch(() => { if (live) setArtifacts([]); });
+    return () => { live = false; };
+  }, [apiBase, meter.session_id, store.revision]);
   const action = async (work: () => Promise<unknown>) => { setNotice(""); try { await work(); } catch (err) { setNotice(err instanceof Error ? err.message : "Workspace action failed"); } };
-  return <div className="wb-details">
-    <strong className="wb-detail-heading"><WorkbenchIcon kind="device" />{data?.computer || "This computer"}</strong>
-    <span className="wb-detail-context">{data?.name || "Choose a project"}{store.context.external_session_id ? " · Agent worktree" : ""}</span>
-    {!store.context.project_id ? <p>Choose a project folder to open files, Git changes and a terminal.</p> : null}
-    <button onClick={() => void action(() => request(`${apiBase}/workbench/editor`, store.context))} disabled={!data}><WorkbenchIcon kind="file" />Open in VS Code</button>
-    <button onClick={() => window.dispatchEvent(new CustomEvent("echospeak:workbench-add-folder"))}><span aria-hidden>＋</span>Add project folder</button>
-    <button disabled={!data} onClick={() => setEditing(value => !value)}><span aria-hidden>＋</span>Add project script</button>
-    {editing ? <form className="wb-script-form" onSubmit={event => { event.preventDefault(); void action(async () => {
-      await request(`${apiBase}/workbench/scripts`, { ...store.context, name, command }); setEditing(false); setName(""); setCommand(""); store.refresh();
-    }); }}><label>Script name<input required value={name} onChange={event => setName(event.target.value)} maxLength={80} /></label>
-      <label>Command<input required value={command} onChange={event => setCommand(event.target.value)} placeholder="npm run dev" maxLength={2000} /></label>
-      <button type="submit" className="es-btn">Save script</button><small>Saving does not run the script.</small></form> : null}
-    {data?.scripts.map(script => <button key={script.id} title={script.command} onClick={() => void action(async () => {
-      const terminal = await request<{ id: string }>(`${apiBase}/workbench/scripts/${script.id}/run`, store.context); store.addTerminal(terminal.id, store.context); useWorkbench.setState({ bottomOpen: true });
-    })}><WorkbenchIcon kind="terminal" />Run {script.name}</button>)}
-    <hr />
-    <button disabled={!data?.git.is_git} onClick={() => store.open("diff")}><WorkbenchIcon kind="pull_requests" /><span>{data?.git.branch === "HEAD" ? "Detached agent worktree" : data?.git.branch || "No Git repository"}</span></button>
-    {data?.git.head ? <small className="wb-commit-id">{data.git.head.slice(0, 10)} · {data.git.repository || "Local repository"}</small> : null}
-    <button disabled={!data?.git.is_git} onClick={() => store.open("pull_requests")}><WorkbenchIcon kind="pull_requests" />Pull requests</button>
-    <button disabled={!data?.git.is_git} onClick={() => store.open("diff")}><WorkbenchIcon kind="diff" />Commit &amp; push<span className="wb-row-end">Review</span></button>
-    <button disabled={!data?.git.is_git} onClick={() => store.open("diff")}><WorkbenchIcon kind="files" />Changes<span className="wb-row-end">{data?.git.changes.length || 0}</span></button>
-    <hr /><div className="wb-runtime-line"><RuntimeMark runtime={data?.runtime || "echo"} />{runtimeName(data?.runtime)}</div>
-    <button onClick={() => store.open("usage")}><WorkbenchIcon kind="usage" />Usage &amp; limits</button>
+  const stat = diffStat(diff && "diff" in diff ? diff.diff : "");
+  const changed = git && diff && "files" in diff ? diff.files.length : 0;
+  const pct = meter.window > 0 ? Math.min(100, Math.round((meter.used / meter.window) * 100)) : 0;
+  const terminals = store.terminalIds[contextKey(store.context)] || [];
+  const shownArtifacts = showAll ? artifacts : artifacts.slice(0, 4);
+  const openPr = (url: string) => { if (!/^https:\/\/github\.com\//.test(url)) return; if (isDesktopRuntime()) void openDesktopExternalUrl(url); else window.open(url, "_blank", "noopener,noreferrer"); };
+  return <div className="wb-details wb-details-v2">
+    <DetailSection id="environment" title="Environment">
+      <div className="wb-drow"><WorkbenchIcon kind="device" /><span>{data?.computer || "This computer"}</span>
+        <button className="wb-dlink" disabled={!data} onClick={() => void action(() => request(`${apiBase}/workbench/editor`, store.context))}>Open in VS Code</button></div>
+      <div className="wb-drow" title={data?.root || ""}><WorkbenchIcon kind="files" />
+        {store.context.project_id ? <span className="wb-dtrunc"><b>{data?.name || "Opening project…"}</b>{data?.root ? <small> · {data.root}</small> : null}{store.context.external_session_id ? <small> · agent worktree</small> : null}</span>
+          : <span className="wb-dmuted">No project</span>}
+        <button className="wb-dlink" onClick={() => window.dispatchEvent(new CustomEvent("echospeak:workbench-add-folder"))}>Add folder</button></div>
+      <div className="wb-drow"><WorkbenchIcon kind="pull_requests" />
+        <span className="wb-dtrunc">{!data ? "—" : git ? (data.git.branch === "HEAD" ? "Detached agent worktree" : data.git.branch) : "No Git repository"}</span>
+        {data?.git.head ? <small className="wb-dmuted">{data.git.head.slice(0, 7)}</small> : null}</div>
+      <div className="wb-drow"><RuntimeMark runtime={data?.runtime || "echo"} /><span>{runtimeName(data?.runtime)}</span>
+        <button className="wb-dlink" onClick={() => store.open("usage")}>Usage &amp; limits</button></div>
+    </DetailSection>
+    <DetailSection id="context" title="Context" meta={meter.window ? <><span>{pct}%</span><i className="wb-dmeter"><i style={{ width: `${pct}%` }} data-level={pct > 85 ? "full" : pct > 60 ? "filling" : "ok"} /></i></> : null}>
+      {meter.window ? <p className="wb-dnote">About {Math.round(meter.used / 1000)}k of {Math.round(meter.window / 1000)}k tokens{meter.model ? ` · ${meter.model}` : ""}. Long conversations are summarized automatically as they fill up.</p>
+        : <p className="wb-dnote">Open a conversation to see how much of the model's context it uses.</p>}
+    </DetailSection>
+    <DetailSection id="outputs" title="Outputs" meta={artifacts.length ? <span>{artifacts.length}</span> : null}>
+      {shownArtifacts.map(item => <button key={item.id} className="wb-drow wb-drow-btn" onClick={() => window.dispatchEvent(new CustomEvent("echospeak:open-artifact", { detail: { id: item.id } }))}>
+        <WorkbenchIcon kind="file" /><span className="wb-dtrunc">{item.title || item.id}</span><small className="wb-dmuted">{item.kind || "Artifact"}</small></button>)}
+      {artifacts.length > 4 ? <button className="wb-dmore" onClick={() => setShowAll(value => !value)}>{showAll ? "Show less" : "Show more"}</button> : null}
+      {!artifacts.length ? <p className="wb-dnote">Artifacts made in this conversation appear here.</p> : null}
+    </DetailSection>
+    <DetailSection id="changes" title="Changes" meta={git && (stat.added || stat.removed) ? <><span className="wb-dadd">+{stat.added}</span><span className="wb-ddel">−{stat.removed}</span></> : null}>
+      {!git ? <p className="wb-dnote">{data ? "This folder isn't a Git repository." : "Choose a project to see its changes."}</p> : <>
+        <button className="wb-drow wb-drow-btn" onClick={() => store.open("diff")}><WorkbenchIcon kind="diff" /><span>{changed ? `${changed} changed file${changed === 1 ? "" : "s"}` : "No uncommitted changes"}</span>
+          <small className="wb-dmuted">Review &amp; commit</small></button>
+        {(prs && "items" in prs ? prs.items : []).slice(0, 4).map(pr => <button key={pr.number} className="wb-drow wb-drow-btn" onClick={() => openPr(pr.url)}>
+          <WorkbenchIcon kind="pull_requests" /><span className="wb-dtrunc">#{pr.number} {pr.title}</span><small className="wb-dstate" data-state={pr.isDraft ? "DRAFT" : pr.state}>{pr.isDraft ? "Draft" : pr.state.toLowerCase()}</small></button>)}
+        <button className="wb-dmore" onClick={() => store.open("pull_requests")}>All pull requests</button>
+      </>}
+    </DetailSection>
+    <DetailSection id="servers" title="Servers & scripts" meta={terminals.length ? <span>{terminals.length} running</span> : null}>
+      {terminals.map((id, index) => <button key={id} className="wb-drow wb-drow-btn" onClick={() => useWorkbench.setState({ bottomOpen: true })}>
+        <WorkbenchIcon kind="terminal" /><span>Terminal {index + 1}</span><small className="wb-dlive">running</small></button>)}
+      {data?.scripts.map(script => <button key={script.id} className="wb-drow wb-drow-btn" title={script.command} onClick={() => void action(async () => {
+        const terminal = await request<{ id: string }>(`${apiBase}/workbench/scripts/${script.id}/run`, store.context); store.addTerminal(terminal.id, store.context); useWorkbench.setState({ bottomOpen: true });
+      })}><WorkbenchIcon kind="terminal" /><span className="wb-dtrunc">{script.name}</span><small className="wb-dmuted">Run</small></button>)}
+      {!terminals.length && !data?.scripts.length ? <p className="wb-dnote">Dev servers and scripts you run here show up in this list.</p> : null}
+      <button className="wb-dmore" disabled={!data} onClick={() => setEditing(value => !value)}>{editing ? "Cancel" : "Add a project script"}</button>
+      {editing ? <form className="wb-script-form" onSubmit={event => { event.preventDefault(); void action(async () => {
+        await request(`${apiBase}/workbench/scripts`, { ...store.context, name, command }); setEditing(false); setName(""); setCommand(""); store.refresh();
+      }); }}><label>Script name<input required value={name} onChange={event => setName(event.target.value)} maxLength={80} /></label>
+        <label>Command<input required value={command} onChange={event => setCommand(event.target.value)} placeholder="npm run dev" maxLength={2000} /></label>
+        <button type="submit" className="es-btn">Save script</button><small>Saving does not run the script.</small></form> : null}
+    </DetailSection>
     {error || notice ? <p className="wb-error" role="alert">{error || notice}</p> : null}
   </div>;
 }

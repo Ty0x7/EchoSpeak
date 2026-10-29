@@ -25,6 +25,7 @@ _PAST = (
     ("Writing", "Wrote"),
     ("Editing", "Edited"),
     ("Running", "Ran"),
+    ("Calculating", "Calculated"),
     ("Finding", "Found"),
     ("Creating", "Created"),
     ("Updating", "Updated"),
