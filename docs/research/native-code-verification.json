@@ -251,19 +251,19 @@
     "artifacts/media/code-inbox/left-sidebar-workspace.png": "930f9e5e38788a101940e9eff4fe58f8a5be487e9182b4a6a9bfa965005f968b",
     "artifacts/media/code-inbox/t3-sidebar-reference.png": "a3034be75488036785719af278141b5c30e0525893aed3128c6a94f9a22f0554",
     "artifacts/releases/index.html": "ff42f90e8971a36c0e6765ecd70ac0af7aa54a073e03540411a183d87b7b6f60",
-    "artifacts/releases/v11.13.0.html": "9cbdf6850d9afe44694f39093e8fd2f850bd8450afbd1fe69f7f1be27493e534",
-    "artifacts/research/native-code.html": "388a73e100806bdfa5a4054f98de8ff74064fb82e5ea5c3dc05f88bc5ffc0833",
+    "artifacts/releases/v11.13.0.html": "9644608f2dc816794599033026656e85a229da64c25ca644726ce88dab3fac4f",
+    "artifacts/research/native-code.html": "fee1abdf3117525a838fbf1ab451bc4c33c5c05e7bfcacfdf6152813a21b39d4",
     "docs/ARCHITECTURE.md": "da95296fb3be1650d331e7c93e70d68e66afaa510a737840708bb9e6f61d7036",
-    "docs/CODEX_HANDOFF.md": "96e14823789b4b6a5622848a4138a91fe6371b96982bca3a79084aa8aee86ec0",
+    "docs/CODEX_HANDOFF.md": "8f95bb8e860bb2364fcd34ace69788821ce4ae9ec7f295c383b68627adb10937",
     "docs/releases/index.md": "117c2f66b6e6efc7315530233e5999ad9aefe1ae67fc30b3814c237676f728ca",
     "docs/releases/v11.13.0-verification.json": "df3461c304bc4881773257ad0c444295d4add919b4d0f34f38de777a3b86f014",
-    "docs/releases/v11.13.0.md": "450fcd6429bdaab2e73fd38434bffea434f6123224b8be376317f774a71308bc",
+    "docs/releases/v11.13.0.md": "d89ed201f435aa967fe9625da93ec8e95b480b1361127ae8d1f1be42db2a4f88",
     "docs/research/echo-code-sources.json": "e684ec1d0f36f1403358a08075774aeb68d76481a5aed98bd7cb41ce300ee44a",
     "docs/research/echo-code.md": "43356cd1c09a82a1ed32bd4b138388407c42e8d4267396ecebdb660d929e37f0",
     "docs/research/native-code.md": "5b0678e6433bb71ae67e0a5d80e6e730e3f7935c5d00f94a78ccd5d2c8858251",
     "docs/research/three-environments.md": "0b8d1ec4d713995e4b48f5fdac5cf88e8c33b598c666363f631b436433ac056d",
     "scripts/check-code-control-bundle.py": "6a77702a04064ad5218fbdb81c331197f2c75f06a40d3d03e49eb073288e7ff8",
-    "scripts/check-code-inbox-ui.py": "3bd9cc6ffd5a3a73747c8c7867470f90381b099ec50801cb28f69fc3fb191b28"
+    "scripts/check-code-inbox-ui.py": "32aac703d51c7ddde621adcb87673c3a859404c16dad70c56e2841c8b2268b3e"
   },
   "initial_inbox_pass": {
     "checked_on_utc": "2026-10-29",
@@ -431,6 +431,7 @@
       "model_calls": 0,
       "request_count": 29
     },
+    "browser_timing_note": "A final rerun intermittently missed the newly inserted draft text click before any restore GET. The verifier now waits for stash completion, activates the button and observes its GET response before checking restored text; product code is unchanged.",
     "packaged_mcp": {
       "version": "11.13.0",
       "status": "passed",
@@ -464,6 +465,13 @@
       "branch": "claude/v11.12",
       "pr": 113,
       "sha": "416fd8de89db90355c4351e176d563c1d3a28db5"
+    },
+    "pull_request": {
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/114",
+      "number": 114,
+      "state": "open",
+      "draft": false,
+      "implementation_commit": "c4d10a455b10bc93eb2772c2170e699e04895c2e"
     },
     "document_checks": "passed: local links/media, unique IDs, no remote embeds/scripts, wide/narrow browser checks and AST/duplicate-definition audit"
   }

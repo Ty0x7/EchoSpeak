@@ -146,7 +146,13 @@ def main():
             task=page.get_by_label("Coding task draft");expect(task).to_be_visible()
             task.fill("Save the layout investigation");task.press("Control+s")
             expect(page.get_by_text("Save the layout investigation",exact=True)).to_be_visible()
-            page.get_by_text("Save the layout investigation",exact=True).click()
+            # Finish the stash's own state update before activating the new row.
+            # Target the button: clicking its newly inserted text can straddle
+            # React's async overview refresh between pointer-down and pointer-up.
+            expect(task).to_have_value("")
+            expect(task).to_be_enabled()
+            with page.expect_response(lambda response:"/echo-code/drafts/" in response.url and response.request.method=="GET"):
+                page.locator(".ec-inbox-drafts .ec-inbox-open").filter(has_text="Save the layout investigation").click()
             try:
                 expect(task).to_have_value("Save the layout investigation")
             except AssertionError:

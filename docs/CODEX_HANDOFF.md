@@ -4,6 +4,10 @@ Updated 30 October 2026 UTC from source; the PR table is the 29 October GitHub s
 is on `codex/code-inbox`, based on `416fd8d` (Claude's 11.12 stack). Source version is 11.13.0. The owner authorized a scoped PR and local Windows build.
 Do not merge or publish a GitHub release without a further instruction.
 
+[PR #114](https://github.com/Ty0x7/EchoSpeak/pull/114) is open, ready for review,
+targeting `claude/v11.12` (stacked on #113). Implementation commit: `c4d10a4`.
+The branch is pushed; only unrelated user files remain untracked locally.
+
 ## Required handoff workflow
 
 **Objective → Research → Environment → Verification → Adaptation → Completion.**
