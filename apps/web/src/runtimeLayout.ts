@@ -39,7 +39,7 @@ export function saveRuntimeLayout(storage: Pick<Storage, "setItem"> | null, layo
  */
 /** The open left sidebar, in pre-zoom layout px (collapsed: 56). */
 // 11.12: a little wider, so titles and the working indicator fit without crowding.
-export const SIDEBAR_WIDTH = 248;
+export const SIDEBAR_WIDTH = 288;
 
 export function runtimeGridColumns(layout: RuntimeLayout): string {
   const columns: string[] = [];

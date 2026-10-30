@@ -13,6 +13,7 @@ import {
 } from "./sidebarSections";
 import { SplitHandle, type SplitGeometry } from "./SplitHandle";
 import { useDesktopUpdate } from "../dashboard/useDesktopUpdate";
+import "./sidebar.css";
 import { ENVIRONMENTS, ENVIRONMENT_PAGES, NEW_LABEL, type Environment } from "../app/environments";
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any> };
@@ -385,7 +386,7 @@ export function ProjectSidebar(props: SidebarProps) {
         <span style={iconSlot(props.activeSessionId === session.id)}>
           <Icon name="session" size={iconOnly ? 16 : 15} active={props.activeSessionId === session.id} />
         </span>
-        {!iconOnly && <span style={titleEllipsis}>{session.name}</span>}
+        {!iconOnly && <span className="es-session-copy"><span className="es-session-title">{session.name}</span><small>{props.projects.find(p => p.id === session.projectId)?.name || (environment === "agents" ? "Agent conversation" : "Conversation")}<time>{new Date(session.at).toLocaleDateString(undefined, {month:"short",day:"numeric"})}</time></small></span>}
         {props.workingSessionIds?.has(session.id) ? <span className="echo-side-working" role="status" aria-label="Working">
           <span className="echo-side-working-dot" aria-hidden />{!iconOnly ? <span className="echo-side-working-text">Working</span> : null}</span> : null}
       </button>
@@ -508,7 +509,8 @@ export function ProjectSidebar(props: SidebarProps) {
 
   return (
     <aside
-      className="echo-sidebar"
+      className={`echo-sidebar es-sidebar-refined${iconOnly ? " is-collapsed" : ""}`}
+      data-environment={environment}
       aria-label="Project and Session sidebar"
       style={{
         minWidth: 0,
@@ -647,6 +649,7 @@ export function ProjectSidebar(props: SidebarProps) {
       {!iconOnly ? (
         <div className="es-side-body">
           <div className="es-side-top">
+            <div className="es-sidebar-identity"><img src="/logo.png" alt=""/><strong>EchoSpeak</strong><span>{environment === "code" ? "Workspace" : environment === "agents" ? "Your team" : "Conversations"}</span></div>
             <div className="es-side-search-row">
             {props.onSearchChats && environment !== "code" ? (
               <label className="es-chat-search">

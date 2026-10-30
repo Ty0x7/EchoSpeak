@@ -3,6 +3,7 @@ import { RuntimeMark } from "../components/RuntimeMark";
 import { request } from "../projects/model";
 import { inboxState, runtimeName, type CodeSession, type InboxSummary } from "./model";
 import { CodeControl } from "./CodeControl";
+import { SidebarIcon } from "../components/SidebarIcon";
 
 export type ExternalRow = { id: string; runtime_id: string; state: string; created_at: number; project_id: string; title?: string; branch?: string; inbox?: InboxSummary };
 export type CodeProjectRow = { id: string; name: string; workspace_root: string; trust_state: string; sessions: CodeSession[]; external?: ExternalRow[] };
@@ -53,6 +54,7 @@ export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, 
   const [saving, setSaving] = useState(false);
   const [prNumber, setPrNumber] = useState("");
   const [control, setControl] = useState(false);
+  const [filters, setFilters] = useState(false);
   const [hideWorking, setHideWorking] = useState(() => saved("echospeak.code.workingShelf", true));
   const [shelves, setShelves] = useState<Record<string, boolean>>(() => saved("echospeak.code.shelves", {}));
   const anchor = useRef("");
@@ -115,9 +117,9 @@ export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, 
     return <li key={r.key} className={`ec-inbox-row${current ? " is-active" : ""}${selected.includes(r.key) ? " is-selected" : ""}`}>
       <button type="button" className="ec-inbox-open" aria-current={current ? "true" : undefined} aria-pressed={selected.includes(r.key)} title={`${r.title} · ${r.inbox?.reason || ""} · ${r.inbox?.verification || ""}`} onClick={e => open(r, e)}>
         <span className="ec-inbox-top"><span className="ec-project-mark" aria-hidden>{r.project.slice(0, 1).toUpperCase()}</span><span className="ec-inbox-project">{r.project}</span>
-          <span className={`ec-inbox-badge is-${state}${r.inbox?.woke ? " is-woke" : ""}`}>{badge}</span></span>
+          <span className={`ec-inbox-badge is-${state}${r.inbox?.woke ? " is-woke" : ""}`}><i aria-hidden>{state === "settled" ? "✓" : state === "needs_attention" ? "?" : state === "working" ? "◌" : r.inbox?.woke ? "↗" : "○"}</i>{badge}</span></span>
         <strong className="ec-inbox-title">{r.title}</strong>
-        <span className="ec-inbox-bottom"><span className="ec-inbox-branch">⌘ {r.branch || (r.external ? "Isolated worktree" : "Project folder")}</span><RuntimeMark runtime={r.runtime} /><small>{elapsed(r.at)}</small></span>
+        <span className="ec-inbox-bottom"><SidebarIcon name="branch"/><span className="ec-inbox-branch">{r.branch || (r.external ? "Isolated worktree" : "Project folder")}</span><RuntimeMark runtime={r.runtime} /><small>{elapsed(r.at)}</small></span>
         {r.inbox?.verification === "Checks failed" ? <span className="ec-inbox-failure">Checks failed</span> : null}
       </button>
       {r.inbox?.can_triage ? <button type="button" className="ec-inbox-menu" aria-label={`Inbox actions for ${r.title}`} onClick={() => setMenu(menu === r.key ? "" : r.key)}>⋯</button> : null}
@@ -134,10 +136,10 @@ export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, 
     {shelves[name] ? <ul>{items.map(renderRow)}</ul> : null}
   </section> : null;
   return <div className="ec-tree ec-inbox" aria-label="Code inbox">
-    <div className="ec-inbox-toolbar"><input aria-label="Search coding sessions" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} />
-      <button type="button" title="Add project" aria-label="Add a project folder" onClick={onAddFolder}>⊞</button><button type="button" title="New thread" aria-label="New coding session" onClick={() => onNewSession(project || data?.projects[0]?.id || "")}>↗</button></div>
-    <div className="ec-inbox-options"><select aria-label="Filter coding projects" value={project} onChange={e => setProject(e.target.value)}><option value="">All projects</option>{data?.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-      <button type="button" aria-label="Hide working threads in their own section" aria-pressed={hideWorking} onClick={() => setHideWorking(v => !v)}>Working shelf</button></div>
+    <div className="ec-inbox-toolbar"><SidebarIcon name="search"/><input aria-label="Search coding sessions" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} />
+      <button type="button" title="Inbox filters" aria-label="Inbox filters" aria-expanded={filters} onClick={()=>setFilters(v=>!v)}><SidebarIcon name="filter"/></button><button type="button" title="Add project" aria-label="Add a project folder" onClick={onAddFolder}><SidebarIcon name="folder"/></button><button type="button" title="New thread" aria-label="New coding session" onClick={() => onNewSession(project || data?.projects[0]?.id || "")}><SidebarIcon name="compose"/></button></div>
+    {filters ? <div className="ec-inbox-options"><select aria-label="Filter coding projects" value={project} onChange={e => setProject(e.target.value)}><option value="">All projects</option>{data?.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+      <label><input type="checkbox" checked={hideWorking} onChange={e=>setHideWorking(e.target.checked)}/>Working shelf</label></div> : null}
     {selected.length ? <div className="ec-inbox-selection"><span>{selected.length} selected</span>{actions(all.filter(r => selected.includes(r.key)))}<button type="button" onClick={() => setSelected([])}>Clear</button></div> : null}
     {error ? <p role="alert" className="ec-tree-note">{error}</p> : null}
     {!data && !error ? <p role="status" className="ec-tree-note">Loading Code…</p> : null}
@@ -150,7 +152,7 @@ export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, 
     {hideWorking ? shelf("working", "Working", rows.filter(r => stateOf(r) === "working")) : null}
     {shelf("snoozed", "Snoozed", rows.filter(r => stateOf(r) === "snoozed"))}
     {shelf("settled", "Settled", rows.filter(r => stateOf(r) === "settled").sort((a,b) => (b.inbox?.settled_at || b.at) - (a.inbox?.settled_at || a.at)))}
-    <div className="ec-inbox-footer"><button type="button" onClick={() => setControl(v => !v)} aria-expanded={control}>MCP access & diagnostics</button></div>
+    <div className="ec-inbox-footer"><button type="button" aria-label="MCP access & diagnostics" onClick={() => setControl(v => !v)} aria-expanded={control}><SidebarIcon name="connections"/><span>Connections & diagnostics</span><small>{control ? "−" : "+"}</small></button></div>
     {control ? <CodeControl apiBase={apiBase} projects={data?.projects || []} /> : null}
   </div>;
 }

@@ -25,18 +25,27 @@ import {CodeTree} from "./src/code/CodeTree";
 import {EchoCodeWorkspace} from "./src/code/EchoCodeWorkspace";
 import {ProjectSidebar} from "./src/components/ProjectSidebar";
 import {RuntimeMark} from "./src/components/RuntimeMark";
+import {AgentRows,CollapsedRoster} from "./src/lean/Roster";
+import {StopEverythingButton} from "./src/dashboard/StopEverything";
+import {WorkbenchIcon} from "./src/workbench/icons";
+import "./src/workbench/workbench.css";
 import "./src/theme/tokens.css";import "./src/lean/lean.css";import "./src/code/code.css";import "./src/projects/workspace.css";import "./src/theme/workspace.css";
 const noop=()=>{};
 const projects=[{id:"p",name:"Example repository",workspace_root:"fixture",trust_state:"trusted"}];
 const info:any={provider:"lmstudio",model:"fixture-local",local:true,binding_revision:1,model_profile:{thinking_controls:{supported:true,effort:true,toggle:true}}};
 function Preview(){
  const [pid,setPid]=useState("p");
+ const [env,setEnv]=useState<any>("code");
+ const [collapsed,setCollapsed]=useState(false);
+ const contacts:any[]=[{id:"echo",name:"Echo",initials:"E",title:"Your personal assistant"},{id:"scout",name:"Jarvis",initials:"J",title:"Research and investigation"}];
+ const conversations=[{id:"chat1",name:"Planning the next release",at:Date.now(),projectId:"p"},{id:"chat2",name:"Ideas for the dashboard",at:Date.now()-86400000}];
  const sidebar=<CodeTree apiBase="/fixture-api" revision={0} activeThreadId="failed" activeExternalId="" workingSessionIds={new Set(["working"])}
  onOpenNative={s=>{document.body.dataset.opened=s.thread_id}} onOpenExternal={(_p,_r,id)=>{document.body.dataset.opened=id}}
  onNewSession={id=>setPid(id||"p")} onAddFolder={noop}/>;
- return <div className="echo-root fixture-layout"><div className="fixture-sidebar"><ProjectSidebar collapsed={false} projects={projects} sessions={[]} activeProjectId={pid} activeSessionId="failed" activeView="code"
- onToggleCollapsed={noop} onNewSession={noop} onAddFolder={noop} onSelectSession={noop} onRenameSession={noop} onDeleteSession={noop} onDeleteProject={noop} onView={noop} onSettings={noop}
- environment="code" onEnvironment={noop} onPage={noop} codeTree={sidebar}/></div><main className="fixture-main">
+ return <div className="echo-root fixture-layout" style={collapsed?{gridTemplateColumns:"56px minmax(0,1fr)"}:undefined}><div className="fixture-sidebar"><ProjectSidebar collapsed={collapsed} projects={projects} sessions={conversations} activeProjectId={pid} activeSessionId="failed" activeView="code"
+ onToggleCollapsed={()=>setCollapsed(v=>!v)} onNewSession={noop} onAddFolder={noop} onSelectSession={noop} onRenameSession={noop} onDeleteSession={noop} onDeleteProject={noop} onView={noop} onSettings={noop}
+ footerExtra={<><div className="wb-sidebar-actions"><button aria-label="Pull requests"><WorkbenchIcon kind="pull_requests"/></button><button aria-label="Usage and limits"><WorkbenchIcon kind="usage"/></button></div><StopEverythingButton apiBase="/fixture-api"/></>}
+ environment={env} onEnvironment={setEnv} onPage={noop} collapsedRoster={<CollapsedRoster agents={contacts} onOpenAgent={a=>{document.body.dataset.agent=a.id}}/>} onSearchChats={async q=>conversations.filter(c=>c.name.toLowerCase().includes(q.toLowerCase())).map(c=>({session_id:c.id,title:c.name,snippet:"Fixture conversation",role:"user",agent:"",created_at:c.at,matches:1}))} agents={{count:2,onNew:noop,list:<AgentRows agents={contacts} rooms={[]} activeThreadId="" onOpenAgent={a=>{document.body.dataset.agent=a.id}} onEditAgent={noop}/>}} codeTree={sidebar}/></div><main className="fixture-main">
  <div className="fixture-caption">EchoSpeak {manifest.version} · component preview · no model connected</div>
  <EchoCodeWorkspace apiBase="/fixture-api" projects={projects} projectId={pid} onProject={setPid} onAddFolder={noop} onSession={s=>{document.body.dataset.started=s.thread_id}} nativeInfo={info} nativeLocked={false} onConfigureProviders={noop}/>
  <div className="fixture-assets" aria-label="Provider image checks"><RuntimeMark runtime="codex"/><RuntimeMark runtime="claude_cli"/></div>
@@ -45,8 +54,8 @@ function Preview(){
 createRoot(document.getElementById("root")!).render(<Preview/>);
 '''
 STYLE="""html,body,#root{margin:0;height:100%;background:var(--es-bg);color:var(--es-text);font-family:Segoe UI,sans-serif}
-.fixture-layout{display:grid;grid-template-columns:248px minmax(0,1fr);height:100vh}.fixture-sidebar{height:100vh;min-width:0}.fixture-main{padding:18px;min-width:0;overflow:auto}.fixture-caption{font-size:11px;color:var(--es-text-3);margin-bottom:24px}.fixture-assets{display:flex;gap:12px;padding:18px}.ec-checkout-bar{flex-wrap:wrap}.es-code-tree-host{overflow:auto;min-height:0;flex:1}
-@media(max-width:600px){.fixture-layout{grid-template-columns:248px}.fixture-main{display:none}}
+.fixture-layout{display:grid;grid-template-columns:288px minmax(0,1fr);height:100vh}.fixture-sidebar{height:100vh;min-width:0}.fixture-main{padding:18px;min-width:0;overflow:auto}.fixture-caption{font-size:11px;color:var(--es-text-3);margin-bottom:24px}.fixture-assets{display:flex;gap:12px;padding:18px}.ec-checkout-bar{flex-wrap:wrap}.es-code-tree-host{overflow:auto;min-height:0;flex:1}
+@media(max-width:600px){.fixture-layout{grid-template-columns:288px}.fixture-main{display:none}}
 """
 
 def main():
@@ -74,6 +83,7 @@ def main():
         with sync_playwright() as p:
             browser=p.chromium.launch()
             page=browser.new_page(viewport={"width":1280,"height":900},device_scale_factor=1)
+            page.emulate_media(reduced_motion="reduce")
             page.on("pageerror",lambda e:failures.append(str(e)))
             def api(route):
                 path=route.request.url.split("/fixture-api",1)[1].split("?")[0]
@@ -121,10 +131,18 @@ def main():
             expect(page.get_by_role("button",name="Snoozed (1)",exact=True)).to_be_visible()
             expect(page.get_by_role("button",name="Settled (1)",exact=True)).to_be_visible()
             assert page.locator(".fixture-sidebar").bounding_box()["x"]==0
-            assert page.locator(".fixture-main").bounding_box()["x"]>=248
+            assert page.locator(".fixture-main").bounding_box()["x"]>=288
             page.wait_for_function("Array.from(document.querySelectorAll('.fixture-assets img')).every(i=>i.complete&&i.naturalWidth>0)")
             page.screenshot(path=str(MEDIA/"left-sidebar-workspace.png"))
             page.locator(".echo-sidebar").screenshot(path=str(MEDIA/"inbox-dark.png"))
+            assert page.locator(".echo-sidebar").bounding_box()["width"]==288
+            page.get_by_role("button",name="Inbox filters",exact=True).click()
+            expect(page.get_by_label("Filter coding projects")).to_be_visible()
+            page.get_by_role("checkbox",name="Working shelf",exact=True).uncheck()
+            expect(page.get_by_text("Update type definitions",exact=True)).to_be_visible()
+            page.get_by_role("checkbox",name="Working shelf",exact=True).check()
+            page.get_by_role("button",name="Inbox filters",exact=True).press("Enter")
+            expect(page.get_by_label("Filter coding projects")).to_have_count(0)
             search.fill("parser");expect(page.get_by_text("Fix settings path",exact=True)).to_have_count(0);search.fill("")
             # Range selection uses the visible list, never collapsed shelves.
             page.get_by_text("Repair parser edge case",exact=True).click(modifiers=["Control"])
@@ -179,6 +197,29 @@ def main():
             expect(page.get_by_label("New MCP client token",exact=True)).to_have_count(0)
             page.get_by_role("button",name="Revoke",exact=True).click()
             expect(page.get_by_text("Fixture reader · Read only",exact=True)).to_have_count(0)
+            # Exercise actual shared navigation and actual AgentRows, not a mock layout.
+            page.get_by_role("tab",name="Chat",exact=True).click()
+            expect(page.get_by_label("Search chats",exact=True)).to_be_visible()
+            expect(page.get_by_role("button",name="Session: Planning the next release",exact=True)).to_be_visible()
+            page.locator(".echo-sidebar").screenshot(path=str(MEDIA/"sidebar-chat-light.png"))
+            page.get_by_label("Search chats",exact=True).fill("dashboard")
+            expect(page.get_by_role("button",name="Ideas for the dashboard You: Fixture conversation")).to_be_visible()
+            page.get_by_label("Search chats",exact=True).fill("")
+            page.get_by_role("tab",name="Agents",exact=True).click()
+            expect(page.get_by_text("Your personal assistant",exact=True)).to_be_visible()
+            page.get_by_role("button",name="Echo Your personal assistant",exact=True).click()
+            assert page.locator("body").get_attribute("data-agent")=="echo"
+            page.locator(".echo-sidebar").screenshot(path=str(MEDIA/"sidebar-agents-light.png"))
+            page.locator("html").evaluate("el=>el.removeAttribute('data-es-theme')")
+            page.locator(".echo-sidebar").screenshot(path=str(MEDIA/"sidebar-agents-dark.png"))
+            page.get_by_role("button",name="Collapse sidebar",exact=True).click()
+            expect(page.get_by_role("button",name="Expand sidebar",exact=True)).to_be_visible()
+            assert page.locator(".echo-sidebar").bounding_box()["width"]==56
+            page.locator(".echo-sidebar").screenshot(path=str(MEDIA/"sidebar-rail.png"))
+            page.get_by_role("button",name="Expand sidebar",exact=True).click()
+            page.get_by_role("tab",name="Chat",exact=True).click()
+            page.locator(".echo-sidebar").screenshot(path=str(MEDIA/"sidebar-chat-dark.png"))
+            page.get_by_role("tab",name="Code",exact=True).click()
             page.set_viewport_size({"width":390,"height":900});expect(search).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth<=innerWidth")
             assert not failures,failures
@@ -192,7 +233,7 @@ def main():
                     assert rp.locator("img").evaluate_all("items=>items.every(i=>i.complete&&i.naturalWidth>0)"),document
                     rp.screenshot(path=str(scratch/f"{label}-{width}.png"))
             report.close();browser.close()
-        result={"version":json.loads((WEB/"package.json").read_text())["version"],"checks":["left sidebar placement","flat active rows","collapsed Working/Snoozed/Settled shelves","local provider image assets","search","visible Shift range selection","bulk timed snooze","stale action rejection","errors survive refresh","dark/light themes","Ctrl+S stash and restore","Ctrl+Enter background submit","image stash","MCP panel read-only create, hide token and revoke","390px without overflow","no page errors","research report, versioned release report and atlas wide/narrow with scripts disabled"],"model_calls":0,"request_count":len(requests)}
+        result={"version":json.loads((WEB/"package.json").read_text())["version"],"checks":["shared Chat/Agents/Code navigation, search and agent callback","left sidebar placement","flat active rows","collapsed Working/Snoozed/Settled shelves","local provider image assets","search","visible Shift range selection","bulk timed snooze","stale action rejection","errors survive refresh","dark/light themes","Ctrl+S stash and restore","Ctrl+Enter background submit","image stash","MCP panel read-only create, hide token and revoke","390px without overflow","no page errors","research report, versioned release report and atlas wide/narrow with scripts disabled"],"model_calls":0,"request_count":len(requests)}
         (scratch/"code-inbox-browser-result.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
         print(json.dumps(result,indent=2))
     finally:

@@ -390,3 +390,16 @@ need the owner's hands-on checks. The initial pass did not push or package.
 The owner subsequently authorized 11.13.0 versioning, local packaging and a
 stacked PR; [release notes](../releases/v11.13.0.md) record that delivery separately.
 Merging and GitHub release publication remain unauthorized.
+
+## 12. Shared sidebar visual refinement
+
+11.13.0's follow-up replaces the sparse sidebar presentation across all three
+environments. `components/sidebar.css` scopes the shared header, icon tabs,
+conversation/agent rows, action visibility and Code typography. `SidebarIcon.tsx`
+provides local SVG navigation glyphs. Code filters are disclosed from the toolbar;
+the existing inbox state/permission owners are unchanged. Runtime layout uses
+288px expanded and 56px collapsed widths. Roster previews use existing messages
+or configured roles. The versioned release HTML shows actual dark/light component
+captures for Chat, Agents and Code; fixture checks include search, opening an agent,
+keyboard filter toggles and collapse/expand. See the release record for build and
+installer provenance; older installer hashes describe the earlier visual pass.

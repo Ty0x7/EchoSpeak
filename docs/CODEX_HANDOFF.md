@@ -164,3 +164,18 @@ unavailable in the noninteractive run. No updater signatures/latest.json were
 produced. Run `apps/desktop/scripts/release-windows.ps1` interactively to enter the
 password locally when preparing a signed release. No installation, merge or GitHub
 release publication was performed. See the versioned artifact evidence.
+
+## Shared sidebar visual continuation
+
+The current 11.13.0 candidate updates Chat, Agents and Code navigation together.
+Expanded width is 288px; the collapsed rail stays 56px. Shared styling lives in
+`components/sidebar.css`, SVG glyphs in `SidebarIcon.tsx`, and actual agent previews
+in `Roster.tsx`. The existing section resizing, search, callbacks and Code inbox
+owners are retained. Filters now open from the Code toolbar. Browser fixtures
+cover all environments, themes, filter keyboard activation and rail collapse.
+
+Current installer: `release/v11.13.0/sidebar-refinement/EchoSpeak_11.13.0_x64-setup.exe`.
+Its normal NSIS build exited 0. This unsigned local test candidate supersedes the
+earlier UI EXE at the version folder root. See the versioned sidebar verification
+record and HTML report. Do not label earlier source hashes or installer checks
+as evidence for this refined UI. No installation, merge or publication occurred.
