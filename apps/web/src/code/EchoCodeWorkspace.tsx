@@ -35,6 +35,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
   const available = projects.filter(project => !project.archived && project.workspace_root);
   const [catalog, setCatalog] = useState<RuntimeCatalog | null>(null);
   const [loaded, setLoaded] = useState<CodeWorkspace | null>(null);
+  const workspaceRevision = useWorkbench(state => state.revision);
   const workspace = loaded?.project.id === projectId ? loaded : null;
   const [runtimeId, setRuntime] = useState(openRequest?.runtimeId || "echo");
   useEffect(() => { if (openRequest) setRuntime(openRequest.runtimeId); }, [openRequest]);
@@ -121,11 +122,11 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
 
   useEffect(() => {
     let live = true;
-    setLoaded(null); setError("");
+    setLoaded(previous => previous?.project.id === projectId ? previous : null); setError("");
     if (projectId) request<CodeWorkspace>(`${apiBase}/echo-code/projects/${encodeURIComponent(projectId)}`)
       .then(value => { if (live) setLoaded(value); }).catch(err => { if (live) setError(err.message); });
     return () => { live = false; };
-  }, [apiBase, projectId, revision]);
+  }, [apiBase, projectId, revision, workspaceRevision]);
 
 
   const selected = catalog?.runtimes.find(runtime => runtime.id === runtimeId);
@@ -178,7 +179,6 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
     <div className="ec-workspace">
       {error ? <p role="alert" className="ec-notice">{error}</p> : null}
       {notice ? <p role="status" className="ec-notice">{notice}</p> : null}
-      {runtimeId !== "echo" && workspace?.external_blocker ? <p role="alert" className="ec-notice">{workspace.external_blocker}</p> : null}
       {runtimeId !== "echo" && account ? <RuntimeUsage usage={account.subscription_usage} compact/> : null}
       <div className="ec-start">
         {runtimeId !== "echo" && externalState?.transcript ? <pre className="ec-chat-transcript" role="log" aria-label="Coding conversation">{externalState.transcript}</pre>
@@ -221,12 +221,13 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
           </div>
         </div>
         <div className="ec-checkout-bar">
+          {runtimeId !== "echo" ? <span>{externalState?.workspaceMode === "worktree" ? "Isolated Git worktree" : "Project folder"}</span> : null}
           <div className="ec-draft-shortcuts"><button type="button" disabled={!projectId || working || (!draft.trim()&&!images.length)} onClick={()=>void stash()}>Stash · Ctrl+S</button>{runtimeId==="echo"?<label className="ec-attach-image">Attach image<input aria-label="Attach image to coding draft" type="file" disabled={working} accept="image/png,image/jpeg,image/webp" onChange={e=>{if(e.target.files?.[0])addImage(e.target.files[0]);e.target.value=""}}/></label>:null}<small>Ctrl+Enter · {runtimeId==="echo"?"send in background":"send to runtime"}</small></div>
           {images.length?<div className="ec-draft-images">{images.map((src,i)=><button type="button" key={i} title="Remove attachment" onClick={()=>setImages(v=>v.filter((_,j)=>i!==j))}><img src={src} alt={`Draft attachment ${i+1}`}/><span>×</span></button>)}</div>:null}
           <label><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><path d="M3 7h6l2 2h10v11H3z" /></svg><select aria-label="Coding project" value={projectId} disabled={busy} onChange={event => onProject(event.target.value)}>
             <option value="">Choose project</option>{available.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select></label>
-          <span title={workspace?.project.workspace_root}>{!projectId ? "Local workspace" : workspace ? (workspace.git_summary || "No git repository")
+          <span title={workspace?.project.workspace_root}>{!projectId ? "Local workspace" : workspace ? (workspace.git_summary || (runtimeId === "echo" ? "Project folder · Git optional" : "Git optional"))
             : error ? "Couldn't open this project" : "Opening project…"}</span>
           <button className="ec-link" disabled={busy} onClick={() => setRevision(value => value + 1)} aria-label="Refresh workspace" title="Refresh workspace">↻</button>
         </div>
@@ -240,7 +241,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
       </div>
       {runtimeId !== "echo" && projectId ? <ExternalSession key={`${projectId}:${runtimeId}:${openRequest?.runtimeId === runtimeId ? openRequest.sessionId : ""}`} ref={external} apiBase={apiBase} projectId={projectId} runtimeId={runtimeId}
         initialSessionId={openRequest?.runtimeId === runtimeId ? openRequest.sessionId : ""}
-        canStart={Boolean(workspace?.can_start_native && !workspace?.external_blocker && selected?.can_start)} account={account} draft={draft} onDraft={setDraft} model={model} effort={agentEffort} onState={externalStatus}
+        canStart={Boolean(workspace?.can_start_native && selected?.can_start)} worktreeAvailable={workspace?.worktree_available} worktreeUnavailable={workspace?.worktree_unavailable} account={account} draft={draft} onDraft={setDraft} model={model} effort={agentEffort} onState={externalStatus}
         open={connectionOpen} anchor={connectionButton} onClose={() => setConnectionOpen(false)}
         onNeedSetup={() => setConnectionOpen(true)} onAccountChanged={recheckAccount} onRefreshAccount={() => setAccountRevision(value => value + 1)} /> : null}
     </div>

@@ -258,7 +258,7 @@ class _TurnHandle:
 class ClaudeCli:
     """The owner's installed, unmodified Claude Code, signed in with their own plan.
 
-    Each turn runs `claude -p` in the session's worktree and resumes Claude Code's own session.
+    Each turn runs `claude -p` in the selected folder/worktree and resumes Claude Code's own session.
     Claude Code keeps its own tools, permissions and transcript. Echo passes no API key, never
     reads Claude Code's credentials, and answers its permission prompts only through the
     documented PermissionRequest hook (agent/code_claude_hook.py) with the owner's decision.
@@ -301,7 +301,7 @@ class ClaudeCli:
         settings = {"hooks": {"PermissionRequest": [{"matcher": "*", "hooks": [
             {"type": "command", "command": command, "args": args, "timeout": 200}]}]}}
         argv = [executable("claude_cli"), "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-                # Edits stay inside the isolated worktree (inspect and roll back in Echo Code);
+                # Claude's edits use the selected folder or optional isolated worktree;
                 # commands, network and anything else Claude Code would ask about go to the owner.
                 "--permission-mode", "acceptEdits",
                 # The owner's own Claude Code settings only: no hooks or MCP servers from the repository.

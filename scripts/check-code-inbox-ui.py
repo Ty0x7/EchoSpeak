@@ -79,6 +79,8 @@ def main():
                 if server.poll() is not None: raise RuntimeError("Vite failed; inspect fixture log")
                 time.sleep(.25)
         data,requests,failures=fixture(),[],[]
+        workspace_git=[False]
+        external_sessions=[]
         clients=[]
         native={"provider":"lmstudio","model":"fixture-local","local":True,"binding_revision":1,"model_profile":{"thinking_controls":{"supported":True,"effort":True,"toggle":True}}}
         runtime=lambda identity,name:{"id":identity,"name":name,"implemented":True,"installed":True,"can_start":True,"authentication":"fixture","protocol":"native","blockers":[],"description":"Fixture"}
@@ -110,8 +112,16 @@ def main():
                     is_codex = "/codex/" in path
                     model = {"model":"fixture-codex-1","displayName":"Fixture Codex","isDefault":True,"efforts":["low","high"]} if is_codex else {"model":"claude-opus-5-5","displayName":"Opus 5.5","isDefault":True,"efforts":["low","high"]}
                     route.fulfill(json={"signed_in":True,"method":"chatgpt" if is_codex else "claude.ai","plan":"fixture","models":[model],"subscription_usage":{"observed_at":time.time(),"source":"Scripted account fixture","windows":[{"label":"Fixture plan window","used_percent":25}]}})
-                elif path.endswith("/external-sessions"):route.fulfill(json=[])
-                elif path=="/echo-code/projects/p":route.fulfill(json={"schema_version":1,"project":data["projects"][0],"git_summary":"codex/fixture","sessions":[],"can_start_native":True,"native_blocker":""})
+                elif path.endswith("/external-sessions") and body is not None:
+                    mode=body.get('workspace_mode','folder')
+                    row={'id':uuid.uuid4().hex,'runtime_id':body['runtime_id'],'project_id':'p','workspace_mode':mode,'worktree':'fixture/project' if mode=='folder' else 'fixture/isolated/tree','workspace_root':'fixture/project','created_at':time.time(),'state':'stopped','account':{'type':'fixture','connected':True},'connected':False,'models':[],'native_id':None,'approvals':[],'events':[],'cursor':0,'replay_gap':False,'rollback_available':False}
+                    external_sessions.append(row);route.fulfill(json=row)
+                elif path.endswith("/external-sessions"):route.fulfill(json=external_sessions)
+                elif path.startswith('/echo-code/external-sessions/'):
+                    row=next(r for r in external_sessions if r['id']==path.split('/')[-1])
+                    cursor=int(parse_qs(urlsplit(route.request.url).query).get('cursor',['0'])[0])
+                    route.fulfill(json={**row,'events':[e for e in row['events'] if e['seq']>cursor]})
+                elif path=="/echo-code/projects/p":route.fulfill(json={"schema_version":1,"project":data["projects"][0],"git_summary":"git: branch feature/fixture" if workspace_git[0] else "","sessions":[],"can_start_native":True,"native_blocker":"","external_blocker":"","worktree_available":workspace_git[0],"worktree_unavailable":"Optional worktree requires a committed Git repository" if not workspace_git[0] else ""})
                 elif path=="/provider/models":
                     provider=parse_qs(urlsplit(route.request.url).query)['provider'][0]
                     route.fulfill(json={"provider":provider,"reachable":True,"models":["fixture-api-model" if provider=="openai" else "fixture-local"]})
@@ -170,6 +180,11 @@ def main():
             page.locator(".es-model-popover").screenshot(path=str(MEDIA/"runtime-model-picker.png"))
             page.get_by_role("button",name="Opus 5.5 claude-opus-5-5",exact=False).first.click()
             expect(page.get_by_role("button",name="Agent runtime",exact=True)).to_contain_text("Opus 5.5")
+            page.get_by_role("button",name="Coding agent connection",exact=True).click()
+            expect(page.get_by_label('Coding workspace mode')).to_have_value('folder')
+            expect(page.get_by_text('Git and GitHub are optional.',exact=False)).to_be_visible()
+            page.locator('.ec-connection-popover').screenshot(path=str(MEDIA/'claude-folder-mode-fixture.png'))
+            page.keyboard.press('Escape')
             page.get_by_role("button",name="Agent runtime",exact=True).click()
             page.get_by_role("button",name="Codex models",exact=True).click()
             page.get_by_role("button",name="Fixture Codex fixture-codex-1",exact=False).first.click()
@@ -181,6 +196,29 @@ def main():
             page.wait_for_timeout(300)
             assert sum(r["path"] == "/echo-code/runtimes/codex/check" for r in requests) == checks_before + 1
             page.locator(".ec-connection-popover").screenshot(path=str(MEDIA/"codex-usage-refresh-fixture.png"))
+            expect(page.get_by_label('Coding workspace mode')).to_have_value('folder')
+            assert page.get_by_role('option',name='Isolated Git worktree',exact=True).evaluate('(option)=>option.disabled')
+            expect(page.get_by_role('checkbox',name='Start from committed HEAD',exact=False)).to_have_count(0)
+            page.get_by_label('I trust Codex with this project.',exact=False).check()
+            page.get_by_role('button',name='Create session',exact=True).click()
+            expect(page.get_by_text('Project folder · stopped',exact=False)).to_be_visible()
+            assert external_sessions[-1]['workspace_mode']=='folder'
+            expect(page.get_by_role('button',name='Roll back last turn',exact=True)).to_have_count(0)
+            page.locator('.ec-connection-popover').screenshot(path=str(MEDIA/'codex-folder-session-fixture.png'))
+            # A runtime completion refreshes Git capabilities without a manual UI reload.
+            workspace_git[0]=True
+            external_sessions[-1].update(cursor=1,events=[{'seq':1,'kind':'turn/finished','data':{'state':'completed'}}])
+            expect(page.get_by_text('git: branch feature/fixture',exact=True)).to_be_visible()
+            page.get_by_label('External coding session').select_option('')
+            expect(page.get_by_label('Coding workspace mode')).to_have_value('folder')
+            page.wait_for_function("() => { const option=document.querySelector('option[value=worktree]'); return option && !option.disabled; }")
+            page.get_by_label('Coding workspace mode').select_option('worktree')
+            expect(page.get_by_role('checkbox',name='Start from committed HEAD',exact=False)).to_be_visible()
+            page.get_by_label('I trust Codex with this project.',exact=False).check()
+            page.locator('.ec-connection-popover').screenshot(path=str(MEDIA/'optional-worktree-mode-fixture.png'))
+            page.get_by_role('button',name='Create isolated session',exact=True).click()
+            expect(page.get_by_text('Isolated Git worktree · stopped',exact=False)).to_be_visible()
+            assert external_sessions[-1]['workspace_mode']=='worktree'
             page.keyboard.press("Escape")
             page.get_by_role("button",name="Agent runtime",exact=True).click()
             page.get_by_role("button",name="Echo native models",exact=True).click()

@@ -186,6 +186,7 @@ class ExternalStart(StartSession):
     acknowledge_dirty: bool = False
     acknowledge_execution: bool = False
     command: list[str] = Field(default_factory=list, max_length=32)
+    workspace_mode: Literal["folder", "worktree"] = "folder"
 
 
 def _external(method, *args, **kwargs):
@@ -255,7 +256,7 @@ def external_start(project_id: str, request: ExternalStart):
     if not request.acknowledge_execution:
         raise HTTPException(400, "Acknowledge the external harness's execution authority first")
     return _external("create", project_id, request.runtime_id, request.idempotency_key,
-                     request.acknowledge_dirty, request.command)
+                     request.acknowledge_dirty, request.command, request.workspace_mode)
 
 
 @router.get("/external-sessions/{session_id}")

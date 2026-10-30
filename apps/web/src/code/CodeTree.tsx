@@ -5,10 +5,10 @@ import { inboxState, runtimeName, type CodeSession, type InboxSummary } from "./
 import { CodeControl } from "./CodeControl";
 import { SidebarIcon } from "../components/SidebarIcon";
 
-export type ExternalRow = { id: string; runtime_id: string; state: string; created_at: number; project_id: string; title?: string; branch?: string; inbox?: InboxSummary };
+export type ExternalRow = { id: string; runtime_id: string; state: string; created_at: number; project_id: string; title?: string; branch?: string; workspace_mode?: "folder" | "worktree"; inbox?: InboxSummary };
 export type CodeProjectRow = { id: string; name: string; workspace_root: string; trust_state: string; sessions: CodeSession[]; external?: ExternalRow[] };
 export type CodeOverview = { projects: CodeProjectRow[]; unorganized: CodeSession[]; drafts?: {id:string;title:string;project_id:string;project_name:string;text:string;images:string[]}[] };
-export type InboxRow = { key: string; id: string; title: string; project: string; projectId: string; runtime: string; external: boolean; branch: string; at: number; inbox?: InboxSummary; native?: CodeSession };
+export type InboxRow = { key: string; id: string; title: string; project: string; projectId: string; runtime: string; external: boolean; branch: string; workspaceMode?: "folder" | "worktree"; at: number; inbox?: InboxSummary; native?: CodeSession };
 export function canDropInto(project: Pick<CodeProjectRow, "id" | "trust_state">, fromProjectId: string): boolean {
   return project.trust_state === "trusted" && project.id !== fromProjectId;
 }
@@ -25,7 +25,7 @@ export function overviewRows(data: CodeOverview | null): InboxRow[] {
   const add = (native: CodeSession[], project: string, projectId: string) => native.forEach(s => rows.push({ key: "native:" + s.thread_id, id: s.thread_id, title: s.title.replace(/^Code · /, "") || "Coding session", project, projectId, runtime: "echo", external: false, branch: "", at: s.inbox?.updated_at || s.last_active_at, inbox: s.inbox, native: s }));
   data.projects.forEach(p => {
     add(p.sessions, p.name, p.id);
-    p.external?.forEach(s => rows.push({ key: "external:" + s.id, id: s.id, title: externalTitle(s), project: p.name, projectId: p.id, runtime: s.runtime_id, external: true, branch: s.branch || "", at: s.inbox?.updated_at || s.created_at, inbox: s.inbox }));
+    p.external?.forEach(s => rows.push({ key: "external:" + s.id, id: s.id, title: externalTitle(s), project: p.name, projectId: p.id, runtime: s.runtime_id, external: true, branch: s.branch || "", workspaceMode: s.workspace_mode || "worktree", at: s.inbox?.updated_at || s.created_at, inbox: s.inbox }));
   });
   add(data.unorganized, "Unorganized", "");
   return rows.sort((a, b) => b.at - a.at || a.key.localeCompare(b.key));
@@ -120,7 +120,7 @@ export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, 
         <span className="ec-inbox-top"><span className="ec-project-mark" aria-hidden>{r.project.slice(0, 1).toUpperCase()}</span><span className="ec-inbox-project">{r.project}</span>
           <span className={`ec-inbox-badge is-${state}${r.inbox?.woke ? " is-woke" : ""}`}><i aria-hidden>{state === "settled" ? "✓" : state === "needs_attention" ? "?" : state === "working" ? "◌" : r.inbox?.woke ? "↗" : "○"}</i>{badge}</span></span>
         <strong className="ec-inbox-title">{r.title}</strong>
-        <span className="ec-inbox-bottom"><SidebarIcon name="branch"/><span className="ec-inbox-branch">{r.branch || (r.external ? "Isolated worktree" : "Project folder")}</span><RuntimeMark runtime={r.runtime} /><small>{elapsed(r.at)}</small></span>
+        <span className="ec-inbox-bottom"><SidebarIcon name="branch"/><span className="ec-inbox-branch">{r.branch || (r.external && r.workspaceMode !== "folder" ? "Isolated worktree" : "Project folder")}</span><RuntimeMark runtime={r.runtime} /><small>{elapsed(r.at)}</small></span>
         {r.inbox?.verification === "Checks failed" ? <span className="ec-inbox-failure">Checks failed</span> : null}
       </button>
       {r.inbox?.can_triage ? <button type="button" className="ec-inbox-menu" aria-label={`Inbox actions for ${r.title}`} onClick={() => setMenu(menu === r.key ? "" : r.key)}>⋯</button> : null}

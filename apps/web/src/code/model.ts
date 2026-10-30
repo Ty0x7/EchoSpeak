@@ -56,6 +56,7 @@ export type CodeWorkspace = {
   project: { id: string; name: string; workspace_root: string; trust_state: string };
   git_summary: string; sessions: CodeSession[]; can_start_native: boolean; native_blocker: string;
   external_blocker?: string;
+  worktree_available?: boolean; worktree_unavailable?: string;
 };
 
 /** Runtime availability and project trust are independent; neither implies model access. */

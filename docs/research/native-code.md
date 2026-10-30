@@ -533,3 +533,26 @@ zero inference prompts. 57 backend tests, 38 web tests, TypeScript, 16 desktop
 contracts and actual-component browser checks passed. See [11.13.1 notes](../releases/v11.13.1.md)
 for the current installer, labeled fixture capture and remaining installed retry.
 Earlier installed failure and new compiled success remain separate evidence.
+
+## 16. Folder-first external sessions
+
+The current 11.13.1 candidate removes mandatory Git isolation. New external
+sessions default to `workspace_mode="folder"`; `worktree` is explicit. Metadata
+always lives in the supervisor's session directory. Folder validation binds the
+trusted project path, not a Git marker, so initializing Git later is valid.
+Folder sessions use the existing Workbench root-lock format to coordinate
+external sessions and Workbench writers. Their turns skip Git snapshots and
+automatic rollback. Legacy rows without a mode stay isolated worktrees.
+
+The owner API separates folder readiness from `worktree_available` and its
+optional diagnostic. UI trust is remembered per mode. Completed external turns
+refresh project capabilities; open files/Git views poll locally for updates.
+Workbench supports Git initialized without commits, and direct-folder branch
+actions use the normal review/apply path instead of the detached-worktree guard.
+
+102 backend, 39 web and 16 desktop regressions passed, plus TypeScript and rendered
+mode selection/creation/Git refresh. Real Codex thread startup and Claude metadata
+initialization passed in a true non-Git folder with zero prompts. Compiled owner
+API checks passed for both folder mode and explicitly requested worktree mode.
+Live inference was rejected by automatic approval review and was not run.
+[Current release record and remaining acceptance](../releases/v11.13.1.md).

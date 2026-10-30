@@ -257,8 +257,16 @@ class Workbench:
     async def summary(self, context):
         self.validate(context, execute=False)
         try:
-            head = (await self.read_git(context, "rev-parse", "HEAD")).strip()
-            branch = (await self.read_git(context, "rev-parse", "--abbrev-ref", "HEAD")).strip()
+            if (await self.read_git(context, "rev-parse", "--is-inside-work-tree")).strip() != "true":
+                raise ValueError("Not a working repository")
+            try:
+                head = (await self.read_git(context, "rev-parse", "--verify", "HEAD")).strip()
+            except ValueError:
+                head = ""  # A newly initialized repository is still a Git workspace.
+            try:
+                branch = (await self.read_git(context, "symbolic-ref", "--short", "HEAD")).strip()
+            except ValueError:
+                branch = "HEAD"
             changes = await self.changes(context)
             branches = (await self.read_git(context, "for-each-ref", "--format=%(refname:short)", "refs/heads/")).splitlines()
             try:
@@ -267,8 +275,8 @@ class Workbench:
                 remote = ""
             repo = self.github_repo(remote)
             git = {"head": head, "branch": branch, "branches": branches[:200], "changes": changes["files"],
-                   "fingerprint": changes["fingerprint"], "repository": repo, "is_git": True}
-        except ValueError:
+                   "fingerprint": changes["fingerprint"], "repository": repo, "is_git": True, "has_commits": bool(head)}
+        except (ValueError, OSError):
             git = {"is_git": False, "branch": "", "head": "", "branches": [], "changes": [], "repository": ""}
         return {**context, "git": git, "computer": platform.node(), "system": platform.system(),
                 "scripts": self.load_scripts().get(context["project_id"], []), "terminal_supported": os.name == "nt"}
@@ -280,7 +288,12 @@ class Workbench:
 
     async def changes(self, context):
         self.validate(context, execute=False)
-        head = (await self.read_git(context, "rev-parse", "HEAD")).strip()
+        try:
+            head = (await self.read_git(context, "rev-parse", "--verify", "HEAD")).strip()
+        except ValueError:
+            if (await self.read_git(context, "rev-parse", "--is-inside-work-tree")).strip() != "true":
+                raise
+            head = ""
         status = await self.read_git(context, "status", "--porcelain=v1", "-z", "--untracked-files=all")
         raw = status.split("\0")
         rows, digest, index = [], hashlib.sha256((head + status).encode()), 0
@@ -317,7 +330,8 @@ class Workbench:
         paths = ["--", path] if path else ["--", *visible]
         if path:
             project_workspace.safe_path(Path(context["root"]), path, exists=False)
-        text = await self.read_git(context, "diff", "--no-ext-diff", "--no-textconv", "HEAD", *paths) if path or visible else ""
+        base = ["HEAD"] if changes["head"] else ["--cached"]
+        text = await self.read_git(context, "diff", "--no-ext-diff", "--no-textconv", *base, *paths) if path or visible else ""
         if path and not text:
             try:
                 text = (await self.file(context, path))["text"]
@@ -344,7 +358,7 @@ class Workbench:
                 raise ValueError("Commit or preserve your local changes before switching branches")
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,100}", branch) or ".." in branch or branch.endswith("/"):
                 raise ValueError("Enter a valid branch name")
-            if context["external_session_id"]:
+            if context["external_session_id"] and self.supervisor.get(context["external_session_id"]).workspace_mode == "worktree":
                 raise ValueError("Agent worktrees stay detached. Create or switch branches in a project checkout.")
         remote = ""
         if action == "push":

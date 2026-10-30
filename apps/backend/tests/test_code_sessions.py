@@ -56,6 +56,7 @@ def fake(monkeypatch, mode):
 
 
 def create(service, item, runtime="codex", key="one", **kwargs):
+    kwargs.setdefault('workspace_mode', 'worktree')  # Existing isolation/rollback coverage stays explicit.
     return service.call(service.create(item.id, runtime, key, **kwargs))
 
 

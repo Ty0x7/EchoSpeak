@@ -25,14 +25,20 @@ function useResource<T>(apiBase: string, resource: string, extra: Record<string,
   const [error, setError] = useState("");
   useEffect(() => {
     let live = true; setData(null); setError("");
+    let pending = false;
     const load = async () => {
-      const value = await request<T>(workbenchUrl(apiBase, context, resource, JSON.parse(key)));
-      if (live) { setData(value); setError(""); }
+      if (pending) return;
+      pending = true;
+      try {
+        const value = await request<T>(workbenchUrl(apiBase, context, resource, JSON.parse(key)));
+        if (live) { setData(value); setError(""); }
+      } finally { pending = false; }
     };
     const failed = (err: unknown) => { if (live) setError(err instanceof Error ? err.message : "Refresh failed; last observation retained"); };
     if (context.project_id) void load().catch(failed);
     const stop = context.project_id && resource === "usage" ? startUsageRefresh(load, failed) : () => {};
-    return () => { live = false; stop(); };
+    const timer = context.project_id && ["summary", "diff", "files", "pull-requests"].includes(resource) ? setInterval(() => { void load().catch(failed); }, resource === "pull-requests" ? 60000 : 5000) : undefined;
+    return () => { live = false; stop(); clearInterval(timer); };
   }, [apiBase, context.project_id, context.external_session_id, revision, resource, key]);
   return { data, error };
 }
@@ -134,7 +140,7 @@ export function WorkspaceDetails({ apiBase }: { apiBase: string }) {
       {!artifacts.length ? <p className="wb-dnote">Artifacts made in this conversation appear here.</p> : null}
     </DetailSection>
     <DetailSection id="changes" title="Changes" meta={git && (stat.added || stat.removed) ? <><span className="wb-dadd">+{stat.added}</span><span className="wb-ddel">−{stat.removed}</span></> : null}>
-      {!git ? <p className="wb-dnote">{data ? "This folder isn't a Git repository." : "Choose a project to see its changes."}</p> : <>
+      {!git ? <p className="wb-dnote">{data ? "Project folder ready. Git is optional; ask your coding agent to set it up when you want version control." : "Choose a project to see its changes."}</p> : <>
         <button className="wb-drow wb-drow-btn" onClick={() => store.open("diff")}><WorkbenchIcon kind="diff" /><span>{changed ? `${changed} changed file${changed === 1 ? "" : "s"}` : "No uncommitted changes"}</span>
           <small className="wb-dmuted">Review &amp; commit</small></button>
         {(prs && "items" in prs ? prs.items : []).slice(0, 4).map(pr => <button key={pr.number} className="wb-drow wb-drow-btn" onClick={() => openPr(pr.url)}>

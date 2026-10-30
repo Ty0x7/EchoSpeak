@@ -109,7 +109,9 @@ def workspace(project_id: str) -> dict:
         "schema_version": 1,
         "project": {"id": item.id, "name": item.name, "workspace_root": str(root), "trust_state": item.trust_state},
         "git_summary": summary(str(root)),
-        "external_blocker": external_blocker,
+        "external_blocker": "",  # External harnesses can work directly in any trusted folder.
+        "worktree_available": not bool(external_blocker),
+        "worktree_unavailable": external_blocker,
         "sessions": _session_rows(project_id),
         "can_start_native": item.trust_state == "trusted",
         "native_blocker": "" if item.trust_state == "trusted" else "This project is not marked trusted. Coding sessions are unavailable for this folder.",

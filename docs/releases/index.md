@@ -123,4 +123,4 @@ with Technical notes through actual repository discovery in the isolated UI.
 
 Latest: [11.13.0 technical notes](v11.13.0.md) · [visual walkthrough](../../artifacts/releases/v11.13.0.html).
 
-[11.13.1](v11.13.1.md) records the final search-first sidebar and compact utilities.
+[11.13.1](v11.13.1.md) records folder-first coding, optional Git worktrees, usage refresh and the final search-first sidebar.

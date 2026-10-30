@@ -236,3 +236,21 @@ Sidecar and Tauri builds exited 0; EXE/MSI report 11.13.1, unsigned. Reinstall
 manually because the version is unchanged. EXE SHA-256: `c280376999ceb555e740742651975b36c0b507c64f1b12b54bd658f360848812`.
 The agent did not install it; the owner has been asked to retry creation and
 provide the new Git reason if it fails. See the runtime_followup evidence.
+
+## Current folder-first correction
+
+Git is optional. New Codex/Claude/ACP sessions default to Project folder; worktree
+is an explicit option. Keep legacy worktree sessions unchanged. Metadata belongs
+in app data, never beside the user's project. Direct folders skip Git checkpoints
+and automatic rollback. Git added by the agent later must refresh the UI without
+replacing the session. Trust is remembered per mode. The latest candidate lives
+under `release/v11.13.1/folder-candidate/`; older installers remain unchanged.
+102 backend, 39 web, 16 desktop and actual-component browser checks passed. Live
+provider startup and compiled checks used zero prompts. Inference was rejected
+by automatic approval review. The later architecture request is research-first:
+do not implement a loop redesign while preparing its source-backed proposal.
+
+The folder candidate build exited 0. EXE SHA-256: `0d3bc6cb35db910718595ab364d6fc5dc01b6dedef99facbac89b379c500fc44`.
+The research baseline found one stale Code/API-policy test (47 passed); no test
+was changed in the research phase. Exact results and remaining acceptance are
+in the current versioned notes. Architecture work is documentation/research only.

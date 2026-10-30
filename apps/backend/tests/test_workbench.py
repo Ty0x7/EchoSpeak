@@ -101,7 +101,7 @@ def test_real_conpty_input_resize_multiple_terminals_and_stop(setup):
 
 def test_agent_worktree_identity_and_terminal_writer_conflict(setup):
     owner, item, root, workbench, source = service(setup)
-    row = owner.call(owner.create(item.id, "codex", "fixture-workbench"))
+    row = owner.call(owner.create(item.id, "codex", "fixture-workbench", workspace_mode="worktree"))
     context = workbench.context(item.id, row["id"])
     assert context["root"] != source["root"]
     job = wb.OwnedJob(workbench, context)
@@ -144,7 +144,7 @@ def test_review_belongs_to_exact_context_and_push_remote_is_constrained(setup):
 
 def test_agent_activity_and_session_credentials_stay_in_their_scope(setup):
     owner, item, root, workbench, source = service(setup)
-    row = owner.call(owner.create(item.id, "codex", "fixture-workbench-activity"))
+    row = owner.call(owner.create(item.id, "codex", "fixture-workbench-activity", workspace_mode="worktree"))
     context = workbench.context(item.id, row["id"])
     session = owner.sessions[row["id"]]
     session.row["native_id"] = "owned-native"

@@ -314,5 +314,170 @@
       }
     ]
   },
-  "source_media_sha256_scope": "Original sidebar candidate snapshot; later changes have their own runtime_followup hashes."
+  "source_media_sha256_scope": "Original sidebar candidate snapshot; later changes have their own runtime_followup hashes.",
+  "folder_followup": {
+    "date_utc": "2026-10-30",
+    "source_base": "d263f4c2a894db7a52393b68d4c4848bc5969335",
+    "backend_tests": 102,
+    "web_tests": 39,
+    "desktop_contracts": 16,
+    "typecheck": "passed",
+    "browser": {
+      "passed": true,
+      "requests": 61,
+      "actual_components": true,
+      "provider_responses": "scripted",
+      "git_capabilities_update_on_turn": true
+    },
+    "live_startup": {
+      "scripted_provider": false,
+      "true_non_git_directory": true,
+      "codex_prompts_sent": 0,
+      "claude_prompts_sent": 0,
+      "codex_connected": true,
+      "codex_thread_start_without_git": true,
+      "codex_file_task": "not attempted: live inference rejected by automatic approval review",
+      "git_not_created": true,
+      "automatic_rollback_off": true,
+      "codex_transport_reconnected": true,
+      "native_history_resume": "Not verified: a no-turn thread was rejected on resume in the earlier no-prompt check",
+      "claude_connected_in_folder": true,
+      "claude_no_prompt_cli_initialization_models": 12,
+      "claude_inference": "not attempted; prior weekly-limit failure is separate historical evidence"
+    },
+    "compiled": {
+      "version": "11.13.1",
+      "compiled": true,
+      "true_non_git_folder": "passed",
+      "default_folder_creation": "passed",
+      "metadata_in_app_data": "passed",
+      "codex_folder_connection_models": "passed",
+      "claude_folder_connection_models": "passed",
+      "git_not_automatically_created": true,
+      "explicit_worktree_without_git": "rejected as requested",
+      "git_added_later_same_session": "passed",
+      "unborn_git_detected": "passed",
+      "optional_committed_worktree": "passed",
+      "provider_prompts_sent": 0,
+      "installed_window_acceptance": "not performed"
+    },
+    "packaging": {
+      "status": "passed",
+      "sidecar_exit": 0,
+      "tauri_exit": 0,
+      "backend_self_check": "passed",
+      "artifacts": [
+        {
+          "sha256": "0d3bc6cb35db910718595ab364d6fc5dc01b6dedef99facbac89b379c500fc44",
+          "product_version": "11.13.1",
+          "installed": false,
+          "path": "release/v11.13.1/folder-candidate/EchoSpeak_11.13.1_x64-setup.exe",
+          "authenticode_status": "NotSigned",
+          "bytes": 174663440
+        },
+        {
+          "sha256": "c74580e4f1bd259d6526fb0059436503798d5de5bf1fb0d99bb1b5b33f1d1150",
+          "product_version": "11.13.1",
+          "installed": false,
+          "path": "release/v11.13.1/folder-candidate/EchoSpeak_11.13.1_x64_en-US.msi",
+          "authenticode_status": "NotSigned",
+          "bytes": 252424676
+        }
+      ],
+      "installed_by_agent": false,
+      "published_release": false
+    },
+    "source_media_sha256": {
+      "apps/backend/agent/code_sessions.py": "0bb84a202839fe6e4e6e0de78080c5444280901b59da6c5ea98a759d13ab99a2",
+      "apps/backend/agent/code_runtimes.py": "e90db8bb5acd008cf38ba3a032f98c030d244e334a0363f00111f76fed82e8b5",
+      "apps/backend/agent/echo_code.py": "3eea357890a6865f5b79c85a623c55e788b7e5f2565f87ed2919edd9769479e2",
+      "apps/backend/agent/workbench.py": "142d3c062581203425f3577cc9c39fc1a7d789b0a8beb4e213f70f72c2ed57ca",
+      "apps/backend/api/routes/echo_code.py": "c428c2ababc060f551c21ff976d77e2561c9e95ee7707559a92723c286044ada",
+      "apps/backend/tests/test_code_folder_sessions.py": "cec57c986c32e2765d35268b93888601213c06793797505cb8ddc24c0f0e2c04",
+      "apps/backend/tests/test_code_sessions.py": "1ab0faa35f542661d516c5df08247725d07cdf5a349e6eb999c609becbd69fbd",
+      "apps/backend/tests/test_workbench.py": "78a90407339126482193b630ab910e40e8781f3d90245714c97c9eafdcaee52e",
+      "apps/backend/tests/fixtures/fake_claude_cli.py": "8623a668a0c9015cbf714c90134889ef9e1e80c65875f6e7aa105316f31be218",
+      "apps/web/src/code/ExternalSession.tsx": "52b2886f250432d8393c0a432b908fd4f25957de14aaa6d37748dd0872b45799",
+      "apps/web/src/code/ExternalSession.test.tsx": "563948d9c9fa9cb2448e79da457d8a36c7705436ca793499cc2e0daf34537dda",
+      "apps/web/src/code/EchoCodeWorkspace.tsx": "d144c831fa10d0738ba335ce02ac2c5aa4ce1f417e07f7fbff73dd4c96cc73c1",
+      "apps/web/src/code/CodeTree.tsx": "f256b7181397e75a5b241885088951e7a78196555ff63d35217675ee4b554d1c",
+      "apps/web/src/code/model.ts": "bb69bb930c66b4c89c48041bc50e209ab7d72b4df6902269e1a34263079d1703",
+      "apps/web/src/workbench/Workbench.tsx": "fcf7082873ea3ffc655c869614d734b1b04cf1dec9ec2740e265138a5e25cb98",
+      "scripts/check-code-inbox-ui.py": "6246eaae537735c40e214a60f13af8263cd00567e1b0acc9454b98ad9e19c0ab",
+      "artifacts/media/folder-11.13.1/claude-folder-mode-fixture.png": "a994b7566442dcf1863760cf2f96e49117903c453ba0a2448e2f2c9cf2266829",
+      "artifacts/media/folder-11.13.1/codex-folder-session-fixture.png": "7b13a9090aa14fbe4c51a646cd655714429a69e57da43070ca752a00ff72eb34",
+      "artifacts/media/folder-11.13.1/codex-usage-refresh-fixture.png": "d1d3e363be0a4d7444cb4fdefe68325b7e45da090c12af94184f64fcf33aa39a",
+      "artifacts/media/folder-11.13.1/inbox-dark.png": "76dd0315b885b4a6086b4f06d3dae2d86e245b96b022c93859d28efb0b4db40c",
+      "artifacts/media/folder-11.13.1/inbox-expanded-short.png": "d4e3e3aa6b1be6b2cf94d1f9653e9917532f0702324459a40dc68da4259a9788",
+      "artifacts/media/folder-11.13.1/inbox-expanded-up.png": "1c6109614ce7dca63efa926239cc7bae993f473a0826452d40ea31794ff9d44e",
+      "artifacts/media/folder-11.13.1/inbox-light.png": "92c13154d08a55bbd695c9864d6084e7192c20c06e850a1c3dbaa7824f0fbc81",
+      "artifacts/media/folder-11.13.1/left-sidebar-workspace.png": "6cca78cf5e3f14014a32676938092933c5f7aaae31aa844a63aa176022f2a4cb",
+      "artifacts/media/folder-11.13.1/optional-worktree-mode-fixture.png": "15636596c97d7afbe1c71deef02374b901859bb23be9d502be933f8aff28d8a1",
+      "artifacts/media/folder-11.13.1/runtime-model-picker.png": "1ee3dbefb703f1cee723962e912bf1d955e3e237eb4824a032b366204b088fcd",
+      "artifacts/media/folder-11.13.1/sidebar-agents-dark.png": "538552f6fa7f0a52aea38f4fc792954cc63758e7b0243c422e079ec3fa554fea",
+      "artifacts/media/folder-11.13.1/sidebar-agents-light.png": "a7ec87218b571802748713322258ad082fa74f4b6d550bb066341d417ad37bdf",
+      "artifacts/media/folder-11.13.1/sidebar-chat-dark.png": "de7ed2bf8a7d46fa1230556cf57c876ff9cc4378b8130f92e15b79af683d5229",
+      "artifacts/media/folder-11.13.1/sidebar-chat-light.png": "c9a7fee86fea883368fdb0d4b63f7ccac139dd94247a8ffdaed1abb212fc05b9",
+      "artifacts/media/folder-11.13.1/sidebar-rail.png": "fdb0e2c498724deff7a40c1123fda001dc9511cbe11b121a1d5307881628de95"
+    },
+    "installed_by_agent": false,
+    "provider_inference_prompts_sent": 0,
+    "architecture_readonly_baseline": {
+      "passed": 47,
+      "failed": 1,
+      "failure": "test_cloud_models.py::test_an_echo_code_conversation_cannot_switch_to_an_api_key_model",
+      "assessment": "Stale expectation of the superseded local-only Code policy; current code permits API binding. Test unchanged during research.",
+      "model_calls": 0
+    },
+    "final_documentation_qa": [
+      {
+        "document": "artifacts/releases/v11.13.1.html",
+        "width": 1400,
+        "theme": "dark",
+        "scripts": false,
+        "overflow": false,
+        "images": "passed"
+      },
+      {
+        "document": "artifacts/releases/v11.13.1.html",
+        "width": 390,
+        "theme": "light",
+        "scripts": false,
+        "overflow": false,
+        "images": "passed"
+      },
+      {
+        "document": "artifacts/research/native-code.html",
+        "width": 1400,
+        "theme": "dark",
+        "scripts": false,
+        "overflow": false,
+        "images": "passed"
+      },
+      {
+        "document": "artifacts/research/native-code.html",
+        "width": 390,
+        "theme": "light",
+        "scripts": false,
+        "overflow": false,
+        "images": "passed"
+      },
+      {
+        "document": "artifacts/releases/index.html",
+        "width": 1400,
+        "theme": "dark",
+        "scripts": false,
+        "overflow": false,
+        "images": "passed"
+      },
+      {
+        "document": "artifacts/releases/index.html",
+        "width": 390,
+        "theme": "light",
+        "scripts": false,
+        "overflow": false,
+        "images": "passed"
+      }
+    ]
+  }
 }
