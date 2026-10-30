@@ -462,8 +462,10 @@ keeps live results separate from fixtures; raw account IDs, native session IDs,
 personal paths, credentials and live quota percentages are excluded.
 
 Live reconnect checks covered transport/authentication and saved identity/model;
-no second inference turn or in-flight live interruption was attempted. Native
-resume execution remains provider acceptance, separate from protocol fixtures.
+a separate **no-prompt Codex `thread/resume`** check then reopened the original
+native history with its selected model preserved. No second inference turn or
+in-flight live interruption was attempted. Claude resumed execution remains
+provider acceptance, separate from protocol fixtures.
 
 ### Architecture and next acceptance
 

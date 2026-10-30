@@ -191,7 +191,8 @@ bounded independent scrolling. Runtime models come from provider metadata;
 Claude's actual catalog includes Opus 5.5. Saved session models survive reconnect.
 Plan windows/reset/rejection observations are separate from token/cost data.
 
-Live Codex passed one isolated file-read/write task and reconnect. Claude sign-in,
+Live Codex passed one isolated file-read/write task, reconnect and a separate
+no-prompt native history-resume check. No second inference turn was sent. Claude sign-in,
 catalog and reconnect passed; its single Haiku task hit the weekly limit. Do not
 claim Claude file/tool execution passed or rerun paid prompts automatically.
 The reported plain folders have no Git repository; owner initialization/review

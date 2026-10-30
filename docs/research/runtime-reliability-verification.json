@@ -275,5 +275,13 @@
       "overflow": false
     }
   ],
-  "live_acceptance_boundary": "Reconnect verifies transport/authentication and saved identity/model. No second inference turn or live in-flight interruption was tested."
+  "live_acceptance_boundary": "Reconnect verifies transport/authentication and saved identity/model; separate no-prompt Codex native history resume passed. No second inference turn or live in-flight interruption was tested.",
+  "live_codex_native_history_resume": {
+    "native_history_resume": "passed",
+    "model_preserved": true,
+    "model_prompts_sent": 0,
+    "method": "Codex app-server thread/resume on the previous disposable live session",
+    "resumed_inference_turn_tested": false,
+    "live_inflight_interruption_tested": false
+  }
 }
