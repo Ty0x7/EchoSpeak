@@ -131,10 +131,10 @@ export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, 
       </div> : null}
     </li>;
   };
-  const shelf = (name: string, label: string, items: InboxRow[]) => items.length ? <section className={`ec-inbox-shelf is-${name}`} aria-label={label}>
-    <button type="button" className="ec-inbox-divider" aria-expanded={Boolean(shelves[name])} onClick={() => setShelves(old => ({ ...old, [name]: !old[name] }))}><span>{label} ({items.length})</span><span aria-hidden>{shelves[name] ? "⌃" : "⌄"}</span></button>
-    {shelves[name] ? <ul>{items.map(renderRow)}</ul> : null}
-  </section> : null;
+  const shelf = (name: string, label: string, items: InboxRow[]) => <section className={`ec-inbox-shelf is-${name}${shelves[name] ? " is-expanded" : ""}`} aria-label={label}>
+    {shelves[name] ? <ul id={`ec-shelf-${name}`}>{items.length ? items.map(renderRow) : <li className="ec-tree-note">No {label.toLowerCase()} sessions</li>}</ul> : null}
+    <button type="button" className="ec-inbox-divider" aria-controls={`ec-shelf-${name}`} aria-expanded={Boolean(shelves[name])} onClick={() => setShelves(old => ({ [name]: !old[name] }))}><span>{label} ({items.length})</span><span aria-hidden>{shelves[name] ? "⌄" : "⌃"}</span></button>
+  </section>;
   return <div className="ec-tree ec-inbox" aria-label="Code inbox">
     <div className="ec-inbox-toolbar"><SidebarIcon name="search"/><input aria-label="Search coding sessions" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} />
       <button type="button" title="Inbox filters" aria-label="Inbox filters" aria-expanded={filters} onClick={()=>setFilters(v=>!v)}><SidebarIcon name="filter"/></button><button type="button" title="Add project" aria-label="Add a project folder" onClick={onAddFolder}><SidebarIcon name="folder"/></button><button type="button" title="New thread" aria-label="New coding session" onClick={() => onNewSession(project || data?.projects[0]?.id || "")}><SidebarIcon name="compose"/></button></div>
@@ -143,16 +143,16 @@ export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, 
     {selected.length ? <div className="ec-inbox-selection"><span>{selected.length} selected</span>{actions(all.filter(r => selected.includes(r.key)))}<button type="button" onClick={() => setSelected([])}>Clear</button></div> : null}
     {error ? <p role="alert" className="ec-tree-note">{error}</p> : null}
     {!data && !error ? <p role="status" className="ec-tree-note">Loading Code…</p> : null}
-    {data?.drafts?.length ? <section className="ec-inbox-drafts" aria-label="Stashed drafts"><strong>Drafts ({data.drafts.length})</strong>{data.drafts.map(d=><div key={d.id}>
+    <div className="ec-inbox-stream">{data?.drafts?.length ? <section className="ec-inbox-drafts" aria-label="Stashed drafts"><strong>Drafts ({data.drafts.length})</strong>{data.drafts.map(d=><div key={d.id}>
       <button type="button" className="ec-inbox-open" onClick={async()=>{try{const restored=await request(`${apiBase}/echo-code/drafts/${d.id}`);sessionStorage.setItem("echospeak.code.restoreDraft",JSON.stringify(restored));onNewSession(d.project_id);window.dispatchEvent(new CustomEvent("echospeak:code-draft"))}catch(e){setError(e instanceof Error?e.message:"Could not restore draft")}}}><span className="ec-inbox-project">{d.project_name} · Draft{d.images.length?` · ${d.images.length} image(s)`:""}</span><strong>{d.title}</strong></button>
       <button type="button" className="ec-tree-action" aria-label={`Remove draft ${d.title}`} onClick={async()=>{try{const r=await fetch(`${apiBase}/echo-code/drafts/${d.id}`,{method:"DELETE"});if(!r.ok)throw new Error("Could not remove draft");refresh(v=>v+1)}catch(e){setError(e instanceof Error?e.message:"Remove failed")}}}>×</button>
     </div>)}</section> : null}
     <ul className="ec-inbox-active" aria-label="Active coding sessions">{active.map(renderRow)}</ul>
     {data && !rows.length ? <p className="ec-tree-note">{all.length ? "No matching sessions" : "Choose a project and start a thread."}</p> : null}
-    {hideWorking ? shelf("working", "Working", rows.filter(r => stateOf(r) === "working")) : null}
+    </div><div className="ec-inbox-dock" aria-label="Parked coding sessions">{hideWorking ? shelf("working", "Working", rows.filter(r => stateOf(r) === "working")) : null}
     {shelf("snoozed", "Snoozed", rows.filter(r => stateOf(r) === "snoozed"))}
     {shelf("settled", "Settled", rows.filter(r => stateOf(r) === "settled").sort((a,b) => (b.inbox?.settled_at || b.at) - (a.inbox?.settled_at || a.at)))}
-    <div className="ec-inbox-footer"><button type="button" aria-label="MCP access & diagnostics" onClick={() => setControl(v => !v)} aria-expanded={control}><SidebarIcon name="connections"/><span>Connections & diagnostics</span><small>{control ? "−" : "+"}</small></button></div>
-    {control ? <CodeControl apiBase={apiBase} projects={data?.projects || []} /> : null}
+    </div><div className="ec-inbox-footer"><button type="button" aria-label="MCP access & diagnostics" onClick={() => setControl(v => !v)} aria-expanded={control}><SidebarIcon name="connections"/><span>Connections & diagnostics</span><small>{control ? "−" : "+"}</small></button></div>
+    {control ? <div className="ec-inbox-control"><CodeControl apiBase={apiBase} projects={data?.projects || []} /></div> : null}
   </div>;
 }

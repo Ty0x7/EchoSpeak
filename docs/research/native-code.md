@@ -1,5 +1,7 @@
 # Native Echo Code: its own environment on the shared harness
 
+> **Current 11.13.0 continuation, 30 October:** upward-opening bottom shelves, runtime-derived model IDs, subscription observations, actionable Git admission and native local/API models. [Implementation and live checks](#13-ui-and-runtime-reliability-continuation). Earlier sections retain historical evidence; the local-only Code policy is superseded.
+
 EchoSpeak 11.11.8 makes native Echo Code a coding environment instead of an Agents conversation. Before, a native Code session ran as **Echo the agent**, with Echo's persona, team, delegation, soul editing and agent-work tools, and Echo's own configured model. Now the model you picked answers *as itself, as a coding assistant*, with an engineering workflow, engineering tools, project and git context, and 11.11.5's verification. Chat, Code and Agents still share one runtime, loop, toolbox, ledger, approvals and learning. [Visual comparison](../../artifacts/research/native-code.html).
 
 ## 1. Audit: where Code inherited Agents
@@ -12,7 +14,7 @@ EchoSpeak 11.11.8 makes native Echo Code a coding environment instead of an Agen
 | Prompt | Echo's soul, rich-answer rules (charts, cards), a team section, past chats from all environments | Nothing about the engineering workflow; git rules only when the request mentioned git |
 | Activity | A command that exited non-zero kept its present-tense label ("Running `pytest`") | A failing test run looked unfinished in the timeline |
 | Learning | Episodes credited to Echo | Code's engineering experience mixed into Echo's agent record |
-| Provider rule | "Plans for code, APIs for chat" (28 Oct): native Code never calls an API-key provider | Correct, and kept (§3) |
+| Provider rule | Historical local-only Code policy (28 Oct) | Superseded by the 30 October brief: native Code supports configured local/API models; subscription harnesses stay independent (§13) |
 | External runtimes | Codex, Claude Code and ACP through `agent/echo_code.py` sessions | Correct, and untouched |
 
 ## 2. Research: how coding harnesses work, and what Echo takes
@@ -48,7 +50,7 @@ LeanSession ──────┼── Code   : code persona (the model) · cod
   - project-scoped context, with no past chats from other environments
   - git rules whenever there's a repo
   - its own learner (`code`)
-- **The provider rule is kept.** Native Code uses a model on this PC. ChatGPT runs in Codex and Claude in Claude Code with your plans; API-key models are for Chat. That was your 28 October decision, and the brief asks to preserve billing boundaries, so `code_provider_problem` still applies to the `code` persona.
+- **Provider admission now follows the 30 October brief.** Native Code accepts configured local and API endpoints through Lean. Codex and Claude Code use their own sign-in and harnesses. This supersedes the earlier local-only policy; API billing and coding subscriptions remain separate.
 - **External harnesses are untouched.** Codex, Claude Code and ACP sessions never enter the Lean loop.
 
 ## 4. Verification
@@ -403,3 +405,87 @@ or configured roles. The versioned release HTML shows actual dark/light componen
 captures for Chat, Agents and Code; fixture checks include search, opening an agent,
 keyboard filter toggles and collapse/expand. See the release record for build and
 installer provenance; older installer hashes describe the earlier visual pass.
+
+## 13. UI and runtime reliability continuation
+
+**Objective → Research → Environment → Verification → Adaptation → Completion.**
+The audit reused existing environment routing, Lean, the external supervisor,
+permission hooks and isolation instead of adding another agent controller.
+
+### Findings and changes
+
+| Finding | Implemented behavior |
+|---|---|
+| Parked sections expanded downward inside the active list | Working, Snoozed and Settled bars dock below the scrolling active list. One parked list opens above its bar at a time; switching bars reserves useful reading space in short windows. Settings and connection controls remain accessible. Working remains optional in Filters; all enabled bars appear even when empty. |
+| Claude used a static alias catalog | `code_accounts.py` reads the installed official CLI's stream initialization model metadata, resolves version IDs, merges duplicate default aliases and keeps reported effort levels. No model prompt, repository hooks, MCP servers or persistence in this metadata probe. Missing/unsupported metadata displays unavailable, with an exact-ID input. |
+| Reconnecting Codex could replace a saved model with the harness default | Preserve the durable session choice; pass it to thread start/resume and the next turn. Claude also reuses the saved model and keeps previously observed limit events on reconnect. |
+| Git stderr was discarded | Bounded classification distinguishes non-repository, missing committed HEAD, nested folder, ownership refusal, access/lock failure, missing Git and timeout. Workspace admission explains the blocker before external session creation. No owner files are auto-committed and `safe.directory` is never changed. |
+| Code excluded configured cloud/API endpoints | Native Code now uses the same configured local/API endpoints as Lean, preserving project trust and provider readiness. The picker labels API vs on-PC models. External coding subscriptions keep their own provider harness and permissions. |
+| Account windows were raw/missing and Claude failures were generic | Normalize provider-reported quota windows, reset times, observation/source and limit rejections. Share `RuntimeUsage` across the picker, workspace, connection and Usage views. Consolidated account observations are separate from per-session tokens/costs. Missing numeric quota never becomes zero. Claude's returned error text is redacted and displayed. |
+
+The owner-project metadata audit confirmed that the two reported non-repository
+folders cannot provision an isolated external session; the EchoSpeak repository
+has a usable committed HEAD. Native Code still accepts a trusted plain folder.
+Selecting an actual repository root or explicitly initializing/reviewing an
+initial commit remains an owner project operation, not an automatic runtime fix.
+
+### Research and compatibility
+
+- [Codex app-server](https://learn.chatgpt.com/docs/app-server): `model/list`,
+  `account/read`, `account/rateLimits/read`, account limit updates and native
+  thread/turn APIs. Quota percentages are account windows, not token costs.
+- [Claude CLI](https://code.claude.com/docs/en/cli-reference),
+  [model configuration](https://code.claude.com/docs/en/model-config) and
+  [SDK reference](https://code.claude.com/docs/en/agent-sdk/typescript): official
+  sign-in, stream initialization/model metadata and `rate_limit_event`.
+  The metadata wire is CLI-version dependent; incompatible versions show
+  discovery unavailable rather than a guessed list. An advertised model is
+  not proof that the account has remaining allowance for a turn.
+- No supported universal passive Claude subscription-percentage endpoint was
+  established by this research. Show numeric utilization/reset only when the
+  runtime supplies it; a rejection/error may provide useful reset information
+  without a numeric window. No credential scraping or private usage endpoint.
+
+### Verification actually performed
+
+| Layer | Result |
+|---|---|
+| Live Codex, installed `0.166.0-alpha.5.1`, existing ChatGPT sign-in | Eight reported models; one isolated file-read/write task completed and its file content was checked. Session identity/model survived stop/reconnect. Account primary/secondary windows were reported. No API key or fresh login. |
+| Live Claude Code, installed `2.1.310`, existing Claude subscription | Twelve resolved models, including **Opus 5.5 / `claude-opus-5-5`**. One low-effort Haiku 5.5 task was attempted; the runtime rejected it at the weekly limit. Native identity/model survived reconnect. File execution did **not** pass. No repeated inference attempts. |
+| Deterministic backend | A broad 128-case run passed 127; its obsolete local-only policy assertion was updated for this explicit brief. Final affected runs passed **26/26** (Git/usage/native/workbench) and **47/47** (Claude/Codex/session protocols). Across these runs all **130 unique** relevant cases passed. |
+| Web | TypeScript, **33/33** runtime/layout tests and **29/29** additional Chat/sidebar tests passed. Browser interactions cover all three sidebars, local/API selection, exact Claude ID, quota rendering, upward shelves at 900px/560px heights, 390px width, keyboard/filter/bulk/stash/background/MCP actions. Screenshots are deterministic component fixtures. |
+| Desktop contracts | **16/16** source contract tests passed; these are separate from installed acceptance. |
+| Packaging / installed | See the current candidate in [11.13.0 notes](../releases/v11.13.0.md). Building a local installer does not establish installed-app acceptance. |
+
+[Machine-readable sanitized evidence](runtime-reliability-verification.json)
+keeps live results separate from fixtures; raw account IDs, native session IDs,
+personal paths, credentials and live quota percentages are excluded.
+
+Live reconnect checks covered transport/authentication and saved identity/model;
+no second inference turn or in-flight live interruption was attempted. Native
+resume execution remains provider acceptance, separate from protocol fixtures.
+
+### Architecture and next acceptance
+
+Chat remains model-first conversation/research/artifacts. Code is model-first
+engineering with project/files/terminal/Git/verification. Agents keep identity,
+responsibility and coordination. Native surfaces share the loop, tools,
+permissions, persistence and verification; external harnesses never enter that
+loop or become tools controlled by Echo's native model.
+
+Existing Chat sizing already gives API/large/unknown models its full profile and
+small local models a compact one. Native context follows configured/discovered
+metadata; unknown windows retain the existing **32,768-token fallback**, which
+is a conservative application setting, not a claim about provider capacity.
+Reasoning/tool controls follow adapter capabilities. The Code welcome composer
+defers effort for a different, unbound native model until its session profile is
+loaded, instead of displaying the previous model's controls.
+
+Next priorities: Claude file/tool/approval/interrupt acceptance after its limit
+resets; installed Windows testing of both providers and the actual projects;
+live native API/local acceptance; richer provider context metadata and model
+catalog pagination beyond the current bounded catalog. The existing browser
+checks are focused, not an exhaustive acceptance test of every app surface.
+Future mobile/remote access needs authenticated pairing, scoped transport,
+session routing, reconnect/replay and approval UX. Remote routing, new schedulers
+and separately forked harnesses were not prematurely implemented.

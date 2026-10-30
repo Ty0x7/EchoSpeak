@@ -20,8 +20,8 @@ from agent import code_worktree as wt, privacy, project_workspace
 from agent.code_runtimes import Acp, ClaudeCli, Codex
 
 
-# The owner's own coding agents, each run in its original harness with the owner's own plan
-# (never Echo's model router, never an API key). API-key models belong to Chat.
+# External coding agents use their original harness and authentication. Native
+# Code's local/API models have a separate path through the shared Lean runtime.
 RUNTIMES = {"codex", "claude_cli", "acp"}
 
 

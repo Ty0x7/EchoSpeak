@@ -1,0 +1,279 @@
+{
+  "schema_version": 1,
+  "checked_on_utc": "2026-10-30",
+  "version": "11.13.0",
+  "continuation": "UI, coding runtime and harness reliability",
+  "base_commit": "9199f9f1e8214524df1724f31c647b646e5b68b4",
+  "pull_request": "https://github.com/Ty0x7/EchoSpeak/pull/114",
+  "delivery": "Local candidate; no installation, merge or public release",
+  "live_source_adapters": {
+    "codex": {
+      "runtime": "codex",
+      "scripted": false,
+      "source_isolated": true,
+      "prompts_submitted": 1,
+      "created": true,
+      "connected": true,
+      "model_count": 8,
+      "selected_model": "gpt-6.1-sol",
+      "state": "completed",
+      "native_session_created": true,
+      "approvals_denied": 0,
+      "file_verified": true,
+      "selected_model_after": "gpt-6.1-sol",
+      "reconnected": true,
+      "identity_preserved": true,
+      "subscription_observation": {
+        "window_count": 2,
+        "reset_reported": true,
+        "numeric_percentage_reported": true,
+        "status": "reported"
+      }
+    },
+    "claude_cli": {
+      "runtime": "claude_cli",
+      "scripted": false,
+      "source_isolated": true,
+      "prompts_submitted": 1,
+      "created": true,
+      "connected": true,
+      "model_count": 12,
+      "selected_model": "claude-haiku-5-5",
+      "state": "failed",
+      "native_session_created": true,
+      "approvals_denied": 0,
+      "file_verified": false,
+      "selected_model_after": "claude-haiku-5-5",
+      "reconnected": true,
+      "identity_preserved": true,
+      "subscription_observation": {
+        "window_count": 0,
+        "reset_reported": false,
+        "numeric_percentage_reported": false,
+        "status": "rejected"
+      },
+      "execution_blocker": "Official runtime reported weekly subscription limit; no file task succeeded.",
+      "reset_text_reported": true
+    }
+  },
+  "installed_runtime_versions": {
+    "codex": "0.166.0-alpha.5.1",
+    "claude_cli": "2.1.310"
+  },
+  "claude_model_observation": {
+    "resolved_model_count": 12,
+    "opus_version_id": "claude-opus-5-5",
+    "note": "Actual installed CLI metadata; advertised availability is not proof of remaining subscription allowance."
+  },
+  "reported_project_git_metadata": {
+    "plain_folder_count": 2,
+    "committed_repository_count": 1,
+    "mutations": 0,
+    "owner_initialization_required_for_external_isolation": true
+  },
+  "backend": {
+    "unique_cases_passed_across_runs": 130,
+    "runs": [
+      {
+        "tests": [
+          "test_code_runtime_upgrade",
+          "test_claude_code_runtime",
+          "test_code_sessions",
+          "test_echo_code",
+          "test_workbench",
+          "test_code_inbox",
+          "test_code_parallel",
+          "test_native_code",
+          "test_environments"
+        ],
+        "collected": 128,
+        "passed": 127,
+        "failed": 1,
+        "seconds": 185.33,
+        "note": "Only failure was the superseded local-only Code expectation; updated to the owner explicit local/API brief."
+      },
+      {
+        "tests": [
+          "test_code_runtime_upgrade",
+          "test_native_code",
+          "test_workbench"
+        ],
+        "passed": 26,
+        "failed": 0,
+        "seconds": 48.88,
+        "note": "Includes two added regressions for missing Git/timeouts and passive account usage."
+      },
+      {
+        "tests": [
+          "test_claude_code_runtime",
+          "test_code_sessions"
+        ],
+        "passed": 47,
+        "failed": 0,
+        "seconds": 118.71,
+        "note": "After final thread-model override and reconnect changes."
+      }
+    ],
+    "environment": "Windows local servers/child processes required an unsandboxed run. Interrupted restricted run did not complete; concurrent default pytest temp directories caused earlier fixture setup errors, resolved using unique basetemp paths."
+  },
+  "web": {
+    "focused_tests": 33,
+    "files": 7,
+    "typecheck": "passed",
+    "command": "npm.cmd run test:run -- src/code src/app/environments.test.tsx src/runtimeLayout.test.ts src/workbench/store.test.ts",
+    "environment": "TMP/TEMP explicitly set to repo .test-state; default restricted temporary-folder rename caused a collection error before correction.",
+    "additional_chat_sidebar_tests": {
+      "passed": 29,
+      "files": 4,
+      "command": "npm.cmd run test:run -- src/components/sidebarSections.test.ts src/app/chatFollow.test.ts src/chatPresentation.test.ts src/widgets/chatRendering.test.tsx"
+    }
+  },
+  "browser": {
+    "version": "11.13.0",
+    "checks": [
+      "shared Chat/Agents/Code navigation, search and agent callback",
+      "left sidebar placement",
+      "flat active rows",
+      "collapsed Working/Snoozed/Settled shelves",
+      "each shelf expands upward with at least 60px reading space at 900px and 560px heights; settings remain visible",
+      "native API model selection; exact Claude model ID and reported usage; switch back to local model",
+      "local provider image assets",
+      "search",
+      "visible Shift range selection",
+      "bulk timed snooze",
+      "stale action rejection",
+      "errors survive refresh",
+      "dark/light themes",
+      "Ctrl+S stash and restore",
+      "Ctrl+Enter background submit",
+      "image stash",
+      "MCP panel read-only create, hide token and revoke",
+      "390px without overflow",
+      "no page errors",
+      "research report, versioned release report and atlas wide/narrow with scripts disabled"
+    ],
+    "model_calls": 0,
+    "request_count": 42
+  },
+  "packaging": {
+    "status": "passed",
+    "exit_code": 0,
+    "command": "powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/build-windows.ps1 (PythonExecutable set to repo backend venv)",
+    "backend_import_self_check": "passed",
+    "production_web_build": "passed",
+    "rust_release_compile": "passed",
+    "artifacts": [
+      {
+        "path": "release/v11.13.0/runtime-reliability/EchoSpeak_11.13.0_x64-setup.exe",
+        "bytes": 174666238,
+        "sha256": "cee96b1635c382073d2a1fd303ce5c7135295b5c670d4f2622264e222fd5d74d",
+        "product_version": "11.13.0",
+        "file_version": "11.13.0",
+        "authenticode_status": "NotSigned",
+        "installed": false
+      },
+      {
+        "path": "release/v11.13.0/runtime-reliability/EchoSpeak_11.13.0_x64_en-US.msi",
+        "bytes": 252432868,
+        "sha256": "18acbf2f93b6dc8ff46597d3359f95fa0932bd84798419468fa7a8d6a85ae531",
+        "product_version": "11.13.0",
+        "installed": false
+      }
+    ],
+    "updater_signatures_produced": false,
+    "windows_publisher_signing": false,
+    "installed": false,
+    "merged": false,
+    "public_release": false,
+    "note": "Fresh backend staged before full build. Ordinary local build; older candidates remain intact. Nonfatal dependency/chunk warnings remain in the local build log."
+  },
+  "remaining": [
+    "Claude live file/tool/approval/interrupt after weekly allowance resets",
+    "Installed Windows UI, fresh OAuth sign-in and real project acceptance",
+    "Live native API/local model acceptance; fixtures do not prove paid API behavior",
+    "Owner-reviewed Git initialization for attached plain folders before isolated external sessions",
+    "Current context metadata fallback is 32768 tokens when no actual configured/discovered window is available",
+    "Bounded catalogs; complete pagination and remote/mobile access remain future work"
+  ],
+  "evidence_privacy": "No credentials, account identifiers, native session IDs, personal project paths or live quota percentages included.",
+  "source_media_sha256": {
+    "apps/backend/agent/code_accounts.py": "f20841366947a55c75041a5b5e58be9c44a153851d4e9905958ca814d9d60890",
+    "apps/backend/agent/code_limits.py": "a5d9ac98098f20d6fafac9a70faaa88871016daf36ff0b03287fecf61c5993f9",
+    "apps/backend/agent/code_runtimes.py": "0952bef5b4be9545bd5337b4c7571820d3f60dbcfc758c9f80c898a8cf44048e",
+    "apps/backend/agent/code_worktree.py": "45ab094b42f4e28d3e3032566e009e4c44ff6bd6cab7fadee2c7ba966582914a",
+    "apps/backend/agent/echo_code.py": "372bb29e20a69b9f04ee1fb9eaf3af0b4612e63609aaf906075b93d91c855867",
+    "apps/backend/agent/workbench.py": "1ea1b7fd6f0075b423fdf77fa35602e3eeaa76efc13f14d8c6262f94ca6ce30f",
+    "apps/web/src/code/CodeTree.tsx": "ee456a7dd199009f7368ef65631ad8a4d131d796dcb265294fd0f79920a3e509",
+    "apps/web/src/code/CodeModelPicker.tsx": "df9890617c6611ccc16a3763094636df28a007df75eb04471b914947d96d0238",
+    "apps/web/src/code/RuntimeUsage.tsx": "acd213e9a857f8cbb73e6bf497bf5a5b8183300d9f40eb47eaab297822ba6895",
+    "apps/web/src/code/EchoCodeWorkspace.tsx": "9c58e9687d4551ccc1c54d817e0280e56c35117edbaac6af304942a4cba61ad8",
+    "apps/web/src/components/sidebar.css": "4be93d7b567e9f1426af367f025ac20e452d348c95c676d206be7c70ec2207e5",
+    "artifacts/media/code-inbox/inbox-expanded-up.png": "7a1ee0539e1a06a43e917040d5cf90fd2a097389bff728a083d2ef3b3bf43e71",
+    "artifacts/media/code-inbox/inbox-expanded-short.png": "1679a99d36c8c593e42c2937b966121bb732cb3d70394aa7b280f5ade8bfc48f",
+    "artifacts/media/code-inbox/runtime-model-picker.png": "1ee3dbefb703f1cee723962e912bf1d955e3e237eb4824a032b366204b088fcd"
+  },
+  "desktop_contracts": {
+    "passed": 16,
+    "command": "npm.cmd test (apps/desktop)"
+  },
+  "packaged_api": {
+    "version": "11.13.0",
+    "status": "passed",
+    "health": true,
+    "owner_auth": true,
+    "grant_read": true,
+    "readonly_denial": true,
+    "owner_key_not_client_grant": true,
+    "revoked_denial": true,
+    "model_prompts_sent": 0,
+    "scope": "Compiled backend API using disposable state; no desktop UI, provider login or model prompts."
+  },
+  "packaged_mcp": {
+    "version": "11.13.0",
+    "status": "passed",
+    "transport": "compiled backend --control-mcp; real SDK stdio initialize/list/call; owned loopback peer",
+    "tools": 8,
+    "calls": [
+      "projects",
+      "send"
+    ],
+    "denied_mutation": true,
+    "provider_calls": 0,
+    "scope": "Packaging/transport only. Source tests separately cover real grants and original harness dispatch."
+  },
+  "documentation_qa": [
+    {
+      "document": "artifacts/research/native-code.html",
+      "width": 1400,
+      "theme": "dark",
+      "scripts": false,
+      "images": "passed",
+      "overflow": false
+    },
+    {
+      "document": "artifacts/research/native-code.html",
+      "width": 390,
+      "theme": "light",
+      "scripts": false,
+      "images": "passed",
+      "overflow": false
+    },
+    {
+      "document": "artifacts/releases/v11.13.0.html",
+      "width": 1400,
+      "theme": "dark",
+      "scripts": false,
+      "images": "passed",
+      "overflow": false
+    },
+    {
+      "document": "artifacts/releases/v11.13.0.html",
+      "width": 390,
+      "theme": "light",
+      "scripts": false,
+      "images": "passed",
+      "overflow": false
+    }
+  ],
+  "live_acceptance_boundary": "Reconnect verifies transport/authentication and saved identity/model. No second inference turn or live in-flight interruption was tested."
+}

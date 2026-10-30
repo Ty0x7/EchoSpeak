@@ -70,3 +70,16 @@
 .echo-root .es-sidebar-refined .ec-inbox-footer button { display:flex; align-items:center; gap:9px; width:100%; font-size:11px; padding:8px; }
 .ec-inbox-footer button small { margin-left:auto; }
 @media(hover:none) { .echo-root .es-sidebar-refined .echo-row-actions,.echo-root .es-sidebar-refined .ec-inbox-menu { opacity:1; } }
+.echo-root .es-sidebar-refined .es-code-tree-host { overflow:hidden; }
+.echo-root .es-sidebar-refined .ec-inbox { height:100%; min-height:0; display:flex; flex-direction:column; }
+.ec-inbox-stream { flex:1 1 40%; min-height:48px; overflow:auto; scrollbar-width:thin; }
+.ec-inbox-dock { display:flex; flex-direction:column; flex:0 0 auto; min-height:0; border-top:1px solid var(--es-border-soft); }
+.ec-inbox-dock:has(.is-expanded) { flex:3 1 60%; }
+.ec-inbox:has(.ec-inbox-shelf.is-expanded) .ec-inbox-stream { flex:1 1 20%; }
+.ec-inbox-dock .ec-inbox-shelf { display:flex; flex-direction:column; flex:0 0 auto; min-height:0; }
+.ec-inbox-dock .ec-inbox-shelf.is-expanded { flex:1 1 0; }
+.ec-inbox-dock .ec-inbox-shelf>ul { flex:1; min-height:0; overflow:auto; scrollbar-width:thin; margin:0; padding:0; list-style:none; }
+.echo-root .es-sidebar-refined .ec-inbox-divider { flex:0 0 36px; padding-block:9px; }
+.echo-root .es-sidebar-refined .ec-inbox-footer { flex:0 0 auto; margin-top:0; padding-top:4px; }
+.ec-inbox-control { flex:0 1 40%; min-height:0; overflow:auto; }
+.ec-inbox-toolbar,.ec-inbox-options,.ec-inbox-selection,.ec-inbox>.ec-tree-note { flex-shrink:0; }

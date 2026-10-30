@@ -20,8 +20,7 @@ class RuntimeUnavailable(ValueError):
     pass
 
 
-CODE_MODEL_RULE = ("In Echo Code, ChatGPT models run in Codex and Claude models in Claude Code with your own plan, "
-                   "and Echo uses a model on this PC. API-key models are for Chat.")
+CODE_MODEL_RULE = "Native Code uses your selected local or API model; external coding subscriptions keep their own harnesses."
 
 
 def is_code_thread(session_id: str) -> bool:
@@ -35,12 +34,9 @@ def is_code_thread(session_id: str) -> bool:
 
 
 def code_provider_problem(session_id: str, provider: str) -> str:
-    """Plans for code, APIs for chat: an Echo Code conversation never runs an API-key provider.
-
-    Returns the reason to refuse, or "" when the provider is allowed here.
-    """
-    from agent.cloud_providers import CLOUD_PROVIDERS
-    return CODE_MODEL_RULE if str(provider or "") in CLOUD_PROVIDERS and is_code_thread(session_id) else ""
+    """Keep the admission hook compatible while native Code supports local and API models."""
+    # Provider readiness and capabilities are enforced by the shared native runtime.
+    return ""
 
 
 def runtime_catalog() -> dict:
@@ -52,7 +48,7 @@ def runtime_catalog() -> dict:
         "can_start": True, "blockers": [],
         "description": "The model you pick on this PC as a coding assistant, in EchoSpeak's own harness: files, "
                        "terminal, checks that verify the work, learning, and your approval rules. "
-                       "API-key models are for Chat; in Echo Code, ChatGPT runs in Codex and Claude in Claude Code.",
+                       "Local and API models use the native engineering harness. Coding subscriptions use their own external harness.",
     }]
     definitions = (
         ("codex", "Codex", "codex-app-server", "codex",
@@ -103,10 +99,17 @@ def workspace(project_id: str) -> dict:
     item = project_workspace.project(project_id)
     root = project_workspace.root_for(item)
     from agent.lean.git_context import summary
+    from agent.code_worktree import preflight
+    external_blocker = ""
+    try:
+        preflight(root)
+    except (ValueError, OSError) as exc:
+        external_blocker = str(exc) if isinstance(exc, ValueError) else "Git is unavailable. Install Git and reopen EchoSpeak."
     return {
         "schema_version": 1,
         "project": {"id": item.id, "name": item.name, "workspace_root": str(root), "trust_state": item.trust_state},
         "git_summary": summary(str(root)),
+        "external_blocker": external_blocker,
         "sessions": _session_rows(project_id),
         "can_start_native": item.trust_state == "trusted",
         "native_blocker": "" if item.trust_state == "trusted" else "This project is not marked trusted. Coding sessions are unavailable for this folder.",

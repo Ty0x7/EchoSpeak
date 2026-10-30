@@ -476,6 +476,16 @@ class Workbench:
         return {"items": json.loads(output), "available": True, "repository": repo}
 
     async def usage(self, context):
+        from agent.code_accounts import remembered
+        from agent.code_limits import codex
+        # Passive cached account observations are useful before opening a session.
+        # Do not launch a CLI or refresh credentials when opening this view.
+        accounts = {}
+        for runtime in ('codex', 'claude_cli'):
+            status = remembered(runtime)
+            if status.get('signed_in'):
+                accounts[runtime] = {'runtime': runtime, 'plan': status.get('plan', ''),
+                                     'subscription_usage': status.get('subscription_usage', {})}
         rows = []
         for session in self.supervisor.sessions.values():
             if session.row["project_id"] != context["project_id"]:
@@ -485,7 +495,7 @@ class Workbench:
                 self.supervisor.admit()
                 try:
                     row["limits"] = await session.adapter.rpc.request("account/rateLimits/read", {})
-                except RuntimeError:
+                except (RuntimeError, TimeoutError):
                     row["unavailable"] = "This Codex connection did not report account limits"
             if session.row.get("reported_usage"):
                 row["usage"] = session.row["reported_usage"].get("tokens", {})
@@ -494,9 +504,15 @@ class Workbench:
                 row["reported_cost_usd"] = session.row["reported_usage"].get("reported_cost_usd")
             if "limits" not in row:
                 row["unavailable"] = "Account limits were not reported. Token use is not remaining subscription allowance."
+            row['subscription_usage'] = codex(row['limits']) if 'limits' in row else session.row.get('subscription_usage', {})
+            usage = row['subscription_usage']
+            previous = accounts.get(row['runtime'], {}).get('subscription_usage', {})
+            if usage and usage.get('observed_at', 0) >= previous.get('observed_at', 0):
+                accounts[row['runtime']] = {**accounts.get(row['runtime'], {}),
+                                            'runtime': row['runtime'], 'subscription_usage': usage}
             rows.append(row)
         from agent.code_diagnostics import snapshot
-        return {"runtimes": redact_payload(rows), "diagnostics": snapshot(self.supervisor),
+        return {"runtimes": redact_payload(rows), "accounts": redact_payload(list(accounts.values())), "diagnostics": snapshot(self.supervisor),
                 "note": "Only runtime-reported data is shown. Turn/thread token counts are not account-wide totals or a subscription bill. Missing limits/costs are unavailable, never zero."}
 
     async def activity(self, context):

@@ -5,8 +5,8 @@ is on `codex/code-inbox`, based on `416fd8d` (Claude's 11.12 stack). Source vers
 Do not merge or publish a GitHub release without a further instruction.
 
 [PR #114](https://github.com/Ty0x7/EchoSpeak/pull/114) is open, ready for review,
-targeting `claude/v11.12` (stacked on #113). Implementation commit: `c4d10a4`.
-The branch is pushed; only unrelated user files remain untracked locally.
+targeting `claude/v11.12` (stacked on #113). Consult its current head for the complete continuation.
+The previous sidebar candidate was pushed. The current runtime continuation is summarized below and in native-code §13; verify the latest commit before continuing.
 
 ## Required handoff workflow
 
@@ -174,8 +174,36 @@ in `Roster.tsx`. The existing section resizing, search, callbacks and Code inbox
 owners are retained. Filters now open from the Code toolbar. Browser fixtures
 cover all environments, themes, filter keyboard activation and rail collapse.
 
-Current installer: `release/v11.13.0/sidebar-refinement/EchoSpeak_11.13.0_x64-setup.exe`.
+Earlier UI installer: `release/v11.13.0/sidebar-refinement/EchoSpeak_11.13.0_x64-setup.exe`, superseded by the runtime candidate below.
 Its normal NSIS build exited 0. This unsigned local test candidate supersedes the
 earlier UI EXE at the version folder root. See the versioned sidebar verification
 record and HTML report. Do not label earlier source hashes or installer checks
 as evidence for this refined UI. No installation, merge or publication occurred.
+
+## Current reliability continuation
+
+30 October: the owner explicitly expanded native Code to configured **local/API**
+models. The earlier local-only policy is superseded. Agents retain their identity
+and coordination; Chat/Code remain model-first; external harnesses stay separate.
+
+Bottom-docked Working/Snoozed/Settled bars open upward, one list at a time, with
+bounded independent scrolling. Runtime models come from provider metadata;
+Claude's actual catalog includes Opus 5.5. Saved session models survive reconnect.
+Plan windows/reset/rejection observations are separate from token/cost data.
+
+Live Codex passed one isolated file-read/write task and reconnect. Claude sign-in,
+catalog and reconnect passed; its single Haiku task hit the weekly limit. Do not
+claim Claude file/tool execution passed or rerun paid prompts automatically.
+The reported plain folders have no Git repository; owner initialization/review
+is needed before isolated external sessions. No source project was auto-committed.
+
+Read [native-code §13](research/native-code.md#13-ui-and-runtime-reliability-continuation)
+and [11.13.0 continuation](releases/v11.13.0.md#runtime-reliability-continuation-30-october)
+for exact checks, architecture, sources and current installer provenance. Older
+fixture-only/live-unverified statements and installer hashes are historical.
+No merge, installation, signing or public release is authorized by this report.
+
+Current EXE: `release/v11.13.0/runtime-reliability/EchoSpeak_11.13.0_x64-setup.exe`.
+Fresh full build exited 0; both EXE/MSI report 11.13.0. Compiled import/API/MCP
+checks passed. Local unsigned artifacts are retained; none was installed.
+EXE SHA-256: `cee96b1635c382073d2a1fd303ce5c7135295b5c670d4f2622264e222fd5d74d` (174,666,238 bytes).

@@ -1,7 +1,8 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageShell } from "../lean/Pages";
 import { WorkspacePopover } from "../components/WorkspacePopover";
 import { RuntimeMark } from "../components/RuntimeMark";
+import { RuntimeUsage } from "./RuntimeUsage";
 import { ExternalSession, type ExternalComposerState, type ExternalSessionHandle } from "./ExternalSession";
 import { CodeModelPicker, type NativeModel } from "./CodeModelPicker";
 import { CodeEffortPicker } from "./CodeEffortPicker";
@@ -91,7 +92,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
       if (!live) return;
       setAccounts(previous => ({ ...previous, [runtimeId]: remembered }));
       if (remembered.stale || accountRevision) return request<AgentAccount>(`${url}/check`, {}).then(fresh => { if (live) setAccounts(previous => ({ ...previous, [runtimeId]: fresh })); });
-    }).catch(() => undefined);
+    }).catch(err => { if (live) setError(`Could not check ${runtimeName(runtimeId)}: ${err instanceof Error ? err.message : "runtime unavailable"}`); });
     return () => { live = false; };
   }, [apiBase, runtimeId, accountRevision]);
   const recheckAccount = useCallback(() => { window.setTimeout(() => setAccountRevision(value => value + 1), 15000); }, []);
@@ -130,9 +131,9 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
     if (pending.current?.scope !== scope) pending.current = { scope, key: crypto.randomUUID() };
     setBusy(true); setError("");
     const requestedProject = projectId;
-    // Plans for code, APIs for chat: Echo native in Echo Code uses a model on this PC.
-    const choice = nativeChoice || (nativeInfo?.local && nativeInfo.provider && nativeInfo.model ? { provider: nativeInfo.provider, model: nativeInfo.model } : null);
-    if (!choice) { setBusy(false); setError("Choose a model on this PC for Echo. ChatGPT runs in Codex and Claude in Claude Code with your plan."); return; }
+    // Bind the selected configured endpoint to this native Code conversation.
+    const choice = nativeChoice || (nativeInfo?.provider && nativeInfo.model ? { provider: nativeInfo.provider, model: nativeInfo.model } : null);
+    if (!choice) { setBusy(false); setError("Choose a connected local or API model for the native harness. Coding subscriptions use Codex or Claude Code."); return; }
     try {
       const session = await createCodeSession(apiBase, projectId, runtimeId, pending.current.key);
       const binding = await request<ProviderInfo>(`${apiBase}/provider?session_id=${encodeURIComponent(session.thread_id)}`);
@@ -152,16 +153,20 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
 
   const projectName = available.find(project => project.id === projectId)?.name;
   const working = busy || Boolean(externalState?.busy || externalState?.active);
-  const account = accounts[runtimeId] || null;
+  const rememberedAccount = accounts[runtimeId] || null;
+  const account = useMemo(() => rememberedAccount && externalState?.subscriptionUsage
+    ? { ...rememberedAccount, subscription_usage: externalState.subscriptionUsage } : rememberedAccount,
+    [rememberedAccount, externalState?.subscriptionUsage]);
   const agentList = externalState?.models.length ? externalState.models : agentModels(account?.models);
-  const modelName = runtimeId === "echo" ? nativeChoice?.model || (nativeInfo?.local ? nativeInfo.model : "") || "Choose a model on this PC"
+  const modelName = runtimeId === "echo" ? nativeChoice?.model || nativeInfo?.model || "Choose a connected model"
     : agentModelName(agentList, model, externalState?.model || "") || `${selected?.name || "Agent"} · Choose model`;
   const signedIn = Boolean(externalState?.signedIn || account?.signed_in);
   const modelRow = runtimeId === "echo" ? undefined : agentModelRow(agentList, model, externalState?.model || "");
   const agentEfforts = modelRow?.efforts || [];
   // A remembered level this model doesn't offer falls back to its default rather than being sent.
   const agentEffort = agentEfforts.includes(effort) ? effort : "";
-  const nativeEffortOn = Boolean(nativeInfo?.model_profile?.thinking_controls?.effort);
+  const nativeProfileCurrent = !nativeChoice || (nativeChoice.provider === nativeInfo?.provider && nativeChoice.model === nativeInfo?.model);
+  const nativeEffortOn = nativeProfileCurrent && Boolean(nativeInfo?.model_profile?.thinking_controls?.effort);
   const connectionLabel = externalState?.connected ? "Session & permissions"
     : signedIn ? `${runtimeName(runtimeId)} · ${planLabel(account) || "Signed in"}` : runtimeId === "acp" ? "Connect agent" : `Sign in to ${runtimeName(runtimeId)}`;
   return <div className="ec-page"><PageShell title="Code" lead=""
@@ -169,6 +174,8 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
     <div className="ec-workspace">
       {error ? <p role="alert" className="ec-notice">{error}</p> : null}
       {notice ? <p role="status" className="ec-notice">{notice}</p> : null}
+      {runtimeId !== "echo" && workspace?.external_blocker ? <p role="alert" className="ec-notice">{workspace.external_blocker}</p> : null}
+      {runtimeId !== "echo" && account ? <RuntimeUsage usage={account.subscription_usage} compact/> : null}
       <div className="ec-start">
         {runtimeId !== "echo" && externalState?.transcript ? <pre className="ec-chat-transcript" role="log" aria-label="Coding conversation">{externalState.transcript}</pre>
           : <div className="ec-welcome"><h2>What should we build{projectName ? <> in <span>{projectName}</span></> : <> together</>}?</h2>
@@ -196,7 +203,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
             </WorkspacePopover> : null}
             {runtimeId === "echo"
               ? <CodeEffortPicker options={nativeEffortOn ? NATIVE_EFFORTS : []} value={nativeEffort} defaultValue="medium" disabled={working}
-                  unavailable="This model has no reasoning control" onChange={value => onNativeEffort?.(value)} />
+                  unavailable={nativeProfileCurrent ? "This model has no reasoning control" : "Reasoning capabilities load when this model's session starts"} onChange={value => onNativeEffort?.(value)} />
               : <CodeEffortPicker options={runtimeId === "acp" ? [] : agentEfforts} value={agentEffort} defaultValue={modelRow?.defaultEffort || ""} disabled={working}
                   unavailable={runtimeId === "acp" ? "This agent manages its own effort" : "Choose a model to see its effort levels"} onChange={setEffort} />}
             {runtimeId === "echo" ? <span className="ec-native-policy" title="Your existing Echo permission rules apply.">Echo permissions</span>
@@ -229,7 +236,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
       </div>
       {runtimeId !== "echo" && projectId ? <ExternalSession key={`${projectId}:${runtimeId}:${openRequest?.runtimeId === runtimeId ? openRequest.sessionId : ""}`} ref={external} apiBase={apiBase} projectId={projectId} runtimeId={runtimeId}
         initialSessionId={openRequest?.runtimeId === runtimeId ? openRequest.sessionId : ""}
-        canStart={Boolean(workspace?.can_start_native && selected?.can_start)} account={account} draft={draft} onDraft={setDraft} model={model} effort={agentEffort} onState={externalStatus}
+        canStart={Boolean(workspace?.can_start_native && !workspace?.external_blocker && selected?.can_start)} account={account} draft={draft} onDraft={setDraft} model={model} effort={agentEffort} onState={externalStatus}
         open={connectionOpen} anchor={connectionButton} onClose={() => setConnectionOpen(false)}
         onNeedSetup={() => setConnectionOpen(true)} onAccountChanged={recheckAccount} /> : null}
     </div>

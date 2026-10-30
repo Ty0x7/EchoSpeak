@@ -5,9 +5,11 @@ import { WorkspacePopover } from "../components/WorkspacePopover";
 import { agentModels, planLabel, runtimeName, type AgentAccount, type AgentModel } from "./model";
 import { useWorkbench } from "../workbench/store";
 import { isDesktopRuntime, openDesktopExternalUrl } from "../desktop/bridge";
+import { RuntimeUsage, type SubscriptionUsage } from "./RuntimeUsage";
 
 type Event = { seq: number; kind: string; data: Record<string, any> };
 type Session = {
+  subscription_usage?: SubscriptionUsage;
   model?: string;
   turn_active?: boolean;
   id: string; runtime_id: string; state: string; worktree: string; native_id: string | null;
@@ -47,6 +49,7 @@ function rememberTrust(projectId: string, runtimeId: string) {
 export type ExternalComposerState = {
   sessionId: string; connected: boolean; signedIn: boolean; canSend: boolean; busy: boolean; active: boolean;
   models: AgentModel[]; model: string; approvals: number; transcript: string; account: string;
+  subscriptionUsage?: SubscriptionUsage;
 };
 export type ExternalSessionHandle = { send(): void };
 export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
@@ -84,6 +87,7 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   useEffect(() => {
     onState({ sessionId: selected, connected: Boolean(session?.connected), signedIn, canSend, busy, active, models,
       model: session?.model || "", approvals: session?.approvals.length || 0, transcript: events.map(eventText).join(""),
+      subscriptionUsage: session?.subscription_usage,
       account: session?.connected ? session.account.type : planLabel(account) });
   }, [selected, session, signedIn, canSend, busy, active, onState, events, account]);
   useEffect(() => {
@@ -166,7 +170,8 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
       onChange={event => setSelected(event.target.value)}><option value="">New isolated session</option>{sessions.map(row =>
       <option key={row.id} value={row.id}>{new Date(row.created_at * 1000).toLocaleString()} · {row.id.slice(0, 7)}</option>)}</select></header>
     {error ? <p role="alert" className="ec-notice">{error}</p> : null}
-    {runtimeId !== "acp" ? <p className="ec-account-line">{signedIn ? `Signed in${planLabel(account) ? ` · ${planLabel(account)}` : ""} · ${name} uses its own harness and your plan.`
+    {runtimeId !== "acp" ? <RuntimeUsage usage={session?.subscription_usage || account?.subscription_usage}/> : null}
+    {runtimeId !== "acp" ? <p className="ec-account-line">{signedIn ? `Signed in${planLabel(account) ? ` · ${planLabel(account)}` : ""} · ${name} uses its own authentication and permissions.`
       : `${name} isn't signed in. Sign in with ${name}'s own login, then send your task.`}
       {!signedIn ? <button className="es-btn es-btn-sm" disabled={busy} onClick={() => void action(async () => {
         const result = await request<{ url?: string }>(`${apiBase}/echo-code/runtimes/${runtimeId}/login`, {});

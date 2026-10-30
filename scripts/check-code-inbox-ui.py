@@ -1,6 +1,7 @@
 """Actual left sidebar, model assets and Code composer: deterministic browser verification."""
 from pathlib import Path
 import json, shutil, socket, subprocess, time, urllib.request, uuid
+from urllib.parse import parse_qs, urlsplit
 from playwright.sync_api import sync_playwright, expect
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -32,7 +33,7 @@ import "./src/workbench/workbench.css";
 import "./src/theme/tokens.css";import "./src/lean/lean.css";import "./src/code/code.css";import "./src/projects/workspace.css";import "./src/theme/workspace.css";
 const noop=()=>{};
 const projects=[{id:"p",name:"Example repository",workspace_root:"fixture",trust_state:"trusted"}];
-const info:any={provider:"lmstudio",model:"fixture-local",local:true,binding_revision:1,model_profile:{thinking_controls:{supported:true,effort:true,toggle:true}}};
+const info:any={provider:"lmstudio",model:"fixture-local",local:true,binding_revision:1,available_providers:[{id:"lmstudio",name:"LM Studio",local:true},{id:"openai",name:"OpenAI",local:false}],model_profile:{thinking_controls:{supported:true,effort:true,toggle:true}}};
 function Preview(){
  const [pid,setPid]=useState("p");
  const [env,setEnv]=useState<any>("code");
@@ -92,7 +93,13 @@ def main():
                 if path=="/echo-code/overview": route.fulfill(json=data)
                 elif path=="/echo-code/inbox/sync":route.fulfill(json={"settled":[]})
                 elif path=="/echo-code/runtimes":route.fulfill(json={"schema_version":1,"privacy_mode":"standard","runtimes":[runtime("echo","Echo native"),runtime("codex","Codex"),runtime("claude_cli","Claude Code")]})
+                elif path.endswith("/account") or path.endswith("/check"):
+                    route.fulfill(json={"signed_in":True,"method":"claude.ai","plan":"fixture","models":[{"model":"claude-opus-5-5","displayName":"Opus 5.5","isDefault":True,"efforts":["low","high"]}],"subscription_usage":{"windows":[{"label":"Fixture plan window","used_percent":25}]}})
+                elif path.endswith("/external-sessions"):route.fulfill(json=[])
                 elif path=="/echo-code/projects/p":route.fulfill(json={"schema_version":1,"project":data["projects"][0],"git_summary":"codex/fixture","sessions":[],"can_start_native":True,"native_blocker":""})
+                elif path=="/provider/models":
+                    provider=parse_qs(urlsplit(route.request.url).query)['provider'][0]
+                    route.fulfill(json={"provider":provider,"reachable":True,"models":["fixture-api-model" if provider=="openai" else "fixture-local"]})
                 elif path.startswith("/provider"):route.fulfill(json=native)
                 elif path=="/echo-code/projects/p/sessions":
                     item={"thread_id":uuid.uuid4().hex,"title":"Background fixture task","project_id":"p","surface":"code","agent_runtime":"echo","last_active_at":time.time(),"message_count":0,"inbox":{**data["projects"][0]["sessions"][2]["inbox"],"state":"settled"}}
@@ -136,6 +143,40 @@ def main():
             page.screenshot(path=str(MEDIA/"left-sidebar-workspace.png"))
             page.locator(".echo-sidebar").screenshot(path=str(MEDIA/"inbox-dark.png"))
             assert page.locator(".echo-sidebar").bounding_box()["width"]==288
+            # Native Code lists configured API models; subscription runtimes show
+            # a separate actual-model catalog and quota observation.
+            page.get_by_role("button",name="Agent runtime",exact=True).click()
+            page.get_by_role("button",name="fixture-api-model ChatGPT · API",exact=True).click()
+            expect(page.get_by_role("button",name="Agent runtime",exact=True)).to_contain_text("fixture-api-model")
+            page.get_by_role("button",name="Agent runtime",exact=True).click()
+            page.get_by_role("button",name="Claude Code models",exact=True).click()
+            expect(page.locator(".es-model-choice code").filter(has_text="claude-opus-5-5")).to_be_visible()
+            expect(page.get_by_text("25% used",exact=True).first).to_be_visible()
+            page.locator(".es-model-popover").screenshot(path=str(MEDIA/"runtime-model-picker.png"))
+            page.get_by_role("button",name="Opus 5.5 claude-opus-5-5",exact=False).first.click()
+            expect(page.get_by_role("button",name="Agent runtime",exact=True)).to_contain_text("Opus 5.5")
+            page.get_by_role("button",name="Agent runtime",exact=True).click()
+            page.get_by_role("button",name="Echo native models",exact=True).click()
+            page.get_by_role("button",name="fixture-local LM Studio · On this PC",exact=False).first.click()
+            # Each parked section grows above its bar. Switching shelves reserves
+            # useful reading space even in a short window instead of three slivers.
+            for height in (900, 560):
+                page.set_viewport_size({"width":1280,"height":height})
+                for name in ("Working (1)", "Snoozed (1)", "Settled (1)"):
+                    page.get_by_role("button",name=name,exact=True).click()
+                    expect(page.locator(".ec-inbox-shelf.is-expanded")).to_have_count(1)
+                    shelf=page.locator(".ec-inbox-shelf.is-expanded")
+                    bar=shelf.locator(".ec-inbox-divider").bounding_box()
+                    contents=shelf.locator("ul").bounding_box()
+                    assert contents["height"]>=60 and contents["y"]+contents["height"]<=bar["y"]+1
+                    assert bar["y"]+bar["height"]<=height
+                footer=page.get_by_role("button",name="MCP access & diagnostics",exact=True).bounding_box()
+                settings=page.get_by_role("button",name="Settings",exact=True).bounding_box()
+                assert footer["y"]+footer["height"]<=settings["y"]
+                assert settings["y"]+settings["height"]<=height
+                page.locator(".echo-sidebar").screenshot(path=str(MEDIA/("inbox-expanded-up.png" if height==900 else "inbox-expanded-short.png")))
+                page.get_by_role("button",name="Settled (1)",exact=True).click()
+            page.set_viewport_size({"width":1280,"height":900})
             page.get_by_role("button",name="Inbox filters",exact=True).click()
             expect(page.get_by_label("Filter coding projects")).to_be_visible()
             page.get_by_role("checkbox",name="Working shelf",exact=True).uncheck()
@@ -233,7 +274,7 @@ def main():
                     assert rp.locator("img").evaluate_all("items=>items.every(i=>i.complete&&i.naturalWidth>0)"),document
                     rp.screenshot(path=str(scratch/f"{label}-{width}.png"))
             report.close();browser.close()
-        result={"version":json.loads((WEB/"package.json").read_text())["version"],"checks":["shared Chat/Agents/Code navigation, search and agent callback","left sidebar placement","flat active rows","collapsed Working/Snoozed/Settled shelves","local provider image assets","search","visible Shift range selection","bulk timed snooze","stale action rejection","errors survive refresh","dark/light themes","Ctrl+S stash and restore","Ctrl+Enter background submit","image stash","MCP panel read-only create, hide token and revoke","390px without overflow","no page errors","research report, versioned release report and atlas wide/narrow with scripts disabled"],"model_calls":0,"request_count":len(requests)}
+        result={"version":json.loads((WEB/"package.json").read_text())["version"],"checks":["shared Chat/Agents/Code navigation, search and agent callback","left sidebar placement","flat active rows","collapsed Working/Snoozed/Settled shelves","each shelf expands upward with at least 60px reading space at 900px and 560px heights; settings remain visible","native API model selection; exact Claude model ID and reported usage; switch back to local model","local provider image assets","search","visible Shift range selection","bulk timed snooze","stale action rejection","errors survive refresh","dark/light themes","Ctrl+S stash and restore","Ctrl+Enter background submit","image stash","MCP panel read-only create, hide token and revoke","390px without overflow","no page errors","research report, versioned release report and atlas wide/narrow with scripts disabled"],"model_calls":0,"request_count":len(requests)}
         (scratch/"code-inbox-browser-result.json").write_text(json.dumps(result,indent=2),encoding="utf-8")
         print(json.dumps(result,indent=2))
     finally:

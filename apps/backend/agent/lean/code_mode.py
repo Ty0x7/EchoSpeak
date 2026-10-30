@@ -11,8 +11,8 @@ approvals and learning. They differ in who answers and what they're for:
 - **Agents**: Echo and the other persistent agents, with identities, teams, routines and work.
 
 External harnesses (Codex, Claude Code, ACP) run in Echo Code too, through agent/echo_code.py; they
-never pass through here. Native Code keeps Echo Code's provider rule: a model on this PC, never an
-API-key provider (agent/echo_code.code_provider_problem).
+never pass through here. Native Code uses the selected configured local or API endpoint;
+external coding subscriptions retain their own harness, authentication and session ownership.
 """
 from __future__ import annotations
 

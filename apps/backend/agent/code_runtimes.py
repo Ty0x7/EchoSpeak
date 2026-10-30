@@ -37,8 +37,14 @@ class Codex:
                                 "type": (account.get("account") or {}).get("type", "none")}
         from agent.code_accounts import codex_models
         self.session.models = codex_models((await self.rpc.request("model/list", {})).get("data", []))
+        from agent.code_limits import codex
+        try:
+            self.session.row['subscription_usage'] = codex(await self.rpc.request('account/rateLimits/read', {}))
+        except (RuntimeError, TimeoutError):
+            self.session.row['subscription_usage'] = codex({})
         default = next((row for row in self.session.models if row.get("isDefault")), {})
-        self.session.record_model(default.get("model"))
+        if not self.session.row.get("model"):
+            self.session.record_model(default.get("model"))
 
     async def login(self):
         result = await self.rpc.request("account/login/start", {"type": "chatgpt"})
@@ -51,8 +57,10 @@ class Codex:
             raise ValueError("Codex returned an unsupported sign-in URL")
         return {"url": url, "login_id": result.get("loginId")}
 
-    async def ensure_thread(self):
+    async def ensure_thread(self, model=""):
         policy = codex_policy(self.session.root)
+        if model:
+            policy['model'] = model
         if self.session.row.get("native_id"):
             result = await self.rpc.request("thread/resume", {**policy, "threadId": self.session.row["native_id"]})
         else:
@@ -62,7 +70,8 @@ class Codex:
         self.session.save()
 
     async def prompt(self, text, model, effort=""):
-        await self.ensure_thread()
+        model = model or self.session.row.get("model", "")
+        await self.ensure_thread(model)
         params = {"threadId": self.session.row["native_id"], "input": [{"type": "text", "text": text}],
                   "approvalPolicy": "untrusted", "approvalsReviewer": "user",
                   "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [str(self.session.root)], "networkAccess": False}}
@@ -104,6 +113,10 @@ class Codex:
             raise ValueError("Unsupported client request")
         if method == "account/login/completed" and params.get("success"):
             self.session.account = {"connected": True, "type": "chatgpt"}
+        if method == "account/rateLimits/updated":
+            from agent.code_limits import codex
+            self.session.row['subscription_usage'] = codex(params)
+            self.session.save()
         if method.startswith("account/"):
             self.session.emit(method, {key: params[key] for key in ("success", "authMode", "planType") if key in params})
             return {}
@@ -248,7 +261,9 @@ class ClaudeCli:
         plan = str(status.get("plan") or "")
         self.session.account = {"connected": True,
                                 "type": f"Your Claude {plan.title()} plan" if plan else f"Claude Code · {status.get('method') or 'signed in'}"}
-        self.session.models = list(code_accounts.CLAUDE_MODELS)
+        self.session.models = status.get("models", [])
+        # A passive auth check cannot replace an observed runtime limit event.
+        self.session.row.setdefault('subscription_usage', status.get('subscription_usage', {}))
         self.token = secrets.token_urlsafe(32)
         self.server = await asyncio.start_server(self._hook, "127.0.0.1", 0)
         self.rpc = _TurnHandle(self)
@@ -307,6 +322,7 @@ class ClaudeCli:
         if not getattr(sys, "frozen", False):
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
         flags = (0x4 | subprocess.CREATE_NO_WINDOW) if os.name == "nt" else 0
+        model = model or self.session.row.get("model", "")
         process = self.process = subprocess.Popen(self.argv(model, effort), cwd=self.session.root, env=workspace_env(env), stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=flags,
                                         start_new_session=os.name != "nt")
@@ -354,10 +370,19 @@ class ClaudeCli:
                     self.session.emit("claude/tool", {"tool": str(block.get("name", ""))[:100], "detail": str(detail)[:300]})
         elif kind == "system" and subtype == "permission_denied":
             self.session.emit("permission_denied", {"reason": f"Not approved: {message.get('tool_name') or 'a tool call'}"})
+        elif kind == "rate_limit_event":
+            from agent.code_limits import claude
+            self.session.row['subscription_usage'] = claude(message.get('rate_limit_info'))
+            self.session.save()
         elif kind == "result":
             self._native(message.get("session_id"))
             from agent.code_usage import record
             record(self.session, message)
+            if message.get('is_error'):
+                errors=message.get('errors') or [message.get('result') or 'Claude Code ended without completing the turn. Check its sign-in, model and limits.']
+                if not isinstance(errors, list):
+                    errors = [errors]
+                self.session.emit('session/error', {'message':' '.join(str(v) for v in errors)[:1000]})
             self.session.emit("claude/result", {"is_error": bool(message.get("is_error")), "subtype": str(subtype or "")[:60]})
             return {"is_error": bool(message.get("is_error"))}
         return None

@@ -10,6 +10,7 @@ export type AgentModel = { id: string; model: string; displayName?: string; isDe
 export type AgentAccount = {
   installed?: boolean; signed_in?: boolean; method?: string; plan?: string; models?: AgentModel[];
   problem?: string; checked_at?: number; stale?: boolean;
+  subscription_usage?: import("./RuntimeUsage").SubscriptionUsage; model_problem?: string;
 };
 /** "Plus plan", "Pro plan", or "" when the agent didn't report one. */
 export function planLabel(account: AgentAccount | null | undefined): string {
@@ -54,6 +55,7 @@ export type CodeWorkspace = {
   schema_version: number;
   project: { id: string; name: string; workspace_root: string; trust_state: string };
   git_summary: string; sessions: CodeSession[]; can_start_native: boolean; native_blocker: string;
+  external_blocker?: string;
 };
 
 /** Runtime availability and project trust are independent; neither implies model access. */
