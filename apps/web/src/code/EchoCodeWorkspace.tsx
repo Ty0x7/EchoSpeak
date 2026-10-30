@@ -40,6 +40,24 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState("");
+  const [images, setImages] = useState<string[]>([]);
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    const restore = () => {
+      try { const raw=sessionStorage.getItem("echospeak.code.restoreDraft"); if(!raw)return; const row=JSON.parse(raw); sessionStorage.removeItem("echospeak.code.restoreDraft"); onProject(row.project_id); setRuntime("echo"); setDraft(row.text); setImages([]); setNotice("Restored stash; its saved copy stays in Drafts until removed."); } catch { setError("Could not restore the stash"); }
+    };
+    restore(); window.addEventListener("echospeak:code-draft",restore); return()=>window.removeEventListener("echospeak:code-draft",restore);
+  }, []);
+  const stash = async () => {
+    setError("");setBusy(true);const requestedProject=projectId;
+    try { await request(`${apiBase}/echo-code/drafts`,{project_id:projectId,text:draft,images});if(mounted.current&&activeProject.current===requestedProject){setDraft("");setImages([]);setNotice("Stashed in the left sidebar");}window.dispatchEvent(new CustomEvent("echospeak:code-changed")); }
+    catch(e) {setError(e instanceof Error?e.message:"Could not stash draft")}
+    finally {if(mounted.current)setBusy(false)}
+  };
+  const addImage = (file: File) => {
+    if(runtimeId!=="echo" || file.size>2000000 || images.length>=4 || !["image/png","image/jpeg","image/webp"].includes(file.type)){setError("Native Code drafts support four PNG, JPEG or WebP images below 2 MB each");return}
+    const reader=new FileReader();reader.onload=()=>setImages(v=>v.length<4?[...v,String(reader.result)]:v);reader.readAsDataURL(file);
+  };
   const [runtimeOpen, setRuntimeOpen] = useState(false);
   const runtimeButton = useRef<HTMLButtonElement>(null);
   const connectionButton = useRef<HTMLButtonElement>(null);
@@ -106,7 +124,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
 
 
   const selected = catalog?.runtimes.find(runtime => runtime.id === runtimeId);
-  const start = async () => {
+  const start = async (background = false) => {
     if (busy || !canStartSession(selected, workspace)) return;
     const scope = `${projectId}:${runtimeId}`;
     if (pending.current?.scope !== scope) pending.current = { scope, key: crypto.randomUUID() };
@@ -114,13 +132,18 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
     const requestedProject = projectId;
     // Plans for code, APIs for chat: Echo native in Echo Code uses a model on this PC.
     const choice = nativeChoice || (nativeInfo?.local && nativeInfo.provider && nativeInfo.model ? { provider: nativeInfo.provider, model: nativeInfo.model } : null);
-    if (!choice) { setError("Choose a model on this PC for Echo. ChatGPT runs in Codex and Claude in Claude Code with your plan."); return; }
+    if (!choice) { setBusy(false); setError("Choose a model on this PC for Echo. ChatGPT runs in Codex and Claude in Claude Code with your plan."); return; }
     try {
       const session = await createCodeSession(apiBase, projectId, runtimeId, pending.current.key);
       const binding = await request<ProviderInfo>(`${apiBase}/provider?session_id=${encodeURIComponent(session.thread_id)}`);
       await request(`${apiBase}/provider/switch`, { ...choice, session_id: session.thread_id, expected_revision: binding.binding_revision || 1 });
+      let text=draft.trim();
+      if(images.length) { const saved=await request<{text:string}>(`${apiBase}/echo-code/drafts`,{project_id:projectId,text,images});text=saved.text;setImages([]);setDraft(text); }
+      if (background) {
+        await request(`${apiBase}/echo-code/background`, {thread_id:session.thread_id,message:text,request_id:`turn:${session.thread_id}`,effort:nativeEffort});
+        setDraft("");setNotice("Sent in the background · open it from Working");onSessionsChanged?.();window.dispatchEvent(new CustomEvent("echospeak:code-changed"));
+      } else if (mounted.current && activeProject.current === requestedProject) onSession(session, text);
       pending.current = null;
-      if (mounted.current && activeProject.current === requestedProject) onSession(session, draft.trim());
     } catch (err) {
       if (err instanceof CodeRequestError && err.status >= 400 && err.status < 500) pending.current = null;
       if (mounted.current && activeProject.current === requestedProject) setError(err instanceof Error ? err.message : "Could not create the coding session");
@@ -145,12 +168,15 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
     action={<button className="es-btn es-btn-quiet es-btn-sm" onClick={onAddFolder}>Add folder</button>}>
     <div className="ec-workspace">
       {error ? <p role="alert" className="ec-notice">{error}</p> : null}
+      {notice ? <p role="status" className="ec-notice">{notice}</p> : null}
       <div className="ec-start">
         {runtimeId !== "echo" && externalState?.transcript ? <pre className="ec-chat-transcript" role="log" aria-label="Coding conversation">{externalState.transcript}</pre>
           : <div className="ec-welcome"><h2>What should we build{projectName ? <> in <span>{projectName}</span></> : <> together</>}?</h2>
               <WelcomeTypewriter coding /></div>}
         <div className="ec-draft-card">
           <textarea aria-label="Coding task draft" value={draft} onChange={event => setDraft(event.target.value)} disabled={working} maxLength={60000}
+            onPaste={event=>{const files=Array.from(event.clipboardData.files);if(files.length){event.preventDefault();files.forEach(addImage)}}}
+            onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==="s"){event.preventDefault();void stash()}else if((event.ctrlKey||event.metaKey)&&event.key==="Enter"){event.preventDefault();if(runtimeId==="echo"&&(draft.trim()||images.length)&&!working)void start(true);else if(runtimeId!=="echo")external.current?.send()}}}
             placeholder="Describe a change, ask about your code, or plan what to build" rows={1}
             onInput={event => { const field=event.currentTarget; field.style.height="auto"; field.style.height=`${Math.min(field.scrollHeight,156)}px`; }} />
           <div className="ec-draft-tools">
@@ -184,6 +210,8 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
           </div>
         </div>
         <div className="ec-checkout-bar">
+          <div className="ec-draft-shortcuts"><button type="button" disabled={!projectId || working || (!draft.trim()&&!images.length)} onClick={()=>void stash()}>Stash · Ctrl+S</button>{runtimeId==="echo"?<label className="ec-attach-image">Attach image<input aria-label="Attach image to coding draft" type="file" disabled={working} accept="image/png,image/jpeg,image/webp" onChange={e=>{if(e.target.files?.[0])addImage(e.target.files[0]);e.target.value=""}}/></label>:null}<small>Ctrl+Enter · {runtimeId==="echo"?"send in background":"send to runtime"}</small></div>
+          {images.length?<div className="ec-draft-images">{images.map((src,i)=><button type="button" key={i} title="Remove attachment" onClick={()=>setImages(v=>v.filter((_,j)=>i!==j))}><img src={src} alt={`Draft attachment ${i+1}`}/><span>×</span></button>)}</div>:null}
           <label><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden><path d="M3 7h6l2 2h10v11H3z" /></svg><select aria-label="Coding project" value={projectId} disabled={busy} onChange={event => onProject(event.target.value)}>
             <option value="">Choose project</option>{available.map(project => <option key={project.id} value={project.id}>{project.name}</option>)}
           </select></label>

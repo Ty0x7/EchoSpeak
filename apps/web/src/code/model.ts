@@ -34,9 +34,21 @@ export function agentModelName(models: AgentModel[], selected: string, reported:
   const id = selected || reported || models.find(row => row.isDefault)?.model || "";
   return models.find(row => row.model === id)?.displayName || id;
 }
+export type InboxState = "working" | "needs_attention" | "ready_to_review" | "settled" | "snoozed";
+export type InboxSummary = { state: InboxState; reason: string; activity: string; verification: string; updated_at: number; can_triage: boolean; snoozed_until?: number; woke?: boolean; settled_at?: number };
+export const INBOX_STATES: InboxState[] = ["working", "needs_attention", "ready_to_review", "settled", "snoozed"];
+export const INBOX_LABELS: Record<InboxState, string> = { working: "Working", needs_attention: "Needs attention", ready_to_review: "Ready to review", settled: "Settled", snoozed: "Snoozed" };
+
+/** Server evidence wins over the optimistic local spinner (an approval is attention). */
+export function inboxState(inbox?: InboxSummary, locallyWorking = false): InboxState {
+  if (inbox?.state === "needs_attention") return "needs_attention";
+  return locallyWorking ? "working" : inbox?.state || "settled";
+}
+
 export type CodeSession = {
   thread_id: string; title: string; project_id: string; surface: string; agent_runtime: string;
   last_active_at: number; message_count: number;
+  inbox?: InboxSummary;
 };
 export type CodeWorkspace = {
   schema_version: number;

@@ -2,7 +2,7 @@
 import time
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from agent import echo_code
@@ -28,13 +28,92 @@ def runtimes():
     return echo_code.runtime_catalog()
 
 
+class ControlGrant(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    projects: list[str] = Field(default_factory=list, max_length=100)
+    agents: list[str] = Field(default_factory=list, max_length=20)
+    control: bool = False
+    days: int = Field(default=7, ge=1, le=30)
+
+
+@router.get("/control/clients")
+def control_clients():
+    from agent.code_control import grants
+    return {"clients": grants().list()}
+
+
+@router.get("/control/bridge")
+def control_bridge():
+    import sys
+    from pathlib import Path
+    if getattr(sys, "frozen", False):
+        return {"command": sys.executable, "args": ["--control-mcp"]}
+    return {"command": sys.executable, "args": ["-m", "agent.control_mcp"], "cwd": str(Path(__file__).resolve().parents[2])}
+
+
+@router.get("/diagnostics")
+def code_diagnostics():
+    from agent.code_sessions import manager
+    from agent.code_diagnostics import snapshot
+    return _call(snapshot, manager())
+
+
+@router.post("/control/clients")
+def create_control_client(request: ControlGrant):
+    from agent.code_control import grants
+    return _call(grants().create, request.name, request.projects, request.agents, request.control, request.days)
+
+
+@router.delete("/control/clients/{identity}")
+def revoke_control_client(identity: str):
+    from agent.code_control import grants
+    return _call(grants().revoke, identity)
+
+
+class ControlCall(BaseModel):
+    action: Literal["projects", "runtimes", "threads", "status", "create", "send", "stop", "triage"]
+    arguments: dict = Field(default_factory=dict)
+
+
+@router.post("/control/invoke")
+def control_invoke(call: ControlCall, request: Request):
+    # This exact endpoint uses only its separate scoped grant, never owner auth.
+    from api.auth import _is_local_client, _request_hostname
+    from agent.code_control import invoke
+    import json
+    if (not _is_local_client(request.client.host if request.client else "") or request.headers.get("origin")
+            or _request_hostname(request.headers.get("host", "")) not in {"localhost", "127.0.0.1", "::1"}):
+        raise HTTPException(403, "MCP control currently accepts local non-browser clients only")
+    auth = request.headers.get("authorization", "")
+    if not auth.startswith("Bearer ") or len(json.dumps(call.arguments)) > 64000:
+        raise HTTPException(403, "A bounded call and separate client grant are required")
+    return _call(invoke, auth[7:], call.action, call.arguments)
+
+
+class BackgroundTask(BaseModel):
+    thread_id: str = Field(min_length=1, max_length=128)
+    message: str = Field(min_length=1, max_length=50000)
+    request_id: str = Field(min_length=8, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
+    effort: Literal["minimal", "low", "medium", "high", "extra_high", "max", "ultra"] = "medium"
+
+
+@router.post("/background")
+def background_task(request: BackgroundTask):
+    from agent.code_tasks import submit
+    if not echo_code.is_code_thread(request.thread_id):
+        raise HTTPException(404, "Coding session unavailable")
+    return _call(submit, request.thread_id, request.message, request.request_id, request.effort)
+
+
 @router.get("/overview")
 def overview():
     """Code's sidebar: projects with their native and external coding sessions, plus unorganized ones."""
     data = echo_code.overview()
+    from agent.code_drafts import list_drafts
+    data["drafts"] = [{k: v for k, v in row.items() if k != "project_root"} for row in list_drafts()]
     for project in data["projects"]:
         try:
-            project["external"] = _external("list", project["id"])
+            project["external"] = _external("list", project["id"], summary=True)
         except HTTPException:
             project["external"] = []
     return data
@@ -42,6 +121,41 @@ def overview():
 
 class MoveSession(BaseModel):
     project_id: str = Field(min_length=1, max_length=128)
+
+
+class Stash(BaseModel):
+    project_id: str = Field(min_length=1, max_length=128)
+    text: str = Field(default="", max_length=50000)
+    images: list[str] = Field(default_factory=list, max_length=4)
+
+
+@router.post("/drafts")
+def save_draft(request: Stash):
+    from agent.code_drafts import save
+    return _call(save, request.project_id, request.text, request.images)
+
+
+@router.delete("/drafts/{identity}")
+def remove_draft(identity: str):
+    from agent.code_drafts import remove
+    return _call(remove, identity)
+
+
+@router.get("/drafts/{identity}")
+def restore_draft(identity: str):
+    from agent.code_drafts import restore
+    return _call(restore, identity)
+
+
+class InboxChoice(BaseModel):
+    action: Literal["settled", "snoozed", "reopen"]
+    activity: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]+$")
+    snooze_seconds: int = Field(default=0, ge=0, le=30 * 86400)
+
+
+@router.post("/sessions/{thread_id}/inbox")
+def triage_session(thread_id: str, request: InboxChoice):
+    return _call(echo_code.triage_session, thread_id, request.action, request.activity, request.snooze_seconds)
 
 
 @router.post("/sessions/{thread_id}/project")
@@ -84,6 +198,56 @@ def _external(method, *args, **kwargs):
 def external_sessions(project_id: str):
     _call(echo_code.workspace, project_id)
     return _external("list", project_id)
+
+
+@router.post("/external-sessions/{session_id}/inbox")
+def external_triage(session_id: str, request: InboxChoice):
+    return _external("triage", session_id, request.action, request.activity, request.snooze_seconds)
+
+
+class InboxTarget(BaseModel):
+    id: str = Field(min_length=1, max_length=128)
+    external: bool = False
+    activity: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]+$")
+
+
+class InboxBatch(BaseModel):
+    targets: list[InboxTarget] = Field(min_length=1, max_length=100)
+    action: Literal["settled", "snoozed", "reopen"]
+    snooze_seconds: int = Field(default=0, ge=0, le=30 * 86400)
+
+
+class LinkPullRequest(InboxTarget):
+    number: int = Field(ge=1, le=1_000_000_000)
+
+
+@router.post("/inbox/pull-request")
+def link_pull_request(request: LinkPullRequest):
+    from agent.code_prs import link
+    from agent.code_sessions import manager
+    service = manager()
+    return _call(service.call, link(service, request.id, request.external, request.number, request.activity))
+
+
+@router.post("/inbox/sync")
+def sync_inbox():
+    from agent.code_prs import sync
+    from agent.code_sessions import manager
+    service = manager()
+    return _call(service.call, sync(service))
+
+
+@router.post("/inbox/batch")
+def inbox_batch(request: InboxBatch):
+    results = []
+    for target in request.targets:
+        try:
+            value = (_external("triage", target.id, request.action, target.activity, request.snooze_seconds)
+                     if target.external else _call(echo_code.triage_session, target.id, request.action, target.activity, request.snooze_seconds))
+            results.append({"id": target.id, "external": target.external, "ok": True, "inbox": value})
+        except HTTPException as exc:
+            results.append({"id": target.id, "external": target.external, "ok": False, "error": str(exc.detail)})
+    return {"results": results}
 
 
 @router.post("/projects/{project_id}/external-sessions")

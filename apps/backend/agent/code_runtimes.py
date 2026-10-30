@@ -119,6 +119,15 @@ class Codex:
                 return {}
             self.session.result = str(turn.get("status", "failed"))
             self.session.turn_finished.set()
+        if method == "thread/tokenUsage/updated" and params.get("threadId") == self.session.row.get("native_id"):
+            from agent.code_usage import record
+            total = (params.get("tokenUsage") or {}).get("total") or {}
+            record(self.session, {"usage": {"input_tokens": total.get("inputTokens"), "output_tokens": total.get("outputTokens"),
+                                           "total_tokens": total.get("totalTokens"), "cached_input_tokens": total.get("cachedInputTokens"),
+                                           "reasoning_output_tokens": total.get("reasoningOutputTokens")}})
+            if self.session.row.get("reported_usage"):
+                self.session.row["reported_usage"]["scope"] = "Native thread cumulative tokens, as reported by Codex"
+                self.session.save()
         self.session.emit(method, params)
         return {}
 
@@ -347,6 +356,8 @@ class ClaudeCli:
             self.session.emit("permission_denied", {"reason": f"Not approved: {message.get('tool_name') or 'a tool call'}"})
         elif kind == "result":
             self._native(message.get("session_id"))
+            from agent.code_usage import record
+            record(self.session, message)
             self.session.emit("claude/result", {"is_error": bool(message.get("is_error")), "subtype": str(subtype or "")[:60]})
             return {"is_error": bool(message.get("is_error"))}
         return None

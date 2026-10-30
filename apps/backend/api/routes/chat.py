@@ -313,6 +313,9 @@ async def query(request: QueryRequest):
     _register_query_cancellation(
         request_id, request.thread_id or "default", cancel_event
     )
+    from agent.code_tasks import was_cancelled
+    if was_cancelled(request_id):
+        cancel_event.set()
     _metric_inc("requests", 1)
     try:
         source = _prepare_query_transport(request, request_id)

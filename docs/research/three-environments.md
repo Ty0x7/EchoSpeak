@@ -2,6 +2,12 @@
 
 EchoSpeak is now split into three environments that share one sidebar and one runtime. [Visual report](../../artifacts/research/three-environments.html).
 
+Current Code details (29 October): [native-code.md](native-code.md) supersedes
+the original Code execution description below. A live owner Code turn runs as
+the selected supported local model with engineering tools, without Agents'
+persona or team. External runtimes keep their own sessions and worktrees. Code's
+inbox projects their existing lifecycle evidence without changing those paths.
+
 - **Chat** is model-first: you talk to the model you chose.
 - **Agents** is where you message your persistent agents.
 - **Code** is project-focused development.
@@ -136,3 +142,14 @@ The agent's own grants, approvals and taint rules apply as for any owner message
 - A session's title isn't renamed when it moves projects.
 - When the app opens, it shows the last-saved environment for a moment, until the remembered conversation's environment arrives.
 - A mobile layout with a full-screen contact list is the next step for Agents. The rail and contact list already work at phone width.
+
+## 6. Code inbox and optional agent control (30 October 2026 UTC)
+
+Code's left sidebar now uses flat project-labeled rows and Working, Snoozed and
+Settled shelves. Chat and Agents keep their existing navigation; both provider
+selectors share local OpenAI/Claude marks. Native background send and project image
+stashes are Code composer features. An explicitly configured local MCP client can
+access granted Code projects and selected persistent Agents, while ordinary Chat
+remains excluded. This does not add an agent persona or supervisor to native Code.
+See [Native Code section 11](native-code.md#11-screenshot-follow-up-parallel-inbox-control-and-observations)
+for scope, permission boundaries, verification and remaining remote/mobile work.

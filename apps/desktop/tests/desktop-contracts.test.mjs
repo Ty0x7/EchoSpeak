@@ -151,8 +151,8 @@ test("sidecar lifetime has both graceful and crash recovery ownership", () => {
 
 test("native contract is reproducible and supports disposable acceptance data", () => {
   for (const version of [
-    'tauri-build = { version = "=2.6.3"',
-    'tauri = { version = "=2.11.6"',
+    'tauri-build = { version = "=2.7.3"',
+    'tauri = { version = "=2.12.4"',
     'tauri-plugin-shell = "=2.3.5"',
     'tauri-plugin-single-instance = "=2.4.2"',
     'tauri-plugin-window-state = "=2.4.1"',
@@ -187,7 +187,7 @@ test("in-app updates verify signed GitHub releases and stop the service before i
   assert.equal(updater.requireSignedVersion, true);
   // Ordinary builds must not need the private signing key; only the release script turns this on.
   assert.notEqual(config.bundle.createUpdaterArtifacts, true);
-  assert.ok(cargo.includes('tauri-plugin-updater = "=2.12.0"'));
+  assert.ok(cargo.includes('tauri-plugin-updater = "=2.14.1"'));
   assert.ok(host.includes("tauri_plugin_updater::Builder::new().build()"));
   assert.ok(host.includes("updates::check_for_update") && host.includes("updates::install_update"));
   assert.ok(permissions.includes('"check_for_update"') && permissions.includes('"install_update"'));

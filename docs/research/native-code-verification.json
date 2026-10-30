@@ -1,0 +1,470 @@
+{
+  "schema_version": 2,
+  "checked_on_utc": "2026-10-30",
+  "branch": "codex/code-inbox",
+  "base_commit": "416fd8de89db90355c4351e176d563c1d3a28db5",
+  "source_version": "11.13.0",
+  "delivery": "11.13.0 local EXE/MSI produced; updater signing incomplete because encrypted key password was unavailable. Scoped stacked PR authorized. Not merged, installed or publicly released.",
+  "backend": {
+    "status": "passed_with_documented_setup_retry",
+    "runs": [
+      {
+        "cwd": "apps/backend",
+        "command": ".venv/Scripts/python.exe -m pytest tests/test_code_parallel.py tests/test_code_inbox.py tests/test_native_code.py tests/test_code_sessions.py tests/test_echo_code.py tests/test_workbench.py tests/test_chat_lifecycle.py tests/test_ask_and_recover.py tests/test_mcp_v760.py -q",
+        "passed": 132,
+        "setup_errors": 2,
+        "seconds": 489.64,
+        "note": "Two disposable Git fixture config commands exceeded their existing 10-second timeout; no test assertion failed. Some final changes postdate this broad run; use the focused final run below for that scope."
+      },
+      {
+        "cwd": "apps/backend",
+        "command": ".venv/Scripts/python.exe -m pytest tests/test_code_sessions.py::test_failed_privacy_save_keeps_admission_closed tests/test_code_sessions.py::test_external_api_requires_acknowledgement_and_never_creates_native_thread -q",
+        "passed": 2,
+        "seconds": 10.95,
+        "note": "Both transient setup failures passed in isolation."
+      },
+      {
+        "cwd": "apps/backend",
+        "command": ".venv/Scripts/python.exe -m pytest tests/test_code_parallel.py tests/test_code_inbox.py tests/test_security_controls.py -q",
+        "passed": 45,
+        "seconds": 28.62,
+        "note": "Final follow-up: real SDK stdio on module and desktop source entry, scoped reads and control mutation, expiry/revoke/root scope, blocked redirects/origin/nonloopback, native queue/idempotence/stop, PR guards, images, observations."
+      }
+    ],
+    "scope": "Scripted native queries, real StateStore/ThreadManager, disposable Git repositories and owned local protocol/MCP peers. No real provider, model, credential or account calls. Counts overlap across runs."
+  },
+  "web": {
+    "status": "passed",
+    "tests": 35,
+    "files": 6,
+    "cwd": "apps/web",
+    "command": "npm.cmd run test:run -- src/code src/app/environments.test.tsx src/workbench/store.test.ts src/lean/activity.test.tsx",
+    "typecheck": {
+      "command": "npm.cmd run typecheck",
+      "status": "passed"
+    },
+    "production_build": {
+      "command": "npm.cmd run build",
+      "status": "passed",
+      "seconds": 30.96,
+      "note": "Existing Vite chunk-size advisory remains. The final removal of an unused drag affordance was subsequently typechecked and browser-verified."
+    }
+  },
+  "browser": {
+    "status": "passed",
+    "command": "apps/backend/.venv/Scripts/python.exe scripts/check-code-inbox-ui.py",
+    "fixture": "Actual ProjectSidebar, CodeTree and EchoCodeWorkspace mounted together with deterministic API responses and temporary Vite. No Echo backend or model service.",
+    "checks": [
+      "left sidebar placement",
+      "flat active rows",
+      "collapsed Working/Snoozed/Settled shelves",
+      "local provider image assets",
+      "search",
+      "visible Shift range selection",
+      "bulk timed snooze",
+      "stale action rejection",
+      "errors survive refresh",
+      "dark/light themes",
+      "Ctrl+S stash and restore",
+      "Ctrl+Enter background submit",
+      "image stash",
+      "390px without overflow",
+      "no page errors",
+      "report wide/narrow with scripts disabled"
+    ],
+    "model_calls": 0,
+    "request_count": 22,
+    "images": [
+      "artifacts/media/code-inbox/left-sidebar-workspace.png",
+      "artifacts/media/code-inbox/inbox-dark.png",
+      "artifacts/media/code-inbox/inbox-light.png"
+    ],
+    "reference_image": "artifacts/media/code-inbox/t3-sidebar-reference.png",
+    "report_renders": [
+      ".test-state/code-inbox-report-1400.png",
+      ".test-state/code-inbox-report-390.png"
+    ],
+    "visual_inspection": "Workspace, dark/light component captures, and report wide/narrow top views inspected. The original user reference is labeled separately."
+  },
+  "environment_notes": [
+    "Tests isolate durable state through tests/conftest.py. Set TMP and TEMP to the repository .test-state directory for sandbox temp restrictions.",
+    "Initial sandbox attempts hit temporary-directory permissions or stalled on local test-client/browser subprocess work. Successful backend and browser runs used an approved unsandboxed invocation; no application security policy was changed.",
+    "No unrelated full suites or paid-model evaluations were run."
+  ],
+  "owner_acceptance_outstanding": [
+    "Real local-model repair and background cancellation/queue behavior",
+    "Live vendor account limits, approval, stop and reconnect",
+    "Live merged-PR link and clean-checkout settlement with owner GitHub CLI",
+    "Real external MCP client configuration with an owner-created grant",
+    "Installed Tauri desktop layout/startup and owner acceptance"
+  ],
+  "preserved_unrelated_paths": [
+    "Echo Marketing/",
+    "Echo Minecraft/",
+    "docs/research/agent-collaboration-11.9.1.md"
+  ],
+  "github_stack_snapshot": [
+    {
+      "number": 103,
+      "state": "open",
+      "merged": false,
+      "base": "main",
+      "head": "claude/agents-and-checkins",
+      "head_sha": "856cc63f3bcd4004d01a5d0a2f54f8fa5eb0b4bc",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/103"
+    },
+    {
+      "number": 104,
+      "state": "open",
+      "merged": false,
+      "base": "claude/agents-and-checkins",
+      "head": "claude/three-environments",
+      "head_sha": "39f3c44db240b9f71f0406b2da575f38ef20b9eb",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/104"
+    },
+    {
+      "number": 105,
+      "state": "open",
+      "merged": false,
+      "base": "claude/three-environments",
+      "head": "claude/chat-harness",
+      "head_sha": "71c48f90c31ffe7c995126d1ba3653429af4d184",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/105"
+    },
+    {
+      "number": 106,
+      "state": "open",
+      "merged": false,
+      "base": "claude/chat-harness",
+      "head": "claude/chat-orchestration",
+      "head_sha": "ac568f6aeadfa792967e520d3f53e746c611268d",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/106"
+    },
+    {
+      "number": 107,
+      "state": "open",
+      "merged": false,
+      "base": "claude/chat-orchestration",
+      "head": "claude/research-engine",
+      "head_sha": "14254c3dffeb826f7633add7bb48d22ec0346781",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/107"
+    },
+    {
+      "number": 108,
+      "state": "open",
+      "merged": false,
+      "base": "claude/research-engine",
+      "head": "claude/chat-reliability",
+      "head_sha": "a0e854fd31ecdb0e1eb91d675135082c60e22937",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/108"
+    },
+    {
+      "number": 109,
+      "state": "open",
+      "merged": false,
+      "base": "claude/chat-reliability",
+      "head": "claude/verified-engineering",
+      "head_sha": "c36cf1419d9232e0391db12f6f893e3243c97999",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/109"
+    },
+    {
+      "number": 110,
+      "state": "open",
+      "merged": false,
+      "base": "claude/verified-engineering",
+      "head": "claude/autonomous-learning",
+      "head_sha": "67e1b32d2f07c3efac56f745b84a2a6d6c48e71b",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/110"
+    },
+    {
+      "number": 111,
+      "state": "open",
+      "merged": false,
+      "base": "claude/autonomous-learning",
+      "head": "claude/learning-research",
+      "head_sha": "5c3f30e015734f6e1f8c0fa75556a5e40ef89f49",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/111"
+    },
+    {
+      "number": 112,
+      "state": "open",
+      "merged": false,
+      "base": "claude/learning-research",
+      "head": "claude/native-code",
+      "head_sha": "f58237e0e0bf66a602a8f967e4f994fa35405fba",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/112"
+    },
+    {
+      "number": 113,
+      "state": "open",
+      "merged": false,
+      "base": "claude/native-code",
+      "head": "claude/v11.12",
+      "head_sha": "416fd8de89db90355c4351e176d563c1d3a28db5",
+      "url": "https://github.com/Ty0x7/EchoSpeak/pull/113"
+    }
+  ],
+  "sha256": {
+    "apps/backend/agent/code_control.py": "8778671c44c42d5572a84ce2cf25728743322138b970ffddd2a29f693e0de50d",
+    "apps/backend/agent/code_diagnostics.py": "a0e982484e456961e402c8c0735cfda3940e509fac20d43f587c3620deffa173",
+    "apps/backend/agent/code_drafts.py": "40ec3f3fe928be93c239f34b5cbbefa32d20f9b7fe08ad285a9623783d44ce91",
+    "apps/backend/agent/code_inbox.py": "f39ce3a42f4f526fad67d2fd6924a2f9bf5ec53d6cced352b7c1787752acf4ed",
+    "apps/backend/agent/code_prs.py": "5dd8763687e23a3b4397eadb5a1d4e1e5526f01dd257c9601b05f3a269736ba9",
+    "apps/backend/agent/code_runtimes.py": "e1488830462b58378e70e75b28d5861426b83a5da17c7d34eb3fda60ba300a9c",
+    "apps/backend/agent/code_sessions.py": "dd639eb20dde844c00a6556ac57b7725a08d6bb1b41f242097a127179f26bbb9",
+    "apps/backend/agent/code_tasks.py": "1846103a5d9aded4257582e015b9daedf62e5287d2e0d8f7c25a821b16ae9165",
+    "apps/backend/agent/code_usage.py": "bb685a4764da2fce1e2cb47cf23d3169a15c7342a80445cbce7b1029bf3dabd6",
+    "apps/backend/agent/control_mcp.py": "9b4afa8592f10919b76cfabc1893913d13586d4548f1402b76f83ee564033e50",
+    "apps/backend/agent/echo_code.py": "62fe07c73cd55c390709bc96757d8dee483b7c82dedf2bda6aeb9773873cd7fa",
+    "apps/backend/agent/state.py": "c16d21761ddb30462f9173abeb9504d92c78fe8a21105be3cb66ccf5768b89e7",
+    "apps/backend/agent/workbench.py": "214a915a478912251b50bb1e31b29fc7a2a323367ad321d490a8ffe4281588ee",
+    "apps/backend/api/auth.py": "177c26c80642b14b80adf7122d7b768aba8a18a3748f2bb0fd53e9a2afa8690a",
+    "apps/backend/api/routes/chat.py": "3c63084170090b3dd0bfb6391ff9273300d08eff0a165373bdaeecc07dfad9af",
+    "apps/backend/api/routes/echo_code.py": "291765228194638bb202064785fd87572a4cba1caac7608add91e397ac9b75cf",
+    "apps/backend/tests/test_code_inbox.py": "387e19b78288e4209bfa8a00668b6c47e333ecf9b2a9325213bacdeaf807b19e",
+    "apps/backend/tests/test_code_parallel.py": "04937bfafda165c1f296fedcc136d9943dfc053e52afca19f5bfbf354fbed9f5",
+    "apps/backend/tests/test_code_sessions.py": "f024cdb6bf947d9f73e24de49379333b45d78134337c0dc6dedbfa3ef8c8297d",
+    "apps/backend/version.py": "4d9aa5a5f423a4f64a266c802f7f4e4d2c39daa6b6cb0173a41d5d25bc6cd1a7",
+    "apps/desktop/backend/echospeak_backend.py": "571af981f7389fbfce67de19063136c4f3463732479702ddc22eb6f0df1ab6d6",
+    "apps/desktop/package-lock.json": "06aec6837eacfd0cc651f46c288a9c3a988fd1a822f4f27041dabfecb0dd94a2",
+    "apps/desktop/package.json": "010f689a2dbf9666e014ae729be400a63bc686f566472ea9c761edd587d19671",
+    "apps/desktop/src-tauri/Cargo.lock": "80f89341505f25d867514d57d1cb35c3861737e4a307745a5c7cf54eddaf94ef",
+    "apps/desktop/src-tauri/Cargo.toml": "017854cff73f99abb85cb36f0605b214bb495ecad63ac3136b05b0e0ce9caf22",
+    "apps/desktop/src-tauri/tauri.conf.json": "665d2c92376e41228e8ca14e2c83dcf786d60406ad02666005c50ecc4cd484d0",
+    "apps/desktop/tests/desktop-contracts.test.mjs": "d4669603132d1aa4ec7bc0667212d22f37510fd6391df01d27acf0fed1ffe9db",
+    "apps/web/package-lock.json": "e805388df91de9755900db1515fc5e9a42cb9421cb9884795f237a1cf1cde4a2",
+    "apps/web/package.json": "22831db559f5fc5abcd32f9db48e4d93352fd6606a202ba9e4364945c0689615",
+    "apps/web/src/app/environments.test.tsx": "cc390ba8b50ea25ce8683a070fcedc052562cece723a9fe4c46f7cc0af15db81",
+    "apps/web/src/code/CodeControl.tsx": "67586a41f1e87637bceb740379f181a7b2989685452e8944d253099b9d01c208",
+    "apps/web/src/code/CodeTree.tsx": "ee1429ec62d79377cf50abdad5cb944bc6a8ad700e1b0e7487a20fbc5c4d2a4e",
+    "apps/web/src/code/EchoCodeWorkspace.tsx": "8d8d90519091770c99d6d31ee1438635aa0549d63092a7d75e3f4fb824f1d757",
+    "apps/web/src/code/code.css": "ff8d88ed9e9aab75a1bb019a2fed661da016de482a46691d945289a030f554ae",
+    "apps/web/src/code/inbox.test.tsx": "b8fef486a014f87363b88a7425b417eef664a52db853c2d54d3ddba31ca0f296",
+    "apps/web/src/code/model.ts": "2170c0f1283a55e9217977a0d7109b26d230096d5daf604d8b4156667cee8864",
+    "apps/web/src/components/ProjectSidebar.tsx": "24e75006f49e6f0dbafeaa51eb3cfaaa022a2efc38b938fd5a50858064719804",
+    "apps/web/src/components/RuntimeMark.tsx": "b066c364108af42bd277030eb621ccc93001c0673847c30902bb75f8ff3e9dbf",
+    "apps/web/src/dashboard/ComposerToolbar.tsx": "f352c4c9e5f9f2488692bde97a1a02571e94a0be509bd45d56f9b02ae5953c30",
+    "apps/web/src/theme/workspace.css": "1488de418d3c7e21e1edc73230ca51dc0f704e69f24da0be8113aeec65833d6d",
+    "apps/web/src/workbench/Workbench.tsx": "27d01e26a15044d8dc0529887a79d2609e5471186870bc16ecffdc0276cf7f57",
+    "artifacts/media/code-inbox/inbox-dark.png": "5a572e0d17093a49dd00d3ceeba0a740b6c9c38baa93cbbaa6134a7bde52e6f5",
+    "artifacts/media/code-inbox/inbox-light.png": "a15cde99427fcaea71ce84706a40d32c42aeb220b9b934594e296512910b1389",
+    "artifacts/media/code-inbox/left-sidebar-workspace.png": "930f9e5e38788a101940e9eff4fe58f8a5be487e9182b4a6a9bfa965005f968b",
+    "artifacts/media/code-inbox/t3-sidebar-reference.png": "a3034be75488036785719af278141b5c30e0525893aed3128c6a94f9a22f0554",
+    "artifacts/releases/index.html": "ff42f90e8971a36c0e6765ecd70ac0af7aa54a073e03540411a183d87b7b6f60",
+    "artifacts/releases/v11.13.0.html": "9cbdf6850d9afe44694f39093e8fd2f850bd8450afbd1fe69f7f1be27493e534",
+    "artifacts/research/native-code.html": "388a73e100806bdfa5a4054f98de8ff74064fb82e5ea5c3dc05f88bc5ffc0833",
+    "docs/ARCHITECTURE.md": "da95296fb3be1650d331e7c93e70d68e66afaa510a737840708bb9e6f61d7036",
+    "docs/CODEX_HANDOFF.md": "96e14823789b4b6a5622848a4138a91fe6371b96982bca3a79084aa8aee86ec0",
+    "docs/releases/index.md": "117c2f66b6e6efc7315530233e5999ad9aefe1ae67fc30b3814c237676f728ca",
+    "docs/releases/v11.13.0-verification.json": "df3461c304bc4881773257ad0c444295d4add919b4d0f34f38de777a3b86f014",
+    "docs/releases/v11.13.0.md": "450fcd6429bdaab2e73fd38434bffea434f6123224b8be376317f774a71308bc",
+    "docs/research/echo-code-sources.json": "e684ec1d0f36f1403358a08075774aeb68d76481a5aed98bd7cb41ce300ee44a",
+    "docs/research/echo-code.md": "43356cd1c09a82a1ed32bd4b138388407c42e8d4267396ecebdb660d929e37f0",
+    "docs/research/native-code.md": "5b0678e6433bb71ae67e0a5d80e6e730e3f7935c5d00f94a78ccd5d2c8858251",
+    "docs/research/three-environments.md": "0b8d1ec4d713995e4b48f5fdac5cf88e8c33b598c666363f631b436433ac056d",
+    "scripts/check-code-control-bundle.py": "6a77702a04064ad5218fbdb81c331197f2c75f06a40d3d03e49eb073288e7ff8",
+    "scripts/check-code-inbox-ui.py": "3bd9cc6ffd5a3a73747c8c7867470f90381b099ec50801cb28f69fc3fb191b28"
+  },
+  "initial_inbox_pass": {
+    "checked_on_utc": "2026-10-29",
+    "backend": {
+      "status": "passed",
+      "total": 121,
+      "runs": [
+        {
+          "cwd": "apps/backend",
+          "command": ".venv/Scripts/python.exe -m pytest tests/test_code_inbox.py tests/test_environments.py tests/test_native_code.py tests/test_code_sessions.py tests/test_echo_code.py -q",
+          "passed": 75,
+          "seconds": 89.28
+        },
+        {
+          "cwd": "apps/backend",
+          "command": ".venv/Scripts/python.exe -m pytest tests/test_verified_engineering.py tests/test_ask_and_recover.py tests/test_workbench.py -q",
+          "passed": 46,
+          "seconds": 43.68
+        }
+      ],
+      "scope": "Real StateStore/ThreadManager and Git/worktree operations in disposable directories; scripted native models and owned local protocol peers. No real provider/account calls."
+    },
+    "web": {
+      "status": "passed",
+      "tests": 33,
+      "files": 6,
+      "command": "npm.cmd run test:run -- src/code src/app/environments.test.tsx src/workbench/store.test.ts src/lean/activity.test.tsx",
+      "cwd": "apps/web",
+      "typecheck": {
+        "command": "npm.cmd run typecheck",
+        "status": "passed"
+      },
+      "production_build": {
+        "command": "npm.cmd run build",
+        "status": "passed",
+        "note": "Vite retained the existing advisory about chunks larger than 500 kB."
+      }
+    },
+    "browser": {
+      "status": "passed",
+      "command": "apps/backend/.venv/Scripts/python.exe scripts/check-code-inbox-ui.py",
+      "fixture": "Actual CodeTree component with deterministic API responses; temporary Vite server; no Echo backend or model service.",
+      "checks": [
+        "five-state grouping",
+        "native failed-check evidence",
+        "external pending approval",
+        "filtering",
+        "snooze changes group while preserving verification",
+        "activity token sent with choice",
+        "stale choice rejected",
+        "error survives overview refresh",
+        "session opens through existing callback",
+        "dark/light fixture renders at 390px",
+        "no horizontal page overflow",
+        "no page exceptions",
+        "paired report at 1400/390px with scripts disabled and images loaded"
+      ],
+      "images": [
+        "artifacts/media/code-inbox/inbox-dark.png",
+        "artifacts/media/code-inbox/inbox-light.png"
+      ],
+      "report_renders": [
+        ".test-state/code-inbox-report-1400.png",
+        ".test-state/code-inbox-report-390.png",
+        ".test-state/code-inbox-comparison-1400.png",
+        ".test-state/code-inbox-comparison-390.png"
+      ],
+      "visual_inspection": "Component dark/light captures and report wide/narrow comparison were inspected. Narrow overflow in the older example timeline was corrected."
+    },
+    "sha256": {
+      "apps/backend/agent/code_inbox.py": "9ec17b48a9e240b8eee7f39d55223c356c53d6f25ae335e2904c9b21ef7f8017",
+      "apps/backend/agent/code_sessions.py": "226638655db7196eb940c2905fdc3ae7035022b82b6795cc050981bb1a2a80c1",
+      "apps/backend/agent/echo_code.py": "5ff1e73cdce5cd19e59374608d0caaf315182f59d39f6a99cdb874414049ac4e",
+      "apps/backend/agent/state.py": "f03f9b011fe40a91413a6c7e3bab7e256dda87cc242a4e3a45042a2d15d5bf1d",
+      "apps/backend/api/routes/echo_code.py": "e30c8cab64657fdea04fe7f696133e15e1462b490ad3ec4d68309ef77be329c7",
+      "apps/backend/tests/test_code_inbox.py": "387e19b78288e4209bfa8a00668b6c47e333ecf9b2a9325213bacdeaf807b19e",
+      "apps/backend/tests/test_code_sessions.py": "f024cdb6bf947d9f73e24de49379333b45d78134337c0dc6dedbfa3ef8c8297d",
+      "apps/web/src/code/CodeTree.tsx": "0d127e5bb1437fd4864595c4ba80e0530e9b99ead7bf6b786408534301720975",
+      "apps/web/src/code/model.ts": "0cbc699934563bee3dc291146379b9311385bcdaa9969637aa41eb4868149a2c",
+      "apps/web/src/code/code.css": "157f4afd609342c5f25f4ab1bd6698e1e94d77a086f0307f701e41a8aa274760",
+      "apps/web/src/code/inbox.test.tsx": "051b4f46284457ce05451d8686db9ebe898166e355acc095d6ad0dc4be96212a",
+      "scripts/check-code-inbox-ui.py": "b03333afd97ec9aa8702b2a06d449602b25a952b97d767bc32907c5c4cc88aca",
+      "artifacts/research/native-code.html": "ef74bf3aa5b913c5ee7c47b16f51df29678d259dee91c2e30296af2a4500f64d",
+      "artifacts/media/code-inbox/inbox-dark.png": "dac6110f52078bc89c05b8417b7f558040e6e11b687ac2440c6166929496119a",
+      "artifacts/media/code-inbox/inbox-light.png": "c56932b4cfb03d3b7c4ff648fe4ffb20a9558f6415d646a2c39f26484caad825",
+      "docs/ARCHITECTURE.md": "01a83e1fe35f65022199cea26dbd3184135e773a4c3d071f7675f6b9e5823a22",
+      "docs/CODEX_HANDOFF.md": "de469d4fcb5424bd90f4c27cf390d660f1898eb02476e29f5c8a23512f23e744",
+      "docs/research/native-code.md": "b8d77ce8d33c3716e9152c9c2d19b2f9ffa6850628e71216e248240343a7f3f1",
+      "docs/research/echo-code-sources.json": "0ed6938b810edf72ebb524ea13b9786a12f052f532e003de2b9a7a35c181263e",
+      "docs/research/echo-code.md": "8a3dc487838ccb0ec079936d4e9e03af9eb391d7a6f99fd685c6007c56513ebd",
+      "docs/research/three-environments.md": "9ad21ff7ba203b4245950f665b2c1a028bbdc2a8c3ebe513d1e27382cb401d8f"
+    }
+  },
+  "desktop": {
+    "status": "passed",
+    "tests": 16,
+    "cwd": "apps/desktop",
+    "command": "npm.cmd test",
+    "note": "First run found two stale dependency-version assertions. Updated to current unchanged Cargo.toml/Cargo.lock pins; all 16 then passed. This does not compile Rust, package or install an EXE."
+  },
+  "limitations": [
+    "No remote HTTP MCP, OAuth pairing, mobile or multi-host control",
+    "No full account-wide historical usage or guessed remaining quota",
+    "No bulk title regeneration or full PR/CI review workflow",
+    "No new native worktree isolation; native background admission refuses same-project parallel writers",
+    "Durable execution IDs stop recorded prompt replay, but background admission/queue watchers are not an independent restart-recovery service"
+  ],
+  "document_checks": {
+    "status": "passed",
+    "scope": "Local HTML links/media exist, fragment IDs unique/resolvable, no script/frame/remote embeds; Python AST parsing and no duplicate top-level/class definitions for recorded changed Python files."
+  },
+  "triage_cli": {
+    "status": "passed",
+    "cwd": "apps/backend",
+    "command": ".venv/Scripts/python.exe -m agent.code_diagnostics --output <new file in repository .test-state>",
+    "scope": "Created a new local report with resource observations and only the documented top-level fields. This CLI observes its own process, not a running app."
+  },
+  "version_preparation": {
+    "version": "11.13.0",
+    "version_files": [
+      "apps/web/package.json",
+      "apps/web/package-lock.json",
+      "apps/desktop/package.json",
+      "apps/desktop/package-lock.json",
+      "apps/desktop/src-tauri/tauri.conf.json",
+      "apps/backend/version.py",
+      "apps/desktop/src-tauri/Cargo.toml",
+      "apps/desktop/src-tauri/Cargo.lock"
+    ],
+    "version_sync": "passed; product entries only; dependency versions unchanged",
+    "backend": {
+      "passed": 57,
+      "seconds": 31.93,
+      "cwd": "apps/backend",
+      "command": ".venv/Scripts/python.exe -m pytest tests/test_release_integration.py tests/test_code_parallel.py tests/test_code_inbox.py tests/test_security_controls.py -q"
+    },
+    "web": {
+      "passed": 35,
+      "typecheck": "passed"
+    },
+    "desktop": {
+      "passed": 16
+    },
+    "browser": {
+      "version": "11.13.0",
+      "checks": [
+        "left sidebar placement",
+        "flat active rows",
+        "collapsed Working/Snoozed/Settled shelves",
+        "local provider image assets",
+        "search",
+        "visible Shift range selection",
+        "bulk timed snooze",
+        "stale action rejection",
+        "errors survive refresh",
+        "dark/light themes",
+        "Ctrl+S stash and restore",
+        "Ctrl+Enter background submit",
+        "image stash",
+        "MCP panel read-only create, hide token and revoke",
+        "390px without overflow",
+        "no page errors",
+        "research report, versioned release report and atlas wide/narrow with scripts disabled"
+      ],
+      "model_calls": 0,
+      "request_count": 29
+    },
+    "packaged_mcp": {
+      "version": "11.13.0",
+      "status": "passed",
+      "transport": "compiled backend --control-mcp; real SDK stdio initialize/list/call; owned loopback peer",
+      "tools": 8,
+      "calls": [
+        "projects",
+        "send"
+      ],
+      "denied_mutation": true,
+      "provider_calls": 0,
+      "scope": "Packaging/transport only. Source tests separately cover real grants and original harness dispatch."
+    },
+    "packaged_api": {
+      "version": "11.13.0",
+      "status": "passed",
+      "health": true,
+      "owner_auth": true,
+      "grant_read": true,
+      "readonly_denial": true,
+      "owner_key_not_client_grant": true,
+      "revoked_denial": true,
+      "model_prompts_sent": 0,
+      "scope": "Compiled backend API using disposable state; no desktop UI, provider login or model prompts."
+    },
+    "workflow": "Objective -> Research -> Environment -> Verification -> Adaptation -> Completion",
+    "release_notes": "docs/releases/v11.13.0.md",
+    "visual_report": "artifacts/releases/v11.13.0.html",
+    "installer_evidence": "docs/releases/v11.13.0-verification.json",
+    "source_pr_base": {
+      "branch": "claude/v11.12",
+      "pr": 113,
+      "sha": "416fd8de89db90355c4351e176d563c1d3a28db5"
+    },
+    "document_checks": "passed: local links/media, unique IDs, no remote embeds/scripts, wide/narrow browser checks and AST/duplicate-definition audit"
+  }
+}

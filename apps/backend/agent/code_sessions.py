@@ -25,6 +25,17 @@ from agent.code_runtimes import Acp, ClaudeCli, Codex
 RUNTIMES = {"codex", "claude_cli", "acp"}
 
 
+def _disconnected_row(row):
+    """Retain the last outcome when recovering transport state, without replaying work."""
+    if row["state"] in {"running", "preparing", "connecting"}:
+        row["last_turn_state"] = "interrupted"
+    elif row["state"] in {"completed", "failed", "interrupted"}:
+        row.setdefault("last_turn_state", row["state"])
+    if row["state"] != "rolled_back":
+        row["state"] = "stopped"
+    return row
+
+
 class Session:
     def __init__(self, manager, row):
         self.manager, self.row = manager, row
@@ -77,7 +88,7 @@ class Session:
             latest = json.loads((self.directory / "session.json").read_text(encoding="utf-8"))
             if any(latest[key] != self.row[key] for key in ("id", "project_id", "runtime_id", "worktree", "source_root", "git_marker")):
                 raise ValueError("Worktree session binding changed")
-            self.row = latest
+            self.row = _disconnected_row(latest) if not self.adapter and not self.task else latest
         except (OSError, ValueError, KeyError):
             handle.close()
             raise ValueError("Worktree session metadata changed or is unavailable") from None
@@ -106,13 +117,18 @@ class Session:
             self.events.pop(0)
 
     def public(self, cursor=0):
-        return {**{key: value for key, value in self.row.items() if key not in {"command", "git_marker", "creation_context", "creation_key"}},
+        return {**{key: value for key, value in self.row.items() if key not in {"command", "git_marker", "creation_context", "creation_key", "control_requests"}},
                 "account": self.account, "models": self.models, "turn_active": bool(self.task),
                 "events": [event for event in self.events if event["seq"] > cursor], "cursor": self.sequence,
                 "replay_gap": bool(self.events and cursor < self.events[0]["seq"] - 1),
                 "approvals": [{"id": key, "kind": row["kind"], "details": row["details"]} for key, row in self.approvals.items()],
                 "rollback_available": (self.directory / "checkpoint.json").is_file() and not self.task,
                 "connected": bool(self.adapter and self.adapter.rpc and not self.adapter.rpc.closed and self.row["state"] != "connecting")}
+
+    def inbox(self):
+        from agent.code_inbox import external_snapshot
+        return external_snapshot(self.row, active=bool(self.task),
+                                 waiting=any(not row["future"].done() for row in self.approvals.values()))
 
     async def approval(self, kind, details):
         if self.manager.suspended or privacy.mode() != "standard" or not self.task or len(self.approvals) >= 8:
@@ -223,7 +239,7 @@ class Sessions:
             try:
                 row = json.loads((directory / "session.json").read_text(encoding="utf-8"))
                 if row["id"] == directory.name and row["runtime_id"] in RUNTIMES:
-                    row["state"] = "stopped"  # never auto-reconnect/replay after restart
+                    row = _disconnected_row(row)  # never auto-reconnect/replay after restart
                     self.sessions[row["id"]] = Session(self, row)
             except (OSError, ValueError, KeyError):
                 continue
@@ -242,8 +258,30 @@ class Sessions:
         session.validate()
         return session
 
-    async def list(self, project_id):
-        return [session.public() for session in self.sessions.values() if session.row["project_id"] == project_id]
+    async def list(self, project_id, summary=False):
+        # Sidebar polling needs identity and activity, never the event replay or approval details.
+        if not summary:
+            return [session.public() for session in self.sessions.values() if session.row["project_id"] == project_id]
+        return [{**{key: session.row[key] for key in ("id", "project_id", "runtime_id", "state", "created_at")},
+                 "title": session.row.get("title", ""), "branch": session.row.get("branch", ""),
+                 "inbox": session.inbox()} for session in self.sessions.values() if session.row["project_id"] == project_id]
+
+    async def triage(self, session_id, action, activity, snooze_seconds=0, automatic=False):
+        from agent.code_inbox import triage_choice
+        session = self.get(session_id)
+        # Share the worktree's existing inter-process writer lease. No provider launches.
+        owned = bool(session.lease)
+        session.acquire()
+        try:
+            if automatic and session.inbox()["state"] != "ready_to_review":
+                raise ValueError("A newer owner choice or work state prevents automatic settlement")
+            session.row["code_inbox"] = triage_choice(session.inbox(), action, activity, snooze_seconds)
+            session.save()
+            return session.inbox()
+        finally:
+            if not owned:
+                session.lease.close()
+                session.lease = None
 
     async def create(self, project_id, runtime_id, key, acknowledge_dirty=False, command=None):
         self.admit()
@@ -334,10 +372,42 @@ class Sessions:
         if session.row["runtime_id"] == "codex" and not session.account.get("connected"):
             raise ValueError("Sign into Codex before sending a task")
         session.row["state"] = "preparing"
+        if not session.row.get("title"):
+            session.row["title"] = text.strip().splitlines()[0][:120]
+        session.row["inbox_revision"] = session.row.get("inbox_revision", 0) + 1
+        session.row["last_activity_at"] = time.time()
+        session.save()
         # Set the writer task BEFORE awaiting a checkpoint: simultaneous requests
         # cannot both start a turn in the same worktree.
         session.task = asyncio.create_task(self._turn(session, text, model, effort))
         return session.public()
+
+    async def control_prompt(self, session_id, text, request_id):
+        import hashlib
+        session = self.get(session_id)
+        if not 8 <= len(request_id) <= 128:
+            raise ValueError("Provide a stable request identity")
+        fingerprint = hashlib.sha256(text.encode()).hexdigest()
+        receipts = dict(session.row.get("control_requests", {}))
+        if request_id in receipts:
+            if receipts[request_id] != fingerprint:
+                raise ValueError("Request identity was already used for another task")
+            return {"id": session_id, "status": "already_accepted", "request_id": request_id}
+        if len(receipts) >= 1024:
+            raise ValueError("This session's control receipt budget is exhausted; start a new session")
+        self.admit()
+        if not text.strip() or len(text) > 60000:
+            raise ValueError("Enter a bounded coding task")
+        if session.row["runtime_id"] == "codex" and not session.account.get("connected"):
+            raise ValueError("Sign into Codex before sending")
+        if session.task or not session.adapter or session.adapter.rpc.closed:
+            raise ValueError("Connect an idle runtime before sending")
+        # Intent is durable before prompt dispatch. A lost reply never replays the task.
+        receipts[request_id] = fingerprint
+        session.row["control_requests"] = receipts
+        session.save()
+        await self.prompt(session_id, text)
+        return {"id": session_id, "status": "accepted", "request_id": request_id}
 
     async def _turn(self, session, text, model, effort=""):
         before = None
@@ -381,6 +451,8 @@ class Sessions:
                 except Exception:
                     (session.directory / "checkpoint.json").unlink(missing_ok=True)
                     session.emit("rollback/unavailable", {"reason": "Worktree changed beyond checkpoint limits"})
+            session.row["last_turn_state"] = session.row["state"]
+            session.row["last_activity_at"] = time.time()
             session.emit("turn/finished", {"state": session.row["state"]})
             session.save()
             session.task = None

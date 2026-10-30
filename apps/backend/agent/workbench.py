@@ -487,11 +487,17 @@ class Workbench:
                     row["limits"] = await session.adapter.rpc.request("account/rateLimits/read", {})
                 except RuntimeError:
                     row["unavailable"] = "This Codex connection did not report account limits"
-            else:
-                result = next((event for event in reversed(session.events) if event["kind"] == "sdk/event" and event["data"].get("kind") == "ResultMessage"), None)
-                row["usage"] = result["data"]["data"].get("usage", {}) if result else {}
+            if session.row.get("reported_usage"):
+                row["usage"] = session.row["reported_usage"].get("tokens", {})
+                row["observed_at"] = session.row["reported_usage"].get("observed_at")
+                row["scope"] = session.row["reported_usage"].get("scope", "Runtime-reported usage")
+                row["reported_cost_usd"] = session.row["reported_usage"].get("reported_cost_usd")
+            if "limits" not in row:
+                row["unavailable"] = "Account limits were not reported. Token use is not remaining subscription allowance."
             rows.append(row)
-        return {"runtimes": redact_payload(rows), "note": "Only runtime-reported data is shown. Missing limits are unavailable, never zero remaining."}
+        from agent.code_diagnostics import snapshot
+        return {"runtimes": redact_payload(rows), "diagnostics": snapshot(self.supervisor),
+                "note": "Only runtime-reported data is shown. Turn/thread token counts are not account-wide totals or a subscription bill. Missing limits/costs are unavailable, never zero."}
 
     async def activity(self, context):
         self.validate(context, execute=False)

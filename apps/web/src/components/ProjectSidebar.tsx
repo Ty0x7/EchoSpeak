@@ -648,7 +648,7 @@ export function ProjectSidebar(props: SidebarProps) {
         <div className="es-side-body">
           <div className="es-side-top">
             <div className="es-side-search-row">
-            {props.onSearchChats ? (
+            {props.onSearchChats && environment !== "code" ? (
               <label className="es-chat-search">
                 <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                   <circle cx="11" cy="11" r="7" />
@@ -673,7 +673,7 @@ export function ProjectSidebar(props: SidebarProps) {
             {switcher}
             {props.onPage ? (
               <nav className="es-nav" aria-label="Pages">
-                <button
+                {!(environment === "code" && props.codeTree) ? <button
                   type="button"
                   className="es-nav-item es-nav-new"
                   onClick={() => {
@@ -687,7 +687,7 @@ export function ProjectSidebar(props: SidebarProps) {
                 >
                   <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
                   <span>{NEW_LABEL[environment]}</span>
-                </button>
+                </button> : null}
                 {shownNav.map((item) => {
                   const active = props.page === item.id;
                   const count = props.pageCounts?.[item.id];

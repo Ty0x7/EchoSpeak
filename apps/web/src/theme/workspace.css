@@ -162,6 +162,7 @@
 .runtime-mark { display:inline-block; width:17px; height:17px; flex:0 0 17px; object-fit:contain; vertical-align:middle; }
 .runtime-mark-echo { border-radius:4px; }
 [data-es-theme=light] .runtime-mark-codex { filter:invert(1); }
+[data-es-theme=light] .lm-model-mark[data-provider=openai] img { filter:invert(1); }
 .es-runtime-option>.runtime-mark { margin-top:3px; }
 .es-provider-rail button { display:grid; place-items:center; }
 .es-provider-rail .runtime-mark { width:20px; height:20px; }

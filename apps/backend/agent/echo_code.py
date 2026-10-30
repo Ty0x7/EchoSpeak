@@ -154,6 +154,14 @@ def create_session(project_id: str, *, runtime_id: str, idempotency_key: str) ->
         return {**thread.to_dict(), "project_id": item.id}
 
 
+def _waiting_sessions() -> set[str]:
+    """The same live and recovered decision owners used by /lean/approvals."""
+    from agent.state import get_state_store
+    from agent.lean.approvals import get_approval_broker
+    return ({row["session_id"] for row in get_approval_broker().pending_for()}
+            | {row["session_id"] for row in get_state_store().coordination.view("approvals") if row["status"] == "pending"})
+
+
 def overview() -> dict:
     """Echo Code's sidebar: each usable project with its native coding sessions, and the rest.
 
@@ -167,13 +175,15 @@ def overview() -> dict:
     projects = [item for item in get_project_manager().list_projects() if not item.archived and item.workspace_root]
     known = {item.id for item in projects}
     states = {row.thread_id: row for row in get_state_store().list_thread_states()}
+    waiting = _waiting_sessions()
     grouped: dict[str, list[dict]] = {item.id: [] for item in projects}
     unorganized: list[dict] = []
     for thread in get_thread_manager().list_threads(limit=2000):
         if thread.surface != "code":
             continue
         project_id = str(getattr(states.get(thread.thread_id), "active_project_id", "") or "")
-        row = {**thread.to_dict(), "project_id": project_id if project_id in known else ""}
+        row = {**thread.to_dict(), "project_id": project_id if project_id in known else "",
+               "inbox": get_state_store().code_inbox_snapshot(thread.thread_id, waiting=thread.thread_id in waiting)}
         (grouped[project_id] if project_id in known else unorganized).append(row)
     return {
         "schema_version": 1,
@@ -181,6 +191,20 @@ def overview() -> dict:
                       "trust_state": item.trust_state, "sessions": grouped[item.id][:100]} for item in projects],
         "unorganized": unorganized[:100],
     }
+
+
+def triage_session(thread_id: str, action: str, activity: str, snooze_seconds: int = 0, automatic: bool = False) -> dict:
+    from agent.state import get_state_store
+    from agent.threads import get_thread_manager
+    from agent.lean.approvals import get_approval_broker
+    thread = get_thread_manager().get_thread(thread_id)
+    if not thread or thread.surface != "code":
+        raise KeyError("Coding session unavailable")
+    try:
+        return get_state_store().update_code_inbox(thread_id, action, activity,
+                    waiting=bool(get_approval_broker().pending_for(thread_id)), snooze_seconds=snooze_seconds, automatic=automatic)
+    except ValueError as exc:
+        raise RuntimeUnavailable(str(exc)) from exc
 
 
 def move_session(thread_id: str, project_id: str) -> dict:

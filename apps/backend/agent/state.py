@@ -467,6 +467,8 @@ class ThreadSessionState(BaseModel):
     # Set by Stop, cleared by the owner's next message or "Run next": queued follow-ups
     # never start by themselves after a Stop, even after a reconnect or restart.
     queue_paused: bool = False
+    # Owner inbox choice, tied to the exact Code activity it acknowledged.
+    code_inbox: dict[str, str] = Field(default_factory=dict)
     pending_approval_id: str = ""
     last_execution_id: str = ""
     last_trace_id: str = ""
@@ -1882,6 +1884,29 @@ class StateStore:
             if changed:
                 self._persist_thread_state()
         return changed
+
+    def code_inbox_snapshot(self, thread_id: str, *, waiting: Optional[bool] = None) -> dict[str, Any]:
+        """Read Code status without creating state or loading a transcript."""
+        from agent.code_inbox import native_snapshot
+        with self._lock:
+            if waiting is None:
+                waiting = any(row["session_id"] == thread_id and row["status"] == "pending"
+                              for row in self.coordination.view("approvals"))
+            state = self._thread_state.get(thread_id)
+            execution_id = (state.active_turn_id or state.current_execution_id or state.last_execution_id) if state else ""
+            approval = self._approvals.get(state.pending_approval_id) if state else None
+            waiting = waiting or bool(approval and approval.status == "pending")
+            return native_snapshot(state, self._executions.get(execution_id), waiting=waiting)
+
+    def update_code_inbox(self, thread_id: str, action: str, activity: str, *, waiting: bool = False, snooze_seconds: int = 0, automatic: bool = False) -> dict[str, Any]:
+        from agent.code_inbox import triage_choice
+        with self._lock:
+            snapshot = self.code_inbox_snapshot(thread_id, waiting=True if waiting else None)
+            if automatic and snapshot["state"] != "ready_to_review":
+                raise ValueError("A newer owner choice or work state prevents automatic settlement")
+            choice = triage_choice(snapshot, action, activity, snooze_seconds)
+            self.update_thread_state(thread_id, code_inbox=choice)
+            return self.code_inbox_snapshot(thread_id, waiting=True if waiting else None)
 
     def list_thread_states(self) -> list[ThreadSessionState]:
         """Return Session state snapshots for UI projections and maintenance."""
