@@ -254,3 +254,15 @@ The folder candidate build exited 0. EXE SHA-256: `0d3bc6cb35db910718595ab364d6f
 The research baseline found one stale Code/API-policy test (47 passed); no test
 was changed in the research phase. Exact results and remaining acceptance are
 in the current versioned notes. Architecture work is documentation/research only.
+
+## Harness architecture research / 30 October
+
+The owner requested research and teaching before any further architecture coding.
+See [architecture review](research/echospeak-architecture.md) and its paired HTML
+and source/test evidence. Proposed direction: shared native mechanics with
+explicit Chat/Code/Agents controllers; separate vendor runtime bridges. This is
+a recommendation, not an implemented loop extraction or SDK migration. The
+read-only baseline is 47 passed / one obsolete Code/API-policy test failed.
+Agree on environment effects/completion contracts and a bounded model-evaluation
+plan before changing the loop. Preserve Agents and local/API support. No paid
+model benchmark or new SDK installation was performed in this research phase.
