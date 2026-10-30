@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { WorkspacePopover } from "../components/WorkspacePopover";
 import { RuntimeMark } from "../components/RuntimeMark";
 import { RuntimeUsage, type SubscriptionUsage } from "../code/RuntimeUsage";
+import { startUsageRefresh } from "../code/usageRefresh";
 import { runtimeName } from "../code/model";
 import { request } from "../projects/model";
 import { isDesktopRuntime, openDesktopExternalUrl } from "../desktop/bridge";
@@ -24,9 +25,14 @@ function useResource<T>(apiBase: string, resource: string, extra: Record<string,
   const [error, setError] = useState("");
   useEffect(() => {
     let live = true; setData(null); setError("");
-    if (context.project_id) request<T>(workbenchUrl(apiBase, context, resource, JSON.parse(key)))
-      .then(value => { if (live) setData(value); }).catch(err => { if (live) setError(err.message); });
-    return () => { live = false; };
+    const load = async () => {
+      const value = await request<T>(workbenchUrl(apiBase, context, resource, JSON.parse(key)));
+      if (live) { setData(value); setError(""); }
+    };
+    const failed = (err: unknown) => { if (live) setError(err instanceof Error ? err.message : "Refresh failed; last observation retained"); };
+    if (context.project_id) void load().catch(failed);
+    const stop = context.project_id && resource === "usage" ? startUsageRefresh(load, failed) : () => {};
+    return () => { live = false; stop(); };
   }, [apiBase, context.project_id, context.external_session_id, revision, resource, key]);
   return { data, error };
 }

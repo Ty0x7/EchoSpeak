@@ -43,6 +43,63 @@ def test_git_discovery_errors_are_actionable(monkeypatch, tmp_path):
     monkeypatch.setattr(wt.subprocess, 'run', timeout)
     with pytest.raises(ValueError, match='timed out'): wt.preflight(tmp_path)
 
+def test_git_failure_retains_the_actual_bounded_diagnostic(tmp_path):
+    wt.git(tmp_path, 'init')
+    with pytest.raises(ValueError) as error:
+        wt.git(tmp_path, 'worktree', 'invalid-operation')
+    message = str(error.value)
+    assert 'Git worktree failed (exit' in message
+    assert 'usage:' in message.lower() or 'unknown subcommand' in message.lower()
+    assert len(message) < 1300
+
+def test_worktree_add_failure_exposes_git_reason_without_changing_the_source(tmp_path):
+    root = tmp_path / 'source'; root.mkdir()
+    wt.git(root, 'init')
+    (root / 'owner.txt').write_text('owner content')
+    wt.git(root, 'add', 'owner.txt')
+    wt.git(root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-m', 'fixture')
+    # A deliberately obstructed admin path produces a real Git worktree exit 128.
+    (root / '.git' / 'worktrees').write_text('fixture obstruction')
+    with pytest.raises(ValueError) as error:
+        wt.create(root, tmp_path / 'session', acknowledge_dirty=True)
+    message = str(error.value)
+    assert 'Git worktree failed (exit 128)' in message and 'fatal:' in message
+    assert (root / 'owner.txt').read_text() == 'owner content'
+
+def test_connected_codex_usage_refresh_is_throttled_and_retains_last_observation(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+    from agent import code_runtimes
+    clock = [0.0]
+    monkeypatch.setattr(code_runtimes.time, 'monotonic', lambda: clock[0])
+    class Rpc:
+        closed = False
+        calls = 0
+        fail = False
+        async def request(self, method, params, timeout):
+            assert method == 'account/rateLimits/read' and timeout == 3
+            self.calls += 1
+            if self.fail: raise RuntimeError('Unavailable')
+            return {'rateLimits': {'primary': {'usedPercent': self.calls}}}
+    session = SimpleNamespace(row={}, save=lambda: None)
+    adapter = code_runtimes.Codex(session); adapter.rpc = Rpc()
+    async def scenario():
+        await adapter.refresh_usage(); await adapter.refresh_usage()
+        assert adapter.rpc.calls == 1
+        clock[0] = 299; await adapter.refresh_usage()
+        assert adapter.rpc.calls == 1
+        clock[0] = 300; await adapter.refresh_usage()
+        assert adapter.rpc.calls == 2
+        last = session.row['subscription_usage']
+        adapter.rpc.fail = True; clock[0] = 600
+        await adapter.refresh_usage(); await adapter.refresh_usage()
+        assert session.row['subscription_usage']['observed_at'] == last['observed_at'] and adapter.rpc.calls == 3
+        assert session.row['subscription_usage']['windows'] == last['windows']
+        assert session.row['subscription_usage']['refresh_error']
+        adapter.rpc.closed = True; clock[0] = 900; await adapter.refresh_usage()
+        assert adapter.rpc.calls == 3
+    asyncio.run(scenario())
+
 def test_usage_view_reads_cached_account_limits_without_launching_a_runtime(monkeypatch, tmp_path):
     import asyncio
     from types import SimpleNamespace

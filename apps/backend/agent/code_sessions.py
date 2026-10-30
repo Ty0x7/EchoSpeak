@@ -479,6 +479,8 @@ class Sessions:
             await session.stop("Privacy mode changed")
         if session.adapter and session.adapter.rpc.closed and session.row["state"] == "ready":
             await session.stop("Runtime exited")
+        if session.row['runtime_id'] == 'codex' and session.adapter:
+            await session.adapter.refresh_usage()
         return session.public(cursor)
 
     async def inspect(self, session_id):

@@ -477,7 +477,6 @@ class Workbench:
 
     async def usage(self, context):
         from agent.code_accounts import remembered
-        from agent.code_limits import codex
         # Passive cached account observations are useful before opening a session.
         # Do not launch a CLI or refresh credentials when opening this view.
         accounts = {}
@@ -493,18 +492,13 @@ class Workbench:
             row = {"runtime": session.row["runtime_id"], "session_id": session.row["id"], "state": session.row["state"]}
             if session.row["runtime_id"] == "codex" and session.adapter and session.adapter.rpc and not session.adapter.rpc.closed:
                 self.supervisor.admit()
-                try:
-                    row["limits"] = await session.adapter.rpc.request("account/rateLimits/read", {})
-                except (RuntimeError, TimeoutError):
-                    row["unavailable"] = "This Codex connection did not report account limits"
+                await session.adapter.refresh_usage()
             if session.row.get("reported_usage"):
                 row["usage"] = session.row["reported_usage"].get("tokens", {})
                 row["observed_at"] = session.row["reported_usage"].get("observed_at")
                 row["scope"] = session.row["reported_usage"].get("scope", "Runtime-reported usage")
                 row["reported_cost_usd"] = session.row["reported_usage"].get("reported_cost_usd")
-            if "limits" not in row:
-                row["unavailable"] = "Account limits were not reported. Token use is not remaining subscription allowance."
-            row['subscription_usage'] = codex(row['limits']) if 'limits' in row else session.row.get('subscription_usage', {})
+            row['subscription_usage'] = session.row.get('subscription_usage', {})
             usage = row['subscription_usage']
             previous = accounts.get(row['runtime'], {}).get('subscription_usage', {})
             if usage and usage.get('observed_at', 0) >= previous.get('observed_at', 0):

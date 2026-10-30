@@ -20,7 +20,7 @@ def _call(function, *args, **kwargs):
     except PermissionError as exc:
         raise HTTPException(403, str(exc)) from exc
     except (ValueError, OSError, RuntimeError, TimeoutError) as exc:
-        raise HTTPException(400, str(exc)[:300]) from exc
+        raise HTTPException(400, str(exc)[:1500]) from exc
 
 
 @router.get("/runtimes")

@@ -93,7 +93,8 @@ def git(root: Path, *args: str, limit=2 * 1024 * 1024, input_data: bytes | None 
             raise ValueError("Git operation timed out. Check repository access and retry.")
         if code:
             errors.seek(0)
-            detail = errors.read(8192).decode('utf-8', 'replace').lower()
+            raw_detail = errors.read(8192).decode('utf-8', 'replace')
+            detail = raw_detail.lower()
             if 'dubious ownership' in detail:
                 raise ValueError('Git refused this repository because of its ownership. Inspect ownership in your terminal; Echo does not change safe.directory automatically.')
             if 'not a git repository' in detail:
@@ -102,7 +103,9 @@ def git(root: Path, *args: str, limit=2 * 1024 * 1024, input_data: bytes | None 
                 raise ValueError('This repository has no usable committed HEAD. Make an initial commit in your terminal, then retry. Existing files are not committed automatically.')
             if 'permission denied' in detail or 'cannot lock' in detail:
                 raise ValueError('Git could not access or lock this repository. Check folder permissions and close other Git operations before retrying.')
-            raise ValueError(f'Git {args[0] if args else "inspection"} failed (exit {code}). Check repository access, free disk space and Git status in your terminal.')
+            from agent.lean.policy import redact_secrets
+            reason = redact_secrets(raw_detail).strip().replace(str(Path.home()), '~')[:1200]
+            raise ValueError(f'Git {args[0] if args else "inspection"} failed (exit {code}): {reason or "Git returned no diagnostic."}')
         if writer:
             writer.join(timeout=2)
         return output

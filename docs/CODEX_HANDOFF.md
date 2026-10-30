@@ -217,6 +217,22 @@ The implementation preserves Code and provider behavior. Current versioned notes
 [11.13.1](releases/v11.13.1.md), with actual component screenshots and exact
 build/install commands. Do not use the older 11.13.0 installer for this refinement.
 
-Current installer: `release/v11.13.1/EchoSpeak_11.13.1_x64-setup.exe`. Full build
+Original sidebar installer: `release/v11.13.1/EchoSpeak_11.13.1_x64-setup.exe`. Full build
 exited 0 and both installer metadata checks report 11.13.1. API/MCP packaged
 checks passed. Unsigned local test builds; no installation, merge or release.
+
+## Current Codex follow-up
+
+The owner confirmed ChatHub. Usage refresh and Git diagnostics are implemented;
+see 11.13.1 notes. **The installed Git exit-128 cause is not established.**
+Do not report it fixed based on passing isolated provisioning. Compiled ChatHub
+creation, Codex subscription auth, model/allowance reads, Usage and stop passed
+with zero inference prompts. Retry the new installed candidate to obtain the
+actual reason if it fails. Preserve the owner draft, source edits and prior
+installers. A real-AppData probe was rejected; no workaround was attempted.
+
+Corrected runtime candidate: `release/v11.13.1/runtime-candidate/EchoSpeak_11.13.1_x64-setup.exe`.
+Sidecar and Tauri builds exited 0; EXE/MSI report 11.13.1, unsigned. Reinstall
+manually because the version is unchanged. EXE SHA-256: `c280376999ceb555e740742651975b36c0b507c64f1b12b54bd658f360848812`.
+The agent did not install it; the owner has been asked to retry creation and
+provide the new Git reason if it fails. See the runtime_followup evidence.

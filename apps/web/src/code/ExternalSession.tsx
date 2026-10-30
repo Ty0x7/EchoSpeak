@@ -5,7 +5,7 @@ import { WorkspacePopover } from "../components/WorkspacePopover";
 import { agentModels, planLabel, runtimeName, type AgentAccount, type AgentModel } from "./model";
 import { useWorkbench } from "../workbench/store";
 import { isDesktopRuntime, openDesktopExternalUrl } from "../desktop/bridge";
-import { RuntimeUsage, type SubscriptionUsage } from "./RuntimeUsage";
+import { RuntimeUsage, latestUsage, type SubscriptionUsage } from "./RuntimeUsage";
 
 type Event = { seq: number; kind: string; data: Record<string, any> };
 type Session = {
@@ -55,10 +55,10 @@ export type ExternalSessionHandle = { send(): void };
 export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   apiBase: string; projectId: string; runtimeId: string; canStart: boolean; account: AgentAccount | null;
   draft: string; onDraft(value: string): void; model: string; effort?: string; onState(state: ExternalComposerState): void;
-  open: boolean; anchor: React.RefObject<HTMLButtonElement>; onClose(): void; onNeedSetup(): void; onAccountChanged(): void;
+  open: boolean; anchor: React.RefObject<HTMLButtonElement>; onClose(): void; onNeedSetup(): void; onAccountChanged(): void; onRefreshAccount?(): void;
   /** A session picked in Code's sidebar; otherwise the newest one. */
   initialSessionId?: string;
-}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, account, draft, onDraft, model, effort = "", onState, open, anchor, onClose, onNeedSetup, onAccountChanged, initialSessionId = "" }, ref) {
+}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, account, draft, onDraft, model, effort = "", onState, open, anchor, onClose, onNeedSetup, onAccountChanged, onRefreshAccount, initialSessionId = "" }, ref) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState("");
   const [session, setSession] = useState<Session | null>(null);
@@ -170,7 +170,8 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
       onChange={event => setSelected(event.target.value)}><option value="">New isolated session</option>{sessions.map(row =>
       <option key={row.id} value={row.id}>{new Date(row.created_at * 1000).toLocaleString()} · {row.id.slice(0, 7)}</option>)}</select></header>
     {error ? <p role="alert" className="ec-notice">{error}</p> : null}
-    {runtimeId !== "acp" ? <RuntimeUsage usage={session?.subscription_usage || account?.subscription_usage}/> : null}
+    {runtimeId !== "acp" ? <RuntimeUsage usage={latestUsage(session?.subscription_usage, account?.subscription_usage)}/> : null}
+    {runtimeId === "codex" && onRefreshAccount ? <p className="ec-account-line"><small>Limits refresh automatically every 5 minutes and when Codex reports a change.</small><button className="es-btn es-btn-sm" disabled={busy} onClick={onRefreshAccount}>Refresh limits</button></p> : null}
     {runtimeId !== "acp" ? <p className="ec-account-line">{signedIn ? `Signed in${planLabel(account) ? ` · ${planLabel(account)}` : ""} · ${name} uses its own authentication and permissions.`
       : `${name} isn't signed in. Sign in with ${name}'s own login, then send your task.`}
       {!signedIn ? <button className="es-btn es-btn-sm" disabled={busy} onClick={() => void action(async () => {

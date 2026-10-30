@@ -1,12 +1,12 @@
 """Actual left sidebar, model assets and Code composer: deterministic browser verification."""
 from pathlib import Path
-import json, shutil, socket, subprocess, time, urllib.request, uuid
+import json, os, shutil, socket, subprocess, time, urllib.request, uuid
 from urllib.parse import parse_qs, urlsplit
 from playwright.sync_api import sync_playwright, expect
 
 ROOT=Path(__file__).resolve().parents[1]
 WEB=ROOT/"apps/web"
-MEDIA=ROOT/"artifacts/media/sidebar-11.13.1"
+MEDIA=ROOT/os.environ.get("ECHOSPEAK_UI_MEDIA", "artifacts/media/sidebar-11.13.1")
 
 def fixture():
     def inbox(state, check="Not checked", triage=True):
@@ -107,7 +107,9 @@ def main():
                 elif path=="/echo-code/inbox/sync":route.fulfill(json={"settled":[]})
                 elif path=="/echo-code/runtimes":route.fulfill(json={"schema_version":1,"privacy_mode":"standard","runtimes":[runtime("echo","Echo native"),runtime("codex","Codex"),runtime("claude_cli","Claude Code")]})
                 elif path.endswith("/account") or path.endswith("/check"):
-                    route.fulfill(json={"signed_in":True,"method":"claude.ai","plan":"fixture","models":[{"model":"claude-opus-5-5","displayName":"Opus 5.5","isDefault":True,"efforts":["low","high"]}],"subscription_usage":{"windows":[{"label":"Fixture plan window","used_percent":25}]}})
+                    is_codex = "/codex/" in path
+                    model = {"model":"fixture-codex-1","displayName":"Fixture Codex","isDefault":True,"efforts":["low","high"]} if is_codex else {"model":"claude-opus-5-5","displayName":"Opus 5.5","isDefault":True,"efforts":["low","high"]}
+                    route.fulfill(json={"signed_in":True,"method":"chatgpt" if is_codex else "claude.ai","plan":"fixture","models":[model],"subscription_usage":{"observed_at":time.time(),"source":"Scripted account fixture","windows":[{"label":"Fixture plan window","used_percent":25}]}})
                 elif path.endswith("/external-sessions"):route.fulfill(json=[])
                 elif path=="/echo-code/projects/p":route.fulfill(json={"schema_version":1,"project":data["projects"][0],"git_summary":"codex/fixture","sessions":[],"can_start_native":True,"native_blocker":""})
                 elif path=="/provider/models":
@@ -168,6 +170,18 @@ def main():
             page.locator(".es-model-popover").screenshot(path=str(MEDIA/"runtime-model-picker.png"))
             page.get_by_role("button",name="Opus 5.5 claude-opus-5-5",exact=False).first.click()
             expect(page.get_by_role("button",name="Agent runtime",exact=True)).to_contain_text("Opus 5.5")
+            page.get_by_role("button",name="Agent runtime",exact=True).click()
+            page.get_by_role("button",name="Codex models",exact=True).click()
+            page.get_by_role("button",name="Fixture Codex fixture-codex-1",exact=False).first.click()
+            page.get_by_role("button",name="Coding agent connection",exact=True).click()
+            expect(page.get_by_text("Limits refresh automatically every 5 minutes and when Codex reports a change.",exact=True)).to_be_visible()
+            checks_before = sum(r["path"] == "/echo-code/runtimes/codex/check" for r in requests)
+            page.get_by_role("button",name="Refresh limits",exact=True).click()
+            page.wait_for_function("() => document.querySelector('.ec-external .ec-plan-usage')?.textContent.includes('25% used')")
+            page.wait_for_timeout(300)
+            assert sum(r["path"] == "/echo-code/runtimes/codex/check" for r in requests) == checks_before + 1
+            page.locator(".ec-connection-popover").screenshot(path=str(MEDIA/"codex-usage-refresh-fixture.png"))
+            page.keyboard.press("Escape")
             page.get_by_role("button",name="Agent runtime",exact=True).click()
             page.get_by_role("button",name="Echo native models",exact=True).click()
             page.get_by_role("button",name="fixture-local LM Studio · On this PC",exact=False).first.click()

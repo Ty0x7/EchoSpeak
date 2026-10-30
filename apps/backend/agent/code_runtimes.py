@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import time
 
 from agent.child_env import child_env
 from agent.code_process import RpcProcess
@@ -26,6 +27,24 @@ class Codex:
     def __init__(self, session):
         self.session = session
         self.rpc = None
+        self._usage_attempt = None
+
+    async def refresh_usage(self, force=False):
+        if not self.rpc or self.rpc.closed:
+            return
+        if not force and self._usage_attempt is not None and time.monotonic() - self._usage_attempt < 300:
+            return
+        self._usage_attempt = time.monotonic()
+        from agent.code_limits import codex
+        try:
+            usage = codex(await self.rpc.request('account/rateLimits/read', {}, timeout=3))
+        except (RuntimeError, TimeoutError):
+            self.session.row['subscription_usage'] = {**self.session.row.get('subscription_usage', {}),
+                'refresh_error': 'Refresh failed. Showing the last observation; retrying within 5 minutes.'}
+            self.session.save()
+            return  # Retain the last observation and its honest timestamp.
+        self.session.row['subscription_usage'] = usage
+        self.session.save()
 
     async def connect(self):
         from agent.code_executables import executable
@@ -38,6 +57,7 @@ class Codex:
         from agent.code_accounts import codex_models
         self.session.models = codex_models((await self.rpc.request("model/list", {})).get("data", []))
         from agent.code_limits import codex
+        self._usage_attempt = time.monotonic()
         try:
             self.session.row['subscription_usage'] = codex(await self.rpc.request('account/rateLimits/read', {}))
         except (RuntimeError, TimeoutError):
@@ -115,6 +135,7 @@ class Codex:
             self.session.account = {"connected": True, "type": "chatgpt"}
         if method == "account/rateLimits/updated":
             from agent.code_limits import codex
+            self._usage_attempt = time.monotonic()
             self.session.row['subscription_usage'] = codex(params)
             self.session.save()
         if method.startswith("account/"):

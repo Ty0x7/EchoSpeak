@@ -123,7 +123,8 @@ async def codex_status() -> dict:
         try:
             limits = codex(await rpc.request("account/rateLimits/read", {}))
         except (RuntimeError, TimeoutError):
-            limits = codex({})
+            limits = {**remembered('codex').get('subscription_usage', {}),
+                      'refresh_error': 'Codex did not refresh its limits. The last observation is retained.'}
     finally:
         await rpc.close()
     return _remember("codex", {**found, "signed_in": bool(account), "method": str(account.get("type") or ""),

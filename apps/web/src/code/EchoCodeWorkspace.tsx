@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { PageShell } from "../lean/Pages";
 import { WorkspacePopover } from "../components/WorkspacePopover";
 import { RuntimeMark } from "../components/RuntimeMark";
-import { RuntimeUsage } from "./RuntimeUsage";
+import { RuntimeUsage, latestUsage } from "./RuntimeUsage";
+import { startUsageRefresh } from "./usageRefresh";
 import { ExternalSession, type ExternalComposerState, type ExternalSessionHandle } from "./ExternalSession";
 import { CodeModelPicker, type NativeModel } from "./CodeModelPicker";
 import { CodeEffortPicker } from "./CodeEffortPicker";
@@ -83,17 +84,20 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
   }, [runtimeId, projectId, onSessionsChanged]);
   useEffect(() => { setExternalState(null); setModel(""); setConnectionOpen(false); }, [runtimeId, projectId]);
   // Each coding agent's own sign-in and plan models, independent of any session: what Echo last
-  // saw (instant, survives restarts), then a fresh check when that's older than ten minutes.
+  // saw (instant, survives restarts). Codex refreshes on entry and every five minutes.
   useEffect(() => {
     if (runtimeId !== "codex" && runtimeId !== "claude_cli") return;
     let live = true;
     const url = `${apiBase}/echo-code/runtimes/${runtimeId}`;
+    let pending: Promise<void> | undefined;
+    const check = () => pending ||= request<AgentAccount>(`${url}/check`, {}).then(fresh => { if (live) setAccounts(previous => ({ ...previous, [runtimeId]: fresh })); }).finally(() => { pending = undefined; });
     request<AgentAccount>(`${url}/account`).then(remembered => {
       if (!live) return;
       setAccounts(previous => ({ ...previous, [runtimeId]: remembered }));
-      if (remembered.stale || accountRevision) return request<AgentAccount>(`${url}/check`, {}).then(fresh => { if (live) setAccounts(previous => ({ ...previous, [runtimeId]: fresh })); });
+      if (runtimeId === "codex" || remembered.stale || accountRevision) return check();
     }).catch(err => { if (live) setError(`Could not check ${runtimeName(runtimeId)}: ${err instanceof Error ? err.message : "runtime unavailable"}`); });
-    return () => { live = false; };
+    const stop = runtimeId === "codex" ? startUsageRefresh(check, err => { if (live) setError(`Usage refresh failed: ${err instanceof Error ? err.message : "runtime unavailable"}. The last observation is retained.`); }) : () => {};
+    return () => { live = false; stop(); };
   }, [apiBase, runtimeId, accountRevision]);
   const recheckAccount = useCallback(() => { window.setTimeout(() => setAccountRevision(value => value + 1), 15000); }, []);
   // Keep a creation identity after a lost response, scoped to the exact request.
@@ -154,8 +158,8 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
   const projectName = available.find(project => project.id === projectId)?.name;
   const working = busy || Boolean(externalState?.busy || externalState?.active);
   const rememberedAccount = accounts[runtimeId] || null;
-  const account = useMemo(() => rememberedAccount && externalState?.subscriptionUsage
-    ? { ...rememberedAccount, subscription_usage: externalState.subscriptionUsage } : rememberedAccount,
+  const account = useMemo(() => rememberedAccount
+    ? { ...rememberedAccount, subscription_usage: latestUsage(rememberedAccount.subscription_usage, externalState?.subscriptionUsage) } : rememberedAccount,
     [rememberedAccount, externalState?.subscriptionUsage]);
   const agentList = externalState?.models.length ? externalState.models : agentModels(account?.models);
   const modelName = runtimeId === "echo" ? nativeChoice?.model || nativeInfo?.model || "Choose a connected model"
@@ -238,7 +242,7 @@ export function EchoCodeWorkspace({ apiBase, projects, projectId, onProject, onA
         initialSessionId={openRequest?.runtimeId === runtimeId ? openRequest.sessionId : ""}
         canStart={Boolean(workspace?.can_start_native && !workspace?.external_blocker && selected?.can_start)} account={account} draft={draft} onDraft={setDraft} model={model} effort={agentEffort} onState={externalStatus}
         open={connectionOpen} anchor={connectionButton} onClose={() => setConnectionOpen(false)}
-        onNeedSetup={() => setConnectionOpen(true)} onAccountChanged={recheckAccount} /> : null}
+        onNeedSetup={() => setConnectionOpen(true)} onAccountChanged={recheckAccount} onRefreshAccount={() => setAccountRevision(value => value + 1)} /> : null}
     </div>
   </PageShell></div>;
 }

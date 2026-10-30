@@ -498,3 +498,38 @@ The approved Code inbox is retained. Search replaces the sidebar identity header
 Chat and Agents use vertical page lists, and four icon utilities share the footer.
 See [11.13.1 notes](../releases/v11.13.1.md) and the paired visual report for current
 captures and installer commands. Earlier 11.13.0 screenshots remain historical.
+
+## 15. ChatHub Git failure and usage refresh follow-up
+
+The owner identified ChatHub. The previous installed window still failed in Git
+worktree creation with exit 128; **its cause remains unresolved**. Source and
+rebuilt compiled provisioning pass for that same repository. A valid committed
+HEAD is confirmed; creating a commit automatically is not an appropriate fix.
+
+The existing infrastructure now handles freshness at three boundaries:
+
+- Code account checks run on entry and every five minutes while Codex is selected.
+  Focus checks are throttled and refresh requests coalesce.
+- Connected-session polling and the open consolidated Usage view share the
+  adapter's five-minute read fallback. Official limit-change notifications still
+  update immediately; failed reads keep their last timestamp and show an error.
+- UI merging selects the newest observation instead of always preferring the
+  selected session. Refresh limits explicitly rechecks the account. Disconnected
+  consolidated observations remain cached until an account check.
+
+[Official Codex documentation](https://learn.chatgpt.com/docs/app-server) provides
+`account/rateLimits/read` and `account/rateLimits/updated`, without prescribing a
+polling interval. Five minutes is Echo's requested fallback policy.
+
+The bounded Git helper now retains redacted stderr; the owner API preserves
+enough diagnostic text. A disposable obstructed repository verified a real
+worktree exit 128 through the compiled API. It is not a reproduction of the
+owner's underlying cause. No speculative DLL-search or authentication changes
+were added.
+
+Compiled ChatHub isolation, existing Codex subscription auth, model discovery,
+numeric limits, consolidated usage and stop passed with disposable state and
+zero inference prompts. 57 backend tests, 38 web tests, TypeScript, 16 desktop
+contracts and actual-component browser checks passed. See [11.13.1 notes](../releases/v11.13.1.md)
+for the current installer, labeled fixture capture and remaining installed retry.
+Earlier installed failure and new compiled success remain separate evidence.
