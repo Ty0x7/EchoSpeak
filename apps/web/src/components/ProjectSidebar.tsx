@@ -13,6 +13,7 @@ import {
 } from "./sidebarSections";
 import { SplitHandle, type SplitGeometry } from "./SplitHandle";
 import { useDesktopUpdate } from "../dashboard/useDesktopUpdate";
+import "./sidebar.css";
 import { ENVIRONMENTS, ENVIRONMENT_PAGES, NEW_LABEL, type Environment } from "../app/environments";
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any> };
@@ -57,6 +58,8 @@ type SidebarProps = {
   workingSessionIds?: Set<string>;
   /** Code's projects and sessions, shown in place of the lists in Code. */
   codeTree?: React.ReactNode;
+  codeQuery?: string;
+  onCodeQuery?(query: string): void;
 };
 
 // Learning isn't a page: it runs on its own; its diagnostics are in Settings › Advanced.
@@ -274,7 +277,7 @@ export function ProjectSidebar(props: SidebarProps) {
   }, [props.collapsed]);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ChatSearchHit[] | null>(null);
-  const searching = query.trim().length >= 2;
+  const searching = props.environment !== "code" && query.trim().length >= 2;
   const onSearchChats = props.onSearchChats;
   useEffect(() => {
     if (!searching || !onSearchChats) {
@@ -295,7 +298,7 @@ export function ProjectSidebar(props: SidebarProps) {
   const iconOnly = props.collapsed;
   const environment: Environment = props.environment || "chat";
   // Each environment lists its own pages; the shell stays the same.
-  const shownNav = NAV_ITEMS.filter((item) => ENVIRONMENT_PAGES[environment].includes(item.id));
+  const shownNav = ENVIRONMENT_PAGES[environment].map(id => NAV_ITEMS.find(item => item.id === id)!);
   const sessions = props.sessions;
   const switcher = props.onEnvironment ? (
     <div className={`es-env-switch${iconOnly ? " is-rail" : ""}`} role="tablist" aria-label="Environment" aria-orientation={iconOnly ? "vertical" : "horizontal"}>
@@ -385,7 +388,7 @@ export function ProjectSidebar(props: SidebarProps) {
         <span style={iconSlot(props.activeSessionId === session.id)}>
           <Icon name="session" size={iconOnly ? 16 : 15} active={props.activeSessionId === session.id} />
         </span>
-        {!iconOnly && <span style={titleEllipsis}>{session.name}</span>}
+        {!iconOnly && <span className="es-session-copy"><span className="es-session-title">{session.name}</span><small>{props.projects.find(p => p.id === session.projectId)?.name || (environment === "agents" ? "Agent conversation" : "Conversation")}<time>{new Date(session.at).toLocaleDateString(undefined, {month:"short",day:"numeric"})}</time></small></span>}
         {props.workingSessionIds?.has(session.id) ? <span className="echo-side-working" role="status" aria-label="Working">
           <span className="echo-side-working-dot" aria-hidden />{!iconOnly ? <span className="echo-side-working-text">Working</span> : null}</span> : null}
       </button>
@@ -508,7 +511,8 @@ export function ProjectSidebar(props: SidebarProps) {
 
   return (
     <aside
-      className="echo-sidebar"
+      className={`echo-sidebar es-sidebar-refined${iconOnly ? " is-collapsed" : ""}`}
+      data-environment={environment}
       aria-label="Project and Session sidebar"
       style={{
         minWidth: 0,
@@ -648,7 +652,7 @@ export function ProjectSidebar(props: SidebarProps) {
         <div className="es-side-body">
           <div className="es-side-top">
             <div className="es-side-search-row">
-            {props.onSearchChats ? (
+            {props.onSearchChats || environment === "code" ? (
               <label className="es-chat-search">
                 <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
                   <circle cx="11" cy="11" r="7" />
@@ -656,13 +660,13 @@ export function ProjectSidebar(props: SidebarProps) {
                 </svg>
                 <input
                   type="search"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  value={environment === "code" ? props.codeQuery || "" : query}
+                  onChange={(event) => environment === "code" ? props.onCodeQuery?.(event.target.value) : setQuery(event.target.value)}
                   onKeyDown={(event) => {
-                    if (event.key === "Escape") setQuery("");
+                    if (event.key === "Escape") { setQuery(""); props.onCodeQuery?.(""); }
                   }}
-                  placeholder={environment === "agents" ? "Search messages" : "Search chats"}
-                  aria-label={environment === "agents" ? "Search messages" : "Search chats"}
+                  placeholder="Search"
+                  aria-label={environment === "code" ? "Search coding sessions" : environment === "agents" ? "Search messages" : "Search chats"}
                 />
               </label>
             ) : null}
@@ -673,7 +677,7 @@ export function ProjectSidebar(props: SidebarProps) {
             {switcher}
             {props.onPage ? (
               <nav className="es-nav" aria-label="Pages">
-                <button
+                {!(environment === "code" && props.codeTree) ? <button
                   type="button"
                   className="es-nav-item es-nav-new"
                   onClick={() => {
@@ -687,7 +691,7 @@ export function ProjectSidebar(props: SidebarProps) {
                 >
                   <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
                   <span>{NEW_LABEL[environment]}</span>
-                </button>
+                </button> : null}
                 {shownNav.map((item) => {
                   const active = props.page === item.id;
                   const count = props.pageCounts?.[item.id];
@@ -816,14 +820,16 @@ export function ProjectSidebar(props: SidebarProps) {
             type="button"
             onClick={props.onSettings}
             aria-pressed={props.settingsOpen}
+            aria-label="Settings" title="Settings"
             style={{ width: "100%", minHeight: 36, borderRadius: 4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 9, padding: "0 11px", fontFamily: "'Inter', 'Segoe UI', sans-serif", fontSize: 11.5 }}
           >
-            <Icon name="studio" size={14} active={props.settingsOpen} /> Settings
+            <Icon name="studio" size={14} active={props.settingsOpen} />
           </button>
         </footer>
       ) : (
         <div className="echo-sidebar-edge-pad" style={{ display: "grid", gap: 4, flexShrink: 0, paddingTop: 5, borderTop: "1px solid rgba(var(--es-edge-rgb), calc(0.07 * var(--es-edge-k)))" }}>
           {updateNotice}
+          {props.footerExtra}
           <button className="echo-side-button" type="button" title="Settings" aria-label="Settings" aria-pressed={props.settingsOpen} onClick={props.onSettings} style={railButton(Boolean(props.settingsOpen))}>
             <span style={iconSlot(Boolean(props.settingsOpen))}><Icon name="studio" size={16} active={Boolean(props.settingsOpen)} /></span>
           </button>

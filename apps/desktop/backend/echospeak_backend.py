@@ -168,6 +168,14 @@ def _self_check() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if (argv if argv is not None else sys.argv[1:]) == ["--control-mcp"]:
+        # A stdio-only client bridge; it does not start or weaken the desktop API.
+        backend_root = Path(__file__).resolve().parents[2] / "backend"
+        if backend_root.exists() and str(backend_root) not in sys.path:
+            sys.path.insert(0, str(backend_root))
+        from agent.control_mcp import server
+        server().run(transport="stdio")
+        return 0
     if (argv if argv is not None else sys.argv[1:]) == ["--self-check"]:
         return _self_check()
     # Windows packaged logs often default to a legacy code page; force UTF-8

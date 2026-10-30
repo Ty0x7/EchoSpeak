@@ -1,0 +1,87 @@
+{
+  "version": "11.13.0",
+  "continuation": "Shared sidebar visual refinement",
+  "base_commit": "17f9b74c6a2671367cd929b53dd875ebca929d09",
+  "pull_request": "https://github.com/Ty0x7/EchoSpeak/pull/114",
+  "scope": "Chat, Agents and Code left sidebar; existing backend and state ownership preserved",
+  "web_tests": {
+    "passed": 33,
+    "files": 6,
+    "command": "npm.cmd run test:run -- src/code src/app/environments.test.tsx src/runtimeLayout.test.ts src/components/sidebarSections.test.ts"
+  },
+  "typecheck": "passed",
+  "desktop_contracts": {
+    "passed": 16,
+    "command": "npm.cmd test (apps/desktop)"
+  },
+  "production_web_build": "passed",
+  "rust_release_build": "passed",
+  "nsis_build": {
+    "exit_code": 0,
+    "command": "npm.cmd run tauri -- build --bundles nsis (apps/desktop)"
+  },
+  "browser": {
+    "version": "11.13.0",
+    "checks": [
+      "shared Chat/Agents/Code navigation, search and agent callback",
+      "left sidebar placement",
+      "flat active rows",
+      "collapsed Working/Snoozed/Settled shelves",
+      "local provider image assets",
+      "search",
+      "visible Shift range selection",
+      "bulk timed snooze",
+      "stale action rejection",
+      "errors survive refresh",
+      "dark/light themes",
+      "Ctrl+S stash and restore",
+      "Ctrl+Enter background submit",
+      "image stash",
+      "MCP panel read-only create, hide token and revoke",
+      "390px without overflow",
+      "no page errors",
+      "research report, versioned release report and atlas wide/narrow with scripts disabled"
+    ],
+    "model_calls": 0,
+    "request_count": 34
+  },
+  "additional_browser_checks": [
+    "288px expanded sidebar fits its grid",
+    "56px collapse/expand",
+    "keyboard filter toggle",
+    "Working shelf checkbox changes visible rows",
+    "actual Stop everything and workbench footer rendered",
+    "light-theme avatar contrast visually inspected"
+  ],
+  "artifact": {
+    "path": "release/v11.13.0/sidebar-refinement/EchoSpeak_11.13.0_x64-setup.exe",
+    "bytes": 174641472,
+    "sha256": "8421ad31d0ebef8609561118357074ee6fe2570a60f26a1d7ba40af30e3f0b3c",
+    "product_version": "11.13.0"
+  },
+  "signing": "Local test EXE; updater and Windows publisher signing not requested in this build",
+  "backend": "Reused unchanged previously validated staged backend; no backend implementation change",
+  "installed_acceptance": "Not performed; real account/provider and installed Windows acceptance remain owner checks",
+  "prior_artifacts": "Earlier EXE/MSI remain under release/v11.13.0/; their hashes in v11.13.0-verification.json describe the initial UI",
+  "build_attempt_note": "An intermediate installer compilation was stopped to incorporate the observed light-theme avatar contrast fix. The final NSIS build exited 0.",
+  "approval_review_note": "One final browser invocation was not executed when approval review hit a usage limit. After the owner asked to continue, the same reviewed invocation was approved and passed.",
+  "sha256": {
+    "apps/web/src/components/ProjectSidebar.tsx": "24b17c01be21a6dd4ddd8197ff55a3f3a702f744a93750854c85bc1f054a5d79",
+    "apps/web/src/components/sidebar.css": "bd358bf338c2d019a05cae5f85e201022c6d0208fd04c9afac57ccf5f1de7620",
+    "apps/web/src/components/SidebarIcon.tsx": "08a993a98101194c61b9dca443cf8e7cd86b1f77847c271827969205319c0e7f",
+    "apps/web/src/lean/Roster.tsx": "9fcf17e6b40aa2efb8e227a7deaa04afc45a9aec933b948c5bd6eee462d689d0",
+    "apps/web/src/code/CodeTree.tsx": "f32bb7e3c8df38efd6bc749e3c04802d357c53daf2733e7e52650614c816a73a",
+    "apps/web/src/runtimeLayout.ts": "26cae9a46dc4b9db304107e0d05288e1ef5851a9c0b465241ba18a5a6ed0a22c",
+    "apps/web/src/runtimeLayout.test.ts": "71bcf6676901f96e328291f1b9b4e7936d0b079676a0537fc6ff1e0c45688f40",
+    "scripts/check-code-inbox-ui.py": "8d876b33ab818008ac0aec7dfe0d250014324c1c0b2c1cb3db7a0788b30795fc",
+    "artifacts/media/code-inbox/inbox-dark.png": "1fd67ba19883457f268edfff9f20c081426788e39724e89802349740ff965b1b",
+    "artifacts/media/code-inbox/inbox-light.png": "ded814ed883c7e1183cffcfe7dfd6e74c9b9ff7fb41039aaa1d82c2bc3a3de95",
+    "artifacts/media/code-inbox/left-sidebar-workspace.png": "634cee96d9f241fa621e5de19ddf216423d7401614f6b47343f3c8a072ffb989",
+    "artifacts/media/code-inbox/sidebar-agents-dark.png": "5a618908875bb4e14f120946f71146242e6a58081ada115d46760bf22aea3d58",
+    "artifacts/media/code-inbox/sidebar-agents-light.png": "98a4aa3d1edc39f450b33b1d9343f82adb142e124d926cfeab721e028de54d6e",
+    "artifacts/media/code-inbox/sidebar-chat-dark.png": "24917c7897c41900745f133351870baaecd6fb71bf5a89352da5fe49e98bf7d9",
+    "artifacts/media/code-inbox/sidebar-chat-light.png": "d177e6c7e735a53db4d815a93c4ef7bcbe43fc74105d9070717a15be10998501",
+    "artifacts/media/code-inbox/sidebar-rail.png": "3112e7446d48073eb5ab18ef1ba335a645d6a68da93f3fd21f74f467fb87b839",
+    "artifacts/media/code-inbox/t3-sidebar-reference.png": "a3034be75488036785719af278141b5c30e0525893aed3128c6a94f9a22f0554"
+  }
+}

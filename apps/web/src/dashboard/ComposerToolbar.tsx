@@ -35,7 +35,7 @@ export function ComposerToolbar(p: ComposerToolbarProps) {
     <div className="composer-tools" role="group" aria-label="Chat controls">
       <button ref={modelButton} type="button" className="composer-tool composer-model-trigger" aria-label="Model and chat options" aria-haspopup="dialog" aria-expanded={open === "model"}
         title={modelName || "Choose a model"} disabled={p.switchingProvider} onClick={() => setOpen(open === "model" ? null : "model")}>
-        <RuntimeMark />
+        <RuntimeMark runtime={p.providerDraft.provider === "openai" ? "codex" : p.providerDraft.provider === "anthropic" ? "claude_cli" : "echo"} />
         <span>{modelName || "Choose model"}</span><Chevron />
       </button>
       <button ref={effortButton} type="button" className="composer-tool composer-effort-trigger" aria-label="Reasoning effort" aria-haspopup="dialog" aria-expanded={open === "effort"}

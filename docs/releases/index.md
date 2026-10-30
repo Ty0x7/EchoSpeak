@@ -1,9 +1,11 @@
 # EchoSpeak visual release atlas
 
-This collection presents every existing versioned note in `docs/releases/v*.md`
-as a complementary HTML report in `artifacts/releases/`. It currently covers
-38 documented updates from 10.0.0 through 11.10.6. Earlier release notes remain
-unchanged; the new 11.10.6 note records the tabbed workbench, Windows terminal, reviewed Git actions and separate build/test/publish steps.
+This collection pairs versioned notes with complementary HTML in
+`artifacts/releases/`. It contains 40 visual reports from 10.0.0 through 11.13.1;
+intervening source-only notes do not all have a historical HTML counterpart.
+Earlier reports remain unchanged. The new [11.13.0](v11.13.0.md) pair records the
+left Code inbox, optional local MCP, actual component screenshots and separate
+source, packaging, PR and owner acceptance evidence.
 The atlas is a source-history presentation, not evidence of installer publication.
 
 Each page includes a curated visual narrative, a conceptual diagram, concise
@@ -119,4 +121,6 @@ external requests. File pairs, local media and links resolved. Original older
 version-note hashes remain unchanged. The current workspace report also opened
 with Technical notes through actual repository discovery in the isolated UI.
 
-Latest: [11.10.6 technical notes](v11.10.6.md) · [visual walkthrough](../../artifacts/releases/v11.10.6.html).
+Latest: [11.13.0 technical notes](v11.13.0.md) · [visual walkthrough](../../artifacts/releases/v11.13.0.html).
+
+[11.13.1](v11.13.1.md) records folder-first coding, optional Git worktrees, usage refresh and the final search-first sidebar.

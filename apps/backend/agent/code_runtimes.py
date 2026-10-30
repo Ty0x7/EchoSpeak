@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import time
 
 from agent.child_env import child_env
 from agent.code_process import RpcProcess
@@ -26,6 +27,24 @@ class Codex:
     def __init__(self, session):
         self.session = session
         self.rpc = None
+        self._usage_attempt = None
+
+    async def refresh_usage(self, force=False):
+        if not self.rpc or self.rpc.closed:
+            return
+        if not force and self._usage_attempt is not None and time.monotonic() - self._usage_attempt < 300:
+            return
+        self._usage_attempt = time.monotonic()
+        from agent.code_limits import codex
+        try:
+            usage = codex(await self.rpc.request('account/rateLimits/read', {}, timeout=3))
+        except (RuntimeError, TimeoutError):
+            self.session.row['subscription_usage'] = {**self.session.row.get('subscription_usage', {}),
+                'refresh_error': 'Refresh failed. Showing the last observation; retrying within 5 minutes.'}
+            self.session.save()
+            return  # Retain the last observation and its honest timestamp.
+        self.session.row['subscription_usage'] = usage
+        self.session.save()
 
     async def connect(self):
         from agent.code_executables import executable
@@ -37,8 +56,15 @@ class Codex:
                                 "type": (account.get("account") or {}).get("type", "none")}
         from agent.code_accounts import codex_models
         self.session.models = codex_models((await self.rpc.request("model/list", {})).get("data", []))
+        from agent.code_limits import codex
+        self._usage_attempt = time.monotonic()
+        try:
+            self.session.row['subscription_usage'] = codex(await self.rpc.request('account/rateLimits/read', {}))
+        except (RuntimeError, TimeoutError):
+            self.session.row['subscription_usage'] = codex({})
         default = next((row for row in self.session.models if row.get("isDefault")), {})
-        self.session.record_model(default.get("model"))
+        if not self.session.row.get("model"):
+            self.session.record_model(default.get("model"))
 
     async def login(self):
         result = await self.rpc.request("account/login/start", {"type": "chatgpt"})
@@ -51,8 +77,10 @@ class Codex:
             raise ValueError("Codex returned an unsupported sign-in URL")
         return {"url": url, "login_id": result.get("loginId")}
 
-    async def ensure_thread(self):
+    async def ensure_thread(self, model=""):
         policy = codex_policy(self.session.root)
+        if model:
+            policy['model'] = model
         if self.session.row.get("native_id"):
             result = await self.rpc.request("thread/resume", {**policy, "threadId": self.session.row["native_id"]})
         else:
@@ -62,7 +90,8 @@ class Codex:
         self.session.save()
 
     async def prompt(self, text, model, effort=""):
-        await self.ensure_thread()
+        model = model or self.session.row.get("model", "")
+        await self.ensure_thread(model)
         params = {"threadId": self.session.row["native_id"], "input": [{"type": "text", "text": text}],
                   "approvalPolicy": "untrusted", "approvalsReviewer": "user",
                   "sandboxPolicy": {"type": "workspaceWrite", "writableRoots": [str(self.session.root)], "networkAccess": False}}
@@ -104,6 +133,11 @@ class Codex:
             raise ValueError("Unsupported client request")
         if method == "account/login/completed" and params.get("success"):
             self.session.account = {"connected": True, "type": "chatgpt"}
+        if method == "account/rateLimits/updated":
+            from agent.code_limits import codex
+            self._usage_attempt = time.monotonic()
+            self.session.row['subscription_usage'] = codex(params)
+            self.session.save()
         if method.startswith("account/"):
             self.session.emit(method, {key: params[key] for key in ("success", "authMode", "planType") if key in params})
             return {}
@@ -119,6 +153,15 @@ class Codex:
                 return {}
             self.session.result = str(turn.get("status", "failed"))
             self.session.turn_finished.set()
+        if method == "thread/tokenUsage/updated" and params.get("threadId") == self.session.row.get("native_id"):
+            from agent.code_usage import record
+            total = (params.get("tokenUsage") or {}).get("total") or {}
+            record(self.session, {"usage": {"input_tokens": total.get("inputTokens"), "output_tokens": total.get("outputTokens"),
+                                           "total_tokens": total.get("totalTokens"), "cached_input_tokens": total.get("cachedInputTokens"),
+                                           "reasoning_output_tokens": total.get("reasoningOutputTokens")}})
+            if self.session.row.get("reported_usage"):
+                self.session.row["reported_usage"]["scope"] = "Native thread cumulative tokens, as reported by Codex"
+                self.session.save()
         self.session.emit(method, params)
         return {}
 
@@ -215,7 +258,7 @@ class _TurnHandle:
 class ClaudeCli:
     """The owner's installed, unmodified Claude Code, signed in with their own plan.
 
-    Each turn runs `claude -p` in the session's worktree and resumes Claude Code's own session.
+    Each turn runs `claude -p` in the selected folder/worktree and resumes Claude Code's own session.
     Claude Code keeps its own tools, permissions and transcript. Echo passes no API key, never
     reads Claude Code's credentials, and answers its permission prompts only through the
     documented PermissionRequest hook (agent/code_claude_hook.py) with the owner's decision.
@@ -239,7 +282,9 @@ class ClaudeCli:
         plan = str(status.get("plan") or "")
         self.session.account = {"connected": True,
                                 "type": f"Your Claude {plan.title()} plan" if plan else f"Claude Code · {status.get('method') or 'signed in'}"}
-        self.session.models = list(code_accounts.CLAUDE_MODELS)
+        self.session.models = status.get("models", [])
+        # A passive auth check cannot replace an observed runtime limit event.
+        self.session.row.setdefault('subscription_usage', status.get('subscription_usage', {}))
         self.token = secrets.token_urlsafe(32)
         self.server = await asyncio.start_server(self._hook, "127.0.0.1", 0)
         self.rpc = _TurnHandle(self)
@@ -256,7 +301,7 @@ class ClaudeCli:
         settings = {"hooks": {"PermissionRequest": [{"matcher": "*", "hooks": [
             {"type": "command", "command": command, "args": args, "timeout": 200}]}]}}
         argv = [executable("claude_cli"), "-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-                # Edits stay inside the isolated worktree (inspect and roll back in Echo Code);
+                # Claude's edits use the selected folder or optional isolated worktree;
                 # commands, network and anything else Claude Code would ask about go to the owner.
                 "--permission-mode", "acceptEdits",
                 # The owner's own Claude Code settings only: no hooks or MCP servers from the repository.
@@ -298,6 +343,7 @@ class ClaudeCli:
         if not getattr(sys, "frozen", False):
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])
         flags = (0x4 | subprocess.CREATE_NO_WINDOW) if os.name == "nt" else 0
+        model = model or self.session.row.get("model", "")
         process = self.process = subprocess.Popen(self.argv(model, effort), cwd=self.session.root, env=workspace_env(env), stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=flags,
                                         start_new_session=os.name != "nt")
@@ -345,8 +391,19 @@ class ClaudeCli:
                     self.session.emit("claude/tool", {"tool": str(block.get("name", ""))[:100], "detail": str(detail)[:300]})
         elif kind == "system" and subtype == "permission_denied":
             self.session.emit("permission_denied", {"reason": f"Not approved: {message.get('tool_name') or 'a tool call'}"})
+        elif kind == "rate_limit_event":
+            from agent.code_limits import claude
+            self.session.row['subscription_usage'] = claude(message.get('rate_limit_info'))
+            self.session.save()
         elif kind == "result":
             self._native(message.get("session_id"))
+            from agent.code_usage import record
+            record(self.session, message)
+            if message.get('is_error'):
+                errors=message.get('errors') or [message.get('result') or 'Claude Code ended without completing the turn. Check its sign-in, model and limits.']
+                if not isinstance(errors, list):
+                    errors = [errors]
+                self.session.emit('session/error', {'message':' '.join(str(v) for v in errors)[:1000]})
             self.session.emit("claude/result", {"is_error": bool(message.get("is_error")), "subtype": str(subtype or "")[:60]})
             return {"is_error": bool(message.get("is_error"))}
         return None

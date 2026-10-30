@@ -29,31 +29,10 @@ STALE_SECONDS = 600  # Echo Code re-checks a remembered status older than this
 _codex_login = None  # (process, task) while an official Codex sign-in is open
 _cache_lock = threading.Lock()
 
-# Claude Code doesn't publish a model list to other programs; these are the choices its
-# documentation gives every plan (code.claude.com/docs/en/model-config, 27 Oct 2026).
-# Claude Code resolves each alias to the current model for the owner's account.
-# Every alias resolves to a current model that takes all five effort levels (model-config, Oct 2026);
-# Claude Code falls back to the highest supported level by itself for older pinned models.
-_CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
-CLAUDE_MODELS = [
-    {"id": "default", "model": "default", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "", "displayName": "Default", "isDefault": True,
-     "description": "Your plan's recommended model (Opus on Pro and Max)."},
-    {"id": "opus", "model": "opus", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Opus", "description": "The latest Opus, for complex work."},
-    {"id": "sonnet", "model": "sonnet", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Sonnet", "description": "The latest Sonnet, for everyday coding."},
-    {"id": "haiku", "model": "haiku", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Haiku", "description": "Fast and light, for simple tasks."},
-    {"id": "opusplan", "model": "opusplan", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Opus plan, Sonnet build",
-     "description": "Opus while planning, then Sonnet to make the changes."},
-    {"id": "opus[1m]", "model": "opus[1m]", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Opus · 1M context",
-     "description": "Long sessions. May use usage credits on Pro."},
-    {"id": "sonnet[1m]", "model": "sonnet[1m]", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "medium", "displayName": "Sonnet · 1M context",
-     "description": "Long sessions. Uses usage credits on every plan."},
-    {"id": "fable", "model": "fable", "efforts": _CLAUDE_EFFORTS, "defaultEffort": "high", "displayName": "Fable",
-     "description": "For the hardest, longest tasks. Can bill usage credits instead of your plan."},
-]
 
 
 def _scratch() -> str:
-    # Neither program gets a project: no hooks, instructions or files of the owner's in reach.
+    # No attached project. Metadata checks below disable Claude hooks explicitly.
     from config import DATA_DIR
     folder = Path(DATA_DIR) / "echo-code" / "account-check"
     folder.mkdir(parents=True, exist_ok=True)
@@ -140,10 +119,16 @@ async def codex_status() -> dict:
     try:
         account = (await rpc.request("account/read", {"refreshToken": False})).get("account") or {}
         models = codex_models((await rpc.request("model/list", {})).get("data", []))
+        from agent.code_limits import codex
+        try:
+            limits = codex(await rpc.request("account/rateLimits/read", {}))
+        except (RuntimeError, TimeoutError):
+            limits = {**remembered('codex').get('subscription_usage', {}),
+                      'refresh_error': 'Codex did not refresh its limits. The last observation is retained.'}
     finally:
         await rpc.close()
     return _remember("codex", {**found, "signed_in": bool(account), "method": str(account.get("type") or ""),
-                               "plan": str(account.get("planType") or ""), "models": models,
+                               "plan": str(account.get("planType") or ""), "models": models, "subscription_usage": limits,
                                "login_open": bool(_codex_login and not _codex_login[1].done())})
 
 
@@ -200,10 +185,17 @@ def claude_status() -> dict:
     # Kept: signed in, how, which plan. Dropped: email, organization and anything else.
     method = str(data.get("authMethod") or "")
     signed_in = bool(data.get("loggedIn"))
+    models, problem = [], ""
+    if signed_in:
+        try:
+            models = claude_models()
+        except (ValueError, OSError, subprocess.TimeoutExpired):
+            problem = "Model discovery unavailable. Update Claude Code or enter an exact model ID; account access is checked by Claude Code when sending."
     return _remember("claude_cli", {**found, "signed_in": signed_in, "method": method,
                                     "plan": str(data.get("subscriptionType") or "") if method == "claude.ai" else "",
                                     "uses_plan": signed_in and method == "claude.ai",
-                                    "models": list(CLAUDE_MODELS) if signed_in else []})
+                                    "models": models, "model_problem": problem,
+                                    "subscription_usage": {"windows":[],"unavailable":"Claude Code reports limits during runtime events; no numeric window has been observed."}})
 
 
 def claude_login() -> dict:
@@ -212,3 +204,42 @@ def claude_login() -> dict:
     subprocess.Popen([executable("claude_cli"), "auth", "login"], cwd=_scratch(), env=child_env(),
                      creationflags=flags, close_fds=True)
     return {"started": True}
+
+
+def normalize_claude_models(rows):
+    """Exact runtime model IDs and capabilities; never expand a guessed alias list."""
+    result = {}
+    for row in rows if isinstance(rows,list) else []:
+        if not isinstance(row,dict): continue
+        identity = row.get('resolvedModel') or row.get('value')
+        if not isinstance(identity,str) or not 0 < len(identity) <= 200: continue
+        old = result.get(identity,{})
+        efforts = row.get('supportedEffortLevels')
+        result[identity] = {'id':identity,'model':identity,
+            'displayName':str(row.get('displayName') or identity)[:120],
+            'description':str(row.get('description') or '')[:240],
+            'isDefault':row.get('value')=='default' or old.get('isDefault',False),
+            'efforts':[v for v in efforts if isinstance(v,str) and v in {'low','medium','high','xhigh','max'}][:5] if isinstance(efforts,list) else [],
+            'defaultEffort':'', 'source':'Claude Code initialization'}
+    return list(result.values())[:60]
+
+def claude_models():
+    """Read the SDK initialization metadata from the owner's official CLI. No prompt."""
+    packet = json.dumps({'type':'control_request','request_id':'echo-models','request':{'subtype':'initialize'}})+'\n'
+    done = subprocess.run([executable('claude_cli'),'--print','--input-format','stream-json',
+        '--output-format','stream-json','--verbose','--strict-mcp-config','--mcp-config','{"mcpServers":{}}',
+        '--settings','{"disableAllHooks":true}','--no-session-persistence','--tools',''],
+        input=packet,cwd=_scratch(),env=child_env(),capture_output=True,text=True,encoding='utf-8',errors='replace',
+        timeout=25,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    if done.returncode or len(done.stdout)>1024*1024: raise ValueError('Claude metadata unavailable')
+    for line in done.stdout.splitlines():
+        try: row=json.loads(line)
+        except ValueError: continue
+        if not isinstance(row, dict):
+            continue
+        response = row.get('response')
+        if row.get('type')=='control_response' and isinstance(response,dict) and response.get('request_id')=='echo-models':
+            payload = response.get('response')
+            models=normalize_claude_models(payload.get('models') if isinstance(payload,dict) else None)
+            if models:return models
+    raise ValueError('Claude Code did not report models')

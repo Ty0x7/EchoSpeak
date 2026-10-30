@@ -1,5 +1,15 @@
 # Echo Code: architecture, integration research, and foundation
 
+> **Current continuation, 29 Oct 2026:** the 11.12 development stack is open and
+> unmerged through PR #113. The current external integrations are the user's
+> Codex app-server, unmodified Claude Code CLI, and ACP agents. The earlier
+> API-key Claude Agent SDK runtime was removed; API-key models belong to Chat.
+> Native Code is model-first with the selected supported local model, its own
+> engineering prompt, verification and learning. See [current Code research and
+> inbox implementation](native-code.md#7-codex-continuation-and-t3-research-29-october-2026)
+> and the [Codex handoff](../CODEX_HANDOFF.md). Older status paragraphs below
+> describe their dated snapshots; they are not current installation evidence.
+
 > **Status, 27 Oct 2026:** everything below shipped through #94–#97 and is in published v11.10.7. Codex (app-server), Claude Agent (SDK, explicit API key) and ACP adapters exist and pass protocol fixtures. No live account session has been accepted, and neither Codex nor Claude Code is installed on the owner's PC yet. The official contracts were rechecked in the [system review](system-review-2026-10-27.md) §8 (the Claude subscription login is not offered to third-party SDK products without Anthropic's approval; the Codex app-server is labelled experimental and `thread/rollback` was removed).
 
 Research date: **2026-10-25 UTC**. EchoSpeak checkout: `claude/security-audit`, package version `11.10.3`, with unrelated work already present. This is a source implementation and research record, not a release or an installed-app acceptance report. Visual companion: [Echo Code review](../../artifacts/research/echo-code.html).
@@ -463,4 +473,16 @@ The model picker's rail is Echo (all connected models), ChatGPT (OpenAI) and Cla
 
 - Choosing one without a key shows a panel to paste it. It's saved through `PUT /settings` and stored encrypted.
 - The panel says API use is billed to the API account, not the plan, and that the plan works in Echo Code through Codex or Claude Code.
+
+## Parallel inbox continuation (30 October 2026 UTC)
+
+The latest implementation is recorded in [Native Code, section 11](native-code.md#11-screenshot-follow-up-parallel-inbox-control-and-observations)
+and its [visual report](../../artifacts/research/native-code.html). Code's left
+navigation is now a flat, project-labeled inbox with Working/Snoozed/Settled shelves,
+timed snooze and bulk triage. Native background submission and image stashes reuse
+existing execution and trusted-project paths. Optional local stdio MCP adds scoped,
+revocable access to Code and selected persistent Agents. Runtime-reported usage and
+an allowlisted local diagnostics export replace guesses or obsolete SDK handling.
+These are local source changes; live providers, packaged MCP and installed desktop
+acceptance remain separate. Remote/mobile MCP and full T3 feature parity are not claimed.
 

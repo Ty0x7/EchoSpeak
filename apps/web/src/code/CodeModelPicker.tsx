@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { RuntimeMark } from "../components/RuntimeMark";
 import { ConnectedModelBrowser } from "../dashboard/ConnectedModelBrowser";
+import { RuntimeUsage } from "./RuntimeUsage";
 import type { ProviderInfo } from "../app/types";
 import { agentModelName, planLabel, type AgentAccount, type AgentModel, type RuntimeCatalog } from "./model";
 
@@ -18,8 +19,8 @@ export function CodeModelPicker(p: {
   const rail = <nav className="es-provider-rail" aria-label="Coding agents">{p.catalog.runtimes.map(row =>
     <button key={row.id} type="button" title={row.name} aria-label={`${row.name} models`} aria-pressed={row.id === p.runtimeId}
       onClick={() => { p.onRuntime(row.id); setSearch(""); setCustom(""); }}><RuntimeMark runtime={row.id} /></button>)}</nav>;
-  // Plans for code, APIs for chat: Echo native in Echo Code lists models on this PC only.
-  if (p.runtimeId === "echo") return <ConnectedModelBrowser apiBase={p.apiBase} info={p.nativeInfo} localOnly
+  // Native Code uses the same configured local/API endpoints as the shared runtime.
+  if (p.runtimeId === "echo") return <ConnectedModelBrowser apiBase={p.apiBase} info={p.nativeInfo}
     provider={p.nativeChoice?.provider || p.nativeInfo?.provider || ""} model={p.nativeChoice?.model || p.nativeInfo?.model || ""}
     locked={p.nativeLocked} rail={rail} onChoose={(provider, model) => p.onNative({ provider, model })} onConfigure={p.onConfigureNative} />;
   const current = agentModelName(p.models, p.model, p.reportedModel);
@@ -35,14 +36,16 @@ export function CodeModelPicker(p: {
     <div className="es-model-list" role="grid" aria-label="Agent models">{rows.map(row => <div className="es-model-row" role="row" key={row.model}
       aria-selected={row.model === selected}><div role="gridcell">
       <button type="button" className="es-model-choice" disabled={p.runtimeId === "acp"} onClick={() => p.onModel(row.model)}>
-        <strong>{row.displayName || row.model}</strong><small>{row.description || runtime?.name}{row.model === selected ? " · Current" : row.isDefault ? " · Default" : ""}</small></button>
+        <strong>{row.displayName || row.model}</strong><code>{row.model}</code><small>{row.description || runtime?.name}{row.model === selected ? " · Current" : row.isDefault ? " · Default" : ""}</small></button>
     </div></div>)}
       {!rows.length ? <p role="status">{search ? "No matching models." : p.runtimeId === "acp" ? "Connect this agent to see the models it reports."
-        : p.signedIn ? "Checking which models your plan offers…" : `Sign in to ${runtime?.name || "this agent"} to see the models your plan offers. Your draft stays here.`}</p> : null}
-      {p.runtimeId !== "acp" ? <button className="es-model-choice" onClick={() => p.onModel("")}><strong>Use {runtime?.name || "the agent"}'s default</strong><small>The model it actually uses appears once it reports it.</small></button> : null}
+        : p.signedIn ? "No model catalog was reported. Refresh the connection or use a supported exact model ID." : `Sign in to ${runtime?.name || "this agent"} to see the models it reports. Your draft stays here.`}</p> : null}
+      {p.account?.model_problem ? <p role="status">{p.account.model_problem}</p> : null}
+      {p.runtimeId !== "acp" ? <RuntimeUsage usage={p.account?.subscription_usage} compact/> : null}
+      {p.runtimeId !== "acp" ? <button className="es-model-choice" disabled={!p.models.some(m=>m.isDefault)} onClick={() => p.onModel(p.models.find(m=>m.isDefault)?.model || "")}><strong>Use {runtime?.name || "the agent"}'s reported default</strong><small>{p.models.find(m=>m.isDefault)?.model || "Default not reported by this connection."}</small></button> : null}
       {p.runtimeId === "claude_cli" ? <form className="ec-custom-model" onSubmit={event => { event.preventDefault(); if (custom.trim()) p.onModel(custom.trim()); }}>
         <label>Model ID<input aria-label="Claude model ID" placeholder="A full model name, e.g. claude-sonnet-5-5" maxLength={200} value={custom} onChange={event => setCustom(event.target.value)} /></label>
-        <button type="submit" disabled={!custom.trim()}>Select model</button><small>Uses your Claude Code sign-in and plan. Claude Code checks availability when you send.</small>
+        <button type="submit" disabled={!custom.trim()}>Select model</button><small>Uses Claude Code's own authentication. Claude Code checks account access when you send.</small>
       </form> : null}
       {p.runtimeId === "acp" ? <p>The ACP agent manages its model. Reported model information is shown here.</p> : null}
     </div></div></div><footer><span>{runtime?.name} · its own harness{plan ? ` · ${plan}` : ""}</span><button onClick={p.onConfigureRuntime}>Connection &amp; session ↗</button></footer></>;

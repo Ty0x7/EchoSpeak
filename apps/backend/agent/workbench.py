@@ -257,8 +257,16 @@ class Workbench:
     async def summary(self, context):
         self.validate(context, execute=False)
         try:
-            head = (await self.read_git(context, "rev-parse", "HEAD")).strip()
-            branch = (await self.read_git(context, "rev-parse", "--abbrev-ref", "HEAD")).strip()
+            if (await self.read_git(context, "rev-parse", "--is-inside-work-tree")).strip() != "true":
+                raise ValueError("Not a working repository")
+            try:
+                head = (await self.read_git(context, "rev-parse", "--verify", "HEAD")).strip()
+            except ValueError:
+                head = ""  # A newly initialized repository is still a Git workspace.
+            try:
+                branch = (await self.read_git(context, "symbolic-ref", "--short", "HEAD")).strip()
+            except ValueError:
+                branch = "HEAD"
             changes = await self.changes(context)
             branches = (await self.read_git(context, "for-each-ref", "--format=%(refname:short)", "refs/heads/")).splitlines()
             try:
@@ -267,8 +275,8 @@ class Workbench:
                 remote = ""
             repo = self.github_repo(remote)
             git = {"head": head, "branch": branch, "branches": branches[:200], "changes": changes["files"],
-                   "fingerprint": changes["fingerprint"], "repository": repo, "is_git": True}
-        except ValueError:
+                   "fingerprint": changes["fingerprint"], "repository": repo, "is_git": True, "has_commits": bool(head)}
+        except (ValueError, OSError):
             git = {"is_git": False, "branch": "", "head": "", "branches": [], "changes": [], "repository": ""}
         return {**context, "git": git, "computer": platform.node(), "system": platform.system(),
                 "scripts": self.load_scripts().get(context["project_id"], []), "terminal_supported": os.name == "nt"}
@@ -280,7 +288,12 @@ class Workbench:
 
     async def changes(self, context):
         self.validate(context, execute=False)
-        head = (await self.read_git(context, "rev-parse", "HEAD")).strip()
+        try:
+            head = (await self.read_git(context, "rev-parse", "--verify", "HEAD")).strip()
+        except ValueError:
+            if (await self.read_git(context, "rev-parse", "--is-inside-work-tree")).strip() != "true":
+                raise
+            head = ""
         status = await self.read_git(context, "status", "--porcelain=v1", "-z", "--untracked-files=all")
         raw = status.split("\0")
         rows, digest, index = [], hashlib.sha256((head + status).encode()), 0
@@ -317,7 +330,8 @@ class Workbench:
         paths = ["--", path] if path else ["--", *visible]
         if path:
             project_workspace.safe_path(Path(context["root"]), path, exists=False)
-        text = await self.read_git(context, "diff", "--no-ext-diff", "--no-textconv", "HEAD", *paths) if path or visible else ""
+        base = ["HEAD"] if changes["head"] else ["--cached"]
+        text = await self.read_git(context, "diff", "--no-ext-diff", "--no-textconv", *base, *paths) if path or visible else ""
         if path and not text:
             try:
                 text = (await self.file(context, path))["text"]
@@ -344,7 +358,7 @@ class Workbench:
                 raise ValueError("Commit or preserve your local changes before switching branches")
             if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,100}", branch) or ".." in branch or branch.endswith("/"):
                 raise ValueError("Enter a valid branch name")
-            if context["external_session_id"]:
+            if context["external_session_id"] and self.supervisor.get(context["external_session_id"]).workspace_mode == "worktree":
                 raise ValueError("Agent worktrees stay detached. Create or switch branches in a project checkout.")
         remote = ""
         if action == "push":
@@ -476,6 +490,15 @@ class Workbench:
         return {"items": json.loads(output), "available": True, "repository": repo}
 
     async def usage(self, context):
+        from agent.code_accounts import remembered
+        # Passive cached account observations are useful before opening a session.
+        # Do not launch a CLI or refresh credentials when opening this view.
+        accounts = {}
+        for runtime in ('codex', 'claude_cli'):
+            status = remembered(runtime)
+            if status.get('signed_in'):
+                accounts[runtime] = {'runtime': runtime, 'plan': status.get('plan', ''),
+                                     'subscription_usage': status.get('subscription_usage', {})}
         rows = []
         for session in self.supervisor.sessions.values():
             if session.row["project_id"] != context["project_id"]:
@@ -483,15 +506,22 @@ class Workbench:
             row = {"runtime": session.row["runtime_id"], "session_id": session.row["id"], "state": session.row["state"]}
             if session.row["runtime_id"] == "codex" and session.adapter and session.adapter.rpc and not session.adapter.rpc.closed:
                 self.supervisor.admit()
-                try:
-                    row["limits"] = await session.adapter.rpc.request("account/rateLimits/read", {})
-                except RuntimeError:
-                    row["unavailable"] = "This Codex connection did not report account limits"
-            else:
-                result = next((event for event in reversed(session.events) if event["kind"] == "sdk/event" and event["data"].get("kind") == "ResultMessage"), None)
-                row["usage"] = result["data"]["data"].get("usage", {}) if result else {}
+                await session.adapter.refresh_usage()
+            if session.row.get("reported_usage"):
+                row["usage"] = session.row["reported_usage"].get("tokens", {})
+                row["observed_at"] = session.row["reported_usage"].get("observed_at")
+                row["scope"] = session.row["reported_usage"].get("scope", "Runtime-reported usage")
+                row["reported_cost_usd"] = session.row["reported_usage"].get("reported_cost_usd")
+            row['subscription_usage'] = session.row.get('subscription_usage', {})
+            usage = row['subscription_usage']
+            previous = accounts.get(row['runtime'], {}).get('subscription_usage', {})
+            if usage and usage.get('observed_at', 0) >= previous.get('observed_at', 0):
+                accounts[row['runtime']] = {**accounts.get(row['runtime'], {}),
+                                            'runtime': row['runtime'], 'subscription_usage': usage}
             rows.append(row)
-        return {"runtimes": redact_payload(rows), "note": "Only runtime-reported data is shown. Missing limits are unavailable, never zero remaining."}
+        from agent.code_diagnostics import snapshot
+        return {"runtimes": redact_payload(rows), "accounts": redact_payload(list(accounts.values())), "diagnostics": snapshot(self.supervisor),
+                "note": "Only runtime-reported data is shown. Turn/thread token counts are not account-wide totals or a subscription bill. Missing limits/costs are unavailable, never zero."}
 
     async def activity(self, context):
         self.validate(context, execute=False)

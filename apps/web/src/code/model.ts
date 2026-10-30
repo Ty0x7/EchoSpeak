@@ -10,6 +10,7 @@ export type AgentModel = { id: string; model: string; displayName?: string; isDe
 export type AgentAccount = {
   installed?: boolean; signed_in?: boolean; method?: string; plan?: string; models?: AgentModel[];
   problem?: string; checked_at?: number; stale?: boolean;
+  subscription_usage?: import("./RuntimeUsage").SubscriptionUsage; model_problem?: string;
 };
 /** "Plus plan", "Pro plan", or "" when the agent didn't report one. */
 export function planLabel(account: AgentAccount | null | undefined): string {
@@ -34,14 +35,28 @@ export function agentModelName(models: AgentModel[], selected: string, reported:
   const id = selected || reported || models.find(row => row.isDefault)?.model || "";
   return models.find(row => row.model === id)?.displayName || id;
 }
+export type InboxState = "working" | "needs_attention" | "ready_to_review" | "settled" | "snoozed";
+export type InboxSummary = { state: InboxState; reason: string; activity: string; verification: string; updated_at: number; can_triage: boolean; snoozed_until?: number; woke?: boolean; settled_at?: number };
+export const INBOX_STATES: InboxState[] = ["working", "needs_attention", "ready_to_review", "settled", "snoozed"];
+export const INBOX_LABELS: Record<InboxState, string> = { working: "Working", needs_attention: "Needs attention", ready_to_review: "Ready to review", settled: "Settled", snoozed: "Snoozed" };
+
+/** Server evidence wins over the optimistic local spinner (an approval is attention). */
+export function inboxState(inbox?: InboxSummary, locallyWorking = false): InboxState {
+  if (inbox?.state === "needs_attention") return "needs_attention";
+  return locallyWorking ? "working" : inbox?.state || "settled";
+}
+
 export type CodeSession = {
   thread_id: string; title: string; project_id: string; surface: string; agent_runtime: string;
   last_active_at: number; message_count: number;
+  inbox?: InboxSummary;
 };
 export type CodeWorkspace = {
   schema_version: number;
   project: { id: string; name: string; workspace_root: string; trust_state: string };
   git_summary: string; sessions: CodeSession[]; can_start_native: boolean; native_blocker: string;
+  external_blocker?: string;
+  worktree_available?: boolean; worktree_unavailable?: string;
 };
 
 /** Runtime availability and project trust are independent; neither implies model access. */

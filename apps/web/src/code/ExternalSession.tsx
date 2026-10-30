@@ -5,9 +5,13 @@ import { WorkspacePopover } from "../components/WorkspacePopover";
 import { agentModels, planLabel, runtimeName, type AgentAccount, type AgentModel } from "./model";
 import { useWorkbench } from "../workbench/store";
 import { isDesktopRuntime, openDesktopExternalUrl } from "../desktop/bridge";
+import { RuntimeUsage, latestUsage, type SubscriptionUsage } from "./RuntimeUsage";
 
 type Event = { seq: number; kind: string; data: Record<string, any> };
 type Session = {
+  subscription_usage?: SubscriptionUsage;
+  workspace_mode?: "folder" | "worktree";
+  workspace_root?: string;
   model?: string;
   turn_active?: boolean;
   id: string; runtime_id: string; state: string; worktree: string; native_id: string | null;
@@ -36,32 +40,36 @@ export function eventText(event: Event): string {
 }
 
 /** One confirmation per project and agent lets Echo Code create its isolated worktree sessions. */
-const trustKey = (projectId: string, runtimeId: string) => `echospeak.code.trusted.${projectId}.${runtimeId}`;
-export function trustedFor(projectId: string, runtimeId: string): boolean {
-  try { return localStorage.getItem(trustKey(projectId, runtimeId)) === "1"; } catch { return false; }
+const trustKey = (projectId: string, runtimeId: string, mode: "folder" | "worktree") => `echospeak.code.trusted.v2.${projectId}.${runtimeId}.${mode}`;
+export function trustedFor(projectId: string, runtimeId: string, mode: "folder" | "worktree" = "folder"): boolean {
+  try { return localStorage.getItem(trustKey(projectId, runtimeId, mode)) === "1"; } catch { return false; }
 }
-function rememberTrust(projectId: string, runtimeId: string) {
-  try { localStorage.setItem(trustKey(projectId, runtimeId), "1"); } catch { /* Ask again next time. */ }
+function rememberTrust(projectId: string, runtimeId: string, mode: "folder" | "worktree") {
+  try { localStorage.setItem(trustKey(projectId, runtimeId, mode), "1"); } catch { /* Ask again next time. */ }
 }
 
 export type ExternalComposerState = {
   sessionId: string; connected: boolean; signedIn: boolean; canSend: boolean; busy: boolean; active: boolean;
   models: AgentModel[]; model: string; approvals: number; transcript: string; account: string;
+  subscriptionUsage?: SubscriptionUsage;
+  workspaceMode?: "folder" | "worktree";
 };
 export type ExternalSessionHandle = { send(): void };
 export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   apiBase: string; projectId: string; runtimeId: string; canStart: boolean; account: AgentAccount | null;
+  worktreeAvailable?: boolean; worktreeUnavailable?: string;
   draft: string; onDraft(value: string): void; model: string; effort?: string; onState(state: ExternalComposerState): void;
-  open: boolean; anchor: React.RefObject<HTMLButtonElement>; onClose(): void; onNeedSetup(): void; onAccountChanged(): void;
+  open: boolean; anchor: React.RefObject<HTMLButtonElement>; onClose(): void; onNeedSetup(): void; onAccountChanged(): void; onRefreshAccount?(): void;
   /** A session picked in Code's sidebar; otherwise the newest one. */
   initialSessionId?: string;
-}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, account, draft, onDraft, model, effort = "", onState, open, anchor, onClose, onNeedSetup, onAccountChanged, initialSessionId = "" }, ref) {
+}>(function ExternalSession({ apiBase, projectId, runtimeId, canStart, account, worktreeAvailable = false, worktreeUnavailable = "", draft, onDraft, model, effort = "", onState, open, anchor, onClose, onNeedSetup, onAccountChanged, onRefreshAccount, initialSessionId = "" }, ref) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [events, setEvents] = useState<Event[]>([]);
   const [acknowledge, setAcknowledge] = useState(() => trustedFor(projectId, runtimeId));
   const [dirty, setDirty] = useState(false);
+  const [workspaceMode, setWorkspaceMode] = useState<"folder" | "worktree">("folder");
   const [executable, setExecutable] = useState("");
   const [args, setArgs] = useState("[]");
   const [busy, setBusy] = useState(false);
@@ -78,14 +86,16 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   const signedIn = runtimeId === "acp" ? Boolean(session?.connected) : Boolean(session?.connected ? session.account.connected : account?.signed_in);
   // Sending creates and connects a session when needed; ACP still needs its executable chosen first.
   const ready = session?.connected ? (runtimeId !== "codex" || session.account.connected)
-    : runtimeId !== "acp" && canStart && signedIn && session?.state !== "rolled_back";
+    : runtimeId !== "acp" && canStart && signedIn && session?.state !== "rolled_back" && (selected || workspaceMode === "folder" || worktreeAvailable);
   const canSend = Boolean(ready && !active && !busy && draft.trim());
   const models = session?.connected && session.models?.length ? agentModels(session.models) : agentModels(account?.models);
   useEffect(() => {
     onState({ sessionId: selected, connected: Boolean(session?.connected), signedIn, canSend, busy, active, models,
       model: session?.model || "", approvals: session?.approvals.length || 0, transcript: events.map(eventText).join(""),
+      subscriptionUsage: session?.subscription_usage,
+      workspaceMode: session ? session.workspace_mode || "worktree" : workspaceMode,
       account: session?.connected ? session.account.type : planLabel(account) });
-  }, [selected, session, signedIn, canSend, busy, active, onState, events, account]);
+  }, [selected, session, signedIn, canSend, busy, active, onState, events, account, workspaceMode]);
   useEffect(() => {
     useWorkbench.getState().setContext({ project_id: projectId, external_session_id: selected });
   }, [projectId, selected]);
@@ -114,6 +124,7 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
         const value = await request<Session>(`${base}?cursor=${cursor.current}`);
         if (!live) return;
         setSession(value); setEvents(previous => [...previous, ...value.events].slice(-600)); cursor.current = value.cursor;
+        if (value.events.some(event => event.kind === "turn/finished" || event.kind === "worktree/rollback")) useWorkbench.getState().refresh();
         if (value.replay_gap) setError("Earlier activity left the replay window. Native history remains in the original harness.");
       } catch (err) { if (live) setError(err instanceof Error ? err.message : "Runtime disconnected"); }
       if (live) timer = setTimeout(poll, 850);
@@ -134,12 +145,12 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
       if (!Array.isArray(values) || !values.every(item => typeof item === "string")) throw new Error("ACP arguments must be a JSON array of strings");
       command = [executable, ...values];
     }
-    const context = JSON.stringify({ command, dirty, projectId, runtimeId });
+    const context = JSON.stringify({ command, dirty: workspaceMode === "worktree" && dirty, projectId, runtimeId, workspaceMode });
     if (pending.current.context !== context) pending.current = { context, key: crypto.randomUUID() };
     const result = await request<Session>(`${apiBase}/echo-code/projects/${encodeURIComponent(projectId)}/external-sessions`, {
-      runtime_id: runtimeId, idempotency_key: pending.current.key, command, acknowledge_dirty: dirty, acknowledge_execution: true,
+      runtime_id: runtimeId, idempotency_key: pending.current.key, command, acknowledge_dirty: workspaceMode === "worktree" && dirty, acknowledge_execution: true, workspace_mode: workspaceMode,
     });
-    rememberTrust(projectId, runtimeId);
+    rememberTrust(projectId, runtimeId, workspaceMode);
     pending.current = { key: crypto.randomUUID(), context: "" };
     if (alive.current) { setSessions(previous => [result, ...previous.filter(row => row.id !== result.id)]); setSelected(result.id); }
     return result.id;
@@ -147,7 +158,7 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   useImperativeHandle(ref, () => ({ send() {
     if (!canSend) return;
     const text = draft;
-    if (!selected && !trustedFor(projectId, runtimeId)) { onNeedSetup(); return; }
+    if (!selected && !trustedFor(projectId, runtimeId, workspaceMode)) { onNeedSetup(); return; }
     void action(async () => {
       // Signed in is enough: Echo starts (or reconnects) the isolated session, then sends.
       const id = selected || await createSession();
@@ -155,7 +166,7 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
       await request(`${baseFor(id)}/turns`, { text, model: runtimeId === "acp" ? "" : model, effort: runtimeId === "acp" ? "" : effort });
       if (alive.current) onDraft("");
     });
-  } }), [canSend, draft, model, effort, selected, session, runtimeId, projectId, onDraft, onNeedSetup]);
+  } }), [canSend, draft, model, effort, selected, session, runtimeId, projectId, workspaceMode, dirty, onDraft, onNeedSetup]);
   const create = () => action(async () => { if (!acknowledge) throw new Error("Confirm you trust this agent with this project first"); await createSession(); });
   const openLogin = (url: string) => {
     setLoginUrl(url);
@@ -163,10 +174,12 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
   };
   return open ? <WorkspacePopover anchor={anchor} label={`${name} connection and session`} width={620} className="ec-connection-popover" onClose={onClose}><section className="ec-external" aria-label={`${name} sessions`}>
     <header><RuntimeMark runtime={runtimeId} /><strong>{name}</strong><select aria-label="External coding session" value={selected} disabled={busy}
-      onChange={event => setSelected(event.target.value)}><option value="">New isolated session</option>{sessions.map(row =>
+      onChange={event => setSelected(event.target.value)}><option value="">New session</option>{sessions.map(row =>
       <option key={row.id} value={row.id}>{new Date(row.created_at * 1000).toLocaleString()} · {row.id.slice(0, 7)}</option>)}</select></header>
     {error ? <p role="alert" className="ec-notice">{error}</p> : null}
-    {runtimeId !== "acp" ? <p className="ec-account-line">{signedIn ? `Signed in${planLabel(account) ? ` · ${planLabel(account)}` : ""} · ${name} uses its own harness and your plan.`
+    {runtimeId !== "acp" ? <RuntimeUsage usage={latestUsage(session?.subscription_usage, account?.subscription_usage)}/> : null}
+    {runtimeId === "codex" && onRefreshAccount ? <p className="ec-account-line"><small>Limits refresh automatically every 5 minutes and when Codex reports a change.</small><button className="es-btn es-btn-sm" disabled={busy} onClick={onRefreshAccount}>Refresh limits</button></p> : null}
+    {runtimeId !== "acp" ? <p className="ec-account-line">{signedIn ? `Signed in${planLabel(account) ? ` · ${planLabel(account)}` : ""} · ${name} uses its own authentication and permissions.`
       : `${name} isn't signed in. Sign in with ${name}'s own login, then send your task.`}
       {!signedIn ? <button className="es-btn es-btn-sm" disabled={busy} onClick={() => void action(async () => {
         const result = await request<{ url?: string }>(`${apiBase}/echo-code/runtimes/${runtimeId}/login`, {});
@@ -179,17 +192,19 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
       void openDesktopExternalUrl(loginUrl);
     }}>Continue official {name} sign-in ↗</a> : null}
     {!selected ? <div className="ec-runtime-setup">
-      <p>{name} works in a separate Git worktree from committed HEAD. Your current checkout and local changes stay where they are.</p>
+      <label>Workspace<select aria-label="Coding workspace mode" value={workspaceMode} disabled={busy} onChange={event => { const mode = event.target.value as "folder" | "worktree"; setWorkspaceMode(mode); setAcknowledge(trustedFor(projectId, runtimeId, mode)); setError(""); }}>
+        <option value="folder">Project folder</option><option value="worktree" disabled={!worktreeAvailable} title={worktreeUnavailable}>Isolated Git worktree</option></select></label>
+      <p>{workspaceMode === "folder" ? `${name} edits this project folder directly, including your local changes. Git and GitHub are optional.` : `${name} works in a separate Git worktree from committed HEAD. Your current checkout and local changes stay where they are.`}</p>
       {runtimeId === "acp" ? <><label>ACP executable<input value={executable} onChange={event => setExecutable(event.target.value)} placeholder="Absolute path to a native executable" /></label>
         <label>Arguments (JSON array)<input value={args} onChange={event => setArgs(event.target.value)} /></label>
         <small>ACP v1 over stdio. Authenticate the agent in its own terminal first. Filesystem and terminal client capabilities are not exposed.</small></> : null}
-      {runtimeId === "claude_cli" ? <small>Runs your installed Claude Code with your own sign-in and plan. Claude Code keeps its tools; Echo asks you before any action Claude Code would ask about. Edits stay in the worktree.</small> : null}
+      {runtimeId === "claude_cli" ? <small>Runs your installed Claude Code with your own sign-in and plan. Claude Code keeps its tools; Echo asks you before any action Claude Code would ask about.</small> : null}
       <label className="ec-check"><input type="checkbox" checked={acknowledge} onChange={event => setAcknowledge(event.target.checked)} />
-        I trust {name} with this project. It runs tools as my Windows account; worktrees don't sandbox it, and approved commands can reach beyond the worktree. Remembered for this project.</label>
-      <label className="ec-check"><input type="checkbox" checked={dirty} onChange={event => setDirty(event.target.checked)} />Start from committed HEAD even if my source checkout has local changes.</label>
-      <button className="es-btn es-btn-primary" disabled={busy || !canStart || !acknowledge} onClick={() => void create()}>Create isolated session</button>
+        I trust {name} with this project. It uses its own permissions as my Windows account; approved commands can reach beyond the workspace. Remembered for this project.</label>
+      {workspaceMode === "worktree" ? <label className="ec-check"><input type="checkbox" checked={dirty} onChange={event => setDirty(event.target.checked)} />Start from committed HEAD even if my source checkout has local changes.</label> : null}
+      <button className="es-btn es-btn-primary" disabled={busy || !canStart || !acknowledge || (workspaceMode === "worktree" && !worktreeAvailable)} onClick={() => void create()}>{workspaceMode === "worktree" ? "Create isolated session" : "Create session"}</button>
     </div> : <>
-      <div className="ec-session-state"><span>{session?.state || "Opening…"} · {session?.account.type || "Own account"}</span>
+      <div className="ec-session-state"><span>{session?.workspace_mode === "folder" ? "Project folder" : "Isolated Git worktree"} · {session?.state || "Opening…"} · {session?.account.type || "Own account"}</span>
         {session?.native_id ? <small title={session.native_id}>Session {session.native_id.slice(0, 12)}</small> : null}</div>
       <p className="ec-worktree-path">{session?.worktree}</p>
       {!session?.connected ? <div className="ec-connect">
@@ -207,10 +222,10 @@ export const ExternalSession = React.forwardRef<ExternalSessionHandle, {
         <button className="es-btn" disabled={busy} onClick={() => void action(() => request(`${base}/approvals/${approval.id}`, { allow: true }))}>Approve once</button>
       </div>)}
       <pre className="ec-runtime-stream" role="log" aria-label="Runtime activity">{events.map(eventText).join("") || "Your agent's streamed responses and command output will appear here."}</pre>
-      <div className="ec-session-actions"><button className="es-btn" disabled={busy || !session} onClick={() => void action(async () => setDiff(await request(`${base}/diff`)))}>Inspect changes</button>
-        <button className="es-btn" disabled={busy || !session?.rollback_available || session?.connected} onClick={() => void action(() => request(`${base}/rollback`, {}))}>Roll back last turn</button>
-        <small>Stop before rollback. Newer edits are preserved; a recovery copy is retained.</small></div>
-      {diff ? <details className="ec-runtime-diff" open><summary>Worktree changes</summary><pre>{diff.status || "Clean worktree"}</pre><pre>{diff.diff}</pre><small>{diff.note}</small></details> : null}
+      <div className="ec-session-actions"><button className="es-btn" onClick={() => useWorkbench.getState().open("files")}>Project files</button><button className="es-btn" disabled={busy || !session} onClick={() => void action(async () => setDiff(await request(`${base}/diff`)))}>Inspect changes</button>
+        {session?.workspace_mode !== "folder" ? <><button className="es-btn" disabled={busy || !session?.rollback_available || session?.connected} onClick={() => void action(() => request(`${base}/rollback`, {}))}>Roll back last turn</button>
+        <small>Stop before rollback. Newer edits are preserved; a recovery copy is retained.</small></> : null}</div>
+      {diff ? <details className="ec-runtime-diff" open><summary>Workspace changes</summary><pre>{diff.status}</pre><pre>{diff.diff}</pre><small>{diff.note}</small></details> : null}
     </>}
   </section></WorkspacePopover> : null;
 });

@@ -1909,8 +1909,8 @@ class LeanSession:
                 runtime = getattr(self.agent, "model_runtime", None)
                 model_id = str(getattr(runtime, "model_id", "") or "")
             endpoint = resolve_endpoint(provider, model_id)
-        # Plans for code, APIs for chat: whatever chose the model (the conversation, an agent's own
-        # model, smart model choice), an Echo Code conversation never calls an API-key provider.
+        # Native Code admits configured local/API endpoints. Keep environment admission
+        # separate from provider readiness and capability checks in the shared runtime.
         from agent.echo_code import code_provider_problem
         if problem := code_provider_problem(self.session_id, str(getattr(endpoint, "provider", "") or "")):
             raise PermissionError(problem)

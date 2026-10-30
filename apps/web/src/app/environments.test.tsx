@@ -82,7 +82,7 @@ describe("one sidebar, three environments", () => {
     expect(chat.includes("New chat") && chat.includes("Artifacts") && !chat.includes("Routines") && !chat.includes("Jarvis contact")).toBe(true);
     expect(agents.includes("New agent") && agents.includes("Routines") && agents.includes("Jarvis contact") && agents.includes("Conversations")).toBe(true);
     expect(agents.includes("Search messages") && !agents.includes("Artifacts")).toBe(true);
-    expect(code.includes("New coding session") && code.includes("Code tree") && !code.includes("Group chats")).toBe(true);
+    expect(code.includes("Code tree") && !code.includes("Search chats") && !code.includes("Group chats")).toBe(true);
   });
 });
 

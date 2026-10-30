@@ -103,15 +103,15 @@ def test_chat_and_agents_are_unchanged(env, monkeypatch):  # noqa: F811
     assert "soul_update" in turn.toolbox.names and "How you work in Echo Code" not in turn.system_prompt
 
 
-def test_native_code_keeps_echo_codes_provider_rule(code_thread, monkeypatch):
-    """Plans for code, APIs for chat (28 Oct): native Code never calls an API-key provider."""
+def test_native_code_uses_the_selected_api_endpoint(code_thread, monkeypatch):
+    """Native Code now supports configured API endpoints as well as local models."""
     from types import SimpleNamespace
 
     session = _session(monkeypatch, code_thread)
     session.agent = SimpleNamespace(memory=None, llm_provider=SimpleNamespace(value="openai"),
                                     model_runtime=SimpleNamespace(model_id="gpt-5"))
-    with pytest.raises(PermissionError):
-        session._endpoint_for(session._code_persona())
+    endpoint = session._endpoint_for(session._code_persona())
+    assert endpoint.provider == "openai" and endpoint.model == "gpt-5"
 
 
 def test_code_can_use_proven_coding_lessons_from_echo_without_becoming_echo(store, monkeypatch):  # noqa: F811

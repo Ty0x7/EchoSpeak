@@ -1,7 +1,19 @@
-import { describe, expect, it } from "vitest";
-import { eventText } from "./ExternalSession";
+import { describe, expect, it, vi } from "vitest";
+import { eventText, trustedFor } from "./ExternalSession";
 
 describe("external harness event boundary", () => {
+  it("remembers trust for the chosen workspace mode without reusing old worktree-only consent", () => {
+    const values = new Map([["echospeak.code.trusted.project.codex", "1"], ["echospeak.code.trusted.v2.project.codex.worktree", "1"]]);
+    vi.stubGlobal("localStorage", { getItem: (key: string) => values.get(key) || null });
+    try {
+      expect(trustedFor("project", "codex")).toBe(false);
+      expect(trustedFor("project", "codex", "worktree")).toBe(true);
+      values.set("echospeak.code.trusted.v2.project.codex.folder", "1");
+      expect(trustedFor("project", "codex")).toBe(true);
+      expect(trustedFor("another-project", "codex")).toBe(false);
+      expect(trustedFor("project", "claude_cli")).toBe(false);
+    } finally { vi.unstubAllGlobals(); }
+  });
   it("uses the original Codex, Claude Code and ACP text deltas", () => {
     expect(eventText({ seq: 1, kind: "item/agentMessage/delta", data: { delta: "Codex" } })).toBe("Codex");
     expect(eventText({ seq: 2, kind: "claude/text", data: { text: "Claude" } })).toBe("Claude");

@@ -1,13 +1,58 @@
 # EchoSpeak architecture
 
-How EchoSpeak works today (10.2). For setup and day-to-day use see [GUIDE.md](GUIDE.md);
+Core architecture, with Code ownership refreshed against the 11.12 development stack
+on 30 October 2026 UTC. For setup and day-to-day use see [GUIDE.md](GUIDE.md);
 for what's next see [ROADMAP.md](ROADMAP.md). Older design documents are in
 [archive/](archive/) and describe runtimes that no longer exist.
 
-For the separate Echo Code workspace foundation and the researched external-runtime
-boundaries, see [Echo Code architecture and implementation](research/echo-code.md).
-The native harness described here remains independent; external agent execution is
-not implemented by that foundation.
+For current Code behavior, evidence-backed inbox state, and the T3 comparison, see
+[Native Echo Code](research/native-code.md). [Echo Code](research/echo-code.md) retains
+the historical foundation and subsequent implementation record. External Codex,
+Claude Code and ACP execution is implemented in `agent/code_sessions.py` and
+`agent/code_runtimes.py`; it stays outside the native Lean loop. The
+[Codex handoff](CODEX_HANDOFF.md) records the open PR stack and remaining work.
+
+## Environment ownership
+
+`apps/backend/agent/environments.py:turn_environment` selects the live owner's Chat
+or Code model identity; persistent agents, routines, guests and resumed agent work
+keep their agent execution path. Native Code uses `lean/code_mode.py` for engineering
+instructions and tools, the selected supported local model, the 11.11.5 verification
+ledger, and Code's learning identity. It adds no AI supervisor or delegated team.
+Chat retains its assistant behavior; Agents retains personas and coordination.
+
+Code's inbox is a deterministic projection (`agent/code_inbox.py`). Native evidence
+comes from StateStore's execution records and the existing approval broker. External
+evidence comes from the external-session supervisor; it never enters native
+verification or learning. Owner settle/snooze choices are stored with an activity
+identity, and new activity invalidates them. They grant no authority, launch no
+processes, and cannot hide a running turn, pending decision, or queued follow-up.
+The existing API authentication/origin middleware protects the owner inbox routes.
+The left sidebar presents a flat inbox, timed snoozes and optional Working shelf.
+Explicit PR links can settle unchanged, clean, idle activity after a confirmed merge.
+
+`code_tasks.py` dispatches owner-submitted background turns through the existing
+`/query` harness and StateStore queue. It adds no model router or scheduler; it
+limits native same-project writers because native Code shares the project folder.
+`code_drafts.py` stores owner stashes and bounded images inside trusted projects.
+
+Optional MCP control uses separate hashed, expiring and revocable project/agent
+grants (`code_control.py`) and a local stdio bridge (`control_mcp.py`). Only the
+exact `/echo-code/control/invoke` route uses these grants instead of owner API
+authentication. It checks physical loopback, a local Host, no browser Origin,
+and per-action scope; grant management still requires owner authentication.
+Read only is the default. A control grant can submit through existing harnesses,
+but cannot approve tools, launch external providers, change policy or merge.
+This is cooperative application scope, not OS confinement. Remote HTTP MCP,
+OAuth pairing, mobile access and multi-host execution are not implemented.
+
+`code_usage.py` persists allowlisted provider-reported values. Workbench Usage
+shows their scope/time, available account limits and local CPU/memory observations;
+missing data remains unavailable. `code_diagnostics.py` exports a local allowlisted
+triage report with no conversations, prompts, raw logs, credentials or upload.
+
+The sections below describe native execution. Provider harnesses instead own their
+tools, sign-in, native history, and session policy in their isolated worktrees.
 
 For the combined dependency, child-process, untrusted-input and updater changes,
 see the [October 2026 security implementation](research/security-audit-2026-10-25.md).

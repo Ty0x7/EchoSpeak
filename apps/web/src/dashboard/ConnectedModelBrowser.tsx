@@ -6,7 +6,7 @@ import { RuntimeMark } from "../components/RuntimeMark";
 type Model = { id: string; provider: string; providerName: string; model: string; local: boolean };
 const FAVORITES = "echospeak.favoriteModels";
 
-/** Chat's API agents: Echo's own harness calling each provider with your API key. Plans are for Echo Code. */
+/** Native local/API endpoints; coding subscriptions use the independent external harnesses. */
 export const API_AGENTS = [
   { provider: "openai", name: "ChatGPT", mark: "codex", keyUrl: "https://platform.openai.com/api-keys", billedBy: "OpenAI", plan: "ChatGPT plan", planHome: "Codex" },
   { provider: "anthropic", name: "Claude", mark: "claude_cli", keyUrl: "https://console.anthropic.com/settings/keys", billedBy: "Anthropic", plan: "Claude plan", planHome: "Claude Code" },

@@ -77,7 +77,7 @@ def test_a_turn_uses_the_owners_sign_in_and_resumes_claude_codes_own_session(tmp
         return first
 
     first = run(scenario())
-    assert session.result == "completed" and session.row["model"] == "claude-fake"
+    assert session.result == "completed" and session.row["model"] == "sonnet"  # selected model persists on resume
     assert session.row["native_id"] == first == "fake-session-1"
     assert "hello acceptEdits|user own-sign-in" in session.text()  # no API key: Claude Code uses its own login
 
@@ -135,10 +135,11 @@ def test_claude_status_keeps_only_sign_in_method_and_plan(monkeypatch):
     payload = {"loggedIn": True, "authMethod": "claude.ai", "subscriptionType": "max", "email": "owner@example.com",
                "orgId": "org-1", "orgName": "Owner's Organization"}
     monkeypatch.setattr(code_accounts, "_claude", lambda *a, **k: subprocess.CompletedProcess([], 0, json.dumps(payload), ""))
+    monkeypatch.setattr(code_accounts, "claude_models", lambda: [{"model":"claude-opus-5-5","displayName":"Opus 5.5"}])
     status = code_accounts.claude_status()
     assert {k: status[k] for k in ("installed", "signed_in", "method", "plan", "uses_plan")} == {
         "installed": True, "signed_in": True, "method": "claude.ai", "plan": "max", "uses_plan": True}
-    assert [m["model"] for m in status["models"]][:4] == ["default", "opus", "sonnet", "haiku"]
+    assert status["models"][0]["model"] == "claude-opus-5-5"
     saved = json.dumps(code_accounts.remembered("claude_cli"))
     for private in ("owner@example.com", "org-1", "Organization"):
         assert private not in json.dumps(status) and private not in saved
@@ -171,8 +172,8 @@ def test_echo_code_status_is_remembered_and_marked_stale_without_running_anythin
     assert client.get("/echo-code/runtimes/codex/account").json()["stale"] is True
 
 
-def test_plans_for_code_apis_for_chat(monkeypatch):
-    """Echo Code never runs an API-key provider; Chat does (switch API and the runtime both refuse)."""
+def test_native_code_supports_api_and_local_models(monkeypatch):
+    """Native Chat and Code admit configured local and API endpoints."""
     from types import SimpleNamespace
 
     from agent import echo_code
@@ -183,7 +184,7 @@ def test_plans_for_code_apis_for_chat(monkeypatch):
     surfaces = {"code-1": "code", "chat-1": "chat"}
     monkeypatch.setattr(echo_code, "is_code_thread", lambda session_id: surfaces.get(session_id) == "code")
     for provider in ("openai", "anthropic", "gemini", "xai"):
-        assert echo_code.code_provider_problem("code-1", provider) == echo_code.CODE_MODEL_RULE
+        assert echo_code.code_provider_problem("code-1", provider) == ""
         assert echo_code.code_provider_problem("chat-1", provider) == ""
     for provider in ("lmstudio", "ollama", "llama_cpp"):
         assert echo_code.code_provider_problem("code-1", provider) == ""
@@ -193,8 +194,7 @@ def test_plans_for_code_apis_for_chat(monkeypatch):
     session = SimpleNamespace(session_id="code-1", _route_overrides={"echo": ("openai", "gpt")},
                               agent=SimpleNamespace(llm_provider=SimpleNamespace(value="lmstudio"), model_runtime=SimpleNamespace(model_id="qwen")))
     persona = AgentPersona(id="echo", name="Echo")
-    with pytest.raises(PermissionError, match="Codex"):
-        runtime.LeanSession._endpoint_for(session, persona)  # even smart model choice can't pick an API model here
+    assert runtime.LeanSession._endpoint_for(session, persona).provider == "openai"
     session._route_overrides = {}
     assert runtime.LeanSession._endpoint_for(session, persona).provider == "lmstudio"
     session.session_id = "chat-1"

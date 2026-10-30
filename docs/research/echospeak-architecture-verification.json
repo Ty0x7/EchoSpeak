@@ -1,0 +1,84 @@
+{
+  "date_utc": "2026-10-30",
+  "source_commit": "6d16dceb7e3703d83f3ec9cdd623451bce8f914d",
+  "version": "11.13.1",
+  "scope": "Native environment routing/controllers/model transports/policies and external runtime/workspace ownership; not an exhaustive file or security audit",
+  "research_only": true,
+  "architecture_implemented": false,
+  "paid_model_calls": 0,
+  "source_sha256": {
+    "apps/backend/agent/environments.py": "96e0594cdb9fdc958fb1f2223d35ba577b0743f54b69e15370d4837b6a07d1dc",
+    "apps/backend/agent/core.py": "129454759e9155e04f5b4737166c7657a599016f48fd3bccfb1713a3dd7fb8b5",
+    "apps/backend/agent/lean/runtime.py": "d507a376d459dab17491efdbff6e4047b2444e9e021c7f40af8e65d7869f06d5",
+    "apps/backend/agent/lean/loop.py": "9d0083acb30b82975e481ae2bb236924a85a0dc34b50de7bbd38b38186d5efe7",
+    "apps/backend/agent/lean/chat_mode.py": "cbf7f007faefdcc94677c67c037cccd4810287f998f174a18410b358b98ce1fd",
+    "apps/backend/agent/lean/chat_run.py": "75cda56bbe5af818e9beeac1d4384e43677625f79b8813c95c7da4f42e48fd41",
+    "apps/backend/agent/lean/code_mode.py": "70ccc1a2d720c6c34e143cee7185ad8c8ca959c532eeb3d226764d2fc493b223",
+    "apps/backend/agent/lean/provider.py": "2834c392da4163338288515117d8529c899a36fce3a87e24b57cf31db4a6221d",
+    "apps/backend/agent/lean/responses_stream.py": "67fa5beec65a6cb0f0c8dc92112e529e8daad2bfdb2a078d263d011337e0b8bf",
+    "apps/backend/agent/lean/cloud_streams.py": "cf51002cbda9bd21b014a04ff06dd355b8308b949df6334b93ad9743d7cbbbbc",
+    "apps/backend/agent/lean/settings.py": "0116bc805a33ff1553f9b7a3b9a37bf977a2110114daaa2c606e65804328d6d4",
+    "apps/backend/agent/lean/toolbox.py": "7dec3ddc374a9fca6f2e6372cc7f7e75658124e55be7d2c992cd66e96e87b620",
+    "apps/backend/agent/model_runtime.py": "ef760920df59da7f2818e842e7ca638c8fdceaa2f050ec054c2f1b771200112d",
+    "apps/backend/agent/code_sessions.py": "0bb84a202839fe6e4e6e0de78080c5444280901b59da6c5ea98a759d13ab99a2",
+    "apps/backend/agent/code_runtimes.py": "e90db8bb5acd008cf38ba3a032f98c030d244e334a0363f00111f76fed82e8b5",
+    "apps/backend/agent/code_process.py": "7c81dec1e266e835597cb2f6c33e85f87a44364ba88ba2a2d4db278d7fff55c6",
+    "apps/backend/agent/code_control.py": "8778671c44c42d5572a84ce2cf25728743322138b970ffddd2a29f693e0de50d",
+    "apps/backend/agent/workbench.py": "142d3c062581203425f3577cc9c39fc1a7d789b0a8beb4e213f70f72c2ed57ca",
+    "apps/backend/api/routes/chat.py": "3c63084170090b3dd0bfb6391ff9273300d08eff0a165373bdaeecc07dfad9af",
+    "apps/backend/api/routes/settings.py": "8f789d9fee8c8e945ed136cd6fd6fe6ed269561e73a0d8809fc99933762b961f",
+    "apps/backend/tests/test_environments.py": "9dc7a71ec849bc31aa65a8ebb48437c49ac355cdb2b49b560be180fb8947f1ab",
+    "apps/backend/tests/test_native_code.py": "f527d2951c8033308f7d9188b86dec6f68110ea6d3430890c9f408f31063860e",
+    "apps/backend/tests/test_chat_mode.py": "b2ad66c4412ad52d6eaf87cb0199827ed369c1f76c17ce4ee917d4e012e9cf40",
+    "apps/backend/tests/test_cloud_models.py": "0efca350edb0cb4fc589cde05ef5175ac107b8c93f0b7cabf48dbaf407ef492d",
+    "apps/web/src/code/EchoCodeWorkspace.tsx": "d144c831fa10d0738ba335ce02ac2c5aa4ce1f417e07f7fbff73dd4c96cc73c1",
+    "apps/web/src/code/ExternalSession.tsx": "52b2886f250432d8393c0a432b908fd4f25957de14aaa6d37748dd0872b45799"
+  },
+  "existing_test_baseline": {
+    "passed": 47,
+    "failed": 1,
+    "command": "pytest tests/test_environments.py tests/test_native_code.py tests/test_chat_mode.py tests/test_cloud_models.py -q",
+    "failure": "test_cloud_models.py::test_an_echo_code_conversation_cannot_switch_to_an_api_key_model",
+    "interpretation": "Obsolete local-only Code expectation contradicts the current API-enabled implementation; unchanged during research",
+    "fixtures": "scripted models and mock HTTP; not API/provider quality acceptance"
+  },
+  "primary_sources_read": [
+    "https://developers.openai.com/api/docs/guides/agents/sdk",
+    "https://developers.openai.com/api/docs/guides/agents/running-agents",
+    "https://developers.openai.com/api/docs/guides/agents",
+    "https://learn.chatgpt.com/docs/app-server",
+    "https://learn.chatgpt.com/docs/codex-sdk",
+    "https://code.claude.com/docs/en/agent-sdk/overview",
+    "https://code.claude.com/docs/en/agent-sdk/agent-loop",
+    "https://code.claude.com/docs/en/how-claude-code-works",
+    "https://www.anthropic.com/research/managed-agents",
+    "https://www.anthropic.com/research/harness-design-long-running-apps",
+    "https://www.anthropic.com/research/demystifying-evals-for-ai-agents",
+    "https://developers.openai.com/api/docs/guides/agent-evals",
+    "https://github.com/pingdotgg/t3code/blob/main/docs/user/faq.md",
+    "https://github.com/pingdotgg/t3code/blob/main/docs/internals/adding-a-provider.md"
+  ],
+  "recommendation": "Shared native execution mechanics plus explicit specialized controllers; separate vendor-owned harness bridges; evaluate before refactoring",
+  "remaining": [
+    "Agree information-first Chat effect contract",
+    "Reconcile stale policy test after research",
+    "Approve models/tasks/budget before live API evals",
+    "No claim of native API quality or installed-window completion from deterministic tests"
+  ],
+  "visual_qa": [
+    {
+      "width": 1400,
+      "theme": "dark",
+      "scripts": false,
+      "overflow": false,
+      "current_and_historical_layout": "passed"
+    },
+    {
+      "width": 390,
+      "theme": "light",
+      "scripts": false,
+      "overflow": false,
+      "current_and_historical_layout": "passed"
+    }
+  ]
+}

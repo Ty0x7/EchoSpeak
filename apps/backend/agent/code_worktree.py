@@ -14,6 +14,7 @@ import re
 from pathlib import Path, PurePosixPath
 import subprocess
 import threading
+import tempfile
 import uuid
 
 from agent.atomic_replace import replace as atomic_replace
@@ -28,10 +29,17 @@ def _filter_overrides(root):
     # Even `git status` may invoke clean/process filters. Query key NAMES only
     # using Git's non-executing config command, then disable every configured
     # filter for this invocation without modifying the owner's configuration.
-    result = subprocess.run(["git", "--no-optional-locks", "-C", str(root), "config", "--null", "--name-only",
-                             "--get-regexp", r"^filter\..*\.(clean|smudge|process|required)$"],
-                            capture_output=True, timeout=10, env=workspace_env(child_env()),
-                            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    try:
+        result = subprocess.run(["git", "--no-optional-locks", "-C", str(root), "config", "--null", "--name-only",
+                                 "--get-regexp", r"^filter\..*\.(clean|smudge|process|required)$"],
+                                capture_output=True, timeout=10, env=workspace_env(child_env()),
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except FileNotFoundError:
+        raise ValueError("Git was not found. Install Git and reopen EchoSpeak before starting an isolated runtime.") from None
+    except subprocess.TimeoutExpired:
+        raise ValueError("Git configuration inspection timed out. Check repository access and retry.") from None
+    except OSError:
+        raise ValueError("Git could not start. Check its installation and folder permissions, then retry.") from None
     if result.returncode not in {0, 1} or len(result.stdout) > 64_000:
         raise ValueError("Cannot safely inspect Git filter configuration")
     args = []
@@ -48,12 +56,16 @@ def _filter_overrides(root):
 def git(root: Path, *args: str, limit=2 * 1024 * 1024, input_data: bytes | None = None) -> bytes:
     # Explicit configuration also disables repository-provided external diff,
     # fsmonitor and hooks, including post-checkout during worktree creation.
-    with subprocess.Popen(["git", "--no-optional-locks", "-c", "core.hooksPath=", "-c", "core.fsmonitor=false",
+    with tempfile.TemporaryFile() as errors, subprocess.Popen(["git", "--no-optional-locks", "-c", "core.hooksPath=", "-c", "core.fsmonitor=false",
                            "-c", "transfer.bundleURI=false", *_filter_overrides(root), "-C", str(root), *args],
                           stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
-                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=workspace_env(child_env()),
+                          stdout=subprocess.PIPE, stderr=errors, env=workspace_env(child_env()),
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as process:
-        timer = threading.Timer(30, process.kill)
+        expired = threading.Event()
+        def timeout():
+            expired.set()
+            process.kill()
+        timer = threading.Timer(30, timeout)
         timer.start()
         def write_input():
             try:
@@ -77,8 +89,23 @@ def git(root: Path, *args: str, limit=2 * 1024 * 1024, input_data: bytes | None 
         except subprocess.TimeoutExpired:
             process.kill()
             raise ValueError("Git operation timed out") from None
+        if expired.is_set():
+            raise ValueError("Git operation timed out. Check repository access and retry.")
         if code:
-            raise ValueError("Git operation failed. Use a local repository with a committed HEAD.")
+            errors.seek(0)
+            raw_detail = errors.read(8192).decode('utf-8', 'replace')
+            detail = raw_detail.lower()
+            if 'dubious ownership' in detail:
+                raise ValueError('Git refused this repository because of its ownership. Inspect ownership in your terminal; Echo does not change safe.directory automatically.')
+            if 'not a git repository' in detail:
+                raise ValueError('This folder is not a Git repository. Select a repository root, or initialize Git and make an initial commit before starting an isolated runtime.')
+            if any(v in detail for v in ('unknown revision','needed a single revision','not a valid object name','bad revision')):
+                raise ValueError('This repository has no usable committed HEAD. Make an initial commit in your terminal, then retry. Existing files are not committed automatically.')
+            if 'permission denied' in detail or 'cannot lock' in detail:
+                raise ValueError('Git could not access or lock this repository. Check folder permissions and close other Git operations before retrying.')
+            from agent.lean.policy import redact_secrets
+            reason = redact_secrets(raw_detail).strip().replace(str(Path.home()), '~')[:1200]
+            raise ValueError(f'Git {args[0] if args else "inspection"} failed (exit {code}): {reason or "Git returned no diagnostic."}')
         if writer:
             writer.join(timeout=2)
         return output
@@ -102,11 +129,17 @@ def atomic_json(path: Path, value):
             temporary.unlink(missing_ok=True)
 
 
-def create(root: Path, directory: Path, *, acknowledge_dirty: bool):
-    head = git(root, "rev-parse", "HEAD").decode().strip()
+def preflight(root: Path):
+    root = Path(root).resolve()
     source = Path(git(root, "rev-parse", "--show-toplevel").decode().strip()).resolve()
     if root != source:
         raise ValueError("Attach the repository root to start an isolated coding session")
+    return git(root, 'rev-parse', '--verify', 'HEAD^{commit}').decode().strip()
+
+
+def create(root: Path, directory: Path, *, acknowledge_dirty: bool):
+    head = preflight(root)
+    source = root
     dirty = bool(git(root, "status", "--porcelain", "--untracked-files=normal"))
     if dirty and not acknowledge_dirty:
         raise ValueError("The source checkout has local changes. Acknowledge starting from committed HEAD; local changes will stay in the source checkout.")

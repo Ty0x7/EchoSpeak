@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { WorkspacePopover } from "../components/WorkspacePopover";
 import { RuntimeMark } from "../components/RuntimeMark";
+import { RuntimeUsage, type SubscriptionUsage } from "../code/RuntimeUsage";
+import { startUsageRefresh } from "../code/usageRefresh";
 import { runtimeName } from "../code/model";
 import { request } from "../projects/model";
 import { isDesktopRuntime, openDesktopExternalUrl } from "../desktop/bridge";
@@ -23,9 +25,20 @@ function useResource<T>(apiBase: string, resource: string, extra: Record<string,
   const [error, setError] = useState("");
   useEffect(() => {
     let live = true; setData(null); setError("");
-    if (context.project_id) request<T>(workbenchUrl(apiBase, context, resource, JSON.parse(key)))
-      .then(value => { if (live) setData(value); }).catch(err => { if (live) setError(err.message); });
-    return () => { live = false; };
+    let pending = false;
+    const load = async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const value = await request<T>(workbenchUrl(apiBase, context, resource, JSON.parse(key)));
+        if (live) { setData(value); setError(""); }
+      } finally { pending = false; }
+    };
+    const failed = (err: unknown) => { if (live) setError(err instanceof Error ? err.message : "Refresh failed; last observation retained"); };
+    if (context.project_id) void load().catch(failed);
+    const stop = context.project_id && resource === "usage" ? startUsageRefresh(load, failed) : () => {};
+    const timer = context.project_id && ["summary", "diff", "files", "pull-requests"].includes(resource) ? setInterval(() => { void load().catch(failed); }, resource === "pull-requests" ? 60000 : 5000) : undefined;
+    return () => { live = false; stop(); clearInterval(timer); };
   }, [apiBase, context.project_id, context.external_session_id, revision, resource, key]);
   return { data, error };
 }
@@ -127,7 +140,7 @@ export function WorkspaceDetails({ apiBase }: { apiBase: string }) {
       {!artifacts.length ? <p className="wb-dnote">Artifacts made in this conversation appear here.</p> : null}
     </DetailSection>
     <DetailSection id="changes" title="Changes" meta={git && (stat.added || stat.removed) ? <><span className="wb-dadd">+{stat.added}</span><span className="wb-ddel">−{stat.removed}</span></> : null}>
-      {!git ? <p className="wb-dnote">{data ? "This folder isn't a Git repository." : "Choose a project to see its changes."}</p> : <>
+      {!git ? <p className="wb-dnote">{data ? "Project folder ready. Git is optional; ask your coding agent to set it up when you want version control." : "Choose a project to see its changes."}</p> : <>
         <button className="wb-drow wb-drow-btn" onClick={() => store.open("diff")}><WorkbenchIcon kind="diff" /><span>{changed ? `${changed} changed file${changed === 1 ? "" : "s"}` : "No uncommitted changes"}</span>
           <small className="wb-dmuted">Review &amp; commit</small></button>
         {(prs && "items" in prs ? prs.items : []).slice(0, 4).map(pr => <button key={pr.number} className="wb-drow wb-drow-btn" onClick={() => openPr(pr.url)}>
@@ -275,17 +288,20 @@ function PullRequests({ apiBase, linked }: { apiBase: string; linked: boolean })
   </div>;
 }
 
-function Usage({ apiBase }: { apiBase: string }) {
-  const { data, error } = useResource<{ runtimes: { runtime: string; session_id: string; limits?: any; usage?: Record<string, unknown>; unavailable?: string }[]; note: string }>(apiBase, "usage");
+export function Usage({ apiBase }: { apiBase: string }) {
+  const { data, error } = useResource<{ accounts?: {runtime:string;plan?:string;subscription_usage?:SubscriptionUsage}[]; runtimes: { runtime: string; session_id: string; subscription_usage?: SubscriptionUsage; usage?: Record<string, unknown>; scope?: string; reported_cost_usd?: number | null; observed_at?: number }[]; note: string; diagnostics?: { resources: { cpu_percent?: number; memory_total_bytes?: number; memory_available_bytes?: number; backend_rss_bytes?: number } } }>(apiBase, "usage");
   return <div className="wb-usage"><header><strong>Usage &amp; limits</strong><button aria-label="Refresh usage" onClick={useWorkbench.getState().refresh}>↻</button></header>
-    {error ? <p role="alert" className="wb-error">{error}</p> : null}{data?.runtimes.map(row => {
-      const windows = row.limits?.rateLimitsByLimitId ? Object.values(row.limits.rateLimitsByLimitId) as any[] : row.limits?.rateLimits ? [row.limits.rateLimits] : [];
-      return <section key={row.session_id}><div className="wb-runtime-line"><RuntimeMark runtime={row.runtime} /><strong>{runtimeName(row.runtime)}</strong><small>{row.session_id.slice(0, 8)}</small></div>
-        {windows.flatMap((limit, index) => ["primary", "secondary"].map(kind => { const window = limit[kind]; return window && typeof window.usedPercent === "number" ? <div key={`${index}:${kind}`} className="wb-limit"><span>{kind === "primary" ? "Session window" : "Longer window"}</span><strong>{Math.max(0, 100 - window.usedPercent).toFixed(0)}% left</strong><progress max={100} value={Math.max(0, 100 - window.usedPercent)} />{window.resetsAt ? <small>Resets {new Date(window.resetsAt * 1000).toLocaleString()}</small> : null}</div> : null; }))}
-        {!windows.length ? <p className="wb-muted">{row.unavailable || "Account limits were not reported by this runtime."}</p> : null}
-        {row.usage && Object.keys(row.usage).length ? <details><summary>Reported API usage</summary><pre>{JSON.stringify(row.usage, null, 2)}</pre></details> : null}
+    {error ? <p role="alert" className="wb-error">{error}</p> : null}
+    {data?.accounts?.map(row => <section key={row.runtime}><div className="wb-runtime-line"><RuntimeMark runtime={row.runtime}/><strong>{runtimeName(row.runtime)}</strong><small>{row.plan || "Account observation"}</small></div><RuntimeUsage usage={row.subscription_usage}/></section>)}
+    {data?.runtimes.map(row => {
+      return <section key={row.session_id}><div className="wb-runtime-line"><RuntimeMark runtime={row.runtime} /><strong>{runtimeName(row.runtime)}</strong><small>{row.session_id.slice(0,8)}</small></div>
+        <p className="wb-muted">Session usage · separate from subscription allowances above</p>
+        {row.usage && Object.keys(row.usage).length ? <><p className="wb-muted">{row.scope}</p><dl>{Object.entries(row.usage).map(([key,value])=><React.Fragment key={key}><dt>{key.replace(/_/g," ")}</dt><dd>{String(value)}</dd></React.Fragment>)}</dl></> : null}
+        {typeof row.reported_cost_usd === "number" ? <p>Runtime-reported cost: ${row.reported_cost_usd.toFixed(4)} <small>(not a subscription bill)</small></p> : null}
+        {row.observed_at ? <small>Observed {new Date(row.observed_at*1000).toLocaleString()}</small> : null}
       </section>;
-    })}{data && !data.runtimes.length ? <p className="wb-muted">Connect a coding runtime to see the usage it reports.</p> : null}<p className="wb-footnote">{data?.note}</p></div>;
+    })}{data && !data.runtimes.length && !data.accounts?.length ? <p className="wb-muted">Check a coding account or connect a runtime to see the usage it reports.</p> : null}<p className="wb-footnote">{data?.note}</p>
+    {data?.diagnostics?.resources ? <section><strong>This computer</strong><p className="wb-muted">A current host observation; no automatic routing.</p><dl>{Object.entries(data.diagnostics.resources).map(([key,value])=><React.Fragment key={key}><dt>{key.replace(/_/g," ")}</dt><dd>{typeof value === "number" ? key.endsWith("bytes") ? `${(value/1024/1024).toFixed(0)} MiB` : `${value.toFixed(1)}%` : String(value)}</dd></React.Fragment>)}</dl></section> : null}</div>;
 }
 
 function AgentActivity({ apiBase, research }: { apiBase: string; research: boolean }) {

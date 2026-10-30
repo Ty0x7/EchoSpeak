@@ -60,9 +60,10 @@ export function StopEverythingButton({ apiBase }: { apiBase: string }) {
   };
   return (
     <button type="button" className={`stop-all${armed ? " is-armed" : ""}`} disabled={busy} onClick={() => void click()}
-      title="Cancel every running agent and pause routines, channels and A2A">
+      aria-label={armed ? "Confirm stop everything" : "Stop everything"} aria-pressed={armed}
+      title={armed ? "Click again to stop everything" : "Stop everything: cancel running agents and pause routines, channels and A2A"}>
       <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden><rect x="1.5" y="1.5" width="9" height="9" rx="2" fill="currentColor" /></svg>
-      {busy ? "Stopping…" : armed ? "Click again to stop all agents" : "Stop everything"}
+      <span className="stop-all-label">{busy ? "Stopping…" : armed ? "Click again to stop all agents" : "Stop everything"}</span>
     </button>
   );
 }
