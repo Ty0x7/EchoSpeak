@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright, expect
 
 ROOT=Path(__file__).resolve().parents[1]
 WEB=ROOT/"apps/web"
-MEDIA=ROOT/"artifacts/media/code-inbox"
+MEDIA=ROOT/"artifacts/media/sidebar-11.13.1"
 
 def fixture():
     def inbox(state, check="Not checked", triage=True):
@@ -37,16 +37,17 @@ const info:any={provider:"lmstudio",model:"fixture-local",local:true,binding_rev
 function Preview(){
  const [pid,setPid]=useState("p");
  const [env,setEnv]=useState<any>("code");
+ const [codeQuery,setCodeQuery]=useState("");
  const [collapsed,setCollapsed]=useState(false);
  const contacts:any[]=[{id:"echo",name:"Echo",initials:"E",title:"Your personal assistant"},{id:"scout",name:"Jarvis",initials:"J",title:"Research and investigation"}];
  const conversations=[{id:"chat1",name:"Planning the next release",at:Date.now(),projectId:"p"},{id:"chat2",name:"Ideas for the dashboard",at:Date.now()-86400000}];
- const sidebar=<CodeTree apiBase="/fixture-api" revision={0} activeThreadId="failed" activeExternalId="" workingSessionIds={new Set(["working"])}
+ const sidebar=<CodeTree searchQuery={codeQuery} apiBase="/fixture-api" revision={0} activeThreadId="failed" activeExternalId="" workingSessionIds={new Set(["working"])}
  onOpenNative={s=>{document.body.dataset.opened=s.thread_id}} onOpenExternal={(_p,_r,id)=>{document.body.dataset.opened=id}}
  onNewSession={id=>setPid(id||"p")} onAddFolder={noop}/>;
  return <div className="echo-root fixture-layout" style={collapsed?{gridTemplateColumns:"56px minmax(0,1fr)"}:undefined}><div className="fixture-sidebar"><ProjectSidebar collapsed={collapsed} projects={projects} sessions={conversations} activeProjectId={pid} activeSessionId="failed" activeView="code"
  onToggleCollapsed={()=>setCollapsed(v=>!v)} onNewSession={noop} onAddFolder={noop} onSelectSession={noop} onRenameSession={noop} onDeleteSession={noop} onDeleteProject={noop} onView={noop} onSettings={noop}
  footerExtra={<><div className="wb-sidebar-actions"><button aria-label="Pull requests"><WorkbenchIcon kind="pull_requests"/></button><button aria-label="Usage and limits"><WorkbenchIcon kind="usage"/></button></div><StopEverythingButton apiBase="/fixture-api"/></>}
- environment={env} onEnvironment={setEnv} onPage={noop} collapsedRoster={<CollapsedRoster agents={contacts} onOpenAgent={a=>{document.body.dataset.agent=a.id}}/>} onSearchChats={async q=>conversations.filter(c=>c.name.toLowerCase().includes(q.toLowerCase())).map(c=>({session_id:c.id,title:c.name,snippet:"Fixture conversation",role:"user",agent:"",created_at:c.at,matches:1}))} agents={{count:2,onNew:noop,list:<AgentRows agents={contacts} rooms={[]} activeThreadId="" onOpenAgent={a=>{document.body.dataset.agent=a.id}} onEditAgent={noop}/>}} codeTree={sidebar}/></div><main className="fixture-main">
+ environment={env} onEnvironment={setEnv} onPage={noop} collapsedRoster={<CollapsedRoster agents={contacts} onOpenAgent={a=>{document.body.dataset.agent=a.id}}/>} onSearchChats={async q=>conversations.filter(c=>c.name.toLowerCase().includes(q.toLowerCase())).map(c=>({session_id:c.id,title:c.name,snippet:"Fixture conversation",role:"user",agent:"",created_at:c.at,matches:1}))} agents={{count:2,onNew:noop,list:<AgentRows agents={contacts} rooms={[]} activeThreadId="" onOpenAgent={a=>{document.body.dataset.agent=a.id}} onEditAgent={noop}/>}} codeTree={sidebar} codeQuery={codeQuery} onCodeQuery={setCodeQuery}/></div><main className="fixture-main">
  <div className="fixture-caption">EchoSpeak {manifest.version} · component preview · no model connected</div>
  <EchoCodeWorkspace apiBase="/fixture-api" projects={projects} projectId={pid} onProject={setPid} onAddFolder={noop} onSession={s=>{document.body.dataset.started=s.thread_id}} nativeInfo={info} nativeLocked={false} onConfigureProviders={noop}/>
  <div className="fixture-assets" aria-label="Provider image checks"><RuntimeMark runtime="codex"/><RuntimeMark runtime="claude_cli"/></div>
@@ -86,6 +87,18 @@ def main():
             page=browser.new_page(viewport={"width":1280,"height":900},device_scale_factor=1)
             page.emulate_media(reduced_motion="reduce")
             page.on("pageerror",lambda e:failures.append(str(e)))
+            def navigation_check(labels, search_label):
+                expect(page.locator('.es-sidebar-identity')).to_have_count(0)
+                search_box=page.get_by_label(search_label,exact=True).bounding_box()
+                assert search_box['y']<page.get_by_role('tab',name='Chat',exact=True).bounding_box()['y']
+                nav=page.get_by_role('navigation',name='Pages',exact=True).get_by_role('button')
+                assert nav.all_inner_texts()==labels
+                boxes=[button.bounding_box() for button in nav.all()]
+                assert all(abs(box['x']-boxes[0]['x'])<1 for box in boxes)
+                assert all(b['y']>=a['y']+a['height'] for a,b in zip(boxes,boxes[1:]))
+                utilities=[page.get_by_role('button',name=n,exact=True).bounding_box() for n in ['Pull requests','Usage and limits','Stop everything','Settings']]
+                assert all(abs(box['y']-utilities[0]['y'])<1 for box in utilities)
+                assert all(b['x']>=a['x']+a['width'] for a,b in zip(utilities,utilities[1:]))
             def api(route):
                 path=route.request.url.split("/fixture-api",1)[1].split("?")[0]
                 body=route.request.post_data_json if route.request.method=="POST" else None
@@ -241,12 +254,14 @@ def main():
             # Exercise actual shared navigation and actual AgentRows, not a mock layout.
             page.get_by_role("tab",name="Chat",exact=True).click()
             expect(page.get_by_label("Search chats",exact=True)).to_be_visible()
+            navigation_check(['New chat','Projects','Creations','Artifacts'],'Search chats')
             expect(page.get_by_role("button",name="Session: Planning the next release",exact=True)).to_be_visible()
             page.locator(".echo-sidebar").screenshot(path=str(MEDIA/"sidebar-chat-light.png"))
             page.get_by_label("Search chats",exact=True).fill("dashboard")
             expect(page.get_by_role("button",name="Ideas for the dashboard You: Fixture conversation")).to_be_visible()
             page.get_by_label("Search chats",exact=True).fill("")
             page.get_by_role("tab",name="Agents",exact=True).click()
+            navigation_check(['New agent','Group chats','Routines'],'Search messages')
             expect(page.get_by_text("Your personal assistant",exact=True)).to_be_visible()
             page.get_by_role("button",name="Echo Your personal assistant",exact=True).click()
             assert page.locator("body").get_attribute("data-agent")=="echo"
@@ -266,7 +281,7 @@ def main():
             assert not failures,failures
             report=browser.new_context(java_script_enabled=False)
             rp=report.new_page()
-            for document,label in [("artifacts/research/native-code.html","code-inbox-report"),("artifacts/releases/v11.13.0.html","release-11.13.0"),("artifacts/releases/index.html","release-atlas")]:
+            for document,label in [("artifacts/research/native-code.html","code-inbox-report"),("artifacts/releases/v11.13.1.html","release-11.13.1"),("artifacts/releases/v11.13.0.html","release-11.13.0"),("artifacts/releases/index.html","release-atlas")]:
                 for width,theme in [(1400,"dark"),(390,"light")]:
                     rp.set_viewport_size({"width":width,"height":1100});rp.emulate_media(color_scheme=theme)
                     rp.goto((ROOT/document).as_uri())

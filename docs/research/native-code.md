@@ -491,3 +491,10 @@ checks are focused, not an exhaustive acceptance test of every app surface.
 Future mobile/remote access needs authenticated pairing, scoped transport,
 session routing, reconnect/replay and approval UX. Remote routing, new schedulers
 and separately forked harnesses were not prematurely implemented.
+
+## 14. Final 11.13.1 sidebar refinement
+
+The approved Code inbox is retained. Search replaces the sidebar identity header;
+Chat and Agents use vertical page lists, and four icon utilities share the footer.
+See [11.13.1 notes](../releases/v11.13.1.md) and the paired visual report for current
+captures and installer commands. Earlier 11.13.0 screenshots remain historical.

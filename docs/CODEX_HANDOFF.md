@@ -1,7 +1,7 @@
 # EchoSpeak: Codex engineering handoff
 
 Updated 30 October 2026 UTC from source; the PR table is the 29 October GitHub snapshot. Current local work
-is on `codex/code-inbox`, based on `416fd8d` (Claude's 11.12 stack). Source version is 11.13.0. The owner authorized a scoped PR and local Windows build.
+is on `codex/code-inbox`, based on `416fd8d` (Claude's 11.12 stack). Source version is 11.13.1. The owner authorized a scoped PR and local Windows build.
 Do not merge or publish a GitHub release without a further instruction.
 
 [PR #114](https://github.com/Ty0x7/EchoSpeak/pull/114) is open, ready for review,
@@ -208,3 +208,15 @@ Current EXE: `release/v11.13.0/runtime-reliability/EchoSpeak_11.13.0_x64-setup.e
 Fresh full build exited 0; both EXE/MSI report 11.13.0. Compiled import/API/MCP
 checks passed. Local unsigned artifacts are retained; none was installed.
 EXE SHA-256: `cee96b1635c382073d2a1fd303ce5c7135295b5c670d4f2622264e222fd5d74d` (174,666,238 bytes).
+
+## Final sidebar candidate: 11.13.1
+
+The owner approved Code and requested search-first headers, vertical Chat/Agents
+shortcuts, no sidebar brand/Workspace label, and four compact footer icons.
+The implementation preserves Code and provider behavior. Current versioned notes:
+[11.13.1](releases/v11.13.1.md), with actual component screenshots and exact
+build/install commands. Do not use the older 11.13.0 installer for this refinement.
+
+Current installer: `release/v11.13.1/EchoSpeak_11.13.1_x64-setup.exe`. Full build
+exited 0 and both installer metadata checks report 11.13.1. API/MCP packaged
+checks passed. Unsigned local test builds; no installation, merge or release.

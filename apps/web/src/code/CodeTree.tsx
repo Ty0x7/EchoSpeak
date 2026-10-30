@@ -39,14 +39,15 @@ function saved<T>(key: string, fallback: T): T {
 }
 const elapsed = (at: number) => { const m = Math.max(0, Math.floor((Date.now() / 1000 - at) / 60)); return m < 1 ? "Now" : m < 60 ? `${m}m` : m < 1440 ? `${Math.floor(m / 60)}h` : `${Math.floor(m / 1440)}d`; };
 
-export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, onOpenNative, onOpenExternal, onNewSession, onAddFolder, workingSessionIds }: {
-  apiBase: string; revision: number; activeThreadId: string; activeExternalId: string; workingSessionIds?: Set<string>;
+export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, onOpenNative, onOpenExternal, onNewSession, onAddFolder, workingSessionIds, searchQuery }: {
+  searchQuery?: string; apiBase: string; revision: number; activeThreadId: string; activeExternalId: string; workingSessionIds?: Set<string>;
   onOpenNative(session: CodeSession): void; onOpenExternal(projectId: string, runtimeId: string, sessionId: string): void;
   onNewSession(projectId: string): void; onAddFolder(): void;
 }) {
   const [data, setData] = useState<CodeOverview | null>(null);
   const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
+  const [localQuery, setQuery] = useState("");
+  const query = searchQuery ?? localQuery;
   const [project, setProject] = useState("");
   const [revisionLocal, refresh] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
@@ -136,7 +137,7 @@ export function CodeTree({ apiBase, revision, activeThreadId, activeExternalId, 
     <button type="button" className="ec-inbox-divider" aria-controls={`ec-shelf-${name}`} aria-expanded={Boolean(shelves[name])} onClick={() => setShelves(old => ({ [name]: !old[name] }))}><span>{label} ({items.length})</span><span aria-hidden>{shelves[name] ? "⌄" : "⌃"}</span></button>
   </section>;
   return <div className="ec-tree ec-inbox" aria-label="Code inbox">
-    <div className="ec-inbox-toolbar"><SidebarIcon name="search"/><input aria-label="Search coding sessions" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} />
+    <div className="ec-inbox-toolbar">{searchQuery === undefined ? <><SidebarIcon name="search"/><input aria-label="Search coding sessions" placeholder="Search" value={query} onChange={e => setQuery(e.target.value)} /></> : <span className="ec-inbox-toolbar-label">Sessions</span>}
       <button type="button" title="Inbox filters" aria-label="Inbox filters" aria-expanded={filters} onClick={()=>setFilters(v=>!v)}><SidebarIcon name="filter"/></button><button type="button" title="Add project" aria-label="Add a project folder" onClick={onAddFolder}><SidebarIcon name="folder"/></button><button type="button" title="New thread" aria-label="New coding session" onClick={() => onNewSession(project || data?.projects[0]?.id || "")}><SidebarIcon name="compose"/></button></div>
     {filters ? <div className="ec-inbox-options"><select aria-label="Filter coding projects" value={project} onChange={e => setProject(e.target.value)}><option value="">All projects</option>{data?.projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       <label><input type="checkbox" checked={hideWorking} onChange={e=>setHideWorking(e.target.checked)}/>Working shelf</label></div> : null}

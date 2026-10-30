@@ -1,0 +1,168 @@
+{
+  "version": "11.13.1",
+  "date_utc": "2026-10-30",
+  "base_commit": "c1e2db62725c4cf12483f5bdbbba16316115e8bb",
+  "scope": "Search-first sidebar, vertical Chat/Agents navigation, compact utilities; approved Code preserved",
+  "workflow": "Objective → Research → Environment → Verification → Adaptation → Completion",
+  "typecheck": "passed",
+  "web_tests": {
+    "passed": 35,
+    "files": 7,
+    "command": "npm.cmd run test:run -- src/components/sidebarSections.test.ts src/app/environments.test.tsx src/code src/runtimeLayout.test.ts"
+  },
+  "desktop_contracts": {
+    "passed": 16,
+    "command": "npm.cmd test (apps/desktop)"
+  },
+  "browser": {
+    "version": "11.13.1",
+    "checks": [
+      "shared Chat/Agents/Code navigation, search and agent callback",
+      "left sidebar placement",
+      "flat active rows",
+      "collapsed Working/Snoozed/Settled shelves",
+      "each shelf expands upward with at least 60px reading space at 900px and 560px heights; settings remain visible",
+      "native API model selection; exact Claude model ID and reported usage; switch back to local model",
+      "local provider image assets",
+      "search",
+      "visible Shift range selection",
+      "bulk timed snooze",
+      "stale action rejection",
+      "errors survive refresh",
+      "dark/light themes",
+      "Ctrl+S stash and restore",
+      "Ctrl+Enter background submit",
+      "image stash",
+      "MCP panel read-only create, hide token and revoke",
+      "390px without overflow",
+      "no page errors",
+      "research report, versioned release report and atlas wide/narrow with scripts disabled"
+    ],
+    "model_calls": 0,
+    "request_count": 43
+  },
+  "new_browser_assertions": [
+    "no identity/logo row",
+    "search above tabs",
+    "Chat: New chat, Projects, Creations, Artifacts; equal x and increasing y",
+    "Agents: New agent, Group chats, Routines; equal x and increasing y",
+    "Pull requests, Usage, Stop everything and Settings share one y and nonoverlapping x"
+  ],
+  "compiled_api": {
+    "version": "11.13.1",
+    "status": "passed",
+    "health": true,
+    "owner_auth": true,
+    "grant_read": true,
+    "readonly_denial": true,
+    "owner_key_not_client_grant": true,
+    "revoked_denial": true,
+    "model_prompts_sent": 0,
+    "scope": "Compiled backend API using disposable state; no desktop UI, provider login or model prompts."
+  },
+  "compiled_mcp": {
+    "version": "11.13.1",
+    "status": "passed",
+    "transport": "compiled backend --control-mcp; real SDK stdio initialize/list/call; owned loopback peer",
+    "tools": 8,
+    "calls": [
+      "projects",
+      "send"
+    ],
+    "denied_mutation": true,
+    "provider_calls": 0,
+    "scope": "Packaging/transport only. Source tests separately cover real grants and original harness dispatch."
+  },
+  "packaging": {
+    "status": "passed",
+    "exit_code": 0,
+    "backend_self_check": "passed",
+    "production_frontend": "passed",
+    "rust_release": "passed",
+    "artifacts": [
+      {
+        "installed": false,
+        "sha256": "8af2f436791dec3f3c7d3abf35787f56050e32a2b5d2d24db19f4818010dc1b8",
+        "authenticode_status": "NotSigned",
+        "product_version": "11.13.1",
+        "bytes": 174661032,
+        "path": "release/v11.13.1/EchoSpeak_11.13.1_x64-setup.exe"
+      },
+      {
+        "installed": false,
+        "sha256": "25c37377bc3f4c1bdf04fc0812af6d8e0682e43c92fef1550582b6003d8cd0b9",
+        "authenticode_status": "NotSigned",
+        "product_version": "11.13.1",
+        "bytes": 252428772,
+        "path": "release/v11.13.1/EchoSpeak_11.13.1_x64_en-US.msi"
+      }
+    ],
+    "signing": "Unsigned local test installers; no updater signatures",
+    "installed": false
+  },
+  "new_model_prompts": 0,
+  "installed_acceptance": false,
+  "merged": false,
+  "public_release": false,
+  "source_media_sha256": {
+    "apps/backend/version.py": "f27cd1991e49aba4aab2f24bdabed162d36812996f16140314d53ebcfc75ba06",
+    "apps/web/package.json": "98635f17f1cc6e0520ad1144d64fb838d5f8379c83e8ca7087ebeb4907e3ef8b",
+    "apps/desktop/package.json": "399a6ed821a21c84c8e9cbadc1f9d62167e88f3905aee2b10e331f2f952ef118",
+    "apps/desktop/src-tauri/tauri.conf.json": "5a95b0244a450334ca7c227ff8a36f344ca09f83cb1298106e529d6a25325a3d",
+    "apps/web/src/components/ProjectSidebar.tsx": "c2d8c4b88cc73f01ec1d7c1ecf9bad1fce5fe463c09ab075d0f15dc8e63afd57",
+    "apps/web/src/components/sidebar.css": "d16e98672d37e1a7900a242216f229a9c24604ed30e99dac9308cd47313a1e49",
+    "apps/web/src/code/CodeTree.tsx": "f8d7cec97e1a0c2e0dc4b8b2a1fc695c930e41f9fd4a2bf97b5f6227b972417a",
+    "apps/web/src/index.tsx": "9c65d4b7f56b4a02b330cbbea83c91b69990265ebeb23f954c4722fb34f9beec",
+    "apps/web/src/dashboard/StopEverything.tsx": "c06f4b88e5ca3e80adb0fffefd8258c4985b75f6b83e71e8236f3e4470b3fa78",
+    "artifacts/media/sidebar-11.13.1/inbox-dark.png": "76dd0315b885b4a6086b4f06d3dae2d86e245b96b022c93859d28efb0b4db40c",
+    "artifacts/media/sidebar-11.13.1/inbox-expanded-short.png": "d4e3e3aa6b1be6b2cf94d1f9653e9917532f0702324459a40dc68da4259a9788",
+    "artifacts/media/sidebar-11.13.1/inbox-expanded-up.png": "1c6109614ce7dca63efa926239cc7bae993f473a0826452d40ea31794ff9d44e",
+    "artifacts/media/sidebar-11.13.1/inbox-light.png": "92c13154d08a55bbd695c9864d6084e7192c20c06e850a1c3dbaa7824f0fbc81",
+    "artifacts/media/sidebar-11.13.1/left-sidebar-workspace.png": "a9bf16335495e64aabfb085f37c4b6ea7f72e41dba532fddf9eb3ed3a33af18b",
+    "artifacts/media/sidebar-11.13.1/runtime-model-picker.png": "1ee3dbefb703f1cee723962e912bf1d955e3e237eb4824a032b366204b088fcd",
+    "artifacts/media/sidebar-11.13.1/sidebar-agents-dark.png": "9bb0a40304b23f23e295bde041c9b0a5c8f6f92a3a97a4576869747f5aa4b56d",
+    "artifacts/media/sidebar-11.13.1/sidebar-agents-light.png": "a7ec87218b571802748713322258ad082fa74f4b6d550bb066341d417ad37bdf",
+    "artifacts/media/sidebar-11.13.1/sidebar-chat-dark.png": "de7ed2bf8a7d46fa1230556cf57c876ff9cc4378b8130f92e15b79af683d5229",
+    "artifacts/media/sidebar-11.13.1/sidebar-chat-light.png": "c9a7fee86fea883368fdb0d4b63f7ccac139dd94247a8ffdaed1abb212fc05b9",
+    "artifacts/media/sidebar-11.13.1/sidebar-rail.png": "fdb0e2c498724deff7a40c1123fda001dc9511cbe11b121a1d5307881628de95"
+  },
+  "notes": [
+    "Browser/screenshots use actual components with deterministic fixtures, not the installed desktop.",
+    "11.13.0 provider acceptance is historical; no new live provider claims.",
+    "11.13.0 screenshots retained unchanged; 11.13.1 media is versioned separately."
+  ],
+  "final_documentation_qa": [
+    {
+      "document": "artifacts/releases/v11.13.1.html",
+      "width": 1400,
+      "theme": "dark",
+      "scripts": false,
+      "overflow": false,
+      "images": "passed"
+    },
+    {
+      "document": "artifacts/releases/v11.13.1.html",
+      "width": 390,
+      "theme": "light",
+      "scripts": false,
+      "overflow": false,
+      "images": "passed"
+    },
+    {
+      "document": "artifacts/releases/index.html",
+      "width": 1400,
+      "theme": "dark",
+      "scripts": false,
+      "overflow": false,
+      "images": "passed"
+    },
+    {
+      "document": "artifacts/releases/index.html",
+      "width": 390,
+      "theme": "light",
+      "scripts": false,
+      "overflow": false,
+      "images": "passed"
+    }
+  ]
+}

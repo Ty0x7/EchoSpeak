@@ -1,7 +1,7 @@
 # EchoSpeak visual release atlas
 
 This collection pairs versioned notes with complementary HTML in
-`artifacts/releases/`. It contains 39 visual reports from 10.0.0 through 11.13.0;
+`artifacts/releases/`. It contains 40 visual reports from 10.0.0 through 11.13.1;
 intervening source-only notes do not all have a historical HTML counterpart.
 Earlier reports remain unchanged. The new [11.13.0](v11.13.0.md) pair records the
 left Code inbox, optional local MCP, actual component screenshots and separate
@@ -122,3 +122,5 @@ version-note hashes remain unchanged. The current workspace report also opened
 with Technical notes through actual repository discovery in the isolated UI.
 
 Latest: [11.13.0 technical notes](v11.13.0.md) · [visual walkthrough](../../artifacts/releases/v11.13.0.html).
+
+[11.13.1](v11.13.1.md) records the final search-first sidebar and compact utilities.

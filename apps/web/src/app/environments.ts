@@ -32,7 +32,7 @@ export function environmentOf(thread: ThreadLike | undefined, roomThreadIds: Set
 
 /** The sidebar's pages, by environment. Each page lives in exactly one environment. */
 export const ENVIRONMENT_PAGES: Record<Environment, Exclude<SidebarPage, "chat" | "code" | "agents">[]> = {
-  chat: ["projects", "artifacts", "creations"],
+  chat: ["projects", "creations", "artifacts"],
   agents: ["groups", "routines"],
   code: [],
 };

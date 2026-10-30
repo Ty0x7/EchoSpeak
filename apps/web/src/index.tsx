@@ -121,6 +121,7 @@ export const Dashboard: React.FC<{
   const [codeTreeRevision, setCodeTreeRevision] = useState(0);
   const [codeConversationOpen, setCodeConversationOpen] = useState(false);
   const [codeProjectId, setCodeProjectId] = useState("");
+  const [codeQuery, setCodeQuery] = useState("");
   const workbench = useWorkbench();
   /** The artifact shown in the side panel. */
   const [openArtifact, setOpenArtifact] = useState<{ id: string; version?: number } | null>(null);
@@ -1907,7 +1908,8 @@ export const Dashboard: React.FC<{
             : threads.filter((thread) => environmentOf(thread, roomThreadIds) === "chat")}
           environment={environment}
           onEnvironment={switchEnvironment}
-          codeTree={<CodeTree apiBase={apiBase} revision={codeTreeRevision + threads.filter(thread => thread.surface === "code").length} workingSessionIds={inFlightSessionIds}
+          codeQuery={codeQuery} onCodeQuery={setCodeQuery}
+          codeTree={<CodeTree searchQuery={codeQuery} apiBase={apiBase} revision={codeTreeRevision + threads.filter(thread => thread.surface === "code").length} workingSessionIds={inFlightSessionIds}
             activeThreadId={mainPage === "code" && codeConversationOpen ? activeThreadId : ""}
             activeExternalId={mainPage === "code" && !codeConversationOpen ? codeOpen?.sessionId || "" : ""}
             onOpenNative={(session) => { setCodeProjectId(session.project_id); setThreads(previous => previous.some(thread => thread.id === session.thread_id) ? previous : [{ id: session.thread_id, name: session.title, at: normalizeTimestampMs(session.last_active_at), projectId: session.project_id, messageCount: session.message_count, surface: "code", agentRuntime: session.agent_runtime, environment: "code" }, ...previous]); switchThread(session.thread_id); setCodeConversationOpen(true); setMainPage("code"); }}
