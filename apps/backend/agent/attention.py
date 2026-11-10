@@ -130,6 +130,9 @@ def _connections() -> list[Item]:
 
 
 def _coding_agents() -> list[Item]:
+    from agent import environments
+    if environments.unified():
+        return []  # EchoSpeak doesn't host Codex or Claude Code in this mode: their sign-in isn't Echo's concern.
     from agent import code_accounts
 
     items = []

@@ -131,3 +131,12 @@ def test_no_external_harness_is_offered_or_started(env, tmp_path):
     # Echo's own workbench (terminal, Git review, scripts) shares the supervisor's executor and its
     # plain gate. Unified mode must not close it: only Private/Offline and Stop everything do.
     manager.admit()
+
+
+def test_no_sign_in_nags_for_tools_echo_no_longer_hosts(env, monkeypatch):
+    from agent import attention, code_accounts
+    signed_out = {"installed": True, "signed_in": False, "plan": "pro", "subscription_usage": {"observed_at": 1}}
+    monkeypatch.setattr(code_accounts, "remembered", lambda runtime: dict(signed_out))
+    assert attention._coding_agents() == []
+    monkeypatch.setattr(config, "assistant_mode", "environments", raising=False)
+    assert len(attention._coding_agents()) == 2  # the default mode still reminds the owner

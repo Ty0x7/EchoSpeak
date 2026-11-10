@@ -490,11 +490,13 @@ class Workbench:
         return {"items": json.loads(output), "available": True, "repository": repo}
 
     async def usage(self, context):
+        from agent import environments
         from agent.code_accounts import remembered
         # Passive cached account observations are useful before opening a session.
         # Do not launch a CLI or refresh credentials when opening this view.
+        # One-assistant mode hosts no subscription harness, so it shows no subscription accounts.
         accounts = {}
-        for runtime in ('codex', 'claude_cli'):
+        for runtime in () if environments.unified() else ('codex', 'claude_cli'):
             status = remembered(runtime)
             if status.get('signed_in'):
                 accounts[runtime] = {'runtime': runtime, 'plan': status.get('plan', ''),
