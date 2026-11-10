@@ -127,4 +127,7 @@ def test_no_external_harness_is_offered_or_started(env, tmp_path):
     assert [row["id"] for row in catalog["runtimes"]] == ["echo"]
     manager = code_sessions.Sessions(tmp_path / "external")
     with pytest.raises(PermissionError, match="no longer starts"):
-        manager.admit()
+        manager.admit_external()
+    # Echo's own workbench (terminal, Git review, scripts) shares the supervisor's executor and its
+    # plain gate. Unified mode must not close it: only Private/Offline and Stop everything do.
+    manager.admit()

@@ -264,7 +264,7 @@ class Sessions:
                 if not session.adapter:
                     continue
                 try:
-                    self.admit()
+                    self.admit_external()
                     session.validate()
                 except (ValueError, OSError, KeyError, PermissionError):
                     await session.stop("Runtime admission or project trust changed")
@@ -294,14 +294,20 @@ class Sessions:
             except (OSError, ValueError, KeyError):
                 continue
 
-    def admit(self):
+    def admit_external(self):
+        """admit(), plus: in the one-assistant mode no external harness is launched, connected or prompted.
+
+        Echo's own workbench (terminal, Git review, scripts) uses admit() only, so it keeps working.
+        Saved external sessions, their worktrees and diffs stay on disk and readable.
+        """
         from agent import environments
-        from agent.lean.stop import paused
         if environments.unified():
-            # One assistant: EchoSpeak runs its own harness only. Saved sessions, worktrees and
-            # their diffs stay on disk and stay readable; nothing is launched or resumed.
             raise PermissionError(
                 "EchoSpeak no longer starts Codex, Claude Code or ACP agents. Run them beside EchoSpeak in their own apps.")
+        self.admit()
+
+    def admit(self):
+        from agent.lean.stop import paused
         if self.suspended or _privacy_failed or privacy.mode() != "standard":
             raise PermissionError("External runtimes are blocked in Private/Offline mode")
         if paused():
@@ -340,7 +346,7 @@ class Sessions:
                 session.lease = None
 
     async def create(self, project_id, runtime_id, key, acknowledge_dirty=False, command=None, workspace_mode="folder"):
-        self.admit()
+        self.admit_external()
         if runtime_id not in RUNTIMES:
             raise ValueError("Select an external runtime")
         if workspace_mode not in {"folder", "worktree"}:
@@ -387,7 +393,7 @@ class Sessions:
             self.starting.discard(key)
 
     async def connect(self, session_id):
-        self.admit()
+        self.admit_external()
         if session_id in self.tool_loans:
             raise ValueError("Close this worktree's terminals before reconnecting the coding runtime")
         session = self.get(session_id)
@@ -408,7 +414,7 @@ class Sessions:
             session.row["state"] = "connecting"
             session.adapter = {"codex": Codex, "claude_cli": ClaudeCli, "acp": Acp}[runtime](session)
             await session.adapter.connect()
-            self.admit()
+            self.admit_external()
             session.row["state"] = "ready"
             session.save()
         except BaseException:
@@ -417,7 +423,7 @@ class Sessions:
         return session.public()
 
     async def login(self, session_id, method_id=""):
-        self.admit()
+        self.admit_external()
         session = self.get(session_id)
         if not session.adapter or session.adapter.rpc.closed or session.task:
             raise ValueError("Connect an idle runtime first")
@@ -430,7 +436,7 @@ class Sessions:
         raise ValueError("Claude Code signs in with its own `claude auth login`: Settings › Models › Coding agents › Claude Code › Sign in")
 
     async def prompt(self, session_id, text, model="", effort=""):
-        self.admit()
+        self.admit_external()
         session = self.get(session_id)
         if session.task or session.row["state"] == "connecting" or not session.adapter or session.adapter.rpc.closed:
             raise ValueError("Connect an idle runtime before sending")
@@ -462,7 +468,7 @@ class Sessions:
             return {"id": session_id, "status": "already_accepted", "request_id": request_id}
         if len(receipts) >= 1024:
             raise ValueError("This session's control receipt budget is exhausted; start a new session")
-        self.admit()
+        self.admit_external()
         if not text.strip() or len(text) > 60000:
             raise ValueError("Enter a bounded coding task")
         if session.row["runtime_id"] == "codex" and not session.account.get("connected"):
@@ -481,7 +487,7 @@ class Sessions:
         try:
             if session.workspace_mode == "worktree":
                 before = await asyncio.to_thread(wt.snapshot, session.root)
-            self.admit()
+            self.admit_external()
             session.validate()
             session.turn_id = None
             session.turn_finished.clear()
