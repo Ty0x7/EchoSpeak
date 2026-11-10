@@ -95,6 +95,41 @@ def _start_background_warmup() -> None:
     threading.Thread(target=warm, name="echospeak-warmup", daemon=True).start()
 
 
+# (host, port) that start_server bound; None under TestClient or other ASGI launchers.
+_SERVE_ADDRESS: tuple[str, int] | None = None
+
+
+def _publish_endpoint() -> None:
+    """POSIX: write endpoint.json so the terminal client can attach (agent/endpoint_file.py)."""
+    if _SERVE_ADDRESS is None:
+        return
+    try:
+        from agent import endpoint_file
+        from api.auth import _api_auth_required_for_host, _configured_api_auth_key
+        from config import DATA_DIR
+        from version import APP_VERSION
+
+        endpoint_file.write_endpoint(
+            _SERVE_ADDRESS[0], _SERVE_ADDRESS[1],
+            auth_key=_configured_api_auth_key(),
+            auth_required=_api_auth_required_for_host("127.0.0.1"),
+            version=APP_VERSION, data_dir=str(DATA_DIR),
+        )
+    except Exception:
+        logger.warning("Endpoint file was not written", exc_info=True)
+
+
+def _unpublish_endpoint() -> None:
+    if _SERVE_ADDRESS is None:
+        return
+    try:
+        from agent import endpoint_file
+
+        endpoint_file.remove_endpoint()
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Manage application lifespan."""
@@ -271,9 +306,11 @@ async def lifespan(app: FastAPI):
 
     research_cleanup = asyncio.create_task(prune_research())
     learning_task = asyncio.create_task(learning_worker())
+    _publish_endpoint()
     try:
         yield
     finally:
+        _unpublish_endpoint()
         from agent.code_sessions import stop_all as stop_code_runtimes
         await asyncio.to_thread(stop_code_runtimes, "Backend shutdown")
         for task in (research_cleanup, learning_task):
@@ -627,6 +664,8 @@ def start_server(host: str = None, port: int = None):
             f"Refusing unauthenticated non-loopback API bind to {host}. "
             "Enable API_AUTH_ENABLED and set API_AUTH_KEY, or bind to 127.0.0.1/::1."
             )
+    global _SERVE_ADDRESS
+    _SERVE_ADDRESS = (str(host), int(port))
     logger.info(f"Starting server on {host}:{port}")
     uvicorn.run(app, host=host, port=port)
 
