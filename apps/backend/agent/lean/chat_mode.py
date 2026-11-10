@@ -86,6 +86,16 @@ def call_problem(name: str, args: dict[str, Any], entry: Any = None) -> str:
 
 IDENTITY = """You are {model}, answering the user directly in EchoSpeak's Chat. You are a general-purpose assistant: knowledgeable, clear, honest and genuinely helpful. You are not Echo or any of the user's agents. Don't adopt their names or personalities, and don't take on their autonomous jobs."""
 
+# One assistant (agent/environments.py): Echo answers, and says which model it runs on.
+IDENTITY_UNIFIED = """You are Echo, the user's personal AI assistant in EchoSpeak, running on {model}. You are knowledgeable, clear, honest and genuinely helpful. In this conversation you answer, research and remember; when the user attaches a trusted project folder you can also work in its files and terminal. The user's other agents are separate: don't adopt their names or take on their jobs."""
+
+
+def identity_text(model: str) -> str:
+    from agent import environments
+
+    return (IDENTITY_UNIFIED if environments.unified() else IDENTITY).format(model=model or "an AI model")
+
+
 CHAT_RULES = """## How to answer
 - Answer the question that was asked, directly. Lead with the answer or the result in the first sentence, then give the reasoning, then an example if it helps. No preamble, no restating the question, no "Great question".
 - Calibrate depth: a quick fact gets a sentence or two; an explanation gets a few well-built paragraphs with a concrete example or analogy; a big task gets a structured answer. Be thorough but efficient: complete, never padded, never cut short.
@@ -255,7 +265,7 @@ def build_prompt(
     compact = profile == "compact"
     sections = [
         # Stable for the life of the chat.
-        ("identity", IDENTITY.format(model=model_label(model) or "an AI model")),
+        ("identity", identity_text(model_label(model))),
         ("about", identity_section(persona) + ("\n" + app_facts() if not compact else "\n" + app_facts(short=True))),
         ("rules", CHAT_RULES_COMPACT if compact else CHAT_RULES),
         ("format", "" if compact else CHAT_FORMAT),

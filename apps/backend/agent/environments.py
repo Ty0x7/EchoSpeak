@@ -12,6 +12,19 @@ One rule, used by the runtime (who answers) and by the session list (where it sh
 
 Nothing is migrated or rewritten. Old conversations keep their records; the rule reads
 fields every thread already has, so a conversation's environment can't drift.
+
+**One assistant** (``assistant_mode = "unified"``, docs/research/harness-first.md). The three
+names above stay as *capability profiles* of one assistant, and the profile follows facts about
+the conversation instead of the tab it was opened from:
+
+- a conversation with an agent (a room, or one an agent started) keeps that agent: "agents";
+- the owner's own conversation gets the engineering profile ("code": file and terminal tools,
+  the verification ledger) exactly while a **trusted project** is attached to it, and the
+  conversation profile ("chat") otherwise. Attaching or detaching a project changes the next turn.
+
+Echo answers in both; the selected model is named as what Echo runs on. Permission switches,
+approvals, the policy check and Private/Offline mode apply unchanged in every profile: a profile
+only narrows what is offered. EchoSpeak starts no external coding harness in this mode.
 """
 from __future__ import annotations
 
@@ -22,6 +35,35 @@ ENVIRONMENTS = ("chat", "agents", "code")
 OWNER_SOURCES = frozenset({"web", "desktop", "voice", "chat"})
 # Turn sources where the owner is talking live; routines, check-ins and channels stay with their agent.
 MODEL_FIRST_TURNS = frozenset({"web", "desktop", "voice", "chat"})
+
+
+ASSISTANT_MODES = ("environments", "unified")
+
+
+def assistant_mode() -> str:
+    """"environments" (three tabs, 11.13 behaviour) or "unified" (one assistant). Unknown values keep the default."""
+    try:
+        from config import config
+        value = str(getattr(config, "assistant_mode", "") or "").strip().lower()
+    except Exception:
+        value = ""
+    return value if value in ASSISTANT_MODES else "environments"
+
+
+def unified() -> bool:
+    return assistant_mode() == "unified"
+
+
+def has_trusted_project(session_id: str) -> bool:
+    """Whether this conversation has a project the owner marked trusted. Any doubt is "no"."""
+    try:
+        from agent import project_workspace
+        from agent.state import get_state_store
+
+        project_id = str(get_state_store().get_thread_state(session_id).active_project_id or "")
+        return bool(project_id) and project_workspace.project(project_id).trust_state == "trusted"
+    except Exception:
+        return False
 
 
 def classify(thread: Any, *, in_room: bool) -> str:
@@ -63,10 +105,15 @@ def turn_environment(session_id: str, *, source: str, caller_role: str = "owner"
     if caller_role != "owner" or work_id or source not in MODEL_FIRST_TURNS:
         return "agents"
     environment = environment_of(session_id)
-    return environment if environment in {"chat", "code"} else "agents"
+    if environment not in {"chat", "code"}:
+        return "agents"
+    if unified():
+        # The profile follows the project, not the tab: a Code session whose project was detached
+        # converses; a chat with a trusted project attached can engineer.
+        return "code" if has_trusted_project(session_id) else "chat"
+    return environment
 
 
 def model_first(session_id: str, *, source: str, caller_role: str = "owner", work_id: str = "") -> bool:
     """Whether this turn runs as Chat: the owner, live, in a Chat conversation, not resuming agent work."""
-    return (caller_role == "owner" and not work_id and source in MODEL_FIRST_TURNS
-            and environment_of(session_id) == "chat")
+    return turn_environment(session_id, source=source, caller_role=caller_role, work_id=work_id) == "chat"

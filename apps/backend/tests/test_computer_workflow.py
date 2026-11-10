@@ -1,4 +1,6 @@
 """Recover the reported GUI-as-shell mistake through the real governed tool loop."""
+import pytest
+import os
 import json
 import threading
 
@@ -12,6 +14,7 @@ from agent.lean.toolbox import Toolbox
 from config import config
 
 
+@pytest.mark.skipif(os.name != "nt", reason="desktop control is Windows-only today")
 def test_screenshot_bad_terminal_call_and_desktop_recovery(monkeypatch, tmp_path):
     monkeypatch.setattr(observations, "root", lambda: tmp_path / "observations")
     monkeypatch.setattr(config, "enable_system_actions", True)

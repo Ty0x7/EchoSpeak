@@ -26,6 +26,13 @@ IDENTITY = (
     "You work in the user's project on this computer with file, terminal and search tools."
 )
 
+# One assistant (agent/environments.py): Echo does the engineering, in whichever conversation has the project.
+IDENTITY_UNIFIED = (
+    "You are Echo, the user's personal AI assistant in EchoSpeak, running on {model}. "
+    "This conversation has a trusted project attached, so you work as its engineer: "
+    "in the user's project on this computer, with file, terminal and search tools."
+)
+
 RULES = """## How you work in Echo Code
 Understand the request → inspect the project → plan when it's not trivial → edit files → run commands → verify → adapt → report.
 - Read before you edit: open the files involved and follow the code's existing style. Use file_search / file_find to locate things; don't guess paths.
@@ -50,7 +57,9 @@ CODE_FOCUS = BUILDER_FOCUS | {"web_search", "safe_web_fetch", "memory_search", "
 
 
 def identity(model: str) -> str:
-    return IDENTITY.format(model=model or "a coding model")
+    from agent import environments
+
+    return (IDENTITY_UNIFIED if environments.unified() else IDENTITY).format(model=model or "a coding model")
 
 
 def restrict(toolbox: Any) -> None:

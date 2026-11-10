@@ -70,7 +70,9 @@ def _model_dump(value: Any) -> dict[str, Any]:
 
 def _is_npx(command: str) -> bool:
     """npx itself, by name or path (npx, npx.cmd, C:\\...\\npx.cmd)."""
-    return Path(str(command or "")).name.lower() in {"npx", "npx.cmd", "npx.exe"}
+    from pathlib import PureWindowsPath
+
+    return PureWindowsPath(str(command or "")).name.lower() in {"npx", "npx.cmd", "npx.exe"}
 
 
 def _safe_error(value: Any) -> str:

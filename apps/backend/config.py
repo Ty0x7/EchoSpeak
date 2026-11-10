@@ -1102,6 +1102,11 @@ class Config:
         self.webhook_secret = os.getenv("WEBHOOK_SECRET", "").strip()
         self.webhook_secret_path = os.getenv("WEBHOOK_SECRET_PATH", str(WEBHOOK_SECRET_PATH)).strip() or str(WEBHOOK_SECRET_PATH)
 
+        # --- One assistant (agent/environments.py; docs/research/harness-first.md) ---
+        # "environments" (default): Chat, Code and Agents as separate environments, as in 11.13.
+        # "unified": Echo answers every conversation the owner starts; engineering tools follow the
+        # conversation's trusted project instead of a Code tab; EchoSpeak launches no external harness.
+        self.assistant_mode = os.getenv("ASSISTANT_MODE", "environments").strip().lower() or "environments"
         # --- Echo checks in (agent/checkins.py) ---
         # "important" (default): model-free notices about things that need the owner. "friendly" adds
         # the heartbeat's periodic check-in. "off": neither. Quiet hours are local, start to end.
@@ -1498,6 +1503,7 @@ class Config:
             "heartbeat_prompt",
             "heartbeat_channels",
             "checkin_mode",
+            "assistant_mode",
             "checkin_quiet_start",
             "checkin_quiet_end",
             # Email

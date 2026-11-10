@@ -59,6 +59,10 @@ def runtime_catalog() -> dict:
         ("acp", "Other ACP agents", "acp", None,
          "Connect compatible agents through their own ACP sessions and capability negotiation."),
     )
+    from agent import environments
+    if environments.unified():
+        # One assistant: only Echo's own harness is offered. No executable lookup, no account check.
+        return {"schema_version": 1, "privacy_mode": current_mode, "runtimes": rows}
     from agent.code_executables import locate
     for runtime_id, name, protocol, command, description in definitions:
         # Paths only. No --version or auth probes here: even a health-check process can run hooks.

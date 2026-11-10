@@ -19,6 +19,9 @@ os.environ["ECHOSPEAK_DATA_DIR"] = str(_TEST_STATE_ROOT)
 # ~/.echospeak (agent/home.py): the owner's real AGENTS.md must not reach test prompts.
 os.environ["ECHOSPEAK_HOME"] = str(_TEST_STATE_ROOT / "home")
 os.environ["ECHOSPEAK_ALLOW_MULTI_WRITER"] = "1"
+# Off Windows the credential broker's key lives in the desktop keyring (agent/credential_posix.py).
+# Tests must never read or write the developer's real keyring: keep the key in the disposable folder.
+os.environ["ECHOSPEAK_CREDENTIAL_KEYFILE"] = "1"
 # Learning (agent/learning) would carry lessons and track records from one test's
 # chats into the next one's prompts. Learning tests turn it on with a fresh store.
 os.environ.setdefault("LEARNING_ENABLED", "0")

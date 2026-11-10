@@ -10,6 +10,10 @@ from agent import app_launcher, tools
 from agent.lean.toolbox import Toolbox
 from config import config
 
+import os
+
+pytestmark = pytest.mark.skipif(os.name != "nt", reason="open_application is Windows-only today")
+
 MINECRAFT_ID = "Microsoft.4297127D64EC6_8wekyb3d8bbwe!Minecraft"
 
 

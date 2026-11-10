@@ -295,7 +295,13 @@ class Sessions:
                 continue
 
     def admit(self):
+        from agent import environments
         from agent.lean.stop import paused
+        if environments.unified():
+            # One assistant: EchoSpeak runs its own harness only. Saved sessions, worktrees and
+            # their diffs stay on disk and stay readable; nothing is launched or resumed.
+            raise PermissionError(
+                "EchoSpeak no longer starts Codex, Claude Code or ACP agents. Run them beside EchoSpeak in their own apps.")
         if self.suspended or _privacy_failed or privacy.mode() != "standard":
             raise PermissionError("External runtimes are blocked in Private/Offline mode")
         if paused():

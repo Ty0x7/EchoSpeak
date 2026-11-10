@@ -90,12 +90,18 @@ CHAT_AGENT_ID = "chat"
 CHAT_TOOLSETS = ["core", "web", "live", "vision", "desktop", "memory", "skills"]
 
 
+def _unified() -> bool:
+    from agent import environments
+
+    return environments.unified()
+
+
 def chat_persona(model_label: str = "") -> AgentPersona:
     """The model itself, for a Chat conversation. Named after the model when it's known."""
     label = " ".join(str(model_label or "").split())[:60]
     return AgentPersona(
         id=CHAT_AGENT_ID,
-        name=label or "Assistant",
+        name="Echo" if _unified() else label or "Assistant",
         title="Chat",
         # Chat's instructions live in agent/lean/chat_mode.py, not in a persona soul.
         soul="",
@@ -118,7 +124,7 @@ def code_persona(model_label: str = "") -> AgentPersona:
     label = " ".join(str(model_label or "").split())[:60]
     return AgentPersona(
         id=CODE_AGENT_ID,
-        name=label or "Code",
+        name="Echo" if _unified() else label or "Code",
         title="Code",
         # The engineering workflow lives in agent/lean/code_mode.py; the identity names the model.
         soul=code_mode.identity(label),
