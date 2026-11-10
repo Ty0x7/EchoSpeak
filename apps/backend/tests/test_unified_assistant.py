@@ -1,0 +1,130 @@
+"""ASSISTANT_MODE=unified: one assistant whose capability profile follows the conversation's project.
+
+Real ThreadManager, RoomStore and StateStore in a temp folder; no model calls.
+The default ("environments") is covered by tests/test_environments.py and must stay unchanged.
+"""
+from __future__ import annotations
+
+import threading
+from types import SimpleNamespace
+
+import pytest
+
+from agent import code_sessions, echo_code, environments, state, threads
+from agent.lean import rooms
+from agent.lean import runtime as lean_runtime
+from config import config
+
+_TEAM_TOOLS = {"delegate_to_agent", "soul_update", "spawn_workers", "work_status", "agent_notes", "propose_agent_change"}
+_ENGINEERING = {"terminal", "file_edit", "file_write"}
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    chats = threads.ThreadManager(tmp_path / "threads.json")
+    monkeypatch.setattr(threads, "get_thread_manager", lambda: chats)
+    room_store = rooms.RoomStore(tmp_path / "rooms.json")
+    monkeypatch.setattr(rooms, "get_room_store", lambda: room_store)
+    store = state.StateStore(tmp_path / "state")
+    monkeypatch.setattr(state, "_state_store", store)
+    folder = tmp_path / "app"
+    folder.mkdir()
+    import agent.projects
+    manager = agent.projects.ProjectManager(tmp_path / "projects")
+    trusted = manager.create_project(name="app", workspace_root=str(folder), trust_state="trusted")
+    untrusted = manager.create_project(name="other", workspace_root=str(folder), trust_state="untrusted")
+    monkeypatch.setattr(agent.projects, "get_project_manager", lambda: manager)
+    _IDS.update(p_trusted=trusted.id, p_untrusted=untrusted.id)
+    monkeypatch.setattr(config, "assistant_mode", "unified", raising=False)
+    # The owner's permission switches still decide; turn the engineering ones on for this test.
+    monkeypatch.setattr(config, "enable_system_actions", True, raising=False)
+    monkeypatch.setattr(config, "allow_terminal_commands", True, raising=False)
+    monkeypatch.setattr(config, "allow_file_write", True, raising=False)
+    return chats, room_store, store
+
+
+def _session(monkeypatch, session_id: str, source: str = "web") -> lean_runtime.LeanSession:
+    monkeypatch.setattr(lean_runtime.LeanSession, "_recall", lambda self, query, limit=8: [])
+    return lean_runtime.LeanSession(
+        agent=SimpleNamespace(memory=None, llm_provider=SimpleNamespace(value="lmstudio"),
+                              model_runtime=SimpleNamespace(model_id="qwen/qwen3-8b")),
+        session_id=session_id, request_id="req-unified", emit=lambda _event: None, cancel=threading.Event(),
+        source=source, room=rooms.get_room_store().by_thread(session_id))
+
+
+_IDS: dict[str, str] = {}
+
+
+def _attach(store, session_id: str, project_id: str) -> None:
+    store.update_thread_state(session_id, active_project_id=_IDS.get(project_id, project_id))
+
+
+def test_mode_is_opt_in_and_unknown_values_keep_the_default(monkeypatch):
+    monkeypatch.setattr(config, "assistant_mode", "environments", raising=False)
+    assert not environments.unified()
+    monkeypatch.setattr(config, "assistant_mode", "nonsense", raising=False)
+    assert environments.assistant_mode() == "environments"
+    monkeypatch.setattr(config, "assistant_mode", " Unified ", raising=False)
+    assert environments.unified()
+
+
+def test_the_profile_follows_the_trusted_project_not_the_tab(env):
+    chats, _, store = env
+    chat = chats.create_thread(title="Ideas", source="web")
+    code = chats.create_thread(title="Code · app", source="web", surface="code")
+    # Without a project both converse, including a session opened from the old Code tab.
+    assert environments.turn_environment(chat.thread_id, source="web") == "chat"
+    assert environments.turn_environment(code.thread_id, source="web") == "chat"
+    # A trusted project makes the next turn an engineering turn, wherever it was started.
+    _attach(store, chat.thread_id, "p_trusted")
+    assert environments.turn_environment(chat.thread_id, source="web") == "code"
+    # An untrusted or missing project never grants engineering tools.
+    _attach(store, chat.thread_id, "p_untrusted")
+    assert environments.turn_environment(chat.thread_id, source="web") == "chat"
+    _attach(store, chat.thread_id, "p_gone")
+    assert environments.turn_environment(chat.thread_id, source="web") == "chat"
+    assert environments.model_first(chat.thread_id, source="web")
+
+
+def test_agents_routines_guests_and_resumed_work_are_unchanged(env, monkeypatch):
+    chats, room_store, store = env
+    contact = room_store.direct("scout", "Jarvis")
+    _attach(store, contact.thread_id, "p_trusted")
+    assert environments.turn_environment(contact.thread_id, source="web") == "agents"
+    chat = chats.create_thread(title="Ideas", source="web")
+    _attach(store, chat.thread_id, "p_trusted")
+    for source in ("routine", "heartbeat", "discord_bot"):
+        assert environments.turn_environment(chat.thread_id, source=source) == "agents"
+    assert environments.turn_environment(chat.thread_id, source="web", caller_role="trusted") == "agents"
+    assert environments.turn_environment(chat.thread_id, source="web", work_id="work_1") == "agents"
+
+
+def test_echo_answers_and_engineering_tools_appear_only_with_a_trusted_project(env, monkeypatch):
+    chats, _, store = env
+    chat = chats.create_thread(title="Ideas", source="web")
+
+    talking = _session(monkeypatch, chat.thread_id)
+    persona = talking._chat_persona()
+    assert talking.model_first and persona.name == "Echo"
+    turn = talking._build_turn(persona, "What should I read next?", history=[], depth=0)
+    assert not set(turn.toolbox.names) & (_ENGINEERING | _TEAM_TOOLS)
+    assert "You are Echo" in turn.system_prompt and "qwen3-8b" in turn.system_prompt
+    assert "not Echo" not in turn.system_prompt
+
+    _attach(store, chat.thread_id, "p_trusted")
+    working = _session(monkeypatch, chat.thread_id)
+    assert working.code_first and not working.model_first
+    persona = working._code_persona()
+    assert persona.name == "Echo"
+    turn = working._build_turn(persona, "Fix the failing test", history=[], depth=0)
+    names = set(turn.toolbox.names)
+    assert "file_edit" in names and not names & _TEAM_TOOLS
+    assert "You are Echo" in turn.system_prompt
+
+
+def test_no_external_harness_is_offered_or_started(env, tmp_path):
+    catalog = echo_code.runtime_catalog()
+    assert [row["id"] for row in catalog["runtimes"]] == ["echo"]
+    manager = code_sessions.Sessions(tmp_path / "external")
+    with pytest.raises(PermissionError, match="no longer starts"):
+        manager.admit()
