@@ -8,6 +8,16 @@ Do not merge or publish a GitHub release without a further instruction.
 targeting `claude/v11.12` (stacked on #113). Consult its current head for the complete continuation.
 The previous sidebar candidate was pushed. The current runtime continuation is summarized below and in native-code §13; verify the latest commit before continuing.
 
+## 10 November 2026: harness-first continuation
+
+Branch `harness-first-rearchitecture` is stacked on this branch (`0567f94`). It changes the direction:
+- one assistant, with no hosted external harnesses;
+- a terminal client alongside the GUI;
+- Linux support.
+
+Read [harness-first.md](research/harness-first.md) before continuing Code work here. Treat the hosted-runtime
+items below as legacy until phase 4 removes them.
+
 ## Required handoff workflow
 
 **Objective → Research → Environment → Verification → Adaptation → Completion.**

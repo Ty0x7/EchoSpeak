@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Harness-first EchoSpeak</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--soft:#f0f0f0;--accent:#2f6fde;--ok:#1f7a3f;--warn:#a86a00;--bad:#b42318}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--soft:#222;--accent:#8fb4ff;--ok:#5cc983;--warn:#d6a955;--bad:#ff8a7a}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 40px}header{padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 4px}header p{margin:0;font-size:13px;color:var(--muted)}nav{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;margin:0 0 8px}nav a{color:var(--muted);text-decoration:none}nav a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 6px}section{margin:34px 0;scroll-margin-top:12px}.lead{font-size:13.5px;color:var(--muted);margin:0 0 14px;max-width:820px}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:13px system-ui,sans-serif}svg .m{fill:var(--muted);font-size:11.5px}svg .b{fill:var(--panel);stroke:var(--line)}svg .s{fill:var(--soft);stroke:var(--line)}svg .l{stroke:var(--muted);fill:none;stroke-width:1.4}svg .hl{fill:var(--panel);stroke:var(--accent);stroke-width:1.6}svg .x{stroke:var(--bad);stroke-width:1.6}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:14px 16px;min-width:0}.node h3{font-size:14px;margin:0 0 4px}.node p,.node li{font-size:13px;color:var(--muted);margin:0}.node ul{margin:6px 0 0;padding-left:18px}code{font:12px ui-monospace,monospace}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:0 8px;margin-right:6px}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}.tag.bad{color:var(--bad)}.note{font-size:12.5px;color:var(--muted);margin:10px 0 0}.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}th{font-weight:600;color:var(--muted)}footer{font-size:12px;color:var(--muted);margin-top:30px;border-top:1px solid var(--line);padding-top:12px}a{color:inherit;text-underline-offset:3px}@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.diagram svg{min-width:720px}}
+</style></head><body><main>
+<header><h1>EchoSpeak / harness-first</h1><p>10 November 2026 UTC · research decision + first foundational changes · branch <code>harness-first-rearchitecture</code> · not merged or released</p></header>
+<nav aria-label="Sections"><a href="#shape">One assistant</a><a href="#clients">Two clients</a><a href="#retire">What retires</a><a href="#refs">What transfers</a><a href="#linux">Linux</a><a href="#status">Status</a></nav>
+
+<section id="shape"><h2>Three applications become one assistant</h2>
+<p class="lead">Tabs no longer decide behaviour. A fact about the conversation does: is a <em>trusted project</em> attached? Agents keep their own conversations. Permissions and approvals apply unchanged in every case. Architecture diagram, not a product screenshot.</p>
+<div class="wrap diagram"><svg viewBox="0 0 1040 300" role="img" aria-label="Before: Chat, Code and Agents are separate tabs, with Code also launching Codex, Claude Code and ACP. After: one Echo conversation whose profile follows the attached project, plus agent conversations, all on one native harness.">
+<text x="20" y="22" class="m">Before (11.13)</text>
+<rect x="20" y="34" width="140" height="44" rx="8" class="b"/><text x="90" y="61" text-anchor="middle">Chat tab</text>
+<rect x="175" y="34" width="140" height="44" rx="8" class="b"/><text x="245" y="61" text-anchor="middle">Code tab</text>
+<rect x="330" y="34" width="140" height="44" rx="8" class="b"/><text x="400" y="61" text-anchor="middle">Agents tab</text>
+<rect x="262" y="96" width="122" height="54" rx="8" class="s"/><text x="323" y="118" text-anchor="middle" class="m">Codex · Claude</text><text x="323" y="138" text-anchor="middle" class="m">Code · ACP (hosted)</text>
+<path d="M245 100h17" class="l"/><line x1="268" y1="102" x2="378" y2="144" class="x"/>
+<rect x="20" y="182" width="450" height="44" rx="8" class="hl"/><text x="245" y="209" text-anchor="middle">Echo native harness (LeanSession → LeanTurn)</text>
+<path d="M90 78v104M245 78v104M400 78v104" class="l"/>
+<text x="20" y="255" class="m">A project appears in two places; coding means switching application.</text>
+
+<text x="560" y="22" class="m">After (ASSISTANT_MODE=unified)</text>
+<rect x="560" y="34" width="250" height="78" rx="8" class="hl"/><text x="685" y="58" text-anchor="middle">Conversation with Echo</text>
+<text x="685" y="80" text-anchor="middle" class="m">no project → converse, research</text>
+<text x="685" y="98" text-anchor="middle" class="m">trusted project → files · terminal · checks</text>
+<rect x="830" y="34" width="190" height="78" rx="8" class="b"/><text x="925" y="66" text-anchor="middle">Agent conversations</text><text x="925" y="88" text-anchor="middle" class="m">identity · tools · routines</text>
+<rect x="560" y="182" width="460" height="44" rx="8" class="hl"/><text x="790" y="209" text-anchor="middle">The same native harness, unchanged</text>
+<path d="M685 112v70M925 112v70" class="l"/>
+<text x="560" y="255" class="m">Codex and Claude Code run beside EchoSpeak (tmux), not inside it.</text>
+<text x="560" y="274" class="m">They can still call Echo through scoped local MCP grants.</text>
+</svg></div>
+<div class="grid3" style="margin-top:12px">
+<div class="node"><span class="tag ok">Implemented · tested</span><h3>Profile follows the project</h3><p><code>environments.turn_environment</code>: owner + live + trusted project → engineering; otherwise conversation. Untrusted or missing projects never grant tools.</p></div>
+<div class="node"><span class="tag ok">Implemented · tested</span><h3>Echo answers</h3><p>Echo names the model it runs on. Agents, routines, guests and resumed work are unchanged. A profile only removes tools.</p></div>
+<div class="node"><span class="tag warn">Recommended</span><h3>GUI navigation</h3><p>Conversations · Agents · Projects · Library, with a project chip in the composer. Needs a UI pass, screenshots and owner acceptance.</p></div>
+</div></section>
+
+<section id="clients"><h2>Two clients, one authority</h2>
+<p class="lead">The backend already owns runs. A detached collector journals every event, readers reattach by cursor, and controls are separate requests. The terminal is another client of that, not another engine.</p>
+<div class="wrap diagram"><svg viewBox="0 0 1040 250" role="img" aria-label="The graphical app and the terminal client both talk HTTP to one FastAPI backend that owns sessions, the run journal, approvals and the native harness. The terminal finds the backend through a private endpoint file.">
+<rect x="20" y="30" width="220" height="60" rx="8" class="b"/><text x="130" y="56" text-anchor="middle">Graphical app</text><text x="130" y="76" text-anchor="middle" class="m">Tauri + React</text>
+<rect x="20" y="140" width="220" height="60" rx="8" class="b"/><text x="130" y="166" text-anchor="middle">Terminal client</text><text x="130" y="186" text-anchor="middle" class="m">echospeak · inline · tmux-friendly</text>
+<rect x="330" y="20" width="420" height="200" rx="10" class="hl"/><text x="540" y="46" text-anchor="middle">Backend (FastAPI, loopback, per-launch key)</text>
+<rect x="350" y="62" width="185" height="40" rx="6" class="s"/><text x="442" y="87" text-anchor="middle">Sessions · history</text>
+<rect x="545" y="62" width="185" height="40" rx="6" class="s"/><text x="637" y="87" text-anchor="middle">Run journal (cursor)</text>
+<rect x="350" y="112" width="185" height="40" rx="6" class="s"/><text x="442" y="137" text-anchor="middle">Approvals · cancel · steer</text>
+<rect x="545" y="112" width="185" height="40" rx="6" class="s"/><text x="637" y="137" text-anchor="middle">Memory · learning</text>
+<rect x="350" y="162" width="380" height="40" rx="6" class="s"/><text x="540" y="187" text-anchor="middle">Native harness → local or cloud model, tools</text>
+<path d="M240 60h90M240 170h90" class="l"/>
+<rect x="800" y="140" width="220" height="60" rx="8" class="b"/><text x="910" y="164" text-anchor="middle">endpoint.json</text><text x="910" y="184" text-anchor="middle" class="m">0600 in 0700 $XDG_RUNTIME_DIR</text>
+<path d="M800 170h-50" class="l"/>
+</svg></div>
+<p class="note">One running request per conversation is enforced by the journal; a second client steers or queues. Gaps: a per-session follow stream, approval answers attributed to a client, and a generated event schema.</p></section>
+
+<section id="retire"><h2>What retires, what stays</h2>
+<p class="lead">The workbench runs on the external-harness supervisor's executor, so the order matters: split the executor first, then delete.</p>
+<div class="wrap"><table>
+<tr><th>Component</th><th>Decision</th></tr>
+<tr><td>Codex / Claude Code / ACP runtimes, accounts, usage limits, Claude Agent SDK requirement, Coding agents settings, external session UI</td><td><span class="tag bad">Remove</span> phase 4, after the executor split</td></tr>
+<tr><td>External supervisor <code>code_sessions</code></td><td><span class="tag warn">Split</span> neutral workbench executor first (phase 1)</td></tr>
+<tr><td>Workbench: PTY terminal, files, diff, Git review/commit/push, PRs, scripts, worktrees</td><td><span class="tag ok">Keep</span> as the conversation's right panel</td></tr>
+<tr><td>Inbox, drafts, background tasks, PR links, attention</td><td><span class="tag ok">Generalize</span> to every conversation</td></tr>
+<tr><td>Scoped local MCP control grants</td><td><span class="tag ok">Keep</span> the bridge for tools running beside Echo</td></tr>
+<tr><td>Saved external sessions and worktrees on disk</td><td><span class="tag ok">Preserve</span> read-only; never deleted automatically</td></tr>
+</table></div></section>
+
+<section id="refs"><h2>What transfers from the references</h2>
+<div class="grid2">
+<div class="node"><h3>DeepSeek Harness</h3><p>TypeScript on Cordis, ~557k lines, prerelease, unaudited.</p><ul><li>Already in Echo: controls as requests, asked/decided approvals, cursor replay, crash repair.</li><li>Adopt: log a hash of the prompt and tool set per step; bubblewrap with honest confinement reporting.</li><li>Skip: Cordis, YAML layers, generated RPC.</li></ul></div>
+<div class="node"><h3>Hermes Agent</h3><p>Python, ~1.07M lines; a gateway daemon owns sessions.</p><ul><li>Already in Echo: backend authority, idempotent submits.</li><li>Adopted: a command floor under every approval mode.</li><li>Adopt next: generated wire schema, byte-stable prompt prefix.</li><li>Skip: autonomous skill-writing forks. They are unevaluated, and SkillsBench shows self-generated skills average −1.3 points.</li></ul></div>
+</div>
+<p class="note">Echo's learning design (advisory lessons, outcome grading, randomized holdout) matches the published evidence better than either reference.</p></section>
+
+<section id="linux"><h2>Linux on Omarchy</h2>
+<div class="grid3">
+<div class="node"><span class="tag ok">Tested</span><h3>Backend</h3><p>Boots in ~1 s; auth enforced; readiness 15/15; bash detected; PTY terminal works.</p></div>
+<div class="node"><span class="tag ok">Implemented · tested</span><h3>Credentials</h3><p>Before: DPAPI only, so no key could be saved. Now: AES-256-GCM under a keyring-held key; fails closed without a keyring.</p></div>
+<div class="node"><span class="tag warn">Not built here</span><h3>Desktop shell</h3><p>Rust missing; WebKitGTK present. Needs a Hyprland titlebar check and a PKGBUILD. Desktop control and the app launcher are Windows-only.</p></div>
+</div></section>
+
+<section id="status"><h2>Status</h2>
+<div class="wrap"><table>
+<tr><th>Item</th><th>State</th></tr>
+<tr><td>Linux test baseline (Windows-only tests skip with reasons)</td><td><span class="tag ok">tested</span></td></tr>
+<tr><td>Linux credential store</td><td><span class="tag ok">tested</span> unit tests + real keyring round trip</td></tr>
+<tr><td>Command floor: system, disk and home wipes always ask (Linux wipes previously ran without asking)</td><td><span class="tag ok">tested</span> 42 cases; security suites pass</td></tr>
+<tr><td>Unified assistant mode (opt-in), external harness gate</td><td><span class="tag ok">tested</span> including the workbench with the mode on</td></tr>
+<tr><td>Terminal client <code>echospeak</code> + endpoint discovery</td><td><span class="tag ok">tested</span> 29 tests incl. a real-backend round trip</td></tr>
+<tr><td>GUI reorganization, executor split, deletions, bubblewrap, Tauri Linux build</td><td><span class="tag warn">recommended</span> phases 1–5</td></tr>
+<tr><td>Default flip to unified</td><td><span class="tag warn">needs owner acceptance</span></td></tr>
+</table></div></section>
+<footer>Technical record: <code>docs/research/harness-first.md</code>. No paid model calls. Nothing merged, published or released.</footer>
+</main></body></html>

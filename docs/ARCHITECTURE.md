@@ -12,6 +12,13 @@ Claude Code and ACP execution is implemented in `agent/code_sessions.py` and
 `agent/code_runtimes.py`; it stays outside the native Lean loop. The
 [Codex handoff](CODEX_HANDOFF.md) records the open PR stack and remaining work.
 
+**Direction from 10 November 2026:** [Harness-first](research/harness-first.md) ([visual](../artifacts/research/harness-first.html))
+replaces the three-environment and hosted-harness direction. Echo becomes one assistant whose capability
+profile follows the conversation's trusted project. The GUI and a terminal client share this backend.
+Codex and Claude Code run beside EchoSpeak, not inside it. The first step is opt-in, via
+`ASSISTANT_MODE=unified`. Linux credential storage is `agent/credential_posix.py`. The sections below
+still describe the default (`environments`) behaviour.
+
 ## Environment ownership
 
 `apps/backend/agent/environments.py:turn_environment` selects the live owner's Chat

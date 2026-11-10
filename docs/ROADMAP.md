@@ -2,6 +2,18 @@
 
 What's next, in order. Sizes: **S** under a day, **M** a few days, **L** a week or more. Earlier plans: [10.x and 11.0](archive/ROADMAP-v11.0-10.x.md), [9.x](archive/ROADMAP-v9.md).
 
+## Next: harness-first (November 2026)
+
+The phased plan and acceptance criteria are in [harness-first.md §11](research/harness-first.md#11-sequence-and-acceptance-criteria):
+
+1. Split a neutral workbench executor out of `code_sessions`.
+2. Unified GUI navigation, behind `assistant_mode`.
+3. Owner acceptance, then flip the default.
+4. Remove the hosted Codex, Claude Code and ACP runtimes, keeping stored sessions read-only.
+5. bubblewrap confinement for host commands; a per-session follow stream; a Tauri Linux build with a PKGBUILD.
+
+The sections below predate this plan. Where they conflict with it, it supersedes them.
+
 ## Where things stand (source, October 2026)
 
 11.9.0 combines the 11.7.1 screenshot and computer-control work, all harness improvements prepared for 11.8, and the visual project workspace with optional report sharing. The harness includes Claude's native computer tool, MCP sign-in, MCP Apps and Tasks, a quarantined reader for outside content, per-reply traces, full-output handles, outbound A2A with signed Agent Cards, the Echo bench, and native replacements for LangChain. See the [11.9.0 release notes](releases/v11.9.0.md), the incorporated [11.8 notes](releases/v11.8.0.md), and the status table in the [README](../README.md#where-each-feature-stands). Real-provider and installed-app validation remain separate from the automated source checks.
