@@ -78,7 +78,46 @@ _DANGEROUS_COMMAND = re.compile(
 
 def dangerous_command(command: str) -> bool:
     """A shell command that can change or delete things on this PC."""
-    return bool(_DANGEROUS_COMMAND.search(command or ""))
+    # The pattern list grew from PowerShell; the floor below also covers Linux disk and system wipes.
+    return bool(_DANGEROUS_COMMAND.search(command or "")) or catastrophic_command(command)
+
+
+# ── the floor: commands that always ask, even with approvals set to "never" ──
+#
+# Approval modes are the owner's choice; this short list is not. Each entry can destroy the
+# system, a disk or the home folder in one step and can't be undone. It asks rather than
+# refuses, so the owner stays in charge; where nobody can answer, asks are refused anyway.
+# Kept deliberately narrow: an ordinary `rm -rf build/` never matches.
+_CATASTROPHIC = re.compile(
+    r"""(?ix)
+    --no-preserve-root
+    |\bmkfs(?:\.\w+)?\b|\bmkswap\b|\bwipefs\b
+    |\bdd\b[^|;&]*\bof=/dev/(?:sd|nvme|hd|vd|xvd|mmcblk|disk)
+    |>\s*/dev/(?:sd|nvme|hd|vd|xvd|mmcblk)\w*
+    |:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:
+    |\b(?:chmod|chown)\s+(?:-\w*R\w*\s+)\S+\s+/(?:\s|$)
+    |\bformat-volume\b|\bformat\s+[a-z]:
+    """
+)
+# Recursive deletes aimed at the root, the home folder or a system folder.
+_RM_RECURSIVE = re.compile(r"(?i)\b(?:rm\s+(?:-{1,2}[\w-]+\s+)*-{1,2}(?:[a-z]*r[a-z]*|recursive)\b|remove-item\b[^|;&]*-r(?:ecurse)?\b|rd\s+/s\b|rmdir\s+/s\b)")
+_PRECIOUS = re.compile(
+    r"""(?ix)(?:^|\s)["']?(?:
+        /\*?|~/?\*?|\$\{?home\}?/?\*?|\$env:userprofile\\?\*?|[a-z]:\\?\*?|
+        /(?:home|etc|usr|boot|var|bin|sbin|lib|lib64|opt|root|srv|sys|proc|dev)/?\*?
+    )["']?(?=\s|$|;|&|\|)"""
+)
+
+
+def catastrophic_command(command: str) -> bool:
+    """A command on the floor: destroys the system, a disk or the home folder in one step."""
+    text = command or ""
+    if _CATASTROPHIC.search(text):
+        return True
+    for segment in re.split(r"&&|\|\||[;|&\n]", text):
+        if _RM_RECURSIVE.search(segment) and _PRECIOUS.search(segment[_RM_RECURSIVE.search(segment).end():]):
+            return True
+    return False
 
 
 # ── approval scopes: what "Always allow" and autonomous mode may cover ────
@@ -202,6 +241,8 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
         return True, "this sends a task to an independent agent"
     if name in ALWAYS_ASK_TOOLS:
         return True, "this opens a pull request under your GitHub account"
+    if name in {"terminal_run", "terminal", "process_start"} and catastrophic_command(str((args or {}).get("command") or "")):
+        return True, "this could wipe your system, a disk or your home folder, so it always asks"
     mode = settings.approval_mode()
     if mode == "never":
         return False, ""
