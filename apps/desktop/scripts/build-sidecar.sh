@@ -5,6 +5,8 @@
 #   scripts/build-sidecar.sh                     # build with the resolved Python (below)
 #   scripts/build-sidecar.sh --make-venv [DIR]   # first create a hash-checked build venv
 #   scripts/build-sidecar.sh --python /path/to/python
+#   scripts/build-sidecar.sh --venv-only DIR     # only create a hash-checked backend venv at DIR
+#                                                # (used by apps/terminal/install.sh --with-backend)
 #
 # Python resolution: --python, then $ECHOSPEAK_PYTHON, then apps/desktop/.build/venv-linux,
 # then apps/backend/.venv. The installed app ships whatever packages that Python has, so
@@ -39,20 +41,32 @@ die() { echo "build-sidecar: $*" >&2; exit 1; }
 
 PYTHON=""
 MAKE_VENV=""
+VENV_ONLY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --python) PYTHON="${2:?--python needs a path}"; shift 2 ;;
     --make-venv)
       if [[ $# -gt 1 && "${2:0:1}" != "-" ]]; then MAKE_VENV="$2"; shift 2
       else MAKE_VENV="$DESKTOP_ROOT/.build/venv-linux"; shift; fi ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    --venv-only) MAKE_VENV="${2:?--venv-only needs a directory}"; VENV_ONLY=1; shift 2 ;;
+    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 
 make_venv() {
-  local dir="$1" base="${ECHOSPEAK_BASE_PYTHON:-python3.12}"
-  command -v "$base" >/dev/null 2>&1 || die "Python 3.12 not found ($base); set ECHOSPEAK_BASE_PYTHON"
+  local dir="$1" base="${ECHOSPEAK_BASE_PYTHON:-}"
+  if [[ -z "$base" ]]; then
+    # A version-manager shim (mise, pyenv) can exist without a 3.12 selected here; uv finds installed ones.
+    if python3.12 -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)' >/dev/null 2>&1; then
+      base=python3.12
+    elif command -v uv >/dev/null 2>&1 && base="$(uv python find 3.12 2>/dev/null)" && [[ -n "$base" ]]; then
+      :
+    else
+      die "Python 3.12 not found; install it (e.g. uv python install 3.12) or set ECHOSPEAK_BASE_PYTHON"
+    fi
+  fi
+  command -v "$base" >/dev/null 2>&1 || [[ -x "$base" ]] || die "Python 3.12 not found ($base); set ECHOSPEAK_BASE_PYTHON"
   "$base" -c 'import sys; sys.exit(0 if sys.version_info[:2] == (3, 12) else 1)' \
     || die "$base is not Python 3.12 (the lock is resolved for 3.12)"
   echo "Creating the build venv at $dir"
@@ -95,6 +109,10 @@ LINUX
 if [[ -n "$MAKE_VENV" ]]; then
   make_venv "$MAKE_VENV"
   PYTHON="$MAKE_VENV/bin/python"
+  if [[ -n "$VENV_ONLY" ]]; then
+    "$PYTHON" -c 'import fastapi, loguru, uvicorn' && echo "Backend venv ready at $MAKE_VENV"
+    exit 0
+  fi
 fi
 
 if [[ -z "$PYTHON" ]]; then

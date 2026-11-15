@@ -5,6 +5,8 @@
 #   apps/terminal/install.sh            # venv + deps, then asks about the symlink
 #   apps/terminal/install.sh --no-link  # venv + deps only
 #   apps/terminal/install.sh --link     # venv + deps + symlink without asking
+#   add --with-backend to also create apps/backend/.venv (the backend's own hash-checked environment),
+#   which `echospeak` needs to start a backend from this checkout
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
@@ -12,11 +14,13 @@ VENV="$HERE/.venv"
 BIN_DIR="${ECHOSPEAK_BIN_DIR:-$HOME/.local/bin}"
 LINK="$BIN_DIR/echospeak"
 MODE="ask"
+WITH_BACKEND=0
 for arg in "$@"; do
   case "$arg" in
     --link) MODE="link" ;;
     --no-link) MODE="skip" ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    --with-backend) WITH_BACKEND=1 ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
@@ -35,6 +39,16 @@ else
 fi
 
 "$VENV/bin/python" -c "import prompt_toolkit, rich; print('Echo TUI ready: prompt_toolkit', prompt_toolkit.__version__)"
+
+if [ "$WITH_BACKEND" = 1 ]; then
+  BACKEND_VENV="$HERE/../backend/.venv"
+  if [ -x "$BACKEND_VENV/bin/python" ] && "$BACKEND_VENV/bin/python" -c 'import fastapi, loguru, uvicorn' 2>/dev/null; then
+    echo "Backend venv already ready at $BACKEND_VENV"
+  else
+    # Same Linux-filtered, hash-checked lock as the desktop build (one place for the pin list).
+    "$HERE/../desktop/scripts/build-sidecar.sh" --venv-only "$BACKEND_VENV"
+  fi
+fi
 
 link() {
   mkdir -p "$BIN_DIR"

@@ -144,11 +144,32 @@ def backend_paths(env: Mapping[str, str] = os.environ) -> tuple[Path, str]:
     root = Path(env.get("ECHOSPEAK_BACKEND_DIR") or Path(__file__).resolve().parents[2] / "backend")
     if not (root / "app.py").is_file():
         raise DiscoveryError(f"backend not found at {root}; set ECHOSPEAK_BACKEND_DIR")
-    python = env.get("ECHOSPEAK_BACKEND_PYTHON", "").strip()
-    if not python:
-        venv = root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        python = str(venv) if venv.exists() else sys.executable
-    return root, python
+    explicit = env.get("ECHOSPEAK_BACKEND_PYTHON", "").strip()
+    if explicit:
+        return root, explicit
+    venv = root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    candidates = [str(venv)] if venv.exists() else []
+    candidates += [sys.executable]
+    for candidate in candidates:
+        if _can_run_backend(candidate, root):
+            return root, candidate
+    raise DiscoveryError(
+        "no Python with the backend's packages was found. From the EchoSpeak checkout run "
+        "`apps/terminal/install.sh --with-backend`, or set ECHOSPEAK_BACKEND_PYTHON to a Python that has "
+        "apps/backend/requirements installed")
+
+
+def _can_run_backend(python: str, root: Path) -> bool:
+    """Whether this interpreter has the backend's core packages (a quick import probe, no app code run)."""
+    import subprocess
+
+    try:
+        probe = subprocess.run([python, "-I", "-c", "import fastapi, loguru, uvicorn"], cwd=str(root),
+                               stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                               timeout=20, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return probe.returncode == 0
 
 
 def free_port() -> int:
