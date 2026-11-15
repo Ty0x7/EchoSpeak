@@ -227,6 +227,27 @@ def cmd_tui(args) -> int:
                    new=args.command == "new", project=getattr(args, "project", "") or "")
 
 
+def cmd_preview(args) -> int:
+    """A read-only change viewer for a tmux companion pane (/preview), or on its own."""
+    from . import tui
+
+    if not tui.available():
+        print(tui.INSTALL_HINT, file=sys.stderr)
+        return 2
+    from .tui.preview import read_key_file, run_viewer
+    from .tui.theme import detect
+
+    if args.key_file:
+        url, key = read_key_file(args.key_file)
+        args.url, args.key = args.url or url, args.key or key
+    endpoint = discovery.discover(args.url, args.key, insecure_remote=args.insecure_remote)
+    client = Client(endpoint.url, endpoint.key, timeout=args.timeout, stream_idle=90)
+    app = App(client, Renderer(color=False), Out(open(os.devnull, "w")), interactive=False)
+    session = app.find_session(args.follow)
+    caps = detect(no_anim=args.no_anim, ascii_only=True if args.ascii else None)
+    return run_viewer(client, str(session.get("thread_id") or args.follow), caps)
+
+
 # ── subcommands ───────────────────────────────────────────────────────
 def cmd_repl(args) -> int:
     interactive = sys.stdin.isatty()
@@ -533,6 +554,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("action", choices=["status", "start", "stop"])
     sp.add_argument("--any", action="store_true", help="stop: also stop a backend the terminal did not start")
     sp.set_defaults(func=cmd_backend)
+    sp = sub.add_parser("preview", parents=[common], help="follow a session's file changes (the /preview tmux pane)")
+    sp.add_argument("--follow", required=True, metavar="SESSION", help="session id or prefix")
+    sp.add_argument("--key-file", default="", help=argparse.SUPPRESS)   # private hand-off from /preview, deleted once read
+    sp.set_defaults(func=cmd_preview)
     sp = sub.add_parser("serve", parents=[common], help="run a backend in the foreground on 127.0.0.1 with a fresh key")
     sp.add_argument("--port", type=int, default=0)
     sp.add_argument("--wait", type=float, default=180, help="seconds to wait for readiness")

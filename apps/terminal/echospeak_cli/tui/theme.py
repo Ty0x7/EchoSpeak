@@ -43,6 +43,11 @@ class Glyphs:
     arrow_up_down: str = "↑↓"
     sep: str = "·"
     face: tuple[str, str, str] = (" ▗▄▄▄▄▄▖ ", " ▐█ █ █▌ ", " ▝▀▀▀▀▀▘ ")
+    minus: str = "−"
+    vdots: str = "⋮"
+    corner: str = "└"
+    vbar: str = "│"
+    move: str = "→"
 
 
 ASCII_GLYPHS = Glyphs(
@@ -50,6 +55,7 @@ ASCII_GLYPHS = Glyphs(
     denied="-", held="=", elbow="|", thought="~", done="*", unverified="o", stopped="#", steer=">",
     handoff="->", revised="~", check="=", rule="-", bullet="*", task_open="o", task_doing="*", attention=">",
     ellipsis="...", arrow_up_down="up/down", sep="-", face=(" +-----+ ", " | o o | ", " +-----+ "),
+    minus="-", vdots=":", corner="`", vbar="|", move="->",
 )
 
 
@@ -62,6 +68,11 @@ class Caps:
     accent_hex: str = ""           # set only when a truecolor accent was asked for
     plain_verbs: bool = False      # ECHO_TUI_VERBS=plain: no flavour verbs
     glyphs: Glyphs = field(default_factory=Glyphs)
+    # Diff rows: background tints that differ in luminance, not hue (edit-preview.md §3.2). Truecolor only,
+    # derived from the theme background (ECHO_TUI_BG or Omarchy colors.toml); ECHO_TUI_DIFF_TINT=0 turns them off.
+    bg_hex: str = ""
+    fg_hex: str = ""
+    diff_tint: bool = False
 
 
 def _utf8(env: Mapping[str, str]) -> bool:
@@ -72,17 +83,21 @@ def _utf8(env: Mapping[str, str]) -> bool:
     return True  # unset: assume a modern UTF-8 terminal
 
 
-def _omarchy_accent(env: Mapping[str, str]) -> str:
+def _omarchy_color(env: Mapping[str, str], key: str) -> str:
     home = Path(env.get("HOME") or Path.home())
     for path in (home / ".local/state/omarchy/current/theme/colors.toml", home / ".config/omarchy/current/theme/colors.toml"):
         try:
             text = path.read_text(encoding="utf-8")
         except OSError:
             continue
-        match = re.search(r'^\s*accent\s*=\s*"(#[0-9a-fA-F]{6})"', text, re.M)
+        match = re.search(r'^\s*' + re.escape(key) + r'\s*=\s*"(#[0-9a-fA-F]{6})"', text, re.M)
         if match:
             return match.group(1)
     return ""
+
+
+def _omarchy_accent(env: Mapping[str, str]) -> str:
+    return _omarchy_color(env, "accent")
 
 
 def detect(env: Mapping[str, str] = os.environ, *, no_anim: bool = False, ascii_only: Optional[bool] = None) -> Caps:
@@ -100,8 +115,17 @@ def detect(env: Mapping[str, str] = os.environ, *, no_anim: bool = False, ascii_
             accent = _omarchy_accent(env)
         elif _HEX.match(wanted):
             accent = wanted
+    bg = fg = ""
+    tint = truecolor and env.get("ECHO_TUI_DIFF_TINT", "auto").strip().lower() not in {"0", "off", "no", "false"}
+    if tint:
+        bg = env.get("ECHO_TUI_BG", "").strip()
+        bg = bg if _HEX.match(bg) else _omarchy_color(env, "background")
+        fg = env.get("ECHO_TUI_FG", "").strip()
+        fg = fg if _HEX.match(fg) else (_omarchy_color(env, "foreground") or ("#d6d6d6" if bg else ""))
+        tint = bool(bg)
     return Caps(color=color, ascii=ascii_mode, reduced_motion=reduced, truecolor=truecolor, accent_hex=accent,
-                plain_verbs=env.get("ECHO_TUI_VERBS", "") == "plain", glyphs=ASCII_GLYPHS if ascii_mode else Glyphs())
+                plain_verbs=env.get("ECHO_TUI_VERBS", "") == "plain", glyphs=ASCII_GLYPHS if ascii_mode else Glyphs(),
+                bg_hex=bg, fg_hex=fg, diff_tint=tint)
 
 
 # ── roles ────────────────────────────────────────────────────────────
@@ -160,3 +184,18 @@ def agent_color(agent_id: str, caps: Caps) -> str:
         return rich_styles(caps)[role]
     total = sum(ord(c) for c in agent_id)
     return "bold " + _OTHER[total % len(_OTHER)]
+
+
+def mix(a: str, b: str, t: float) -> str:
+    """#rrggbb blended from a toward b by t (0..1)."""
+    ca = [int(a[i:i + 2], 16) for i in (1, 3, 5)]
+    cb = [int(b[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#" + "".join(f"{round(x + (y - x) * t):02x}" for x, y in zip(ca, cb))
+
+
+def diff_tints(caps: Caps) -> tuple[str, str]:
+    """(added bg, removed bg): lighter and darker than the theme background, so they read on any hue."""
+    if not (caps.diff_tint and caps.color and caps.truecolor and _HEX.match(caps.bg_hex or "")):
+        return "", ""
+    fg = caps.fg_hex if _HEX.match(caps.fg_hex or "") else "#ffffff"
+    return mix(caps.bg_hex, fg, 0.10), mix(caps.bg_hex, "#000000", 0.35)

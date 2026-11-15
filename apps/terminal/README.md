@@ -100,6 +100,10 @@ Options: `--plain` (line REPL, no colours) · `--no-anim` · `--ascii` · `--no-
 - **Answers** stream into the live tail and are committed to scrollback as rendered markdown, block by block.
   Thinking is collapsed (`∴ Thought for 8s`; `/verbose` shows it). Tool steps: `✓` done (dim), `✗` failed
   (bold), `⊘` denied, `⏸` held, with `⎿` previews; Ctrl+O has the full output.
+- **File edits** print as a diff block: `✓ Edited src/stats.py · +4 −2` (or Created / Wrote / Deleted), then
+  numbered rows with a sign column (`+` bold, `-` bold with dim code, context dim) and `⋮` between hunks; 16 rows
+  inline (8 for a new file, none for a delete), then `… +N lines · ctrl+o`. Hue is never the only signal. With
+  `COLORTERM=truecolor` and a known theme background, rows also get lighter/darker tints.
 - **Outcome**: the end of a task says *Done* (`◆`) only when the backend's verification says Verified or
   Checks pass. Otherwise `◇ Done (not verified)` / `◇ Finished (not verified)` with the verification label.
   A ✓ on every step never means Done.
@@ -109,6 +113,9 @@ Options: `--plain` (line REPL, no colours) · `--no-anim` · `--ascii` · `--no-
   nothing ever defaults to allow. "Tell Echo" sends your note as a steer, then denies. Questions from an agent
   show their options and "Other". Held approvals (autonomous mode) show `⏸ N held · /approvals` in the footer;
   allowing one offers to resume the paused work.
+  A file edit's approval shows the proposed diff instead of its JSON arguments: options on the left and the diff
+  on the right (PgUp/PgDn scroll it) at 120+ columns, stacked with at most 10 diff rows below that. Ctrl+G
+  pages the full diff and the arguments.
 
 ### Keys
 
@@ -144,6 +151,8 @@ commands marked *live* run at once; the others run when the turn ends.
 | `/approvals` *live* | `GET /lean/approvals`, `POST /lean/approvals/{id}`, `POST /lean/work/{id}` (resume) |
 | `/memory [query]` | `GET /memory` (filtered locally) |
 | `/status`, `/usage` *live* | `/health`, `/settings`, `/provider`, `/lean/stop-status`, token totals and context % |
+| `/diff [session\|git]` *live* | the project's `git diff` incl. untracked files in the pager; else this session's edits from `/query/runs/{id}/events` |
+| `/preview` *live* | in tmux (pane ≥ 140 columns): open or close a right-hand pane running `echospeak preview --follow <session>`; elsewhere it opens `/diff` |
 | `/stop`, `/detach`, `/transcript`, `/verbose`, `/copy` (OSC 52), `/clear`, `/help`, `/quit` | |
 
 Settings changed here are global: the desktop app uses them too. The TUI never turns anything on by itself.
@@ -170,6 +179,8 @@ Plain `http://` to a non-loopback host is refused unless `--insecure-remote` (us
 | `ECHO_REDUCED_MOTION=1` | static `●`, no shimmer, no typewriter (`--no-anim`) |
 | `ECHO_TUI_VERBS=plain` | no "Listening…/Tuning in…" flavour while nothing specific is known |
 | `ECHO_TUI_ACCENT=#4c72df\|echo\|auto` | truecolor accent (`auto` reads Omarchy's theme); default is the ANSI palette |
+| `ECHO_TUI_BG`, `ECHO_TUI_FG` | theme colours for truecolor diff tints (default: Omarchy's `colors.toml`) |
+| `ECHO_TUI_DIFF_TINT=0` | no diff background tints |
 | `ECHOSPEAK_PLAIN=1` | always the plain REPL |
 
 Narrow terminals: under 60 columns the banner is one line, the footer is `model · context%` and option keys are
@@ -180,6 +191,13 @@ hidden; under 40 the status is `● Working… esc`; under 12 rows dialogs show 
 Inline rendering: scrollback, copy-mode, search and `capture-pane` work. `/copy` uses OSC 52, which tmux
 forwards with `set -g set-clipboard on`. Run the TUI in one pane and `echospeak attach <session>` in another to
 watch the same run.
+
+`/preview` splits the current pane (`split-window -h -l 40%`) and runs `echospeak preview --follow <session>`
+there: a read-only, full-screen viewer (its own alternate screen; the conversation pane keeps its scrollback)
+with the session's changed files and the selected file's diffs, newest first, including edits waiting for
+approval (`PROPOSED`). Keys: j/k or arrows scroll, n/p file, f follow the newest edit, s split old│new (pane ≥ 150
+columns), q quit. `/preview` again closes it. It finds the backend like every other client; the key is never put on
+a command line.
 
 ## Security
 

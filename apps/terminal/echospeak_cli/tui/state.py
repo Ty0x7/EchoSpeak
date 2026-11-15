@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from ..render import NORMAL_STOPS, one_line, sanitize
 from . import blocks as B
+from . import diffview as DV
 from .mdstream import MdStream
 from .motion import fmt_elapsed, thinking_words
 
@@ -214,6 +215,8 @@ class Run:
         self.last_agent_printed = ""
         self.thought_total = 0.0
         self.transcript: list[B.Block] = []   # full-detail copy for the pager
+        self.changes: list[DV.Change] = []    # files this run changed (tool_end meta.file_change), for /diff
+        self.approval_changes: dict[str, DV.Change] = {}   # approval id -> the proposed change it showed
 
     # ── helpers ──────────────────────────────────────────────────────
     def _msg(self, evt: dict) -> Optional[Msg]:
@@ -257,7 +260,7 @@ class Run:
             out = []
         self.last_event = now
         # Tool lines add their full-output copy to the transcript themselves (_tool_end).
-        self.transcript.extend(b for b in out if not isinstance(b, B.ToolLine))
+        self.transcript.extend(b for b in out if not isinstance(b, (B.ToolLine, B.FileDiff)))
         return out
 
     def _feed(self, evt: dict, now: float) -> list[B.Block]:
@@ -345,6 +348,11 @@ class Run:
                 m.last = "question" if (evt.get("kind") == "question" or evt.get("question")) else "approval"
             else:
                 out = []
+            proposed = DV.parse(evt.get("file_change"))
+            if proposed is not None:
+                self.approval_changes[str(evt.get("id") or "")] = proposed
+                if evt.get("tool_call_id"):
+                    self.approval_changes[str(evt["tool_call_id"])] = proposed
             self.approvals.append(Pending(evt, verified=not evt.get("_recovered")))
             self.approval_info[str(evt.get("id") or "")] = one_line(evt.get("summary") or evt.get("question") or evt.get("tool"), 160)
             self.last_specific = now
@@ -365,6 +373,9 @@ class Run:
             if decision == "allow":
                 return [B.Note(g.ok, f"Allowed{suffix}", "dim", 2)]
             if decision == "deny":
+                change = self.approval_changes.get(aid)
+                if change is not None:
+                    return [B.Note(g.denied, f"Denied {DV.noun(change)} {g.sep} {DV.where(change, _caps_of(g))}", "bold", 2)]
                 return [B.Note(g.denied, f"Denied{suffix}", "bold", 2)]
             if decision in {"timeout", "cancelled"}:
                 return [B.Note(g.denied, f"Approval {decision}{suffix}", "dim", 2)]
@@ -491,6 +502,15 @@ class Run:
             m.last_tool = name
             m.printed = True
         self.last_specific = now
+        if status == "denied" and decision == "deny" and tid in self.approval_changes:
+            return []   # "⊘ Denied edit · path" already said it
+        meta = evt.get("meta") if isinstance(evt.get("meta"), dict) else {}
+        change = DV.parse(meta.get("file_change")) if status == "ok" else None
+        if change is not None:
+            self.changes.append(change)
+            dur = float(evt.get("duration_ms") or 0)
+            self.transcript.append(B.FileDiff(change, "ok", dur, full=True))
+            return [B.FileDiff(change, "ok", dur, full=self.verbose)]
         line = B.ToolLine(status, label, summary, float(evt.get("duration_ms") or 0), preview, more)
         full = B.ToolLine(status, label, summary, float(evt.get("duration_ms") or 0),
                           [x for x in output.splitlines() if x.strip()][:400], 0)
@@ -599,6 +619,12 @@ class Run:
             out.append(B.RuleLine(f"Answered in {elapsed}{thought}", gap=True))
         self.transcript.extend(out)
         return out
+
+
+def _caps_of(glyphs) -> Any:
+    from .theme import Caps
+
+    return Caps(glyphs=glyphs)
 
 
 def tool_input_detail(raw: Any) -> str:

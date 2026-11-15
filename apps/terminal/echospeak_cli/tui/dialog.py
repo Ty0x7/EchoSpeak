@@ -84,6 +84,12 @@ class Dialog:
     full_text: str = ""            # ctrl+g shows this in the pager
     filter_text: str = ""          # pickers: typed filter
     filterable: bool = False
+    change: Any = None             # approvals for file tools: the proposed diffview.Change
+    diff_top: int = 0              # first diff row shown (pgup/pgdn)
+
+    def scroll_diff(self, delta: int, total: int, page: int) -> None:
+        """PgUp/PgDn in the diff; never moves the option cursor and is never a decision."""
+        self.diff_top = max(0, min(max(0, total - page), self.diff_top + delta))
 
     def visible_options(self) -> list[tuple[int, Option]]:
         if not self.filter_text:

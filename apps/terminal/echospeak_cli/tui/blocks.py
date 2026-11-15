@@ -111,13 +111,22 @@ class Table:
 
 
 @dataclass
+class FileDiff:
+    """A finished file edit: header, then numbered hunks (tui/diffview.py)."""
+    change: Any                   # diffview.Change
+    status: str = "ok"            # ok | fail
+    duration_ms: float = 0
+    full: bool = False            # the transcript copy: every row the backend sent
+
+
+@dataclass
 class Raw:
     """Pre-rendered ANSI from our own code (never server text)."""
     ansi: str
 
 
 Block = Union[Banner, UserLine, AgentHeader, MarkdownBlock, ToolLine, ThinkingLine, Note, RuleLine, Outcome,
-              TaskBoard, Table, Raw]
+              TaskBoard, Table, FileDiff, Raw]
 
 
 # ── rendering ────────────────────────────────────────────────────────
@@ -203,6 +212,8 @@ def render(block: Block, width: int, caps: Caps, verbose: bool = False) -> str:
         return _markdown(block, width, caps)
     if isinstance(block, ToolLine):
         return _tool(block, width, caps, verbose)
+    if isinstance(block, FileDiff):
+        return _file_diff(block, width, caps, verbose)
     if isinstance(block, ThinkingLine):
         secs = max(1, round(block.seconds))
         text = Text(f"  {g.thought} Thought for {secs}s", style="dim italic")
@@ -395,6 +406,24 @@ def _tool(b: ToolLine, width: int, caps: Caps, verbose: bool) -> str:
             rows.append(Text(f"       {g.ellipsis} +{b.more} lines (ctrl+o for details)", style="dim"))
         out += _render(Group(*rows), width, caps)
     return out
+
+
+def _file_diff(b: FileDiff, width: int, caps: Caps, verbose: bool) -> str:
+    from . import diffview as DV
+
+    g = caps.glyphs
+    st = rich_styles(caps)
+    ok = b.status == "ok"
+    proposed = getattr(b.change, "status", "") == "proposed"
+    head = DV.header(b.change, caps, glyph=(g.attention if proposed else g.ok if ok else g.fail),
+                     glyph_style="dim" if ok else st["error"], label=DV.proposed_label(b.change) if proposed else "",
+                     duration=fmt_duration_ms(b.duration_ms), width=width)
+    rows, _hidden = DV.block_rows(b.change, width, caps, verbose=verbose or b.full)
+    lines = [head] + rows
+    for line in lines:
+        line.no_wrap = True
+        line.overflow = "crop"
+    return _render(Group(*lines), width, caps)
 
 
 def _table(b: Table, width: int, caps: Caps) -> str:

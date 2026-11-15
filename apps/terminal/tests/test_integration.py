@@ -203,6 +203,10 @@ def test_tui_in_a_real_pty_round_trip(backend, tmp_path):
     try:
         wait_for("EchoSpeak")
         wait_for("? for shortcuts")
+        wait_for("Work in this folder?")       # the first-start folder offer (tmp_path is a fresh folder)
+        time.sleep(0.4)                         # past the dialog's 300 ms input guard
+        os.write(master, b"n")
+        wait_for("just chatting")
         os.write(master, b"hello from the tui\r")
         wait_for(REPLY)
         assert KEY not in screen()

@@ -33,7 +33,8 @@ from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.key_binding.defaults import load_key_bindings
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import (ConditionalContainer, D, FormattedTextControl, HSplit, Layout, Window)
+from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+from prompt_toolkit.layout import (ConditionalContainer, D, FormattedTextControl, HSplit, Layout, VSplit, Window)
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.layout.processors import Processor, Transformation, TransformationInput
 from prompt_toolkit.output.color_depth import ColorDepth
@@ -46,6 +47,7 @@ from ..client import ApiError, Client, ConnectError, follow, new_request_id, sub
 from ..render import Renderer, one_line, sanitize
 from ..repl import App as Core, Out
 from . import blocks as B
+from . import diffview as DV
 from . import motion as M
 from .commands import COMMANDS, KEYS_HELP, SHORTCUTS, filter_commands, lookup, visible
 from .dialog import Action, Dialog, Option, approval_options, question_options
@@ -56,6 +58,12 @@ VERSION_FALLBACK = ""
 PASTE_CHARS = 1000
 PASTE_LINES = 12
 CHIP_RE = re.compile(r"\[Pasted [\d,]+ chars · \d+ lines #(\d+)\]")
+# Approval with a diff (edit-preview.md §3.3): two columns from this width (and height), else stacked.
+TWO_COL_MIN_W = 120
+TWO_COL_MIN_H = 20
+TWO_COL_LEFT = 44
+STACKED_DIFF_ROWS = 10
+DIFF_MARK = "__diff__"
 
 
 
@@ -180,6 +188,10 @@ class EchoTUI:
         self.context: Optional[tuple[int, int]] = None
         self.held = 0
         self.transcript: list[B.Block] = []
+        self.changes: list[DV.Change] = []     # file changes seen in this terminal (fallback for /diff)
+        self.preview_pane = ""                  # tmux pane id of the /preview companion
+        self.project_root = ""
+        self._diff_cache: dict = {}
         self.notice = ("", 0.0)
         self.ctrl_c_at = 0.0
         self._ctrl_c_mode = ""
@@ -273,7 +285,9 @@ class EchoTUI:
         self.composer_window = Window(composer_control, height=D(min=1, max=8), wrap_lines=True,
                                       get_line_prefix=self._line_prefix, dont_extend_height=True)
         self.dialog_window = Window(FormattedTextControl(self._dialog_text, focusable=True, show_cursor=False),
-                                    dont_extend_height=True, wrap_lines=True)
+                                    dont_extend_height=True, wrap_lines=True,
+                                    width=lambda: D.exact(self._left_w()) if self._two_col() else D())
+        self.diff_window = Window(FormattedTextControl(self._diff_pane_text), dont_extend_height=True, wrap_lines=False)
         self.dialog_text_window = Window(BufferControl(self.dialog_buffer), height=1,
                                          get_line_prefix=lambda _l, _w: [("class:attention", f" {self._dialog_prompt()} ")])
 
@@ -289,7 +303,8 @@ class EchoTUI:
             Window(FormattedTextControl(self._bottom_rule), height=1),
         ])
         dialog = HSplit([
-            self.dialog_window,
+            VSplit([self.dialog_window,
+                    ConditionalContainer(self.diff_window, filter=Condition(self._two_col))]),
             ConditionalContainer(self.dialog_text_window, filter=text_mode),
             Window(FormattedTextControl(self._dialog_footer), dont_extend_height=True),
         ])
@@ -530,7 +545,8 @@ class EchoTUI:
         d = self.dialog
         if d is None:
             return []
-        w = self.width()
+        two = self._two_col()
+        w = self._left_w() if two else self.width()
         g = self.caps.glyphs
         style = "class:attention.rule" if d.attention else "class:rule"
         out: StyleAndTextTuples = list(M.rule(w, d.title, self.caps, style=style,
@@ -538,11 +554,16 @@ class EchoTUI:
         small = self.height() < 12
         if not small and d.body:
             for st, text in d.body:
+                if st == DIFF_MARK:
+                    if not two:
+                        for frags in self._stacked_diff(d, w):
+                            out += [("", "\n")] + frags
+                    continue
                 for line in _wrap(text, max(10, w - 2)):
                     out += [("", "\n"), (st, " " + line)]
             out.append(("", "\n"))
         vis = d.visible_options()
-        narrow = w < 60
+        narrow = self.width() < 60
         top = 0
         if d.selected in [i for i, _ in vis]:
             pos = [i for i, _ in vis].index(d.selected)
@@ -571,6 +592,78 @@ class EchoTUI:
             out += [("", "\n"), ("class:dim", f"   … {len(vis) - 12} more · type to filter")]
         if d.filterable and d.filter_text:
             out += [("", "\n"), ("class:dim", f"   filter: {d.filter_text}")]
+        return out
+
+    # ── approval diff (two columns or stacked) ─────────────────────
+    def _two_col(self) -> bool:
+        d = self.dialog
+        return bool(d is not None and d.change is not None and d.change.hunks and not d.text_mode
+                    and self.width() >= TWO_COL_MIN_W and self.height() >= TWO_COL_MIN_H)
+
+    def _left_w(self) -> int:
+        """The left column fits the longest option (labels are never cut), 44 by default, at most 64."""
+        d = self.dialog
+        longest = max((M.width_of(o.label) + 7 + (M.width_of(o.key) + 4 if o.key else 0) for o in (d.options if d else [])),
+                      default=0)
+        return max(TWO_COL_LEFT, min(64, longest + 2, self.width() - 60))
+
+    def _ansi_rows(self, lines, width: int) -> list[StyleAndTextTuples]:
+        return [list(to_formatted_text(ANSI(row))) for row in DV.to_ansi(lines, width, self.caps)]
+
+    def _diff_rows(self, change: DV.Change, width: int, indent: int) -> list[StyleAndTextTuples]:
+        """Every diff row as fragments, cached: the live region redraws up to 20 times a second."""
+        key = (id(change), width, indent)
+        hit = self._diff_cache.get(key)
+        if hit is None:
+            rows, _ = DV.unified(change, width, self.caps, max_rows=None, indent=indent, hint="")
+            hit = self._ansi_rows(rows, width)
+            if len(self._diff_cache) > 8:
+                self._diff_cache.clear()
+            self._diff_cache[key] = hit
+        return hit
+
+    def _stacked_diff(self, d: Dialog, width: int) -> list[StyleAndTextTuples]:
+        """Below 120 columns: at most 10 rows of the diff (6 under 60), scrolled with pgup/pgdn."""
+        page = 6 if width < 60 else STACKED_DIFF_ROWS
+        rows = self._diff_rows(d.change, width, 4)
+        top = max(0, min(d.diff_top, max(0, len(rows) - page)))
+        shown = rows[top:top + page]
+        rest = len(rows) - top - len(shown)
+        if rest > 0 or top:
+            where = f"rows {top + 1}–{top + len(shown)} of {len(rows)}"
+            shown.append([("class:dim", f"    {self.caps.glyphs.ellipsis} +{rest} lines {self.caps.glyphs.sep} "
+                                        f"{where} {self.caps.glyphs.sep} pgup/pgdn {self.caps.glyphs.sep} ctrl+g"
+                           if rest > 0 else f"    {where} {self.caps.glyphs.sep} ctrl+g full diff")])
+        return shown
+
+    def _diff_page(self) -> int:
+        return max(4, self.height() - 8)
+
+    def _diff_pane_text(self) -> StyleAndTextTuples:
+        """The right column: '┬─ src/dates.py · +3 −1 ───── rows 1–9 of 14 ─' over '│ ' + diff rows."""
+        d = self.dialog
+        if d is None or d.change is None:
+            return []
+        g = self.caps.glyphs
+        width = max(20, self.width() - self._left_w())
+        rows = self._diff_rows(d.change, width - 2, 1)
+        page = self._diff_page()
+        top = max(0, min(d.diff_top, max(0, len(rows) - page)))
+        d.diff_top = top
+        shown = rows[top:top + page]
+        where = f"rows {top + 1}–{top + len(shown)} of {len(rows)}"
+        title = M.truncate(DV.summary_text(d.change, self.caps), max(10, width - M.width_of(where) - 10))
+        fill = max(1, width - 3 - M.width_of(title) - 2 - M.width_of(where) - 2)
+        top_rule = "┬" if not self.caps.ascii else "+"
+        bar = "class:attention.rule" if d.attention else "class:rule"
+        out: StyleAndTextTuples = [(bar, top_rule + g.rule + " "), ("class:title", title), (bar, " " + g.rule * fill + " "),
+                                   ("class:dim", where), (bar, " " + g.rule)]
+        left_lines = sum(t.count("\n") for _s, t, *_ in self._dialog_text()) + 1
+        body = shown
+        for i in range(max(len(body), left_lines - 1)):
+            out += [("", "\n"), (bar, g.vbar + " ")]
+            if i < len(body):
+                out += body[i]
         return out
 
     def _dialog_footer(self) -> StyleAndTextTuples:
@@ -719,7 +812,7 @@ class EchoTUI:
         @kb.add("c-g", filter=dialog_open)
         def _full_args(event) -> None:
             if self.dialog and self.dialog.full_text:
-                self._spawn(self._page_text(self.dialog.full_text))
+                self._spawn(self._page_text(self.dialog.full_text, end=self.dialog.change is None))
 
         @kb.add("c-l")
         def _redraw(event) -> None:
@@ -750,6 +843,20 @@ class EchoTUI:
             key = {"up": "up", "down": "down", "c-m": "enter", "escape": "escape"}.get(event.key_sequence[0].key,
                                                                                       event.key_sequence[0].key)
             self._dialog_key(key)
+
+        @kb.add("pageup", filter=nav)
+        @kb.add("pagedown", filter=nav)
+        def _dialog_scroll(event) -> None:
+            d = self.dialog
+            if d is None or d.change is None:
+                return
+            two = self._two_col()
+            page = self._diff_page() if two else STACKED_DIFF_ROWS
+            width = max(20, self.width() - self._left_w()) - 2 if two else self.width()
+            total = len(self._diff_rows(d.change, width, 1 if two else 4))
+            step = max(1, page - 2)
+            d.scroll_diff(step if event.key_sequence[0].key == Keys.PageDown else -step, total, page)
+            self.app.invalidate()
 
         @kb.add("backspace", filter=nav)
         def _dialog_backspace(event) -> None:
@@ -1017,7 +1124,8 @@ class EchoTUI:
             if kind == "event":
                 etype = str(payload.get("type") or "")
                 blocks = run.feed(payload, now)
-                self.emit(*blocks, transcript=True)
+                # The run keeps its own full-detail transcript; it joins the session's when the run ends.
+                self.emit(*blocks, transcript=False)
                 if etype == "token_usage" and run.context:
                     self.context = run.context
                     try:
@@ -1054,7 +1162,9 @@ class EchoTUI:
         run = self.run
         if run is None:
             return
-        self.emit(*run.finish(status, self.now()))
+        self.emit(*run.finish(status, self.now()), transcript=False)
+        self.transcript.extend(run.transcript)
+        self.changes.extend(run.changes)
         if run.final_text:
             self.last_answer = run.final_text
         self.session_tokens["runs"] += 1
@@ -1171,7 +1281,10 @@ class EchoTUI:
         if self.follow_abandon:
             self.follow_abandon.set()
         self.run_gen += 1
-        self.emit(*[b for b in run.finish("detached", self.now()) if isinstance(b, (B.MarkdownBlock, B.ThinkingLine))])
+        self.emit(*[b for b in run.finish("detached", self.now()) if isinstance(b, (B.MarkdownBlock, B.ThinkingLine))],
+                  transcript=False)
+        self.transcript.extend(b for b in run.transcript if not isinstance(b, (B.Outcome, B.RuleLine)))
+        self.changes.extend(run.changes)
         self.emit(B.Note(self.caps.glyphs.handoff, f"Detached. The task keeps running on the backend · "
                                                    f"echospeak attach {self.sid[:8]} or /resume", "dim", 0))
         self.run = None
@@ -1216,10 +1329,27 @@ class EchoTUI:
                        selected=-1, footer=f"{g.arrow_up_down} choose · enter confirm · esc to leave it for later",
                        full_text=full)
         else:
-            body.append(("class:title", one_line(evt.get("summary") or evt.get("tool"), 300) + count))
             args = evt.get("args") if isinstance(evt.get("args"), dict) else {}
+            change = DV.parse(evt.get("file_change"))
             command = args.get("command") or args.get("cmd")
-            if command:
+            if change is not None:
+                # A file tool: the proposed change itself instead of its JSON arguments (edit-preview.md §3.3).
+                body.append(("class:title", DV.ask_title(change) + count))
+                body.append(("bold", DV.where(change, self.caps)))
+                tail = "".join(t for t, _s in DV.counts(change, self.caps))
+                note = DV.withheld_note(change)
+                if note and not change.hunks:
+                    body.append(("class:dim", f"Diff not shown: {note}. Approve once only if you expected it."))
+                elif tail:
+                    body.append(("class:dim", tail + (f" {g.sep} preview cut at {DV.FULL_ROWS} lines" if change.truncated else "")))
+                if change.hunks:
+                    body.append((DIFF_MARK, ""))
+                full = self._change_text(change, "Proposed change") + ("\n\nArguments\n" + full if full else "")
+            else:
+                body.append(("class:title", one_line(evt.get("summary") or evt.get("tool"), 300) + count))
+            if change is not None:
+                pass   # the diff replaces the arguments (ctrl+g still shows them)
+            elif command:
                 for line in sanitize(command).splitlines()[:6] or [""]:
                     body.append(("", f"$ {line}"))
                 where = args.get("cwd") or args.get("workdir")
@@ -1236,10 +1366,15 @@ class EchoTUI:
             if evt.get("recovered"):
                 body.append(("class:dim", "Waiting from earlier work: only this exact action can be allowed, and the "
                                           "work can resume once you answer."))
+            footer = f"y/n or {g.arrow_up_down} then enter · esc: tell {agent} what to do instead"
+            if change is not None and change.hunks:
+                footer = (f"y/n or {g.arrow_up_down} then enter {g.sep} pgup/pgdn diff {g.sep} ctrl+g full diff "
+                          f"{g.sep} esc: tell {agent} instead")
+            elif full:
+                footer += " · ctrl+g full arguments"
             d = Dialog(title=f"{agent} needs your OK", options=approval_options(evt, agent), body=body, kind="approval",
-                       payload=evt, selected=-1, escape_value="__steer__", full_text=full,
-                       footer=f"y/n or {g.arrow_up_down} then enter · esc: tell {agent} what to do instead"
-                              + (" · ctrl+g full arguments" if full else ""))
+                       payload=evt, selected=-1, escape_value="__steer__", full_text=full, footer=footer,
+                       change=change)
         d.text_prompt = f"Tell {agent} what to do instead:" if not is_q else "Your answer:"
 
         async def decided(action: Action) -> None:
@@ -1247,6 +1382,14 @@ class EchoTUI:
 
         d.on_result = decided
         return d
+
+    def _change_text(self, change: DV.Change, title: str = "") -> str:
+        """A whole change as ANSI text for the pager: header, then every row the backend sent."""
+        width = self.width()
+        out = B.render(B.FileDiff(change, "ok", 0, full=True), width, self.caps, verbose=True)
+        if title:
+            out = B.render(B.Note("", title, "bold", 0), width, self.caps) + out
+        return out
 
     async def _decide(self, evt: dict, action: Action, is_q: bool) -> None:
         aid = str(evt.get("id") or "")
@@ -1358,7 +1501,7 @@ class EchoTUI:
         rows = [[c.name + (" " + c.args if c.args else ""), c.desc + ("" if c.live else "")] for c in self.commands]
         self.emit(B.Table(rows, title="Commands"))
         self.emit(B.Table([[k, v] for k, v in KEYS_HELP], title="Keys"))
-        self.emit(B.Note("", "During a task, /stop /status /usage /approvals /transcript /verbose /copy /help /detach /quit "
+        self.emit(B.Note("", "During a task, /stop /status /usage /approvals /transcript /diff /preview /verbose /copy /help /detach /quit "
                              "run at once; other commands wait for the turn to end. Start a message with // to send a "
                              "literal slash.", "dim", 2))
 
@@ -1402,6 +1545,85 @@ class EchoTUI:
 
     async def cmd_transcript(self, args) -> None:
         await self._pager()
+
+    # ── /diff and /preview (edit-preview.md §3.4, §3.5) ──────────────
+    def _session_changes(self) -> list[DV.Change]:
+        return list(self.changes) + (list(self.run.changes) if self.run else [])
+
+    async def cmd_diff(self, args) -> None:
+        want = (args[0].lower() if args else "")
+        root = await self.call(self._git_root) if want != "session" else ""
+        if want == "git" and not root:
+            self.note("not a git repository here · /diff session shows this session's edits")
+            return
+        if root:
+            text = await self.call(git_diff_text, root, self.width())
+            if text.strip():
+                await self._page_text(text, end=False)
+                return
+            if want == "git":
+                self.note(f"no uncommitted changes in {_home(root)}")
+                return
+        text = await self._session_diff_text()
+        if not text:
+            self.note("no file changes in this session yet" + (f" (and none uncommitted in {_home(root)})" if root else ""))
+            return
+        await self._page_text(text, end=False)
+
+    def _git_root(self) -> str:
+        for base in (self.project_root, os.getcwd()):
+            if base and Path(base).is_dir():
+                root = git_toplevel(base)
+                if root:
+                    return root
+        return ""
+
+    async def _session_diff_text(self) -> str:
+        """This session's recorded changes: from the run journal when it answers, else what this terminal saw."""
+        from .preview import Model, collect
+
+        model: Optional[Model] = None
+        if self.sid:
+            try:
+                model = await self.call(collect, self.client, self.sid)
+            except (ApiError, ConnectError):
+                model = None
+        changes = [e.change for e in sorted(model.entries, key=lambda e: e.order) if e.status == "applied"] if model else []
+        if self.run:
+            have = {x.change_id for x in changes}
+            changes += [c for c in self.run.changes if c.change_id not in have]
+        if not changes:
+            changes = self._session_changes()
+        if not changes:
+            return ""
+        return session_diff_text(changes, self.width(), self.caps)
+
+    async def cmd_preview(self, args) -> None:
+        if not self.env.get("TMUX") or not shutil.which("tmux"):
+            self.note("/preview opens a live diff pane beside this one inside tmux; showing /diff in the pager instead")
+            await self.cmd_diff([])
+            return
+        if self.preview_pane and await self.call(tmux_pane_alive, self.preview_pane):
+            await self.call(tmux, "kill-pane", "-t", self.preview_pane)
+            self.preview_pane = ""
+            self.note("preview pane closed")
+            return
+        if not self.sid:
+            self.note("send a message first: the preview follows this session's edits")
+            return
+        here = self.env.get("TMUX_PANE", "")
+        width = await self.call(tmux_pane_width, here)
+        if width and width < PREVIEW_MIN_COLS:
+            self.note(f"Widen to {PREVIEW_MIN_COLS} columns for the preview pane (this one has {width}), or use /diff")
+            return
+        command, env = preview_command(self.sid, self.endpoint, self.client, self.env)
+        try:
+            pane = await self.call(tmux_split, here, command, env)
+        except (OSError, subprocess.SubprocessError) as exc:
+            self.note(f"tmux could not open the pane ({one_line(exc, 120)}) · /diff shows the changes in the pager")
+            return
+        self.preview_pane = pane
+        self.note("preview pane open on the right · it follows this session's edits · /preview again closes it")
 
     async def cmd_stop(self, args) -> None:
         if self.running:
@@ -1580,6 +1802,7 @@ class EchoTUI:
             await self.call(self.client.request, "POST", f"/projects/{pid}/activate", None, {"thread_id": self.sid})
         self.core.project_id = pid
         self.project_name = one_line(project.get("name") or "", 40)
+        self.project_root = str(project.get("workspace_root") or "")
         trust = str(project.get("trust_state") or "")
         extra = "" if trust == "trusted" else " · untrusted: Echo can't edit or run anything there"
         self.note(f"project {self.project_name} ({_home(one_line(project.get('workspace_root'), 120))}){extra}"
@@ -2083,7 +2306,7 @@ class EchoTUI:
                 parts.append(self.run.tail())
         await self._page_text("".join(parts) or "(nothing in this session yet)\n")
 
-    async def _page_text(self, text: str) -> None:
+    async def _page_text(self, text: str, end: bool = True) -> None:
         pager = shutil.which("less")
         fd, path = tempfile.mkstemp(prefix="echospeak-", suffix=".txt")
         try:
@@ -2091,7 +2314,7 @@ class EchoTUI:
                 fh.write(text)
             async with in_terminal():
                 if pager:
-                    subprocess.call([pager, "-R", "+G", path])
+                    subprocess.call([pager, "-R", "+G", path] if end else [pager, "-R", path])
                 else:
                     sys.stdout.write(text)
                     sys.stdout.flush()
@@ -2130,6 +2353,131 @@ class EchoTUI:
                   if self.caps.color else f"Session {self.sid[:8]} · resume with: echospeak resume {self.sid[:8]}")
         return 0
 
+
+
+# ── /diff text, read-only git, and tmux (only on /preview) ─────────
+PREVIEW_MIN_COLS = 140
+PREVIEW_ENV = ("HOME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "COLORTERM", "NO_COLOR", "XDG_RUNTIME_DIR", "XDG_DATA_HOME",
+               "ECHOSPEAK_DATA_DIR", "ECHOSPEAK_RUNTIME_DIR", "ECHOSPEAK_URL", "ECHOSPEAK_BACKEND_DIR",
+               "ECHO_TUI_ASCII", "ECHO_TUI_ACCENT", "ECHO_TUI_BG", "ECHO_TUI_FG", "ECHO_TUI_DIFF_TINT", "ECHO_REDUCED_MOTION")
+
+
+def session_diff_text(changes: list, width: int, caps: Caps) -> str:
+    """The file list with net counts, then every change in full, oldest first."""
+    files: dict[str, list[int]] = {}
+    for c in changes:
+        row = files.setdefault(c.display, [0, 0])
+        row[0] += c.added
+        row[1] += c.removed
+    g = caps.glyphs
+    rows = [[name, f"+{a}", f"{g.minus}{r}"] for name, (a, r) in files.items()]
+    out = B.render(B.Table(rows, title=f"Changes {g.sep} this session {g.sep} {len(files)} file"
+                                       f"{'s' if len(files) != 1 else ''}"), width, caps)
+    for c in changes:
+        out += "\n" + B.render(B.FileDiff(c, "ok", 0, full=True), width, caps, verbose=True)
+    return out
+
+
+def _git(root: str, *args: str, timeout: float = 15) -> str:
+    try:
+        res = subprocess.run(["git", "-C", root, *args], capture_output=True, timeout=timeout,
+                             env={**os.environ, "GIT_PAGER": "cat", "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"})
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if res.returncode not in (0, 1):
+        return ""
+    return res.stdout.decode("utf-8", "replace")
+
+
+def git_toplevel(path: str) -> str:
+    if not shutil.which("git"):
+        return ""
+    return _git(path, "rev-parse", "--show-toplevel", timeout=5).strip()
+
+
+def git_diff_text(root: str, width: int, max_untracked: int = 50) -> str:
+    """Uncommitted changes plus untracked files (as Codex's /diff does), coloured by git. File contents are
+    untrusted, so everything except git's own colour codes goes through sanitize."""
+    color = "--color=always"
+    tracked = _git(root, "diff", color, "HEAD") or _git(root, "diff", color)
+    names = [n for n in _git(root, "ls-files", "--others", "--exclude-standard", "-z").split("\0") if n][:max_untracked]
+    parts = [tracked] if tracked.strip() else []
+    for name in names:
+        parts.append(_git(root, "diff", color, "--no-index", "--", "/dev/null", name))
+    text = "".join(parts)
+    if not text.strip():
+        return ""
+    head = f"Uncommitted changes in {_home(root)}" + (f" · {len(names)} untracked file(s) included" if names else "")
+    return head + "\n\n" + _sgr_only(text)
+
+
+_SGR = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _sgr_only(text: str) -> str:
+    out, pos = [], 0
+    for m in _SGR.finditer(text):
+        out.append(sanitize(text[pos:m.start()]))
+        out.append(m.group(0))
+        pos = m.end()
+    out.append(sanitize(text[pos:]))
+    return "".join(out)
+
+
+def tmux(*args: str) -> str:
+    res = subprocess.run(["tmux", *args], capture_output=True, timeout=10, check=True)
+    return res.stdout.decode("utf-8", "replace").strip()
+
+
+def tmux_pane_alive(pane: str) -> bool:
+    try:
+        return pane in tmux("list-panes", "-a", "-F", "#{pane_id}").split()
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def tmux_pane_width(pane: str) -> int:
+    try:
+        return int(tmux("display-message", "-p", *(["-t", pane] if pane else []), "#{pane_width}") or 0)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return 0
+
+
+def preview_command(sid: str, endpoint: discovery.Endpoint, client: Client, env) -> tuple[list[str], dict[str, str]]:
+    """argv and environment for `echospeak preview --follow <sid>` in a new pane.
+
+    tmux runs pane commands in its server's environment, so the discovery variables are passed with -e.
+    The API key is never on a command line or in the pane's environment: when it didn't come from the
+    endpoint file (which the viewer finds itself), it goes in a private 0600 file the viewer deletes.
+    """
+    import json
+
+    root = str(Path(__file__).resolve().parents[2])
+    argv = [sys.executable, "-m", "echospeak_cli", "preview", "--follow", sid]
+    passed = {k: str(env[k]) for k in PREVIEW_ENV if env.get(k)}
+    passed["PYTHONPATH"] = root
+    passed["ECHOSPEAK_NO_VENV"] = "1"
+    if endpoint.source != "endpoint-file":
+        argv += ["--url", client.base_url]
+        if client.key:
+            folder = tempfile.mkdtemp(prefix="echospeak-preview-")
+            path = os.path.join(folder, "endpoint.json")
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump({"url": client.base_url, "key": client.key}, fh)
+            argv += ["--key-file", path]
+    return argv, passed
+
+
+def tmux_split(target: str, argv: list[str], env: dict[str, str]) -> str:
+    """The viewer in a right-hand split of ``target`` (this pane); focus stays here. Returns the pane id."""
+    args = ["split-window", "-h", "-d", "-l", "40%", "-P", "-F", "#{pane_id}"]
+    if target:
+        args += ["-t", target]
+    for key, value in env.items():
+        args += ["-e", f"{key}={value}"]
+    args.append(" ".join(shlex.quote(a) for a in argv))
+    return tmux(*args)
 
 
 def _plural_msgs(n) -> str:
