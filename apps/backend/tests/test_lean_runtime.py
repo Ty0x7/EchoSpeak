@@ -208,7 +208,8 @@ def test_empty_reply_is_nudged_instead_of_ending():
     ])
     result = _turn(client, _toolbox({}), []).run("go")
     assert result.text == "Here you go."
-    assert "stopped without replying" in client.calls[1][-1]["content"]
+    # It reasoned but wrote nothing: asked for the reply it worked out, thinking off (test_harness_eval_findings.py).
+    assert "worked out your reply in your reasoning" in client.calls[1][-1]["content"]
 
 
 def test_repeated_identical_call_is_short_circuited():

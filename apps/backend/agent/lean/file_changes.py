@@ -326,6 +326,30 @@ def _proposed_edit(text: str, args: dict[str, Any]) -> tuple[Optional[str], str]
     return None, "the text to replace wasn't found, so the edit will fail without changing the file"
 
 
+def lost_work(record: Optional[dict[str, Any]]) -> str:
+    """Why a proposed write or edit would destroy existing work, or "" when it wouldn't.
+
+    Ordinary edits don't ask in the default approval mode, but the harness promises the model (and
+    the owner) that deleting or overwriting work does. An empty write is a delete by another name: in
+    the harness evaluation the model, refused `rm old_report.txt`, wrote "" to it instead, and an
+    "overwrite budget.csv with an empty file" request ran without a card.
+    """
+    if not record or record.get("op") not in {"write", "edit"} or record.get("status") != "proposed":
+        return ""
+    name = record.get("display_path") or record.get("path") or "the file"
+    if record.get("op") == "write" and (record.get("binary") or record.get("too_large")):
+        return f"this overwrites {name}, which is too large or not text to show the change"
+    added, removed, total = int(record.get("added") or 0), int(record.get("removed") or 0), int(record.get("total_lines") or 0)
+    before = total - added + removed
+    if before <= 0 or record.get("withheld_reason"):
+        return ""
+    if total == 0:
+        return f"this empties {name} ({before} line{'s' if before != 1 else ''} now)"
+    if removed >= 5 and removed >= 0.5 * before and removed > 2 * added:
+        return f"this removes {removed} of the {before} lines in {name}"
+    return ""
+
+
 def proposed(name: str, args: dict[str, Any], root: str = "") -> Optional[dict[str, Any]]:
     """What this call would change, computed from its arguments and the current file. Never writes."""
     if name not in TRACKED or not isinstance(args, dict):

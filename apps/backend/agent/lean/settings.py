@@ -50,6 +50,13 @@ def context_tokens(endpoint: Any = None) -> int:
         known = int(meta.get("context_limit") or 0)
         if not known and endpoint.local:
             known = int(getattr(config.local, "context_length", 0) or 0)
+        if endpoint.local:
+            # What the server really serves wins over what EchoSpeak was told: a longer prompt is cut
+            # silently, not refused (agent/lean/window.py). It can only lower the limit.
+            from agent.lean import window
+            served = window.served(endpoint)
+            if served > 0:
+                known = min(known, served) if known > 0 else served
         if known > 0:
             return max(512, min(known, configured) if configured > 0 else known)
     if configured > 0:

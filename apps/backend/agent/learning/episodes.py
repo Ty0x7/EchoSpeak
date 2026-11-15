@@ -151,8 +151,11 @@ _ASKS_FOR_TESTS = re.compile(r"(?i)\b(tests?|testing|spec|unit tests?|pytest|jes
 
 def command_kind(command: str) -> str:
     """test | run | read | change, for one terminal command."""
+    from agent.lean.verification import check_kind
+
     text = str(command or "")
-    if _TEST_CMD.search(text):
+    # The runner must be what runs: `pip install pytest` or `pip list | grep pytest` checks nothing.
+    if _TEST_CMD.search(text) and check_kind(text) == "test":
         return "test"
     if _MUTATING_CMD.search(text):
         return "change"

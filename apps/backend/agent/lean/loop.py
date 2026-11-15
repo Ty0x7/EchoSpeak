@@ -18,17 +18,19 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from loguru import logger
 
 from agent.lean import policy, settings
-from agent.lean import quarantine, tool_outputs, tracing
+from agent.lean import quarantine, tool_outputs, tracing, window
 from agent.lean import approvals, steering
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, evidence, outbound
@@ -53,7 +55,12 @@ NUDGE_CONTINUE = ("Your answer was cut off by the output limit. Continue it exac
 # All of the output went to reasoning: answer from it instead of reasoning again from scratch.
 NUDGE_REASONING_SPENT = ("Your reasoning used the whole output budget before you wrote the answer. Write the answer now, "
                          "directly and concisely, from what you already worked out. Don't deliberate again.")
+# Reasoning, then an empty reply that stopped normally: the answer was written as reasoning. Answer it, thinking off.
+NUDGE_THOUGHT_ONLY = ("You worked out your reply in your reasoning but didn't write it for the user. Write the reply "
+                      "now, from what you already worked out; don't mention this note.")
 CONTINUATIONS = 2
+# Failed summaries in one turn before compaction stops being tried (the loop trims instead).
+COMPACT_FAILURES = 2
 
 
 def exit_code_known(output: str) -> bool:
@@ -177,6 +184,9 @@ class LeanTurn:
         # Calls (by signature) the user denied or a policy blocked in this turn: never asked
         # or tried a second time. Persistence after a "no" is a failure mode, not diligence.
         self._refused: dict[str, str] = {}
+        # Existing files and folders named by an action the owner refused (or a policy blocked, or autonomous
+        # mode held) in this turn: later changes to them ask again, whatever tool they come through.
+        self._denied_targets: set[str] = set()
         # Failures in a row per tool, whatever the arguments: after a few, say so.
         self._fail_streak: dict[str, int] = {}
         # Approvals autonomous mode held for the owner instead of waiting ({tool, summary, reason}).
@@ -203,6 +213,7 @@ class LeanTurn:
         self._on_seal = on_seal
         self._handed_off = False
         self.compactions = 0
+        self._compact_failures = 0
         # Extra fields on agent_start, e.g. who handed this work over.
         self.meta = dict(meta or {})
         self.client = client
@@ -292,6 +303,11 @@ class LeanTurn:
         if any(item.get("kind") == "text" and item.get("step") == step for item in self.timeline):
             self.timeline = [item for item in self.timeline if not (item.get("kind") == "text" and item.get("step") == step)]
             self.emit({"type": "text_replace", "step": step, "text": ""})
+
+    def _discard_step(self, step: int) -> None:
+        """Take back everything a step streamed (its reply was made from a prompt the server cut)."""
+        self._retract_text(step)
+        self.timeline = [item for item in self.timeline if not (item.get("kind") == "thinking" and item.get("step") == step)]
 
     def _close_thinking(self) -> None:
         for item in reversed(self.timeline):
@@ -535,11 +551,18 @@ class LeanTurn:
                 if nudges < 2:
                     nudges += 1
                     messages.pop()
+                    tail = self._reasoning_tail(step)
                     if turn.finish_reason == "length":
                         # Reasoning used the whole budget: answer from it (thinking off), don't reason again.
-                        tail = self._reasoning_tail(step)
                         add_note(messages, NUDGE_REASONING_SPENT + (f" Your reasoning ended with: \"{tail}\"" if tail else ""))
                         self._no_think_next = True
+                    elif tail:
+                        # Thought but said nothing: the answer is often written in the reasoning and the turn
+                        # ended there. Asking again with thinking on repeats it (qwen3.5:9b on Ollama: every
+                        # replay of such a call came back empty, every replay with thinking off answered).
+                        add_note(messages, NUDGE_THOUGHT_ONLY + f" Your reasoning ended with: \"{tail}\"")
+                        self._no_think_next = True
+                        self.emit({"type": "empty_reply", "step": step, "retry": "thinking_off"})
                     else:
                         add_note(messages, NUDGE_EMPTY)
                     continue
@@ -703,12 +726,26 @@ class LeanTurn:
             # Count the step once: "fresh" is what it added (new input + reply). Charging the total
             # re-counted the whole re-sent conversation every step, so a 64k work budget ran out after
             # about five steps on a 16k-context model, even on a task whose tests had already passed.
-            fresh = self._account_usage(turn.usage) if turn.usage else 0
+            fresh = self._account_usage(turn.usage, messages, tools) if turn.usage else 0
             # The admission wrapper leaves this call's charge to the loop (admission.loop_accounted).
             if self.work_context:
                 self.work_context.coordinator.account(self.work_context, fresh)
         if turn.usage:
             self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens(getattr(self.client, "endpoint", None))})
+        sent = _estimate_tokens(messages, tools) if turn.usage else 0
+        kept = int((turn.usage or {}).get("prompt") or 0)
+        cut = window.truncated(endpoint, sent, kept)
+        if cut:
+            # The server answered a prompt it had silently cut (system prompt and request gone first). Nothing
+            # from this reply is used: its text is taken back, its tool calls never run, and the loop trims
+            # to the window the server really has and asks again (agent/lean/window.py).
+            window.learn(endpoint, cut)
+            self._discard_step(step)
+            if getattr(self, "trace", None) is not None:
+                self.trace.event("context.truncated", step=step, sent=sent, kept=kept, window=cut)
+            self.emit({"type": "context_truncated", "step": step, "sent": sent, "kept": kept, "window": cut})
+            raise ProviderError(413, f"The model server cut the prompt to fit its {cut}-token context window "
+                                     f"(about {sent} tokens were sent, {kept} kept).")
         # In group chats the transcript shows "[Name]: text"; models sometimes copy
         # that onto their own reply. Drop it.
         own_prefix = re.match(rf"\s*\[{re.escape(self.persona.name)}\]:\s*", turn.content or "")
@@ -730,7 +767,35 @@ class LeanTurn:
                 self.emit({"type": "text_replace", "step": step, "text": cleaned})
         return turn
 
-    def _account_usage(self, usage: dict[str, Any]) -> int:
+    def _account_side(self, usage: Optional[dict[str, Any]], kind: str) -> None:
+        """A model call outside the agent's own steps (compaction): all of it is new input, so all of it counts.
+
+        It doesn't move the step baseline (_last_prompt): the next step is still compared with the last step.
+        """
+        if not usage:
+            return
+        prompt, completion = int(usage.get("prompt") or 0), int(usage.get("completion") or 0)
+        self.usage["prompt"] += prompt
+        self.usage["completion"] += completion
+        self.usage["total"] += int(usage.get("total") or prompt + completion)
+        self.usage["fresh"] = self.usage.get("fresh", 0) + prompt + completion
+        self.emit({"type": "side_usage", "kind": kind, "prompt": prompt, "completion": completion})
+
+    def _added_since_last_call(self, messages: list[dict[str, Any]], tools: Optional[list[dict[str, Any]]]) -> int:
+        """Estimated tokens of what the loop added to the conversation since the previous model call.
+
+        Each message's size is remembered by identity (the messages are held, so an id can't be reused):
+        new messages count whole, messages that grew (a note appended to a tool result) count what they
+        gained, and messages that were trimmed or dropped count nothing.
+        """
+        seen: dict[int, tuple[dict[str, Any], int]] = getattr(self, "_message_sizes", {})
+        sizes = {id(m): (m, _estimate_tokens([m], [])) for m in messages}
+        added = sum(max(0, size - seen.get(key, (None, 0))[1]) for key, (_m, size) in sizes.items())
+        self._message_sizes = sizes
+        return added
+
+    def _account_usage(self, usage: dict[str, Any], messages: Optional[list[dict[str, Any]]] = None,
+                       tools: Optional[list[dict[str, Any]]] = None) -> int:
         """Add one step's token counts to the turn's.
 
         "fresh" is what the step added. Every step re-sends the whole conversation, so
@@ -740,12 +805,21 @@ class LeanTurn:
         """
         for key in ("prompt", "completion", "total"):
             self.usage[key] += int(usage.get(key) or 0)
+        added = self._added_since_last_call(messages, tools) if messages is not None else None
         if "prompt" in usage or "completion" in usage:
             prompt = int(usage.get("prompt") or 0)
-            # A prompt that shrank was trimmed to fit the context window (_fit_context): nothing new was
-            # sent, so it adds no input. Counting the whole prompt again on every trim drained a 64k
-            # work budget in ~5 steps on a 16k-context model. Only the first step counts it whole.
-            grown = max(0, prompt - self._last_prompt) if self._last_prompt else prompt
+            # A prompt that shrank was trimmed to fit the context window (_fit_context), so the server's growth
+            # says nothing about what was added: counting the whole prompt again drained a 64k work budget in ~5
+            # steps on a 16k model, but counting nothing missed the new tool result sent in the same step. The
+            # loop knows what it added since the last call; it's converted to the server's tokens by this
+            # call's own ratio. Only the first step counts the prompt whole.
+            if not self._last_prompt:
+                grown = prompt
+            elif prompt >= self._last_prompt or added is None:
+                grown = max(0, prompt - self._last_prompt)
+            else:
+                sent = _estimate_tokens(messages, tools or [])
+                grown = int(added * prompt / sent) if sent else 0
             self._last_prompt = prompt
             fresh = max(0, grown) + int(usage.get("completion") or 0)
         else:  # a provider that reports only a total
@@ -789,6 +863,13 @@ class LeanTurn:
                 elif decision.action == "ask":
                     self._policy_reasons[call.id] = decision.reason
                     self._policy_rules[call.id] = decision.rule
+            if not problem and self._denied_targets and call.id not in self._policy_reasons:
+                hit = self._after_denial(name, args)
+                if hit:
+                    # Another route to what the owner just refused (`rm x` denied, then x written empty): it asks
+                    # again, and no grant or autonomous mode answers for the owner (approvals.scope_for).
+                    self._policy_reasons[call.id] = f"you refused an action on {hit} earlier in this request"
+                    self._policy_rules[call.id] = "after_denial"
             prepared.append((call, name, args, problem))
 
         results: dict[str, tuple[bool, str]] = {}
@@ -834,6 +915,7 @@ class LeanTurn:
                 output = (f"Blocked by EchoSpeak's safety policy: {self._policy_reasons.get(call.id, 'not allowed')}. "
                           "Don't retry it; continue without it or tell the user what was blocked.")
                 self._refused[self._sig(name, args)] = "blocked by EchoSpeak's safety policy"
+                self._denied_targets |= self._touched(name, args)
                 results[call.id] = (False, output)
                 self._tool_finished(call, name, args, step, False, output, 0, outcome="refused")
                 continue
@@ -882,6 +964,8 @@ class LeanTurn:
                     self._refused[self._sig(name, args)] = "denied by the user"
                 elif denial.startswith("Not run:") and "autonomous mode" in denial:
                     self._refused[self._sig(name, args)] = "held for the owner's approval"
+                if denied_as in {"denied", "held"}:
+                    self._denied_targets |= self._touched(name, args)
                 results[call.id] = (False, denial)
                 self._tool_finished(call, name, args, step, False, denial, 0, outcome=denied_as)
                 continue
@@ -1034,6 +1118,64 @@ class LeanTurn:
             return f" ({'; '.join(parts)})" if parts else ""
         return ""
 
+    def _touched(self, name: str, args: dict[str, Any]) -> set[str]:
+        """Existing files and folders a call names: a file tool's paths, or a command's arguments.
+
+        The project folder itself and its parents are left out: every command runs somewhere in them.
+        """
+        from agent.lean.file_changes import TRACKED
+
+        root = Path(str(getattr(self.toolbox, "project_root", "") or ".")).expanduser()
+        base = root
+        if name in TRACKED:
+            raw = [str(args.get(k) or "") for k in ("path", "file_path", "src", "source", "dst", "destination")]
+        elif name in {"terminal", "terminal_run", "process_start"}:
+            command = str(args.get("command") or args.get("cmd") or "")
+            try:
+                tokens = shlex.split(command)
+            except ValueError:
+                tokens = command.split()
+            raw = [token.lstrip("<>|&;") for token in tokens if not token.startswith("-")]
+            base = Path(str(args.get("cwd") or root)).expanduser()
+        else:
+            return set()
+        try:
+            exclude = {str(root.resolve()), *(str(p) for p in root.resolve().parents)}
+        except OSError:
+            exclude = set()
+        found: set[str] = set()
+        for token in raw:
+            if not token.strip():
+                continue
+            path = Path(token).expanduser()
+            path = path if path.is_absolute() else base / path
+            try:
+                resolved = path.resolve()
+                if resolved.exists() and str(resolved) not in exclude:
+                    found.add(str(resolved))
+            except (OSError, ValueError):
+                continue
+        return found
+
+    def _after_denial(self, name: str, args: dict[str, Any]) -> str:
+        """The refused target this call would change (shown to the owner), or ""."""
+        from agent.learning.episodes import command_kind
+        from agent.lean.file_changes import TRACKED
+
+        if name not in TRACKED:
+            if name not in {"terminal", "terminal_run", "process_start"}:
+                return ""
+            if command_kind(str(args.get("command") or args.get("cmd") or "")) == "read":
+                return ""
+        hit = sorted(self._touched(name, args) & self._denied_targets)
+        if not hit:
+            return ""
+        root = Path(str(getattr(self.toolbox, "project_root", "") or ".")).expanduser()
+        try:
+            return str(Path(hit[0]).relative_to(root.resolve()))
+        except (ValueError, OSError):
+            return hit[0]
+
     @staticmethod
     def _sig(name: str, args: dict[str, Any]) -> str:
         return hashlib.sha1(f"{name}:{json.dumps(args, sort_keys=True, default=str)}".encode()).hexdigest()
@@ -1092,6 +1234,12 @@ class LeanTurn:
         """(allowed, the result text when not, and its outcome: refused, denied, held or skipped)."""
         entry = self.toolbox.entry(name)
         needs, reason = tool_needs_approval(entry, name, args)
+        if not needs and settings.approval_mode() != "never" and hasattr(self.toolbox, "file_change_preview"):
+            # Emptying a file, or removing most of it, is deleting work: it asks like a delete does.
+            from agent.lean.file_changes import lost_work
+            lost = lost_work(self.toolbox.file_change_preview(name, args))
+            if lost:
+                needs, reason = True, lost
         context = self.work_context
         if context and context.coordinator.consume_approval(context, name, args):
             return True, "", ""
@@ -1192,7 +1340,7 @@ class LeanTurn:
             decision = broker.wait(approval, self.cancel)
             span.set(decision=decision)
         if policy_reason:
-            policy.audit(policy.Decision("ask", policy_reason, "rule_of_two"), name=name, args=args,
+            policy.audit(policy.Decision("ask", policy_reason, self._policy_rules.get(call.id) or "rule_of_two"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome=decision)
         for item in self.timeline:
             if item.get("kind") == "approval" and item.get("id") == approval.id:
@@ -1469,6 +1617,8 @@ class LeanTurn:
         `keep_steps` assistant steps stay verbatim. Returns False when there is
         too little to compact or the summary call fails.
         """
+        if self._compact_failures >= COMPACT_FAILURES:
+            return False  # it hasn't worked in this turn; trimming (step 4) still fits the context
         user_index = 1 + self._history_in_messages
         if user_index >= len(messages) or messages[user_index].get("role") != "user":
             return False
@@ -1494,14 +1644,28 @@ class LeanTurn:
             "Keep: the goal, what was tried, concrete findings (values, file paths, links, errors), and what is "
             "left to do. At most 200 words, plain sentences.\n\n" + body
         )
+        from agent.coordination import work_scope
+        saved = getattr(self.client, "reasoning_effort", None)
         try:
-            with self._span("context.compact", steps=len(steps) - keep_steps, input_chars=len(body)):
+            # A summary needs no thinking phase. With it, every compaction call qwen3.5:9b made in the harness
+            # evaluation spent its 700 tokens reasoning (finish "length") and returned nothing, and the loop
+            # asked again on the next step: 37 wasted calls in one run, none of them charged.
+            if saved is not None:
+                self.client.reasoning_effort = "none"
+            # In the work's scope, the admission wrapper charges the call to the work budget (prompt + reply).
+            with work_scope(self.work_context), self._span("context.compact", steps=len(steps) - keep_steps, input_chars=len(body)):
                 turn = self.client.stream_turn([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=700, cancel=self.cancel)
             summary = str(turn.content or "").strip()
         except Exception:
             logger.debug("Lean turn compaction failed", exc_info=True)
+            self._compact_failures += 1
             return False
+        finally:
+            if saved is not None:
+                self.client.reasoning_effort = saved
+        self._account_side(getattr(turn, "usage", None), "compaction")
         if not summary:
+            self._compact_failures += 1
             return False
         messages[user_index] = {
             **messages[user_index],

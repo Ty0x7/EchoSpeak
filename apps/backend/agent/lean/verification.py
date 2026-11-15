@@ -44,6 +44,7 @@ STALL_ATTEMPTS = 3        # attempts in a row that don't improve on the best res
 MODEL_SLIPS = 3           # malformed tool calls in a row
 READ_MISSES = 4           # lookups in a row that found nothing
 UNCHECKED_CHANGES = 8     # changes with no check at all, before it's called a verification gap
+ENVIRONMENT_STOP = 3      # checks blocked by the setup before the note says to stop fixing it and report
 
 _HEADER = re.compile(r"^\[(ok|exit code (-?\d+)|exited with code (-?\d+))\b", re.I)
 _PROCESS = re.compile(r"^Process \S+ is (finished(?: \(ok\)| with exit code (-?\d+))?|[^:]*?):\s*(.*)$", re.I)
@@ -64,7 +65,8 @@ _ABOUT_TESTS = re.compile(r"(?i)\b(tests?|spec|testing|coverage|fixtures?|ci|wor
 # The setup, not the code: a missing package or program, permissions, disk, network, a service that isn't up.
 # A missing module with a dotted or relative name ('app.utils', './utils') is usually the code's own, so it's left out.
 ENVIRONMENT_ERROR = re.compile(
-    r"(?i)(No module named '[^'.]+'|command not found|is not recognized as an internal or external command|"
+    # `python -m pytest` without pytest prints the name unquoted ("No module named pytest"); a dotted name stays code's.
+    r"(?i)(No module named '[^'.]+'|No module named [A-Za-z_][\w-]*(?![\w.'])|command not found|is not recognized as an internal or external command|"
     r"is not recognized as the name of a cmdlet|Cannot find (module|package) '[^'./][^']*'|ENOENT|EACCES|permission denied|"
     r"Access is denied|MemoryError|out of memory|ENOSPC|No space left|connection refused|ECONNREFUSED|Could not resolve host|"
     r"network is unreachable|getaddrinfo|docker.{0,40}(not running|cannot connect)|externally-managed-environment|"
@@ -84,12 +86,63 @@ STATUS_LABELS = {"verified": "Verified", "checks_pass": "Checks pass", "partial"
                  "failing": "Not verified: the last check failed", "unverified": "Not verified", "blocked": "Blocked"}
 
 
+# Commands that mention a runner without running it: `pip install pytest`, `grep -i pytest`, `which jest`.
+_NOT_A_RUN = {"pip", "pip3", "pipx", "uv", "conda", "mamba", "apt", "apt-get", "dnf", "yum", "pacman", "yay", "brew", "winget",
+              "choco", "scoop", "grep", "rg", "egrep", "find", "which", "where", "whereis", "type", "command", "echo", "printf",
+              "cat", "less", "more", "head", "tail", "ls", "man", "help", "sed", "awk", "wc", "sort", "uniq", "tee", "xargs",
+              "npm-check", "pydoc"}
+_SEGMENTS = re.compile(r"&&|\|\||;|\|(?!\|)")
+# An exit code something else decides: `pytest || true`, `pytest; exit 0`, or a runner piped into another command.
+_MASKED = re.compile(r"(?i)\|\|\s*(true|:|exit\s+0|echo\b)|;\s*(true|exit\s+0)\s*$")
+
+
+def _runs(segment: str) -> bool:
+    """Whether this one command (no && ; |) runs something, as opposed to installing, finding or printing it."""
+    words = [w for w in segment.split() if "=" not in w.split("/")[0] or w.startswith("-")]  # drop FOO=bar prefixes
+    while words and words[0] in {"sudo", "env", "nice", "time", "command", "exec"}:
+        words = words[1:]
+    if words and words[0] == "timeout":
+        words = words[2:]
+    if not words:
+        return False
+    first = words[0].rsplit("/", 1)[-1].lower()
+    if first in _NOT_A_RUN:
+        return False
+    if first.startswith("python") or first in {"py"}:
+        module = words[words.index("-m") + 1].lower() if "-m" in words[:-1] else ""
+        if module in {"pip", "pip3", "ensurepip", "venv", "virtualenv", "pydoc"}:
+            return False
+    return True
+
+
+def _check_segment(command: str) -> tuple[str, str, bool]:
+    """(kind, the segment that runs the check, whether its exit code is masked)."""
+    text = str(command or "")
+    parts = [(m.start(), m.end()) for m in _SEGMENTS.finditer(text)]
+    bounds = [0] + [e for _, e in parts]
+    ends = [s for s, _ in parts] + [len(text)]
+    runnable = [(text[s:e].strip(), e) for s, e in zip(bounds, ends) if _runs(text[s:e].strip())]
+    for kind, pattern in _KINDS:  # the same priority as before: a test anywhere in the command makes it a test
+        for segment, end in runnable:
+            if pattern.search(segment):
+                after = text[end:]
+                piped = after.startswith("|") and not after.startswith("||") and "pipefail" not in text
+                return kind, segment, bool(piped or _MASKED.search(after))
+    return "", "", False
+
+
 def check_kind(command: str) -> str:
-    """test | build | typecheck | lint | bench for a command that verifies something, else ''."""
-    for kind, pattern in _KINDS:
-        if pattern.search(command or ""):
-            return kind
-    return ""
+    """test | build | typecheck | lint | bench for a command that runs a check, else ''.
+
+    The runner has to be what runs: `pip install pytest`, `pip list | grep -i pytest` and `which jest`
+    mention one without checking anything (found live: they were reported as passing checks).
+    """
+    return _check_segment(command)[0]
+
+
+def exit_masked(command: str) -> bool:
+    """The check's own exit code doesn't reach the result (`|| true`, `; exit 0`, piped into `tail`)."""
+    return _check_segment(command)[2]
 
 
 def scope_of(command: str) -> str:
@@ -250,6 +303,8 @@ class VerificationLedger:
     read_misses: int = 0
     resumed: bool = False
     last_step: int = 0
+    # Checks the setup blocked: after ENVIRONMENT_STOP the note says to stop fixing it and report instead.
+    environment_hits: int = 0
     _pending: dict[str, str] = field(default_factory=dict, repr=False)
 
     # ── the objective (set_objective) ──────────────────────────────────
@@ -320,6 +375,20 @@ class VerificationLedger:
             return
         if code is None:
             return  # moved to the background: process_output reports it when it finishes
+        if exit_masked(command):
+            # `pytest || true` exits 0 whatever happened (found live: "No module named pytest" counted as a pass).
+            # The runner's own summary is still evidence; the exit code isn't.
+            passed, failed, errors = counts(text)
+            if passed <= 0 and failed <= 0 and errors <= 0:
+                setup = ENVIRONMENT_ERROR.search(text)
+                self._block("environment" if setup else "verification",
+                            setup.group(0) if setup else f"`{command[:80]}` hides its exit code, so it verifies nothing")
+                self._pending[call_id or command] = (
+                    f"Verification: `{command[:120]}` hides the check's own exit code (`|| true`, `; exit 0` or a pipe) and "
+                    "printed no test summary, so it checked nothing" + (f" — and the output shows a setup problem "
+                    f"({setup.group(0)})" if setup else "") + ". Run the check on its own to see whether it passes.")
+                return
+            code = 1 if failed > 0 or errors > 0 else 0
         self._record(self._parse(step, kind, command, code, text), text, call_id or command)
 
     def _changed(self, target: str) -> None:
@@ -369,6 +438,7 @@ class VerificationLedger:
         setup = ENVIRONMENT_ERROR.search(text) if not check.ok and check.failed <= 0 else None
         if setup:
             check.environment = setup.group(0)
+            self.environment_hits += 1
             self._block("environment", check.environment)
         if check.no_tests:
             self._block("verification", f"`{check.command[:80]}` ran no tests, so it verifies nothing")
@@ -403,6 +473,12 @@ class VerificationLedger:
         if check.ok and not target.startswith("Target not met"):
             lines.append("This check passes. If it covers every acceptance criterion, finish and report the evidence; "
                          "if it doesn't, run the check that does.")
+        elif check.environment and self.environment_hits >= ENVIRONMENT_STOP:
+            # Found live: a 9B model spent 40 more steps (and searched the owner's home folder) trying to install
+            # a test runner after the third of these notes.
+            lines.append(f"The setup has blocked this check {self.environment_hits} times ({check.environment}). Stop working "
+                         "on the environment now: don't search outside the project or try more installs. Reply to the user "
+                         "with what you changed, that it isn't verified, and exactly what they need to set up to check it.")
         elif check.environment:
             lines.append(f"This is the environment, not your code ({check.environment}). Fix the setup if you're allowed to, "
                          "for example by installing into the project's own environment; otherwise stop and tell the user "
@@ -445,7 +521,16 @@ class VerificationLedger:
     def unfinished(self, answer: str) -> str:
         """For an answer that claims success the evidence contradicts: what to fix first (asked once)."""
         done = self.completion()
-        if done["status"] not in {"failing", "unverified", "partial"} or not self.checks or not DONE_CLAIM.search(answer or ""):
+        if not DONE_CLAIM.search(answer or ""):
+            return ""
+        setup = next((c.environment for c in reversed(self.checks) if c.environment), "")
+        if done["status"] == "blocked" and setup and self.changes:
+            # "The test passes" when the test never ran (found live: pytest wasn't installed, and the reply said the
+            # hard-coded fix was verified). Blocked used to let the claim stand with only a note under it.
+            return (f"Your reply says it works, but nothing has verified it: the check couldn't run ({setup}). Don't say "
+                    "it passes. Say plainly that it isn't verified, what you changed, and what the user needs to set up "
+                    "to run the check.")
+        if done["status"] not in {"failing", "unverified", "partial"} or not self.checks:
             return ""
         if done["status"] == "failing":
             what = f"the last check failed ({done['last']})"
