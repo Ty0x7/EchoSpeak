@@ -281,6 +281,11 @@ _PY_CALL_BLOCKS = (
     re.compile(r"```tool_code\s*(.*?)```", re.S),
 )
 _PIPE_TOOL = re.compile(r"\|TOOL\|\s*([\w.\-]+)\s*(\{.*\})", re.S)
+# DeepSeek's own format (how its template renders past calls, so the model may write it back):
+#   <｜tool▁call▁begin｜>function<｜tool▁sep｜>file_read\n```json\n{"path": "a"}\n```<｜tool▁call▁end｜>
+_DEEPSEEK_CALL = re.compile(r"<｜tool▁call▁begin｜>\s*\w*\s*<｜tool▁sep｜>\s*([\w.\-]+)\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```)?\s*"
+                            r"(?:<｜tool▁call▁end｜>|$)", re.S)
+_DEEPSEEK_WRAPPER = re.compile(r"<｜tool▁calls▁(?:begin|end)｜>|<｜end▁of▁sentence｜>")
 _LIQUID_TOOL = re.compile(r"<\|tool_call_start\|>(.*?)<\|tool_call_end\|>", re.S)
 _NAME_ALIASES = {"terminal_run": "terminal", "run_terminal": "terminal", "shell": "terminal", "run_command": "terminal"}
 _ARG_ALIASES = {"file_path": "path", "filepath": "path", "filename": "path"}
@@ -462,6 +467,11 @@ def extract_text_tool_calls(content: str, known_tools: set[str]) -> tuple[list[T
     for match in list(_PIPE_TOOL.finditer(cleaned)):
         add(match.group(1), _repair_json(match.group(2)) or {})
         cleaned = cleaned.replace(match.group(0), "")
+    for match in list(_DEEPSEEK_CALL.finditer(cleaned)):
+        add(match.group(1), _repair_json(match.group(2)) or {})
+        cleaned = cleaned.replace(match.group(0), "")
+    if calls:
+        cleaned = _DEEPSEEK_WRAPPER.sub("", cleaned)
     return calls, cleaned.strip()
 
 

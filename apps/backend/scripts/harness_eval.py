@@ -362,7 +362,7 @@ def server_log(since: float, until: float) -> list[str]:
     try:
         out = subprocess.run(["journalctl", "--user", "-u", "ollama", "--no-pager", "-o", "cat",
                               "--since", f"@{int(since) - 1}", "--until", f"@{int(until) + 2}"],
-                             capture_output=True, text=True, timeout=30).stdout
+                             capture_output=True, text=True, errors="replace", timeout=30).stdout  # model tokens aren't always UTF-8
     except (OSError, subprocess.SubprocessError):
         return []
     keep = ("truncating input prompt", "level=WARN", "level=ERROR", "exceeds", "truncated = 1")

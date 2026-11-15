@@ -104,9 +104,18 @@ def truncated(endpoint: Any, estimated: int, reported: int) -> int:
     if endpoint is None or not getattr(endpoint, "local", False) or reported <= 0 or estimated < MIN_PROMPT:
         return 0
     window = served(endpoint)
-    half_window = bool(window) and abs(reported - window // 2) <= 16 and estimated > 0.7 * window
-    if reported < CUT_RATIO * estimated or half_window:
-        return window or 2 * reported
+    if window:
+        # Only a prompt that could have overflowed can have been cut. The estimate runs at most ~1.3x low
+        # (digit-heavy text), so under 3/4 of the window nothing was. Without this, a template that renders
+        # less than EchoSpeak sends (deepseek-r1:8b drops the tool schemas: 2,699 counted of ~4.6k sent)
+        # looked like a cut, and three good replies were thrown away.
+        if estimated < 0.75 * window:
+            return 0
+        if abs(reported - window // 2) <= 16 or reported < CUT_RATIO * estimated:
+            return window
+        return 0
+    if reported < CUT_RATIO * estimated:
+        return 2 * reported
     return 0
 
 

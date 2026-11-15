@@ -80,6 +80,14 @@ def test_cut_prompts_are_recognised(monkeypatch):
     assert window.truncated(OLLAMA, 9000, 0) == 0
 
 
+def test_a_template_that_renders_less_is_not_a_cut(monkeypatch):
+    """deepseek-r1:8b's template drops the tool schemas: the server counted 2,699 of ~4,600 sent. Not a cut."""
+    serving(monkeypatch, 16384)
+    assert window.truncated(OLLAMA, 4600, 2699) == 0
+    assert window.truncated(OLLAMA, 11000, 6000) == 0  # under 3/4 of the window: it fitted, whatever was rendered
+    assert window.truncated(OLLAMA, 14000, 8194) == 16384  # near the window and cut to half of it: a cut
+
+
 def test_an_unknown_window_is_inferred_from_the_cut_and_remembered(monkeypatch):
     serving(monkeypatch, 0)  # not loaded / not Ollama
     assert window.truncated(OLLAMA, 30000, 2050) == 4100

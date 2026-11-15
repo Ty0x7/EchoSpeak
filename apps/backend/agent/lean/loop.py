@@ -30,7 +30,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from agent.lean import policy, settings
-from agent.lean import quarantine, tool_outputs, tracing, window
+from agent.lean import quarantine, tool_outputs, tool_prompting, tracing, window
 from agent.lean import approvals, steering
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, evidence, outbound
@@ -61,6 +61,10 @@ NUDGE_THOUGHT_ONLY = ("You worked out your reply in your reasoning but didn't wr
 CONTINUATIONS = 2
 # Failed summaries in one turn before compaction stops being tried (the loop trims instead).
 COMPACT_FAILURES = 2
+
+
+class _RetryStep(Exception):
+    """The reply can't be used and the step should be asked again (the cause is fixed for the next call)."""
 
 
 def exit_code_known(output: str) -> bool:
@@ -441,6 +445,9 @@ class LeanTurn:
             self.emit({"type": "step_start", "step": step})
             try:
                 turn = self._call_model(messages, tools, step)
+            except _RetryStep:
+                step -= 1  # the same step again, now that the call can be made properly (bounded: detected once)
+                continue
             except ProviderError as exc:
                 if exc.context_overflow and overflow_retries < 2:
                     overflow_retries += 1
@@ -712,8 +719,10 @@ class LeanTurn:
         from agent.admission import inference, loop_accounted
         with work_scope(self.work_context), loop_accounted(), inference(endpoint, cancel=self.cancel), self._span("model.call", step=step, model=str(getattr(endpoint, "model", "") or ""),
                         provider=str(getattr(endpoint, "provider", "") or ""), tools=len(tools or [])) as span:
+            # A template that drops tool definitions gets them as text (agent/lean/tool_prompting.py).
+            sent_messages = tool_prompting.with_catalog(messages, tools) if tools and tool_prompting.needed(endpoint) else messages
             turn = self.client.stream_turn(
-                messages,
+                sent_messages,
                 tools=tools or None,
                 on_reasoning=on_reasoning,
                 on_content=on_content,
@@ -735,6 +744,15 @@ class LeanTurn:
         sent = _estimate_tokens(messages, tools) if turn.usage else 0
         kept = int((turn.usage or {}).get("prompt") or 0)
         cut = window.truncated(endpoint, sent, kept)
+        if not cut and tools and kept and not tool_prompting.known(endpoint):
+            if tool_prompting.observe(endpoint, sent, _estimate_tokens(messages, []), kept):
+                # The server counted the messages but not the tool definitions: this reply was made without
+                # knowing the tools (deepseek-r1:8b invented a script's output). Discarded; asked again with them.
+                self._discard_step(step)
+                if getattr(self, "trace", None) is not None:
+                    self.trace.event("tools.prompted", step=step, sent=sent, kept=kept)
+                self.emit({"type": "tools_prompted", "step": step, "sent": sent, "kept": kept})
+                raise _RetryStep()
         if not cut and sent >= 512 and kept:
             self._token_scale = min(1.4, max(0.75, kept / sent))  # calibrates the next _fit_context
         if cut:
