@@ -280,9 +280,11 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
         const { [id]: _dropped, ...rest } = state.messages;
         return { ...state, order: state.order.filter((x) => x !== id), messages: rest };
       }
+      // A run the owner stopped is not a failure (the outcome says "Stopped"); only real errors fail.
+      const stoppedByOwner = ["cancelled", "canceled"].includes(String(evt.error || "").trim().toLowerCase());
       return patchMessage(state, id, (m) => ({
         ...m,
-        status: evt.success === false && evt.error ? "failed" : "done",
+        status: evt.success === false && evt.error && !stoppedByOwner ? "failed" : "done",
         text: String(evt.text || ""),
         stopReason: evt.stop_reason ? String(evt.stop_reason) : undefined,
         endedAt: at,

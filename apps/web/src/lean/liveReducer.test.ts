@@ -6,6 +6,20 @@ const run = (events: LeanEvent[]) => events.reduce(leanReducer, emptyLive("r1"))
 const base = { request_id: "r1", message_id: "m1", agent_id: "echo" };
 
 describe("lean live reducer", () => {
+  it("shows a run the owner stopped as stopped, not failed; a real error still fails", () => {
+    const stopped = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "agent_token", ...base, step: 1, data: "Partial answer" },
+      { type: "agent_done", ...base, text: "Partial answer", success: false, error: "cancelled" },
+    ] as LeanEvent[]);
+    expect(stopped.messages.m1.status).toBe("done");
+    const broken = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "agent_done", ...base, text: "", success: false, error: "The model request failed" },
+    ] as LeanEvent[]);
+    expect(broken.messages.m1.status).toBe("failed");
+  });
+
   it("keeps a finished answer in place and adds the review note under it (no erase, no second draft)", () => {
     const state = run([
       { type: "agent_start", ...base, agent: { id: "chat", name: "gemma" } },
