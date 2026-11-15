@@ -384,3 +384,27 @@ def test_a_check_in_prompt_is_not_shown_as_something_the_owner_said(env, monkeyp
         return [m.get("role") for turn in store.session_timeline(session)["turns"] for m in turn["messages"]]
     assert "user" not in roles("checkins") and roles("checkins")
     assert "user" in roles("owner-chat")
+
+
+def test_denying_a_live_step_lets_the_run_continue_but_a_recovered_denial_blocks(env, tmp_path):
+    """A "No" mid-run goes back to the model; it must not poison the work item it is still running."""
+    store, _, _ = env
+    coord = store.coordination
+    work = coord.create(objective="Tidy", agent_id="echo", tools=["file_delete", "file_read"])
+    ctx = coord.claim(work["id"])
+    coord.bind(ctx, ["file_delete", "file_read"], project_root=str(tmp_path))
+    coord.approval(ctx, approval_id="live", tool="file_delete", args={"path": "a.txt"}, summary="Delete", reason="Review")
+    assert coord.decide("live", "deny")["status"] == "denied"
+    assert coord.get(work["id"])["status"] == "running"
+    coord.check(ctx, "file_read")  # the agent can carry on with what the owner suggested instead
+    coord.action_intent(ctx, "next", "file_read", {"path": "b.txt"}, read_only=True)
+
+    # The same denial with nobody running the work (answered after a restart) still blocks it.
+    other = coord.create(objective="Tidy later", agent_id="echo", tools=["file_delete"])
+    later = coord.claim(other["id"])
+    coord.bind(later, ["file_delete"], project_root=str(tmp_path))
+    coord.approval(later, approval_id="recovered", tool="file_delete", args={"path": "a.txt"}, summary="Delete", reason="Review")
+    coord.finish(later, status="completed", result="")
+    assert coord.get(other["id"])["status"] == "waiting_approval"
+    coord.decide("recovered", "deny")
+    assert coord.get(other["id"])["status"] == "blocked"
