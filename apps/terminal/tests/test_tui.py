@@ -476,3 +476,10 @@ def test_folder_offer_skips_home_root_and_remembered_declines(tmp_path):
     assert not control.folder_offer(str(project), env)       # asked once; "no" is remembered
     control.forget_folder_decline(str(project), env)
     assert control.folder_offer(str(project), env)
+
+
+def test_resume_recap_is_plain_text_not_markdown():
+    from echospeak_cli.tui.app import plain_recap
+
+    md = "# How unittest works\n\nPython's `unittest` is **elegant**.\n\n## Discovery\n- finds `test_*.py`\n1. see [docs](https://x.y)"
+    assert plain_recap(md) == "How unittest works Python's unittest is elegant. Discovery finds test_*.py see docs"

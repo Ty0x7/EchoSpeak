@@ -58,6 +58,25 @@ PASTE_LINES = 12
 CHIP_RE = re.compile(r"\[Pasted [\d,]+ chars · \d+ lines #(\d+)\]")
 
 
+
+_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+_MD_MARKS = re.compile(r"(^|\s)(#{1,6}|[-*+]|\d+[.)]|>)\s+", re.M)
+
+
+def plain_recap(text: str) -> str:
+    """A one-line recap of a markdown answer: no heading hashes, bullets, emphasis, code ticks or link targets."""
+    text = _MD_LINK.sub(r"\1", str(text or ""))
+    text = re.sub(r"```[^\n]*\n?", " ", text)
+    text = _MD_MARKS.sub(r"\1", text)
+    out = []
+    # Odd segments are inline code: kept exactly (test_*.py stays test_*.py).
+    for i, part in enumerate(text.split("`")):
+        if i % 2 == 0:
+            part = re.sub(r"(\*\*|__)(\S.*?\S|\S)\1", r"\2", part)
+            part = re.sub(r"(?<![\w*])[*_](\S[^*_]*?)[*_](?![\w*])", r"\1", part)
+        out.append(part)
+    return " ".join("".join(out).split())
+
 class _Abandon(Exception):
     pass
 
@@ -1802,7 +1821,7 @@ class EchoTUI:
             if h.startswith("Human: "):
                 self.emit(B.Note(self.caps.glyphs.prompt, one_line(h[7:], 300), "dim", 0))
             elif h.startswith("Assistant: "):
-                self.emit(B.Note(self.caps.glyphs.bullet, one_line(h[11:], 300), "dim", 0))
+                self.emit(B.Note(self.caps.glyphs.bullet, one_line(plain_recap(h[11:]), 300), "dim", 0))
         if tail:
             self.emit(B.Raw("\n"), transcript=False)
 
