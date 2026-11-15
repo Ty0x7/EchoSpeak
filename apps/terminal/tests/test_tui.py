@@ -483,3 +483,9 @@ def test_resume_recap_is_plain_text_not_markdown():
 
     md = "# How unittest works\n\nPython's `unittest` is **elegant**.\n\n## Discovery\n- finds `test_*.py`\n1. see [docs](https://x.y)"
     assert plain_recap(md) == "How unittest works Python's unittest is elegant. Discovery finds test_*.py see docs"
+
+
+def test_several_edits_to_one_file_count_as_one_changed_file():
+    tools = [{"name": "file_edit", "path": "/p/stats.py"}, {"name": "file_edit", "path": "/p/stats.py"},
+             {"name": "file_write", "path": "/p/test_stats.py"}, {"name": "terminal"}]
+    assert steps_summary(tools) == "Changed 2 files · Ran 1 command"

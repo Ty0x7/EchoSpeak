@@ -66,12 +66,19 @@ def steps_summary(tools: list[dict]) -> str:
     counts: dict[str, int] = {}
     order: dict[str, int] = {}
     other = failed = 0
+    changed_paths: set[str] = set()
     for tool in tools:
         if tool.get("failed"):
             failed += 1
         name = str(tool.get("name") or "")
         if name in _BUCKETS:
             key, rank = _BUCKETS[name]
+            path = str(tool.get("path") or "")
+            # Several edits to one file are one changed file (the preview pane counts files too).
+            if key == "change" and path:
+                if path in changed_paths:
+                    continue
+                changed_paths.add(path)
             counts[key] = counts.get(key, 0) + 1
             order[key] = rank
         else:
@@ -495,8 +502,10 @@ class Run:
         output = sanitize(evt.get("output") or "")
         preview, more = self._preview(name, ok, output) if status not in {"denied", "held"} else ([], 0)
         if status not in {"denied", "held"}:
-            self.finished_tools.append({"name": name, "failed": status == "fail",
-                                        "pages": (evt.get("meta") or {}).get("pages", 0) if isinstance(evt.get("meta"), dict) else 0})
+            meta = evt.get("meta") if isinstance(evt.get("meta"), dict) else {}
+            change = meta.get("file_change") if isinstance(meta.get("file_change"), dict) else {}
+            self.finished_tools.append({"name": name, "failed": status == "fail", "pages": meta.get("pages", 0),
+                                        "path": str(change.get("path") or "")})
         if m:
             m.last = "tool_done" if ok else "tool_failed"
             m.last_tool = name
