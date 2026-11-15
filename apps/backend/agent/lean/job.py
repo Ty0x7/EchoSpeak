@@ -31,13 +31,19 @@ from typing import Any, Optional
 
 # Phrases that announce work instead of doing it. Matched only on short replies
 # that end the turn without a tool call or handoff.
+# Verbs of work an agent announces. Reading and searching verbs included: "I will now check the next log file,
+# billing.log." ended gemma4's turn with nothing done (five-model evaluation, H6).
+_WORK = (r"do|handle|take|get|start|write|make|build|fix|look|check|run|create|update|set|work|go|put|add|have|read|search|"
+         r"open|review|inspect|examine|scan|analy[sz]e|verify|test|try|proceed|continue|move|list|fetch|find|install|edit|apply")
+# One adverb may sit in between: "I'll now read", "I will next check", "Let me quickly look".
+_SOON = r"(?:(?:now|next|then|also|quickly|first|go\s+ahead\s+and)\s+)?"
 _PROMISE = re.compile(
-    r"""(?ix)
+    rf"""(?ix)
     # First person, anywhere in the reply: "Sure, I'll write it", "Let me check".
     (^|[\s,.!])(
-        i'?ll\s+(?:do|handle|take|get|start|write|make|build|fix|look|check|run|create|update|set|work|go|put|add|have)\b|
-        i\s+will\s+(?:do|handle|take|get|start|write|make|build|fix|look|check|run|create|update|set|work|go|put|add|have)\b|
-        let\s+me\s+(?:do|handle|take|get|start|write|make|build|fix|look|check|run|create|update|set|see|find|grab|pull|try|put|add)\b|
+        i'?ll\s+{_SOON}(?:{_WORK})\b|
+        i\s+will\s+{_SOON}(?:{_WORK})\b|
+        let\s+me\s+{_SOON}(?:{_WORK}|see|grab|pull)\b|
         i'?m\s+(?:going\s+to|gonna|on\s+it|starting|working\s+on)\b|
         leave\s+it\s+(?:to|with)\s+me\b|
         give\s+me\s+a\s+(?:sec|second|moment|minute)\b

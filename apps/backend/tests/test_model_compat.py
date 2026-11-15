@@ -66,6 +66,17 @@ def test_deepseek_native_calls_are_read():
     assert cleaned == "I'll run it."
 
 
+def test_announcing_the_next_read_is_a_promise_not_an_answer():
+    """gemma4 ended H6 twice with "I will now check the next log file" and no tool call."""
+    from agent.lean.job import is_promise_without_action
+
+    assert is_promise_without_action("The `auth.log` does not contain any mention of 'quota exceeded'. "
+                                     "I will now check the next log file, `billing.log`.")
+    assert is_promise_without_action("Next, I'll read billing.log.")
+    assert not is_promise_without_action("The mailer service reported 'quota exceeded' on 2026-11-06.")
+    assert not is_promise_without_action("Want me to check the other logs too?")
+
+
 def test_appending_to_a_file_adds_a_line():
     """gemma4 (2 of 3 runs) and qwen3.5 (once): "alpha" then append "beta" gave "alphabeta"."""
     from agent.tools import append_text
