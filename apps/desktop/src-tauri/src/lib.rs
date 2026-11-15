@@ -1,4 +1,6 @@
 mod backend;
+#[cfg(unix)]
+mod endpoint;
 mod tray;
 mod updates;
 
@@ -63,7 +65,20 @@ fn open_desktop_logs(state: State<'_, DesktopState>) -> Result<(), String> {
             .map_err(|error| format!("Could not open the desktop log directory: {error}"))?;
         Ok(())
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|error| {
+                format!(
+                    "Could not open the desktop log directory {}: {error}",
+                    path.display()
+                )
+            })?;
+        Ok(())
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
     Err(format!(
         "Open this log directory manually: {}",
         path.display()
@@ -175,8 +190,22 @@ fn open_external_url(app: tauri::AppHandle, url: String) -> Result<(), String> {
         .map_err(|error| format!("Could not open the link: {error}"))
 }
 
+/// Linux + NVIDIA: WebKitGTK's DMA-BUF renderer makes the compositor drop the
+/// connection ("Error 71 (Protocol error) dispatching to Wayland display") and the
+/// app exits at first paint. Use the fallback renderer unless the user chose otherwise.
+#[cfg(target_os = "linux")]
+fn prepare_linux_webview() {
+    let nvidia = std::path::Path::new("/sys/module/nvidia").exists()
+        || std::path::Path::new("/proc/driver/nvidia/version").exists();
+    if nvidia && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "linux")]
+    prepare_linux_webview();
     let mut log_builder = tauri_plugin_log::Builder::new()
         .level(log::LevelFilter::Info)
         .max_file_size(5_000_000);
@@ -193,7 +222,19 @@ pub fn run() {
         ]);
     }
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // The renderer reveals the hidden main window from requestAnimationFrame once its
+    // boot screen has painted. WebKitGTK runs no animation frames for a window that is
+    // not mapped, so on Linux that never fires: show it when its page has loaded.
+    #[cfg(target_os = "linux")]
+    let builder = builder.on_page_load(|webview, payload| {
+        if webview.label() == "main"
+            && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+        {
+            let _ = webview.window().show();
+        }
+    });
+    let app = builder
         // Single-instance must initialize first so a second launch only focuses this window.
         // A second launch (also while hidden in the tray) brings the window back.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -208,6 +249,14 @@ pub fn run() {
                     api.prevent_close();
                     tray::hide_to_tray(window.app_handle());
                 }
+            }
+            // Linux window managers close windows themselves (Hyprland's killactive,
+            // a dock's Close). The hidden Settings/setup/companion windows would keep the
+            // app, and its backend, running with nothing on screen, so quit like the
+            // title bar's close button does.
+            #[cfg(target_os = "linux")]
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                window.app_handle().exit(0);
             }
         })
         // Restore size/position, but not visibility: the UI reveals the window

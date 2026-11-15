@@ -19,6 +19,21 @@ pub struct UpdateInfo {
     pub version: String,
     pub notes: String,
     pub date: String,
+    /// Why updates are not offered, when `configured` is false and the reason is not
+    /// the default "built without update signing" (e.g. Linux packages).
+    pub note: String,
+}
+
+/// Linux builds (.deb, .rpm, AppImage) do not self-update: no Linux artefacts are
+/// signed or listed in latest.json, and a package manager owns installed files.
+const LINUX_UPDATES_NOTE: &str = "On Linux, updates come from your package manager or a newer AppImage from the releases page.";
+
+fn not_configured_note() -> String {
+    if cfg!(target_os = "linux") {
+        LINUX_UPDATES_NOTE.into()
+    } else {
+        String::new()
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -30,6 +45,9 @@ struct UpdateProgress {
 
 /// Builds without a signing key have an empty public key and cannot verify updates.
 fn updates_configured(app: &AppHandle) -> bool {
+    if cfg!(target_os = "linux") {
+        return false;
+    }
     app.config()
         .plugins
         .0
@@ -59,6 +77,7 @@ pub async fn check_for_update(app: AppHandle) -> Result<UpdateInfo, String> {
             version: current,
             notes: String::new(),
             date: String::new(),
+            note: not_configured_note(),
         });
     }
     let update = app
@@ -75,6 +94,7 @@ pub async fn check_for_update(app: AppHandle) -> Result<UpdateInfo, String> {
             version: update.version.clone(),
             notes: update.body.clone().unwrap_or_default(),
             date: update.date.map(|date| date.to_string()).unwrap_or_default(),
+            note: String::new(),
         },
         None => UpdateInfo {
             configured: true,
@@ -83,6 +103,7 @@ pub async fn check_for_update(app: AppHandle) -> Result<UpdateInfo, String> {
             version: current,
             notes: String::new(),
             date: String::new(),
+            note: String::new(),
         },
     })
 }
@@ -90,7 +111,8 @@ pub async fn check_for_update(app: AppHandle) -> Result<UpdateInfo, String> {
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), String> {
     if !updates_configured(&app) {
-        return Err("Updates are not set up in this build.".into());
+        let note = not_configured_note();
+        return Err(if note.is_empty() { "Updates are not set up in this build.".into() } else { note });
     }
     let update = app
         .updater()

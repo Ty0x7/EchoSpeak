@@ -1658,7 +1658,7 @@ function UpdateRow() {
     help = progress?.phase === "installing" ? "Installing… EchoSpeak will restart." : `Downloading${pct === null ? "…" : ` · ${pct}%`}`;
     tone = "warn";
   } else if (info && !info.configured) {
-    help = "This build was made without update signing, so it can't update itself.";
+    help = info.note || "This build was made without update signing, so it can't update itself.";
   } else if (info?.available) {
     const headline = info.notes.trim().split(/\r?\n/)[0] || "";
     help = `Version ${info.version} is ready to install.${headline ? ` ${headline}` : ""}`;

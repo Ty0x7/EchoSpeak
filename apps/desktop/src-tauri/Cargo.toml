@@ -30,6 +30,10 @@ tauri-plugin-window-state = "=2.4.1"
 tokio = { version = "1.46", features = ["time"] }
 uuid = { version = "1.18", features = ["v4"] }
 
+[target.'cfg(unix)'.dependencies]
+# Process probes/signals for the backend and the endpoint-file owner check (Linux).
+libc = "0.2.186"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
 

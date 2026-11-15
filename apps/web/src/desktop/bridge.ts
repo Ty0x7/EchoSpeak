@@ -13,6 +13,8 @@ export type DesktopRuntime = {
   max_automatic_restarts: number;
   data_dir: string;
   log_dir: string;
+  /** Linux: the app is using a backend it did not start (shared with the terminal client). */
+  backend_attached?: boolean;
 };
 
 export type DesktopReadinessComponent = {
@@ -221,6 +223,8 @@ export type DesktopUpdateInfo = {
   version: string;
   notes: string;
   date: string;
+  /** Why updates are not offered when `configured` is false (Linux: the package manager owns them). */
+  note?: string;
 };
 
 export type DesktopUpdateProgress = { phase: "downloading" | "installing"; downloaded: number; total: number | null };
