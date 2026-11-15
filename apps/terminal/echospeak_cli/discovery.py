@@ -30,11 +30,16 @@ class Endpoint:
     pid: int = 0
 
 
+DESKTOP_APP_ID = "ai.echospeak.desktop"
+
+
 def data_dir(env: Mapping[str, str] = os.environ) -> Path:
+    """The desktop app's data folder (Tauri ``app_local_data_dir()/runtime``), so the app and the
+    terminal share one backend's agents, chats, memory and settings. ECHOSPEAK_DATA_DIR overrides it."""
     if env.get("ECHOSPEAK_DATA_DIR", "").strip():
         return Path(env["ECHOSPEAK_DATA_DIR"]).expanduser()
-    base = env.get("XDG_DATA_HOME", "").strip() or str(Path.home() / ".local" / "share")
-    return Path(base) / "echospeak"
+    base = env.get("XDG_DATA_HOME", "").strip() or str(Path(env.get("HOME") or Path.home()) / ".local" / "share")
+    return Path(base) / DESKTOP_APP_ID / "runtime"
 
 
 def runtime_dirs(env: Mapping[str, str] = os.environ) -> list[Path]:

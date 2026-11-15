@@ -1,9 +1,24 @@
 #!/usr/bin/env python3
-"""Launcher for the EchoSpeak terminal client. Symlink it onto PATH as `echospeak`."""
+"""Launcher for the EchoSpeak terminal client. Symlink it onto PATH as `echospeak`.
+
+Prefers the project venv (apps/terminal/.venv, made by install.sh), which has the terminal UI's
+dependencies. Without it, the standard-library client still works: plain REPL and every subcommand.
+"""
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+HERE = os.path.dirname(os.path.realpath(__file__))
+VENV_PY = os.path.join(HERE, ".venv", "bin", "python")
+
+if (os.path.exists(VENV_PY) and not os.environ.get("ECHOSPEAK_NO_VENV")
+        and os.path.realpath(sys.prefix) != os.path.realpath(os.path.join(HERE, ".venv"))):
+    os.environ["ECHOSPEAK_NO_VENV"] = "1"  # never loop
+    try:
+        os.execv(VENV_PY, [VENV_PY, os.path.realpath(__file__), *sys.argv[1:]])
+    except OSError:
+        pass  # a broken venv: fall through to this interpreter
+
+sys.path.insert(0, HERE)
 
 from echospeak_cli.main import main  # noqa: E402
 

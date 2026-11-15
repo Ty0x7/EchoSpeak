@@ -149,3 +149,72 @@ def test_send_pipe_json_sessions_agents(backend):
     assert res.returncode == 0
     res = cli(backend, "stop", "--session", sid)
     assert res.returncode == 0 and "nothing running" in res.stdout
+
+
+TUI_PYTHON = ROOT / "apps" / "terminal" / ".venv" / "bin" / "python"
+
+
+@pytest.mark.skipif(not TUI_PYTHON.exists(), reason="the TUI venv (apps/terminal/install.sh) is not installed")
+def test_tui_in_a_real_pty_round_trip(backend, tmp_path):
+    """The terminal UI against the real backend in a pseudo-terminal: banner, a message, the answer, ctrl+c twice."""
+    import fcntl
+    import pty
+    import re as _re
+    import struct
+    import termios
+    import threading
+
+    master, slave = pty.openpty()
+    fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+    env = {**backend["env"], "TERM": "xterm-256color", "ECHOSPEAK_STATE_DIR": str(tmp_path / "state"),
+           "LANG": "C.UTF-8", "ECHO_REDUCED_MOTION": "1"}
+    env.pop("NO_COLOR", None)
+    proc = subprocess.Popen([str(TUI_PYTHON), str(LAUNCHER), "new"], stdin=slave, stdout=slave, stderr=slave,
+                            env=env, cwd=str(tmp_path), start_new_session=True, close_fds=True)
+    os.close(slave)
+    chunks: list[bytes] = []
+    done = threading.Event()
+
+    def reader() -> None:
+        while not done.is_set():
+            try:
+                data = os.read(master, 65536)
+            except OSError:
+                return
+            if not data:
+                return
+            chunks.append(data)
+            if b"\x1b[6n" in data:
+                os.write(master, b"\x1b[24;1R")  # answer prompt_toolkit's cursor position request
+
+    threading.Thread(target=reader, daemon=True).start()
+
+    def screen() -> str:
+        text = b"".join(chunks).decode("utf-8", "replace")
+        return _re.sub(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07", "", text)
+
+    def wait_for(needle: str, timeout: float = 60) -> None:
+        deadline = time.monotonic() + timeout
+        while needle not in screen():
+            assert proc.poll() is None or needle in screen(), screen()[-2000:]
+            assert time.monotonic() < deadline, f"{needle!r} never appeared:\n{screen()[-3000:]}"
+            time.sleep(0.1)
+
+    try:
+        wait_for("EchoSpeak")
+        wait_for("? for shortcuts")
+        os.write(master, b"hello from the tui\r")
+        wait_for(REPLY)
+        assert KEY not in screen()
+        time.sleep(0.5)
+        os.write(master, b"\x03")
+        time.sleep(0.3)
+        os.write(master, b"\x03")
+        assert proc.wait(timeout=15) == 0
+        time.sleep(0.3)
+        assert "resume with: echospeak resume" in screen()
+    finally:
+        done.set()
+        if proc.poll() is None:
+            proc.kill()
+        os.close(master)

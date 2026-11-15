@@ -43,7 +43,7 @@ def test_default_when_nothing_found(tmp_path):
 def test_runtime_dir_order_matches_backend(tmp_path):
     env = {"XDG_RUNTIME_DIR": "/run/user/1", "ECHOSPEAK_DATA_DIR": str(tmp_path)}
     assert discovery.runtime_dirs(env) == [discovery.Path("/run/user/1/echospeak"), tmp_path / "runtime"]
-    assert discovery.data_dir({"XDG_DATA_HOME": "/x"}) == discovery.Path("/x/echospeak")
+    assert discovery.data_dir({"XDG_DATA_HOME": "/x"}) == discovery.Path("/x/ai.echospeak.desktop/runtime")
 
 
 def test_unsafe_or_stale_files_are_ignored(tmp_path):

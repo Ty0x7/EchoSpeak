@@ -10,10 +10,9 @@ import signal
 import subprocess
 import sys
 import time
-from datetime import datetime
 from typing import Optional
 
-from . import discovery
+from . import backend, control, discovery
 from .client import ApiError, AuthError, Client, ConnectError, follow, new_request_id, submit
 from .render import Renderer, one_line, sanitize
 from .repl import HELP, App, Out, RunResult
@@ -161,9 +160,84 @@ def slash(app: App, text: str) -> bool:
     return True
 
 
+# ── the shared backend ────────────────────────────────────────────────
+def ensure_backend(args) -> discovery.Endpoint:
+    """Attach to the running backend, else start one detached on the shared data folder."""
+    endpoint = discovery.discover(args.url, args.key, insecure_remote=args.insecure_remote)
+    if endpoint.source != "default" or getattr(args, "no_start", False):
+        return endpoint
+    data = discovery.data_dir()
+    tty = sys.stderr.isatty()
+    frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+
+    def progress(elapsed: float) -> None:
+        if tty:
+            sys.stderr.write(f"\r{frames[int(elapsed * 10) % len(frames)]} Starting the EchoSpeak backend "
+                             f"({elapsed:.0f}s) · data {_home(str(data))}\x1b[K")
+            sys.stderr.flush()
+
+    if not tty:
+        print(f"starting the EchoSpeak backend (data {data})", file=sys.stderr)
+    try:
+        started = backend.start_detached(progress=progress)
+    except backend.BackendError as exc:
+        if tty:
+            sys.stderr.write("\r\x1b[K")
+        # A backend we can't see the endpoint of may still be serving on the default port.
+        try:
+            Client(discovery.DEFAULT_URL, endpoint.key, timeout=2).health()
+            print(f"echospeak: could not start a backend ({sanitize(exc)}); using {discovery.DEFAULT_URL}", file=sys.stderr)
+            return endpoint
+        except (ConnectError, ApiError):
+            raise discovery.DiscoveryError(f"could not start the backend: {exc}") from exc
+    if tty:
+        sys.stderr.write("\r\x1b[K")
+        sys.stderr.flush()
+    return started
+
+
+def _home(path: str) -> str:
+    home = os.path.expanduser("~")
+    return "~" + path[len(home):] if path.startswith(home) else path
+
+
+def _use_tui(args) -> bool:
+    if args.plain or os.environ.get("TERM") == "dumb" or os.environ.get("ECHOSPEAK_PLAIN"):
+        return False
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return False
+    from . import tui
+
+    if not tui.available():
+        print(tui.INSTALL_HINT, file=sys.stderr)
+        return False
+    return True
+
+
+def cmd_tui(args) -> int:
+    from .tui.app import run_tui
+    from .tui.theme import detect
+
+    endpoint = ensure_backend(args)
+    client = Client(endpoint.url, endpoint.key, timeout=args.timeout, stream_idle=90)
+    client.get("/threads", limit=1)  # fail fast on a bad key, before the screen is drawn
+    caps = detect(no_anim=args.no_anim, ascii_only=True if args.ascii else None)
+    return run_tui(client, endpoint, caps, verbose=args.show_thinking, agent=getattr(args, "agent", "") or "",
+                   resume=getattr(args, "session", "") if args.command == "resume" else "",
+                   new=args.command == "new", project=getattr(args, "project", "") or "")
+
+
 # ── subcommands ───────────────────────────────────────────────────────
 def cmd_repl(args) -> int:
+    interactive = sys.stdin.isatty()
+    if interactive and _use_tui(args):
+        return cmd_tui(args)
+    if interactive and not args.url:
+        endpoint = ensure_backend(args)
+        args.url, args.key = endpoint.url, endpoint.key
     app = make_app(args)
+    if interactive:
+        plain_model_setup(app)
     if args.agent:
         app.agent_id = args.agent
     if args.command == "resume":
@@ -180,6 +254,39 @@ def cmd_repl(args) -> int:
         app.out.line("stdin is not a terminal; use `echospeak send` for scripts")
         return 2
     return app.repl(slash)
+
+
+def plain_model_setup(app: App) -> None:
+    """First run in the plain REPL: the same check as the TUI, as a numbered prompt. Never switches silently."""
+    try:
+        settings = control.settings_of(app.client)
+        provider, model = control.current_model(settings)
+        if provider not in {"", "ollama"}:
+            return
+        base = control.ollama_base(settings)
+        models = control.with_hints(control.ollama_models(base), control.gpu_vram_mib())
+    except (ApiError, ConnectError, OSError, ValueError):
+        return
+    found = discovery.read_endpoint_file(discovery.runtime_dirs()[0] / "endpoint.json") or {}
+    data = str(found.get("data_dir") or discovery.data_dir())
+    reason = control.model_setup_reason(settings, [m.name for m in models], control.confirmed_model(data))
+    if not reason or not models:
+        return
+    app.out.line(reason + " Choose Echo's model (saved for the app too):")
+    for i, m in enumerate(models, 1):
+        app.out.line(f"  {i}. {m.name}  {m.hint}" + ("  (configured)" if m.name == model else ""))
+    try:
+        raw = input("number (Enter to decide later) > ").strip()
+    except (EOFError, KeyboardInterrupt):
+        app.out.line()
+        return
+    if not raw.isdigit() or not 1 <= int(raw) <= len(models):
+        app.out.line("no model confirmed; it stays as it is")
+        return
+    name = models[int(raw) - 1].name
+    control.save_default_model(app.client, name, base)
+    control.confirm_model(data, f"ollama:{name}")
+    app.out.line(f"model: {name} (context {control.DEFAULT_CONTEXT:,} tokens)")
 
 
 def cmd_attach(args) -> int:
@@ -284,6 +391,38 @@ def cmd_simple(args) -> int:
     return 0
 
 
+def cmd_backend(args) -> int:
+    action = args.action
+    if action == "status":
+        st = backend.status()
+        if not st.running:
+            print(f"no backend running for {st.data_dir}" + (f" (data folder locked by pid {st.lock_pid})" if st.lock_pid else ""))
+            return 1
+        who = "started by the terminal (detached)" if st.started_by_terminal else "started by the app or `serve`"
+        print(f"running  {st.url}  pid {st.pid}  version {st.version or '?'}  {who}")
+        print(f"data     {st.data_dir}")
+        if st.started_by_terminal:
+            print(f"log      {st.log}")
+        return 0
+    if action == "stop":
+        try:
+            print(backend.stop(any_backend=args.any))
+        except backend.BackendError as exc:
+            print(f"echospeak: {exc}", file=sys.stderr)
+            return 2
+        return 0
+    if action == "start":
+        st = backend.status()
+        if st.running:
+            print(f"already running: {st.url} (pid {st.pid})")
+            return 0
+        endpoint = ensure_backend(argparse.Namespace(url="", key="", insecure_remote=False, no_start=False))
+        print(f"started {endpoint.url} (pid {endpoint.pid}); it keeps running after this terminal closes. "
+              "Stop it with: echospeak backend stop")
+        return 0
+    return 2
+
+
 def cmd_serve(args) -> int:
     root, python = discovery.backend_paths()
     port = args.port or discovery.free_port()
@@ -341,7 +480,12 @@ def _add_common(parser: argparse.ArgumentParser, top: bool) -> None:
     parser.add_argument("--url", default=d(""), help="backend URL (default: ECHOSPEAK_URL, endpoint file, 127.0.0.1:8000)")
     parser.add_argument("--key", default=d(""), help="API key. Visible to other users in `ps`; prefer ECHOSPEAK_KEY")
     parser.add_argument("--insecure-remote", action="store_true", default=d(False), help="allow plain http to a non-loopback host")
-    parser.add_argument("--plain", action="store_true", default=d(False), help="no colors (also NO_COLOR)")
+    parser.add_argument("--plain", action="store_true", default=d(False),
+                        help="the plain line REPL instead of the terminal UI, without colors (NO_COLOR: colors only)")
+    parser.add_argument("--no-anim", action="store_true", default=d(False), help="no animation (also ECHO_REDUCED_MOTION=1)")
+    parser.add_argument("--ascii", action="store_true", default=d(False), help="ASCII glyphs only (also ECHO_TUI_ASCII=1)")
+    parser.add_argument("--no-start", action="store_true", default=d(False),
+                        help="never start a backend; only attach to a running one")
     parser.add_argument("--show-thinking", action="store_true", default=d(False), help="stream model reasoning")
     parser.add_argument("--timeout", type=float, default=d(15.0), help="request timeout seconds (default 15)")
 
@@ -385,7 +529,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--all", action="store_true", help="stop everything (POST /lean/stop-all)")
     sp.add_argument("--session", default="")
     sp.set_defaults(func=cmd_simple)
-    sp = sub.add_parser("serve", parents=[common], help="start a private backend on 127.0.0.1 with a fresh key")
+    sp = sub.add_parser("backend", parents=[common], help="the shared backend: status, start (detached) or stop")
+    sp.add_argument("action", choices=["status", "start", "stop"])
+    sp.add_argument("--any", action="store_true", help="stop: also stop a backend the terminal did not start")
+    sp.set_defaults(func=cmd_backend)
+    sp = sub.add_parser("serve", parents=[common], help="run a backend in the foreground on 127.0.0.1 with a fresh key")
     sp.add_argument("--port", type=int, default=0)
     sp.add_argument("--wait", type=float, default=180, help="seconds to wait for readiness")
     sp.set_defaults(func=cmd_serve)
