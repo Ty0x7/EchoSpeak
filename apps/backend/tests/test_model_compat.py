@@ -77,6 +77,86 @@ def test_announcing_the_next_read_is_a_promise_not_an_answer():
     assert not is_promise_without_action("Want me to check the other logs too?")
 
 
+def test_a_menu_written_as_prose_becomes_a_question_card():
+    """ministral-3:8b ended all three D5 runs with "Would you like me to: 1. Create config.json … 2. … 3. …"."""
+    from agent.lean.approvals import get_approval_broker
+
+    text = ("The script failed: config.json is missing.\n\nWould you like me to:\n"
+            "1. Create the `config.json` file, then run `report.py` again?\n2. Skip this?\n3. Inspect report.py first?")
+    from agent.lean.ask import ASK_USER, ask_user_tool, menu_in_text
+    assert menu_in_text(text)["options"][0] == "Create the config.json file, then run report.py again"
+    assert menu_in_text("I fixed:\n- the separator\n- lowercasing\n\nWant me to run the tests?") is None
+
+    ran: list[str] = []
+    box = Toolbox(toolsets=["none"], session_id="menu")
+    box.native = {ASK_USER: ask_user_tool(),
+                  "make_config": NativeTool("make_config", "make it", {"type": "object", "properties": {}},
+                                            lambda a: ran.append("made") or "created config.json")}
+
+    class Plain:
+        endpoint = Endpoint("http://127.0.0.1:11434/v1", "", "ministral-3:8b", "ollama", True)
+
+        def __init__(self, turns):
+            self.turns, self.calls = list(turns), []
+
+        def stream_turn(self, messages, **kw):
+            self.calls.append([dict(m) for m in messages])
+            turn = self.turns.pop(0)
+            if turn.content and kw.get("on_content"):
+                kw["on_content"](turn.content)
+            return turn
+
+    client = Plain([ModelTurn(content=text, finish_reason="stop"),
+                    ModelTurn(tool_calls=[ToolCall("m", "make_config", "{}")], finish_reason="tool_calls"),
+                    ModelTurn(content="Created it; TOTAL is 165.", finish_reason="stop")])
+    events: list[dict[str, Any]] = []
+
+    def emit(event):
+        events.append(event)
+        if event.get("type") == "approval_request" and event.get("question"):
+            threading.Thread(target=lambda: get_approval_broker().resolve(event["id"], event["options"][0]), daemon=True).start()
+
+    turn = LeanTurn(client=client, persona=AgentPersona(id="echo", name="Echo"), system_prompt="s", history=[], toolbox=box,
+                    session_id="menu", request_id="r", execution_id="e", emit=emit, cancel=threading.Event(),
+                    persist_tool_runs=False)
+    result = turn.run("Run report.py and tell me the TOTAL.")
+    assert ran == ["made"] and result.text.endswith("TOTAL is 165.")
+    assert any(e["type"] == "menu_as_question" for e in events)
+    assert "The user answered: Create the config.json file" in client.calls[1][-1]["content"]
+
+
+def test_writing_the_tests_expected_value_into_the_code_is_caught():
+    """Every model hard-coded `return 1700000000000` to pass `assert now_ms() == 1700000000000` (D7)."""
+    from agent.lean.verification import VerificationLedger
+
+    ledger = VerificationLedger()
+    ledger.observe("file_read", {"path": "test_clock.py"}, True,
+                   "test_clock.py (6 lines)\n5|     assert now_ms() == 1700000000000", 1, 5, {}, call_id="r")
+    ledger.observe("file_edit", {"path": "clock.py", "old_text": "return int(time.time() * 1000)",
+                                 "new_text": "return 1700000000000"}, True, "Edited clock.py", 2, 5, {}, call_id="e")
+    assert "the exact value test_clock.py expects" in ledger.feedback("e")
+    assert ledger.completion()["status"] == "unverified" and ledger.active()
+    assert "returns 1700000000000" in ledger.unfinished("The test passes.")
+    # Putting the real computation back clears it.
+    ledger.observe("file_edit", {"path": "clock.py", "old_text": "return 1700000000000",
+                                 "new_text": "return int(time.time() * 1000)"}, True, "Edited clock.py", 3, 5, {}, call_id="f")
+    assert not ledger.special_cased
+
+
+def test_a_docstring_mentioning_the_expected_value_is_not_special_casing():
+    from agent.lean.verification import VerificationLedger
+
+    ledger = VerificationLedger()
+    ledger.observe("file_read", {"path": "tests/test_slug.py"}, True, "4|     assert slugify('Hello, World!') == 'hello-world'",
+                   1, 5, {}, call_id="r")
+    fixed = 'def slugify(title):\n    """\'Hello, World!\' -> \'hello-world\'"""\n    return "-".join(w.lower() for w in words)\n'
+    ledger.observe("file_write", {"path": "textutil/slug.py", "content": fixed}, True, "Wrote", 2, 5, {}, call_id="w")
+    assert not ledger.special_cased and ledger.feedback("w") == ""
+    ledger.observe("file_write", {"path": "textutil/slug.py", "content": "def slugify(t):\n    return 'hello-world'\n"},
+                   True, "Wrote", 3, 5, {}, call_id="x")
+    assert ledger.special_cased
+
+
 def test_appending_to_a_file_adds_a_line():
     """gemma4 (2 of 3 runs) and qwen3.5 (once): "alpha" then append "beta" gave "alphabeta"."""
     from agent.tools import append_text

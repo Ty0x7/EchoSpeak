@@ -204,6 +204,28 @@ def redact_payload(value: Any, secrets: Optional[list[str]] = None) -> Any:
     return value
 
 
+# ── downloading code and running it ────────────────────────────────────
+
+_URL = r"(https?://[^\s'\"|;&)]+)"
+_DOWNLOAD_RUN = (
+    # curl … URL … | sudo bash, wget -O- URL | python3, iwr URL | iex
+    # (An interpreter runs piped input only with no script: `| python3 -m json.tool` just formats it.)
+    re.compile(r"(?i)\b(?:curl|wget|iwr|invoke-webrequest|fetch)\b[^|;&]*?" + _URL + r"[^|;&]*\|\s*(?:sudo\s+)?"
+               r"(?:(?:(?:ba|z|da|k)?sh|iex|invoke-expression)\b|(?:python3?|perl|ruby|node)\s*(?:-(?:\s|$)|$|[;&|)]))"),
+    # bash <(curl URL), sh -c "$(wget -qO- URL)"
+    re.compile(r"(?i)\b(?:(?:ba|z|da|k)?sh|python3?)\b[^|;&]*(?:<\(|\$\()\s*(?:curl|wget)\b[^)]*?" + _URL),
+)
+
+
+def download_and_run(command: str) -> str:
+    """The address a command downloads code from to run it at once, or ""."""
+    for pattern in _DOWNLOAD_RUN:
+        match = pattern.search(str(command or ""))
+        if match:
+            return match.group(1)
+    return ""
+
+
 # ── the decision ────────────────────────────────────────────────────────
 
 # Tools whose argument is a shell command.

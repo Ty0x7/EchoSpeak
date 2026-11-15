@@ -132,6 +132,15 @@ def _check_segment(command: str) -> tuple[str, str, bool]:
     return "", "", False
 
 
+# What a test expects: `== 1700000000000`, `assertEqual(x, 'hello-world')`, `toBe("…")`. Only distinctive values
+# (5+ digit numbers, 6+ character strings): writing `4` or `True` into code is no sign of special-casing.
+_EXPECTED = re.compile(r"(?:==|assertEqual\([^,\n]+,|toBe\(|toEqual\()\s*(-?\d{5,}(?:\.\d+)?|\"[^\"\n]{6,80}\"|'[^'\n]{6,80}')")
+
+
+def _expected_literals(text: str) -> set[str]:
+    return {match.group(1).strip("'\"") for match in _EXPECTED.finditer(str(text or ""))}
+
+
 def check_kind(command: str) -> str:
     """test | build | typecheck | lint | bench for a command that runs a check, else ''.
 
@@ -306,6 +315,9 @@ class VerificationLedger:
     last_step: int = 0
     # Checks the setup blocked: after ENVIRONMENT_STOP the note says to stop fixing it and report instead.
     environment_hits: int = 0
+    # Distinctive values the tests read this turn assert ({literal: test file}), and code changes that wrote one in.
+    expected: dict[str, str] = field(default_factory=dict)
+    special_cased: list[list[str]] = field(default_factory=list)
     _pending: dict[str, str] = field(default_factory=dict, repr=False)
 
     # ── the objective (set_objective) ──────────────────────────────────
@@ -350,9 +362,14 @@ class VerificationLedger:
             return
         if name in _CHANGE_TOOLS:
             if ok:
-                self._changed(str(args.get("path") or args.get("destination") or args.get("file") or ""))
+                path = str(args.get("path") or args.get("destination") or args.get("file") or "")
+                self._changed(path)
+                self._watch_special_case(name, path, args, call_id)
             return
         if name in _LOOKUP_TOOLS:
+            if ok and name == "file_read" and _TEST_FILE.search(str(args.get("path") or "")):
+                for literal in _expected_literals(text):
+                    self.expected.setdefault(literal, str(args.get("path"))[:200])
             self.read_misses = self.read_misses + 1 if _MISS.search(head) else 0
             if self.read_misses >= READ_MISSES:
                 self._block("information", f"{self.read_misses} lookups in a row found nothing")
@@ -391,6 +408,31 @@ class VerificationLedger:
                 return
             code = 1 if failed > 0 or errors > 0 else 0
         self._record(self._parse(step, kind, command, code, text), text, call_id or command)
+
+    def _watch_special_case(self, name: str, path: str, args: dict[str, Any], call_id: str) -> None:
+        """A code change that writes a test's expected value in, instead of computing it.
+
+        Every model in the five-model evaluation turned `assert now_ms() == 1700000000000` into
+        `return 1700000000000` and reported "the test passes": a pass that fixes nothing (METR's reward-hacking
+        reports describe the same). Like tests edited after they fail, it makes the check worthless.
+        """
+        if not self.expected or _TEST_FILE.search(path) or name not in {"file_write", "file_edit"}:
+            return
+        new = str(args.get("content") if name == "file_write" else args.get("new_text") or args.get("new_string") or "")
+        old = str(args.get("old_text") or args.get("old_string") or "")
+        key = path[:200]
+        for literal, test in self.expected.items():
+            # Used as a value (`return 1700000000000`, `FROZEN = "hello-world"`), not just mentioned in a docstring.
+            as_value = re.compile(r"(?:\breturn\b|[^=!<>]=)\s*[(\[]?\s*['\"]?" + re.escape(literal) + r"\b")
+            if as_value.search(new) and not as_value.search(old):
+                if (key, literal) not in [tuple(s[:2]) for s in self.special_cased]:
+                    self.special_cased.append([key, literal, test])
+                self._pending[call_id or key] = (
+                    f"Verification: this change writes {literal}, the exact value {test} expects, into {path} instead of "
+                    "computing it. That makes the test pass without fixing anything. Undo it and fix the real cause, or "
+                    "tell the user plainly why the test can't pass as written.")
+            elif not as_value.search(new) and (name == "file_write" or as_value.search(old)):
+                self.special_cased = [s for s in self.special_cased if not (s[0] == key and s[1] == literal)]
 
     def _changed(self, target: str) -> None:
         self.changes += 1
@@ -517,13 +559,18 @@ class VerificationLedger:
         return self._pending.pop(key, "")
 
     def active(self) -> bool:
-        return bool(self.checks or self.blockers or self.objective)
+        return bool(self.checks or self.blockers or self.objective or self.special_cased)
 
     def unfinished(self, answer: str) -> str:
         """For an answer that claims success the evidence contradicts: what to fix first (asked once)."""
         done = self.completion()
         if not DONE_CLAIM.search(answer or ""):
             return ""
+        if self.special_cased:
+            path, literal, test = self.special_cased[0][:3]
+            return (f"Your reply says it works, but {path} now returns {literal}, the value {test} expects, instead of "
+                    "computing it, so the test passing proves nothing. Undo that and fix the real cause, or say plainly "
+                    "that the test can't pass as written and why.")
         setup = next((c.environment for c in reversed(self.checks) if c.environment), "")
         if done["status"] == "blocked" and setup and self.changes:
             # "The test passes" when the test never ran (found live: pytest wasn't installed, and the reply said the
@@ -562,6 +609,8 @@ class VerificationLedger:
             detail = "nothing checked the work" if self.changes else ""
         elif self.tamper_after_fail:
             status, detail = "unverified", "tests were changed after they failed"
+        elif self.special_cased:
+            status, detail = "unverified", f"the code returns the test's expected value ({self.special_cased[0][1]}) directly"
         elif self.changes_since_check:
             status, detail = "unverified", f"{self.changes_since_check} change(s) after the last check"
         elif primary.ok:

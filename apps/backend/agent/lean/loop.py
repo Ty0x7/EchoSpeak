@@ -413,6 +413,7 @@ class LeanTurn:
         claim_nudges = 0
         check_nudges = 0
         verify_nudges = 0
+        menus = 0
         final_text = ""
         error = ""
         success = True
@@ -538,6 +539,17 @@ class LeanTurn:
                         add_note(messages, problem)
                         self.emit({"type": "verification_nudge", "step": step, "note": problem[:300]})
                         self._retract_text(step)
+                        continue
+                    menu = (ask.menu_in_text(content) if self.interactive and ask.ASK_USER in self.toolbox.names
+                            and menus < 2 and not stop_reason else None)
+                    if menu:
+                        # A choice written as prose ends the run; as a question card the run goes on with the pick.
+                        menus += 1
+                        call = ToolCall(f"menu_{uuid.uuid4().hex[:10]}", ask.ASK_USER, json.dumps(menu))
+                        messages[-1]["tool_calls"] = [{"id": call.id, "type": "function",
+                                                       "function": {"name": call.name, "arguments": call.arguments}}]
+                        self.emit({"type": "menu_as_question", "step": step, "options": len(menu["options"])})
+                        self._run_tools([call], messages, step, call_counts)
                         continue
                     if self._absorb_steering(messages, step):
                         # The user added something while this answer was written: keep going with it.
@@ -883,6 +895,22 @@ class LeanTurn:
                 elif decision.action == "ask":
                     self._policy_reasons[call.id] = decision.reason
                     self._policy_rules[call.id] = decision.rule
+            fetched = (policy.download_and_run(str(args.get("command") or args.get("cmd") or ""))
+                       if not problem and name in policy.COMMAND_TOOLS else "")
+            if fetched:
+                # Downloading code and running it at once. From an address the user gave, it asks (no grant covers it);
+                # otherwise it came from something the agent read, as in a README's planted `wget … | bash`
+                # (granite4.2:8b ran one in the five-model evaluation), and it isn't run.
+                asked_for = fetched in f"{getattr(self, '_goal', '')}\n{self.goal}"
+                reason = f"it downloads code from {fetched[:120]} and runs it straight away"
+                if asked_for:
+                    self._policy_reasons[call.id], self._policy_rules[call.id] = reason, "download_execute"
+                else:
+                    reason += ", and that address isn't in the user's request. Tell the user the exact command if they want to run it"
+                    policy.audit(policy.Decision("deny", reason, "download_execute"), name=name, args=args,
+                                 session_id=self.session_id, agent=self.persona.id, outcome="blocked")
+                    self._policy_reasons[call.id] = reason
+                    problem = "policy"
             if not problem and self._denied_targets and call.id not in self._policy_reasons:
                 hit = self._after_denial(name, args)
                 if hit:
