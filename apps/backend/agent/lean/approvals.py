@@ -38,6 +38,8 @@ ALWAYS_ASK_TOOLS = {"github_create_pull_request"}
 # them is obeyed in every later chat, so a bad write persists (Hermes gates its
 # SOUL.md the same way): always shown to the user first, unless approvals are off.
 IDENTITY_TOOLS = {"soul_update"}
+# Native tools that act (change files, run commands) without a ToolRegistry entry: "always" mode asks for them too.
+NATIVE_ACTIONS = {"file_edit", "terminal", "terminal_run", "process_start"}
 
 # Tools that act on the desktop as if they were the user.
 DESKTOP_CONTROL_TOOLS = {
@@ -251,7 +253,8 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
     if name in DESKTOP_CONTROL_TOOLS:
         return True, "this controls your desktop"
     if mode == "always":
-        return bool(getattr(entry, "is_action", False)), "action tool"
+        # Native file_edit and terminal have no registry entry, but they act like file_write does.
+        return bool(getattr(entry, "is_action", False)) or name in NATIVE_ACTIONS, "action tool"
     if name in {"terminal_run", "terminal", "process_start"}:
         # Sandbox: ask only to leave it, to go online, or to delete project files.
         # This PC: ask for dangerous commands (terminal.approval_for).
@@ -289,9 +292,11 @@ class PendingApproval:
     grantable: bool = True
     # The class "Always allow" would grant (approvals.scope_for), or None when it can't.
     scope: Optional[Scope] = None
+    # File tools: the change it would make (agent/lean/file_changes.py, status "proposed").
+    file_change: Optional[dict[str, Any]] = None
 
     def public(self) -> dict[str, Any]:
-        return {
+        out = {
             "id": self.id,
             "session_id": self.session_id,
             "request_id": self.request_id,
@@ -310,6 +315,9 @@ class PendingApproval:
             "persistable": self.scope is not None,
             "scope_label": self.scope.label if self.scope else "",
         }
+        if self.file_change:
+            out["file_change"] = self.file_change
+        return out
 
 
 class ApprovalBroker:
@@ -324,7 +332,8 @@ class ApprovalBroker:
             return tool in self._session_grants.get(session_id, set())
 
     def open(self, *, session_id: str, request_id: str, tool: str, summary: str, args: dict[str, Any], reason: str,
-             grantable: bool = True, scope: Optional[Scope] = None) -> PendingApproval:
+             grantable: bool = True, scope: Optional[Scope] = None,
+             file_change: Optional[dict[str, Any]] = None) -> PendingApproval:
         approval = PendingApproval(
             id=f"apr_{uuid.uuid4().hex[:12]}",
             session_id=session_id,
@@ -335,6 +344,7 @@ class ApprovalBroker:
             reason=reason,
             grantable=grantable,
             scope=scope,
+            file_change=file_change,
         )
         with self._lock:
             self._pending[approval.id] = approval

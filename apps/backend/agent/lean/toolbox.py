@@ -684,10 +684,59 @@ class Toolbox:
             return ToolResult(False, f"Blocked by the user's privacy setting: {blocked} This is intended, not a fault: "
                               "don't retry it or look for another way around it. Continue without it, or tell the "
                               "user what it would need.", 0, outcome="refused")
+        snap = self._file_snapshot(name, args)
         # Connections the tool makes count as its component's (agent/privacy.py backstop).
         with privacy.scope(privacy.tool_component(name, args)):
             result = self._run(name, args)
-        return self._observe(name, args, result)
+        result = self._observe(name, args, result)
+        if snap is not None and result.ok:
+            self._attach_file_change(snap, result)
+        return result
+
+    # ── structured file changes (agent/lean/file_changes.py) ────────────
+    def _in_tool_context(self, fn: Callable[[], Any]) -> Any:
+        from agent.tools import _tool_execution_context
+
+        token = _tool_execution_context.set(self.tool_context())
+        try:
+            return fn()
+        finally:
+            _tool_execution_context.reset(token)
+
+    def _file_snapshot(self, name: str, args: dict[str, Any]):
+        from agent.lean import file_changes
+
+        if name not in file_changes.TRACKED:
+            return None
+        try:
+            return self._in_tool_context(lambda: file_changes.snapshot(name, args))
+        except Exception:
+            logger.debug("file_change snapshot for {} failed", name, exc_info=True)
+            return None
+
+    def _attach_file_change(self, snap: Any, result: ToolResult) -> None:
+        from agent.lean import file_changes
+
+        try:
+            change = self._in_tool_context(lambda: file_changes.applied(snap, str(self.project_root or "")))
+        except Exception:
+            logger.debug("file_change for {} failed", snap.name, exc_info=True)
+            return
+        if change:
+            result.meta = {**(result.meta or {}), "file_change": change}
+
+    def file_change_preview(self, name: str, args: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """The change a file tool call would make, for its approval card. A dry run: nothing is written."""
+        from agent.lean import file_changes
+
+        name = self.resolve_name(name)
+        if name not in file_changes.TRACKED:
+            return None
+        try:
+            return self._in_tool_context(lambda: file_changes.proposed(name, args, str(self.project_root or "")))
+        except Exception:
+            logger.debug("Proposed file_change for {} failed", name, exc_info=True)
+            return None
 
     def _unavailable(self, name: str) -> ToolResult:
         """A call to a tool this turn doesn't have: the owner's setting (refused) or a name that doesn't exist (skipped)."""

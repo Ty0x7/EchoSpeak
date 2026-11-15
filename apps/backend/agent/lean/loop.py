@@ -1157,6 +1157,10 @@ class LeanTurn:
         # present intact instead of approving a truncated command or hidden key.
         if len(json.dumps(args, ensure_ascii=False, default=str).encode("utf-8")) > 65536:
             return False, f"{name} has more than 64 KiB of arguments and cannot be shown safely for approval.", "skipped"
+        # File tools also show the change they would make (a dry run against the current file).
+        preview_change = self.toolbox.file_change_preview(name, args) if hasattr(self.toolbox, "file_change_preview") else None
+        if preview_change:
+            preview_change = {**preview_change, "tool_call_id": call.id}
         approval = broker.open(
             session_id=self.session_id,
             request_id=self.request_id,
@@ -1167,6 +1171,7 @@ class LeanTurn:
             reason=reason,
             grantable=grantable,
             scope=scope,
+            file_change=preview_change,
         )
         if self.ensure_work and self.work_context is None:
             self.work_context = self.ensure_work()
@@ -1340,6 +1345,10 @@ class LeanTurn:
         effects = list(effects or [])
         self._outcomes_by_call[call.id] = outcome
         facts = {**steps.widget_counts(widgets), **(meta or {})}
+        if isinstance(facts.get("file_change"), dict):
+            # The structured diff for clients (agent/lean/file_changes.py) travels on the event only;
+            # the saved timeline keeps the numeric facts.
+            facts["file_change"] = {**facts["file_change"], "tool_call_id": call.id}
         if name in CHECK_TOOLS:
             self._unchecked.clear()  # something ran after the changes, pass or fail
         elif ok:
@@ -1371,7 +1380,8 @@ class LeanTurn:
         for item in self.timeline:
             if item.get("kind") == "tool" and item.get("id") == call.id:
                 item.update({"status": "done" if ok else "failed", "output": preview, "duration_ms": duration_ms,
-                             "done_label": done, "summary": summary, "meta": facts, "outcome": outcome})
+                             "done_label": done, "summary": summary,
+                             "meta": {k: v for k, v in facts.items() if k != "file_change"}, "outcome": outcome})
                 if effects:
                     item["effects"] = effects[:8]
                 item.pop("detail", None)
