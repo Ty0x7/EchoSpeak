@@ -81,7 +81,19 @@ def test_tool_lines_statuses_and_previews():
     assert tools[2].summary == "you denied it" and tools[2].preview == []
     notes = [b.text for b in out if isinstance(b, B.Note)]
     assert "Denied: Running `rm x`" in notes
-    assert steps_summary(run.finished_tools) == "Searched the web · Changed 1 file · Ran 2 commands · 1 failed"
+    # Denied and held steps never ran: only the search and the pytest run count.
+    assert steps_summary(run.finished_tools) == "Searched the web · Ran 1 command · 1 failed"
+
+
+def test_a_passing_check_note_is_not_shown_as_a_warning():
+    events = [(0, start()),
+              (1, {"type": "answer_note", "message_id": "m1", "note": "Checks pass — test `pytest`: 2 passed",
+                   "verification": "checks_pass"}),
+              (2, {"type": "answer_note", "message_id": "m1", "note": "No check ran after the last change"})]
+    _, out = run_of(events)
+    notes = [b for b in out if isinstance(b, B.Note)]
+    assert notes[0].glyph != "!" and notes[0].text.startswith("Checks pass")
+    assert notes[1].glyph == "!"
 
 
 def test_activity_wording_follows_the_gui():

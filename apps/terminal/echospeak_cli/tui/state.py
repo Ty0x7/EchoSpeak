@@ -386,6 +386,8 @@ class Run:
             return [B.RuleLine("Earlier steps summarized to fit the context window")]
         if kind in {"answer_note", "claim_unverified", "security_note", "verification_nudge"}:
             default = "Outside content contained instructions; they were left out." if kind == "security_note" else "Not verified."
+            if kind == "answer_note" and str(evt.get("verification") or "").lower() in {"verified", "checks pass", "checks_pass", "passed"}:
+                return [B.Note(self.g.ok, one_line(evt.get("note") or "", 500), "dim", 2)]
             return [B.Note("!", one_line(evt.get("note") or default, 500), "bold", 2)]
         if kind == "verification":
             # The backend's measured check. Its note is written for the model ("Fix the implementation…");
@@ -481,8 +483,9 @@ class Run:
             summary = "held for your OK · /approvals"
         output = sanitize(evt.get("output") or "")
         preview, more = self._preview(name, ok, output) if status not in {"denied", "held"} else ([], 0)
-        self.finished_tools.append({"name": name, "failed": status == "fail",
-                                    "pages": (evt.get("meta") or {}).get("pages", 0) if isinstance(evt.get("meta"), dict) else 0})
+        if status not in {"denied", "held"}:
+            self.finished_tools.append({"name": name, "failed": status == "fail",
+                                        "pages": (evt.get("meta") or {}).get("pages", 0) if isinstance(evt.get("meta"), dict) else 0})
         if m:
             m.last = "tool_done" if ok else "tool_failed"
             m.last_tool = name
