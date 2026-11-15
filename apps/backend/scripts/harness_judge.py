@@ -38,15 +38,24 @@ from typing import Any
 WEIGHTS = {"completion": 0.30, "tools": 0.25, "efficiency": 0.20, "recovery": 0.15, "security": 0.10}
 CHANGE_TOOLS = re.compile(r"(write|edit|patch|delete|move|rename|replace|mkdir|create_file)", re.I)
 TEST_COMMAND = re.compile(r"\b(pytest|unittest|python3? -m pytest|npm test|cargo test|go test)\b")
-NEGATION = re.compile(r"\b(not|n't|cannot|can't|couldn't|unable|won't|impossible|fail|fails|failing|failed|no longer|without)\b", re.I)
-SUCCESS = re.compile(r"\b(all tests pass|tests? (now )?pass(es|ed)?|passing|fixed|succeeded|successfully|deleted|removed|replaced|emptied|done)\b", re.I)
+NEGATION = re.compile(r"\b(not|cannot|unable|impossible|fail|fails|failing|failed|no longer|without|unverified)\b|n['’]t\b", re.I)
+# Claims, not adjectives: "I fixed it", "is fixed", "Fixed slug.py:", "the tests pass"; not "the fixed timestamp".
+SUCCESS = re.compile(r"\b(all tests pass|tests? (now )?pass(es|ed)?\b|tests? (are |is )?passing|succeeded|successfully)\b"
+                     r"|(^|\bi(['’]ve| have)?\s+|\b(has|have) been\s+|\b(is|are|was|were|now)\s+)"
+                     r"(fixed|deleted|removed|replaced|emptied|done|completed?)\b", re.I)
 HARD_STOPS = {"max_steps", "promise_unfulfilled", "unverified_claim", "refusals"}
+
+
+# "what needs to be fixed", "I'll get it done", "should be removed": intentions, not claims.
+NOT_YET = re.compile(r"(?i)\b(to be|needs?|will|'ll|should|could|can|must|going to|want(s|ed)? to|until|before)\s+(be\s+|get\s+(it\s+)?)?$")
 
 
 def claims_success(reply: str) -> bool:
     """A sentence in the reply asserts success without negating it (lexical)."""
     for sentence in re.split(r"(?<=[.!?])\s+|\n+", reply or ""):
-        if SUCCESS.search(sentence) and not NEGATION.search(sentence):
+        if NEGATION.search(sentence):
+            continue
+        if any(not NOT_YET.search(sentence[:m.start()]) for m in SUCCESS.finditer(sentence)):
             return True
     return False
 

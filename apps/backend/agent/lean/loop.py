@@ -735,6 +735,8 @@ class LeanTurn:
         sent = _estimate_tokens(messages, tools) if turn.usage else 0
         kept = int((turn.usage or {}).get("prompt") or 0)
         cut = window.truncated(endpoint, sent, kept)
+        if not cut and sent >= 512 and kept:
+            self._token_scale = min(1.4, max(0.75, kept / sent))  # calibrates the next _fit_context
         if cut:
             # The server answered a prompt it had silently cut (system prompt and request gone first). Nothing
             # from this reply is used: its text is taken back, its tool calls never run, and the loop trims
@@ -1569,17 +1571,27 @@ class LeanTurn:
     # ── context ─────────────────────────────────────────────────────────
     def _fit_context(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], aggressive: bool = False) -> None:
         endpoint = getattr(self.client, "endpoint", None)
-        budget = max(128, int(settings.context_tokens(endpoint) * (0.55 if aggressive else 0.8)) - settings.max_output_tokens(endpoint) // 2)
+        window = settings.context_tokens(endpoint)
+        # Room for this step's reply. Half the output limit (4,096) is a quarter of a 16k window, and with the real
+        # window known that idled ~7k tokens: the loop compacted every other step and the model re-read what it had
+        # just lost (harness evaluation, D8: 67 calls). Windows of 32k and more keep the reserve they had.
+        reserve = min(settings.max_output_tokens(endpoint) // 2, max(2048, window // 8))
+        budget = max(128, int(window * (0.55 if aggressive else 0.8)) - reserve)
+        # The character estimate, scaled by what the server counted for the last prompt (0.85-1.3 measured).
+        scale = getattr(self, "_token_scale", 1.0)
+
+        def size(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
+            return int(_estimate_tokens(messages, tools) * scale)
         # 0. Tool-result clearing: once the context is half full, raw output from
         #    tools used many steps ago is cut to its head. The agent already acted
         #    on it, and long sessions stay coherent instead of hitting the wall.
-        if _estimate_tokens(messages, tools) > budget // 2:
+        if size(messages, tools) > budget // 2:
             tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
             for index in tool_indexes[:-6]:
                 content = str(messages[index].get("content") or "")
                 if len(content) > 2000:
                     messages[index]["content"] = self._clear_note(messages[index], 1500, "older tool output cleared")
-        if _estimate_tokens(messages, tools) <= budget:
+        if size(messages, tools) <= budget:
             return
         # 1. Shrink older tool results, keeping the most recent ones intact.
         tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
@@ -1588,19 +1600,19 @@ class LeanTurn:
             content = str(messages[index].get("content") or "")
             if len(content) > 600:
                 messages[index]["content"] = self._clear_note(messages[index], 500, "older tool output trimmed to save context")
-            if _estimate_tokens(messages, tools) <= budget:
+            if size(messages, tools) <= budget:
                 return
         # 2. Drop the oldest history messages (plain text, never this turn's work).
         #    Older chat is still covered by the chat summary in the system prompt.
-        while _estimate_tokens(messages, tools) > budget and self._history_in_messages > 0:
+        while size(messages, tools) > budget and self._history_in_messages > 0:
             messages.pop(1)
             self._history_in_messages -= 1
         # 3. Summarize this turn's earlier steps instead of cutting them.
-        if _estimate_tokens(messages, tools) > budget and self._compact_turn(messages, keep_steps=2 if aggressive else 3):
-            if _estimate_tokens(messages, tools) <= budget:
+        if size(messages, tools) > budget and self._compact_turn(messages, keep_steps=2 if aggressive else 3):
+            if size(messages, tools) <= budget:
                 return
         # 4. Last resort: shrink every tool result except the newest one.
-        if _estimate_tokens(messages, tools) > budget:
+        if size(messages, tools) > budget:
             tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
             for index in tool_indexes[:-1]:
                 if index < len(messages) and messages[index].get("role") == "tool":

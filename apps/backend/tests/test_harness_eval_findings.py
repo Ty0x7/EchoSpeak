@@ -330,6 +330,15 @@ def test_claiming_a_pass_when_the_check_could_not_run_is_sent_back():
     assert ledger.unfinished("I changed clock.py, but pytest isn't installed, so I couldn't run the test.") == ""
 
 
+def test_tests_pass_with_no_test_run_is_sent_back_but_other_done_claims_are_not():
+    ledger = VerificationLedger()
+    ledger.observe("file_edit", {"path": "clock.py"}, True, "Edited clock.py", 1, 5, {}, call_id="e")
+    ledger.observe("terminal", {"command": "python test_clock.py"}, True, "[ok · 0.0s · this PC · /p]\n(no output)", 2, 5, {}, call_id="r")
+    assert not ledger.checks  # running the test file directly checked nothing
+    assert "no test runner has run since your change" in ledger.unfinished("The test passes.")
+    assert ledger.unfinished("I've updated notes.md, it's done.") == ""  # not about tests: the check step covers code
+
+
 def test_after_repeated_setup_failures_the_note_says_to_stop_and_report():
     ledger = VerificationLedger()
     out = "[exit code 1 · 0.0s · this PC · /p]\n/usr/bin/python: No module named pytest"

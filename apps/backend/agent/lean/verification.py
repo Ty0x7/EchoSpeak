@@ -81,6 +81,7 @@ _MISS = re.compile(r"(?i)^(error: )?(no (matches|results|files?)\b|nothing (foun
 DONE_CLAIM = re.compile(r"(?i)\b(all (the )?(tests|checks) (now )?pass|tests? (now )?pass(es)?\b|tests (are )?(passing|green)|"
                             r"it works|works now|(is|are) (now )?(fixed|done|complete|working)|fixed (it|the)|i'?ve (fixed|finished|completed)|"
                             r"successfully (implemented|fixed|completed)|ready to (use|go|ship)|task (is )?complete)")
+TESTS_PASS_CLAIM = re.compile(r"(?i)\b(all (the )?tests (now )?pass|tests? (now )?pass(es)?\b|tests (are )?(passing|green))")
 _TIME_UNITS = {"ns": 1e-6, "µs": 1e-3, "us": 1e-3, "ms": 1.0, "s": 1000.0, "sec": 1000.0}
 STATUS_LABELS = {"verified": "Verified", "checks_pass": "Checks pass", "partial": "Partly verified",
                  "failing": "Not verified: the last check failed", "unverified": "Not verified", "blocked": "Blocked"}
@@ -530,6 +531,12 @@ class VerificationLedger:
             return (f"Your reply says it works, but nothing has verified it: the check couldn't run ({setup}). Don't say "
                     "it passes. Say plainly that it isn't verified, what you changed, and what the user needs to set up "
                     "to run the check.")
+        if not self.checks and self.changes and TESTS_PASS_CLAIM.search(answer or ""):
+            # "The test passes" with no test runner run since the change (found live: `python test_clock.py`, which only
+            # defines the test, cleared the check step and the claim stood).
+            return ("Your reply says the test passes, but no test runner has run since your change (running a test file "
+                    "directly usually only defines the tests). Run the tests with the project's runner, or say plainly "
+                    "that the change isn't verified.")
         if done["status"] not in {"failing", "unverified", "partial"} or not self.checks:
             return ""
         if done["status"] == "failing":

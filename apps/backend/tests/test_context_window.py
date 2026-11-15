@@ -161,6 +161,23 @@ def test_a_known_window_is_respected_before_the_first_call(monkeypatch):
     assert next(e for e in events if e["type"] == "token_usage")["context_limit"] == 16384
 
 
+def test_a_16k_window_keeps_room_for_the_work_but_still_fits(monkeypatch):
+    """A 16k window used to lose a quarter of itself to the reply reserve (4,096): with the real window known,
+    the loop compacted every other step and re-read what it had just trimmed (D8: 67 calls)."""
+    serving(monkeypatch, 16384)
+    history = _long_history(10500)
+    client = Client([ModelTurn(content="Fine.", finish_reason="stop")])
+    turn, _ran, _events = _turn(client, history)
+    turn.run("Hello?")
+    assert len(client.calls[0]) == len(history) + 2  # nothing trimmed: 10.5k fits a 16k window with room to reply
+    serving(monkeypatch, 16384)
+    window.reset()
+    client = Client([ModelTurn(content="Fine.", finish_reason="stop")])
+    turn, _ran, _events = _turn(client, _long_history(13000))
+    turn.run("Hello?")
+    assert _estimate_tokens(client.calls[0], []) <= 16384 - 2048  # but more than the window allows is trimmed
+
+
 def test_a_prompt_that_cannot_fit_ends_the_turn_honestly(monkeypatch):
     serving(monkeypatch, 0)
     client = Client([ModelTurn(content="?", finish_reason="stop", usage={"prompt": 2050, "completion": 1, "total": 2051})
