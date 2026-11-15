@@ -933,6 +933,18 @@ def _looks_like_code_stub(path: str, content: str) -> bool:
     return False
 
 
+def append_text(existing: str, body: str) -> tuple[str, bool]:
+    """Text after appending `body`, and whether a line break was added between them.
+
+    Appending to a text file means adding lines: "alpha" + "beta" becoming "alphabeta" was the most common
+    file mistake in the five-model evaluation (gemma4 2 of 3 runs, qwen3.5 once). When the file doesn't end
+    with a line break and the new text doesn't start with one, the new text starts on its own line.
+    """
+    if existing and body and not existing.endswith(("\n", "\r")) and not body.startswith(("\n", "\r")):
+        return f"{existing}\n{body}", True
+    return existing + body, False
+
+
 @tool(args_schema=FileWriteArgs, description="Write text to a file (restricted; opt-in system action).")
 def file_write(path: str, content: str, append: bool = False) -> str:
     if denied := _tool_scope_denial("file_write"):
@@ -982,9 +994,10 @@ def file_write(path: str, content: str, append: bool = False) -> str:
             logger.warning("Checkpoint creation failed: {}", exc)
 
         final_body = body
+        new_line = False
         if append and target.exists():
             try:
-                final_body = target.read_text(encoding="utf-8", errors="strict") + body
+                final_body, new_line = append_text(target.read_text(encoding="utf-8", errors="strict"), body)
             except UnicodeDecodeError:
                 return "Unsupported text encoding; UTF-8 append required for safe editing."
         temp_target = target.with_name(f".{target.name}.echospeak-{uuid.uuid4().hex}.tmp")
@@ -1008,8 +1021,9 @@ def file_write(path: str, content: str, append: bool = False) -> str:
             except Exception:
                 pass
         action = "Appended" if append else "Wrote"
+        note = " (on a new line: the file didn't end with a line break)" if new_line else ""
         # Include file body so Code visualizer can show real source (not "Wrote N chars")
-        return f"{action} {len(body)} chars to {target}\n{_echo_file_payload(target, body, action='write')}"
+        return f"{action} {len(body)} chars to {target}{note}\n{_echo_file_payload(target, body, action='write')}"
     except Exception as e:
         return f"Failed to write file: {str(e)}"
 

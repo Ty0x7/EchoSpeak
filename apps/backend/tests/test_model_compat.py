@@ -66,6 +66,26 @@ def test_deepseek_native_calls_are_read():
     assert cleaned == "I'll run it."
 
 
+def test_appending_to_a_file_adds_a_line():
+    """gemma4 (2 of 3 runs) and qwen3.5 (once): "alpha" then append "beta" gave "alphabeta"."""
+    from agent.tools import append_text
+
+    assert append_text("alpha", "beta") == ("alpha\nbeta", True)
+    assert append_text("alpha\n", "beta") == ("alpha\nbeta", False)
+    assert append_text("alpha", "\nbeta") == ("alpha\nbeta", False)
+    assert append_text("", "beta") == ("beta", False)
+
+
+def test_the_approval_preview_shows_the_line_that_will_be_written(tmp_path):
+    from agent.lean.file_changes import proposed
+
+    (tmp_path / "notes.md").write_text("alpha")
+    change = proposed("file_write", {"path": str(tmp_path / "notes.md"), "content": "beta", "append": True}, str(tmp_path))
+    added = [text for hunk in change["hunks"] for tag, text in hunk["lines"] if tag == "+"]
+    removed = [text for hunk in change["hunks"] for tag, text in hunk["lines"] if tag == "-"]
+    assert added == ["beta"] and removed == [] and change["total_lines"] == 2  # before: -alpha +alphabeta
+
+
 class Client:
     """A server whose template drops tool definitions: it counts only the messages."""
 

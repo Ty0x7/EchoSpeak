@@ -375,7 +375,11 @@ def proposed(name: str, args: dict[str, Any], root: str = "") -> Optional[dict[s
                 body = strip_echo_file_wrapper(str(args.get("content") or ""))
             except Exception:
                 body = str(args.get("content") or "")
-            new_text = ((before.text or "") + body) if args.get("append") and before.exists else body
+            if args.get("append") and before.exists:
+                from agent.tools import append_text
+                new_text = append_text(before.text or "", body)[0]  # what file_write will actually write
+            else:
+                new_text = body
             op = "write" if before.exists else "create"
             if before.exists and before.text is None:
                 return build(path=path, op=op, before=before, after=Side(), root=root, status="proposed")
