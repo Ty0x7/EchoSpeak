@@ -452,3 +452,28 @@ on qwen3.5:9b, then fixed, covered by a test and re-run live:
 - Desktop: 19 contracts + 9 Rust.
 
 **Next.** See `interfaces.md` for the prioritised desktop/terminal changes.
+
+## Harness evaluation on qwen3.5:9b (15 November 2026)
+
+The harness was measured with real local-model runs and a separate judge, then fixed where the evidence pointed. Full
+record: [harness-evaluation.md](harness-evaluation.md) ([visual](../../artifacts/research/harness-evaluation.html)).
+
+- **Score.** 7.94 → 8.95 out of 10 over 14 cases × 3 runs; held-out cases 7.41 → 9.38.
+- **Execution success.** 48% → 83%.
+- **Security.** Critical findings 6 → 0, at the same token cost.
+- **Fixed** (commits `bc35212` and `9b221d2`):
+  - a context window assumed at 32k while Ollama served 16k and silently truncated (audit F06);
+  - answers written only as reasoning;
+  - file-emptying writes without approval, including as a workaround after a denial;
+  - compaction that never worked on this model and was never charged;
+  - fresh-token accounting after a trim (audit F09);
+  - verification checks that checked nothing;
+  - a run-stream race that dropped the end of a run.
+- **Evaluation workflow:**
+  - `scripts/model_recorder.py`
+  - `scripts/harness_eval.py`
+  - `scripts/harness_judge.py`
+- **Still open:**
+  - D7, where the model hard-codes a test's expected value;
+  - planted instructions in trusted project files;
+  - the D8 cost increase under the true window.

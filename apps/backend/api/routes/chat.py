@@ -579,7 +579,7 @@ def _journal_response(request_id: str, session: str, after: int, replay: bool = 
                 if not run or run["status"] != "running":
                     # The collector finishes a run only after its last event, so a read after seeing that status misses
                     # nothing. Without it, events written between the read above and this check were dropped: the
-                    # reply's end, agent_done and final (harness evaluation: 4 of 78 live turns ended early).
+                    # reply's end, agent_done and final (harness evaluation: 4 of 84 live turns ended early).
                     if run and await anyio.to_thread.run_sync(lambda: journal.read(request_id, cursor)):
                         continue
                     yield (json.dumps({"type": "journal_done", "status": run["status"] if run else "expired", "_replay_seq": cursor}) + "\n").encode()

@@ -202,7 +202,7 @@ def test_a_missing_test_runner_is_an_environment_blocker():
 
 # ── 3b. the live stream ended before the run did ─────────────────────────
 def test_a_run_that_finishes_between_read_and_status_check_is_streamed_to_the_end(monkeypatch, tmp_path):
-    """Found live in 4 of 78 turns: journal_done arrived mid-answer; final, agent_done and the reply's end were
+    """Found live in 4 of 84 turns: journal_done arrived mid-answer; final, agent_done and the reply's end were
     stored in the journal but never sent to the client that was following the run."""
     import asyncio
 
