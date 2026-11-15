@@ -254,6 +254,12 @@ def file_edit(args: dict[str, Any]) -> str:
     key = str(target).casefold()
     if count == 0:
         updated, how, places = _loose_match(text, old, new)
+        if updated is not None and updated == text:
+            # Live: a re-indent was fitted back to the file's own indentation, so nothing changed, but the
+            # tool still said "Edited". Say so; the model must not count it as progress.
+            return (f"Error: nothing changed in {target.name}. old_text matched {how}, and after fitting your new "
+                    "text to the file's indentation it is identical to what is already there. To change indentation "
+                    "or whitespace, file_read the file and rewrite it with file_write.")
         if updated is not None:
             _MISSES.pop(key, None)
             _atomic_write(target, updated, "file_edit")
@@ -272,6 +278,8 @@ def file_edit(args: dict[str, Any]) -> str:
     if count > 1 and not replace_all:
         return f"Error: old_text appears {count} times in {target.name}. Include more surrounding lines so it is unique, or set replace_all=true."
     updated = text.replace(old, new) if replace_all else text.replace(old, new, 1)
+    if updated == text:
+        return f"Error: nothing changed in {target.name}; the replacement produced the same text."
     _MISSES.pop(key, None)
     _atomic_write(target, updated, "file_edit")
     changed = count if replace_all else 1

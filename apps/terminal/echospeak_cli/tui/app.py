@@ -1609,8 +1609,9 @@ class EchoTUI:
             self.note("preview pane closed")
             return
         if not self.sid:
-            self.note("send a message first: the preview follows this session's edits")
-            return
+            # Opening the preview first is natural; start the session now so the pane has one to follow.
+            await self.call(self.core.ensure_session, "New session")
+            await self._refresh_title()
         here = self.env.get("TMUX_PANE", "")
         width = await self.call(tmux_pane_width, here)
         if width and width < PREVIEW_MIN_COLS:

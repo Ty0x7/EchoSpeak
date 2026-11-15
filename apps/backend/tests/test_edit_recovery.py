@@ -208,3 +208,23 @@ def test_other_agents_on_local_models_get_the_everyday_chat_focus(monkeypatch):
             assert sent <= CHAT_FOCUS | always | {"find_tools"} and "find_tools" in sent
             assert box.deferred and all(box.entry(n) or n in box.native for n in box.deferred)  # still callable by name
     assert sizes["lmstudio"] < sizes["openai"]
+
+
+def test_a_reindent_that_fits_back_to_the_file_is_reported_as_no_change(tmp_path):
+    """Live (2026-11-15): a model "re-indented" a 3-space function to 4 spaces; the edit was fitted back to the
+    file's 3 spaces, nothing changed, and the tool still said "Edited … (1 replacement)"."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    source = "def median(xs):\n   if not xs:\n       return 0\n   return sorted(xs)[len(xs) // 2]\n"
+    (root / "stats.py").write_text(source, encoding="utf-8")
+    coding._MISSES.clear()
+    token = _tool_execution_context.set({"strict_scope": True, "project_root": str(root), "lean_runtime": True})
+    try:
+        # The model's view of the body: 4-space indents and a stray trailing space, so it only matches loosely.
+        old = "    if not xs: \n        return 0"
+        new = "    if not xs:\n        return 0"     # its "fix": the same lines, re-indented to 4 spaces
+        out = file_edit({"path": "stats.py", "old_text": old, "new_text": new})
+    finally:
+        _tool_execution_context.reset(token)
+    assert out.startswith("Error: nothing changed"), out
+    assert (root / "stats.py").read_text(encoding="utf-8") == source

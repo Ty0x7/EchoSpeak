@@ -700,11 +700,13 @@ class LeanTurn:
             span.set(tool_calls=len(turn.tool_calls), finish=str(turn.finish_reason or ""),
                      prompt_tokens=int((turn.usage or {}).get("prompt") or 0),
                      completion_tokens=int((turn.usage or {}).get("completion") or 0))
+            # Count the step once: "fresh" is what it added (new input + reply). Charging the total
+            # re-counted the whole re-sent conversation every step, so a 64k work budget ran out after
+            # about five steps on a 16k-context model, even on a task whose tests had already passed.
+            fresh = self._account_usage(turn.usage) if turn.usage else 0
             if self.work_context and not getattr(self.client.stream_turn, "_echo_admitted", False):
-                usage = turn.usage or {}
-                self.work_context.coordinator.account(self.work_context, int(usage.get("total") or usage.get("prompt", 0) + usage.get("completion", 0)))
+                self.work_context.coordinator.account(self.work_context, fresh)
         if turn.usage:
-            self._account_usage(turn.usage)
             self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens(getattr(self.client, "endpoint", None))})
         # In group chats the transcript shows "[Name]: text"; models sometimes copy
         # that onto their own reply. Drop it.
@@ -727,7 +729,7 @@ class LeanTurn:
                 self.emit({"type": "text_replace", "step": step, "text": cleaned})
         return turn
 
-    def _account_usage(self, usage: dict[str, Any]) -> None:
+    def _account_usage(self, usage: dict[str, Any]) -> int:
         """Add one step's token counts to the turn's.
 
         "fresh" is what the step added. Every step re-sends the whole conversation, so
@@ -745,6 +747,7 @@ class LeanTurn:
         else:  # a provider that reports only a total
             fresh = int(usage.get("total") or 0)
         self.usage["fresh"] = self.usage.get("fresh", 0) + fresh
+        return fresh
 
     # ── tools ───────────────────────────────────────────────────────────
     def _run_tools(self, calls: list[Any], messages: list[dict[str, Any]], step: int, call_counts: dict[str, int]) -> None:
