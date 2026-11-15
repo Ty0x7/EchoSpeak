@@ -70,8 +70,10 @@ def test_work_budget_counts_new_tokens_not_the_re_sent_conversation(env, monkeyp
     native = runtime.LeanSession._native_tools
     monkeypatch.setattr(runtime.LeanSession, "_native_tools", lambda self, *a, **k: native(self, *a, **k) + [
         NativeTool("fixture_read", "read", {"type": "object", "properties": {}}, lambda _: "Observed value: 42", parallel_safe=True, always=True)])
+    # Near the 16k limit the harness trims old tool output (_fit_context), so the prompt goes down as well as up.
+    prompts = [12_000, 12_600, 11_900, 12_500, 11_800, 12_400, 11_700, 12_300]
     steps = [ModelTurn(tool_calls=[ToolCall(f"r{i}", "fixture_read", "{}")],
-                       usage={"prompt": 12_000 + 300 * i, "completion": 200, "total": 12_200 + 300 * i}) for i in range(8)]
+                       usage={"prompt": p, "completion": 200, "total": p + 200}) for i, p in enumerate(prompts)]
     steps.append(ModelTurn(content="Observed value is 42.", usage={"prompt": 14_700, "completion": 50, "total": 14_750}))
     install_clients(monkeypatch, {"echo": steps})
     work = store.coordination.create(objective="Inspect value", agent_id="echo", session_id="native")

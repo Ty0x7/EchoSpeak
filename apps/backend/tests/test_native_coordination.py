@@ -194,3 +194,21 @@ def test_retention_drops_old_finished_history_but_keeps_anything_unresolved(tmp_
     assert all(a["work_id"] != old for a in coord.view("actions") + coord.view("attempts"))
     assert {d["key"] for d in coord.view("deliveries")} == {"unsettled"}  # settled notice aged out too
     assert coord.prune(now=later) == 0
+
+
+def test_loop_accounted_calls_are_charged_once_by_the_loop_not_the_admission_wrapper(tmp_path):
+    """Live: the admission wrapper charged every agent-loop call its full total (the whole re-sent
+    conversation), draining a 64k work budget in ~5 steps. Loop calls are charged by the loop only."""
+    from types import SimpleNamespace
+    from agent.admission import admitted, loop_accounted
+    from agent.coordination import work_scope
+
+    ledger, row = setup_work(tmp_path)
+    ctx = ledger.claim(row["id"])
+    call = admitted(lambda *a, **k: SimpleNamespace(usage={"prompt": 12_000, "completion": 200, "total": 12_200}))
+    with work_scope(ctx):
+        with loop_accounted():
+            call(None)
+        assert ledger.get(row["id"])["tokens"] == 0          # the loop charges this call itself
+        call(None)                                            # e.g. a reviewer or summary call
+    assert ledger.get(row["id"])["tokens"] == 12_200

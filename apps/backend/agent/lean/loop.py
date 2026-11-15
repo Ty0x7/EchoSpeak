@@ -686,8 +686,8 @@ class LeanTurn:
         if self.work_context:
             self.work_context.coordinator.check(self.work_context)
         from agent.coordination import work_scope
-        from agent.admission import inference
-        with work_scope(self.work_context), inference(endpoint, cancel=self.cancel), self._span("model.call", step=step, model=str(getattr(endpoint, "model", "") or ""),
+        from agent.admission import inference, loop_accounted
+        with work_scope(self.work_context), loop_accounted(), inference(endpoint, cancel=self.cancel), self._span("model.call", step=step, model=str(getattr(endpoint, "model", "") or ""),
                         provider=str(getattr(endpoint, "provider", "") or ""), tools=len(tools or [])) as span:
             turn = self.client.stream_turn(
                 messages,
@@ -704,7 +704,8 @@ class LeanTurn:
             # re-counted the whole re-sent conversation every step, so a 64k work budget ran out after
             # about five steps on a 16k-context model, even on a task whose tests had already passed.
             fresh = self._account_usage(turn.usage) if turn.usage else 0
-            if self.work_context and not getattr(self.client.stream_turn, "_echo_admitted", False):
+            # The admission wrapper leaves this call's charge to the loop (admission.loop_accounted).
+            if self.work_context:
                 self.work_context.coordinator.account(self.work_context, fresh)
         if turn.usage:
             self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens(getattr(self.client, "endpoint", None))})
@@ -741,7 +742,10 @@ class LeanTurn:
             self.usage[key] += int(usage.get(key) or 0)
         if "prompt" in usage or "completion" in usage:
             prompt = int(usage.get("prompt") or 0)
-            grown = prompt - self._last_prompt if self._last_prompt and prompt >= self._last_prompt else prompt
+            # A prompt that shrank was trimmed to fit the context window (_fit_context): nothing new was
+            # sent, so it adds no input. Counting the whole prompt again on every trim drained a 64k
+            # work budget in ~5 steps on a 16k-context model. Only the first step counts it whole.
+            grown = max(0, prompt - self._last_prompt) if self._last_prompt else prompt
             self._last_prompt = prompt
             fresh = max(0, grown) + int(usage.get("completion") or 0)
         else:  # a provider that reports only a total
