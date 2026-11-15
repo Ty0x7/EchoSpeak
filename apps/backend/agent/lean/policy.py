@@ -230,6 +230,18 @@ def evaluate(
             return Decision("deny", reason + ". Nobody can approve it from here", "rule_of_two")
         return Decision("ask", reason, "rule_of_two")
     if name in COMMAND_TOOLS:
+        # A command that uses a project's secrets file and isn't a plain read can move its values somewhere else
+        # without the model ever seeing them (`cat secrets.env >> README.md`). It asks, and no grant covers it.
+        from agent.lean.secret_files import secret_paths_in_command
+        from agent.learning.episodes import command_kind
+
+        command = str(args.get("command") or args.get("cmd") or "")
+        secret_paths = secret_paths_in_command(command)
+        if secret_paths and command_kind(command) != "read":
+            reason = (f"this command uses {', '.join(sorted(set(secret_paths)))[:120]}, a secrets file, and could copy or "
+                      "send its values")
+            return Decision("ask" if interactive else "deny", reason, "secret_file")
+    if name in COMMAND_TOOLS:
         # Blocked apps hold on every route, not only open_application: no approval can lift them here.
         from agent.app_launcher import blocked_in_command
 

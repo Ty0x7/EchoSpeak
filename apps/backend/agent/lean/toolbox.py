@@ -689,6 +689,9 @@ class Toolbox:
         with privacy.scope(privacy.tool_component(name, args)):
             result = self._run(name, args)
         result = self._observe(name, args, result)
+        # A project's secrets files are shown without their values (agent/lean/secret_files.py).
+        from agent.lean.secret_files import guard_output
+        result.output = guard_output(name, args, result.output)
         if snap is not None and result.ok:
             self._attach_file_change(snap, result)
         return result
