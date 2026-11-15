@@ -395,3 +395,60 @@ Verified on this machine: Omarchy, Linux 7.2, Hyprland on Wayland, Python 3.12 v
 | GUI, Tauri, installed app, live model inference | — | **not verified** |
 
 No paid model was called. Nothing was merged, published or released.
+
+## Milestone 2 (15 November 2026): terminal, Linux desktop, evaluation loop
+
+**Built.** All commits are on this branch.
+
+- **Echo terminal UI** (`apps/terminal`, `7c14ef3`). A Claude Code / Codex-style interactive client:
+  - designed from real captures and source (`cli-design.md`);
+  - inline scrollback, Echo identity, live status;
+  - approvals, steer, queue and stop;
+  - `/model`, `/agents`, `/project`, `/mode`, `/permissions`, `/approvals`, `/resume` and more;
+  - first-run model picker with GPU-fit hints;
+  - a "Work in this folder?" trust prompt (`b241324`).
+- **Edit view** (`786d981`):
+  - inline numbered diffs for every edit;
+  - the proposed diff beside the approval (stacked when narrow);
+  - `/diff` pager;
+  - `/preview`, a live diff pane on the right inside tmux;
+  - backed by a structured `file_change` record (`404ebcc`).
+- **Linux desktop** (`15d7f22`):
+  - runs natively on Hyprland/Wayland;
+  - attaches to a running shared backend instead of starting a second one;
+  - `.deb`, `.rpm` and `.AppImage` built and inspected.
+  - See `apps/desktop/LINUX.md`. Packages built on Arch need glibc 2.44, so release builds belong in an
+    older-distro container.
+- **Workspace.** Echo is window 3 of the owner's tmux AI workspace; Commands moved to 4.
+- **Setup.** Ollama 0.40.16 runs as a user service, with `qwen3.5:9b` (fits 8 GB) and `qwen3.8:27b` (spills to RAM).
+
+**Evaluation loop.** Each defect below was found by driving the real terminal against a real backend
+on qwen3.5:9b, then fixed, covered by a test and re-run live:
+
+| Found live | Fix |
+|---|---|
+| Denying one step (even "tell Echo what to do instead") ended the whole run | Live denials keep the work running (`7e51e59`) |
+| With no project, Echo searched EchoSpeak's own source | Start-up folder trust prompt (`b241324`) |
+| "Always ask" approval mode never asked for native file edits or terminal commands | `approvals.NATIVE_ACTIONS` (`404ebcc`) |
+| A task whose tests passed ended "Work budget exhausted · The run failed" (71k of 64k tokens charged) | The loop charges fresh tokens once; the admission wrapper defers to it (`da171a3`, `9d60611`). Same task: 2,117 tokens, "Done · Checks pass" |
+| A re-indent fitted back to the file changed nothing but was reported as an edit | "Error: nothing changed" (`da171a3`) |
+| Desktop showed a stopped run as "ERROR · cancelled" | Owner cancellation isn't a failure (`11e3987`) |
+| Terminal: backend start crashed without a backend venv; denied steps counted as run; edits counted as files; markdown in the resume recap | `d0dce4e`, `47e324b`, `a2775c2`, `8fbdd87` |
+
+**Scores** (my own, from the live evidence above; 1–10):
+
+| Category | Score | Why not higher |
+|---|---|---|
+| Functionality | 8.5 | No agent create/edit, routines or privacy mode from the terminal |
+| Harness integration | 8.5 | No live cross-client follow stream; a 16k local context fills fast (60% after one research answer) |
+| Visual design | 9 | Some truncation; old rule lines remain in scrollback after `/preview` re-wraps the pane |
+| Terminal usability | 8.5 | `/preview` needs a 140-column pane; the old\|new split needs 150 |
+| Real end-to-end behaviour | 8.5 | Verified fix, tests, verification, cancel, resume, agents and the shared desktop. The 9B model wastes steps |
+
+**Tests at the end of the milestone:**
+- Backend: 1,674 passed. Only the known stale `test_cloud_models` case and the pre-existing flaky `test_swarm` race fail.
+- Terminal: 99 (TUI venv) + 30 (backend venv).
+- Web: 238.
+- Desktop: 19 contracts + 9 Rust.
+
+**Next.** See `interfaces.md` for the prioritised desktop/terminal changes.
