@@ -447,3 +447,20 @@ def test_flavour_verbs():
     assert M.flavour(0, 2000, CAPS) == "Listening"
     assert M.flavour(0, 6000, CAPS) == "Tuning in"
     assert M.flavour(0, 9000, Caps(plain_verbs=True)) == ""
+
+
+def test_folder_offer_skips_home_root_and_remembered_declines(tmp_path):
+    from echospeak_cli import control
+
+    home = tmp_path / "home"
+    project = home / "code" / "app"
+    project.mkdir(parents=True)
+    env = {"HOME": str(home), "ECHOSPEAK_STATE_DIR": str(tmp_path / "state")}
+    assert control.folder_offer(str(project), env)
+    assert not control.folder_offer(str(home), env)          # too broad to offer
+    assert not control.folder_offer("/", env)
+    assert not control.folder_offer(str(tmp_path / "missing"), env)
+    control.decline_folder(str(project), env)
+    assert not control.folder_offer(str(project), env)       # asked once; "no" is remembered
+    control.forget_folder_decline(str(project), env)
+    assert control.folder_offer(str(project), env)

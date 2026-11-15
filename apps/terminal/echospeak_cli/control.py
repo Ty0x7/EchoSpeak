@@ -93,6 +93,36 @@ def confirm_model(data_dir: str, model_ref: str, env: Mapping[str, str] = os.env
     write_prefs(prefs, env)
 
 
+def folder_offer(cwd: str, env: Mapping[str, str] = os.environ) -> bool:
+    """Whether to offer "work in this folder?" at start: a real folder, not / or the home folder itself,
+    and not one the owner already said no to."""
+    try:
+        path = Path(cwd).resolve()
+    except OSError:
+        return False
+    home = Path(env.get("HOME") or Path.home()).resolve()
+    if not path.is_dir() or path == Path(path.anchor) or path == home:
+        return False
+    return str(path) not in (read_prefs(env).get("declined_folders") or [])
+
+
+def decline_folder(cwd: str, env: Mapping[str, str] = os.environ) -> None:
+    prefs = read_prefs(env)
+    declined = [p for p in (prefs.get("declined_folders") or []) if isinstance(p, str)]
+    path = str(Path(cwd).resolve())
+    if path not in declined:
+        prefs["declined_folders"] = (declined + [path])[-200:]
+        write_prefs(prefs, env)
+
+
+def forget_folder_decline(cwd: str, env: Mapping[str, str] = os.environ) -> None:
+    prefs = read_prefs(env)
+    path = str(Path(cwd).resolve())
+    if path in (prefs.get("declined_folders") or []):
+        prefs["declined_folders"] = [p for p in prefs["declined_folders"] if p != path]
+        write_prefs(prefs, env)
+
+
 # ── models ───────────────────────────────────────────────────────────
 @dataclass
 class ModelInfo:

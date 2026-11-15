@@ -1550,6 +1550,7 @@ class EchoTUI:
         if action.kind != "choose" or action.value is not True:
             self.note("not attached")
             return
+        await self.call(control.forget_folder_decline, target, self.env)
         project = await self.call(self.client.post, "/projects/attach-folder",
                                   {"path": target, "trust_state": "trusted", "session_id": self.sid})
         await self._activate_project(project, activated=bool(self.sid))
@@ -1937,11 +1938,49 @@ class EchoTUI:
     async def _after_start(self) -> None:
         try:
             await self._model_setup()
+            await self._folder_setup()
             if self.sid:
                 await self._show_recent()
                 await self._catch_up()
         except (ApiError, ConnectError, LookupError) as exc:
             self._report(exc)
+
+    async def _folder_setup(self) -> None:
+        """Work in the folder Echo was started in, like Claude Code and Codex, but only once the owner trusts it.
+
+        Without a project the backend's file tools fall back to its default root, which in a source
+        checkout is EchoSpeak itself; the terminal should mean "here".
+        """
+        if self.core.project_id or self.start_project:
+            return
+        cwd = os.getcwd()
+        existing = await self.call(self.core.project_for_path, cwd, False)
+        if existing:
+            project = await self.call(self.client.get, "/projects/" + existing)
+            if str(project.get("trust_state") or "") == "trusted":
+                await self._activate_project(project)
+            return
+        if not control.folder_offer(cwd, self.env):
+            return
+        body = [("", _home(str(Path(cwd).resolve()))),
+                ("class:dim", "Echo can read, edit and run commands in this folder, still within your permission "
+                              "switches and approvals. Say no to just chat; /project changes this later.")]
+        action = await self.ask("Work in this folder?", [Option("Yes, I trust this folder", True, "y"),
+                                                         Option("No, just chat", False, "n")],
+                                body=body, attention=True, selected=-1, kind="confirm",
+                                footer="y/n or ↑↓ then enter · esc decide later")
+        if action.kind != "choose":
+            self.note("not working in this folder yet · /project when you want to")
+            return
+        if action.value is not True:
+            await self.call(control.decline_folder, cwd, self.env)
+            self.note("just chatting · /project to work in this folder later")
+            return
+        await self.call(control.forget_folder_decline, cwd, self.env)
+        project = await self.call(self.client.post, "/projects/attach-folder",
+                                  {"path": str(Path(cwd).resolve()), "trust_state": "trusted",
+                                   **({"session_id": self.sid} if self.sid else {})})
+        await self._activate_project(project, activated=bool(self.sid))
 
     async def _model_setup(self) -> None:
         provider, model = control.current_model(self.settings)
