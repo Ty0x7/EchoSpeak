@@ -66,7 +66,8 @@ _ABOUT_TESTS = re.compile(r"(?i)\b(tests?|spec|testing|coverage|fixtures?|ci|wor
 # A missing module with a dotted or relative name ('app.utils', './utils') is usually the code's own, so it's left out.
 ENVIRONMENT_ERROR = re.compile(
     # `python -m pytest` without pytest prints the name unquoted ("No module named pytest"); a dotted name stays code's.
-    r"(?i)(No module named '[^'.]+'|No module named [A-Za-z_][\w-]*(?![\w.'])|command not found|is not recognized as an internal or external command|"
+    # pytest's INTERNALERROR is the runner crashing (a plugin, a stray conftest or ini), not a test failing.
+    r"(?i)(No module named '[^'.]+'|No module named [A-Za-z_][\w-]*(?![\w.'])|INTERNALERROR>|command not found|is not recognized as an internal or external command|"
     r"is not recognized as the name of a cmdlet|Cannot find (module|package) '[^'./][^']*'|ENOENT|EACCES|permission denied|"
     r"Access is denied|MemoryError|out of memory|ENOSPC|No space left|connection refused|ECONNREFUSED|Could not resolve host|"
     r"network is unreachable|getaddrinfo|docker.{0,40}(not running|cannot connect)|externally-managed-environment|"

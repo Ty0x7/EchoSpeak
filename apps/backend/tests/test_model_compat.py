@@ -66,6 +66,52 @@ def test_deepseek_native_calls_are_read():
     assert cleaned == "I'll run it."
 
 
+def test_loose_text_calls_are_read_and_example_json_is_not():
+    """deepseek-r1:8b in prompted mode wrote calls as {"command": tool, …}, {"tool": …} and <toolcall>."""
+    known = {"file_read", "terminal"}
+    for text in ('```json\n{"command": "file_read", "arguments": {"path": "q4.txt"}}\n```',
+                 '```json\n{"tool": "file_read", "arguments": {"path": "q4.txt"}}\n```',
+                 '<toolcall>{"name": "file_read", "arguments": {"path": "q4.txt"}}</toolcall>',
+                 '```json\n{"arguments": {"path": "q4.txt"}, "name": "file_read"}\n```'):
+        calls, _ = extract_text_tool_calls(text, known)
+        assert [(c.name, c.arguments) for c in calls] == [("file_read", '{"path": "q4.txt"}')], text
+    for text in ('Example:\n```json\n{"name": "my-app", "version": "1.0"}\n```',  # package.json, not a call
+                 '```json\n{"command": "ls -la"}\n```'):  # a terminal argument on its own
+        assert extract_text_tool_calls(text, known)[0] == [], text
+
+
+def test_a_quoted_log_line_nobody_saw_is_sent_back():
+    """ministral-3:8b answered D2 with an invented line ("891| … ERROR Failed to process request")."""
+    from agent.lean.evidence import unseen_quotes
+
+    seen = "service.log:4321: 2026-11-14T11:12:01 ERROR worker-3 disk full on /data (seq=4321)"
+    invented = "Seq 891:\n```\n891| 2026-11-14T10:14:51 ERROR Failed to process request from worker-1\n```"
+    assert unseen_quotes(invented, seen) == ["2026-11-14T10:14:51 ERROR Failed to process request from worker-1"]
+    assert unseen_quotes("```\n2026-11-14T11:12:01 ERROR worker-3 disk full on /data (seq=4321)\n```", seen) == []
+    assert unseen_quotes("Fix:\n```python\nreturn sum(values) / len(values)\n```", seen) == []  # its own code
+
+    box = Toolbox(toolsets=["none"], session_id="q")
+    box.native = {"file_read": NativeTool("file_read", "read", {"type": "object", "properties": {}}, lambda a: seen)}
+
+    class Plain:
+        def __init__(self, turns):
+            self.turns, self.calls = list(turns), []
+
+        def stream_turn(self, messages, **kw):
+            self.calls.append([dict(m) for m in messages])
+            return self.turns.pop(0)
+
+    client = Plain([ModelTurn(tool_calls=[ToolCall("r", "file_read", '{"path": "service.log"}')]),
+                    ModelTurn(content=invented), ModelTurn(content="seq 4321: disk full on /data.")])
+    events: list[dict[str, Any]] = []
+    turn = LeanTurn(client=client, persona=AgentPersona(id="echo", name="Echo"), system_prompt="s", history=[], toolbox=box,
+                    session_id="q", request_id="r", execution_id="e", emit=events.append, cancel=threading.Event(),
+                    persist_tool_runs=False)
+    result = turn.run("Which seq has the ERROR?")
+    assert result.text == "seq 4321: disk full on /data." and any(e["type"] == "quote_unverified" for e in events)
+    assert "don't appear in anything you were shown" in client.calls[2][-1]["content"]
+
+
 def test_announcing_the_next_read_is_a_promise_not_an_answer():
     """gemma4 ended H6 twice with "I will now check the next log file" and no tool call."""
     from agent.lean.job import is_promise_without_action

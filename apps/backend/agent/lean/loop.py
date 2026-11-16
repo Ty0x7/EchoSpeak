@@ -414,6 +414,7 @@ class LeanTurn:
         check_nudges = 0
         verify_nudges = 0
         menus = 0
+        quote_nudges = 0
         final_text = ""
         error = ""
         success = True
@@ -538,6 +539,18 @@ class LeanTurn:
                         verify_nudges += 1
                         add_note(messages, problem)
                         self.emit({"type": "verification_nudge", "step": step, "note": problem[:300]})
+                        self._retract_text(step)
+                        continue
+                    invented = (evidence.unseen_quotes(content, "\n".join(str(m.get("content") or "") for m in messages
+                                                                           if m.get("role") != "assistant"))
+                                if quote_nudges < 1 and not stop_reason and step < max_steps else [])
+                    if invented:
+                        # Quoting a log line nobody showed the model (ministral-3:8b invented one): back once, with the line.
+                        quote_nudges += 1
+                        add_note(messages, "Your reply quotes lines that don't appear in anything you were shown in this "
+                                           f"conversation: “{invented[0][:200]}”. Quote only what a tool returned; search "
+                                           "or read the file again if you need the exact line, or say you couldn't find it.")
+                        self.emit({"type": "quote_unverified", "step": step, "lines": len(invented)})
                         self._retract_text(step)
                         continue
                     menu = (ask.menu_in_text(content) if self.interactive and ask.ASK_USER in self.toolbox.names
