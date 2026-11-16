@@ -340,6 +340,10 @@ class Stack:
             # An owner who engineers in a project has these on (Settings > Permissions); a fresh data
             # folder has them off. Approval mode stays at its default (smart).
             "ENABLE_SYSTEM_ACTIONS": "true", "ALLOW_FILE_WRITE": "true", "ALLOW_TERMINAL_COMMANDS": "true",
+            # Cases share one backend: with learning on, its tool-reliability note ("terminal failed 6 of its last
+            # 10 calls") carried from one case into the next. Each case should stand alone. Turn it on with
+            # --env LEARNING_ENABLED=true to measure learning itself.
+            "LEARNING_ENABLED": "false",
         })
         env.update(self.extra_env)
         self.env_used = {k: v for k, v in env.items() if k.startswith(("LOCAL_MODEL", "LEAN_", "ASSISTANT", "USE_LOCAL", "LEARNING",
@@ -485,8 +489,19 @@ def run_turn(stack: Stack, thread_id: str, turn: Turn, events: list[dict[str, An
             "message_ids": [m.get("message_id") for m in final.get("messages") or [] if m.get("message_id")]}
 
 
+def projects_root(run_dir: Path) -> Path:
+    """Where a run's case projects live: outside the repository.
+
+    Inside it (the old <run>/projects), an agent's terminal could read this script's ground truth, earlier cases'
+    records and judge.json, and pytest in a project picked up the repo's own configuration (INTERNALERROR in the
+    held-out package cases). HEVAL_PROJECTS_ROOT overrides the default ~/.cache/echospeak-heval/projects.
+    """
+    base = Path(os.environ.get("HEVAL_PROJECTS_ROOT") or Path.home() / ".cache" / "echospeak-heval" / "projects")
+    return base / run_dir.name
+
+
 def run_case(stack: Stack, case: Case, run_dir: Path) -> dict[str, Any]:
-    project = Path(tempfile.mkdtemp(prefix=f"heval-{case.id}-", dir=run_dir / "projects"))
+    project = Path(tempfile.mkdtemp(prefix=f"heval-{case.id}-", dir=projects_root(run_dir)))
     truth = case.setup(project)
     before = snapshot(project)
     project_id = stack.api.call("POST", "/projects/attach-folder",
@@ -531,7 +546,8 @@ def main() -> int:
     chosen = {c.strip() for c in args.only.split(",") if c.strip()}
     cases = [c for c in SETS["all" if chosen else args.set] if not chosen or c.id in chosen]
     run_dir = OUT / f"{time.strftime('%Y%m%d-%H%M%S')}-{args.label}"
-    (run_dir / "projects").mkdir(parents=True)
+    run_dir.mkdir(parents=True)
+    projects_root(run_dir).mkdir(parents=True, exist_ok=True)
     extra = dict(item.split("=", 1) for item in args.env)
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     # Everything that changes what is measured: the harness, the eval scripts and the configuration.
@@ -540,6 +556,7 @@ def main() -> int:
     diff = subprocess.run(["git", "diff", "HEAD", "--", *tracked], cwd=ROOT, capture_output=True, text=True).stdout
     meta = {"label": args.label, "model": args.model, "set": args.set, "cases": [c.id for c in cases], "repeat": args.repeat,
             "commit": commit + ("+dirty" if status else ""), "started": time.time(),
+            "projects_root": str(projects_root(run_dir)),
             "dirty": {"files": status.splitlines()[:40], "diff_sha256": hashlib.sha256(diff.encode()).hexdigest()[:16]} if status else {}}
     agents_md = Path(args.agents_md).read_text(encoding="utf-8") if args.agents_md else ""
     skills = tuple(Path(p).read_text(encoding="utf-8") for p in args.skill)
