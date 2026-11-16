@@ -3,7 +3,8 @@
 This collection pairs versioned notes with complementary HTML in
 `artifacts/releases/`. It contains 40 visual reports from 10.0.0 through 11.13.1;
 intervening source-only notes do not all have a historical HTML counterpart.
-Earlier reports remain unchanged. The new [11.13.0](v11.13.0.md) pair records the
+Earlier reports remain unchanged. [11.14.0](v11.14.0.md) (Markdown note; HTML report to follow) covers the
+harness work merged on 2026-11-16. The [11.13.0](v11.13.0.md) pair records the
 left Code inbox, optional local MCP, actual component screenshots and separate
 source, packaging, PR and owner acceptance evidence.
 The atlas is a source-history presentation, not evidence of installer publication.

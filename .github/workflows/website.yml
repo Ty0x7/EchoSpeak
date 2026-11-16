@@ -45,13 +45,33 @@ jobs:
         env:
           SITE_BASE: /EchoSpeak/
         run: npm run build:site
-      - uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
-      - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
+      # GitHub Pages is only available while the repository is public (or on a paid plan). Since the repository
+      # went private, configure-pages failed with "Get Pages site failed … HttpError: Not Found" and every merge
+      # to main showed a red X. The site is still built above, so a broken build still fails this job; it is
+      # published only when Pages is enabled, and deploys again by itself once it is.
+      - name: Is GitHub Pages enabled?
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/pages" --silent 2>/dev/null; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GitHub Pages is not enabled for this repository; the website was built but not published."
+          fi
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - if: steps.pages.outputs.enabled == 'true'
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: apps/web/dist-site
+    outputs:
+      pages: ${{ steps.pages.outputs.enabled }}
 
   deploy:
     needs: build
+    if: needs.build.outputs.pages == 'true'
     runs-on: ubuntu-latest
     permissions:
       pages: write

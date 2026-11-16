@@ -1,6 +1,52 @@
 # Changes
 
-## v11.12.0 — Quieter, clearer, and easier to follow (source; not yet built)
+## v11.14.0 — A harness you can check: sandboxed, honest about failures, measured (source; installer not yet built)
+
+* **Linux sandbox:** terminal commands run in bubblewrap.
+  * The system is read-only and only the workspace is writable.
+  * Credential folders and `/run/user` are hidden.
+  * There's no network unless you allow it, and commands get their own process namespace.
+  * If the sandbox can't start, a command is refused or asks first; it never runs unconfined silently.
+* **Reliability fixes:**
+  * MCP failures are no longer recorded as success, and a call lost in flight is marked uncertain.
+  * Every approval is asked, parallel reads included, and calls run in the order the model gave.
+  * Stop ends the running command, and the task's own background work.
+    * Dev servers keep running, are listed, and stop when you ask.
+    * Commands a crash left behind are ended at the next start.
+  * An MCP server that changes its tools waits for re-approval.
+  * Secrets in tool arguments and MCP server tokens are redacted.
+* **Honest outcomes:**
+  * An empty reply carries its cause: an incomplete stream, a full context window, the output limit, or reasoning only.
+  * A turn without an answer ends as `no_answer`.
+  * An exhausted work budget ends as `budget`, not as a crash.
+  * Claims like "I corrected `calc.py`" with no edit behind them are caught.
+* **Resilience:**
+  * Passing model failures are retried twice, but only before anything was shown.
+  * The clock and git status sit last in the prompt, so model servers can reuse the rest between turns.
+* **Providers:** the served context window and the embedding-model list are read from LM Studio's REST v1.
+* **Evaluation:**
+  * live tests of seven local models;
+  * the reusable `model-harness-testing` skill;
+  * a review of all 20 harness areas.
+  * Reference model `qwen3.5:9b`: 9.07 on 15 cases × 2, 0 critical findings.
+* **Build and CI:**
+  * the AppImage-only Linux build no longer stops after the backend;
+  * the website workflow builds every time and publishes only when GitHub Pages is enabled.
+* See the [release notes](docs/releases/v11.14.0.md) and the [architecture review](docs/research/harness-architecture-2026-11.md).
+
+## v11.13.1 — Folder-first coding and sidebar polish (in main since 2026-11-16; no installer published)
+
+* Codex, Claude Code and ACP sessions work in the selected project folder by default; Git isn't required.
+* Search-first sidebar header, vertical navigation and one utility row.
+* See the [release notes](docs/releases/v11.13.1.md).
+
+## v11.13.0 — A focused inbox for parallel coding (in main since 2026-11-16; no installer published)
+
+* Echo Code gets a flat inbox, timed snoozing, bulk triage, native background tasks and prompt/image stashes.
+* Optional scoped MCP connects outside tools to approved Code projects and persistent Agents.
+* See the [release notes](docs/releases/v11.13.0.md).
+
+## v11.12.0 — Quieter, clearer, and easier to follow — 2026-10-29 (Windows release)
 
 * Activity, as Claude and ChatGPT show it:
   * Steps are plain lines, with a shimmer on the running one.
@@ -26,7 +72,7 @@
 * Sidebar: 248 px wide; a "Working" indicator for in-flight Sessions in Chat, Agents and Code's tree.
 * See [release notes](docs/releases/v11.12.0.md) and the [report](docs/research/interface-11-12.md).
 
-## v11.11.8 — Code is a coding assistant (source; not yet built)
+## v11.11.8 — Code is a coding assistant (in main since 2026-11-16; no installer published)
 
 * `environments.turn_environment` returns chat, code or agents. A live owner turn in a Code conversation is now model-first, with its own `code` persona (`personas.code_persona`) named after the selected model. Routines, guests and resumed work stay with their agent.
 * New `agent/lean/code_mode.py`:
@@ -44,7 +90,7 @@
   * External Codex, Claude Code and ACP sessions are untouched.
 * See [release notes](docs/releases/v11.11.8.md) and the [report](docs/research/native-code.md).
 
-## v11.11.7 — Learning that has to earn its place (source; not yet built)
+## v11.11.7 — Learning that has to earn its place (in main since 2026-11-16; no installer published)
 
 * Research audit against ReasoningBank, ACE, Reflexion, AlphaEvolve, Claude Code, Letta, LangMem, Codex, SkillsBench and MINJA ([report](docs/research/learning-research.md)).
 * Untrusted (web-read) lessons wait for **confirmation**: a lesson taught by work in a different conversation is released (untrusted, never shared). `Lesson.awaiting` distinguishes "confirmation" from "owner"; diagnostics list only owner-gated lessons.
@@ -60,7 +106,7 @@
 * Control mode records tagged episodes, and the evaluation adds `by_mode` with lesson characters per task.
 * See [release notes](docs/releases/v11.11.7.md).
 
-## v11.11.6 — Echo learns as it works (source; not yet built)
+## v11.11.6 — Echo learns as it works — 2026-10-29 (Windows release)
 
 * Learning is a harness mechanic across Chat, Agents and Code: one learner in `agent/learning`, wired through the shared `LeanSession` hooks.
 * **Fix:** Chat's prompt now includes the lessons `prepare_turn` counted as used. Before, they were credited but never shown, which corrupted their holdouts. Compact Chat reads at most 2.
@@ -81,7 +127,7 @@
   * The "reviews per day" and "lessons per task" controls are removed.
 * See [release notes](docs/releases/v11.11.6.md) and the [report](docs/research/autonomous-learning.md).
 
-## v11.11.5 — Verified engineering: measured progress, honest completion (source; not yet built)
+## v11.11.5 — Verified engineering: measured progress, honest completion (in main since 2026-11-16; no installer published)
 
 * Echo Native (Agents and Code) measures engineering work with a verification ledger (`agent/lean/verification.py`). It's deterministic and makes no model calls; Chat, guests, read-only turns and external harnesses don't get it.
   * Checks are parsed from what ran: tests, builds, type checks, linters and benchmarks across the common runners. Each gives counts, failing tests, the first error, the exit code and a metric. Background runs count when they finish.
@@ -97,7 +143,7 @@
 * `GET /lean/learning/evaluation` reports verified completion, false success, recovery, stalls, cost per verified task, and each lesson against its random holdout. The Learning page shows each experience's cause and verification status.
 * A reusable engineering prompt template for Claude Code, Codex and Echo is in [docs/engineering-prompt.md](docs/engineering-prompt.md). See [release notes](docs/releases/v11.11.5.md) and the [report](docs/research/verified-engineering.md).
 
-## v11.11.4 — Chat answers once, and stands by it (source; not yet built)
+## v11.11.4 — Chat answers once, and stands by it (in main since 2026-11-16; no installer published)
 
 * Double thinking fixed at its causes in the Lean loop:
   * Chat's citation and claim checks no longer erase a streamed answer and regenerate it. A new `answer_review` hook de-links unverified links in place and adds notes, and `claim_nudge_limit` is 0 in Chat.
@@ -111,7 +157,7 @@
 * Recalled memories show their saved date and scope; sports times carry the local zone name; Mermaid renderer crashes are told apart from syntax errors.
 * See [release notes](docs/releases/v11.11.4.md).
 
-## v11.11.3 — A search engine that reads the right source (source; not yet built)
+## v11.11.3 — A search engine that reads the right source (in main since 2026-11-16; no installer published)
 
 * Model-written queries reach providers as written (`search_rank.prepare_query`). The old sentence normaliser changed 12 of 20 realistic queries: versions, dotted names, `site:`, intent.
 * Ranking (`agent/search_rank.py`):
@@ -131,7 +177,7 @@
   * Graded evidence in the answer check (`unsupported_links`).
 * See [release notes](docs/releases/v11.11.3.md).
 
-## v11.11.2 — Chat answers from evidence (source; not yet built)
+## v11.11.2 — Chat answers from evidence (in main since 2026-11-16; no installer published)
 
 * Chat execution layer over the shared Lean loop (`agent/lean/chat_run.py`):
   * An evidence ledger of searches, results, pages read, files and memory.
@@ -144,7 +190,7 @@
 * Chat prompt ordered for prefix caching (clock last). Research rules now cover contradictions and when to stop.
 * See [release notes](docs/releases/v11.11.2.md).
 
-## v11.11.1 — A better Chat: diagrams that draw, sharper answers (source; not yet built)
+## v11.11.1 — A better Chat: diagrams that draw, sharper answers (in main since 2026-11-16; no installer published)
 
 * Mermaid draws reliably:
   * Common syntax slips are repaired and marked.
@@ -159,7 +205,7 @@
 * New real-browser check: `apps/desktop/scripts/check-chat-render-browser.cjs`.
 * See [release notes](docs/releases/v11.11.1.md).
 
-## v11.11.0 — Chat, Agents and Code (source; not yet built)
+## v11.11.0 — Chat, Agents and Code — 2026-10-28 (Windows release)
 
 * Three environments in one app, with one sidebar and a Chat · Agents · Code switcher. One backend rule (`agent/environments.py`) decides where each conversation lives and who answers.
 * Chat is model-first: the chosen model answers as itself (name and maker's mark) in Echo's harness, with tools, memory and approvals, but without delegation, team, workers or persona editing.
@@ -169,7 +215,7 @@
 * A coding test no longer depends on whether Docker is running.
 * See [release notes](docs/releases/v11.11.0.md).
 
-## v11.10.10 — Plans for code, APIs for chat, and an Echo that checks in (source; not yet built)
+## v11.10.10 — Plans for code, APIs for chat, and an Echo that checks in (in main since 2026-11-16; no installer published)
 
 * Echo Code remembers each coding agent's sign-in, plan and models, so Codex and Claude Code show as signed in, with every model the plan offers, before any session connects. Sending creates and connects the isolated session automatically.
 * Plans for code, APIs for chat:
