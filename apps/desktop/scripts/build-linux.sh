@@ -66,7 +66,9 @@ export NO_STRIP="${NO_STRIP:-true}"
 # The web UI was built above, so skip tauri.conf.json's beforeBuildCommand.
 NO_WEB_BUILD='"build":{"beforeBuildCommand":""}'
 
-PACKAGES="$(tr ',' '\n' <<<"$BUNDLES" | grep -Ev '^appimage$' | paste -sd, -)"
+# `|| true`: with --bundles appimage alone grep selects nothing and exits 1, which pipefail turned into a
+# silent exit of the whole script right after the backend build.
+PACKAGES="$(tr ',' '\n' <<<"$BUNDLES" | { grep -Ev '^appimage$' || true; } | paste -sd, -)"
 if [[ -n "$PACKAGES" ]]; then
   echo "==> Tauri ($PACKAGES)"
   (cd "$DESKTOP_ROOT" && npx --no-install tauri build --bundles "$PACKAGES" --config "{$NO_WEB_BUILD}")
