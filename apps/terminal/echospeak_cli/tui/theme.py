@@ -150,8 +150,8 @@ def pt_style_dict(caps: Caps) -> dict[str, str]:
             "dim": "dim", "accent": "bold", "attention": "bold", "attention.rule": "bold", "error": "bold",
             "footer": "dim", "footer.bold": "bold", "menu.sel": "bold reverse", "menu.desc": "dim", "menu.name": "",
             "status.glyph": "bold", "status.glyph.dim": "dim", "shimmer.0": "dim", "shimmer.1": "", "shimmer.2": "bold",
-            "tail": "", "chip": "reverse", "mode": "bold", "sel": "bold reverse", "key": "dim", "title": "bold",
-            "search": "reverse", "bottom-toolbar": "noreverse",
+            "tail": "", "tail.code": "bold", "chip": "reverse", "mode": "bold", "sel": "bold reverse", "key": "dim",
+            "title": "bold", "search": "reverse", "bottom-toolbar": "noreverse",
         }
     return {
         "rule": "ansibrightblack", "rule.title": "ansibrightblack", "prompt": f"bold {accent}", "prompt.dim": "dim",
@@ -159,6 +159,7 @@ def pt_style_dict(caps: Caps) -> dict[str, str]:
         "attention.rule": "bold ansiyellow", "error": "bold ansired", "footer": "dim", "footer.bold": "bold",
         "menu.sel": f"bold {accent}", "menu.desc": "dim", "menu.name": "", "status.glyph": f"bold {accent}",
         "status.glyph.dim": "dim", "shimmer.0": "dim", "shimmer.1": "", "shimmer.2": "bold", "tail": "",
+        "tail.code": "bold ansicyan",   # matches markdown.code in scrollback, so committing doesn't change the look
         "chip": f"reverse {accent}", "mode": accent, "sel": f"bold {accent}", "key": "dim", "title": "bold",
         "search": "reverse", "bottom-toolbar": "noreverse",
     }

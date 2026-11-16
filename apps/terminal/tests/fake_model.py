@@ -45,11 +45,19 @@ class FakeModel:
                     self._json(404, {"error": "not found"})
                     return
                 text = owner.reply
+                # Report the whole prompt as kept, counted like the backend counts it (agent/lean/loop.py
+                # _estimate_tokens). A fixed tiny number makes its truncation check (agent/lean/window.py)
+                # decide the server cut the prompt to fit a 20-token window, and the run fails.
+                size = len(json.dumps(body.get("tools") or [], ensure_ascii=False)) if body.get("tools") else 0
+                for message in body.get("messages") or []:
+                    size += len(str(message.get("content") or "")) + 16
+                prompt_tokens = max(10, int(size / 3.4))
                 if not body.get("stream"):
                     self._json(200, {"id": "c1", "object": "chat.completion", "created": int(time.time()), "model": MODEL,
                                      "choices": [{"index": 0, "finish_reason": "stop",
                                                   "message": {"role": "assistant", "content": text}}],
-                                     "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}})
+                                     "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": 5,
+                                               "total_tokens": prompt_tokens + 5}})
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -67,7 +75,8 @@ class FakeModel:
                                "choices": [{"index": 0, "delta": delta, "finish_reason": None}]})
                 self._sse({"id": "c1", "object": "chat.completion.chunk", "created": int(time.time()), "model": MODEL,
                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                           "usage": {"prompt_tokens": 10, "completion_tokens": len(chunks), "total_tokens": 10 + len(chunks)}})
+                           "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": len(chunks),
+                                     "total_tokens": prompt_tokens + len(chunks)}})
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
 

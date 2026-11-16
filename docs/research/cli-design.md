@@ -1,7 +1,8 @@
 # Echo terminal UI: design spec (from Claude Code, Codex CLI and Hermes)
 
-Status: design spec, **implemented** in `apps/terminal/echospeak_cli/tui/` (14 November 2026, branch
-`harness-first-rearchitecture`, not merged). §5 records what was built, what was verified and what is left.
+Status: design spec, **implemented** in `apps/terminal/echospeak_cli/tui/` (14 November 2026; merged in 11.14.0).
+§5 records what was built, what was verified and what is left. §6 (16 November 2026, branch `tui-responsive`)
+makes the live region and scrollback fit any terminal size and fixes leftover rules after a resize.
 Scope: the interactive `echospeak` client in `apps/terminal/`. The plain, stdlib-only reducer
 (`apps/terminal/echospeak_cli/render.py`) stays as the non-TTY path.
 
@@ -366,10 +367,9 @@ All roles keep their glyph and weight when there is no colour (NO_COLOR, mono, o
 ### 3.11 Degradation
 - **Not a TTY** (pipe or file): use the existing `render.py` reducer, which is unchanged. No live region, no animation.
 - **`NO_COLOR` set:** no SGR colours. Bold, dim, reverse and all glyphs remain. **`TERM=dumb`:** plain line REPL (current `repl.py`).
-- **Width under 60:** single-line banner. Footer becomes `model · context%`, and hints are dropped. Status keeps
-  `glyph activity (esc to stop)`, dropping tokens, then detail, then elapsed. The approval option keys `(y)` are hidden.
-  Tool lines truncate their detail first. **Width under 40:** status is `glyph Working… esc`.
-- **Height under 12:** stream tail of 3 lines, and the step list collapses to `N running`.
+- **Any width or height:** superseded by §6 (16 November 2026). The fixed cliffs that were here (footer reduced to
+  `model · context%` under 60 columns, `glyph Working… esc` under 40, a 3-line tail under 12 rows) are replaced by
+  width tiers, step-by-step degradation ladders and a height budget for the live region.
 
 ### 3.12 Implementation sketch (prompt_toolkit 3.0.4x + rich 13)
 
@@ -495,4 +495,115 @@ plain REPL stays as `--plain` and the automatic fallback; every subcommand is un
 - Scrollback is not reflowed on resize (by design, §3.12); lines printed at a wider width wrap.
 - `/mode` switches `assistant_mode` (unified/environments) instead of §3.8's chat/code persona switch.
 - No `@` path completion, no `$EDITOR` round-trip test, no truecolor fg/bg-blend shimmer (attribute levels only).
+
+---
+
+## 6. Any terminal size (16 November 2026)
+
+**Goal.** The live region and scrollback look deliberate at every size from a split pane to an ultrawide window,
+keep the same information in the same places (model, context, mode, what is running), and never leave debris
+behind when the window is resized.
+
+### 6.1 What was broken (measured before changing anything)
+
+| Check | Before | After |
+|---|---|---|
+| Headless layout matrix: 11 UI states × 21 widths (8–240) × 11 heights (4–60) | **1,421 of 2,541** cases broken | **0 of 2,541** |
+| Real TUI in tmux, shrink → grow sequence (`tests/sizelab.py`) | stale rule rows left above the composer after every narrowing (1 → 3 rule-only lines) | 1 rule-only line at every step, including mid-stream |
+| Scrollback blocks at widths 8–140 | every block type over-wide under 20 columns | all fit |
+
+Causes, from source inspection:
+1. **Resize ghosts.** prompt_toolkit erases the old live region by moving up the number of rows it drew. Terminals
+   that re-wrap lines on resize (kitty, ghostty, foot, alacritty, wezterm, VTE, tmux) have already turned each
+   full-width rule into 2–3 rows, so the erase stops short and the old rules stay on screen.
+2. **No height budget.** Tail (8) + steps (4) + pending (8) + menu (8) + dialog + composer (10) + footer (2) could
+   exceed the terminal; prompt_toolkit then clips the region (or prints "Window too small").
+3. **A hard 20-column floor.** `width()` and `blocks.render` used `max(20, width)`, so narrower panes got lines
+   the terminal wrapped again.
+4. **Cliffs instead of degradation.** The footer dropped agent, project, mode and context together under 60
+   columns, the status line became `Working… esc` under 40, and long notices or the "Queued for after this
+   turn" header were never cut.
+
+### 6.2 Design
+
+- **Width tiers** (`tui/layout.py`): micro < 30, narrow < 60, regular < 100, wide ≥ 100. They replace scattered
+  thresholds; inside a tier everything degrades one step at a time.
+- **Height budget.** The live region gets `rows − 1` rows (it must not start at row 0, see §5). Every section asks
+  for a natural and a minimum height with a priority, and `layout.allocate` hands out rows: minimums by priority,
+  then growth by priority, then decorations (blank spacer, mode line) from leftovers only.
+
+  | Priority | Sections |
+  |---|---|
+  | 0 | the composer input · an open dialog (rule, first body line, every option up to 6, hint) |
+  | 1 | status line · footer · history search |
+  | 2 | slash menu (≥ 3 rows, scrolled to the selection) · shortcuts |
+  | 3 | pending steers / queued messages (collapses to `↳ 2 to steer · 1 queued` + newest) |
+  | 4 | running steps (collapses to `N steps running`) |
+  | 5 | the composer's rules |
+  | 6 | stream tail (newest lines) |
+  | 7, 9 | mode line, blank spacer: leftovers only |
+
+  Each prompt_toolkit window takes exactly its planned rows; text is cut or wrapped by us, never by
+  prompt_toolkit (`wrap_lines=False` on the dialog). The plan is computed once per frame and dropped after it.
+- **Dialogs fit their rows.** Options first (scrolled to the selection, `… N more · ↑↓ to see them`), then the
+  title rule, then the body: the stacked diff shrinks before the text, the first line (the question, or "Edit a
+  file") is kept whole on one line, a command's `$ …` line is kept at two rows, otherwise `… ctrl+g for
+  everything`. The blank line above the hint is the first thing to go. Option keys `(y)` drop per option only
+  when that option's label would otherwise be cut.
+- **Footer ladder** (`motion.FOOTER_LADDER`). Items keep their order (`model · context · agent · project · mode ·
+  held`) and shorten one step at a time: hints → short hints, project/agent cut, mode `◇ ask if risky`, project and
+  agent hidden, held `⏸ 2 held`, hints hidden, `ctx 64%`, model cut to 16/10/6, mode `◇`, `64%`, `⏸2`. **Context is
+  shown whenever it is known** (it used to appear only past 50 %), at every width from 12 columns. A notice
+  outranks everything but the model and is cut, never dropped.
+- **Status ladder** (`motion.status_line`). Drops tokens → detail → elapsed → shortens `esc to stop` to `esc` →
+  cuts the activity. The real activity stays (`· Echo is thinking it t… (esc)` at 30 columns), never a generic
+  "Working…".
+- **Reflow-safe resize** (`EchoTUI._reflow_on_resize`). On a narrowing resize it measures the drawn length of every
+  row of the old region (what prompt_toolkit actually wrote), computes how many rows they take after re-wrapping
+  at the new width (`layout.reflowed_rows_above`), moves up that far and erases. Widening keeps prompt_toolkit's
+  own erase. Terminals that crop instead of re-wrapping (plain xterm, the Linux console) are detected by
+  `layout.terminal_reflows`; `ECHO_TUI_REFLOW=0/1` overrides the guess.
+- **Scrollback at the real width.** No 20-column floor. Tool lines drop their indent and duration before cutting
+  the label; previews use a 2-cell gutter under 30 columns; turn rules shrink to fit.
+- **Readable measure.** Prose (answers, notes, thinking, outcomes) wraps at 100 columns on wider terminals; code,
+  diffs, tables and tool lines keep the full width. `ECHO_TUI_MEASURE=0` turns it off, `=140` changes it. Besides
+  readability, text printed at ≤ 100 columns survives narrowing to 100 without the terminal re-wrapping it.
+- **Stream tail looks like the answer.** It word-wraps at the same measure and renders closed `**bold**`,
+  `` `code` ``, `*italic*` and `#` headings (half-streamed markers stay literal; code fences stay literal), so a
+  block no longer changes appearance when it is committed to scrollback.
+
+### 6.3 Where
+
+| Part | File |
+|---|---|
+| Tiers, budget, allocator, reflow arithmetic, reflow detection, measure | `apps/terminal/echospeak_cli/tui/layout.py` |
+| Height plan, section renderers, dialog fitting, resize handler, tail markdown | `apps/terminal/echospeak_cli/tui/app.py` |
+| Status and footer ladders, rule | `apps/terminal/echospeak_cli/tui/motion.py` |
+| Scrollback width fixes | `apps/terminal/echospeak_cli/tui/blocks.py` |
+| `tail.code` style | `apps/terminal/echospeak_cli/tui/theme.py` |
+
+### 6.4 Verification (what was actually run)
+
+- `tests/test_layout_matrix.py`: the real `EchoTUI` layout rendered headlessly into a W×H screen buffer for 11
+  states (idle, autonomous mode, a 12-line draft, slash menu, shortcuts, a long notice, running, running with 6
+  tools and 6 pending, approval with diff, command approval, question) × 21 widths × 11 heights, plus ASCII/no-colour.
+  Invariants: the region fits `rows − 1`; no "Window too small"; no line wider than the terminal; the prompt is
+  visible; the footer is visible from 8 rows (12 with a dialog open). `python tests/test_layout_matrix.py`
+  prints a per-state report.
+- `tests/test_layout.py` (allocator, reflow arithmetic, terminal detection), `tests/test_blocks_widths.py` (every
+  block type at widths 1–140, UTF-8 and ASCII), updated footer/status tests in `tests/test_tui.py`.
+- `tests/layout_gallery.py`: prints any state at any size for review by eye (used for every decision above).
+- `tests/sizelab.py`: the real TUI in a private tmux server against the real backend and the scripted model, at
+  120×40, 100×30, 80×24, 60×20 and 40×16; captures idle, slash menu, streaming, a resize mid-stream and back,
+  the answer, then shrink to ½ and ⅓, back, half height, wider, back. Ghost counts as in §6.1.
+- Suites: `apps/terminal/.venv`: 2,675 passed, 1 skipped. `apps/backend/.venv`: `tests/test_integration.py` 4
+  passed (including the real-PTY TUI round trip).
+- Test fixture fix: `tests/fake_model.py` reported `prompt_tokens: 10` for every request, so the backend's
+  truncation check (`agent/lean/window.py`, added in 11.14) decided the server had cut the prompt and failed the
+  run. Three integration tests failed for that reason, including two (`send --json`, attach replay) on code paths
+  this branch does not touch. It now reports the prompt size counted the way the backend counts it.
+
+**Not verified.** No screenshots in a real GUI terminal emulator yet. tmux reflows like kitty/ghostty/foot, but
+ghostty and alacritty themselves should be checked by hand (drag-resize while a task streams). Plain xterm (no
+reflow) was not tried. Scrollback printed before a resize is still not re-rendered (by design, §3.12/§4).
 

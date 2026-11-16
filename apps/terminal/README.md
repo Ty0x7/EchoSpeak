@@ -132,6 +132,13 @@ Options: `--plain` (line REPL, no colours) · `--no-anim` · `--ascii` · `--no-
 | `\`+Enter, Ctrl+J, Alt+Enter | newline | newline |
 | `?` on empty input | shortcuts | shortcuts |
 
+**Any size.** The live region fits every terminal from a 20-column split to an ultrawide window: sections get
+rows by priority (input and dialogs first, the stream tail last), the footer shortens one item at a time and
+always keeps the model and context %, and resizing never leaves old rules behind (the terminal's re-wrap is
+accounted for). Answers wrap at 100 columns on wide terminals (`ECHO_TUI_MEASURE=0` for full width);
+`ECHO_TUI_REFLOW=0` for terminals that crop instead of re-wrapping on resize (plain xterm, detected
+automatically). Design and verification: `docs/research/cli-design.md` §6.
+
 Pastes over 1,000 characters or 12 lines become a chip (`[Pasted 2,431 chars · 58 lines #1]`), expanded when
 sent. Never auto-submitted. History: `~/.local/state/echospeak/history`.
 
