@@ -48,6 +48,7 @@ from ..render import Renderer, one_line, sanitize
 from ..repl import App as Core, Out
 from . import blocks as B
 from . import diffview as DV
+from . import layout as L
 from . import motion as M
 from .commands import COMMANDS, KEYS_HELP, SHORTCUTS, filter_commands, lookup, visible
 from .dialog import Action, Dialog, Option, approval_options, question_options
@@ -132,19 +133,134 @@ def _home(path: str) -> str:
     return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
 
 
+_WORDS = re.compile(r"(\s+)")
+
+
 def _wrap(text: str, width: int) -> list[str]:
-    """Hard-wrap by display width (the tail is plain text)."""
+    """Word-wrap plain text by display width; words longer than a line are broken."""
+    width = max(1, width)
     out: list[str] = []
     for raw in text.split("\n"):
         line, used = "", 0
-        for ch in raw:
-            w = max(0, M.width_of(ch))
-            if used + w > width:
-                out.append(line)
+        for word in _WORDS.split(raw):
+            if not word:
+                continue
+            ww = M.width_of(word)
+            if used + ww <= width:
+                line, used = line + word, used + ww
+                continue
+            if word.isspace():
+                out.append(line.rstrip())
                 line, used = "", 0
-            line += ch
+                continue
+            if ww <= width:
+                out.append(line.rstrip())
+                line, used = word, ww
+                continue
+            for ch in word:
+                cw = max(0, M.width_of(ch))
+                if used + cw > width and line:
+                    out.append(line.rstrip())
+                    line, used = "", 0
+                line, used = line + ch, used + cw
+        out.append(line.rstrip())
+    return out
+
+
+_INLINE = re.compile(r"(\*\*[^*\n]+\*\*|`[^`\n]+`|(?<![\w*])\*[^*\s][^*\n]*\*(?![\w*]))")
+_HEADING = re.compile(r"^(#{1,6})\s+")
+
+
+def _inline_md(line: str, base: str = "class:tail") -> StyleAndTextTuples:
+    """Light inline markdown for the streaming tail: **bold**, `code`, *italic*, # headings.
+
+    Only closed pairs are styled; a half-streamed `**bo` stays literal until its closing marker arrives.
+    """
+    m = _HEADING.match(line)
+    if m:
+        return [(base + " bold", line[m.end():])]
+    out: StyleAndTextTuples = []
+    pos = 0
+    for hit in _INLINE.finditer(line):
+        if hit.start() > pos:
+            out.append((base, line[pos:hit.start()]))
+        tok = hit.group(0)
+        if tok.startswith("**"):
+            out.append((base + " bold", tok[2:-2]))
+        elif tok.startswith("`"):
+            out.append((base + " class:tail.code", tok[1:-1]))
+        else:
+            out.append((base + " italic", tok[1:-1]))
+        pos = hit.end()
+    if pos < len(line):
+        out.append((base, line[pos:]))
+    return out
+
+
+def _wrap_frags(frags: StyleAndTextTuples, width: int) -> list[StyleAndTextTuples]:
+    """Word-wrap one line of styled fragments by display width (as _wrap, keeping styles)."""
+    width = max(1, width)
+    lines: list[StyleAndTextTuples] = []
+    cur: StyleAndTextTuples = []
+    used = 0
+
+    def push() -> None:
+        nonlocal cur, used
+        while cur and cur[-1][1].isspace():
+            cur.pop()
+        if cur:
+            st, text = cur[-1][0], cur[-1][1].rstrip()
+            cur[-1] = (st, text)
+        lines.append(cur)
+        cur, used = [], 0
+
+    for st, text, *_ in frags:
+        for word in _WORDS.split(text):
+            if not word:
+                continue
+            ww = M.width_of(word)
+            if used + ww <= width:
+                cur.append((st, word))
+                used += ww
+            elif word.isspace():
+                push()
+            elif ww <= width:
+                push()
+                cur.append((st, word))
+                used = ww
+            else:
+                for ch in word:
+                    cw = max(0, M.width_of(ch))
+                    if used + cw > width and cur:
+                        push()
+                    cur.append((st, ch))
+                    used += cw
+    push()
+    return lines
+
+
+def _crop(frags: StyleAndTextTuples, width: int) -> StyleAndTextTuples:
+    """Cut a row of fragments to ``width`` display cells (diff rows at very small widths)."""
+    out: StyleAndTextTuples = []
+    used = 0
+    for st, text, *rest in frags:
+        room = width - used
+        if room <= 0:
+            break
+        w = M.width_of(text)
+        if w <= room:
+            out.append((st, text, *rest))
             used += w
-        out.append(line)
+            continue
+        cut, cw = "", 0
+        for ch in text:
+            chw = max(0, M.width_of(ch))
+            if cw + chw > room:
+                break
+            cut += ch
+            cw += chw
+        out.append((st, cut, *rest))
+        break
     return out
 
 
@@ -210,6 +326,9 @@ class EchoTUI:
         self._out_event: Optional[asyncio.Event] = None
         self._events: Optional[asyncio.Queue] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+        self._plan_cache: Optional[tuple[tuple[int, int], dict[str, int]]] = None
+        self._tail_cache: Optional[tuple[tuple[str, int], list]] = None   # the tail redraws ~20×/s
+        self.reflows = L.terminal_reflows(env)   # does the terminal re-wrap lines on resize?
         self.app = self._build_app()
 
     # ── small helpers ────────────────────────────────────────────────
@@ -222,14 +341,15 @@ class EchoTUI:
         return self.run is not None
 
     def width(self) -> int:
+        """The terminal's real width. Every renderer copes with any width; nothing assumes a minimum."""
         try:
-            return max(20, self.app.output.get_size().columns)
+            return max(1, self.app.output.get_size().columns)
         except Exception:  # noqa: BLE001
-            return shutil.get_terminal_size((100, 30)).columns
+            return max(1, shutil.get_terminal_size((100, 30)).columns)
 
     def height(self) -> int:
         try:
-            return self.app.output.get_size().rows
+            return max(1, self.app.output.get_size().rows)
         except Exception:  # noqa: BLE001
             return 30
 
@@ -240,12 +360,17 @@ class EchoTUI:
         self.notice = (text, self.now() + seconds)
         self.app.invalidate()
 
+    # Prose wraps at a readable measure on very wide terminals; code, diffs, tables and tool lines
+    # use the full width (layout.measure, ECHO_TUI_MEASURE).
+    _PROSE = (B.MarkdownBlock, B.Note, B.ThinkingLine, B.UserLine, B.Outcome, B.AgentHeader, B.TaskBoard)
+
     def emit(self, *blocks: B.Block, transcript: bool = True) -> None:
         width = self.width()
+        prose = L.measure(width, self.env)
         for b in blocks:
             if b is None:
                 continue
-            text = B.render(b, width, self.caps, verbose=self.verbose)
+            text = B.render(b, prose if isinstance(b, self._PROSE) else width, self.caps, verbose=self.verbose)
             if isinstance(b, (B.UserLine, B.Outcome)) or (isinstance(b, B.AgentHeader)):
                 # One blank line before a new turn or a header, never two.
                 text = ("" if self._tail.endswith("\n\n") else "\n") + text.lstrip("\n")
@@ -282,25 +407,29 @@ class EchoTUI:
         composer_control = BufferControl(self.buffer, input_processors=[Placeholder(self._placeholder), ChipHighlighter()],
                                          search_buffer_control=self.search.control, focus_on_click=True,
                                          preview_search=True)
-        self.composer_window = Window(composer_control, height=D(min=1, max=8), wrap_lines=True,
-                                      get_line_prefix=self._line_prefix, dont_extend_height=True)
+        # Every live-region section takes exactly the rows the plan gives it (layout.allocate), so the
+        # region always fits the terminal. Text is cut or wrapped by us, never by prompt_toolkit.
+        self.composer_window = Window(composer_control, height=lambda: D(min=1, max=max(1, self._rows("input"))),
+                                      wrap_lines=True, get_line_prefix=self._line_prefix, dont_extend_height=True)
         self.dialog_window = Window(FormattedTextControl(self._dialog_text, focusable=True, show_cursor=False),
-                                    dont_extend_height=True, wrap_lines=True,
+                                    dont_extend_height=True, wrap_lines=False,
                                     width=lambda: D.exact(self._left_w()) if self._two_col() else D())
         self.diff_window = Window(FormattedTextControl(self._diff_pane_text), dont_extend_height=True, wrap_lines=False)
         self.dialog_text_window = Window(BufferControl(self.dialog_buffer), height=1,
                                          get_line_prefix=lambda _l, _w: [("class:attention", f" {self._dialog_prompt()} ")])
+
+        def shown(name: str) -> Condition:
+            return Condition(lambda: self._rows(name) > 0)
 
         is_running = Condition(lambda: self.running)
         dialog_open = Condition(lambda: self.dialog is not None)
         text_mode = Condition(lambda: self.dialog is not None and self.dialog.text_mode)
 
         composer = HSplit([
-            Window(FormattedTextControl(self._top_rule), height=1),
+            ConditionalContainer(Window(FormattedTextControl(self._top_rule), height=1), filter=shown("top_rule")),
             self.composer_window,
-            ConditionalContainer(self.search, filter=Condition(lambda: self.search.control.buffer.text != "" or
-                                                               self.app.layout.has_focus(self.search.control))),
-            Window(FormattedTextControl(self._bottom_rule), height=1),
+            ConditionalContainer(self.search, filter=Condition(self._searching)),
+            ConditionalContainer(Window(FormattedTextControl(self._bottom_rule), height=1), filter=shown("bottom_rule")),
         ])
         dialog = HSplit([
             VSplit([self.dialog_window,
@@ -310,20 +439,21 @@ class EchoTUI:
         ])
         root = HSplit([
             ConditionalContainer(Window(FormattedTextControl(self._tail_text), dont_extend_height=True),
-                                 filter=Condition(lambda: bool(self._tail_lines()))),
+                                 filter=shown("tail")),
             ConditionalContainer(Window(FormattedTextControl(self._steps_text), dont_extend_height=True),
-                                 filter=Condition(lambda: bool(self.run and self.run.running_tools()))),
-            ConditionalContainer(Window(FormattedTextControl(self._status_text), height=1), filter=is_running),
+                                 filter=shown("steps")),
+            ConditionalContainer(Window(FormattedTextControl(self._status_text), height=1), filter=shown("status")),
             ConditionalContainer(Window(FormattedTextControl(self._pending_text), dont_extend_height=True),
-                                 filter=Condition(lambda: bool(self.pending))),
-            ConditionalContainer(Window(height=1), filter=is_running | Condition(lambda: bool(self.pending))),
+                                 filter=shown("pending")),
+            ConditionalContainer(Window(height=1), filter=shown("spacer")),
             ConditionalContainer(Window(FormattedTextControl(self._menu_text), dont_extend_height=True),
-                                 filter=Condition(lambda: bool(self._menu_items()) and self.dialog is None)),
+                                 filter=shown("menu")),
             ConditionalContainer(Window(FormattedTextControl(self._shortcuts_text), dont_extend_height=True),
-                                 filter=Condition(lambda: self.show_shortcuts and self.dialog is None)),
+                                 filter=shown("shortcuts")),
             ConditionalContainer(dialog, filter=dialog_open),
             ConditionalContainer(composer, filter=~dialog_open),
-            Window(FormattedTextControl(self._footer_text), dont_extend_height=True),
+            ConditionalContainer(Window(FormattedTextControl(self._footer_text), dont_extend_height=True),
+                                 filter=shown("footer")),
         ])
         kb = self._key_bindings(dialog_open, text_mode, is_running)
         color_depth = None if self.caps.color else ColorDepth.DEPTH_1_BIT
@@ -333,7 +463,10 @@ class EchoTUI:
                           erase_when_done=True, color_depth=color_depth, include_default_pygments_style=False)
         app.ttimeoutlen = 0.05
         app.timeoutlen = 0.08
+        app.before_render += lambda _a: self._forget_plan()
+        app.after_render += lambda _a: self._forget_plan()
         self._fit_live_region(app)
+        self._reflow_on_resize(app)
         return app
 
     @staticmethod
@@ -359,31 +492,149 @@ class EchoTUI:
             if last is None:
                 return
             size = app.output.get_size()
-            want = app.layout.container.preferred_height(size.columns, size.rows).preferred
+            want = min(size.rows, app.layout.container.preferred_height(size.columns, size.rows).preferred)
             if want < last.height:
                 renderer.erase(leave_alternate_screen=False)
 
         app.before_render += before_render
+
+    def _reflow_on_resize(self, app: Application) -> None:
+        """Erase the old live region correctly when the terminal narrows (layout.reflowed_rows_above).
+
+        prompt_toolkit erases by moving up the number of rows it drew. A terminal that re-wraps lines
+        on resize has turned each full-width rule into two or more rows by then, so that erase stops
+        short and leaves copies of the rules above the new region. Count the rows the old region takes
+        at the new width instead, and erase from there. Widening (or a terminal that only crops) keeps
+        prompt_toolkit's own erase.
+        """
+        renderer = app.renderer
+
+        def on_resize() -> None:
+            last = renderer._last_screen
+            old = renderer._last_size
+            new = app.output.get_size()
+            if self.reflows and last is not None and old is not None and new.columns < old.columns:
+                lengths = []
+                styled = renderer._style_string_has_style   # what prompt_toolkit counts as written
+                for y in range(last.height):
+                    row = last.data_buffer[y]
+                    used = [x for x, ch in row.items()
+                            if ch.char != " " or (styled[ch.style] if styled is not None else bool(ch.style.strip()))]
+                    lengths.append(min(old.columns, max(used) + 1) if used else 0)
+                pos = renderer._cursor_pos
+                up = L.reflowed_rows_above(lengths, pos.y, pos.x, new.columns)
+                out = app.output
+                out.write_raw("\r")
+                out.cursor_up(up)
+                out.erase_down()
+                out.reset_attributes()
+                out.enable_autowrap()
+                out.flush()
+                renderer.reset(leave_alternate_screen=False)
+            else:
+                renderer.erase(leave_alternate_screen=False)
+            self._forget_plan()
+            app._request_absolute_cursor_position()
+            app._redraw()
+
+        app._on_resize = on_resize   # used by both the SIGWINCH handler and the size poll
 
     def _style(self) -> dict:
         from .theme import pt_style_dict
 
         return pt_style_dict(self.caps)
 
+    # ── the height plan ──────────────────────────────────────────────
+    def _forget_plan(self) -> None:
+        self._plan_cache = None
+
+    def _rows(self, name: str) -> int:
+        return self._plan().get(name, 0)
+
+    def _searching(self) -> bool:
+        try:
+            return self.search.control.buffer.text != "" or self.app.layout.has_focus(self.search.control)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _plan(self) -> dict[str, int]:
+        """Rows for each live-region section at this size (layout.allocate), computed once per frame.
+
+        Priorities: the input (or a dialog) first, then the status and footer, the menu, what you
+        sent while it runs, running steps, the rules, the stream tail, then the decorations.
+        """
+        w, h = self.width(), self.height()
+        if self._plan_cache is not None and self._plan_cache[0] == (w, h):
+            return self._plan_cache[1]
+        wants: list[L.Want] = []
+        run = self.run
+        if run is not None:
+            tail = len(self._tail_all())
+            wants.append(L.Want("tail", min(8, tail), 1, 6))
+            tools = len(run.running_tools())
+            if tools:
+                wants.append(L.Want("steps", min(3, tools) + (1 if tools > 3 else 0), 1, 4))
+            wants.append(L.Want("status", 1, 1, 1))
+        if self.pending:
+            wants.append(L.Want("pending", len(self._pending_lines()), 1, 3))
+        if run is not None or self.pending:
+            wants.append(L.Want("spacer", 1, 0, 9))     # only from leftover rows
+        if self.dialog is None:
+            items = self._menu_items()
+            if items:
+                wants.append(L.Want("menu", len(items), min(3, len(items)), 2))
+            if self.show_shortcuts:
+                wants.append(L.Want("shortcuts", len(self._shortcut_rows()), 1, 2))
+            wants.append(L.Want("top_rule", 1, 1, 5))
+            wants.append(L.Want("input", self._input_rows(), 1, 0))
+            if self._searching():
+                wants.append(L.Want("search", 1, 1, 1))
+            wants.append(L.Want("bottom_rule", 1, 1, 5))
+        else:
+            natural = self._dialog_natural()
+            wants.append(L.Want("dialog", natural, min(natural, self._dialog_minimum()), 0))
+        lines = M.footer_lines(self._footer_input(), w, self.caps)
+        wants.append(L.Want("footer", 1, 1, 1))
+        if len(lines) > 1:
+            wants.append(L.Want("mode_line", 1, 0, 7))  # the footer already says the mode
+        plan = L.allocate(wants, L.budget(h))
+        self._plan_cache = ((w, h), plan)
+        return plan
+
+    def _input_rows(self) -> int:
+        """Rows the draft needs at this width (the prompt takes 2 cells), at most 8."""
+        w = max(1, self.width() - 2)
+        text = self.buffer.text
+        if not text:
+            return 1
+        rows = sum(max(1, -(-M.width_of(line) // w)) for line in text.split("\n"))
+        return max(1, min(8, rows))
+
     # ── live region renderers ───────────────────────────────────────
+    @staticmethod
+    def _join(lines: list[StyleAndTextTuples]) -> StyleAndTextTuples:
+        out: StyleAndTextTuples = []
+        for i, line in enumerate(lines):
+            if i:
+                out.append(("", "\n"))
+            out += line
+        return out
+
     def _line_prefix(self, lineno: int, wrap_count: int) -> StyleAndTextTuples:
         if lineno == 0 and wrap_count == 0:
             return [("class:prompt", f"{self.caps.glyphs.prompt} ")]
         return [("", "  ")]
 
     def _placeholder(self) -> str:
+        room = max(0, self.width() - 3)   # never wraps: a wrapped placeholder would grow the composer
         if self.running:
-            return "Steer Echo, or tab to queue a follow-up" if self.agent_name == "Echo" else \
+            text = "Steer Echo, or tab to queue a follow-up" if self.agent_name == "Echo" else \
                 f"Steer {self.agent_name}, or tab to queue a follow-up"
+            return M.truncate(text, room) or " "
         phrases = self._phrases()
         if self.typed or self.caps.reduced_motion:
-            return phrases[0]
-        return M.typewriter(time.monotonic() * 1000 - self.start_ms, phrases) or " "
+            return M.truncate(phrases[0], room) or " "
+        return M.truncate(M.typewriter(time.monotonic() * 1000 - self.start_ms, phrases), room) or " "
 
     def _phrases(self) -> tuple[str, ...]:
         if self.core.agent_id or ((self.core.session or {}).get("environment") == "agents"):
@@ -404,45 +655,69 @@ class EchoTUI:
     def _bottom_rule(self) -> StyleAndTextTuples:
         return M.rule(self.width(), "", self.caps)
 
-    def _tail_lines(self) -> list[str]:
+    def _tail_indent(self) -> int:
+        return 2 if self.width() >= L.MICRO else 0
+
+    def _tail_all(self) -> list[StyleAndTextTuples]:
+        """The answer still streaming, wrapped at the prose measure, with light inline markdown so
+        it already looks like the block it will be committed as (code fences stay literal)."""
         if not self.run:
             return []
         tail = self.run.tail()
         if not tail.strip():
             return []
-        lines = _wrap(tail.rstrip("\n"), max(10, self.width() - 4))
-        limit = 3 if self.height() < 12 else 8
-        return lines[-limit:]
+        width = max(1, min(self.width(), L.measure(self.width(), self.env)) - 2 - self._tail_indent())
+        key = (tail, width)
+        if self._tail_cache is not None and self._tail_cache[0] == key:
+            return self._tail_cache[1]
+        out: list[StyleAndTextTuples] = []
+        fence = False
+        for line in tail.rstrip("\n").split("\n"):
+            if line.lstrip().startswith(("```", "~~~")):
+                fence = not fence
+                out += [[("class:tail class:dim", part)] for part in _wrap(line, width)]
+                continue
+            frags = [("class:tail", line)] if fence else _inline_md(line)
+            out += _wrap_frags(frags, width)
+        self._tail_cache = (key, out)
+        return out
+
+    def _tail_lines(self) -> list[StyleAndTextTuples]:
+        rows = self._rows("tail")
+        return self._tail_all()[-rows:] if rows > 0 else []
 
     def _tail_text(self) -> StyleAndTextTuples:
-        out: StyleAndTextTuples = []
-        lines = self._tail_lines()
-        for i, line in enumerate(lines):
-            out.append(("class:tail", "  " + line))
-            if i < len(lines) - 1:
-                out.append(("", "\n"))
-        return out
+        pad = " " * self._tail_indent()
+        return self._join([[("", pad)] + line for line in self._tail_lines()])
 
     def _steps_text(self) -> StyleAndTextTuples:
         if not self.run:
             return []
         tools = self.run.running_tools()
+        rows = self._rows("steps")
+        if not tools or rows <= 0:
+            return []
         now = self.now()
         w = self.width()
-        out: StyleAndTextTuples = []
-        if self.height() < 12 and len(tools) > 1:
-            return [("class:dim", f"  {len(tools)} running")]
-        for i, t in enumerate(tools[:3]):
+        g = self.caps.glyphs
+        indent = "  " if w >= L.MICRO else ""
+        if rows == 1 and len(tools) > 1:
+            return [("class:dim", M.truncate(f"{indent}{len(tools)} steps running", w))]
+        show = tools[:rows] if len(tools) <= rows else tools[:rows - 1]
+        lines: list[StyleAndTextTuples] = []
+        for i, t in enumerate(show):
             style, glyph = M.ping((now * 1000) + i * 240, self.caps)
             dur = M.fmt_elapsed(now - t.started)
-            label = t.label + (f" · {t.detail}" if t.detail else "")
-            label = M.truncate(label, max(10, w - 12 - len(dur)))
-            out += [("", "  "), (f"class:{style}", glyph + " "), ("", label), ("class:dim", f"  {dur}")]
-            if i < min(3, len(tools)) - 1:
-                out.append(("", "\n"))
-        if len(tools) > 3:
-            out += [("", "\n"), ("class:dim", f"    +{len(tools) - 3} more")]
-        return out
+            label = t.label + (f" {g.sep} {t.detail}" if t.detail else "")
+            fixed = len(indent) + 2
+            if w - fixed - M.width_of(dur) - 2 >= 8:
+                lines.append([("", indent), (f"class:{style}", glyph + " "),
+                              ("", M.truncate(label, w - fixed - M.width_of(dur) - 2)), ("class:dim", f"  {dur}")])
+            else:
+                lines.append([("", indent), (f"class:{style}", glyph + " "), ("", M.truncate(label, max(1, w - fixed)))])
+        if len(show) < len(tools):
+            lines.append([("class:dim", M.truncate(f"{indent}  +{len(tools) - len(show)} more", w))])
+        return self._join(lines)
 
     def _status_text(self) -> StyleAndTextTuples:
         run = self.run
@@ -461,23 +736,43 @@ class EchoTUI:
                            needs_ok=run.needs_ok() and not run.stopping, stopping=run.stopping)
         return M.status_line(si, now * 1000, self.width(), self.caps)
 
-    def _pending_text(self) -> StyleAndTextTuples:
-        out: StyleAndTextTuples = []
+    def _pending_lines(self, rows: Optional[int] = None) -> list[StyleAndTextTuples]:
+        """What you sent while it runs. Cut to ``rows``: newest items first, then a one-line summary."""
         steers = [p for p in self.pending if p.kind == "steer"]
         queued = [p for p in self.pending if p.kind == "queue"]
         w = self.width()
         g = self.caps.glyphs
+        ind = "  " if w >= L.MICRO else ""
+
+        def head(text: str) -> StyleAndTextTuples:
+            return [("class:dim", M.truncate(ind + text, w))]
+
+        def item(p: PendingInput) -> StyleAndTextTuples:
+            lead = f"{ind}{g.steer} "
+            return [("class:dim", lead), ("", M.truncate(one_line(p.text, 400), max(1, w - M.width_of(lead))))]
+
+        lines: list[StyleAndTextTuples] = []
         if steers:
-            out.append(("class:dim", "  Sent at the next checkpoint"))
-            for p in steers[-3:]:
-                out += [("", "\n"), ("class:dim", f"  {g.steer} "), ("", M.truncate(one_line(p.text, 400), w - 6))]
+            lines.append(head("Sent at the next checkpoint"))
+            lines += [item(p) for p in steers[-3:]]
         if queued:
-            if out:
-                out.append(("", "\n"))
-            out.append(("class:dim", "  Queued for after this turn" + (" · ↑ to edit the last one" if self.running else "")))
-            for p in queued[-3:]:
-                out += [("", "\n"), ("class:dim", f"  {g.steer} "), ("", M.truncate(one_line(p.text, 400), w - 6))]
-        return out
+            edit = f" {g.sep} ↑ to edit the last one" if self.running and w >= 56 else ""
+            lines.append(head("Queued for after this turn" + edit))
+            lines += [item(p) for p in queued[-3:]]
+        if rows is None or len(lines) <= rows:
+            return lines
+        parts = []
+        if steers:
+            parts.append(f"{len(steers)} to steer")
+        if queued:
+            parts.append(f"{len(queued)} queued")
+        summary = head(f"{g.steer} " + f" {g.sep} ".join(parts))
+        newest = [item(p) for p in (steers + queued)[-(rows - 1):]] if rows > 1 else []
+        return [summary] + newest
+
+    def _pending_text(self) -> StyleAndTextTuples:
+        rows = self._rows("pending")
+        return self._join(self._pending_lines(rows)) if rows > 0 else []
 
     def _menu_token(self) -> Optional[str]:
         text = self.buffer.text
@@ -493,55 +788,135 @@ class EchoTUI:
 
     def _menu_text(self) -> StyleAndTextTuples:
         items = self._menu_items()
+        rows = self._rows("menu")
+        if not items or rows <= 0:
+            return []
         w = self.width()
-        name_w = max(len(c.name) for c in items) + 3 if items else 0
-        out: StyleAndTextTuples = []
-        sel = self.menu_index % len(items) if items else 0
-        for i, c in enumerate(items):
-            mark = f"{self.caps.glyphs.select} " if i == sel else "  "
-            name = c.name.ljust(name_w)
-            desc = M.truncate(c.desc, max(4, w - name_w - 6))
-            style = "class:menu.sel" if i == sel else "class:menu.name"
-            out += [("", "  "), (style, mark + name), ("class:menu.sel" if i == sel else "class:menu.desc", desc)]
-            if i < len(items) - 1:
-                out.append(("", "\n"))
+        sel = self.menu_index % len(items)
+        top = max(0, min(sel - rows + 1, len(items) - rows)) if sel >= rows else 0
+        indent = "  " if w >= L.MICRO else ""
+        name_w = max(M.width_of(c.name) for c in items) + 3
+        lines: list[StyleAndTextTuples] = []
+        for i, c in enumerate(items[top:top + rows], start=top):
+            chosen = i == sel
+            mark = f"{self.caps.glyphs.select} " if chosen else "  "
+            room = w - len(indent) - M.width_of(mark) - name_w
+            name = c.name.ljust(name_w) if room >= 8 else c.name
+            desc = M.truncate(c.desc, room) if room >= 8 else ""
+            head = M.truncate(indent + mark + name, w)
+            style = "class:menu.sel" if chosen else "class:menu.name"
+            lines.append([(style, head)] + ([("class:menu.sel" if chosen else "class:menu.desc", desc)] if desc else []))
+        return self._join(lines)
+
+    def _shortcut_rows(self) -> list[str]:
+        w = self.width()
+        cols = 3 if w >= L.WIDE else 2 if w >= L.NARROW else 1
+        indent = 2 if w >= L.MICRO else 0
+        col_w = max(1, (w - indent) // cols)
+        cells = [c for row in SHORTCUTS for c in row]
+        rows = [cells[i:i + cols] for i in range(0, len(cells), cols)]
+        out = []
+        for row in rows:
+            text = "".join(M.truncate(c, max(1, col_w - 2)).ljust(col_w) for c in row).rstrip()
+            out.append(M.truncate(" " * indent + text, w))
         return out
 
     def _shortcuts_text(self) -> StyleAndTextTuples:
-        w = self.width()
-        cols = 3 if w >= 100 else 2 if w >= 60 else 1
-        col_w = max(20, (w - 4) // cols)
-        cells = [c for row in SHORTCUTS for c in row]
-        rows = [cells[i:i + cols] for i in range(0, len(cells), cols)]
-        out: StyleAndTextTuples = []
-        for n, row in enumerate(rows):
-            out.append(("class:dim", "  " + "".join(M.truncate(c, col_w - 2).ljust(col_w) for c in row).rstrip()))
-            if n < len(rows) - 1:
-                out.append(("", "\n"))
-        return out
+        rows = self._rows("shortcuts")
+        lines = self._shortcut_rows()
+        if rows <= 0:
+            return []
+        if len(lines) > rows:
+            ind = "  " if self.width() >= L.MICRO else ""
+            hidden = len(lines) - max(0, rows - 1)
+            lines = lines[:max(0, rows - 1)] + [M.truncate(f"{ind}… {hidden} more rows (a taller terminal shows all)",
+                                                           self.width())]
+        return self._join([[("class:dim", line)] for line in lines])
 
-    def _footer_text(self) -> StyleAndTextTuples:
+    def _footer_input(self) -> M.FooterInput:
         notice = self.notice[0] if self.notice[1] > self.now() else ""
         ctx = None
         if self.context and self.context[1]:
             ctx = round(100 * self.context[0] / self.context[1])
         agent = self.agent_name if self.core.agent_id else ""
-        fi = M.FooterInput(model=self.model, agent=agent, project=self.project_name, approval_mode=self.approval_mode,
-                           context_pct=ctx, held=self.held, running=self.running and self.dialog is None, notice=notice,
-                           quiet=self.dialog is not None)
-        lines = M.footer_lines(fi, self.width(), self.caps)
-        out: StyleAndTextTuples = []
-        for i, line in enumerate(lines):
-            out += line
-            if i < len(lines) - 1:
-                out.append(("", "\n"))
-        return out
+        return M.FooterInput(model=self.model, agent=agent, project=self.project_name, approval_mode=self.approval_mode,
+                             context_pct=ctx, held=self.held, running=self.running and self.dialog is None,
+                             notice=notice, quiet=self.dialog is not None)
+
+    def _footer_text(self) -> StyleAndTextTuples:
+        lines = M.footer_lines(self._footer_input(), self.width(), self.caps)
+        rows = self._rows("footer") + self._rows("mode_line")
+        return self._join(lines[:max(1, rows)])
 
     def _dialog_prompt(self) -> str:
         d = self.dialog
         return (d.text_prompt if d and d.text_prompt else "›") + ""
 
+    # ── dialogs: fitted to the rows the plan gives them ─────────────
+    def _dialog_chrome(self, rows: Optional[int]) -> int:
+        """Rows under the options: the text field (when open) and the footer (a blank line + hint, or
+        just the hint when space is short)."""
+        d = self.dialog
+        field = 1 if d is not None and d.text_mode else 0
+        if rows is None:
+            return field + 2
+        # The blank line above the hint is the first thing to go when the dialog doesn't fit.
+        return field + (2 if rows >= self._dialog_natural() else 1)
+
+    def _dialog_minimum(self) -> int:
+        d = self.dialog
+        if d is None:
+            return 0
+        # What you need to decide without scrolling: the title rule, the first line of the body (the
+        # question, or what the action is), every option up to 6, and the hint.
+        first = 1 if d.body and d.body[0][0] != DIFF_MARK else 0
+        return 1 + first + min(6, max(1, len(d.visible_options()))) + self._dialog_chrome(0)
+
+    def _dialog_natural(self) -> int:
+        left = len(self._dialog_lines(None))
+        if self._two_col():
+            left = max(left, 1 + min(len(self._diff_rows(self.dialog.change, self._diff_w(), 1)), self._diff_page()))
+        return left + self._dialog_chrome(None)
+
+    def _dialog_rows(self) -> int:
+        """Rows for the dialog's own text (rule, body, options) at this frame."""
+        total = self._rows("dialog")
+        return max(1, total - self._dialog_chrome(total))
+
     def _dialog_text(self) -> StyleAndTextTuples:
+        if self.dialog is None:
+            return []
+        return self._join(self._dialog_lines(self._dialog_rows()))
+
+    def _option_line(self, d: Dialog, i: int, opt: Option, w: int) -> StyleAndTextTuples:
+        g = self.caps.glyphs
+        selected = i == d.selected
+        mark = f"{g.select} " if selected else "  "
+        num = "" if d.filterable else f"{i + 1}. "
+        key = f"({opt.key})" if opt.key else ""
+        left = " " + mark + num + opt.label
+        if key and M.width_of(left) + 1 + M.width_of(key) > w - 1:
+            key = ""   # keys go first when space runs out; the numbers still work
+        avail = w - 1 - (M.width_of(key) + 1 if key else 0)
+        hint = opt.hint
+        if M.width_of(left) > avail:
+            left, hint = M.truncate(left, max(1, avail)), ""
+        elif hint and M.width_of(left) + 2 + M.width_of(hint) > avail:
+            room = avail - M.width_of(left) - 2
+            hint = M.truncate(hint, room) if room > 6 else ""
+        body_style = "class:sel" if selected else ("class:dim" if opt.style == "dim" else "")
+        out: StyleAndTextTuples = [(body_style, left)]
+        used = M.width_of(left)
+        if hint:
+            out.append(("class:dim", "  " + hint))
+            used += 2 + M.width_of(hint)
+        if key:
+            out += [("", " " * max(1, avail - used + 1)), ("class:key", key)]
+        return out
+
+    def _dialog_lines(self, rows: Optional[int]) -> list[StyleAndTextTuples]:
+        """Rule, body, options. With ``rows``, fitted: options first (scrolled to the selection), then
+        the rule, then the body (the diff gives way before the text, the title line is kept)."""
         d = self.dialog
         if d is None:
             return []
@@ -549,50 +924,58 @@ class EchoTUI:
         w = self._left_w() if two else self.width()
         g = self.caps.glyphs
         style = "class:attention.rule" if d.attention else "class:rule"
-        out: StyleAndTextTuples = list(M.rule(w, d.title, self.caps, style=style,
-                                              title_style="class:attention" if d.attention else "class:title"))
-        small = self.height() < 12
-        if not small and d.body:
+        rule = M.rule(w, d.title, self.caps, style=style,
+                      title_style="class:attention" if d.attention else "class:title")
+        if w < 24 and d.title:
+            rule = [("class:attention" if d.attention else "class:title", M.truncate(d.title, w))]
+        vis = d.visible_options()
+        pos = [i for i, _ in vis].index(d.selected) if d.selected in [i for i, _ in vis] else 0
+        limit = 12 if rows is None else max(1, rows - (1 if rows >= 3 else 0))
+        shown = min(len(vis), 12, limit)
+        more = len(vis) - shown
+        if more > 0 and shown >= 3:
+            shown -= 1          # room for the "… N more" line
+        top = max(0, min(pos - shown + 1, len(vis) - shown)) if pos >= shown else 0
+        options = [self._option_line(d, i, opt, w) for i, opt in vis[top:top + shown]]
+        if len(vis) > shown and shown >= 2:
+            how = "↑↓ or type to filter" if d.filterable else "↑↓ to see them"
+            options.append([("class:dim", M.truncate(f"   … {len(vis) - shown} more · {how}", w))])
+        if d.filterable and d.filter_text:
+            options.append([("class:dim", M.truncate(f"   filter: {d.filter_text}", w))])
+
+        def body(diff_rows: Optional[int]) -> list[StyleAndTextTuples]:
+            out: list[StyleAndTextTuples] = []
             for st, text in d.body:
                 if st == DIFF_MARK:
-                    if not two:
-                        for frags in self._stacked_diff(d, w):
-                            out += [("", "\n")] + frags
+                    if not two and diff_rows != 0:
+                        out += self._stacked_diff(d, w, diff_rows)
                     continue
-                for line in _wrap(text, max(10, w - 2)):
-                    out += [("", "\n"), (st, " " + line)]
-            out.append(("", "\n"))
-        vis = d.visible_options()
-        narrow = self.width() < 60
-        top = 0
-        if d.selected in [i for i, _ in vis]:
-            pos = [i for i, _ in vis].index(d.selected)
-            top = max(0, pos - 11)
-        for i, opt in vis[top:top + 12]:
-            selected = i == d.selected
-            mark = f"{g.select} " if selected else "  "
-            num = "" if d.filterable else f"{i + 1}. "
-            key = f"({opt.key})" if opt.key and not narrow else ""
-            avail = w - 2 - (M.width_of(key) + 1 if key else 0)
-            left = " " + mark + num + opt.label
-            hint = opt.hint
-            if M.width_of(left) > avail:
-                left, hint = M.truncate(left, avail), ""
-            elif hint and M.width_of(left) + 2 + M.width_of(hint) > avail:
-                hint = M.truncate(hint, avail - M.width_of(left) - 2) if avail - M.width_of(left) - 2 > 6 else ""
-            body_style = "class:sel" if selected else ("class:dim" if opt.style == "dim" else "")
-            out += [("", "\n"), (body_style, left)]
-            used = M.width_of(left)
-            if hint:
-                out.append(("class:dim", "  " + hint))
-                used += 2 + M.width_of(hint)
-            if key:
-                out += [("", " " * max(1, avail - used + 1)), ("class:key", key)]
-        if len(vis) > 12:
-            out += [("", "\n"), ("class:dim", f"   … {len(vis) - 12} more · type to filter")]
-        if d.filterable and d.filter_text:
-            out += [("", "\n"), ("class:dim", f"   filter: {d.filter_text}")]
-        return out
+                for line in _wrap(text, max(1, w - 2)):
+                    out.append([(st, " " + line)])
+            return out + [[]] if out else out
+
+        if rows is None:
+            return [rule] + body(None) + options
+        left = rows - len(options)
+        out = [rule] if left >= 1 and rows >= 3 else []
+        left -= len(out)
+        if left > 0 and d.body:
+            full = body(None)
+            if len(full) > left:
+                text_only = len(body(0))
+                diff_room = left - text_only
+                full = body(diff_room if diff_room >= 3 else 0)
+                if len(full) > left:
+                    if left == 1:
+                        # The title line (the question, "Edit a file") whole on one line beats a hint.
+                        st, text = d.body[0]
+                        full = [[(st, M.truncate(" " + one_line(text, 400), w))]] if st != DIFF_MARK else full[:1]
+                    elif left == 2:
+                        full = full[:2]     # the title and the command ("$ pytest …") you are approving
+                    else:
+                        full = full[:left - 1] + [[("class:dim", M.truncate(" … ctrl+g for everything", w))]]
+            out += full
+        return out + options[:max(0, rows - len(out))] if len(out) + len(options) > rows else out + options
 
     # ── approval diff (two columns or stacked) ─────────────────────
     def _two_col(self) -> bool:
@@ -607,47 +990,65 @@ class EchoTUI:
                       default=0)
         return max(TWO_COL_LEFT, min(64, longest + 2, self.width() - 60))
 
+    def _diff_w(self) -> int:
+        return max(20, self.width() - self._left_w()) - 2
+
     def _ansi_rows(self, lines, width: int) -> list[StyleAndTextTuples]:
-        return [list(to_formatted_text(ANSI(row))) for row in DV.to_ansi(lines, width, self.caps)]
+        return [_crop(list(to_formatted_text(ANSI(row))), width) for row in DV.to_ansi(lines, width, self.caps)]
 
     def _diff_rows(self, change: DV.Change, width: int, indent: int) -> list[StyleAndTextTuples]:
         """Every diff row as fragments, cached: the live region redraws up to 20 times a second."""
+        width = max(1, width)
         key = (id(change), width, indent)
         hit = self._diff_cache.get(key)
         if hit is None:
-            rows, _ = DV.unified(change, width, self.caps, max_rows=None, indent=indent, hint="")
+            rows, _ = DV.unified(change, width, self.caps, max_rows=None, indent=min(indent, max(0, width // 4)),
+                                 hint="")
             hit = self._ansi_rows(rows, width)
             if len(self._diff_cache) > 8:
                 self._diff_cache.clear()
             self._diff_cache[key] = hit
         return hit
 
-    def _stacked_diff(self, d: Dialog, width: int) -> list[StyleAndTextTuples]:
-        """Below 120 columns: at most 10 rows of the diff (6 under 60), scrolled with pgup/pgdn."""
-        page = 6 if width < 60 else STACKED_DIFF_ROWS
-        rows = self._diff_rows(d.change, width, 4)
-        top = max(0, min(d.diff_top, max(0, len(rows) - page)))
-        shown = rows[top:top + page]
-        rest = len(rows) - top - len(shown)
+    def _stacked_page(self, width: int) -> int:
+        return 6 if width < L.NARROW else STACKED_DIFF_ROWS
+
+    def _stacked_diff(self, d: Dialog, width: int, rows: Optional[int] = None) -> list[StyleAndTextTuples]:
+        """Below 120 columns: at most 10 rows of the diff (6 under 60, fewer when the terminal is
+        short), scrolled with pgup/pgdn, plus one line saying where you are."""
+        page = self._stacked_page(width) if rows is None else max(1, min(self._stacked_page(width), rows - 1))
+        rows_all = self._diff_rows(d.change, width, 4 if width >= L.NARROW else 1)
+        top = max(0, min(d.diff_top, max(0, len(rows_all) - page)))
+        shown = rows_all[top:top + page]
+        rest = len(rows_all) - top - len(shown)
+        g = self.caps.glyphs
         if rest > 0 or top:
-            where = f"rows {top + 1}–{top + len(shown)} of {len(rows)}"
-            shown.append([("class:dim", f"    {self.caps.glyphs.ellipsis} +{rest} lines {self.caps.glyphs.sep} "
-                                        f"{where} {self.caps.glyphs.sep} pgup/pgdn {self.caps.glyphs.sep} ctrl+g"
-                           if rest > 0 else f"    {where} {self.caps.glyphs.sep} ctrl+g full diff")])
+            where = f"rows {top + 1}–{top + len(shown)} of {len(rows_all)}"
+            text = (f"    {g.ellipsis} +{rest} lines {g.sep} {where} {g.sep} pgup/pgdn {g.sep} ctrl+g"
+                    if rest > 0 else f"    {where} {g.sep} ctrl+g full diff")
+            shown.append([("class:dim", M.truncate(text if width >= L.NARROW else text.strip(), width))])
         return shown
 
     def _diff_page(self) -> int:
+        """Diff rows the right column would like (the plan may give it fewer)."""
         return max(4, self.height() - 8)
+
+    def _scroll_page(self) -> tuple[int, int, int]:
+        """(page, width, indent) of the diff on screen now, for PgUp/PgDn."""
+        if self._two_col():
+            return max(1, self._dialog_rows() - 1), self._diff_w(), 1
+        w = self.width()
+        return self._stacked_page(w), w, 4 if w >= L.NARROW else 1
 
     def _diff_pane_text(self) -> StyleAndTextTuples:
         """The right column: '┬─ src/dates.py · +3 −1 ───── rows 1–9 of 14 ─' over '│ ' + diff rows."""
         d = self.dialog
-        if d is None or d.change is None:
+        if d is None or d.change is None or not self._two_col():
             return []
         g = self.caps.glyphs
         width = max(20, self.width() - self._left_w())
         rows = self._diff_rows(d.change, width - 2, 1)
-        page = self._diff_page()
+        page = max(1, self._dialog_rows() - 1)
         top = max(0, min(d.diff_top, max(0, len(rows) - page)))
         d.diff_top = top
         shown = rows[top:top + page]
@@ -658,12 +1059,11 @@ class EchoTUI:
         bar = "class:attention.rule" if d.attention else "class:rule"
         out: StyleAndTextTuples = [(bar, top_rule + g.rule + " "), ("class:title", title), (bar, " " + g.rule * fill + " "),
                                    ("class:dim", where), (bar, " " + g.rule)]
-        left_lines = sum(t.count("\n") for _s, t, *_ in self._dialog_text()) + 1
-        body = shown
-        for i in range(max(len(body), left_lines - 1)):
+        left_lines = len(self._dialog_lines(self._dialog_rows()))
+        for i in range(min(page, max(len(shown), left_lines - 1))):
             out += [("", "\n"), (bar, g.vbar + " ")]
-            if i < len(body):
-                out += body[i]
+            if i < len(shown):
+                out += shown[i]
         return out
 
     def _dialog_footer(self) -> StyleAndTextTuples:
@@ -676,7 +1076,10 @@ class EchoTUI:
             text = d.footer
         else:
             text = f"{self.caps.glyphs.arrow_up_down} choose · enter confirm · esc cancel"
-        return [("", "\n"), ("class:dim", " " + M.truncate(text, self.width() - 2))]
+        line = [("class:dim", M.truncate(" " + text, self.width()))]
+        total = self._rows("dialog")
+        blank = self._dialog_chrome(total) - (1 if d.text_mode else 0) > 1
+        return ([("", "\n")] if blank else []) + line
 
     # ── key bindings ─────────────────────────────────────────────────
     def _key_bindings(self, dialog_open, text_mode, is_running) -> KeyBindings:
@@ -850,10 +1253,8 @@ class EchoTUI:
             d = self.dialog
             if d is None or d.change is None:
                 return
-            two = self._two_col()
-            page = self._diff_page() if two else STACKED_DIFF_ROWS
-            width = max(20, self.width() - self._left_w()) - 2 if two else self.width()
-            total = len(self._diff_rows(d.change, width, 1 if two else 4))
+            page, width, indent = self._scroll_page()
+            total = len(self._diff_rows(d.change, width, indent))
             step = max(1, page - 2)
             d.scroll_diff(step if event.key_sequence[0].key == Keys.PageDown else -step, total, page)
             self.app.invalidate()

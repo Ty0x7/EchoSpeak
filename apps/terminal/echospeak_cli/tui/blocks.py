@@ -149,7 +149,7 @@ def _theme(caps: Caps) -> Theme:
 
 
 def console(width: int, caps: Caps, file: Optional[io.StringIO] = None) -> Console:
-    return Console(file=file or io.StringIO(), force_terminal=True, width=max(20, width),
+    return Console(file=file or io.StringIO(), force_terminal=True, width=max(1, width),
                    color_system=("truecolor" if caps.truecolor else "standard") if caps.color else "standard",
                    no_color=not caps.color, markup=False, emoji=False, highlight=False, legacy_windows=False,
                    soft_wrap=False, force_jupyter=False, force_interactive=False, theme=_theme(caps), _environ={})
@@ -185,7 +185,7 @@ def _t(text: Any, style: str = "") -> Text:
 def render(block: Block, width: int, caps: Caps, verbose: bool = False) -> str:
     st = rich_styles(caps)
     g = caps.glyphs
-    width = max(20, width)
+    width = max(1, width)   # the real width: a wider line would be wrapped again by the terminal
     if isinstance(block, Raw):
         return block.ansi
     if isinstance(block, Banner):
@@ -234,8 +234,11 @@ def render(block: Block, width: int, caps: Caps, verbose: bool = False) -> str:
         grid.add_row(Text(block.glyph, style=style), body)
         return _render(Padding(grid, (0, 0, 0, block.indent)), width, caps)
     if isinstance(block, RuleLine):
-        label = f" {one_line(block.text, max(10, width - 8))} "
-        line = Text(g.rule * 2 + label + g.rule * 2, style=st["rule"])
+        if width < 10:
+            line = Text(g.rule * width, style=st["rule"])
+        else:
+            label = f" {truncate(one_line(block.text, 300), width - 6)} "
+            line = Text(g.rule * 2 + label + g.rule * 2, style=st["rule"])
         return _render(line, width, caps) + ("\n" if block.gap else "")
     if isinstance(block, Outcome):
         text = Text()
@@ -387,25 +390,30 @@ def _tool(b: ToolLine, width: int, caps: Caps, verbose: bool) -> str:
     label = one_line(b.label, 300)
     summary = one_line(b.summary, 200)
     body = label + (f" · {summary}" if summary else "")
-    room = width - 4 - (width_of(dur) + 2 if dur else 0)
+    pad = "  " if width >= 30 else ""
+    head = f"{pad}{glyph} "
+    room = width - width_of(head) - (width_of(dur) + 2 if dur else 0)
+    if dur and room < 12:
+        dur, room = "", width - width_of(head)   # the duration goes before the label is cut short
     if width_of(body) > room:
         # Detail is dropped first, then the label is cut.
-        body = truncate(label + (f" · {summary}" if summary else ""), max(10, room))
-    line = Text(f"  {glyph} ", style=style)
+        body = truncate(body, max(1, room))
+    line = Text(head, style=style)
     line.append(body, style=style)
     if dur:
         line.append(" " * max(2, room - width_of(body) + 2) + dur, style="dim")
-    out = _render(line, width, caps)
-    preview = b.preview
-    if preview:
-        rows = []
-        for i, row in enumerate(preview):
-            lead = f"    {g.elbow}  " if i == 0 else "       "
-            rows.append(Text(lead + truncate(sanitize(row), max(10, width - 8)), style="dim"))
+    lines = [line]
+    if b.preview:
+        first, rest = (f"    {g.elbow}  ", "       ") if width >= 30 else (f"{g.elbow} ", "  ")
+        for i, row in enumerate(b.preview):
+            lead = first if i == 0 else rest
+            lines.append(Text(lead + truncate(sanitize(row), max(1, width - width_of(lead) - 1)), style="dim"))
         if b.more:
-            rows.append(Text(f"       {g.ellipsis} +{b.more} lines (ctrl+o for details)", style="dim"))
-        out += _render(Group(*rows), width, caps)
-    return out
+            more = f"{g.ellipsis} +{b.more} lines (ctrl+o for details)"
+            lines.append(Text(rest + truncate(more, max(1, width - width_of(rest))), style="dim"))
+    for t in lines:
+        t.no_wrap, t.overflow = True, "crop"
+    return _render(Group(*lines), width, caps)
 
 
 def _file_diff(b: FileDiff, width: int, caps: Caps, verbose: bool) -> str:

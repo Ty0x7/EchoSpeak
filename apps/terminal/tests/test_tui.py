@@ -234,7 +234,11 @@ def test_status_line_drops_optional_parts_by_width():
     assert "tokens" not in mid and mid.endswith("(14s · esc to stop)")
     small = text_of(M.status_line(si, 0, 44, CAPS))
     assert small.endswith("(esc to stop)") and "14s" not in small
-    assert text_of(M.status_line(si, 0, 30, CAPS)).startswith("· Working…")
+    # Narrower: the real activity stays (cut), the stop hint shortens; never a generic "Working…".
+    tiny = text_of(M.status_line(si, 0, 30, CAPS))
+    assert tiny.startswith("· Echo is thinking") and tiny.endswith("(esc)") and M.width_of(tiny) <= 30
+    for width in range(1, 130):
+        assert M.frag_width(M.status_line(si, 0, width, CAPS)) <= width
     stall = text_of(M.status_line(M.StatusInput("Echo is starting", 40, stalled_ms=31_000), 0, 120, CAPS))
     assert "still waiting (31s)" in stall
     ok = text_of(M.status_line(M.StatusInput("Echo needs your OK", 3, needs_ok=True), 0, 120, CAPS))
@@ -248,16 +252,38 @@ def test_footer_composition():
     assert line.rstrip().endswith("? for shortcuts")
     bold = M.footer_lines(M.FooterInput(model="m", context_pct=90), 120, CAPS)[0]
     assert ("class:footer.bold", "context 90%") in bold
-    assert "context" not in text_of(M.footer_lines(M.FooterInput(model="m", context_pct=40), 120, CAPS)[0])
+    # Context is shown whenever it is known, not only past 50 %.
+    assert "context 40%" in text_of(M.footer_lines(M.FooterInput(model="m", context_pct=40), 120, CAPS)[0])
     running = text_of(M.footer_lines(M.FooterInput(model="m", running=True), 120, CAPS)[0])
     assert running.rstrip().endswith("esc to stop · enter to steer · tab to queue")
     auto = M.footer_lines(M.FooterInput(model="m", approval_mode="autonomous", held=2), 120, CAPS)
     assert len(auto) == 2 and "shift+tab to cycle" in text_of(auto[1]) and "⏸ 2 held" in text_of(auto[0])
-    narrow = M.footer_lines(M.FooterInput(model="m", agent="Jarvis", approval_mode="autonomous", context_pct=70), 50, CAPS)
-    assert len(narrow) == 1 and text_of(narrow[0]).strip() == "m · context 70%"
-    for width in (40, 60, 80, 200):
+    # Narrow: items shorten one at a time and keep their order; nothing jumps or disappears all at once.
+    narrow = text_of(M.footer_lines(M.FooterInput(model="m", agent="Jarvis", approval_mode="autonomous",
+                                                  context_pct=70), 50, CAPS)[0])
+    assert narrow.strip().startswith("m · context 70% · Jarvis · ◇ auto")
+    for width in range(1, 201):
         for line in M.footer_lines(fi, width, CAPS):
             assert M.frag_width(line) <= width
+        first = text_of(M.footer_lines(fi, width, CAPS)[0])
+        if width >= 12:
+            assert "64%" in first, (width, first)        # context survives at every usable width
+        if width >= 16:
+            assert first.strip().startswith("qwen"), (width, first)
+
+
+def test_footer_degrades_one_step_at_a_time():
+    fi = M.FooterInput(model="qwen3.5:9b", agent="Jarvis", project="echospeak", approval_mode="smart", context_pct=64,
+                       held=2)
+    widths = {}
+    for width in range(12, 140):
+        widths[width] = M.frag_width(M.footer_lines(fi, width, CAPS)[0])
+    # Going one column narrower never removes more than one item's worth of text (no cliffs).
+    texts = [text_of(M.footer_lines(fi, w, CAPS)[0]).split() for w in range(12, 140)]
+    for a, b in zip(texts, texts[1:]):
+        assert len(b) - len(a) <= 6
+    held = text_of(M.footer_lines(fi, 40, CAPS)[0])
+    assert "⏸" in held and "64%" in held
 
 
 def test_rule_fits_width():

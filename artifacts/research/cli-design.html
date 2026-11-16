@@ -3,9 +3,10 @@
 <title>Echo TUI</title>
 <style>
 :root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--soft:#f0f0f0;--accent:#2f6fde;--ok:#1f7a3f;--warn:#a86a00;--bad:#b42318}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--soft:#222;--accent:#8fb4ff;--ok:#5cc983;--warn:#d6a955;--bad:#ff8a7a}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 40px}header{padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 4px}header p{margin:0;font-size:13px;color:var(--muted)}nav{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;margin:0 0 8px}nav a{color:var(--muted);text-decoration:none}nav a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 6px}section{margin:34px 0;scroll-margin-top:12px}.lead{font-size:13.5px;color:var(--muted);margin:0 0 14px;max-width:820px}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:13px system-ui,sans-serif}svg .m{fill:var(--muted);font-size:11.5px}svg .b{fill:var(--panel);stroke:var(--line)}svg .s{fill:var(--soft);stroke:var(--line)}svg .hl{fill:var(--panel);stroke:var(--accent);stroke-width:1.6}svg .l{stroke:var(--muted);fill:none;stroke-width:1.4}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}figure{margin:0;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px;min-width:0}figure img{width:100%;height:auto;display:block;border-radius:6px}figcaption{font-size:12.5px;color:var(--muted);margin-top:8px}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:14px 16px;min-width:0}.node h3{font-size:14px;margin:0 0 4px}.node p,.node li{font-size:13px;color:var(--muted);margin:0}.node ul{margin:6px 0 0;padding-left:18px}code{font:12px ui-monospace,monospace}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:0 8px;margin-right:6px}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}.tag.bad{color:var(--bad)}.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}th{font-weight:600;color:var(--muted)}pre{font:12px/1.45 ui-monospace,monospace;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;margin:0}footer{font-size:12px;color:var(--muted);margin-top:30px;border-top:1px solid var(--line);padding-top:12px}@media(max-width:860px){.grid3{grid-template-columns:1fr}.diagram svg{min-width:720px}}
+.strip{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}.strip figure{flex:0 1 auto;max-width:100%}pre.term{font:11px/1.35 ui-monospace,'JetBrains Mono',monospace;white-space:pre;background:var(--soft)}
 </style></head><body><main>
-<header><h1>Echo TUI · the EchoSpeak terminal</h1><p>14 November 2026 · <code>apps/terminal</code> · branch <code>harness-first-rearchitecture</code> · not merged or released · technical record: <code>docs/research/cli-design.md</code> §5</p></header>
-<nav aria-label="Sections"><a href="#shots">Screenshots</a><a href="#layout">Live region</a><a href="#control">What it controls</a><a href="#status">Status</a></nav>
+<header><h1>Echo TUI · the EchoSpeak terminal</h1><p>14 November 2026, merged in 11.14.0 · any-size layout 16 November 2026, branch <code>tui-responsive</code> · <code>apps/terminal</code> · technical record: <code>docs/research/cli-design.md</code> §5–§6</p></header>
+<nav aria-label="Sections"><a href="#shots">Screenshots</a><a href="#layout">Live region</a><a href="#sizes">At any size</a><a href="#control">What it controls</a><a href="#status">Status</a></nav>
 
 <section id="shots"><h2>In a real terminal</h2>
 <p class="lead">Real screenshots: foot + tmux on Omarchy (lumon theme, all-blue palette), backend on an isolated test data folder, local model <code>qwen3.5:9b</code>. Output is inline: everything above the composer is ordinary terminal scrollback.</p>
@@ -28,6 +29,86 @@
 <rect x="40" y="230" width="960" height="44" rx="6" class="b"/><text x="52" y="248" class="m">──────── session title ─   › composer (placeholder types itself)   ────────</text><text x="52" y="266" class="m">qwen3.5:9b · Jarvis · project · ◇ ask for risky actions · context 64% · ⏸ 1 held          ? for shortcuts</text>
 </svg></div></section>
 
+
+<section id="sizes"><h2>At any size</h2>
+<p class="lead">16 November 2026, branch <code>tui-responsive</code>. Real <code>tmux</code> captures of the same session (the
+real TUI against the real backend and a scripted model): shrunk to 40 then 26 columns, then back to 80. Text captures,
+not screenshots.</p>
+<div class="strip">
+<figure><pre class="term">── Answered in 5s ──
+────────────────────────────────────────
+───────────────── explain
+────────────────────────────────────────────────────────────────────────────────
+────────────────────────────────────────────────────── explain the week 53 bug ─
+› Ask a question, search the web, or explore an idea.
+────────────────────────────────────────────────────────────────────────────────
+  fake-scripted-model · ◇ ask for risky actions                  ? for shortcuts</pre><figcaption><span class="tag bad">Before</span>The old live region's rules, re-wrapped by the terminal, stay above the
+composer after every narrowing.</figcaption></figure>
+<figure><pre class="term">── Answered in 5s ──
+────────────────────────────────────────────────────── explain the week 53 bug ─
+› Ask a question, search the web, or explore an idea.
+────────────────────────────────────────────────────────────────────────────────
+  fake-scripted-model · context 2% · ◇ ask for risky actions     ? for shortcuts</pre><figcaption><span class="tag ok">After</span>The old region is measured at the new width and erased fully. Context is
+now always in the footer.</figcaption></figure>
+</div>
+<p class="lead" style="margin-top:18px">The same running task (two steps, a steer and a queued message, an answer streaming) at four
+sizes. These are headless renders of the real layout code into a terminal-sized buffer
+(<code>tests/layout_gallery.py</code>), not screenshots. Every section gets rows by priority; the footer and status line
+shorten one item at a time.</p>
+<div class="strip"><figure><pre class="term">  First, iso_week should check _long_year. Then the round trip in parse_week needs the same rule,
+  otherwise 2026-W53 becomes 2027-W01 and the tests in tests/test_dates.py fail with a confusing
+  off-by-one.
+  · Running `pytest tests/test_dates.py -k week_0 -x -q` · collecting 214 items  0s
+  ● Running `pytest tests/test_dates.py -k week_1 -x -q` · collecting 214 items  3s
+· Echo is writing the answer… (1m 15s · ↓ 12.4k tokens · esc to stop)
+  Sent at the next checkpoint
+  ↳ also make sure the CLI flag --week 0 works the same way in every locale
+  Queued for after this turn · ↑ to edit the last one
+  ↳ also make sure the CLI flag --week 1 works the same way in every locale
+
+──────────────────────────────────────────────── Fix the parser so dates in ISO week 53 round-trip ─
+› Steer Echo, or tab to queue a follow-up
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  qwen3.5:9b · echospeak · ◇ ask for risky actions       esc to stop · enter to steer · tab to queue</pre><figcaption>100×30 columns × rows</figcaption></figure><figure><pre class="term">  First, iso_week should check _long_year. Then the round
+  trip in parse_week needs the same rule, otherwise
+  2026-W53 becomes 2027-W01 and the tests in
+  tests/test_dates.py fail with a confusing off-by-one.
+  · Running `pytest tests/test_dates.py -k week_0 -x -q…  0s
+  ● Running `pytest tests/test_dates.py -k week_1 -x -q…  3s
+· Echo is writing the answer… (1m 15s · esc to stop)
+  Sent at the next checkpoint
+  ↳ also make sure the CLI flag --week 0 works the same way…
+  Queued for after this turn · ↑ to edit the last one
+  ↳ also make sure the CLI flag --week 1 works the same way…
+─────────────────────────── Fix the parser so dates in IS… ─
+› Steer Echo, or tab to queue a follow-up
+────────────────────────────────────────────────────────────
+  qwen3.5:9b · ◇ ask if risky           esc stop · tab queue</pre><figcaption>60×16 columns × rows</figcaption></figure><figure><pre class="term">  confusing off-by-one.
+  2 steps running
+· Echo is writing the answer… (esc)
+  Sent at the next checkpoint
+  ↳ also make sure the CLI flag --w…
+  Queued for after this turn
+  ↳ also make sure the CLI flag --w…
+─────────────── Fix the parser so… ─
+› Steer Echo, or tab to queue a fo…
+────────────────────────────────────
+  qwen3.5:9b · ◇ ask if risky</pre><figcaption>36×12 columns × rows</figcaption></figure><figure><pre class="term">2 steps running
+· Echo is wri… (esc)
+↳ 1 to steer · 1 qu…
+────────────────────
+› Steer Echo, or t…
+────────────────────
+ qwen3.5:9b ◇</pre><figcaption>20×8 columns × rows</figcaption></figure></div>
+<div class="wrap" style="margin-top:18px"><table>
+<tr><th>Check</th><th>Before</th><th>After</th></tr>
+<tr><td>Layout matrix: 11 states × 21 widths (8–240) × 11 heights (4–60)</td><td>1,421 of 2,541 broken</td><td>0 of 2,541</td></tr>
+<tr><td>tmux shrink/grow, also mid-stream, at 120×40 → 40×16</td><td>stale rules after each narrowing</td><td>none</td></tr>
+<tr><td>Scrollback blocks, widths 8–140</td><td>over-wide under 20 columns</td><td>all fit</td></tr>
+<tr><td>Footer context %</td><td>only past 50 %, gone under 60 columns</td><td>always, from 12 columns</td></tr>
+</table></div>
+</section>
+
 <section id="control"><h2>Controlling EchoSpeak from the terminal</h2>
 <p class="lead">Every command is an existing backend route. The menu hides commands whose routes did not answer at startup. Global settings ask first; nothing is ever turned on automatically.</p>
 <div class="wrap"><table>
@@ -45,9 +126,9 @@ $ echospeak backend stop    # only a backend the terminal started</pre></section
 
 <section id="status"><h2>Status</h2>
 <div class="grid3">
-<div class="node"><span class="tag ok">Tested</span><h3>Automated</h3><p>46 unit tests for the pure parts; a pseudo-terminal round trip against the real backend. Existing terminal and endpoint-file tests stay green.</p></div>
+<div class="node"><span class="tag ok">Tested</span><h3>Automated</h3><p>2,675 terminal tests, including the 2,541-case size matrix; a pseudo-terminal round trip against the real backend; a tmux resize lab (<code>tests/sizelab.py</code>).</p></div>
 <div class="node"><span class="tag ok">Verified live</span><h3>tmux, real model</h3><p>Approvals, deny with a note, steering, queueing, stop, detach/resume, pickers, held approvals, questions, paste chips, 70 columns, NO_COLOR, ASCII, plain fallback.</p></div>
-<div class="node"><span class="tag warn">Gaps</span><h3>Backend-side</h3><ul><li>A denial blocks the whole work item.</li><li>Resumed held work does not stream.</li><li>No backend-wide run list.</li></ul></div>
+<div class="node"><span class="tag warn">Gaps</span><h3>Still to check</h3><ul><li>Drag-resize by hand in ghostty and alacritty (tmux was the test terminal).</li><li>A denial blocks the whole work item.</li><li>Resumed held work does not stream.</li></ul></div>
 </div></section>
 <footer>Screenshots are real captures from this machine; paths in them are temporary test folders. The terminal client never executes anything itself: tools run in the backend under the owner's permissions and approvals.</footer>
 </main></body></html>

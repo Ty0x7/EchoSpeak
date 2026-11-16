@@ -197,60 +197,68 @@ class StatusInput:
 
 
 def status_line(si: StatusInput, now_ms: float, width: int, caps: Caps) -> Fragments:
-    """`◉ Echo is thinking it through… (14s · ↓ 1.2k tokens · esc to stop)`.
+    """`◉ Echo is thinking it through… (14s · ↓ 1.2k tokens · esc to stop)`, degraded one step at a time.
 
-    `esc to stop` keeps its place; tokens, then detail, then elapsed are dropped as width runs out.
-    Under 40 columns it collapses to `glyph Working… esc`.
+    The ladder, richest first: drop tokens → drop the detail → shorten the stop hint to `esc` → drop
+    the stall note → drop elapsed → cut the activity (never below a few letters) → glyph and `esc`.
+    The glyph is always first and the stop hint, when shown, always last, so nothing jumps around.
     """
     g = caps.glyphs
+    width = max(1, width)
     if si.needs_ok:
-        return [("class:attention", f"{g.still} "), ("class:attention", truncate(si.activity, max(4, width - 2)))]
+        return [("class:attention", f"{g.still} "), ("class:attention", truncate(si.activity, max(1, width - 2)))]
     style, glyph = ping(now_ms, caps, si.stalled_ms)
     head: Fragments = [(f"class:{style}", glyph + " ")]
-    if width < 40:
-        return head + [("", "Working" + g.ellipsis + " "), ("class:dim", "esc")]
+    if width < 4:
+        return [(f"class:{style}", glyph)]
     activity = si.activity.rstrip("…").rstrip(".") + g.ellipsis
-    stop_hint = "stopping" + g.ellipsis if si.stopping else "esc to stop"
-    optional = []
-    elapsed = fmt_elapsed(si.elapsed_s)
+    stalled = si.stalled_ms >= STALL_DIM_MS
+    tokens = ""
     if si.tokens:
-        optional.append(("tokens", f"↓ {fmt_tokens(si.tokens)} tokens" if not caps.ascii else f"{fmt_tokens(si.tokens)} tokens"))
+        tokens = f"↓ {fmt_tokens(si.tokens)} tokens" if not caps.ascii else f"{fmt_tokens(si.tokens)} tokens"
     stall = ""
     if si.stalled_ms >= STALL_BOLD_MS:
         stall = f"still waiting ({int(si.stalled_ms // 1000)}s)"
-    elif si.stalled_ms >= STALL_DIM_MS:
+    elif stalled:
         stall = "waiting on the model"
-    parts = [("elapsed", elapsed)] + optional
+    elapsed = fmt_elapsed(si.elapsed_s)
+    sep = f" {g.sep} "
 
-    def build(keep: list[tuple[str, str]], detail: str) -> Fragments:
-        body = shimmer(activity, now_ms, caps) if not si.stalled_ms >= STALL_DIM_MS else [("", activity)]
+    def build(act: str, detail: str, stall_txt: str, parts: list[str], stop: str) -> Fragments:
+        body = shimmer(act, now_ms, caps) if not stalled else [("", act)]
         out = head + body
-        sep = f" {g.sep} "
         if detail:
             out += [("class:dim", sep + detail)]
-        if stall:
-            out += [("class:dim" if si.stalled_ms < STALL_BOLD_MS else "bold", sep + stall)]
-        inner = sep.join([t for _k, t in keep] + [stop_hint])
-        out += [("class:dim", f" ({inner})")]
+        if stall_txt:
+            out += [("class:dim" if si.stalled_ms < STALL_BOLD_MS else "bold", sep + stall_txt)]
+        inner = sep.join([p for p in parts if p] + ([stop] if stop else []))
+        if inner:
+            out += [("class:dim", f" ({inner})")]
         return out
 
-    detail = si.detail
-    keep = list(parts)
-    candidate = build(keep, detail)
-    # Drop tokens, then detail, then elapsed.
-    while frag_width(candidate) > width:
-        if any(k == "tokens" for k, _ in keep):
-            keep = [p for p in keep if p[0] != "tokens"]
-        elif detail:
-            detail = ""
-        elif keep:
-            keep = []
-        else:
-            budget = width - frag_width(head) - width_of(f" ({stop_hint})") - 1
-            body = truncate(activity, max(4, budget))
-            return head + [("", body), ("class:dim", f" ({stop_hint})")]
-        candidate = build(keep, detail)
-    return candidate
+    stop_full = "stopping" + g.ellipsis if si.stopping else "esc to stop"
+    stop_short = "stopping" if si.stopping else "esc"
+    ladder = [
+        (si.detail, stall, [elapsed, tokens], stop_full),
+        (si.detail, stall, [elapsed], stop_full),
+        ("", stall, [elapsed], stop_full),
+        ("", stall, [], stop_full),
+        ("", stall, [elapsed], stop_short),
+        ("", "", [elapsed], stop_short),
+        ("", "", [], stop_short),
+    ]
+    for detail, stall_txt, parts, stop in ladder:
+        candidate = build(activity, detail, stall_txt, parts, stop)
+        if frag_width(candidate) <= width:
+            return candidate
+    # Cut the activity, keeping `(esc)` while at least a few letters of it still fit.
+    for stop in (stop_short, ""):
+        tail = width_of(f" ({stop})") if stop else 0
+        room = width - frag_width(head) - tail
+        if room >= 6 or not stop:
+            act = truncate(activity, max(1, room), g.ellipsis if room > width_of(g.ellipsis) + 1 else "")
+            return head + [("", act)] + ([("class:dim", f" ({stop})")] if stop else [])
+    return head
 
 
 # ── footer ───────────────────────────────────────────────────────────
@@ -274,69 +282,132 @@ MODE_LABEL = {
     "always": "ask before every action",
     "never": "never ask",
 }
+MODE_SHORT = {"smart": "ask if risky", "autonomous": "auto", "always": "ask always", "never": "never ask"}
 MODE_LINE = {
     "autonomous": "autonomous: routine approvals won't interrupt",
     "always": "always ask: every action waits for your OK",
     "never": "never ask: actions run without approval",
 }
+MODE_LINE_MIN_W = 30
+CONTEXT_BOLD = 85
+LEFT_ORDER = ("model", "context", "agent", "project", "mode", "held")
+
+# The order in which the footer gives things up as the terminal narrows: (item, level). Level 0 is
+# the full form; each step moves one item to a shorter form, and an empty form means hidden.
+# Context and held approvals are shortened last and never hidden; the model is cut, never dropped.
+FOOTER_LADDER = (
+    ("hints", 1), ("project", 1), ("agent", 1), ("mode", 1), ("project", 2), ("agent", 2), ("held", 1),
+    ("hints", 2), ("context", 1), ("model", 1), ("mode", 2), ("model", 2), ("context", 2), ("held", 2),
+    ("mode", 3), ("model", 3),
+)
+
+
+def _footer_forms(fi: FooterInput, caps: Caps) -> dict[str, list[tuple[str, str]]]:
+    """Every item's forms, longest first: [(style, text), ...]; an empty text means hidden."""
+    g = caps.glyphs
+    mode_glyph = "◇" if not caps.ascii else "o"
+    forms: dict[str, list[tuple[str, str]]] = {}
+    model = fi.model or ""
+    forms["model"] = [("class:footer", model), ("class:footer", truncate(model, 16)),
+                      ("class:footer", truncate(model, 10)), ("class:footer", truncate(model, 6))]
+    if fi.context_pct is not None:
+        pct = max(0, min(100, int(fi.context_pct)))
+        st = "class:footer.bold" if pct >= CONTEXT_BOLD else "class:footer"
+        forms["context"] = [(st, f"context {pct}%"), (st, f"ctx {pct}%"), (st, f"{pct}%")]
+    if fi.held:
+        forms["held"] = [("class:attention", f"{g.held} {fi.held} held {g.sep} /approvals"),
+                         ("class:attention", f"{g.held} {fi.held} held"), ("class:attention", f"{g.held}{fi.held}")]
+    if fi.agent:
+        forms["agent"] = [("class:footer", fi.agent), ("class:footer", truncate(fi.agent, 12)), ("class:footer", "")]
+    if fi.project:
+        forms["project"] = [("class:footer", fi.project), ("class:footer", truncate(fi.project, 14)),
+                            ("class:footer", "")]
+    label = MODE_LABEL.get(fi.approval_mode, fi.approval_mode)
+    short = MODE_SHORT.get(fi.approval_mode, fi.approval_mode)
+    forms["mode"] = [("class:footer", f"{mode_glyph} {label}"), ("class:footer", f"{mode_glyph} {short}"),
+                     ("class:footer", mode_glyph), ("class:footer", "")]
+    if fi.notice:
+        forms["hints"] = [("class:footer.bold", fi.notice)] * 3
+    elif fi.quiet:
+        forms["hints"] = [("class:footer", "")] * 3
+    elif fi.running:
+        forms["hints"] = [("class:footer", f"esc to stop {g.sep} enter to steer {g.sep} tab to queue"),
+                          ("class:footer", f"esc stop {g.sep} tab queue"), ("class:footer", "")]
+    else:
+        forms["hints"] = [("class:footer", "? for shortcuts"), ("class:footer", "? help"), ("class:footer", "")]
+    return forms
 
 
 def footer_lines(fi: FooterInput, width: int, caps: Caps) -> list[Fragments]:
-    """Left: model · agent · project · mode (+ context %, held). Right: hints. Plus the mode line."""
+    """`  model · context 64% · agent · project · ◇ mode · ⏸ 2 held        ? for shortcuts`.
+
+    Items keep their order at every width. As space runs out they shorten one at a time following
+    FOOTER_LADDER, so the line changes gradually instead of losing half its content at one width.
+    A notice ("press ctrl+c again to exit") takes the hint's place and is cut, never dropped.
+    """
     g = caps.glyphs
-    mode_glyph = "◇" if not caps.ascii else "o"
-    narrow = width < 60
-    left: Fragments = []
+    width = max(1, width)
+    forms = _footer_forms(fi, caps)
+    level = {k: 0 for k in forms}
+    indent = 2 if width >= 24 else 1 if width >= 8 else 0
+    sep = f" {g.sep} " if width >= 24 else " "
 
-    def add(text: str, style: str = "class:footer") -> None:
-        if not text:
-            return
-        if left:
-            left.append(("class:footer", f" {g.sep} "))
-        left.append((style, text))
+    def compose() -> tuple[Fragments, tuple[str, str]]:
+        left: Fragments = []
+        for k in LEFT_ORDER:
+            if k not in forms:
+                continue
+            st, text = forms[k][min(level[k], len(forms[k]) - 1)]
+            if not text:
+                continue
+            if left:
+                left.append(("class:footer", sep))
+            left.append((st, text))
+        return left, forms["hints"][min(level["hints"], 2)]
 
-    add(fi.model)
-    if fi.context_pct is not None and fi.context_pct >= 50:
-        add(f"context {fi.context_pct}%", "class:footer.bold" if fi.context_pct >= 85 else "class:footer")
-    if not narrow:
-        add(fi.agent)
-        add(fi.project)
-        add(f"{mode_glyph} {MODE_LABEL.get(fi.approval_mode, fi.approval_mode)}")
-        if fi.held:
-            add(f"{g.held} {fi.held} held {g.sep} /approvals", "class:attention")
-    if fi.notice:
-        right = fi.notice
-        right_style = "class:footer.bold"
-    elif narrow or fi.quiet:
-        right, right_style = "", "class:footer"
-    elif fi.running:
-        right, right_style = f"esc to stop {g.sep} enter to steer {g.sep} tab to queue", "class:footer"
-    else:
-        right, right_style = "? for shortcuts", "class:footer"
-    # Fit: shrink the left side, never the hint.
-    avail = width - 2 - (width_of(right) + 2 if right else 0)
-    while left and frag_width(left) > avail:
-        # Drop from the end (least important), keeping at least the model.
-        if len(left) > 1:
-            left = left[:-2]
-        else:
-            left = [(left[0][0], truncate(left[0][1], max(1, avail)))]
+    def total(left: Fragments, right: tuple[str, str]) -> int:
+        return indent + frag_width(left) + (2 + width_of(right[1]) if right[1] else 0)
+
+    left, right = compose()
+    for item, lvl in FOOTER_LADDER:
+        if total(left, right) <= width:
             break
-    line: Fragments = [("", "  ")] + left
-    if right:
-        pad = max(2, width - frag_width(line) - width_of(right))
-        line += [("", " " * pad), (right_style, right)]
+        if item in level and level[item] < lvl:
+            level[item] = lvl
+            left, right = compose()
+    if fi.notice and total(left, right) > width:
+        # The notice outranks everything but the model: cut it to the room that is left.
+        if width - indent - frag_width(left) - 2 < 12 and left:
+            st, text = left[0]
+            left = [(st, truncate(text, max(1, min(width_of(text), width - indent - 14))))]
+        right = (right[0], truncate(right[1], max(1, width - indent - frag_width(left) - 2)))
+    elif total(left, right) > width:
+        right = (right[0], "")
+    if total(left, right) > width and left:
+        # Last resort: the model alone, cut to fit.
+        st, text = left[0]
+        left = [(st, truncate(text, max(1, width - indent - (2 + width_of(right[1]) if right[1] else 0))))]
+    line: Fragments = [("", " " * indent)] + left
+    if right[1]:
+        gap = 2 if left else 0
+        pad = max(gap, width - frag_width(line) - width_of(right[1]))
+        line += [("", " " * pad), right]
     lines = [line]
-    if fi.approval_mode in MODE_LINE and not narrow:
-        text = f"{'◆' if not caps.ascii else '*'} {MODE_LINE[fi.approval_mode]} (shift+tab to cycle)"
-        lines.append([("", "  "), ("class:mode", truncate(text, width - 3))])
+    if fi.approval_mode in MODE_LINE and width >= MODE_LINE_MIN_W:
+        star = "◆" if not caps.ascii else "*"
+        full = f"{star} {MODE_LINE[fi.approval_mode]} (shift+tab to cycle)"
+        if width_of(full) + indent > width:
+            full = f"{star} {MODE_LINE[fi.approval_mode]}"
+        lines.append([("", " " * indent), ("class:mode", truncate(full, max(1, width - indent - 1)))])
     return lines
 
 
 def rule(width: int, title: str, caps: Caps, style: str = "class:rule", title_style: str = "class:rule.title") -> Fragments:
-    """`──────── title ─` (title right-aligned, Claude's capture)."""
+    """`──────── title ─` (title right-aligned, Claude's capture). The title is cut to fit, or left out
+    below 24 columns, so the rule is always exactly ``width`` cells."""
     ch = caps.glyphs.rule
-    if not title or width < 20:
-        return [(style, ch * max(0, width))]
-    title = truncate(title, max(5, width // 2))
+    width = max(0, width)
+    if not title or width < 24:
+        return [(style, ch * width)]
+    title = truncate(title, max(5, min(width // 2, width - 8)))
     return [(style, ch * max(1, width - width_of(title) - 3)), (title_style, f" {title} "), (style, ch)]
