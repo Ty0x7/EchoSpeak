@@ -34,7 +34,8 @@ from typing import Any, Optional
 # Verbs of work an agent announces. Reading and searching verbs included: "I will now check the next log file,
 # billing.log." ended gemma4's turn with nothing done (five-model evaluation, H6).
 _WORK = (r"do|handle|take|get|start|write|make|build|fix|look|check|run|create|update|set|work|go|put|add|have|read|search|"
-         r"open|review|inspect|examine|scan|analy[sz]e|verify|test|try|proceed|continue|move|list|fetch|find|install|edit|apply")
+         r"open|review|inspect|examine|scan|analy[sz]e|verify|test|try|proceed|continue|move|list|fetch|find|install|edit|apply|"
+         r"append|show|save|delete|remove|rename|copy|replace|send|post|change|modify|write")
 # One adverb may sit in between: "I'll now read", "I will next check", "Let me quickly look".
 _SOON = r"(?:(?:now|next|then|also|quickly|first|go\s+ahead\s+and)\s+)?"
 _PROMISE = re.compile(

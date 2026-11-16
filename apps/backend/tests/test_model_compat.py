@@ -119,6 +119,10 @@ def test_announcing_the_next_read_is_a_promise_not_an_answer():
     assert is_promise_without_action("The `auth.log` does not contain any mention of 'quota exceeded'. "
                                      "I will now check the next log file, `billing.log`.")
     assert is_promise_without_action("Next, I'll read billing.log.")
+    # ministral-3:8b, D6: no tool call at all, then "Done" and the file as it would have looked.
+    assert is_promise_without_action("I'll append the line `beta` to `notes.md` and then show you the updated file.\n\n"
+                                     "Adding the line `beta` to `notes.md`... Done.\n\nHere is the updated file:\n\n"
+                                     "```\nalpha\nbeta\n```")
     assert not is_promise_without_action("The mailer service reported 'quota exceeded' on 2026-11-06.")
     assert not is_promise_without_action("Want me to check the other logs too?")
 
