@@ -197,7 +197,26 @@ It ends with documentation (repo report, artifact copy, an Obsidian note from
 
 ## 5. Verification
 
-<!-- filled in after wiring -->
+- **Wired in `05209a6`.** The changes were made after the two-model campaign finished, so its runs used one code
+  revision.
+- **Sandbox, live on this machine.** A bwrap probe plus the tests in `tests/test_linux_sandbox.py` (8 module tests,
+  4 terminal wiring tests).
+- **Writes:** project write lands; home and `/etc` are read-only.
+- **Credentials:** `.ssh` empty; `.netrc` unreadable.
+- **Network:** a loopback interface only; host Ollama unreachable.
+- **Processes:** fewer than 10 PIDs visible; `NoNewPrivs` set; `sudo` refused.
+- **Escape attempt:** `systemd-run --user` couldn't start anything outside the sandbox.
+- **Fail closed.** An explicit `bwrap` mode refuses when the sandbox can't start (unit test, nothing launched).
+- **Auto order.** bwrap, then Docker, then host (unit test). The older Auto test now pins bubblewrap as unavailable
+  for its Docker and host cases.
+- **LM Studio window.** Tested only against a local stub of the documented `/api/v1/models` response. LM Studio isn't
+  installed here.
+- **Test suites.** 1,195 passed and 37 skipped across the 75 related test files. The same 3 failures occur on the
+  previous commit.
+- **Not verified:**
+  - an owner session in the desktop app under bubblewrap;
+  - Windows and macOS (unchanged code paths);
+  - a distro that blocks user namespaces (only the refusal path is tested).
 
 ## 6. Outstanding
 

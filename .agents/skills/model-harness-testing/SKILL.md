@@ -67,7 +67,7 @@ have to rediscover it.
 | Script | Use |
 |---|---|
 | `harness_campaign.py` | **Start here.** `--models a,b --baseline-ref <git ref> --repeat 3 --label <name>`. Loads each model once and keeps it loaded. Runs the baseline harness (a cached `git archive`, with today's eval scripts) and then the current one. Judges in the background. Writes `campaign.json` and `campaign.md`. |
-| `harness_eval.py` | One run. Flags: `--model`, `--set dev\|heldout\|all`, `--only D1,H3`, `--repeat`, `--label`, `--env KEY=VALUE`. Boots an isolated backend (own data folder, auth on, unified mode) behind the recorder; never the owner's. |
+| `harness_eval.py` | One run. Flags: `--model`, `--set dev\|heldout\|all` (**the default is `dev`, 8 cases; pass `--set all` for 15**), `--only D1,H3`, `--repeat`, `--label`, `--env KEY=VALUE`, plus the A/B arms `--agents-md <file>` (the owner's AGENTS.md) and `--skill <SKILL.md>` (imported and approved through the real API). Boots an isolated backend (own data folder, auth on, unified mode) behind the recorder; never the owner's. `meta.json` records the arm and a hash of the dirty diff. |
 | `model_recorder.py` | Proxy that records every chat call: messages, tool schemas, the server's own usage and timings, reasoning. Started by `harness_eval.py`. |
 | `harness_judge.py` | `<run> [--window N] [--compare <run>]`. Scores from evidence only: re-runs tests in a copy of the project, compares hashes, reads the Ollama log, and checks the harness's own verification status. |
 | `replay_call.py` | Replays one recorded call N times under a variant (`no_think`, `note_as_user`, `drop_note`). Use it to test a hypothesis before changing code. |
@@ -150,6 +150,30 @@ Confirm a hypothesis cheaply first: replay the recorded call, read the raw serve
   must make it more accurate, and apply to every run.
 - **Don't change harness code while a run is using the worktree.** The eval backend imports it.
 - **Commit each fix with the evidence in the message.** Don't push, merge or publish unless the owner asks.
+
+## Testing a rule or a skill before keeping it
+
+Use this for a candidate instruction, skill or lesson, in the spirit of Harness²: propose, probe, compose, retain.
+See `docs/research/check-integrity-experiment.md`.
+
+1. **Pick one recurring development failure** from judged runs, and one regression case.
+2. **Keep one variable per arm.** Baseline, `--agents-md`, `--skill`, then the combination only if an arm helped.
+   Keep the model, window, cases, repetitions and harness commit the same in every arm.
+3. **Set `--env LEARNING_ENABLED=false` in every arm.** Otherwise learning's reliability note carries over between
+   cases and changes later ones.
+4. **Count invocation before crediting a skill.** Count `read_skill` calls in `model-calls.jsonl`. In the first
+   experiment a 9B model never opened a listed skill (0 of 182 requests).
+5. **Replicate an apparent win before keeping it.** Three runs can't separate a 1–2 point effect from noise: a 2/3
+   success fell to 0/3 when the same skill was tested again.
+6. **Report cost next to score:** model calls, server prompt and reply tokens, model time, and any editor calls.
+7. **Validate on held-out cases only for a change you mean to keep**, and say which held-out cases were already seen.
+
+## Memory on a 16 GB machine
+
+- Ollama's bundled `llama-server` keeps a host-RAM prompt cache of up to 8 GiB. A long run with Gemma 4 12B grew its
+  runner to 12 GB and the job was stopped for low memory.
+- Run long campaigns with a watchdog that unloads the model when `MemAvailable` falls under about 1.5 GB. That
+  resets the cache; it changes speed, not outputs. Log every reset.
 
 ## Retest
 
