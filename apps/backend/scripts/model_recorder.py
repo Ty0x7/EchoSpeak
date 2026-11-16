@@ -38,6 +38,7 @@ def summarize_stream(raw: bytes) -> dict[str, Any]:
     calls: dict[int, dict[str, str]] = {}
     finish = ""
     usage: dict[str, Any] = {}
+    timings: dict[str, Any] = {}  # llama.cpp's own: prompt_n (processed, not cached), *_per_second
     for line in raw.decode("utf-8", errors="replace").splitlines():
         if not line.startswith("data:"):
             continue
@@ -50,6 +51,8 @@ def summarize_stream(raw: bytes) -> dict[str, Any]:
             continue
         if isinstance(chunk.get("usage"), dict):
             usage = chunk["usage"]
+        if isinstance(chunk.get("timings"), dict):
+            timings = {k: v for k, v in chunk["timings"].items() if isinstance(v, (int, float))}
         for choice in chunk.get("choices") or []:
             delta = choice.get("delta") or {}
             if isinstance(delta.get("content"), str):
@@ -66,7 +69,7 @@ def summarize_stream(raw: bytes) -> dict[str, Any]:
             if choice.get("finish_reason"):
                 finish = str(choice["finish_reason"])
     return {"content": "".join(content), "reasoning_chars": reasoning, "reasoning": "".join(thought)[:1500], "tool_calls": [calls[i] for i in sorted(calls)],
-            "finish_reason": finish, "usage": usage}
+            "finish_reason": finish, "usage": usage, "timings": timings}
 
 
 class Recorder(BaseHTTPRequestHandler):
