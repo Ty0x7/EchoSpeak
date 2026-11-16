@@ -73,7 +73,8 @@ function evidenceOf(lesson: LearningLesson) {
 
 function lessonLine(lesson: LearningLesson): string {
   const e = evidenceOf(lesson);
-  if (lesson.status === "pending_review") return "Learned while reading outside content or from an unusual task, so Echo won't use it until you decide.";
+  if (lesson.status === "pending_review" && lesson.awaiting === "confirmation") return "Learned while reading outside content: Echo uses it once work in another conversation teaches the same thing, or you approve it.";
+  if (lesson.status === "pending_review") return "Risky (it names sites, sends things, or came from a task that changed tests), so Echo won't use it until you decide.";
   if (lesson.status === "retired") return lesson.note ? sentence(lesson.note) : "No longer used.";
   if (lesson.status === "quarantined") return "You rejected it. Echo never uses it.";
   if (!lesson.uses) return "New: Echo hasn't used it on a task yet.";
@@ -92,6 +93,9 @@ function outcomeOf(ep: LearningEpisode): { label: string; tone: "ok" | "warn" | 
   if (ep.feedback > 0) return { label: "You said it worked", tone: "ok" };
   if (ep.feedback < 0) return { label: "You said it didn't work", tone: "bad" };
   if (ep.outcome === "error") return { label: "The model failed", tone: "neutral" };
+  const blocked = BLOCKED[ep.effective_cause || ""];
+  if (blocked) return { label: blocked, tone: "neutral" };
+  if (ep.effective_cause === "false_success") return { label: "Said done, but the checks disagreed", tone: "bad" };
   if (ep.failed) return { label: ep.outcome === "stopped" ? "Stopped before finishing" : "Didn't work", tone: "bad" };
   if (ep.verified_success) return { label: "Checked and worked", tone: "ok" };
   return { label: "Done, but not checked", tone: "warn" };
@@ -103,6 +107,24 @@ const whoOf = (ep: LearningEpisode) => `${ep.agent_name || ep.agent_id}${isWorke
 /** Unchecked replies where your Worked / Didn't work is the only evidence there will be. */
 const wantsFeedback = (ep: LearningEpisode) =>
   !isWorker(ep) && !ep.feedback && Boolean(ep.execution_id) && ep.outcome !== "error" && !ep.failed && !ep.verified_success;
+
+/** Causes that weren't the agent's strategy at work: never counted for or against a lesson. */
+const BLOCKED: Record<string, string> = {
+  environment: "Blocked by the setup",
+  authorization: "Needed your permission",
+  tool_failure: "A tool broke",
+  information_gap: "Couldn't find what it needed",
+  misunderstood: "You said it misunderstood",
+};
+
+const VERIFIED_TEXT: Record<string, string> = {
+  verified: "Verified against the task's own acceptance check.",
+  checks_pass: "The checks after the last change pass.",
+  partial: "Partly verified.",
+  failing: "The last check failed.",
+  unverified: "Not verified.",
+  blocked: "Blocked before it could be verified.",
+};
 
 const LEVEL_TEXT = [
   "Echo said it was done, but nothing it ran shows that.",
@@ -155,8 +177,8 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
 
   return (
     <PageShell
-      title="Learning"
-      lead="What Echo learns from finished tasks: short lessons it may use next time. Lessons are advice only; they never change permissions, tools or settings."
+      title="Learning diagnostics"
+      lead="Echo learns on its own from checked work in Chat, Agents and Code; you don't need to manage it. This shows what it learned and whether it's helping. Lessons are advice only; they never change permissions, tools or settings."
       action={<button type="button" className="es-btn" aria-pressed={view.kind === "guide"} onClick={() => go(view.kind === "guide" ? { kind: "overview" } : { kind: "guide" })}>How learning works</button>}
     >
       <div className="es-lx">
@@ -179,8 +201,11 @@ export function LearningPage({ apiBase }: { apiBase: string }) {
 
 // ── overview ─────────────────────────────────────────────────────────────
 
+/** Waiting lessons only the owner can release; ones waiting for confirmation release themselves. */
+const needsOwner = (l: LearningLesson) => l.status === "pending_review" && l.awaiting !== "confirmation";
+
 function Overview({ data, names, go, api, act }: { data: Data; names: Map<string, string>; go(v: View): void; api: Api; act: Act }) {
-  const pending = data.lessons.filter((l) => l.status === "pending_review");
+  const pending = data.lessons.filter(needsOwner);
   const inUse = data.lessons
     .filter((l) => l.status === "established" || l.status === "probation")
     .sort((a, b) => (b.last_used_at || b.updated_at) - (a.last_used_at || a.updated_at));
@@ -195,7 +220,7 @@ function Overview({ data, names, go, api, act }: { data: Data; names: Map<string
         <div className="es-learn-callout" role="note">
           {data.status.mode === "control"
             ? "Learning is in test mode: agents read unrelated notes instead of lessons, and nothing new is recorded."
-            : "Learning is off, so Echo isn't recording experiences or using lessons. Turn it on in Settings › General."}
+            : "Learning is off, so Echo isn't recording experiences or using lessons. Turn it on in Settings › Memory."}
         </div>
       ) : null}
       <Improvement data={data} inUse={inUse} />
@@ -417,7 +442,7 @@ function ExperienceList({ api, profiles, go, back }: { api: Api; profiles: Learn
 }
 
 function ReviewList({ data, go, back }: { data: Data; go(v: View): void; back(): void }) {
-  const pending = data.lessons.filter((l) => l.status === "pending_review");
+  const pending = data.lessons.filter(needsOwner);
   const feedback = data.recent.filter(wantsFeedback);
   return (
     <>
@@ -600,7 +625,12 @@ function ExperienceDetail({ episode, lessonById, api, act, go, back }: {
       <section className="es-lx-block" aria-label="What was checked">
         <h4>What was checked</h4>
         <p>{LEVEL_TEXT[level]}</p>
-        {ep.reasons.length ? <ul className="es-learn-reasons">{ep.reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
+        {ep.verification?.status && VERIFIED_TEXT[ep.verification.status] ? (
+          <p>{VERIFIED_TEXT[ep.verification.status]}{ep.verification.detail || ep.verification.last ? ` ${ep.verification.detail || ep.verification.last}` : ""}
+            {ep.verification.attempts ? ` (${plural(ep.verification.attempts, "attempt")})` : ""}</p>
+        ) : null}
+        {BLOCKED[ep.effective_cause || ""] ? <p className="es-lx-muted">This wasn't the approach's fault, so it doesn't count for or against any lesson.</p> : null}
+        {ep.reasons.length ?<ul className="es-learn-reasons">{ep.reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
         {!ep.trusted ? <p className="es-lx-muted">It read outside content ({ep.taint.join(", ")}), so anything learned from it waits for your review.</p> : null}
         {ep.feedback_note ? <p className="es-lx-muted">Your note: "{ep.feedback_note}"</p> : null}
       </section>
@@ -660,7 +690,7 @@ function Guide({ data, lessonById, go, back }: { data: Data; lessonById: Map<str
         </li>
         <li>
           <strong>Give feedback where it helps.</strong>
-          <span>Under a reply, or on an unchecked experience here, press Worked or Didn't work. Lessons learned while reading web pages or email wait for your review in {link("Needs your feedback", { kind: "review" })}.</span>
+          <span>Under a reply, press Worked or Didn't work, or just say "that worked" or "that's wrong" in your next message. A few risky lessons (about sending things, or naming sites learned from the web) wait in {link("Needs your feedback", { kind: "review" })}; unreviewed ones are set aside after 30 days.</span>
         </li>
         <li>
           <strong>See whether a lesson came out of it.</strong>
@@ -675,7 +705,7 @@ function Guide({ data, lessonById, go, back }: { data: Data; lessonById: Map<str
         <span className="es-lx-badge">Example, not your data</span>
         <p>A lesson "Run a script once after writing it" is used on 4 coding tasks (3 worked) and left out on 3 (1 worked). That's evidence it helps, so it becomes <b>Proven</b>. If the tasks without it had gone just as well, it would stay <b>Being tested</b>; clearly better without it, and it's retired.</p>
       </div>
-      {lessonById.size === 0 && !data.recent.length ? <p className="es-lx-muted">Learning needs to be on: Settings › General › Learning from experience.</p> : null}
+      {lessonById.size === 0 && !data.recent.length ? <p className="es-lx-muted">Learning needs to be on: Settings › Memory › Learning from experience.</p> : null}
     </article>
   );
 }
@@ -694,6 +724,12 @@ function Advanced({ data, api, act }: { data: Data; api: Api; act: Act }) {
         Reviews happen when no chat is running.{" "}
         <button type="button" className="es-lx-link" disabled={!data.status.enabled || !data.status.reflections_pending}
           onClick={() => void act(() => api.reflectNow(), "Reviewing finished tasks in the background. Check back in a minute.")}>Review now</button>
+      </p>
+      <p className="es-lx-muted">
+        Reset forgets every lesson, experience and statistic. Memory is separate and isn't touched.{" "}
+        <button type="button" className="es-lx-link" onClick={() => {
+          if (window.confirm("Forget everything Echo learned? Memory isn't affected.")) void act(() => api.resetLearning(), "Learning was reset.");
+        }}>Reset learning</button>
       </p>
       <div className="es-page-list">
         {data.profiles.map((profile) => <AgentRow key={profile.agent_id} profile={profile} onPause={(paused) => void act(() => api.pauseLearning(profile.agent_id, paused))} />)}

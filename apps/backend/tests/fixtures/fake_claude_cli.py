@@ -29,5 +29,8 @@ if "needs-approval" in prompt:
 else:
     text = "hello " + "|".join(a for a in args if a in {"acceptEdits", "user"})
     text += " api-key-present" if __import__("os").environ.get("ANTHROPIC_API_KEY") else " own-sign-in"
+    if "write-folder-fixture" in prompt:
+        from pathlib import Path
+        Path("folder-result.txt").write_text("fixture edit", encoding="utf-8")
 emit({"type": "stream_event", "event": {"delta": {"type": "text_delta", "text": text}}})
 emit({"type": "result", "subtype": "success", "is_error": False, "session_id": session})

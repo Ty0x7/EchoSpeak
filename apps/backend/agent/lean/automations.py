@@ -47,9 +47,10 @@ def deliver(text: str, channels: list[str], label: str, *, session_id: str = "",
 
 
 def _ensure_chat(title: str) -> str:
+    """A conversation an agent starts (a routine's results, reminders). It belongs to Agents, not Chat."""
     from agent.threads import get_thread_manager
 
-    return get_thread_manager().create_thread(title=title[:60], source="web").thread_id
+    return get_thread_manager().create_thread(title=title[:60], source="agent").thread_id
 
 
 def run_automation(
@@ -181,11 +182,7 @@ def _thread_exists(thread_id: str) -> bool:
 
 
 def heartbeat_session() -> str:
-    """The heartbeat posts into one dedicated chat."""
-    from agent.threads import get_thread_manager
+    """Friendly check-ins and notices share one chat, where the owner can reply (agent/checkins.py)."""
+    from agent import checkins
 
-    manager = get_thread_manager()
-    for thread in manager.list_threads(include_archived=True, limit=500):
-        if str(getattr(thread, "title", "")) == "Heartbeat":
-            return thread.thread_id
-    return _ensure_chat("Heartbeat")
+    return checkins.session()

@@ -70,7 +70,9 @@ def _model_dump(value: Any) -> dict[str, Any]:
 
 def _is_npx(command: str) -> bool:
     """npx itself, by name or path (npx, npx.cmd, C:\\...\\npx.cmd)."""
-    return Path(str(command or "")).name.lower() in {"npx", "npx.cmd", "npx.exe"}
+    from pathlib import PureWindowsPath
+
+    return PureWindowsPath(str(command or "")).name.lower() in {"npx", "npx.cmd", "npx.exe"}
 
 
 def _safe_error(value: Any) -> str:
@@ -707,7 +709,21 @@ class MCPManager:
                     continue
                 ToolRegistry.remove_owned(name, owner)
                 self._registered_names.remove(name)
-            for definition in session.list_tools():
+            definitions = session.list_tools()
+            from agent import mcp_trust
+
+            if not mcp_trust.tools_ok(state.name, definitions):
+                # The same check as at startup (C4): a running server that adds or changes a tool waits for the
+                # owner again instead of registering it. None of its tools stay, as at startup.
+                state.approval = "tools_changed"
+                state.last_error = ("Its tools changed since you approved it: approve it again in Settings › Advanced › "
+                                    "Connections & skills.")
+                logger.warning("MCP server '{}' changed its tools while running; waiting for approval", state.name)
+                session.stop()
+                state.running = False
+                self._sync_connection(state, {"display_name": state.name})
+                return
+            for definition in definitions:
                 try:
                     self._register_tool(state.name, definition, session)
                 except Exception as exc:

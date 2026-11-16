@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Echo TUI</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--soft:#f0f0f0;--accent:#2f6fde;--ok:#1f7a3f;--warn:#a86a00;--bad:#b42318}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--soft:#222;--accent:#8fb4ff;--ok:#5cc983;--warn:#d6a955;--bad:#ff8a7a}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 40px}header{padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 4px}header p{margin:0;font-size:13px;color:var(--muted)}nav{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;margin:0 0 8px}nav a{color:var(--muted);text-decoration:none}nav a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 6px}section{margin:34px 0;scroll-margin-top:12px}.lead{font-size:13.5px;color:var(--muted);margin:0 0 14px;max-width:820px}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:13px system-ui,sans-serif}svg .m{fill:var(--muted);font-size:11.5px}svg .b{fill:var(--panel);stroke:var(--line)}svg .s{fill:var(--soft);stroke:var(--line)}svg .hl{fill:var(--panel);stroke:var(--accent);stroke-width:1.6}svg .l{stroke:var(--muted);fill:none;stroke-width:1.4}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}figure{margin:0;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px;min-width:0}figure img{width:100%;height:auto;display:block;border-radius:6px}figcaption{font-size:12.5px;color:var(--muted);margin-top:8px}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:14px 16px;min-width:0}.node h3{font-size:14px;margin:0 0 4px}.node p,.node li{font-size:13px;color:var(--muted);margin:0}.node ul{margin:6px 0 0;padding-left:18px}code{font:12px ui-monospace,monospace}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:0 8px;margin-right:6px}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}.tag.bad{color:var(--bad)}.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}th{font-weight:600;color:var(--muted)}pre{font:12px/1.45 ui-monospace,monospace;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;margin:0}footer{font-size:12px;color:var(--muted);margin-top:30px;border-top:1px solid var(--line);padding-top:12px}@media(max-width:860px){.grid3{grid-template-columns:1fr}.diagram svg{min-width:720px}}
+</style></head><body><main>
+<header><h1>Echo TUI · the EchoSpeak terminal</h1><p>14 November 2026 · <code>apps/terminal</code> · branch <code>harness-first-rearchitecture</code> · not merged or released · technical record: <code>docs/research/cli-design.md</code> §5</p></header>
+<nav aria-label="Sections"><a href="#shots">Screenshots</a><a href="#layout">Live region</a><a href="#control">What it controls</a><a href="#status">Status</a></nav>
+
+<section id="shots"><h2>In a real terminal</h2>
+<p class="lead">Real screenshots: foot + tmux on Omarchy (lumon theme, all-blue palette), backend on an isolated test data folder, local model <code>qwen3.5:9b</code>. Output is inline: everything above the composer is ordinary terminal scrollback.</p>
+<div class="grid3">
+<figure><img src="../media/echo-tui/approval.png" alt="Echo TUI: banner with Echo's face, a user request to run unittest, a running step with the Echo ping, and the approval dialog replacing the composer with five numbered options and key hints."><figcaption>An approval replaces the composer. Only the decisions the backend accepts are offered; nothing is preselected and keys typed in the first 300 ms are ignored.</figcaption></figure>
+<figure><img src="../media/echo-tui/running.png" alt="Echo TUI mid-run: failed and successful tool lines with previews, verification notes, collapsed thinking lines and the shimmering status line with elapsed time, tokens and esc to stop."><figcaption>During a run: ✓/✗ tool lines with <code>⎿</code> previews, collapsed thinking, the shimmering status line, and steering hints in the footer.</figcaption></figure>
+<figure><img src="../media/echo-tui/answer.png" alt="Echo TUI after a run: markdown answer with inline code and a syntax-highlighted Python block, then a dim 'Worked for 10s · Read 1 file' separator and the idle composer."><figcaption>A finished answer: markdown committed block by block, code in the terminal's own palette, the turn separator, and the idle composer.</figcaption></figure>
+</div></section>
+
+<section id="layout"><h2>The live region</h2>
+<p class="lead">Only this part is redrawn (prompt_toolkit, inline). Finished blocks are rendered with rich and written above it. Diagram, not a screenshot.</p>
+<div class="wrap diagram"><svg viewBox="0 0 1040 300" role="img" aria-label="Terminal scrollback on top; below it the live region stacks the stream tail, running steps, the status line, pending steers and queued messages, the slash menu or a dialog, the composer with title rule, and the footer.">
+<rect x="20" y="14" width="1000" height="58" rx="8" class="s"/><text x="40" y="38">Scrollback (immutable)</text><text x="40" y="58" class="m">banner · › user turns · ● answers (markdown) · ✓ ✗ ⊘ ⏸ tool lines · ◆/◇ outcome · ── Worked for 42s · … ──</text>
+<rect x="20" y="84" width="1000" height="200" rx="10" class="hl"/><text x="40" y="106">Live region</text>
+<rect x="40" y="116" width="470" height="30" rx="6" class="b"/><text x="52" y="136" class="m">stream tail (≤ 8 lines of the open markdown block)</text>
+<rect x="530" y="116" width="470" height="30" rx="6" class="b"/><text x="542" y="136" class="m">running steps · ◉ Running `pytest -q`  12s</text>
+<rect x="40" y="154" width="470" height="30" rx="6" class="b"/><text x="52" y="174" class="m">◉ Echo is thinking it through… (14s · ↓ 1.2k tokens · esc to stop)</text>
+<rect x="530" y="154" width="470" height="30" rx="6" class="b"/><text x="542" y="174" class="m">↳ steers (next checkpoint) · queued follow-ups</text>
+<rect x="40" y="192" width="960" height="30" rx="6" class="b"/><text x="52" y="212" class="m">slash menu (≤ 8 rows)  —or—  dialog: approval · question · trust folder · model / agent / session picker</text>
+<rect x="40" y="230" width="960" height="44" rx="6" class="b"/><text x="52" y="248" class="m">──────── session title ─   › composer (placeholder types itself)   ────────</text><text x="52" y="266" class="m">qwen3.5:9b · Jarvis · project · ◇ ask for risky actions · context 64% · ⏸ 1 held          ? for shortcuts</text>
+</svg></div></section>
+
+<section id="control"><h2>Controlling EchoSpeak from the terminal</h2>
+<p class="lead">Every command is an existing backend route. The menu hides commands whose routes did not answer at startup. Global settings ask first; nothing is ever turned on automatically.</p>
+<div class="wrap"><table>
+<tr><th>Command</th><th>What it does</th></tr>
+<tr><td><code>/model</code></td><td>Ollama models with size and “fits your GPU / slow: spills to RAM”; saves the default (<code>PUT /settings</code>) and/or this chat (<code>POST /provider/switch</code>). First run asks the same way.</td></tr>
+<tr><td><code>/agents</code>, <code>/agent</code></td><td>Talk to Echo or any agent (Jarvis, Glados, custom) in a direct session.</td></tr>
+<tr><td><code>/permissions</code>, Shift+Tab</td><td>Permission switches with a confirmation per change; approval mode smart → autonomous → always ask (<code>never</code> only by typing it).</td></tr>
+<tr><td><code>/approvals</code></td><td>Answer waiting and held approvals; allowing a held one offers to resume the paused work.</td></tr>
+<tr><td><code>/project</code>, <code>/mode</code></td><td>Attach this folder after an explicit “Trust this folder?”; unified or environments assistant mode.</td></tr>
+<tr><td><code>/new /resume /sessions /memory /status /usage /stop /detach /transcript /verbose /copy /clear</code></td><td>Sessions shared with the app, memory, backend state, token and context use, stop or leave a running task, the full transcript in a pager.</td></tr>
+</table></div>
+<pre style="margin-top:12px">$ echospeak                 # attach to the app's backend, or start one detached (shared data folder)
+$ echospeak backend status  # url · pid · who started it · data folder · log
+$ echospeak backend stop    # only a backend the terminal started</pre></section>
+
+<section id="status"><h2>Status</h2>
+<div class="grid3">
+<div class="node"><span class="tag ok">Tested</span><h3>Automated</h3><p>46 unit tests for the pure parts; a pseudo-terminal round trip against the real backend. Existing terminal and endpoint-file tests stay green.</p></div>
+<div class="node"><span class="tag ok">Verified live</span><h3>tmux, real model</h3><p>Approvals, deny with a note, steering, queueing, stop, detach/resume, pickers, held approvals, questions, paste chips, 70 columns, NO_COLOR, ASCII, plain fallback.</p></div>
+<div class="node"><span class="tag warn">Gaps</span><h3>Backend-side</h3><ul><li>A denial blocks the whole work item.</li><li>Resumed held work does not stream.</li><li>No backend-wide run list.</li></ul></div>
+</div></section>
+<footer>Screenshots are real captures from this machine; paths in them are temporary test folders. The terminal client never executes anything itself: tools run in the backend under the owner's permissions and approvals.</footer>
+</main></body></html>

@@ -79,6 +79,20 @@ def inference(endpoint=None, *, cancel=None):
             yield
 
 
+_LOOP_ACCOUNTS = contextvars.ContextVar("echo_loop_accounts", default=False)
+
+
+@contextmanager
+def loop_accounted():
+    """Mark model calls made inside as charged by the agent loop itself (agent/lean/loop.py), which knows
+    how many tokens a step actually added. Totals re-count the whole re-sent conversation every step."""
+    token = _LOOP_ACCOUNTS.set(True)
+    try:
+        yield
+    finally:
+        _LOOP_ACCOUNTS.reset(token)
+
+
 def admitted(function):
     @functools.wraps(function)
     def call(*args, **kwargs):
@@ -90,7 +104,7 @@ def admitted(function):
             if context:
                 context.coordinator.check(context)
             result = function(*args, **kwargs)
-            if context:
+            if context and not _LOOP_ACCOUNTS.get():
                 usage = getattr(result, "usage", {}) or {}
                 context.coordinator.account(context, int(usage.get("total") or (usage.get("prompt", 0) + usage.get("completion", 0))))
             return result

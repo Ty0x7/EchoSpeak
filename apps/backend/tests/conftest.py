@@ -19,12 +19,18 @@ os.environ["ECHOSPEAK_DATA_DIR"] = str(_TEST_STATE_ROOT)
 # ~/.echospeak (agent/home.py): the owner's real AGENTS.md must not reach test prompts.
 os.environ["ECHOSPEAK_HOME"] = str(_TEST_STATE_ROOT / "home")
 os.environ["ECHOSPEAK_ALLOW_MULTI_WRITER"] = "1"
+# Off Windows the credential broker's key lives in the desktop keyring (agent/credential_posix.py).
+# Tests must never read or write the developer's real keyring: keep the key in the disposable folder.
+os.environ["ECHOSPEAK_CREDENTIAL_KEYFILE"] = "1"
 # Learning (agent/learning) would carry lessons and track records from one test's
 # chats into the next one's prompts. Learning tests turn it on with a fresh store.
 os.environ.setdefault("LEARNING_ENABLED", "0")
 # The quarantined reader adds a model call per email or app result; scripted test
 # models would answer it. Its own tests (test_quarantine_reader.py) turn it on.
 os.environ.setdefault("LEAN_QUARANTINE_READER", "off")
+# Echo's check-in notices (agent/checkins.py) run on every scheduler tick and read state other
+# tests leave behind; tests/test_checkins.py turns them on with its own isolated store.
+os.environ.setdefault("CHECKIN_MODE", "off")
 
 
 def pytest_sessionfinish(session, exitstatus):  # type: ignore[no-untyped-def]

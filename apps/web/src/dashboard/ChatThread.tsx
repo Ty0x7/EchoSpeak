@@ -28,6 +28,9 @@ type ChatThreadProps = {
   actions?: MessageActionProps;
   voiceStage?: React.ReactNode;
   contextBar?: React.ReactNode;
+  /** Shown while new content arrives below and the user has scrolled up to read. */
+  showJumpToLatest?: boolean;
+  onJumpToLatest?(): void;
 };
 
 /** The message timeline owns only presentation; Dashboard owns session changes. */
@@ -35,7 +38,7 @@ export function ChatThread({
   activeThreadId, streaming, scrollRef, onScroll, onWheel, onKeyDown, onTouchStart, onTouchEnd,
   activeRoom, agents, onEditRoom, timeline, live, providerInfo, onQuickReply,
   onLeanApproval,
-  actions, voiceStage, contextBar,
+  actions, voiceStage, contextBar, showJumpToLatest, onJumpToLatest,
 }: ChatThreadProps) {
   return (
     <div className={`conversation-view${voiceStage ? " is-voice" : ""}`}>
@@ -82,6 +85,11 @@ export function ChatThread({
       ) : null}
       </div>
     </div>
+    {showJumpToLatest && onJumpToLatest ? (
+      <button type="button" className="chat-jump-latest" onClick={onJumpToLatest} aria-label="Jump to the latest message">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M12 5v14M6 13l6 6 6-6" /></svg>
+      </button>
+    ) : null}
     </div>
   );
 }

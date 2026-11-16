@@ -106,7 +106,7 @@ def test_transport_retries_and_concurrent_creation_return_one_session(env):
     assert len({row["thread_id"] for row in rows}) == len(tm.list_threads()) == 1
 
 
-@pytest.mark.parametrize("runtime", ["codex", "claude_code", "acp"])
+@pytest.mark.parametrize("runtime", ["codex", "claude_cli", "acp"])
 def test_external_runtime_never_falls_back_to_native(env, runtime):
     client, item, _, _, tm, store = env
     response = start(client, item, runtime)

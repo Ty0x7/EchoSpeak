@@ -156,7 +156,11 @@ def render(memories: Iterable[dict[str, Any]]) -> str:
         if lines and used + len(line) > PROMPT_CHARS:
             break
         seen.append(line)
-        lines.append(f"- {line}")
+        # Provenance: when it was saved, and whether it's about this project only, so the model can say
+        # "you told me on…" or notice a fact may have changed instead of presenting it as current truth.
+        where = {"project": "this project", "session": "this chat"}.get(str(memory.get("scope") or ""), "")
+        origin = ", ".join(part for part in (f"saved {memory['saved_at']}" if memory.get("saved_at") else "", where) if part)
+        lines.append(f"- {line}" + (f" ({origin})" if origin else ""))
         used += len(line)
         if len(lines) >= PROMPT_ROWS:
             break

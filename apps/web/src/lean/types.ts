@@ -5,6 +5,8 @@ export type LeanAgentRef = {
   name: string;
   title?: string;
   initials?: string;
+  /** Which provider answered. Chat (agent id "chat") shows the model, not an agent. */
+  provider?: string;
 };
 
 export type LeanSegment =
@@ -154,6 +156,8 @@ export type LeanApproval = {
 export type LessonStatus = "pending_review" | "probation" | "established" | "retired" | "quarantined";
 
 export type LearningLesson = {
+  /** For a waiting lesson: "owner" (only you release it) or "confirmation" (released when other work teaches it too). */
+  awaiting?: string;
   id: string;
   agent_id: string;
   agent_name?: string;
@@ -218,6 +222,10 @@ export type LearningEpisode = {
   role?: string;
   /** "swarm" for research workers. */
   source?: string;
+  /** Why it turned out this way, from the evidence or as your feedback reclassified it. */
+  effective_cause?: string;
+  /** The verification ledger's record, when checks measured the work. */
+  verification?: { status?: string; detail?: string; last?: string; attempts?: number; bottleneck?: string };
 };
 
 export type LearningKindStats = { wins: number; losses: number; checked: number; answered: number; confirmed: number; decided: number; rate: number };

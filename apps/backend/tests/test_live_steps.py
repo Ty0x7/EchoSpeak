@@ -70,7 +70,9 @@ def _box(search_output: str):
     return box, fetched
 
 
-RESULTS = "Search provider: ddg\n\n1. One\n   URL: https://one.com/a\n\n2. Two\n   URL: https://two.com/b\n\n3. Three\n   URL: https://three.com/c"
+# Realistic results mention what was searched; results that don't aren't opened (agent/search_rank.py).
+RESULTS = ("Search provider: ddg\n\n1. Best budget mic review\n   URL: https://one.com/a\n\n2. Budget mic comparison\n"
+           "   URL: https://two.com/b\n\n3. Edmonton population and budget mics\n   URL: https://three.com/c")
 
 
 def test_search_reads_the_top_results_for_comparisons_and_reports_progress():
@@ -80,18 +82,18 @@ def test_search_reads_the_top_results_for_comparisons_and_reports_progress():
         result = box.run("web_search", {"query": "best budget mic"})
     assert result.ok
     assert fetched == ["https://one.com/a", "https://two.com/b"]
-    assert result.meta == {"results": 3, "pages": 2}
-    assert "## Pages read from the top results" in result.output and "Text from https://two.com/b." in result.output
+    assert result.meta == {"results": 3, "pages": 2, "skipped": 0, "direct": 0}
+    assert "## Pages read (inspected, not just snippets)" in result.output and "Text from https://two.com/b." in result.output
     assert any(line.startswith("Reading two.com/b") for line in lines)
 
 
 def test_plain_lookups_only_search_unless_asked():
     box, fetched = _box(RESULTS)
     result = box.run("web_search", {"query": "edmonton population"})
-    assert fetched == [] and result.meta == {"results": 3}
+    assert fetched == [] and result.meta == {"results": 3, "pages": 0, "skipped": 0, "direct": 0}
     box, fetched = _box(RESULTS)
     box.run("web_search", {"query": "edmonton population", "read": 1})
-    assert fetched == ["https://one.com/a"]
+    assert fetched == ["https://three.com/c"]  # the first result that mentions the question, not just the first result
 
 
 def test_search_schema_offers_read_and_the_prompt_asks_for_sources_and_a_heads_up():

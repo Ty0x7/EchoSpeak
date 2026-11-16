@@ -6,6 +6,35 @@ const run = (events: LeanEvent[]) => events.reduce(leanReducer, emptyLive("r1"))
 const base = { request_id: "r1", message_id: "m1", agent_id: "echo" };
 
 describe("lean live reducer", () => {
+  it("shows a run the owner stopped as stopped, not failed; a real error still fails", () => {
+    const stopped = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "agent_token", ...base, step: 1, data: "Partial answer" },
+      { type: "agent_done", ...base, text: "Partial answer", success: false, error: "cancelled" },
+    ] as LeanEvent[]);
+    expect(stopped.messages.m1.status).toBe("done");
+    const broken = run([
+      { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },
+      { type: "agent_done", ...base, text: "", success: false, error: "The model request failed" },
+    ] as LeanEvent[]);
+    expect(broken.messages.m1.status).toBe("failed");
+  });
+
+  it("keeps a finished answer in place and adds the review note under it (no erase, no second draft)", () => {
+    const state = run([
+      { type: "agent_start", ...base, agent: { id: "chat", name: "gemma" } },
+      { type: "reasoning_delta", ...base, step: 2, text: "plan" },
+      { type: "agent_token", ...base, step: 2, data: "Ships 3 Nov ([a](https://made-up.example/r))." },
+      { type: "text_replace", ...base, step: 2, text: "Ships 3 Nov (a)." },
+      { type: "answer_note", ...base, step: 2, note: "Unverified links removed (made-up.example)." },
+      { type: "agent_done", ...base, text: "Ships 3 Nov (a).", success: true },
+    ] as LeanEvent[]);
+    const msg = state.messages.m1;
+    expect(msg.segments.map((s) => s.kind)).toEqual(["thinking", "text", "note"]);
+    expect((msg.segments[1] as { text: string }).text).toBe("Ships 3 Nov (a).");
+    expect(isLeanEvent({ type: "answer_note", ...base } as LeanEvent) && isLeanEvent({ type: "answer_continue", ...base } as LeanEvent)).toBe(true);
+  });
+
   it("keeps thinking, tools, and text in the order they streamed", () => {
     const state = run([
       { type: "agent_start", ...base, agent: { id: "echo", name: "Echo" } },

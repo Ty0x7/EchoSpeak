@@ -1,3 +1,265 @@
+# EchoSpeak architecture — research review, 30 October 2026
+
+**Status: source audit and architecture proposal. No loop redesign implemented.**
+The already-running folder-mode correction is a separate completed 11.13.1 change.
+Workflow: **Objective → Research → Environment → Verification → Adaptation → Completion.**
+
+[Visual architecture and teaching guide](../../artifacts/research/echospeak-architecture.html) ·
+[Audit evidence](echospeak-architecture-verification.json) ·
+[Current folder-mode build](../releases/v11.13.1.md)
+
+## The decision in plain language
+
+EchoSpeak already has **its own native harness** and **adapters for other harnesses**.
+Chat, Code and Agents describe the experience and responsibilities. Echo native,
+Codex and Claude Code describe who executes the work. A selected model is another
+choice. These should be explicit, separate contracts.
+
+**Provisional recommendation:** retain one shared native execution core, with
+separately testable Chat, Code and Agents controllers. Keep vendor-owned runtimes
+behind their adapters. Do not copy the native loop three times, replace it with
+an SDK, or remove working features before comparative traces justify the change.
+This recommendation is engineering judgment, not a measured model-quality result.
+
+Sharing loop code does not mean sharing a conversation's state. Each run has its
+own session, selected model, history, context, cancellation and permissions. The
+native session lock is per conversation; independent conversations can run in
+parallel subject to resource admission. An asyncio process-supervision loop and
+the model/tool reasoning cycle are also different kinds of “loop.”
+
+## A vocabulary we can use consistently
+
+These are proposed product/engineering names mapped to current code. They are not
+new modules or class renames that have already been implemented.
+
+| Name | Responsibility | Current implementation |
+|---|---|---|
+| **Echo Core** | Shared services: persistence, tool execution, permissions, events, model access, cancellation | `agent/core.py`, `state.py`, `lean/toolbox.py`, `lean/policy.py`, stores and API services; broader than the file named core.py |
+| **Echo Native** | Echo's own model/tool execution engine | `LeanSession` in `lean/runtime.py`, `LeanTurn` in `lean/loop.py`, `ChatClient` and native tools |
+| **Chat Controller** | Information-first conversation, retrieval, citations and answer completion | `environments.py`, `chat_mode.py`, `chat_run.py`, Chat branches in LeanSession |
+| **Code Controller** | Project context, engineering tools and observed verification | `code_mode.py`, `echo_code.py`, LeanSession Code branches and verification ledger |
+| **Agent Coordinator** | Persistent identities, responsibilities, rooms, delegation, schedules and durable work | personas/rooms, coordination/work services and Agents branches in LeanSession |
+| **Runtime Bridge** | Control an external harness and translate its events/capabilities | `code_sessions.py`, `code_runtimes.py`, `code_process.py`; Codex app-server, Claude CLI, ACP |
+| **Model Binding** | Exact provider/endpoint/model/account selection and capability provenance | `model_runtime.py`, `cloud_providers.py`, `lean/provider.py`, native session bindings |
+| **Workspace** | The files/tools the run operates on | Project folder or explicit Git worktree; workspace path is independent of a model or agent identity |
+
+A **session** is the durable conversation/work record. A **run** is one user
+request carried to a stopping point. A **step** is a model response and any tool
+work it requests. A **context window** is the subset supplied to the model now;
+it is not the whole session. An **agent identity** is a persistent persona and
+responsibility, not the language model's weights. Echo's learning records advice
+and experience; that does not train the underlying provider model's weights.
+External SDKs use “turn” differently, so adapters should preserve their native IDs
+while application traces use explicit run/step/session fields.
+
+## What is actually running today
+
+| Experience | Executor | Context and tools | Completion |
+|---|---|---|---|
+| Chat | Echo Native + selected local/API model | Model-first identity; Chat tool boundary; owner facts and Chat recall; research/answer controller | Answer and evidence/citation checks |
+| Native Code | Echo Native + selected local/API model | Model-first coding identity; project/instructions; engineering tool boundary | File/tool evidence and engineering verification ledger |
+| Agents | Echo Native + persona model/defaults and optional routing | Persistent personas, rooms, responsibilities, delegation and work | Agent/work outcomes, with engineering checks where applicable |
+| Codex in Code | Official Codex harness through app-server | Codex owns its tool loop, model context, native history and permissions | Provider events/outcomes, plus separately observed workspace acceptance |
+| Claude Code in Code | Installed official Claude CLI | Claude owns its tools, context and native session; permission requests reach Echo's UI | Claude result/events and separate workspace acceptance |
+| ACP in Code | Connected ACP harness | Protocol-negotiated features; current Echo client does not advertise filesystem/terminal client capabilities | Only implemented protocol behavior may be offered |
+
+External runtimes are currently exposed in Code, not as general selectable
+executors for all three tabs. That future possibility should not be confused with
+an implemented feature.
+
+Native path: `index.tsx → /query/stream → EchoSpeakAgent.process_query → LeanSession
+→ environment policy → LeanTurn → ChatClient → local/API model → Toolbox → results`.
+External Code path: `ExternalSession → external-session API → supervisor/adapter
+→ vendor process → vendor-owned model/tool loop → native events and approvals`.
+Echo's native model does not sit in control of Codex or Claude on that path.
+
+Source walk: [routing](../../apps/backend/agent/environments.py),
+[native controller](../../apps/backend/agent/lean/runtime.py),
+[step engine](../../apps/backend/agent/lean/loop.py),
+[external supervisor](../../apps/backend/agent/code_sessions.py),
+[runtime adapters](../../apps/backend/agent/code_runtimes.py).
+
+The native transport layer already includes Responses, Anthropic Messages,
+Gemini-specific handling and Chat Completions. Responses opaque items are bound
+to the originating provider, endpoint, model and protocol. Calling the Responses
+API does not make the application an OpenAI-managed harness. Calling Anthropic
+Messages does not make it the Claude Agent SDK. These are separate layers.
+
+## What the other systems actually demonstrate
+
+| System | Who owns the loop? | Implication for Echo |
+|---|---|---|
+| [OpenAI Agents SDK](https://developers.openai.com/api/docs/guides/agents/sdk) | SDK runner in the application's process; the application supplies its infrastructure and tools | Useful runner/orchestration primitives, not an automatic replacement for Echo's product policies |
+| [Codex app-server](https://learn.chatgpt.com/docs/app-server) | Codex; clients drive threads/turns and receive events/approvals | Correct family of integration for a rich Code client; keep its session and permission semantics |
+| [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) | Claude Code engine, exposed through a library, with tools/context/permissions | It is a full harness option; using it would not be the same as using a Claude model inside Echo Native |
+| [T3 Code](https://github.com/pingdotgg/t3code/blob/main/docs/user/faq.md) | Connected provider harnesses | Its useful comparison is the control/orchestration surface. Echo additionally owns an independent native engine |
+
+OpenAI's [runner documentation](https://developers.openai.com/api/docs/guides/agents/running-agents)
+describes a repeated model/tool cycle with explicit stopping and continuation.
+Claude's [loop documentation](https://code.claude.com/docs/en/agent-sdk/agent-loop)
+similarly separates model responses, tool execution, results and budgets. Those
+mechanics can support multiple specialized experiences; different tabs do not
+in themselves require different copies of that cycle.
+
+T3's [provider integration rules](https://github.com/pingdotgg/t3code/blob/main/docs/internals/adding-a-provider.md)
+are especially applicable: adapter-specific behavior belongs in adapters, and the
+UI should offer only capabilities the adapter and provider actually support.
+An available upstream API is not proof that Echo has implemented its UI path.
+For example, native steering exists, but active-turn steering is not exposed by
+the current external-session API. Do not present all runtimes as feature-identical.
+T3's local-model product stance is not a universal capability benchmark; Echo's
+local support should be evaluated on representative tasks and retained.
+
+## What better models change
+
+Better models can reduce the need for corrective prompts, name repair, forced
+planning and repeated reminders. They do not decide the application's permission
+boundary, which files are available, who owns history, how work resumes after a
+crash, or what evidence counts as completion. Those remain software contracts.
+
+Anthropic's [April 2026 architecture discussion](https://www.anthropic.com/research/managed-agents)
+describes a context-reset workaround becoming unnecessary after a model change,
+and separates durable sessions, the harness and execution environments. The
+lesson is to revisit model-specific scaffolding and keep interfaces stable, not
+to assume every model needs the same workaround or that reliable execution needs
+no infrastructure. Its [long-running application study](https://www.anthropic.com/research/harness-design-long-running-apps)
+also shows why task grading and independent evidence matter on substantial work.
+Neither study establishes the best loop for Echo without Echo-specific tests.
+
+## Concrete findings in this checkout
+
+1. **Environment separation already exists.** Chat/Code suppress Agents identity,
+   team routing and delegation; persistent Agents retain them. Shared mechanics
+   are already a foundation, so a rewrite would duplicate existing systems.
+2. **Chat is not strictly read-only.** Its native boundary denies terminal/file
+   mutation/desktop tools, but permits artifacts, media, reminders, optional app
+   opening and connected tools by origin. Your information-first intent needs an
+   explicit action/effect contract, while preserving deliberate creation features.
+3. **Some adaptation remains deployment-based.** Chat uses compact/full profiles
+   (6/10 steps; compact for identified local models up to 9B). Code tool focus uses
+   the local-provider distinction, including large local models. Capability
+   metadata/context overrides already exist; they are not one uniformly enforced
+   model-performance policy. Treat model size/name as a hint, not a quality test.
+4. **Old contracts remain in tests.** The read-only baseline passed 47/48 tests.
+   One unchanged cloud test still demands the obsolete Code/API prohibition.
+   Current implementation allows API binding. This is not evidence that API Code
+   is blocked, nor evidence of live API quality; it is a stale test to reconcile.
+5. **Defaults need explicit ownership.** The corrected Git requirement was a
+   workspace/provisioning-policy error, not evidence that the reasoning loop must
+   be copied. Folder mode and optional worktrees now have distinct contracts.
+6. **Environment inference has edge cases.** Thread/source/room and resumed work
+   determine native mode; unknown threads and non-live sources use Agents rules.
+   Audit API/voice/resume contracts before treating every entry point as Chat.
+7. **The native controller is concentrated.** LeanSession contains substantial
+   Chat, Code and Agents branching. Extracting controllers later could improve
+   testability without copying transport, policy or persistence implementations.
+8. **MCP is a transport/control boundary.** The current control API creates native
+   sessions or agent rooms; it can control existing external sessions through
+   status/send/stop/triage. It is not yet a universal external creation/fork/steer
+   interface, and it does not replace any harness's reasoning loop.
+
+## One loop or three?
+
+| Option | Benefit | Cost | Decision |
+|---|---|---|---|
+| Three copied native loops | Independent edits | Permissions, retries, traces and fixes drift; three maintenance paths | No evidence currently justifies it |
+| One growing conditional controller | Small initial change | Environment behavior and model heuristics become harder to reason about | Current concentration should be measured and bounded |
+| Shared step engine/services + explicit environment controllers | Shared reliability with independently testable behavior | Requires clear contracts and careful extraction | Recommended direction, after baseline/acceptance agreement |
+
+Share transport adapters, tool execution, state/event schemas, cancellation,
+privacy/approval primitives and capability metadata. Specialize identity,
+retrieval/memory scope, tool/effect policy, budgets, orchestration and completion
+criteria. Shared stores must not imply unfiltered shared histories or persona
+memories. Vendor-owned loops remain separate execution backends.
+
+Separate native engines become justified if measured control requirements really
+diverge—for example realtime audio, long-running durable workflows or a different
+deployment/trust boundary. A third UI tab alone is not that evidence.
+
+## Testing before changing the architecture
+
+Use the unit of comparison **task + model binding + harness + workspace + policy**.
+Changing several at once cannot isolate why a result improved.
+
+| Test family | Representative task | Evidence |
+|---|---|---|
+| Chat | Explain a supplied document; answer a current question with sources; brainstorm without side effects | Grounding/citation correctness, relevance, unexpected actions, model/identity preservation |
+| Code | Repair a seeded failing test in a plain folder; repeat in an optional worktree; add Git later | Actual file diff, test exit/result, unrelated files preserved, accurate workspace state |
+| Agents | Resume a named agent's responsibility; coordinate two bounded mocked tasks | Identity/memory isolation, task ownership, durable outcome, cancellation and duplicate prevention |
+| Cross-cutting | Long context, model switch, denial, interruption, reconnect | Provider-state affinity, no unintended writes/replay, clear capability/error states |
+
+First reuse deterministic tests/traces. Then choose a small set of capable API
+models and a local comparison, pin exact IDs, approve a fixed spend/request limit,
+and run the same tasks through Echo Native. Compare a vendor harness where the
+model/task match is meaningful; otherwise label model/harness differences as
+confounded. Record every call, retry, input/output/cached token count when exposed,
+latency and actual task outcome. Subscription windows are not API token bills.
+
+Both [Anthropic's eval guide](https://www.anthropic.com/research/demystifying-evals-for-ai-agents)
+and [OpenAI's workflow eval guide](https://developers.openai.com/api/docs/guides/agent-evals)
+support task-level evaluation and trace inspection. Use deterministic outcome
+checks first; a model grader's praise is not a passing build or a correct source.
+Include failed runs, not just selected demonstrations. This pass did not run a
+paid API benchmark, install an SDK or tune the loop.
+
+## Credentials and SDK strategy
+
+Provider API keys, Echo's local owner API key, vendor CLI sign-in and scoped MCP
+control grants are different credentials. Native cloud models use Echo's provider
+bindings; subscription harnesses keep their native authentication. Do not route
+one provider's opaque history or credentials through another by default.
+
+The [Claude SDK overview](https://code.claude.com/docs/en/agent-sdk/overview) documents restrictions on third-party claude.ai login
+unless approved. [Codex app-server documentation](https://learn.chatgpt.com/docs/app-server) distinguishes existing local
+integrations from hosted/commercial authentication and recommends its documented
+Sign in with ChatGPT path. T3 describes its own approved integrations; their
+approval is not inherited by copying code. Treat supported authentication as a
+provider contract to verify before a new distribution/integration—not as proof
+that a technically successful local connection licenses a hosted service.
+
+No SDK migration is recommended yet. OpenAI's generic Agents SDK, Claude's full
+Agent SDK and managed agent services own different amounts of the runtime. Any
+adoption needs a measured benefit and a plan to retain Echo's local models,
+permissions, persistent Agents, stores, interruption and evidence semantics.
+
+## Next review, before implementation
+
+1. Agree on the glossary and ownership map; keep the two execution families clear.
+2. Specify Chat's information-first action policy and the three completion contracts.
+3. Reconcile stale tests and inventory each model/runtime capability with provenance.
+4. Select representative tasks/models and an explicit small test budget; benchmark
+   the existing architecture before changing it.
+5. Extract environment controllers only where traces show policy coupling or
+   wasted work. Keep native mechanics shared unless measured needs diverge.
+
+Mobile/remote access would add authenticated client pairing, durable event replay
+and remote execution/approval transport. It does not by itself require a new
+reasoning loop. No remote system, scheduler replacement or harness fork is proposed
+for immediate implementation.
+
+## Audit scope and evidence
+
+Reviewed native/external entry points, environment routing, controller policies,
+model capabilities/transports, provider history, tools, coordination/persistence
+boundaries, workspace modes, UI paths, tests and existing architecture reports.
+This is not an exhaustive security audit of every file or a live API quality test.
+Source hashes and exact source paths are in the paired evidence file.
+
+Research baseline: **47 passed, 1 stale-policy test failed** across environments,
+native Code, Chat policy and cloud contracts. These use scripted models/mock HTTP,
+not paid providers. The separate folder-mode delivery has 102 passing backend
+tests, 39 web tests, 16 desktop contracts and zero-prompt real/compiled startup
+checks; it is not an installed-window or inference success claim.
+
+---
+
+## Earlier platform walkthrough (historical)
+
+The material below records the earlier architecture snapshot. Its agent-centric
+message/prompt description does not apply unchanged to model-first Chat/Code.
+Use the ownership map above for the current 11.13.1 interpretation. Earlier test
+and model observations remain historical, not newly verified in this review.
+
 # EchoSpeak architecture, as built (October 2026)
 
 How one message becomes an agent's work, and how the pieces around the loop (capabilities, permissions, approvals, memory, learning, workers, queue and steering, projects, artifacts, providers, privacy) connect.

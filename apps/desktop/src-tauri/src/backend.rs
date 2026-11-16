@@ -3,10 +3,13 @@ use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     path::PathBuf,
-    process::Command as StdCommand,
     sync::{Arc, Mutex},
     time::Duration,
 };
+#[cfg(windows)]
+use std::process::Command as StdCommand;
+#[cfg(unix)]
+use std::time::Instant;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
@@ -18,6 +21,12 @@ const MAX_AUTOMATIC_RESTARTS: u32 = 3;
 const HEALTH_ATTEMPTS: usize = 360;
 const HEALTH_INTERVAL_MS: u64 = 250;
 const PROCESS_MONITOR_INTERVAL_MS: u64 = 500;
+/// POSIX: how long a SIGTERM'd backend may run its graceful shutdown before SIGKILL.
+#[cfg(unix)]
+const GRACEFUL_STOP_MS: u64 = 5_000;
+/// POSIX: how often an attached (not spawned) backend is checked.
+#[cfg(unix)]
+const ATTACHED_MONITOR_INTERVAL_MS: u64 = 1_000;
 
 #[derive(Debug)]
 struct Supervisor {
@@ -35,6 +44,9 @@ struct Supervisor {
     restart_count: u32,
     consecutive_failures: u32,
     startup_failure: Option<String>,
+    /// POSIX: pid of an already-running backend for the same data folder that this
+    /// host attached to instead of spawning one. This host never stops it.
+    attached_pid: Option<u32>,
 }
 
 #[derive(Clone)]
@@ -56,6 +68,8 @@ pub struct DesktopRuntime {
     pub max_automatic_restarts: u32,
     pub data_dir: String,
     pub log_dir: String,
+    /// True when the host attached to a backend it did not start (POSIX shared backend).
+    pub backend_attached: bool,
 }
 
 impl DesktopState {
@@ -71,7 +85,7 @@ impl DesktopState {
             .canonicalize()
             .map_err(|error| format!("Could not resolve desktop log directory: {error}"))?;
         let port = reserve_loopback_port()?;
-        let api_session_key = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+        let api_session_key = new_session_key();
         Ok(Self {
             inner: Arc::new(Mutex::new(Supervisor {
                 phase: "starting".into(),
@@ -88,6 +102,7 @@ impl DesktopState {
                 restart_count: 0,
                 consecutive_failures: 0,
                 startup_failure: None,
+                attached_pid: None,
             })),
         })
     }
@@ -103,13 +118,14 @@ impl DesktopState {
             api_session_key: supervisor.api_session_key.clone(),
             backend_phase: supervisor.phase.clone(),
             backend_detail: supervisor.detail.clone(),
-            backend_pid: supervisor.child_pid,
+            backend_pid: supervisor.child_pid.or(supervisor.attached_pid),
             connection_generation: supervisor.generation,
             instance_id: supervisor.instance_id.clone(),
             restart_count: supervisor.restart_count,
             max_automatic_restarts: MAX_AUTOMATIC_RESTARTS,
             data_dir: supervisor.data_dir.to_string_lossy().into_owned(),
             log_dir: supervisor.log_dir.to_string_lossy().into_owned(),
+            backend_attached: supervisor.attached_pid.is_some(),
         }
     }
 
@@ -120,6 +136,20 @@ impl DesktopState {
             .log_dir
             .clone()
     }
+}
+
+fn new_session_key() -> String {
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+/// POSIX: give the host its own fresh port and key again (an attached backend is gone).
+#[cfg(unix)]
+fn reset_own_endpoint(supervisor: &mut Supervisor) {
+    match reserve_loopback_port() {
+        Ok(port) => supervisor.api_base = format!("http://127.0.0.1:{port}"),
+        Err(error) => log::error!("{error}"),
+    }
+    supervisor.api_session_key = new_session_key();
 }
 
 fn reserve_loopback_port() -> Result<u16, String> {
@@ -188,6 +218,37 @@ fn product_ready(port: u16, session_key: &str, instance_id: &str) -> bool {
         && payload.get("instance_id").and_then(|value| value.as_str()) == Some(instance_id)
 }
 
+/// POSIX attach: the authenticated readiness payload's instance id, if the key is
+/// accepted and the protocol is the one the renderer speaks.
+#[cfg(unix)]
+fn readiness_instance(port: u16, session_key: &str) -> Option<String> {
+    let address = SocketAddr::from(([127, 0, 0, 1], port));
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(500)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(3000)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(750)));
+    let request = format!(
+        "GET /startup/readiness HTTP/1.1\r\nHost: 127.0.0.1\r\nX-EchoSpeak-Key: {session_key}\r\nConnection: close\r\n\r\n"
+    );
+    stream.write_all(request.as_bytes()).ok()?;
+    let mut response = String::new();
+    stream.read_to_string(&mut response).ok()?;
+    if !response.starts_with("HTTP/1.1 200") {
+        return None;
+    }
+    let (_, body) = response.split_once("\r\n\r\n")?;
+    let payload = serde_json::from_str::<serde_json::Value>(body).ok()?;
+    if payload.get("protocol_version").and_then(|value| value.as_str()) != Some("1") {
+        return None;
+    }
+    Some(
+        payload
+            .get("instance_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default()
+            .to_string(),
+    )
+}
+
 fn request_backend_exit(port: u16, session_key: &str) -> bool {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(350)) else {
@@ -225,20 +286,180 @@ fn process_is_alive(pid: u32) -> bool {
     }
 }
 
-#[cfg(not(windows))]
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    let Ok(raw_pid) = libc::pid_t::try_from(pid) else {
+        return false;
+    };
+    if raw_pid <= 0 {
+        return false;
+    }
+    // A child that exited but is not yet reaped is a zombie: dead for our purposes.
+    #[cfg(target_os = "linux")]
+    if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+        let state = stat
+            .rsplit_once(')')
+            .and_then(|(_, rest)| rest.trim_start().chars().next());
+        return !matches!(state, Some('Z') | Some('X'));
+    }
+    // SAFETY: signal 0 only probes for existence and permission.
+    let result = unsafe { libc::kill(raw_pid, 0) };
+    result == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(any(windows, unix)))]
 fn process_is_alive(_pid: u32) -> bool {
-    // The current product target is Windows. Other targets retain the shell
-    // termination-event path until they gain an equivalent native probe.
+    // Other targets retain the shell termination-event path until they gain an
+    // equivalent native probe.
     true
 }
 
+/// POSIX: attach to a backend that is already running for this data folder (for
+/// example one the terminal client started) instead of spawning a second one, which
+/// would fail on the backend's single-writer lock. Returns false to spawn as usual.
+#[cfg(unix)]
+fn try_attach(app: &AppHandle, state: &DesktopState) -> bool {
+    let data_dir = {
+        let Ok(supervisor) = state.inner.lock() else {
+            return false;
+        };
+        if supervisor.child.is_some()
+            || supervisor.attached_pid.is_some()
+            || !supervisor.desired_running
+        {
+            return false;
+        }
+        supervisor.data_dir.clone()
+    };
+    let path = crate::endpoint::runtime_dir(&data_dir).join(crate::endpoint::FILENAME);
+    let endpoint = match crate::endpoint::load(&path) {
+        Ok(Some(endpoint)) => endpoint,
+        Ok(None) => return false,
+        Err(reason) => {
+            log::warn!("Not attaching to the backend in {}: {reason}", path.display());
+            return false;
+        }
+    };
+    let refuse = |reason: String| {
+        log::info!("Not attaching to the backend in {}: {reason}", path.display());
+        false
+    };
+    if !process_is_alive(endpoint.pid) {
+        return refuse(format!("its process {} is not running (stale file)", endpoint.pid));
+    }
+    if let Err(reason) = crate::endpoint::matches_desktop(&endpoint, &data_dir) {
+        return refuse(reason);
+    }
+    if !health_ready(endpoint.port) {
+        return refuse(format!("port {} does not answer /health", endpoint.port));
+    }
+    let Some(instance_id) = readiness_instance(endpoint.port, &endpoint.auth_key) else {
+        return refuse("/startup/readiness refused its key or protocol".into());
+    };
+    let generation = {
+        let Ok(mut supervisor) = state.inner.lock() else {
+            return false;
+        };
+        if supervisor.child.is_some()
+            || supervisor.attached_pid.is_some()
+            || !supervisor.desired_running
+        {
+            return false;
+        }
+        supervisor.generation += 1;
+        supervisor.instance_id = instance_id;
+        supervisor.api_base = format!("http://127.0.0.1:{}", endpoint.port);
+        supervisor.api_session_key = endpoint.auth_key.clone();
+        supervisor.attached_pid = Some(endpoint.pid);
+        supervisor.child_pid = None;
+        supervisor.phase = "ready".into();
+        supervisor.detail = format!(
+            "Using the EchoSpeak service already running for this data folder (pid {})",
+            endpoint.pid
+        );
+        supervisor.consecutive_failures = 0;
+        supervisor.startup_failure = None;
+        supervisor.generation
+    };
+    log::info!(
+        "Attached to the running EchoSpeak backend {} (pid {}, port {}, data {}); the app will not stop it",
+        endpoint.version,
+        endpoint.pid,
+        endpoint.port,
+        data_dir.display()
+    );
+    monitor_attached(app.clone(), state.clone(), generation, endpoint.pid, endpoint.port);
+    true
+}
+
+/// POSIX: watch an attached backend. When it goes away, start the app's own backend
+/// (which first looks again for one to attach to).
+#[cfg(unix)]
+fn monitor_attached(app: AppHandle, state: DesktopState, generation: u64, pid: u32, port: u16) {
+    tauri::async_runtime::spawn(async move {
+        let mut misses = 0_u32;
+        loop {
+            tokio::time::sleep(Duration::from_millis(ATTACHED_MONITOR_INTERVAL_MS)).await;
+            let still_current = {
+                let supervisor = state
+                    .inner
+                    .lock()
+                    .expect("desktop supervisor mutex poisoned");
+                supervisor.generation == generation
+                    && supervisor.desired_running
+                    && supervisor.attached_pid == Some(pid)
+            };
+            if !still_current {
+                return;
+            }
+            let alive = process_is_alive(pid);
+            if alive && health_ready(port) {
+                misses = 0;
+                continue;
+            }
+            misses += 1;
+            // A busy backend can miss a probe; a dead one cannot come back.
+            if alive && misses < 5 {
+                continue;
+            }
+            let reason = format!("The shared EchoSpeak service (pid {pid}) stopped");
+            {
+                let mut supervisor = state
+                    .inner
+                    .lock()
+                    .expect("desktop supervisor mutex poisoned");
+                if supervisor.generation != generation
+                    || supervisor.attached_pid != Some(pid)
+                    || !supervisor.desired_running
+                {
+                    return;
+                }
+                supervisor.attached_pid = None;
+                supervisor.generation += 1;
+                supervisor.phase = "recovering".into();
+                supervisor.detail = format!("{reason}. Starting the app's own service.");
+                reset_own_endpoint(&mut supervisor);
+            }
+            log::warn!("{reason}; starting the app's own backend");
+            if let Err(error) = launch_backend(app.clone(), state.clone()) {
+                schedule_restart(app, state, error);
+            }
+            return;
+        }
+    });
+}
+
 pub fn launch_backend(app: AppHandle, state: DesktopState) -> Result<(), String> {
+    #[cfg(unix)]
+    if try_attach(&app, &state) {
+        return Ok(());
+    }
     let (generation, instance_id, api_base, api_session_key, data_dir, log_dir) = {
         let mut supervisor = state
             .inner
             .lock()
             .map_err(|_| "Desktop supervisor lock failed")?;
-        if supervisor.child.is_some() {
+        if supervisor.child.is_some() || supervisor.attached_pid.is_some() {
             return Ok(());
         }
         if !supervisor.desired_running {
@@ -277,6 +498,20 @@ pub fn launch_backend(app: AppHandle, state: DesktopState) -> Result<(), String>
             "The packaged EchoSpeak backend is missing at {}",
             backend_exe.display()
         ));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&backend_exe)
+            .map(|metadata| metadata.permissions().mode())
+            .unwrap_or(0);
+        if mode & 0o111 == 0 {
+            return Err(format!(
+                "The packaged EchoSpeak backend at {} is not executable (mode {:o}). Reinstall EchoSpeak.",
+                backend_exe.display(),
+                mode & 0o7777
+            ));
+        }
     }
     let command = app
         .shell()
@@ -560,8 +795,14 @@ fn take_failed_generation(
     Some(supervisor.child.take())
 }
 
+/// The backend's single-writer lock (agent/state.py) is held by another process.
+const DATA_FOLDER_LOCKED: &str = "durable state is already locked by another process";
+
 fn permanent_startup_failure(line: &str) -> Option<String> {
-    if line.contains("ImportError:") || line.contains("ModuleNotFoundError:") {
+    if line.contains("ImportError:")
+        || line.contains("ModuleNotFoundError:")
+        || line.contains(DATA_FOLDER_LOCKED)
+    {
         Some(line.trim().chars().take(500).collect())
     } else {
         None
@@ -578,7 +819,11 @@ fn schedule_restart(app: AppHandle, state: DesktopState, reason: String) {
             return;
         }
         if let Some(cause) = &supervisor.startup_failure {
-            supervisor.detail = format!("The installed backend could not load: {cause}. Install the latest complete EchoSpeak installer. Your data is preserved; restarting this bundle cannot repair missing dependencies.");
+            supervisor.detail = if cause.contains(DATA_FOLDER_LOCKED) {
+                format!("Another EchoSpeak service is already using this data folder ({}) and the app could not share it: {cause}. Stop that service, or run it with an API key so the app can attach to it, then restart.", supervisor.data_dir.display())
+            } else {
+                format!("The installed backend could not load: {cause}. Install the latest complete EchoSpeak installer. Your data is preserved; restarting this bundle cannot repair missing dependencies.")
+            };
             supervisor.phase = "failed".into();
             return;
         }
@@ -621,6 +866,35 @@ pub fn recover_from_launch_failure(app: AppHandle, state: DesktopState, reason: 
 }
 
 pub fn restart_backend(app: AppHandle, state: DesktopState) -> DesktopRuntime {
+    // An attached backend belongs to someone else: reconnect (re-attach while it is
+    // still there, otherwise start the app's own) instead of stopping it.
+    #[cfg(unix)]
+    {
+        let was_attached = {
+            let mut supervisor = state
+                .inner
+                .lock()
+                .expect("desktop supervisor mutex poisoned");
+            if supervisor.attached_pid.take().is_some() {
+                supervisor.desired_running = true;
+                supervisor.generation += 1;
+                supervisor.consecutive_failures = 0;
+                supervisor.startup_failure = None;
+                supervisor.phase = "recovering".into();
+                supervisor.detail = "Reconnecting to the local EchoSpeak service".into();
+                reset_own_endpoint(&mut supervisor);
+                true
+            } else {
+                false
+            }
+        };
+        if was_attached {
+            if let Err(error) = launch_backend(app.clone(), state.clone()) {
+                schedule_restart(app, state.clone(), error);
+            }
+            return state.snapshot();
+        }
+    }
     let (child, orphan_endpoint) = {
         let mut supervisor = state
             .inner
@@ -672,10 +946,14 @@ pub fn shutdown_backend(state: &DesktopState) {
         supervisor.phase = "stopped".into();
         supervisor.detail = "Desktop host is closing".into();
         supervisor.child_pid = None;
+        // A shared backend this host attached to keeps running for its other clients.
+        // Not cleared here: shutdown runs again on RunEvent::Exit and must still see it.
+        let attached = supervisor.attached_pid.is_some();
         (
             supervisor.child.take(),
             port_from_api_base(&supervisor.api_base)
                 .ok()
+                .filter(|_| !attached)
                 .map(|port| (port, supervisor.api_session_key.clone())),
         )
     };
@@ -699,12 +977,51 @@ fn terminate_process_tree(child: CommandChild) {
             .creation_flags(CREATE_NO_WINDOW)
             .status();
     }
+    // POSIX: SIGTERM first so uvicorn runs its shutdown (code sessions stop, the
+    // endpoint file is removed), then SIGKILL whatever is left after the grace period.
+    #[cfg(unix)]
+    if let Ok(raw_pid) = libc::pid_t::try_from(pid) {
+        // SAFETY: plain signal delivery to the child this host spawned and still owns.
+        unsafe { libc::kill(raw_pid, libc::SIGTERM) };
+        let deadline = Instant::now() + Duration::from_millis(GRACEFUL_STOP_MS);
+        while Instant::now() < deadline && process_is_alive(pid) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
     let _ = child.kill();
 }
 
 #[cfg(test)]
 mod tests {
     use super::{backend_stderr_level, permanent_startup_failure};
+
+    #[cfg(unix)]
+    #[test]
+    fn quitting_never_contacts_an_attached_backend_even_when_exit_runs_twice() {
+        use super::{shutdown_backend, DesktopState};
+        use std::net::TcpListener;
+        let dir = std::env::temp_dir().join(format!(
+            "echospeak-shutdown-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let state = DesktopState::new(dir.join("data"), dir.join("logs")).unwrap();
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        {
+            let mut supervisor = state.inner.lock().unwrap();
+            supervisor.api_base = format!("http://127.0.0.1:{port}");
+            supervisor.attached_pid = Some(std::process::id());
+        }
+        // RunEvent::ExitRequested and RunEvent::Exit both call it.
+        shutdown_backend(&state);
+        shutdown_backend(&state);
+        assert!(
+            listener.accept().is_err(),
+            "no request may reach a backend the app did not start"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn missing_packaged_import_is_not_a_transient_restart() {
@@ -714,6 +1031,10 @@ mod tests {
                 .is_some()
         );
         assert!(permanent_startup_failure("WARNING: provider quota exceeded").is_none());
+        assert!(permanent_startup_failure(
+            "RuntimeError: EchoSpeak durable state is already locked by another process (x)"
+        )
+        .is_some());
     }
 
     #[test]

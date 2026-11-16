@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import os
+
 from types import SimpleNamespace
 from typing import Any
 
@@ -79,6 +81,7 @@ def test_research_workers_back_no_claim_that_something_was_written():
     assert unbacked_claim("I've created the comparison file.", {"spawn_workers"})
 
 
+@pytest.mark.skipif(os.name != "nt", reason="the scripted write uses a Windows path")
 def test_a_false_file_claim_beside_a_tool_call_is_caught_and_corrected():
     wrote: list[str] = []
     client = _Scripted([

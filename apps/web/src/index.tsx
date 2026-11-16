@@ -16,7 +16,6 @@ import type {
 import { canApplySessionHistory, ownsStreamCleanup } from "./desktop/sessionProjection";
 import leanCss from "./lean/lean.css?inline";
 import learningCss from "./lean/learning.css?inline";
-import { LearningPage } from "./lean/LearningPage";
 import settingsCss from "./settings/settings.css?inline";
 import chatPolishCss from "./dashboard/chatPolish.css?inline";
 import workspaceCss from "./theme/workspace.css?inline";
@@ -27,7 +26,7 @@ import { SettingsPanel } from "./settings/SettingsPanel";
 import { SystemCheckNotice } from "./settings/SystemCheck";
 import { PausedNotice, StopEverythingButton } from "./dashboard/StopEverything";
 import { LeanMessage } from "./lean/LeanMessage";
-import { ChatFollower } from "./app/chatFollow";
+import { ChatFollower, distanceFromBottom, innerScrollerTakes } from "./app/chatFollow";
 import { isLeanEvent } from "./lean/liveReducer";
 import { useLeanLive } from "./lean/useLeanLive";
 import { FollowUpQueue, useFollowUps } from "./lean/FollowUps";
@@ -42,7 +41,10 @@ import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, lastReply
 import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
-import { EchoCodeWorkspace } from "./code/EchoCodeWorkspace";
+import { EchoCodeWorkspace, type CodeOpenRequest } from "./code/EchoCodeWorkspace";
+import { CodeTree } from "./code/CodeTree";
+import { AgentsHome, directRoom } from "./lean/AgentsHome";
+import { environmentOf, handoffDraft, loadEnvironment, saveEnvironment, type Environment } from "./app/environments";
 import { WorkbenchContent, WorkbenchTabs } from "./workbench/Workbench";
 import { TerminalDock } from "./workbench/Terminal";
 import { useWorkbench } from "./workbench/store";
@@ -55,7 +57,7 @@ import {
 } from "./desktop/workspaceState";
 import { isStreamThreadCurrent } from "./agentActivity";
 import { type ActivityItem, type AgentStreamEvent, type Message, type Role, type ThreadSessionState, type TimelineItem, type VisionAnalyzeResponse } from "./app/types";
-import { buildMessageUsage } from "./app/toolDisplay";
+import { buildMessageUsage, estimateTokens } from "./app/toolDisplay";
 import { colors, fetchWithTimeout, isEmptySessionDraft, normalizeTimestampMs, stopTts, useAppStore } from "./app/runtime";
 import { applyFeed, browserNotify } from "./app/reminderFeed";
 import { ComposerToolbar, type ReasoningEffort } from "./dashboard/ComposerToolbar";
@@ -112,8 +114,14 @@ export const Dashboard: React.FC<{
   const [showSidebar, setShowSidebar] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarVisible);
   /** Which page the main area shows: the chat, or one of the sidebar nav pages. */
   const [mainPage, setMainPage] = useState<SidebarPage>("chat");
+  // Chat, Agents or Code (app/environments.ts): one app, one sidebar, three environments.
+  const [environment, setEnvironment] = useState<Environment>(() => loadEnvironment(typeof window !== "undefined" ? window.localStorage : null));
+  useEffect(() => saveEnvironment(typeof window !== "undefined" ? window.localStorage : null, environment), [environment]);
+  const [codeOpen, setCodeOpen] = useState<CodeOpenRequest | null>(null);
+  const [codeTreeRevision, setCodeTreeRevision] = useState(0);
   const [codeConversationOpen, setCodeConversationOpen] = useState(false);
   const [codeProjectId, setCodeProjectId] = useState("");
+  const [codeQuery, setCodeQuery] = useState("");
   const workbench = useWorkbench();
   /** The artifact shown in the side panel. */
   const [openArtifact, setOpenArtifact] = useState<{ id: string; version?: number } | null>(null);
@@ -151,7 +159,7 @@ export const Dashboard: React.FC<{
   const [initialHydrationComplete, setInitialHydrationComplete] = useState(false);
   const [threadState, setThreadState] = useState<ThreadSessionState | null>(() => (desktopBootstrap?.thread_state || null) as ThreadSessionState | null);
 
-  const [threads, setThreads] = useState<{ id: string; name: string; at: number; projectId?: string; messageCount?: number; surface?: string; agentRuntime?: string }[]>(() =>
+  const [threads, setThreads] = useState<{ id: string; name: string; at: number; projectId?: string; messageCount?: number; surface?: string; agentRuntime?: string; environment?: string }[]>(() =>
     (desktopBootstrap?.threads || []).map((item: any) => ({
       id: String(item.thread_id || item.id || ""),
       name: String(item.title || item.name || "Session"),
@@ -160,6 +168,7 @@ export const Dashboard: React.FC<{
       messageCount: Number(item.message_count || 0),
       surface: String(item.surface || "chat"),
       agentRuntime: String(item.agent_runtime || "echo"),
+      environment: String(item.environment || ""),
     })),
   );
   const [activeThreadId, setActiveThreadId] = useState<string>(() => desktopBootstrap?.active_session_id || "");
@@ -297,6 +306,7 @@ export const Dashboard: React.FC<{
         messageCount: Number(item.message_count || 0),
         surface: String(item.surface || "chat"),
         agentRuntime: String(item.agent_runtime || "echo"),
+        environment: String(item.environment || ""),
       }));
       setProjects(Array.isArray(bootstrap.projects) ? bootstrap.projects : []);
       setThreads(mapped);
@@ -451,6 +461,7 @@ export const Dashboard: React.FC<{
   };
 
   const refreshThreads = async () => {
+    const firstLoad = !threadsHydratedRef.current;
     try {
       const resp = await fetchWithTimeout(`${apiBase}/threads?limit=50`, undefined, 6000);
       if (!resp.ok) throw new Error(`Threads failed (${resp.status})`);
@@ -465,8 +476,9 @@ export const Dashboard: React.FC<{
         messageCount: Number(item.message_count || 0),
         surface: String(item.surface || "chat"),
         agentRuntime: String(item.agent_runtime || "echo"),
+        environment: String(item.environment || ""),
       })).filter((item: any) => {
-        if (!item.id) return false;
+        if (!item.id || deletedThreadIdsRef.current.has(item.id)) return false;
         const placeholder = isEmptySessionDraft(item);
         if (!placeholder) return true;
         // A zero-message Session is a draft. Show it only while it is the
@@ -476,11 +488,18 @@ export const Dashboard: React.FC<{
         item.name = "New Session";
         return true;
       });
+      threadsHydratedRef.current = true;
       if (mapped.length) {
         setThreads(mapped);
-        const nextId = mapped.some((item: any) => item.id === selectedId) ? selectedId : mapped[0].id;
+        // Only the first load opens the most recent Session. Later, a Session that's gone (deleted here or
+        // elsewhere) leaves the user on the new-chat screen of the same environment, not in another one.
+        const nextId = mapped.some((item: any) => item.id === selectedId) ? selectedId : firstLoad && !selectedId ? mapped[0].id : "";
         activeThreadIdRef.current = nextId;
         setActiveThreadId(nextId);
+        if (!nextId) {
+          useAppStore.setState({ messages: [] });
+          setActivities([]);
+        }
       } else {
         // Session creation belongs exclusively to explicit New Session/+ UI.
         activeThreadIdRef.current = "";
@@ -623,26 +642,41 @@ export const Dashboard: React.FC<{
   };
 
   const deleteThread = async (id: string) => {
+    // Decided before anything changes: which environment this Session was in, and whether it was open.
+    const env = threadEnvironment(id);
+    const wasOpen = id === activeThreadIdRef.current;
+    const deleted = threads.find((t) => t.id === id);
     try {
       const response = await fetch(`${apiBase}/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!response.ok) throw new Error(`Delete Session failed (${response.status})`);
     } catch (e2) {
+      // Not deleted: keep it in the list instead of hiding a Session that still exists.
       console.error("Failed to delete thread:", e2);
+      return;
     }
-    const nextThreads = threads.filter((t) => t.id !== id);
-    setThreads(nextThreads);
-    if (id === activeThreadId) {
-      if (nextThreads[0]) switchThread(nextThreads[0].id);
-      else {
-        cancelSessionTurn(id);
-        activeThreadIdRef.current = "";
-        setActiveThreadId("");
-        useAppStore.setState({ messages: [] });
-        setActivities([]);
-        setThreadState(null);
-        setActiveProjectId("");
-      }
+    deletedThreadIdsRef.current.add(id);
+    sessionProjectionRef.current.delete(id);
+    setThreads((prev) => prev.filter((t) => t.id !== id));
+    if (!wasOpen) return;
+    cancelSessionTurn(id);
+    // Stay in the same environment: its most recent Session (Code: in the same project), or its new-chat screen.
+    const next = threads
+      .filter((t) => t.id !== id && !deletedThreadIdsRef.current.has(t.id) && !isEmptySessionDraft(t)
+        && environmentOf(t, roomThreadIds) === env && (env !== "code" || (t.projectId || "") === (deleted?.projectId || "")))
+      .sort((a, b) => (b.at || 0) - (a.at || 0))[0];
+    setEnvironment(env);
+    if (next) {
+      switchThread(next.id);
+      return;
     }
+    activeThreadIdRef.current = "";
+    setActiveThreadId("");
+    useAppStore.setState({ messages: [] });
+    setActivities([]);
+    setThreadState(null);
+    if (env === "code") { setCodeConversationOpen(false); setMainPage("code"); }
+    else if (env === "agents") setMainPage("agents");
+    else { setActiveProjectId(""); setMainPage("chat"); }
   };
 
   const attachFolder = async (candidatePath: string = "") => {
@@ -711,10 +745,19 @@ export const Dashboard: React.FC<{
   }, [reasoningEffort]);
 
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  // The scroller is keyed by conversation, so it's replaced on every switch: observers follow the element
+  // itself (a callback ref), not whatever chatScrollRef held when an effect last ran.
+  const [chatScrollEl, setChatScrollEl] = useState<HTMLDivElement | null>(null);
+  const attachChatScroll = useCallback((el: HTMLDivElement | null) => { chatScrollRef.current = el; setChatScrollEl(el); }, []);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   /** Follow new messages while the user is at the bottom; leave the view alone once they scroll up (app/chatFollow.ts). */
   const followerRef = useRef(new ChatFollower());
   const sessionScrollRef = useRef<Map<string, { top: number; atBottom: boolean }>>(new Map());
+  /** Sessions deleted here: a list refresh racing the delete never brings one back. */
+  const deletedThreadIdsRef = useRef<Set<string>>(new Set());
+  /** After the first Session list load, refreshes never open a Session on their own. */
+  const threadsHydratedRef = useRef(false);
   const pinBottomRafRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -803,11 +846,21 @@ export const Dashboard: React.FC<{
     const el = chatScrollRef.current;
     if (!el) return;
     followerRef.current.onScroll(el);
+    const away = !followerRef.current.following && distanceFromBottom(el) > 240;
+    setShowJumpToLatest(previous => (previous === away ? previous : away));
     const sessionId = String(activeThreadIdRef.current || "");
     if (sessionId) sessionScrollRef.current.set(sessionId, { top: el.scrollTop, atBottom: followerRef.current.following });
   };
   const onChatWheel = (event: React.WheelEvent<HTMLDivElement>) => {
-    if (chatScrollRef.current) followerRef.current.onWheel(event.deltaY, chatScrollRef.current);
+    const el = chatScrollRef.current;
+    // A wheel an inner scroller takes (the thinking box, a long tool output) scrolls that box, not the chat:
+    // reading back inside the thinking box mustn't stop the chat following what comes below it.
+    if (el && !innerScrollerTakes(event.target as Element | null, el, event.deltaY)) followerRef.current.onWheel(event.deltaY, el);
+  };
+  const jumpToLatest = () => {
+    followerRef.current.reset(true, chatScrollRef.current || undefined);
+    setShowJumpToLatest(false);
+    scrollChatToBottom(true);
   };
   const onChatKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (chatScrollRef.current) followerRef.current.onKey(event.key, chatScrollRef.current);
@@ -864,7 +917,7 @@ export const Dashboard: React.FC<{
 
   // When message/tool nodes resize (markdown, embeds, ops card), stay at true bottom.
   useEffect(() => {
-    const el = chatScrollRef.current;
+    const el = chatScrollEl;
     if (!el || typeof ResizeObserver === "undefined") return;
 
     const pinIfStuck = () => {
@@ -888,7 +941,7 @@ export const Dashboard: React.FC<{
       ro.disconnect();
       mo.disconnect();
     };
-  }, [scrollChatToBottom, leftTab]);
+  }, [scrollChatToBottom, chatScrollEl]);
 
 
   const sendText = async (overrideText?: string, voiceTranscript?: VoiceTranscript, recovery?: { id: string; session: string }) => {
@@ -1551,9 +1604,21 @@ export const Dashboard: React.FC<{
     const key = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.code === "Backquote") { event.preventDefault(); workbench.toggleBottom(); }
     };
+    // Workspace details › Outputs opens an artifact in the side panel.
+    const artifact = (event: Event) => {
+      const id = String((event as CustomEvent<{ id?: string }>).detail?.id || "");
+      if (id) { setOpenArtifact({ id }); setRightTab("artifact"); }
+    };
     window.addEventListener("echospeak:workbench-add-folder", folder); window.addEventListener("keydown", key);
-    return () => { window.removeEventListener("echospeak:workbench-add-folder", folder); window.removeEventListener("keydown", key); };
+    window.addEventListener("echospeak:open-artifact", artifact);
+    return () => { window.removeEventListener("echospeak:workbench-add-folder", folder); window.removeEventListener("keydown", key); window.removeEventListener("echospeak:open-artifact", artifact); };
   }, [activeThreadId, mainPage]);
+  // Workspace details › Context: how much of the model's context the open conversation uses (same count as the composer's meter).
+  useEffect(() => {
+    const window_ = Number(providerInfo?.context_window || 0);
+    const used = messages.reduce((sum, m) => sum + (m.usage?.tokens ?? estimateTokens(m.text)), 0);
+    workbench.setMeter({ session_id: activeThreadId || "", used, window: window_, model: String(providerInfo?.model || "") });
+  }, [messages, providerInfo?.context_window, providerInfo?.model, activeThreadId]);
   const rightOpen = !voiceConversationMode && workbench.rightOpen;
   const rightDocked = rightOpen && !narrowLayout;
   const shellColumns = [
@@ -1568,11 +1633,13 @@ export const Dashboard: React.FC<{
     rightDocked ? `${panelWidth}px` : "",
   ].filter(Boolean).join(" ");
 
+  const threadEnvironment = useCallback((id: string) => environmentOf(threads.find(thread => thread.id === id) || (roomThreadIds.has(id) ? { id } : undefined), roomThreadIds), [threads, roomThreadIds]);
   const closePage = useCallback(() => {
-    const coding = threads.find(thread => thread.id === activeThreadId)?.surface === "code";
-    setCodeConversationOpen(coding);
-    setMainPage(coding ? "code" : "chat");
-  }, [activeThreadId, threads]);
+    const env = activeThreadId ? threadEnvironment(activeThreadId) : environment;
+    setEnvironment(env);
+    setCodeConversationOpen(env === "code" && Boolean(activeThreadId));
+    setMainPage(env === "code" ? "code" : env === "agents" && !activeThreadId ? "agents" : "chat");
+  }, [activeThreadId, threadEnvironment, environment]);
 
   // Recover the session's surface on selection or hydration without moving the
   // user away from another page on every background session-list refresh.
@@ -1581,11 +1648,18 @@ export const Dashboard: React.FC<{
     const thread = threads.find(row => row.id === activeThreadId);
     if (!thread || lastSurfaceSession.current === activeThreadId) return;
     lastSurfaceSession.current = activeThreadId;
-    const coding = thread.surface === "code";
+    const env = environmentOf(thread, roomThreadIds);
+    setEnvironment(env);
+    const coding = env === "code";
     setCodeConversationOpen(coding);
     setMainPage(coding ? "code" : "chat");
     if (coding) setCodeProjectId(thread.projectId || "");
-  }, [activeThreadId, threads]);
+  }, [activeThreadId, threads, roomThreadIds]);
+  // Remember the agent conversation you were in, so coming back to Agents opens it again.
+  useEffect(() => {
+    if (!activeThreadId || environment !== "agents") return;
+    try { window.localStorage.setItem("echospeak.agents.last_thread", activeThreadId); } catch { /* per-viewer convenience */ }
+  }, [activeThreadId, environment]);
   const sidebarWidthPx = showSidebar ? (sidebarCollapsed || narrowLayout ? 56 : SIDEBAR_WIDTH) : 0;
   /** Room chat + side panel share (the shell minus the left sidebar). */
   const measurePanelRoom = useCallback(() => {
@@ -1653,16 +1727,11 @@ export const Dashboard: React.FC<{
     } }),
     [apiBase],
   );
-  /** Open (or create) the one-to-one chat with an agent. Echo's chat is the most recent plain chat. */
-  const openAgentChat = async (agent: LeanPersona) => {
+  /** Open (or create) an agent's conversation: its contact in Agents. Echo has one too. */
+  const openAgentChat = async (agent: LeanPersona): Promise<string> => {
+    setEnvironment("agents");
     setMainPage("chat");
-    if (agent.id === "echo") {
-      const recent = threads.find((thread) => !roomThreadIds.has(thread.id));
-      if (recent) switchThread(recent.id);
-      else void createNewThread();
-      return;
-    }
-    let room = rooms.find((r) => r.kind === "direct" && r.agent_ids.length === 1 && r.agent_ids[0] === agent.id);
+    let room = directRoom(rooms, agent.id);
     if (!room) {
       try {
         room = await leanClient.createRoom({ name: agent.name, agent_ids: [agent.id], kind: "direct" });
@@ -1670,24 +1739,63 @@ export const Dashboard: React.FC<{
         await refreshThreads();
       } catch (error) {
         console.warn("Could not open a chat with", agent.name, error);
-        return;
+        return "";
       }
     }
     const opened = room;
-    setThreads((prev) => (prev.some((t) => t.id === opened.thread_id) ? prev : [{ id: opened.thread_id, name: opened.name, at: Date.now() }, ...prev]));
+    setThreads((prev) => (prev.some((t) => t.id === opened.thread_id) ? prev : [{ id: opened.thread_id, name: opened.name, at: Date.now(), environment: "agents" }, ...prev]));
     switchThread(opened.thread_id);
+    return opened.thread_id;
+  };
+  /** Chat → Agents: the chosen reply becomes a draft in the agent's conversation. Nothing is sent until you send it. */
+  const sendToAgent = async (message: Message, agentId: string) => {
+    const agent = agents.find(item => item.id === agentId);
+    if (!agent) return;
+    const title = threads.find(thread => thread.id === activeThreadId)?.name || "Chat";
+    const draft = handoffDraft(title, message.text);
+    if (!(await openAgentChat(agent))) return;
+    setInput(draft);
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+  /** Switch environments without losing your place in the others. */
+  const switchEnvironment = (next: Environment) => {
+    const current = activeThreadId ? threadEnvironment(activeThreadId) : null;
+    setEnvironment(next);
+    if (next === "code") { setCodeConversationOpen(current === "code"); setMainPage("code"); return; }
+    if (next === "agents") {
+      if (current === "agents") { setMainPage("chat"); return; }
+      // Back where you left off: the last agent conversation, else the most recent one, else the start screen.
+      let remembered = "";
+      try { remembered = window.localStorage.getItem("echospeak.agents.last_thread") || ""; } catch { /* storage may be unavailable */ }
+      const isAgents = (id: string) => Boolean(id) && !deletedThreadIdsRef.current.has(id) && (roomThreadIds.has(id) || threadEnvironment(id) === "agents") && threads.some(t => t.id === id);
+      const recent = isAgents(remembered) ? remembered
+        : threads.filter(t => isAgents(t.id)).sort((a, b) => (b.at || 0) - (a.at || 0))[0]?.id || "";
+      if (recent) { setMainPage("chat"); switchThread(recent); return; }
+      setMainPage("agents");
+      return;
+    }
+    setMainPage("chat");
+    if (current !== "chat") {
+      const recent = threads.find(thread => environmentOf(thread, roomThreadIds) === "chat" && !isEmptySessionDraft(thread));
+      if (recent) switchThread(recent.id);
+      else void createNewThread();
+    }
   };
   const openRoom = (room: LeanRoom) => {
+    setEnvironment("agents");
     setMainPage("chat");
-    setThreads((prev) => (prev.some((t) => t.id === room.thread_id) ? prev : [{ id: room.thread_id, name: room.name, at: Date.now() }, ...prev]));
+    setThreads((prev) => (prev.some((t) => t.id === room.thread_id) ? prev : [{ id: room.thread_id, name: room.name, at: Date.now(), environment: "agents" }, ...prev]));
     switchThread(room.thread_id);
   };
-  /** Removes a project; its chats stay and become ordinary chats. */
+  /** Removes a project; its chats stay and become ordinary chats. The page you're on doesn't change. */
   const deleteProject = async (id: string) => {
     const response = await fetch(`${apiBase}/projects/${encodeURIComponent(id)}`, { method: "DELETE" });
     if (!response.ok) return;
     setThreads(items => items.map(item => item.projectId === id ? { ...item, projectId: "" } : item));
     if (activeProjectId === id) { setActiveProjectId(""); await refreshThreadState(activeThreadId); }
+    // Nothing keeps pointing at the removed project (Code's picker, the open project page).
+    if (codeProjectId === id) setCodeProjectId("");
+    if (workspaceProjectId === id) setWorkspaceProjectId("");
     await refreshProjects();
   };
 
@@ -1793,7 +1901,21 @@ export const Dashboard: React.FC<{
           hydrating={!initialHydrationComplete}
           collapsed={sidebarCollapsed || narrowLayout}
           projects={projects}
-          sessions={threads.filter((thread) => thread.surface !== "code" && !roomThreadIds.has(thread.id))}
+          sessions={environment === "agents"
+            // Groups, then conversations agents started (routine results, channels). Contacts are listed above.
+            ? [...rooms.filter((room) => room.kind === "group").map((room) => ({ id: room.thread_id, name: room.name, at: Math.max(room.last_message_at || 0, room.updated_at || 0) * 1000 })),
+               ...threads.filter((thread) => environmentOf(thread, roomThreadIds) === "agents" && !roomThreadIds.has(thread.id))]
+            : threads.filter((thread) => environmentOf(thread, roomThreadIds) === "chat")}
+          environment={environment}
+          onEnvironment={switchEnvironment}
+          codeQuery={codeQuery} onCodeQuery={setCodeQuery}
+          codeTree={<CodeTree searchQuery={codeQuery} apiBase={apiBase} revision={codeTreeRevision + threads.filter(thread => thread.surface === "code").length} workingSessionIds={inFlightSessionIds}
+            activeThreadId={mainPage === "code" && codeConversationOpen ? activeThreadId : ""}
+            activeExternalId={mainPage === "code" && !codeConversationOpen ? codeOpen?.sessionId || "" : ""}
+            onOpenNative={(session) => { setCodeProjectId(session.project_id); setThreads(previous => previous.some(thread => thread.id === session.thread_id) ? previous : [{ id: session.thread_id, name: session.title, at: normalizeTimestampMs(session.last_active_at), projectId: session.project_id, messageCount: session.message_count, surface: "code", agentRuntime: session.agent_runtime, environment: "code" }, ...previous]); switchThread(session.thread_id); setCodeConversationOpen(true); setMainPage("code"); }}
+            onOpenExternal={(projectId, runtimeId, sessionId) => { setCodeProjectId(projectId); setCodeOpen({ runtimeId, sessionId, nonce: Date.now() }); setCodeConversationOpen(false); setMainPage("code"); }}
+            onNewSession={(projectId) => { setCodeProjectId(projectId); setCodeOpen(null); setCodeConversationOpen(false); setMainPage("code"); }}
+            onAddFolder={() => void attachFolder()} />}
           agents={agents.length ? {
             count: agents.length,
             onNew: () => setAgentEditor({ open: true, agent: null }),
@@ -1809,24 +1931,33 @@ export const Dashboard: React.FC<{
           } : undefined}
           collapsedRoster={agents.length ? <CollapsedRoster agents={agents} onOpenAgent={(agent) => void openAgentChat(agent)} /> : undefined}
           page={mainPage}
-          onPage={(page) => { if (page === "projects") setWorkspaceProjectId(""); if (page === "code") setCodeConversationOpen(false); setMainPage(page); }}
+          onPage={(page) => { if (page === "projects") setWorkspaceProjectId(""); if (page === "code") setCodeConversationOpen(false); if (page === "chat" && environment === "agents" && !roomThreadIds.has(activeThreadId) && threadEnvironment(activeThreadId) !== "agents") page = "agents"; setMainPage(page); }}
           pageCounts={{ groups: rooms.filter((r) => r.kind === "group").length, projects: projects.filter((p) => !p.archived).length }}
           activeProjectId={activeProjectId}
           activeSessionId={activeThreadId}
           activeView="chat"
           onToggleCollapsed={() => setSidebarCollapsed(v => !v)}
           onNewSession={(projectId) => {
+            if (environment === "agents") { setAgentEditor({ open: true, agent: null }); return; }
+            if (environment === "code") { setCodeOpen(null); setCodeConversationOpen(false); setMainPage("code"); return; }
             setMainPage("chat");
             void createNewThread(projectId);
           }}
           onAddFolder={() => void attachFolder()}
           onSelectSession={(id) => {
-            setMainPage("chat");
+            const room = rooms.find((row) => row.thread_id === id);
+            if (room) { openRoom(room); return; }
+            // A search hit can be in any environment: go where it lives.
+            const env = threadEnvironment(id);
+            setEnvironment(env);
+            setCodeConversationOpen(env === "code");
+            setMainPage(env === "code" ? "code" : "chat");
             switchThread(id);
           }}
           onSearchChats={searchChats}
           onRenameSession={(id, title) => void renameThread(id, title)}
           onDeleteSession={(id) => void deleteThread(id)}
+          workingSessionIds={inFlightSessionIds}
           onDeleteProject={(id) => void deleteProject(id)}
           onSettings={() => openSettingsAt()}
           footerExtra={<><div className="wb-sidebar-actions"><button aria-label="Pull requests" title="Pull requests" onClick={() => workbench.open("pull_requests")}><WorkbenchIcon kind="pull_requests" /></button><button aria-label="Usage and limits" title="Usage and limits" onClick={() => workbench.open("usage")}><WorkbenchIcon kind="usage" /></button></div><StopEverythingButton apiBase={apiBase} /></>}
@@ -1894,7 +2025,9 @@ export const Dashboard: React.FC<{
             {mainPage === "code" ? (
               <WidgetEnvProvider value={widgetEnv}>
                 <EchoCodeWorkspace apiBase={apiBase} projects={projects} projectId={codeProjectId}
+                  openRequest={codeOpen} onSessionsChanged={() => setCodeTreeRevision(value => value + 1)}
                   nativeInfo={providerInfo} nativeLocked={lmStudioOnly} onConfigureProviders={() => openSettingsAt("models")}
+                  nativeEffort={reasoningEffort} onNativeEffort={(value) => setReasoningEffort(value as ReasoningEffort)}
                   onProject={setCodeProjectId} onAddFolder={() => void attachFolder()}
                   onSession={(session, draft) => {
                     setThreads(previous => [{ id: session.thread_id, name: session.title,
@@ -1908,6 +2041,13 @@ export const Dashboard: React.FC<{
                     setCodeConversationOpen(true); setMainPage("code");
                   }} />
               </WidgetEnvProvider>
+            ) : mainPage === "agents" ? (
+              <AgentsHome agents={agents} rooms={rooms}
+                onOpenAgent={(agent) => void openAgentChat(agent)}
+                onEditAgent={(agent) => setAgentEditor({ open: true, agent })}
+                onNewAgent={() => setAgentEditor({ open: true, agent: null })}
+                onOpenRoom={openRoom}
+                onNewGroup={() => setRoomDialog({ open: true, room: null })} />
             ) : mainPage === "groups" ? (
               <GroupChatsPage
                 agents={agents}
@@ -1920,6 +2060,15 @@ export const Dashboard: React.FC<{
                     await leanClient.deleteRoom(room.id);
                   } catch (error) {
                     console.warn("Delete room failed", error);
+                    return;
+                  }
+                  deletedThreadIdsRef.current.add(room.thread_id);
+                  setThreads((prev) => prev.filter((t) => t.id !== room.thread_id));
+                  if (activeThreadIdRef.current === room.thread_id) {
+                    activeThreadIdRef.current = "";
+                    setActiveThreadId("");
+                    useAppStore.setState({ messages: [] });
+                    setActivities([]);
                   }
                   await refreshRoster();
                   await refreshThreads();
@@ -1959,8 +2108,6 @@ export const Dashboard: React.FC<{
               />
             ) : mainPage === "creations" ? (
               <CreationsPage apiBase={apiBase} sessionId={activeThreadId} onChat={id => { setMainPage("chat"); switchThread(id); }} onEdit={asset => { setMainPage("chat"); switchThread(asset.session_id); setInput(`Edit this image using input_asset_ids ["${asset.id}"]. Keep the composition and change the lighting to soft morning light.`); }} />
-            ) : mainPage === "learning" ? (
-              <LearningPage apiBase={apiBase} />
             ) : mainPage === "artifacts" ? (
               <ArtifactsPage apiBase={apiBase} onOpen={openArtifactFromPage} />
             ) : (
@@ -2054,7 +2201,7 @@ export const Dashboard: React.FC<{
                   <PausedNotice apiBase={apiBase} />
                   <SystemCheckNotice apiBase={apiBase} onOpen={() => openSettingsAt("system")} />
                   <ChatThread
-                    contextBar={<div className="ec-conversation-bar"><strong className="workspace-breadcrumb"><span>{mainPage === "code" ? "Echo Code · Echo native" : "EchoSpeak"}</span><i aria-hidden>/</i>{threads.find(thread => thread.id === activeThreadId)?.name || "New chat"}</strong><div className="workspace-header-actions">{mainPage === "code" ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setCodeConversationOpen(false)}>Workspace</button> : null}{!rightOpen && !voiceConversationMode && activeThreadId ? (
+                    contextBar={<div className="ec-conversation-bar"><strong className="workspace-breadcrumb"><span>{mainPage === "code" ? "Code · Echo native" : environment === "agents" ? "Agents" : "Chat"}</span><i aria-hidden>/</i>{threads.find(thread => thread.id === activeThreadId)?.name || "New chat"}</strong><div className="workspace-header-actions">{mainPage === "code" ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setCodeConversationOpen(false)}>Workspace</button> : null}{environment === "agents" && activeRoom?.kind === "direct" && roomMembers[0] ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setAgentEditor({ open: true, agent: roomMembers[0] })}>{roomMembers[0].name}'s profile</button> : null}{!rightOpen && !voiceConversationMode && activeThreadId ? (
                     <button
                       type="button"
                       className="rp-toggle workspace-research-button"
@@ -2070,7 +2217,8 @@ export const Dashboard: React.FC<{
                       <small>{activityItems.length}</small>
                     </button>
                   ) : null}</div></div>}
-                    activeThreadId={activeThreadId} streaming={streaming} scrollRef={chatScrollRef}
+                    activeThreadId={activeThreadId} streaming={streaming} scrollRef={attachChatScroll}
+                    showJumpToLatest={showJumpToLatest} onJumpToLatest={jumpToLatest}
                     onScroll={onChatScroll} onWheel={onChatWheel} onKeyDown={onChatKeyDown}
                     onTouchStart={onChatTouchStart} onTouchEnd={onChatTouchEnd}
                     activeRoom={activeRoom} agents={agents}
@@ -2078,12 +2226,12 @@ export const Dashboard: React.FC<{
                     timeline={timeline} live={lean.live} providerInfo={providerInfo}
                     onQuickReply={(text) => void sendText(text)}
                     onLeanApproval={decideLeanApproval}
-                    actions={{ onRevise: reviseMessage, onRead: readMessage, onFeedback: (message, value, note) => leanClient.feedback(message.executionId || "", value, note || "", message.lean?.agent?.id || ""), readingId: speaking ? readingId : "", actionBusy: messageActionBusy }}
+                    actions={{ ...(environment === "chat" && mainPage === "chat" ? { agentTargets: agents.map(agent => ({ id: agent.id, name: agent.name })), onSendToAgent: (message: Message, agentId: string) => void sendToAgent(message, agentId) } : {}), onRevise: reviseMessage, onRead: readMessage, onFeedback: (message, value, note) => leanClient.feedback(message.executionId || "", value, note || "", message.lean?.agent?.id || ""), readingId: speaking ? readingId : "", actionBusy: messageActionBusy }}
                     voiceStage={voiceConversationMode ? <VoiceStage apiBase={apiBase} phase={voicePhase} notice={voiceNotice} listening={listening} speaking={speaking} streaming={streaming} native={nativeLiveVoice} level={voiceInputLevel} tool={activityItems.find(item => item.status === "running")?.label || ""} online={Boolean(backendOnline)} onListen={() => { if (streaming) stopActiveTurn(); void start(); }} onPause={pauseVoice} onEnd={toggleVoiceMode} onSettings={openVoiceSettings} /> : undefined}
                   />
                   </WidgetEnvProvider>
                   {!voiceConversationMode || mainPage !== "chat" ? <div className="input-bar">
-                    {emptyConversation ? <div className="conversation-welcome"><h1>{mainPage === "code" ? "What should we build" : "What can I help you with"}{mainPage === "code" && activeProjectId ? <> in <span>{projects.find(project => project.id === activeProjectId)?.name || "this project"}</span></> : null}?</h1><WelcomeTypewriter coding={mainPage === "code"} /></div> : null}
+                    {emptyConversation ? <div className="conversation-welcome"><h1>{mainPage === "code" ? "What should we build" : environment === "agents" && activeRoom ? (activeRoom.kind === "direct" && roomMembers[0] ? `What should ${roomMembers[0].name} work on` : "What should the team work on") : "What can I help you with"}{mainPage === "code" && activeProjectId ? <> in <span>{projects.find(project => project.id === activeProjectId)?.name || "this project"}</span></> : null}?</h1><WelcomeTypewriter coding={mainPage === "code"} agents={environment === "agents"} /></div> : null}
                     <LiveStatusPill live={streaming ? lean.live : null} onStop={stopActiveTurn} />
                     {/* One card: session strip, the text box, then tools · context · send */}
                     <ComposerInput

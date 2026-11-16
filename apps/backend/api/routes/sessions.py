@@ -361,11 +361,16 @@ class ThreadResponse(BaseModel):
     project_id: str = ""
     surface: str = "chat"
     agent_runtime: str = "echo"
+    # Chat, Agents or Code (agent/environments.py): where the session shows and who answers in it.
+    environment: str = "chat"
 
 
-def _thread_response(thread) -> ThreadResponse:
+def _thread_response(thread, rooms: Optional[set[str]] = None) -> ThreadResponse:
+    from agent import environments
     payload = thread.to_dict()
     payload["project_id"] = get_state_store().get_thread_state(thread.thread_id).active_project_id
+    rooms = environments.room_threads() if rooms is None else rooms
+    payload["environment"] = environments.classify(thread, in_room=thread.thread_id in rooms)
     return ThreadResponse(**payload)
 
 
@@ -379,7 +384,9 @@ async def list_threads(
     from agent.threads import get_thread_manager
     tm = get_thread_manager()
     threads = tm.list_threads(include_archived=include_archived, source=source, limit=limit)
-    return [_thread_response(t) for t in threads]
+    from agent import environments
+    rooms = environments.room_threads()
+    return [_thread_response(t, rooms) for t in threads]
 
 
 @router.post("/threads", response_model=ThreadResponse)

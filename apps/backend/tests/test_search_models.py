@@ -156,6 +156,8 @@ def test_lmstudio_lists_only_embedding_models(monkeypatch):
             return False
 
         def get(self, url: str):
+            if url == "http://localhost:1234/api/v1/models":
+                return _Response(404, {})  # LM Studio before REST v1: the v0 listing is used
             assert url == "http://localhost:1234/api/v0/models"
             return _Response(200, {"data": [
                 {"id": "google/gemma-4-e4b", "type": "vlm", "state": "loaded"},
@@ -168,6 +170,40 @@ def test_lmstudio_lists_only_embedding_models(monkeypatch):
         {"id": "text-embedding-qwen3-embedding-0.6b", "loaded": True},
         {"id": "text-embedding-nomic-embed-text-v1.5", "loaded": False},
     ]
+
+
+def test_lmstudio_rest_v1_listing_is_read_first(monkeypatch):
+    """LM Studio 0.4 deprecated REST v0; v1 lists `models` with type "embedding" and loaded_instances
+    (https://lmstudio.ai/docs/developer/rest/list)."""
+    import httpx
+
+    asked: list[str] = []
+
+    class Client:
+        def __init__(self, timeout: float) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url: str):
+            asked.append(url)
+            return _Response(200, {"models": [
+                {"type": "llm", "key": "qwen/qwen3.5-9b", "loaded_instances": [{"id": "qwen/qwen3.5-9b"}]},
+                {"type": "embedding", "key": "text-embedding-nomic-embed-text-v1.5",
+                 "loaded_instances": [{"id": "text-embedding-nomic-embed-text-v1.5", "config": {"context_length": 2048}}]},
+                {"type": "embedding", "key": "text-embedding-qwen3-embedding-0.6b", "loaded_instances": []},
+            ]})
+
+    monkeypatch.setattr(httpx, "Client", Client)
+    assert emb.lmstudio_embedding_models("http://localhost:1234/v1") == [
+        {"id": "text-embedding-nomic-embed-text-v1.5", "loaded": True},
+        {"id": "text-embedding-qwen3-embedding-0.6b", "loaded": False},
+    ]
+    assert asked == ["http://localhost:1234/api/v1/models"]
 
 
 def test_lmstudio_not_running_lists_nothing(monkeypatch):

@@ -86,7 +86,9 @@ def idle_seconds() -> float:
         return 0.0 if _running else max(0.0, time.time() - _last_activity)
 
 
-def stop_everything(reason: str = "") -> dict[str, Any]:
+def stop_everything(reason: str = "", include_servers: bool = False) -> dict[str, Any]:
+    """Cancel every running turn and pause the queues. Their own background work stops too; servers keep
+    running and are listed unless ``include_servers`` (the owner's explicit choice) stops them as well."""
     from agent.lean.approvals import get_approval_broker
 
     with _lock:
@@ -112,7 +114,18 @@ def stop_everything(reason: str = "") -> dict[str, Any]:
     except Exception:
         pass
     waiting = get_approval_broker().cancel_all()
-    return {"paused": True, "stopped": len(events) + cancelled_requests, "approvals_cancelled": waiting}
+    processes: dict[str, Any] = {"stopped": [], "servers_running": []}
+    try:
+        from agent.lean.terminal import stop_cancelled_processes, stop_servers
+
+        processes = stop_cancelled_processes()
+        if include_servers:
+            processes["stopped"] += stop_servers()
+            processes["servers_running"] = []
+    except Exception:
+        pass
+    return {"paused": True, "stopped": len(events) + cancelled_requests, "approvals_cancelled": waiting,
+            "processes_stopped": processes["stopped"], "servers_running": processes["servers_running"]}
 
 
 def resume() -> dict[str, Any]:

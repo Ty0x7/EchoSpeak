@@ -20,6 +20,25 @@ class RuntimeUnavailable(ValueError):
     pass
 
 
+CODE_MODEL_RULE = "Native Code uses your selected local or API model; external coding subscriptions keep their own harnesses."
+
+
+def is_code_thread(session_id: str) -> bool:
+    """Whether this conversation belongs to Echo Code (not Chat)."""
+    try:
+        from agent.threads import get_thread_manager
+        thread = get_thread_manager().get_thread(str(session_id or ""))
+        return bool(thread and getattr(thread, "surface", "chat") == "code")
+    except Exception:
+        return False
+
+
+def code_provider_problem(session_id: str, provider: str) -> str:
+    """Keep the admission hook compatible while native Code supports local and API models."""
+    # Provider readiness and capabilities are enforced by the shared native runtime.
+    return ""
+
+
 def runtime_catalog() -> dict:
     """Passive availability only. Finding a CLI proves neither login nor compatibility."""
     current_mode = privacy.mode()
@@ -27,7 +46,9 @@ def runtime_catalog() -> dict:
         "id": "echo", "name": "Echo native", "protocol": "native",
         "implemented": True, "installed": True, "authentication": "existing_model_settings",
         "can_start": True, "blockers": [],
-        "description": "Echo's own tools, skills, memory, learning, and approval policies. Choose a local or cloud model in the conversation.",
+        "description": "The model you pick on this PC as a coding assistant, in EchoSpeak's own harness: files, "
+                       "terminal, checks that verify the work, learning, and your approval rules. "
+                       "Local and API models use the native engineering harness. Coding subscriptions use their own external harness.",
     }]
     definitions = (
         ("codex", "Codex", "codex-app-server", "codex",
@@ -35,23 +56,22 @@ def runtime_catalog() -> dict:
         ("claude_cli", "Claude Code", "claude-code-cli", "claude_cli",
          "Your installed Claude Code, signed in with your own Claude plan through its own login. Claude Code keeps "
          "its tools and permissions; EchoSpeak asks you before any action Claude Code would ask about."),
-        ("claude_code", "Claude Agent", "claude-agent-sdk", None,
-         "Original Claude tools and sessions through the official Agent SDK. Requires a separate Anthropic API key; subscription OAuth is not copied."),
         ("acp", "Other ACP agents", "acp", None,
          "Connect compatible agents through their own ACP sessions and capability negotiation."),
     )
+    from agent import environments
+    if environments.unified():
+        # One assistant: only Echo's own harness is offered. No executable lookup, no account check.
+        return {"schema_version": 1, "privacy_mode": current_mode, "runtimes": rows}
     from agent.code_executables import locate
-    from agent.code_sessions import sdk_installed
     for runtime_id, name, protocol, command, description in definitions:
         # Paths only. No --version or auth probes here: even a health-check process can run hooks.
         # The owner checks sign-in explicitly from Settings › Models › Coding agents.
         found = locate(command) if command else None
-        installed = sdk_installed() if runtime_id == "claude_code" else bool(found["path"]) if found else None
+        installed = bool(found["path"]) if found else None
         blockers = []
         if installed is False:
             blockers.append(found["problem"] if found else f"{name} was not found.")
-        if runtime_id == "claude_code" and not installed:
-            blockers = ["The optional Claude Agent SDK is not installed in this backend."]
         if current_mode != "standard":
             blockers.append("External runtimes are blocked in Private/Offline mode until their process network access can be enforced.")
         rows.append({
@@ -83,10 +103,19 @@ def workspace(project_id: str) -> dict:
     item = project_workspace.project(project_id)
     root = project_workspace.root_for(item)
     from agent.lean.git_context import summary
+    from agent.code_worktree import preflight
+    external_blocker = ""
+    try:
+        preflight(root)
+    except (ValueError, OSError) as exc:
+        external_blocker = str(exc) if isinstance(exc, ValueError) else "Git is unavailable. Install Git and reopen EchoSpeak."
     return {
         "schema_version": 1,
         "project": {"id": item.id, "name": item.name, "workspace_root": str(root), "trust_state": item.trust_state},
         "git_summary": summary(str(root)),
+        "external_blocker": "",  # External harnesses can work directly in any trusted folder.
+        "worktree_available": not bool(external_blocker),
+        "worktree_unavailable": external_blocker,
         "sessions": _session_rows(project_id),
         "can_start_native": item.trust_state == "trusted",
         "native_blocker": "" if item.trust_state == "trusted" else "This project is not marked trusted. Coding sessions are unavailable for this folder.",
@@ -132,3 +161,81 @@ def create_session(project_id: str, *, runtime_id: str, idempotency_key: str) ->
             store.update_thread_state(thread.thread_id, active_project_id=item.id,
                                       workspace_root=str(root), project_path=str(root))
         return {**thread.to_dict(), "project_id": item.id}
+
+
+def _waiting_sessions() -> set[str]:
+    """The same live and recovered decision owners used by /lean/approvals."""
+    from agent.state import get_state_store
+    from agent.lean.approvals import get_approval_broker
+    return ({row["session_id"] for row in get_approval_broker().pending_for()}
+            | {row["session_id"] for row in get_state_store().coordination.view("approvals") if row["status"] == "pending"})
+
+
+def overview() -> dict:
+    """Echo Code's sidebar: each usable project with its native coding sessions, and the rest.
+
+    A session whose project was removed, archived or detached is "unorganized": still
+    reachable, and movable into a project. External runtimes' sessions are listed by the
+    route, since they live in their own session store with their own worktrees.
+    """
+    from agent.projects import get_project_manager
+    from agent.state import get_state_store
+    from agent.threads import get_thread_manager
+    projects = [item for item in get_project_manager().list_projects() if not item.archived and item.workspace_root]
+    known = {item.id for item in projects}
+    states = {row.thread_id: row for row in get_state_store().list_thread_states()}
+    waiting = _waiting_sessions()
+    grouped: dict[str, list[dict]] = {item.id: [] for item in projects}
+    unorganized: list[dict] = []
+    for thread in get_thread_manager().list_threads(limit=2000):
+        if thread.surface != "code":
+            continue
+        project_id = str(getattr(states.get(thread.thread_id), "active_project_id", "") or "")
+        row = {**thread.to_dict(), "project_id": project_id if project_id in known else "",
+               "inbox": get_state_store().code_inbox_snapshot(thread.thread_id, waiting=thread.thread_id in waiting)}
+        (grouped[project_id] if project_id in known else unorganized).append(row)
+    return {
+        "schema_version": 1,
+        "projects": [{"id": item.id, "name": item.name, "workspace_root": item.workspace_root,
+                      "trust_state": item.trust_state, "sessions": grouped[item.id][:100]} for item in projects],
+        "unorganized": unorganized[:100],
+    }
+
+
+def triage_session(thread_id: str, action: str, activity: str, snooze_seconds: int = 0, automatic: bool = False) -> dict:
+    from agent.state import get_state_store
+    from agent.threads import get_thread_manager
+    from agent.lean.approvals import get_approval_broker
+    thread = get_thread_manager().get_thread(thread_id)
+    if not thread or thread.surface != "code":
+        raise KeyError("Coding session unavailable")
+    try:
+        return get_state_store().update_code_inbox(thread_id, action, activity,
+                    waiting=bool(get_approval_broker().pending_for(thread_id)), snooze_seconds=snooze_seconds, automatic=automatic)
+    except ValueError as exc:
+        raise RuntimeUnavailable(str(exc)) from exc
+
+
+def move_session(thread_id: str, project_id: str) -> dict:
+    """Move a native coding session into another project (drag and drop in Code's sidebar).
+
+    Only Echo's own sessions move: they work in the project folder itself, so moving one
+    re-scopes its next turn to the new folder. History stays with the session. External
+    runtimes' sessions own a worktree inside their project and never move.
+    """
+    from agent.state import get_state_store
+    from agent.threads import get_thread_manager
+    thread = get_thread_manager().get_thread(str(thread_id or ""))
+    if thread is None or thread.surface != "code":
+        raise KeyError("Coding session unavailable")
+    item = project_workspace.project(project_id)
+    root = project_workspace.root_for(item)
+    if item.trust_state != "trusted":
+        raise PermissionError("This project is not marked trusted. Coding sessions are unavailable for this folder.")
+    store = get_state_store()
+    state = store.get_thread_state(thread.thread_id)
+    if state.current_execution_id or state.active_turn_id:
+        raise RuntimeUnavailable("This session is working. Move it when its turn has finished.")
+    if state.active_project_id != item.id:
+        store.update_thread_state(thread.thread_id, active_project_id=item.id, workspace_root=str(root), project_path=str(root))
+    return {**thread.to_dict(), "project_id": item.id}

@@ -63,6 +63,26 @@ def test_direct_work_records_attempt_tools_and_provenance(env, monkeypatch):
     assert any(i.payload.get("work_id") == work["id"] for i in items)
 
 
+def test_work_budget_counts_new_tokens_not_the_re_sent_conversation(env, monkeypatch):
+    """Live: a 16k-context model re-sends ~12k tokens a step; charging totals exhausted the 64k work budget
+    after five steps of a task whose tests had already passed ("PermissionError: Work budget exhausted")."""
+    store, _, _ = env
+    native = runtime.LeanSession._native_tools
+    monkeypatch.setattr(runtime.LeanSession, "_native_tools", lambda self, *a, **k: native(self, *a, **k) + [
+        NativeTool("fixture_read", "read", {"type": "object", "properties": {}}, lambda _: "Observed value: 42", parallel_safe=True, always=True)])
+    # Near the 16k limit the harness trims old tool output (_fit_context), so the prompt goes down as well as up.
+    prompts = [12_000, 12_600, 11_900, 12_500, 11_800, 12_400, 11_700, 12_300]
+    steps = [ModelTurn(tool_calls=[ToolCall(f"r{i}", "fixture_read", "{}")],
+                       usage={"prompt": p, "completion": 200, "total": p + 200}) for i, p in enumerate(prompts)]
+    steps.append(ModelTurn(content="Observed value is 42.", usage={"prompt": 14_700, "completion": 50, "total": 14_750}))
+    install_clients(monkeypatch, {"echo": steps})
+    work = store.coordination.create(objective="Inspect value", agent_id="echo", session_id="native")
+    out = run(work_id=work["id"])
+    assert out["work"]["status"] == "completed"
+    # Nine steps re-sent ~120k tokens in total; only what each step added (~16k) is charged.
+    assert store.coordination.get(work["id"])["tokens"] < 20_000
+
+
 def test_echo_requests_specialist_help_with_child_grant(env, monkeypatch):
     store, _, _ = env
     install_clients(monkeypatch, {"echo": [ModelTurn(tool_calls=[ToolCall("d1", "delegate_to_agent", json.dumps({"agent": "Jarvis", "task": "Compare the supplied numbers"}))]), ModelTurn(content="Jarvis returned the comparison.")],
@@ -372,3 +392,39 @@ def test_chat_question_creates_no_work_but_a_real_write_does(env, monkeypatch):
         session_id="write", request_id="request-write", emit=lambda _: None, cancel=threading.Event())
     assert writes == [1] and wrote["work"]["status"] == "completed"
     assert store.coordination.view("deliveries") == []  # the reply streamed into the chat; no outbox row
+
+
+def test_a_check_in_prompt_is_not_shown_as_something_the_owner_said(env, monkeypatch):
+    store, _, _ = env
+    install_clients(monkeypatch, {"echo": [ModelTurn(content="Hey! Your Codex sign-in expired; want me to walk you through it?")]})
+    run(session="checkins", source="heartbeat")
+    install_clients(monkeypatch, {"echo": [ModelTurn(content="Sure.")]})
+    run(session="owner-chat")
+    def roles(session):
+        return [m.get("role") for turn in store.session_timeline(session)["turns"] for m in turn["messages"]]
+    assert "user" not in roles("checkins") and roles("checkins")
+    assert "user" in roles("owner-chat")
+
+
+def test_denying_a_live_step_lets_the_run_continue_but_a_recovered_denial_blocks(env, tmp_path):
+    """A "No" mid-run goes back to the model; it must not poison the work item it is still running."""
+    store, _, _ = env
+    coord = store.coordination
+    work = coord.create(objective="Tidy", agent_id="echo", tools=["file_delete", "file_read"])
+    ctx = coord.claim(work["id"])
+    coord.bind(ctx, ["file_delete", "file_read"], project_root=str(tmp_path))
+    coord.approval(ctx, approval_id="live", tool="file_delete", args={"path": "a.txt"}, summary="Delete", reason="Review")
+    assert coord.decide("live", "deny")["status"] == "denied"
+    assert coord.get(work["id"])["status"] == "running"
+    coord.check(ctx, "file_read")  # the agent can carry on with what the owner suggested instead
+    coord.action_intent(ctx, "next", "file_read", {"path": "b.txt"}, read_only=True)
+
+    # The same denial with nobody running the work (answered after a restart) still blocks it.
+    other = coord.create(objective="Tidy later", agent_id="echo", tools=["file_delete"])
+    later = coord.claim(other["id"])
+    coord.bind(later, ["file_delete"], project_root=str(tmp_path))
+    coord.approval(later, approval_id="recovered", tool="file_delete", args={"path": "a.txt"}, summary="Delete", reason="Review")
+    coord.finish(later, status="completed", result="")
+    assert coord.get(other["id"])["status"] == "waiting_approval"
+    coord.decide("recovered", "deny")
+    assert coord.get(other["id"])["status"] == "blocked"

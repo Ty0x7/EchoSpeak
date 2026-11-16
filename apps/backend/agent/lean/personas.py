@@ -82,6 +82,61 @@ def _seed() -> list[AgentPersona]:
     ]
 
 
+# Chat is model-first (agent/environments.py): the selected model answers as itself, in Echo's
+# harness, without Echo's persona or team. It is not a roster agent: list() never shows it,
+# and nothing can delegate to it, but get() resolves it so its messages have a name.
+CHAT_AGENT_ID = "chat"
+# Broad on purpose: agent/lean/chat_mode.py keeps only Chat's allowlist (no terminal, no desktop input).
+CHAT_TOOLSETS = ["core", "web", "live", "vision", "desktop", "memory", "skills"]
+
+
+def _unified() -> bool:
+    from agent import environments
+
+    return environments.unified()
+
+
+def chat_persona(model_label: str = "") -> AgentPersona:
+    """The model itself, for a Chat conversation. Named after the model when it's known."""
+    label = " ".join(str(model_label or "").split())[:60]
+    return AgentPersona(
+        id=CHAT_AGENT_ID,
+        name="Echo" if _unified() else label or "Assistant",
+        title="Chat",
+        # Chat's instructions live in agent/lean/chat_mode.py, not in a persona soul.
+        soul="",
+        avatar="",
+        toolsets=list(CHAT_TOOLSETS),
+        context_scope="project",
+        builtin=True,
+        created_at=0.0,
+        updated_at=0.0,
+    )
+
+
+CODE_AGENT_ID = "code"
+
+
+def code_persona(model_label: str = "") -> AgentPersona:
+    """The model itself, for a native Echo Code session: a coding assistant, not one of the agents."""
+    from agent.lean import code_mode
+
+    label = " ".join(str(model_label or "").split())[:60]
+    return AgentPersona(
+        id=CODE_AGENT_ID,
+        name="Echo" if _unified() else label or "Code",
+        title="Code",
+        # The engineering workflow lives in agent/lean/code_mode.py; the identity names the model.
+        soul=code_mode.identity(label),
+        avatar="",
+        toolsets=list(code_mode.CODE_TOOLSETS),
+        context_scope="project",
+        builtin=True,
+        created_at=0.0,
+        updated_at=0.0,
+    )
+
+
 _SOULS = {
     "scout": (
         "You are Jarvis, a meticulous researcher on Echo's team. You search widely, read the "
@@ -191,6 +246,10 @@ class PersonaStore:
         return [agent.model_copy() for agent in agents]
 
     def get(self, agent_id: str) -> Optional[AgentPersona]:
+        if str(agent_id or "").strip() == CHAT_AGENT_ID:
+            return chat_persona()
+        if str(agent_id or "").strip() == CODE_AGENT_ID:
+            return code_persona()
         with self._lock:
             agent = self._agents.get(str(agent_id or "").strip())
             return agent.model_copy() if agent else None

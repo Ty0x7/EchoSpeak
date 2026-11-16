@@ -124,7 +124,7 @@ const SECTIONS: Section[] = [
     icon: "learn",
     body: (
       <>
-        <p>Agents learn from their own checked work. When a task is verified, the agent writes down a short lesson about what to repeat or avoid next time. This is an experimental preview.</p>
+        <p>Echo learns on its own from checked work in Chat, Agents and Code, with whichever model you use. When a task is verified, a short lesson about what to repeat or avoid is written down, tried on similar tasks, and kept only if tasks go better with it. You don't have to manage any of it.</p>
         <ol className="doc-ladder" aria-label="How sure EchoSpeak is that a task worked">
           {[["Claimed", "The agent said it was done"], ["Ran", "A tool actually ran"], ["Checked", "The result was read back or tested"], ["Double-checked", "Checked a second way"], ["You confirmed", "You pressed Worked"]].map(([t, d], i) => (
             <li key={t} style={{ "--n": i + 1 } as React.CSSProperties}><b>{t}</b>{d}</li>
@@ -132,9 +132,9 @@ const SECTIONS: Section[] = [
         </ol>
         <ul className="doc-list">
           <li><strong>Lessons are advice only.</strong> They can never change permissions, approvals, tools, settings or code.</li>
-          <li><strong>You review the risky ones.</strong> Anything learned from web pages, email or other outside content waits for your approval.</li>
-          <li><strong>Review and manage lessons.</strong> The <em>Learning</em> page shows each lesson, where it came from, and its history.</li>
-          <li><strong>Tell it how it went:</strong> the thumbs under a reply mean Worked or Didn't work. Agents learn from that too.</li>
+          <li><strong>Only the risky ones wait for you.</strong> Lessons from a task that changed tests or EchoSpeak's own files, lessons about sending things, and lessons from web pages that name sites or say what to trust. Anything else learned while reading the web is tried with extra care and never shared between agents.</li>
+          <li><strong>Tell it how it went, any way you like:</strong> the thumbs under a reply, or just say "that worked" or "that's wrong" in your next message.</li>
+          <li><strong>Diagnostics</strong> in Settings › Advanced › Learning show each lesson, where it came from and whether it helps, and let you pause or reset learning.</li>
         </ul>
       </>
     ),

@@ -3,6 +3,8 @@ stall on approvals, and the boundaries neither may cross."""
 
 from __future__ import annotations
 
+import os
+
 import threading
 from typing import Any
 
@@ -202,6 +204,7 @@ def test_autonomy_is_not_a_bypass_of_disabled_permissions(monkeypatch, tmp_path)
     assert "not available right now" in box.run("terminal", {"command": "dir"}).output
 
 
+@pytest.mark.skipif(os.name != "nt", reason="open_application is Windows-only today")
 def test_always_allow_doesnt_unblock_a_blocked_app(grants, monkeypatch):
     from agent import tools as registry_tools
 

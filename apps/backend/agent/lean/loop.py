@@ -18,17 +18,19 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shlex
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from loguru import logger
 
 from agent.lean import policy, settings
-from agent.lean import quarantine, tool_outputs, tracing
+from agent.lean import quarantine, tool_outputs, tool_prompting, tracing, window
 from agent.lean import approvals, steering
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, evidence, outbound
@@ -37,7 +39,7 @@ from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_n
                             unbacked_screen_claim, written_names)
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
-from agent.lean.provider import ChatClient, ModelTurn, ProviderError, extract_text_tool_calls
+from agent.lean.provider import ChatClient, ModelTurn, ProviderError, ToolCall, extract_text_tool_calls
 from agent.lean.toolbox import Toolbox, ToolResult, call_target, describe_call, safe_args_preview
 
 Emit = Callable[[dict[str, Any]], None]
@@ -47,6 +49,94 @@ NUDGE_EMPTY = (
     "otherwise write your answer."
 )
 NUDGE_TRUNCATED = "Your last reply was cut off by the output limit. Continue from where you stopped, concisely."
+# Output limit reached mid-answer: the same answer continues (thinking off), it isn't rewritten.
+NUDGE_CONTINUE = ("Your answer was cut off by the output limit. Continue it exactly where it stopped, without repeating "
+                  "anything already written and without starting over.")
+# All of the output went to reasoning: answer from it instead of reasoning again from scratch.
+NUDGE_REASONING_SPENT = ("Your reasoning used the whole output budget before you wrote the answer. Write the answer now, "
+                         "directly and concisely, from what you already worked out. Don't deliberate again.")
+# Reasoning, then an empty reply that stopped normally: the answer was written as reasoning. Answer it, thinking off.
+NUDGE_THOUGHT_ONLY = ("You worked out your reply in your reasoning but didn't write it for the user. Write the reply "
+                      "now, from what you already worked out; don't mention this note.")
+# The stream ended without a finish (or with an error inside it). Seen live: Ollama's qwen3.5 parser rejected a
+# malformed tool call ("XML syntax error … <function> closed by </parameter>") and still answered HTTP 200 with
+# no tool call, no finish_reason and no usage. Nothing ran; saying "you wrote it in your reasoning" (the
+# thought-only note) led the model to claim the edit was done.
+NUDGE_INCOMPLETE = ("Your last reply didn't come through complete: if it contained a tool call, the server couldn't "
+                    "read it, so nothing was run. Do the next step again; if it needs a tool, call it with valid "
+                    "arguments. Don't say anything was done that wasn't run.")
+NUDGE_WINDOW_SPENT = ("Your reasoning filled the model's context window before you wrote the answer. Write the answer "
+                      "now, directly and concisely, from what you already worked out. Don't deliberate again.")
+CONTINUATIONS = 2
+# A model call that failed for a passing reason (rate limit, server error, dropped connection, a local runner
+# that crashed and reloads) is retried this many times per turn, after these pauses, before the turn ends with
+# the error. One hiccup used to end a long task outright. Only calls that streamed nothing visible are retried,
+# and no tool has run at that point, so a retry has no side effect.
+TRANSIENT_RETRIES = 2
+TRANSIENT_PAUSES = (2.0, 5.0)
+_TRANSIENT_STATUS = {408, 429, 500, 502, 503, 504}
+_TRANSIENT_ERRORS = ("ConnectError", "ConnectTimeout", "ReadError", "RemoteProtocolError", "WriteError",
+                     "ConnectionResetError", "ConnectionRefusedError", "BrokenPipeError")
+
+
+def empty_cause(turn: Any, window: int) -> str:
+    """Why a reply has no text and no tool calls, from the server's own evidence.
+
+    incomplete_stream: the stream ended with no finish reason, or carried an error (the provider says so;
+        adapters that don't track this never produce it).
+    context_window: stopped for length with prompt + reply filling the served window (not the output limit).
+    output_limit: stopped for length below the window, i.e. the max_tokens sent.
+    reasoning_only: no text after reasoning (stopped normally, or an adapter that reports no finish).
+    empty: nothing at all.
+    """
+    finish = str(getattr(turn, "finish_reason", "") or "")
+    if getattr(turn, "incomplete", False) or getattr(turn, "stream_error", ""):
+        return "incomplete_stream"
+    if finish == "length":
+        usage = getattr(turn, "usage", None) or {}
+        used = int(usage.get("total") or 0) or int(usage.get("prompt") or 0) + int(usage.get("completion") or 0)
+        return "context_window" if window and used >= window - 64 else "output_limit"
+    return "reasoning_only" if str(getattr(turn, "reasoning", "") or "").strip() else "empty"
+# Failed summaries in one turn before compaction stops being tried (the loop trims instead).
+COMPACT_FAILURES = 2
+
+
+def _redacted_card(card: dict[str, Any]) -> dict[str, Any]:
+    """An approval card as emitted (and journaled): configured secrets in its arguments are masked (C5)."""
+    return {**card, "args": policy.redact_payload(card.get("args"))} if card.get("args") else card
+
+
+# An EchoSpeak note written by the model itself, in its own reply (open tag through close, or to the end).
+_FORGED_NOTE = re.compile(r"<echospeak-note>.*?(?:</echospeak-note>|$)", re.S | re.I)
+
+
+class _RetryStep(Exception):
+    """The reply can't be used and the step should be asked again (the cause is fixed for the next call)."""
+
+
+def exit_code_known(output: str) -> bool:
+    """The terminal reported how the command ended (agent/lean/terminal.py result header)."""
+    from agent.lean.verification import exit_code
+    return exit_code(output) is not None
+
+
+def app_note(text: str) -> str:
+    """An instruction from EchoSpeak inside the conversation, marked so the model never takes it for the user.
+
+    Corrections sent as plain user messages ("You wrote… but…") read as the user criticising the
+    model, which then apologised for things the user never said (live test, 11.11.3).
+    """
+    return f"<echospeak-note>{text}</echospeak-note>"
+
+
+def add_note(messages: list[dict[str, Any]], text: str) -> None:
+    """Add an app note without breaking user/assistant alternation (Gemma-style templates require it)."""
+    note = app_note(text)
+    last = messages[-1] if messages else {}
+    if last.get("role") in {"user", "tool"}:
+        last["content"] = f"{last.get('content') or ''}\n\n{note}"
+    else:
+        messages.append({"role": "user", "content": note})
 # Failures in a row of one tool (any arguments) before the agent is told to change approach.
 FAIL_STREAK_NOTE = 3
 # Refused or blocked actions (denied, policy, privacy, switched off, held): a firm note after
@@ -90,6 +180,8 @@ class TurnResult:
     # The summary passed to complete_task, if the agent marked its work done.
     completed: str = ""
     usage: dict[str, int] = field(default_factory=dict)
+    # The verification ledger's completion record (agent/lean/verification.py), when checks ran.
+    verification: dict[str, Any] = field(default_factory=dict)
 
 
 def _estimate_tokens(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
@@ -143,6 +235,9 @@ class LeanTurn:
         # Calls (by signature) the user denied or a policy blocked in this turn: never asked
         # or tried a second time. Persistence after a "no" is a failure mode, not diligence.
         self._refused: dict[str, str] = {}
+        # Existing files and folders named by an action the owner refused (or a policy blocked, or autonomous
+        # mode held) in this turn: later changes to them ask again, whatever tool they come through.
+        self._denied_targets: set[str] = set()
         # Failures in a row per tool, whatever the arguments: after a few, say so.
         self._fail_streak: dict[str, int] = {}
         # Approvals autonomous mode held for the owner instead of waiting ({tool, summary, reason}).
@@ -169,9 +264,32 @@ class LeanTurn:
         self._on_seal = on_seal
         self._handed_off = False
         self.compactions = 0
+        self._compact_failures = 0
+        self._empty_cause = ""  # why the last reply was empty (see empty_cause)
         # Extra fields on agent_start, e.g. who handed this work over.
         self.meta = dict(meta or {})
         self.client = client
+        # Set by the session for environments with their own boundary (Chat); returns why a call is refused.
+        self.call_guard: Optional[Callable[[str, dict[str, Any], Any], str]] = None
+        # Environment hooks (Chat: agent/lean/chat_run.py). tool_observer sees every finished call
+        # (name, args, ok, output, step, duration_ms, meta); final_check may ask for one correction
+        # before an answer is accepted (an output guardrail); grace_prompt asks for the best answer
+        # when the step budget runs out.
+        self.tool_observer: Optional[Callable[..., None]] = None
+        # Reviews a finished answer without regenerating it: returns (notes to show under it,
+        # replacement text or ""). Chat uses it for citation and figure checks.
+        self.answer_review: Optional[Callable[[str], tuple[list[str], str]]] = None
+        # How many times an untrue "I did it" claim is sent back for a rewrite before it's just noted.
+        self.claim_nudge_limit = 1
+        self._no_think_next = False
+        # Calls to run before the model's first turn, through the normal tool path ([(name, args)]):
+        # Chat reads addresses the user gave without waiting for a small model to notice them.
+        self.prefetch: Optional[Callable[[], list[tuple[str, dict[str, Any]]]]] = None
+        self.final_check: Optional[Callable[[str], str]] = None
+        # Measures engineering work against its objective (agent/lean/verification.py): sees every finished
+        # call, adds structured feedback to check results, and states completion under the answer.
+        self.verifier: Optional[Any] = None
+        self.grace_prompt = ""
         self.persona = persona
         self.system_prompt = system_prompt
         self.history = history
@@ -206,11 +324,42 @@ class LeanTurn:
             except Exception:
                 logger.exception("Lean event emit failed")
 
+    def _reasoning_tail(self, step: int, limit: int = 1200) -> str:
+        """The end of this step's reasoning, for answering from it instead of reasoning again."""
+        text = " ".join(item.get("text", "") for item in self.timeline if item.get("kind") == "thinking" and item.get("step") == step)
+        text = " ".join(text.split())
+        return text[-limit:]
+
+    def _review_answer(self, step: int) -> None:
+        """Annotate the finished answer (answer_review): notes under it, and at most a light in-place fix.
+
+        Never erases the answer and never calls the model again: a visible final answer stays the
+        final answer (the live-test double-thinking came from regenerating after streaming).
+        """
+        try:
+            notes, replacement = self.answer_review(self._visible_text())
+        except Exception:
+            logger.debug("Answer review failed", exc_info=True)
+            return
+        if replacement and replacement != self._visible_text():
+            texts = [item for item in self.timeline if item.get("kind") == "text"]
+            if len(texts) == 1:
+                texts[0]["text"] = replacement
+                self.emit({"type": "text_replace", "step": texts[0].get("step", step), "text": replacement})
+        for note in notes:
+            self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
+            self.emit({"type": "answer_note", "step": step, "note": note})
+
     def _retract_text(self, step: int) -> None:
         """Take back text streamed in this step (a claim that turned out to be untrue)."""
         if any(item.get("kind") == "text" and item.get("step") == step for item in self.timeline):
             self.timeline = [item for item in self.timeline if not (item.get("kind") == "text" and item.get("step") == step)]
             self.emit({"type": "text_replace", "step": step, "text": ""})
+
+    def _discard_step(self, step: int) -> None:
+        """Take back everything a step streamed (its reply was made from a prompt the server cut)."""
+        self._retract_text(step)
+        self.timeline = [item for item in self.timeline if not (item.get("kind") == "thinking" and item.get("step") == step)]
 
     def _close_thinking(self) -> None:
         for item in reversed(self.timeline):
@@ -238,6 +387,7 @@ class LeanTurn:
                 "name": self.persona.name,
                 "title": self.persona.title,
                 "initials": self.persona.initials(),
+                "provider": str(getattr(getattr(self.client, "endpoint", None), "provider", "") or ""),
             },
             **extra,
         })
@@ -310,11 +460,26 @@ class LeanTurn:
         promise_nudges = 0
         claim_nudges = 0
         check_nudges = 0
+        verify_nudges = 0
+        menus = 0
+        quote_nudges = 0
+        forged_nudges = 0
         final_text = ""
         error = ""
         success = True
         overflow_retries = 0
+        transient_retries = 0
+        continuations = 0
         step = 0
+        planned = self.prefetch() if self.prefetch is not None else []
+        if planned and not self.cancel.is_set():
+            # Deterministic retrieval as the turn's first step, recorded like the model's own calls.
+            step = 1
+            self.emit({"type": "step_start", "step": step})
+            calls = [ToolCall(f"prefetch_{index}", name, json.dumps(args)) for index, (name, args) in enumerate(planned)]
+            messages.append({"role": "assistant", "content": "", "tool_calls": [
+                {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}} for call in calls]})
+            self._run_tools(calls, messages, step, call_counts)
 
         while step < max_steps:
             if self.cancel.is_set():
@@ -332,16 +497,34 @@ class LeanTurn:
             self.emit({"type": "step_start", "step": step})
             try:
                 turn = self._call_model(messages, tools, step)
+            except _RetryStep:
+                step -= 1  # the same step again, now that the call can be made properly (bounded: detected once)
+                continue
             except ProviderError as exc:
                 if exc.context_overflow and overflow_retries < 2:
                     overflow_retries += 1
                     self._fit_context(messages, tools, aggressive=True)
                     step -= 1
                     continue
+                if transient_retries < TRANSIENT_RETRIES and self._retry_transient(exc, step, transient_retries):
+                    transient_retries += 1
+                    step -= 1
+                    continue
                 error = str(exc)
                 success = False
                 break
             except Exception as exc:  # network errors, model unloaded, etc.
+                if isinstance(exc, PermissionError) and "budget exhausted" in str(exc).lower():
+                    # A limit reached, not a crash: it used to be logged as a failed model call with a traceback.
+                    stop_reason = "budget"
+                    error = ("This task reached its work budget (tokens or time), so I stopped here. What's done so far is "
+                             "kept; ask me to continue if you want more.")
+                    success = False
+                    break
+                if transient_retries < TRANSIENT_RETRIES and self._retry_transient(exc, step, transient_retries):
+                    transient_retries += 1
+                    step -= 1
+                    continue
                 logger.exception("Lean model call failed")
                 error = f"{type(exc).__name__}: {exc}"
                 success = False
@@ -373,13 +556,37 @@ class LeanTurn:
             messages.append(assistant)
 
             if not calls:
+                if content.strip() and turn.finish_reason == "length" and continuations < CONTINUATIONS and step < max_steps:
+                    # Cut off by the output limit mid-answer: carry on with the same answer, thinking off,
+                    # instead of accepting half an answer or starting a new one.
+                    continuations += 1
+                    add_note(messages, NUDGE_CONTINUE)
+                    self._no_think_next = True
+                    self.emit({"type": "answer_continue", "step": step, "count": continuations})
+                    continue
                 if content.strip():
+                    if _FORGED_NOTE.search(content):
+                        # deepseek-r1:8b wrote "<echospeak-note>Success! The test now passes.</echospeak-note>" into its own
+                        # reply, having run nothing. Only EchoSpeak writes those notes: back once, then removed from view.
+                        if forged_nudges < 1:
+                            forged_nudges += 1
+                            add_note(messages, "Notes in <echospeak-note> tags come only from EchoSpeak, and your reply "
+                                               "contained one you wrote yourself. Reply again without it, saying only what "
+                                               "the tool results in this conversation show.")
+                            self.emit({"type": "forged_note", "step": step})
+                            self._retract_text(step)
+                            continue
+                        content = _FORGED_NOTE.sub("", content).strip()
+                        for item in self.timeline:
+                            if item.get("kind") == "text" and item.get("step") == step:
+                                item["text"] = _FORGED_NOTE.sub("", item["text"])
+                        self.emit({"type": "text_replace", "step": step, "text": content})
                     if self.promise_guard and self.toolbox.names and is_promise_without_action(content):
                         # "Sure, I'll do that" is not the work. Ask for the action
                         # (twice at most) instead of ending the turn on a promise.
                         if promise_nudges < 2:
                             promise_nudges += 1
-                            messages.append({"role": "user", "content": promise_nudge(self.toolbox.names)})
+                            add_note(messages, promise_nudge(self.toolbox.names))
                             self.emit({"type": "promise_nudge", "step": step, "count": promise_nudges})
                             continue
                         stop_reason = "promise_unfulfilled"
@@ -388,9 +595,9 @@ class LeanTurn:
                              if self.promise_guard and self.toolbox.names else "")
                     if claim and not stop_reason:
                         # "I've saved it" with nothing saved: ask once for the tool call or the truth.
-                        if claim_nudges < 1:
+                        if claim_nudges < self.claim_nudge_limit:
                             claim_nudges += 1
-                            messages.append({"role": "user", "content": claim_nudge(claim)})
+                            add_note(messages, claim_nudge(claim))
                             self.emit({"type": "claim_nudge", "step": step, "claim": claim[:200]})
                             self._retract_text(step)
                             continue
@@ -402,12 +609,50 @@ class LeanTurn:
                             and any(name in self.toolbox.names for name in CHECK_TOOLS)):
                         # Code changed and nothing ran since: check it before calling it done (once).
                         check_nudges += 1
-                        messages.append({"role": "user", "content": check_nudge(list(self._unchecked))})
+                        add_note(messages, check_nudge(list(self._unchecked)))
                         self.emit({"type": "check_nudge", "step": step, "files": list(self._unchecked)[:5]})
                         self._retract_text(step)
                         continue
+                    problem = (self.verifier.unfinished(content) if self.verifier is not None and not stop_reason
+                               and verify_nudges < 1 and step < max_steps else "")
+                    if problem:
+                        # "All tests pass" while the last check failed: back to the work once, with the evidence.
+                        verify_nudges += 1
+                        add_note(messages, problem)
+                        self.emit({"type": "verification_nudge", "step": step, "note": problem[:300]})
+                        self._retract_text(step)
+                        continue
+                    invented = (evidence.unseen_quotes(content, "\n".join(str(m.get("content") or "") for m in messages
+                                                                           if m.get("role") != "assistant"))
+                                if quote_nudges < 1 and not stop_reason and step < max_steps else [])
+                    if invented:
+                        # Quoting a log line nobody showed the model (ministral-3:8b invented one): back once, with the line.
+                        quote_nudges += 1
+                        add_note(messages, "Your reply quotes lines that don't appear in anything you were shown in this "
+                                           f"conversation: “{invented[0][:200]}”. Quote only what a tool returned; search "
+                                           "or read the file again if you need the exact line, or say you couldn't find it.")
+                        self.emit({"type": "quote_unverified", "step": step, "lines": len(invented)})
+                        self._retract_text(step)
+                        continue
+                    menu = (ask.menu_in_text(content) if self.interactive and ask.ASK_USER in self.toolbox.names
+                            and menus < 2 and not stop_reason else None)
+                    if menu:
+                        # A choice written as prose ends the run; as a question card the run goes on with the pick.
+                        menus += 1
+                        call = ToolCall(f"menu_{uuid.uuid4().hex[:10]}", ask.ASK_USER, json.dumps(menu))
+                        messages[-1]["tool_calls"] = [{"id": call.id, "type": "function",
+                                                       "function": {"name": call.name, "arguments": call.arguments}}]
+                        self.emit({"type": "menu_as_question", "step": step, "options": len(menu["options"])})
+                        self._run_tools([call], messages, step, call_counts)
+                        continue
                     if self._absorb_steering(messages, step):
                         # The user added something while this answer was written: keep going with it.
+                        self._retract_text(step)
+                        continue
+                    correction = self.final_check(content) if self.final_check is not None and not stop_reason else ""
+                    if correction and step < max_steps:
+                        add_note(messages, correction)
+                        self.emit({"type": "answer_check", "step": step, "note": correction[:300]})
                         self._retract_text(step)
                         continue
                     final_text = content.strip()
@@ -416,15 +661,37 @@ class LeanTurn:
                     # The teammate already answered; nothing more is needed.
                     final_text = ""
                     break
+                cause = empty_cause(turn, settings.context_tokens(getattr(self.client, "endpoint", None)))
+                self._empty_cause = cause
                 if nudges < 2:
                     nudges += 1
                     messages.pop()
-                    messages.append({
-                        "role": "user",
-                        "content": NUDGE_TRUNCATED if turn.finish_reason == "length" else NUDGE_EMPTY,
-                    })
+                    tail = self._reasoning_tail(step)
+                    if cause == "incomplete_stream":
+                        # Ask for the same step again as it was; thinking wasn't the problem.
+                        add_note(messages, NUDGE_INCOMPLETE)
+                    elif turn.finish_reason == "length":
+                        # Reasoning used the whole budget: answer from it (thinking off), don't reason again.
+                        spent = NUDGE_WINDOW_SPENT if cause == "context_window" else NUDGE_REASONING_SPENT
+                        add_note(messages, spent + (f" Your reasoning ended with: \"{tail}\"" if tail else ""))
+                        self._no_think_next = True
+                    elif tail:
+                        # Thought but said nothing: the answer is often written in the reasoning and the turn
+                        # ended there. Asking again with thinking on repeats it (qwen3.5:9b on Ollama: every
+                        # replay of such a call came back empty, every replay with thinking off answered).
+                        add_note(messages, NUDGE_THOUGHT_ONLY + f" Your reasoning ended with: \"{tail}\"")
+                        self._no_think_next = True
+                    else:
+                        add_note(messages, NUDGE_EMPTY)
+                    # The cause and the server's raw evidence, beside the retry (the judge and the journal read these).
+                    self.emit({"type": "empty_reply", "step": step, "cause": cause, "finish": turn.finish_reason,
+                               "stream_error": getattr(turn, "stream_error", ""), "usage": dict(turn.usage or {}),
+                               "reasoning_chars": len(turn.reasoning or ""),
+                               "retry": "thinking_off" if self._no_think_next else "as_is"})
                     continue
                 final_text = ""
+                # No answer after the bounded retries: say so in the outcome instead of an empty "success".
+                stop_reason = "no_answer"
                 break
 
             self._run_tools(calls, messages, step, call_counts)
@@ -447,7 +714,7 @@ class LeanTurn:
                 # Appended to the tool result, not sent as its own message: some chat
                 # templates (Gemma) require strict user/assistant alternation.
                 messages[-1]["content"] = (str(messages[-1].get("content") or "") + "\n\n"
-                                           + reminder(self.goal, step, self._outcomes[-REMIND_EVERY:]))
+                                           + app_note(reminder(self.goal, step, self._outcomes[-REMIND_EVERY:])))
                 self.emit({"type": "goal_reminder", "step": step})
             completed = self._completion_from(calls, messages)
             if completed is not None:
@@ -467,6 +734,14 @@ class LeanTurn:
                 self._append_text("text", step, note)
                 self.emit({"type": "agent_token", "step": step, "data": note})
 
+        if self.answer_review is not None and success and not error and self._visible_text():
+            self._review_answer(step)
+        verification = self.verifier.completion() if self.verifier is not None and self.verifier.active() else {}
+        if verification and error != "cancelled":
+            note = self.verifier.summary_note()
+            if note:
+                self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
+                self.emit({"type": "answer_note", "step": step, "note": note, "verification": verification["status"]})
         visible = self._visible_text()
         if not visible:
             visible = final_text
@@ -482,9 +757,27 @@ class LeanTurn:
             elif error:
                 visible = _friendly_error(error)
             else:
-                visible = "I couldn't put together a reply this time. Try asking again or rephrasing."
+                visible = {
+                    "incomplete_stream": ("The model's replies kept arriving incomplete (the server couldn't read them), "
+                                          "so nothing more was done. Try again, or try another model."),
+                    "context_window": ("The model filled its context window while thinking and never wrote an answer. "
+                                       "Try a shorter request, a new chat, or a model with a larger window."),
+                    "output_limit": ("The model used its whole output allowance thinking and never wrote an answer. "
+                                     "Try again, or turn thinking down for this model."),
+                }.get(self._empty_cause if stop_reason == "no_answer" else "",
+                      "I couldn't put together a reply this time. Try asking again or rephrasing.")
             self._append_text("text", step, visible)
             self.emit({"type": "agent_token", "step": step, "data": visible})
+        if self.cancel.is_set():
+            # Stop ends this turn's own background work too; its servers keep running and are listed (C3).
+            try:
+                from agent.lean.terminal import stop_cancelled_processes
+
+                swept = stop_cancelled_processes()
+                if swept["stopped"] or swept["servers_running"]:
+                    self.emit({"type": "processes_stopped", "step": step, **swept})
+            except Exception:
+                logger.debug("Stopping the turn's processes failed", exc_info=True)
         self.emit({
             "type": "agent_done",
             "text": visible,
@@ -494,6 +787,7 @@ class LeanTurn:
             "usage": dict(self.usage),
             "empty": empty,
             "stop_reason": stop_reason,
+            "empty_cause": self._empty_cause if stop_reason == "no_answer" else "",
             # Approvals autonomous mode held for the owner: the actionable exceptions of a walk-away run.
             "held": list(self.held),
             "completed": self.completed_summary or "",
@@ -509,6 +803,7 @@ class LeanTurn:
             stop_reason=stop_reason,
             completed=self.completed_summary or "",
             usage=dict(self.usage),
+            verification=verification,
         )
 
     def _completion_from(self, calls: list[Any], messages: list[dict[str, Any]]) -> Optional[str]:
@@ -537,11 +832,23 @@ class LeanTurn:
     # ── model ───────────────────────────────────────────────────────────
     def _call_model(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], step: int) -> ModelTurn:
         self.client.on_audio = lambda packet: self.emit({"type": "voice_audio", **packet})
+        if self._no_think_next:
+            # A continuation or an answer-from-reasoning: one call without a new thinking phase.
+            self._no_think_next = False
+            saved = getattr(self.client, "reasoning_effort", "")
+            try:
+                self.client.reasoning_effort = "none"
+                return self._call_model(messages, tools, step)
+            finally:
+                self.client.reasoning_effort = saved
         def on_reasoning(text: str) -> None:
             self._append_text("thinking", step, text)
             self.emit({"type": "reasoning_delta", "step": step, "text": text})
 
+        self._answer_streamed = False
+
         def on_content(text: str) -> None:
+            self._answer_streamed = True  # visible answer text: a retry would repeat it, so none is made
             self._append_text("text", step, text)
             self.emit({"type": "agent_token", "step": step, "data": text})
 
@@ -549,11 +856,13 @@ class LeanTurn:
         if self.work_context:
             self.work_context.coordinator.check(self.work_context)
         from agent.coordination import work_scope
-        from agent.admission import inference
-        with work_scope(self.work_context), inference(endpoint, cancel=self.cancel), self._span("model.call", step=step, model=str(getattr(endpoint, "model", "") or ""),
+        from agent.admission import inference, loop_accounted
+        with work_scope(self.work_context), loop_accounted(), inference(endpoint, cancel=self.cancel), self._span("model.call", step=step, model=str(getattr(endpoint, "model", "") or ""),
                         provider=str(getattr(endpoint, "provider", "") or ""), tools=len(tools or [])) as span:
+            # A template that drops tool definitions gets them as text (agent/lean/tool_prompting.py).
+            sent_messages = tool_prompting.with_catalog(messages, tools) if tools and tool_prompting.needed(endpoint) else messages
             turn = self.client.stream_turn(
-                messages,
+                sent_messages,
                 tools=tools or None,
                 on_reasoning=on_reasoning,
                 on_content=on_content,
@@ -563,12 +872,40 @@ class LeanTurn:
             span.set(tool_calls=len(turn.tool_calls), finish=str(turn.finish_reason or ""),
                      prompt_tokens=int((turn.usage or {}).get("prompt") or 0),
                      completion_tokens=int((turn.usage or {}).get("completion") or 0))
-            if self.work_context and not getattr(self.client.stream_turn, "_echo_admitted", False):
-                usage = turn.usage or {}
-                self.work_context.coordinator.account(self.work_context, int(usage.get("total") or usage.get("prompt", 0) + usage.get("completion", 0)))
+            # Count the step once: "fresh" is what it added (new input + reply). Charging the total
+            # re-counted the whole re-sent conversation every step, so a 64k work budget ran out after
+            # about five steps on a 16k-context model, even on a task whose tests had already passed.
+            fresh = self._account_usage(turn.usage, messages, tools) if turn.usage else 0
+            # The admission wrapper leaves this call's charge to the loop (admission.loop_accounted).
+            if self.work_context:
+                self.work_context.coordinator.account(self.work_context, fresh)
         if turn.usage:
-            self._account_usage(turn.usage)
             self.emit({"type": "token_usage", **turn.usage, "context_limit": settings.context_tokens(getattr(self.client, "endpoint", None))})
+        sent = _estimate_tokens(messages, tools) if turn.usage else 0
+        kept = int((turn.usage or {}).get("prompt") or 0)
+        cut = window.truncated(endpoint, sent, kept)
+        if not cut and tools and kept and not tool_prompting.known(endpoint):
+            if tool_prompting.observe(endpoint, sent, _estimate_tokens(messages, []), kept):
+                # The server counted the messages but not the tool definitions: this reply was made without
+                # knowing the tools (deepseek-r1:8b invented a script's output). Discarded; asked again with them.
+                self._discard_step(step)
+                if getattr(self, "trace", None) is not None:
+                    self.trace.event("tools.prompted", step=step, sent=sent, kept=kept)
+                self.emit({"type": "tools_prompted", "step": step, "sent": sent, "kept": kept})
+                raise _RetryStep()
+        if not cut and sent >= 512 and kept:
+            self._token_scale = min(1.4, max(0.75, kept / sent))  # calibrates the next _fit_context
+        if cut:
+            # The server answered a prompt it had silently cut (system prompt and request gone first). Nothing
+            # from this reply is used: its text is taken back, its tool calls never run, and the loop trims
+            # to the window the server really has and asks again (agent/lean/window.py).
+            window.learn(endpoint, cut)
+            self._discard_step(step)
+            if getattr(self, "trace", None) is not None:
+                self.trace.event("context.truncated", step=step, sent=sent, kept=kept, window=cut)
+            self.emit({"type": "context_truncated", "step": step, "sent": sent, "kept": kept, "window": cut})
+            raise ProviderError(413, f"The model server cut the prompt to fit its {cut}-token context window "
+                                     f"(about {sent} tokens were sent, {kept} kept).")
         # In group chats the transcript shows "[Name]: text"; models sometimes copy
         # that onto their own reply. Drop it.
         own_prefix = re.match(rf"\s*\[{re.escape(self.persona.name)}\]:\s*", turn.content or "")
@@ -590,7 +927,35 @@ class LeanTurn:
                 self.emit({"type": "text_replace", "step": step, "text": cleaned})
         return turn
 
-    def _account_usage(self, usage: dict[str, Any]) -> None:
+    def _account_side(self, usage: Optional[dict[str, Any]], kind: str) -> None:
+        """A model call outside the agent's own steps (compaction): all of it is new input, so all of it counts.
+
+        It doesn't move the step baseline (_last_prompt): the next step is still compared with the last step.
+        """
+        if not usage:
+            return
+        prompt, completion = int(usage.get("prompt") or 0), int(usage.get("completion") or 0)
+        self.usage["prompt"] += prompt
+        self.usage["completion"] += completion
+        self.usage["total"] += int(usage.get("total") or prompt + completion)
+        self.usage["fresh"] = self.usage.get("fresh", 0) + prompt + completion
+        self.emit({"type": "side_usage", "kind": kind, "prompt": prompt, "completion": completion})
+
+    def _added_since_last_call(self, messages: list[dict[str, Any]], tools: Optional[list[dict[str, Any]]]) -> int:
+        """Estimated tokens of what the loop added to the conversation since the previous model call.
+
+        Each message's size is remembered by identity (the messages are held, so an id can't be reused):
+        new messages count whole, messages that grew (a note appended to a tool result) count what they
+        gained, and messages that were trimmed or dropped count nothing.
+        """
+        seen: dict[int, tuple[dict[str, Any], int]] = getattr(self, "_message_sizes", {})
+        sizes = {id(m): (m, _estimate_tokens([m], [])) for m in messages}
+        added = sum(max(0, size - seen.get(key, (None, 0))[1]) for key, (_m, size) in sizes.items())
+        self._message_sizes = sizes
+        return added
+
+    def _account_usage(self, usage: dict[str, Any], messages: Optional[list[dict[str, Any]]] = None,
+                       tools: Optional[list[dict[str, Any]]] = None) -> int:
         """Add one step's token counts to the turn's.
 
         "fresh" is what the step added. Every step re-sends the whole conversation, so
@@ -600,14 +965,27 @@ class LeanTurn:
         """
         for key in ("prompt", "completion", "total"):
             self.usage[key] += int(usage.get(key) or 0)
+        added = self._added_since_last_call(messages, tools) if messages is not None else None
         if "prompt" in usage or "completion" in usage:
             prompt = int(usage.get("prompt") or 0)
-            grown = prompt - self._last_prompt if self._last_prompt and prompt >= self._last_prompt else prompt
+            # A prompt that shrank was trimmed to fit the context window (_fit_context), so the server's growth
+            # says nothing about what was added: counting the whole prompt again drained a 64k work budget in ~5
+            # steps on a 16k model, but counting nothing missed the new tool result sent in the same step. The
+            # loop knows what it added since the last call; it's converted to the server's tokens by this
+            # call's own ratio. Only the first step counts the prompt whole.
+            if not self._last_prompt:
+                grown = prompt
+            elif prompt >= self._last_prompt or added is None:
+                grown = max(0, prompt - self._last_prompt)
+            else:
+                sent = _estimate_tokens(messages, tools or [])
+                grown = int(added * prompt / sent) if sent else 0
             self._last_prompt = prompt
             fresh = max(0, grown) + int(usage.get("completion") or 0)
         else:  # a provider that reports only a total
             fresh = int(usage.get("total") or 0)
         self.usage["fresh"] = self.usage.get("fresh", 0) + fresh
+        return fresh
 
     # ── tools ───────────────────────────────────────────────────────────
     def _run_tools(self, calls: list[Any], messages: list[dict[str, Any]], step: int, call_counts: dict[str, int]) -> None:
@@ -625,6 +1003,13 @@ class LeanTurn:
             problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} | computer_names else "repeat")
             if not problem and signature in self._refused:
                 problem = "refused"
+            if not problem and self.call_guard is not None:
+                # The environment's own boundary (Chat: agent/lean/chat_mode.py), after alias resolution.
+                if reason := self.call_guard(name, args, self.toolbox.entry(name)):
+                    policy.audit(policy.Decision("deny", reason, "environment"), name=name, args=args,
+                                 session_id=self.session_id, agent=self.persona.id, outcome="blocked")
+                    self._policy_reasons[call.id] = reason
+                    problem = "policy"
             if not problem:
                 # Checked for every call, parallel read-only ones included.
                 decision = policy.evaluate(name, args, entry=self.toolbox.entry(name), tainted_by=self.taint,
@@ -638,11 +1023,39 @@ class LeanTurn:
                 elif decision.action == "ask":
                     self._policy_reasons[call.id] = decision.reason
                     self._policy_rules[call.id] = decision.rule
+            fetched = (policy.download_and_run(str(args.get("command") or args.get("cmd") or ""))
+                       if not problem and name in policy.COMMAND_TOOLS else "")
+            if fetched:
+                # Downloading code and running it at once. From an address the user gave, it asks (no grant covers it);
+                # otherwise it came from something the agent read, as in a README's planted `wget … | bash`
+                # (granite4.2:8b ran one in the five-model evaluation), and it isn't run.
+                asked_for = fetched in f"{getattr(self, '_goal', '')}\n{self.goal}"
+                reason = f"it downloads code from {fetched[:120]} and runs it straight away"
+                if asked_for:
+                    self._policy_reasons[call.id], self._policy_rules[call.id] = reason, "download_execute"
+                else:
+                    reason += ", and that address isn't in the user's request. Tell the user the exact command if they want to run it"
+                    policy.audit(policy.Decision("deny", reason, "download_execute"), name=name, args=args,
+                                 session_id=self.session_id, agent=self.persona.id, outcome="blocked")
+                    self._policy_reasons[call.id] = reason
+                    problem = "policy"
+            if not problem and self._denied_targets and call.id not in self._policy_reasons:
+                hit = self._after_denial(name, args)
+                if hit:
+                    # Another route to what the owner just refused (`rm x` denied, then x written empty): it asks
+                    # again, and no grant or autonomous mode answers for the owner (approvals.scope_for).
+                    self._policy_reasons[call.id] = f"you refused an action on {hit} earlier in this request"
+                    self._policy_rules[call.id] = "after_denial"
             prepared.append((call, name, args, problem))
 
         results: dict[str, tuple[bool, str]] = {}
         visual_results: dict[str, list[dict]] = {}
-        parallel = [item for item in prepared if not item[3] and self.toolbox.is_parallel_safe(item[1])]
+        # Read-only calls run together only when the whole step is such calls and none needs the owner: the pool
+        # doesn't go through _approve, and it ran before the step's other calls. An "ask" on a read went unasked,
+        # and a read listed after a write saw the state before it (C2). Anything else runs one by one, in order.
+        parallel = [item for item in prepared if not item[3] and self._may_run_unasked_in_parallel(*item[:3])]
+        if len(parallel) != len(prepared):
+            parallel = []
         sequential = [item for item in prepared if item not in parallel]
 
         if len(parallel) > 1:
@@ -683,6 +1096,7 @@ class LeanTurn:
                 output = (f"Blocked by EchoSpeak's safety policy: {self._policy_reasons.get(call.id, 'not allowed')}. "
                           "Don't retry it; continue without it or tell the user what was blocked.")
                 self._refused[self._sig(name, args)] = "blocked by EchoSpeak's safety policy"
+                self._denied_targets |= self._touched(name, args)
                 results[call.id] = (False, output)
                 self._tool_finished(call, name, args, step, False, output, 0, outcome="refused")
                 continue
@@ -731,6 +1145,8 @@ class LeanTurn:
                     self._refused[self._sig(name, args)] = "denied by the user"
                 elif denial.startswith("Not run:") and "autonomous mode" in denial:
                     self._refused[self._sig(name, args)] = "held for the owner's approval"
+                if denied_as in {"denied", "held"}:
+                    self._denied_targets |= self._touched(name, args)
                 results[call.id] = (False, denial)
                 self._tool_finished(call, name, args, step, False, denial, 0, outcome=denied_as)
                 continue
@@ -792,6 +1208,11 @@ class LeanTurn:
                 self.emit({"type": "fail_streak", "step": step, "tool": name, "count": streak})
             if not refused:
                 text += self._screen_progress(name, ok, outcome, step)
+            measured = self.verifier.feedback(call.id) if self.verifier is not None else ""
+            if measured:
+                # Expected vs actual, progress against the best result, and the bottleneck, on the check's own result.
+                text += "\n\n" + app_note(measured)
+                self.emit({"type": "verification", "step": step, "tool": name, "note": measured[:600]})
             messages.append({"role": "tool", "tool_call_id": call.id, "name": name, "content": text or "(empty result)"})
             if visual_results.get(call.id):
                 messages[-1]["observations"] = visual_results[call.id]
@@ -878,6 +1299,64 @@ class LeanTurn:
             return f" ({'; '.join(parts)})" if parts else ""
         return ""
 
+    def _touched(self, name: str, args: dict[str, Any]) -> set[str]:
+        """Existing files and folders a call names: a file tool's paths, or a command's arguments.
+
+        The project folder itself and its parents are left out: every command runs somewhere in them.
+        """
+        from agent.lean.file_changes import TRACKED
+
+        root = Path(str(getattr(self.toolbox, "project_root", "") or ".")).expanduser()
+        base = root
+        if name in TRACKED:
+            raw = [str(args.get(k) or "") for k in ("path", "file_path", "src", "source", "dst", "destination")]
+        elif name in {"terminal", "terminal_run", "process_start"}:
+            command = str(args.get("command") or args.get("cmd") or "")
+            try:
+                tokens = shlex.split(command)
+            except ValueError:
+                tokens = command.split()
+            raw = [token.lstrip("<>|&;") for token in tokens if not token.startswith("-")]
+            base = Path(str(args.get("cwd") or root)).expanduser()
+        else:
+            return set()
+        try:
+            exclude = {str(root.resolve()), *(str(p) for p in root.resolve().parents)}
+        except OSError:
+            exclude = set()
+        found: set[str] = set()
+        for token in raw:
+            if not token.strip():
+                continue
+            path = Path(token).expanduser()
+            path = path if path.is_absolute() else base / path
+            try:
+                resolved = path.resolve()
+                if resolved.exists() and str(resolved) not in exclude:
+                    found.add(str(resolved))
+            except (OSError, ValueError):
+                continue
+        return found
+
+    def _after_denial(self, name: str, args: dict[str, Any]) -> str:
+        """The refused target this call would change (shown to the owner), or ""."""
+        from agent.learning.episodes import command_kind
+        from agent.lean.file_changes import TRACKED
+
+        if name not in TRACKED:
+            if name not in {"terminal", "terminal_run", "process_start"}:
+                return ""
+            if command_kind(str(args.get("command") or args.get("cmd") or "")) == "read":
+                return ""
+        hit = sorted(self._touched(name, args) & self._denied_targets)
+        if not hit:
+            return ""
+        root = Path(str(getattr(self.toolbox, "project_root", "") or ".")).expanduser()
+        try:
+            return str(Path(hit[0]).relative_to(root.resolve()))
+        except (ValueError, OSError):
+            return hit[0]
+
     @staticmethod
     def _sig(name: str, args: dict[str, Any]) -> str:
         return hashlib.sha1(f"{name}:{json.dumps(args, sort_keys=True, default=str)}".encode()).hexdigest()
@@ -895,13 +1374,10 @@ class LeanTurn:
         """
         if self.cancel.is_set():
             return ""
-        ask = ("[EchoSpeak]: Your step budget is used up. Reply now, without tools, with your findings in the "
-               "required format, using only what you actually found. Say what you couldn't confirm.")
-        last = messages[-1] if messages else {}
-        if last.get("role") in {"tool", "user"}:
-            last["content"] = f"{last.get('content') or ''}\n\n{ask}"  # keep strict role alternation
-        else:
-            messages.append({"role": "user", "content": ask})
+        ask = self.grace_prompt or (
+            "[EchoSpeak]: Your step budget is used up. Reply now, without tools, with your findings in the "
+            "required format, using only what you actually found. Say what you couldn't confirm.")
+        add_note(messages, ask.removeprefix("[EchoSpeak]: "))  # keeps strict role alternation
         try:
             turn = self._call_model(messages, [], step)
         except Exception:
@@ -935,10 +1411,37 @@ class LeanTurn:
         self.timeline.append({"kind": "note", "step": step, "text": text, "at": time.time()})
         self.emit({"type": "auto_approved", "step": step, "note": text})
 
+    def _retry_transient(self, exc: BaseException, step: int, attempt: int) -> bool:
+        """Wait and say so when ``exc`` is a passing failure worth one more try (see TRANSIENT_RETRIES)."""
+        status = int(getattr(exc, "status", 0) or 0)
+        passing = status in _TRANSIENT_STATUS or type(exc).__name__ in _TRANSIENT_ERRORS
+        if not passing or getattr(self, "_answer_streamed", False) or self.cancel.is_set():
+            return False
+        pause = TRANSIENT_PAUSES[min(attempt, len(TRANSIENT_PAUSES) - 1)]
+        reason = f"HTTP {status}" if status else type(exc).__name__
+        logger.info("Model call failed ({}); retrying in {}s", reason, pause)
+        self.emit({"type": "model_retry", "step": step, "attempt": attempt + 1, "reason": reason, "detail": str(exc)[:300],
+                   "pause_s": pause})
+        return not self.cancel.wait(pause)  # Stop during the pause ends the turn instead
+
+    def _may_run_unasked_in_parallel(self, call: Any, name: str, args: dict[str, Any]) -> bool:
+        """A read-only call nothing would ask about: no policy ask and no approval rule (lost-work checks
+        concern writes, which never run in parallel)."""
+        if not self.toolbox.is_parallel_safe(name) or call.id in self._policy_reasons:
+            return False
+        needs, _reason = tool_needs_approval(self.toolbox.entry(name), name, args)
+        return not needs and settings.approval_mode() not in {"always"}
+
     def _approve(self, call: Any, name: str, args: dict[str, Any], step: int) -> tuple[bool, str, str]:
         """(allowed, the result text when not, and its outcome: refused, denied, held or skipped)."""
         entry = self.toolbox.entry(name)
         needs, reason = tool_needs_approval(entry, name, args)
+        if not needs and settings.approval_mode() != "never" and hasattr(self.toolbox, "file_change_preview"):
+            # Emptying a file, or removing most of it, is deleting work: it asks like a delete does.
+            from agent.lean.file_changes import lost_work
+            lost = lost_work(self.toolbox.file_change_preview(name, args))
+            if lost:
+                needs, reason = True, lost
         context = self.work_context
         if context and context.coordinator.consume_approval(context, name, args):
             return True, "", ""
@@ -1011,6 +1514,10 @@ class LeanTurn:
         # present intact instead of approving a truncated command or hidden key.
         if len(json.dumps(args, ensure_ascii=False, default=str).encode("utf-8")) > 65536:
             return False, f"{name} has more than 64 KiB of arguments and cannot be shown safely for approval.", "skipped"
+        # File tools also show the change they would make (a dry run against the current file).
+        preview_change = self.toolbox.file_change_preview(name, args) if hasattr(self.toolbox, "file_change_preview") else None
+        if preview_change:
+            preview_change = {**preview_change, "tool_call_id": call.id}
         approval = broker.open(
             session_id=self.session_id,
             request_id=self.request_id,
@@ -1021,6 +1528,7 @@ class LeanTurn:
             reason=reason,
             grantable=grantable,
             scope=scope,
+            file_change=preview_change,
         )
         if self.ensure_work and self.work_context is None:
             self.work_context = self.ensure_work()
@@ -1029,12 +1537,12 @@ class LeanTurn:
                 summary=approval.summary, reason=reason)
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})
-        self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **approval.public()})
+        self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **_redacted_card(approval.public())})
         with self._span("approval.wait", step=step, tool=name, rule=self._policy_rules.get(call.id, "") or "approval") as span:
             decision = broker.wait(approval, self.cancel)
             span.set(decision=decision)
         if policy_reason:
-            policy.audit(policy.Decision("ask", policy_reason, "rule_of_two"), name=name, args=args,
+            policy.audit(policy.Decision("ask", policy_reason, self._policy_rules.get(call.id) or "rule_of_two"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome=decision)
         for item in self.timeline:
             if item.get("kind") == "approval" and item.get("id") == approval.id:
@@ -1076,7 +1584,7 @@ class LeanTurn:
         self.timeline.append({"kind": "approval", "step": step, "id": pending.id, "tool_call_id": call.id,
                               "tool": ask.ASK_USER, "summary": question, "question": question, "options": options,
                               "allow_other": allow_other, "reason": "", "decision": "", "answer": "", "at": time.time()})
-        self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **pending.public()})
+        self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **_redacted_card(pending.public())})
         decision = broker.wait(pending, self.cancel)
         for item in self.timeline:
             if item.get("kind") == "approval" and item.get("id") == pending.id:
@@ -1161,15 +1669,17 @@ class LeanTurn:
         # A short, redacted copy of the arguments, so a saved chat can become a replay case (agent/lean/replays.py).
         item["args"] = policy.redact_payload(safe_args_preview(args, 200))
         self.timeline.append(item)
+        # The event is journaled and the tool run is saved, so both get the redacted copy too (C5); only the
+        # tool itself, and the approval binding's hash, see the real values.
         self.emit({"type": "tool_start", "step": step, "id": call.id, "name": name, "label": label,
-                   "input": json.dumps(safe_args_preview(args, 200), ensure_ascii=False)[:400]})
+                   "input": json.dumps(policy.redact_payload(safe_args_preview(args, 200)), ensure_ascii=False)[:400]})
         if self.persist_tool_runs:
             try:
                 from agent.state import get_state_store
 
                 get_state_store().create_tool_run(
                     turn_id=self.execution_id, tool_name=name, session_id=self.session_id,
-                    run_id=call.id, canonical_arguments=safe_args_preview(args, 2000),
+                    run_id=call.id, canonical_arguments=policy.redact_payload(safe_args_preview(args, 2000)),
                 )
             except Exception:
                 logger.debug("Lean tool run persistence failed", exc_info=True)
@@ -1181,9 +1691,23 @@ class LeanTurn:
 
         # Execution evidence (agent/lean/evidence.py): the outcome is set where it's known, not read back from text.
         outcome = outcome or ("ok" if ok else "failed")
+        if self.tool_observer is not None:
+            try:
+                self.tool_observer(name, args, ok, output, step, duration_ms, meta)
+            except Exception:
+                logger.debug("Tool observer failed", exc_info=True)
+        if self.verifier is not None:
+            try:
+                self.verifier.observe(name, args, ok, output, step, duration_ms, meta, call_id=call.id)
+            except Exception:
+                logger.debug("Verification ledger failed", exc_info=True)
         effects = list(effects or [])
         self._outcomes_by_call[call.id] = outcome
         facts = {**steps.widget_counts(widgets), **(meta or {})}
+        if isinstance(facts.get("file_change"), dict):
+            # The structured diff for clients (agent/lean/file_changes.py) travels on the event only;
+            # the saved timeline keeps the numeric facts.
+            facts["file_change"] = {**facts["file_change"], "tool_call_id": call.id}
         if name in CHECK_TOOLS:
             self._unchecked.clear()  # something ran after the changes, pass or fail
         elif ok:
@@ -1191,7 +1715,10 @@ class LeanTurn:
             if changed:
                 self._unchecked[changed] = True
         label = describe_call(name, args)
-        done = steps.done_label(label) if ok else label
+        # A command that ran and exited non-zero did run ("Ran `pytest`" · "Tests: 1 failed"); a refused or
+        # failed file write didn't happen, so it keeps its present-tense label.
+        ran_command = name in {"terminal", "terminal_run"} and evidence.ran(outcome) and exit_code_known(output)
+        done = steps.done_label(label) if ok or ran_command else label
         summary = steps.summarize(name, args, ok, output, facts)
         if outcome == "no_effect":
             summary = "No visible change on screen"  # the row says what the screen showed, whatever the reply claims
@@ -1212,7 +1739,8 @@ class LeanTurn:
         for item in self.timeline:
             if item.get("kind") == "tool" and item.get("id") == call.id:
                 item.update({"status": "done" if ok else "failed", "output": preview, "duration_ms": duration_ms,
-                             "done_label": done, "summary": summary, "meta": facts, "outcome": outcome})
+                             "done_label": done, "summary": summary,
+                             "meta": {k: v for k, v in facts.items() if k != "file_change"}, "outcome": outcome})
                 if effects:
                     item["effects"] = effects[:8]
                 item.pop("detail", None)
@@ -1245,17 +1773,27 @@ class LeanTurn:
     # ── context ─────────────────────────────────────────────────────────
     def _fit_context(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], aggressive: bool = False) -> None:
         endpoint = getattr(self.client, "endpoint", None)
-        budget = max(128, int(settings.context_tokens(endpoint) * (0.55 if aggressive else 0.8)) - settings.max_output_tokens(endpoint) // 2)
+        window = settings.context_tokens(endpoint)
+        # Room for this step's reply. Half the output limit (4,096) is a quarter of a 16k window, and with the real
+        # window known that idled ~7k tokens: the loop compacted every other step and the model re-read what it had
+        # just lost (harness evaluation, D8: 67 calls). Windows of 32k and more keep the reserve they had.
+        reserve = min(settings.max_output_tokens(endpoint) // 2, max(2048, window // 8))
+        budget = max(128, int(window * (0.55 if aggressive else 0.8)) - reserve)
+        # The character estimate, scaled by what the server counted for the last prompt (0.85-1.3 measured).
+        scale = getattr(self, "_token_scale", 1.0)
+
+        def size(messages: list[dict[str, Any]], tools: list[dict[str, Any]]) -> int:
+            return int(_estimate_tokens(messages, tools) * scale)
         # 0. Tool-result clearing: once the context is half full, raw output from
         #    tools used many steps ago is cut to its head. The agent already acted
         #    on it, and long sessions stay coherent instead of hitting the wall.
-        if _estimate_tokens(messages, tools) > budget // 2:
+        if size(messages, tools) > budget // 2:
             tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
             for index in tool_indexes[:-6]:
                 content = str(messages[index].get("content") or "")
                 if len(content) > 2000:
                     messages[index]["content"] = self._clear_note(messages[index], 1500, "older tool output cleared")
-        if _estimate_tokens(messages, tools) <= budget:
+        if size(messages, tools) <= budget:
             return
         # 1. Shrink older tool results, keeping the most recent ones intact.
         tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
@@ -1264,19 +1802,19 @@ class LeanTurn:
             content = str(messages[index].get("content") or "")
             if len(content) > 600:
                 messages[index]["content"] = self._clear_note(messages[index], 500, "older tool output trimmed to save context")
-            if _estimate_tokens(messages, tools) <= budget:
+            if size(messages, tools) <= budget:
                 return
         # 2. Drop the oldest history messages (plain text, never this turn's work).
         #    Older chat is still covered by the chat summary in the system prompt.
-        while _estimate_tokens(messages, tools) > budget and self._history_in_messages > 0:
+        while size(messages, tools) > budget and self._history_in_messages > 0:
             messages.pop(1)
             self._history_in_messages -= 1
         # 3. Summarize this turn's earlier steps instead of cutting them.
-        if _estimate_tokens(messages, tools) > budget and self._compact_turn(messages, keep_steps=2 if aggressive else 3):
-            if _estimate_tokens(messages, tools) <= budget:
+        if size(messages, tools) > budget and self._compact_turn(messages, keep_steps=2 if aggressive else 3):
+            if size(messages, tools) <= budget:
                 return
         # 4. Last resort: shrink every tool result except the newest one.
-        if _estimate_tokens(messages, tools) > budget:
+        if size(messages, tools) > budget:
             tool_indexes = [i for i, m in enumerate(messages) if m.get("role") == "tool"]
             for index in tool_indexes[:-1]:
                 if index < len(messages) and messages[index].get("role") == "tool":
@@ -1293,6 +1831,8 @@ class LeanTurn:
         `keep_steps` assistant steps stay verbatim. Returns False when there is
         too little to compact or the summary call fails.
         """
+        if self._compact_failures >= COMPACT_FAILURES:
+            return False  # it hasn't worked in this turn; trimming (step 4) still fits the context
         user_index = 1 + self._history_in_messages
         if user_index >= len(messages) or messages[user_index].get("role") != "user":
             return False
@@ -1318,14 +1858,28 @@ class LeanTurn:
             "Keep: the goal, what was tried, concrete findings (values, file paths, links, errors), and what is "
             "left to do. At most 200 words, plain sentences.\n\n" + body
         )
+        from agent.coordination import work_scope
+        saved = getattr(self.client, "reasoning_effort", None)
         try:
-            with self._span("context.compact", steps=len(steps) - keep_steps, input_chars=len(body)):
+            # A summary needs no thinking phase. With it, every compaction call qwen3.5:9b made in the harness
+            # evaluation spent its 700 tokens reasoning (finish "length") and returned nothing, and the loop
+            # asked again on the next step: 37 wasted calls in one run, none of them charged.
+            if saved is not None:
+                self.client.reasoning_effort = "none"
+            # In the work's scope, the admission wrapper charges the call to the work budget (prompt + reply).
+            with work_scope(self.work_context), self._span("context.compact", steps=len(steps) - keep_steps, input_chars=len(body)):
                 turn = self.client.stream_turn([{"role": "user", "content": prompt}], temperature=0.2, max_tokens=700, cancel=self.cancel)
             summary = str(turn.content or "").strip()
         except Exception:
             logger.debug("Lean turn compaction failed", exc_info=True)
+            self._compact_failures += 1
             return False
+        finally:
+            if saved is not None:
+                self.client.reasoning_effort = saved
+        self._account_side(getattr(turn, "usage", None), "compaction")
         if not summary:
+            self._compact_failures += 1
             return False
         messages[user_index] = {
             **messages[user_index],
@@ -1341,10 +1895,12 @@ class LeanTurn:
 
 def _friendly_error(error: str) -> str:
     low = error.lower()
+    if "work budget" in low:
+        return error  # already written for the owner (the budget stop above)
     if "connect" in low or "connection" in low:
-        return "I couldn't reach the model server. Is LM Studio (or your provider) running with a model loaded?"
+        return "I couldn't reach the model server. Is it running (Ollama, LM Studio or your provider) with a model available?"
     if "failed to load model" in low or "model unloaded" in low or "no models loaded" in low:
-        return "The model server couldn't load the selected model. Load it in LM Studio and try again."
+        return "The model server couldn't load the selected model. Check that it's installed and fits in memory, then try again."
     if "context" in low and ("length" in low or "window" in low or "n_ctx" in low):
         return "This conversation is larger than the model's context window. Start a new chat or raise the context length."
     if "timeout" in low or "timed out" in low:

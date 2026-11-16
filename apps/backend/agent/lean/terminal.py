@@ -1,7 +1,10 @@
-"""Terminal for the lean loop: real shells, two backends.
+"""Terminal for the lean loop: real shells, three backends.
 
-host    PowerShell on this PC. Full access to installed tools (node, python,
-        git). Pipes, variables, and chaining work.
+host    PowerShell (Windows) or bash (Linux) on this PC. Full access to installed
+        tools (node, python, git). Pipes, variables, and chaining work.
+bwrap   Linux only: bash on this PC inside bubblewrap (see linux_sandbox.py). Only
+        the workspace folders are writable, credentials are hidden, no network
+        unless allowed. Auto uses it on Linux when it can start.
 docker  A persistent Linux dev container ("echospeak-sandbox") with Node,
         Python, and git. Only your workspace folders are mounted (at
         /work/<folder>), so commands cannot touch the rest of the PC. The
@@ -72,11 +75,24 @@ _NEVER = re.compile(
 
 
 def execution_mode() -> str:
-    """The configured mode: "auto" (sandbox when Docker runs, else this PC), "docker" or "host"."""
+    """The configured mode: "auto", "docker", "bwrap" or "host".
+
+    auto: on Linux the bubblewrap sandbox when it can start, else the Docker sandbox when Docker
+    runs, else this PC (each command asks first). docker / bwrap: only that sandbox; if it can't
+    start, commands are refused, never run unconfined.
+    """
     raw = str(getattr(config, "terminal_execution_mode", "auto") or "auto").strip().lower()
     if raw in {"docker", "sandbox", "container"}:
         return "docker"
+    if raw in {"bwrap", "bubblewrap", "linux-sandbox"}:
+        return "bwrap"
     return "host" if raw == "host" else "auto"
+
+
+def bwrap_available() -> bool:
+    from agent.lean import linux_sandbox
+
+    return os.name == "posix" and linux_sandbox.available()[0]
 
 
 _DOCKER_CHECK: dict[str, Any] = {"at": 0.0, "ok": False}
@@ -92,9 +108,12 @@ def docker_available(max_age: float = 30.0) -> bool:
 
 
 def resolved_mode() -> str:
-    """Where commands actually run: "docker" (sandbox) or "host"."""
+    """Where commands actually run: "bwrap" or "docker" (a sandbox), or "host"."""
     mode = execution_mode()
     if mode == "auto":
+        # On Linux bwrap first: no daemon, no root-equivalent docker group, and files stay owned by you.
+        if bwrap_available():
+            return "bwrap"
         return "docker" if docker_available() else "host"
     return mode
 
@@ -264,7 +283,7 @@ def failure_hint(code: int, text: str, where: str, command: str = "", shell: str
         also = ' Or pass shell="bash" to use bash flags in Git Bash.' if git_bash() else ""
         return "Hint: PowerShell commands take their own options, not bash flags. " + POWERSHELL_EQUIVALENTS + also
     if code == 127 or "command not found" in low or "is not recognized as" in low:
-        place = "in the sandbox (install it with network=true, or" if where == "docker" else "on this PC (install it, or"
+        place = "in the sandbox (install it with network=true, or" if where != "host" else "on this PC (install it, or"
         return f"Hint: that program isn't installed {place} check the name)."
     if "'&&' is not a valid statement separator" in low or "token '&&' is not a valid" in low:
         return "Hint: Windows PowerShell 5.1 has no &&. Use ; between commands."
@@ -276,7 +295,7 @@ def failure_hint(code: int, text: str, where: str, command: str = "", shell: str
         return hint
     if any(phrase in low for phrase in ("could not resolve host", "temporary failure in name resolution",
                                         "network is unreachable", "getaddrinfo enotfound", "eai_again")):
-        return "Hint: no internet for this command" + (". Run it again with network=true." if where == "docker" else ".")
+        return "Hint: no internet for this command" + (". Run it again with network=true." if where != "host" else ".")
     return ""
 
 
@@ -694,16 +713,102 @@ def _host_command(command: str, shell: str = "") -> str:
     return command
 
 
-def _host_launch(command: str, cwd: Path, log: Path, err: Path, shell: str = "") -> subprocess.Popen:
-    """Start on this PC with no keyboard input, output to files, in its own process group."""
+def _host_launch(command: str, cwd: Path, log: Path, err: Path, shell: str = "", *,
+                 confine: Optional[list[Path]] = None, network: bool = False) -> subprocess.Popen:
+    """Start on this PC with no keyboard input, output to files, in its own process group.
+
+    With ``confine`` (the writable folders), the command runs inside the bubblewrap sandbox.
+    """
+    argv = [*_host_shell(shell), _host_command(command, shell)]
+    env = child_env({**_QUIET_ENV, "CHERE_INVOKING": "1"})
+    if confine is not None:
+        from agent.lean import linux_sandbox
+
+        argv = linux_sandbox.wrap(argv, cwd=cwd, writable=confine, network=network, hidden=[DATA_DIR])
+        env = linux_sandbox.sandbox_env(env)
     with open(log, "w", encoding="utf-8", errors="replace") as out_handle, \
             open(err, "w", encoding="utf-8", errors="replace") as err_handle:
-        return subprocess.Popen(
-            [*_host_shell(shell), _host_command(command, shell)], cwd=str(cwd), stdin=subprocess.DEVNULL,
-            stdout=out_handle, stderr=err_handle, env=child_env({**_QUIET_ENV, "CHERE_INVOKING": "1"}),
+        popen = subprocess.Popen(
+            argv, cwd=str(cwd), stdin=subprocess.DEVNULL,
+            stdout=out_handle, stderr=err_handle, env=env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             start_new_session=os.name != "nt",
         )
+    _remember(popen, command)
+    return popen
+
+
+# ── processes left behind by a crash ─────────────────────────────────────
+# Each command runs in its own session, so a backend that crashes leaves them running, and the in-memory
+# process list that could stop them is gone. Every host or bubblewrap process is recorded here (pid and the
+# kernel's start time, so a recycled pid never matches); the next start of this backend ends what is still
+# running from the last one (reap_orphans). POSIX only: Windows keeps its old behaviour.
+_REGISTRY_LOCK = threading.Lock()
+
+
+def _registry() -> Path:
+    return Path(DATA_DIR) / "lean" / "processes" / "running.json"
+
+
+def _start_time(pid: int) -> str:
+    """The kernel's start time of ``pid`` (field 22 of /proc/<pid>/stat), or '' if it isn't running."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return stat.rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return ""
+
+
+def _load_registry() -> dict[str, dict[str, str]]:
+    try:
+        data = json.loads(_registry().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _remember(popen: subprocess.Popen, command: str) -> None:
+    if os.name != "posix":
+        return
+    start = _start_time(popen.pid)
+    if not start:
+        return
+    with _REGISTRY_LOCK:
+        live = {pid: row for pid, row in _load_registry().items() if _start_time(int(pid)) == row.get("start")}
+        live[str(popen.pid)] = {"start": start, "command": command[:160]}
+        try:
+            _registry().parent.mkdir(parents=True, exist_ok=True)
+            _registry().write_text(json.dumps(live), encoding="utf-8")
+        except OSError:
+            logger.debug("Could not record process {}", popen.pid, exc_info=True)
+
+
+def reap_orphans() -> list[dict[str, str]]:
+    """At startup: end the process groups a previous run of this backend left running. Returns what was ended."""
+    if os.name != "posix":
+        return []
+    with _REGISTRY_LOCK:
+        rows = _load_registry()
+        ended = []
+        for pid, row in rows.items():
+            if _start_time(int(pid)) != row.get("start"):
+                continue  # gone, or the pid now belongs to something else
+            for sig in (15, 9):
+                try:
+                    os.killpg(int(pid), sig)
+                except OSError:
+                    break
+                if sig == 15:
+                    time.sleep(1.0)
+            ended.append({"pid": pid, "command": row.get("command", "")})
+        try:
+            _registry().unlink()
+        except OSError:
+            pass
+    if ended:
+        logger.warning("Ended {} command(s) left running by EchoSpeak's last run: {}", len(ended),
+                       "; ".join(r["command"][:60] for r in ended))
+    return ended
 
 
 def _read(path: Optional[Path], chars: int = 0) -> str:
@@ -737,9 +842,87 @@ class BackgroundProcess:
     container_pid: str = ""
     # Sandbox internet was switched on for it ("ask" policy): off again once it ends.
     network: bool = False
+    # Who it belongs to (C3). `owner` is the Stop event of the turn that started it: when that turn is stopped,
+    # its own work stops too. A server (a dev server or watcher, or anything started with process_start) is
+    # kept running and reported instead, and stops only when asked (stop_servers).
+    owner: Optional[threading.Event] = field(default=None, repr=False)
+    session_id: str = ""
+    server: bool = False
 
 
 _PROCESSES: dict[str, BackgroundProcess] = {}
+
+
+def _kill_group(popen: subprocess.Popen, grace: float = 3.0) -> None:
+    """Stop a process and everything it started. POSIX: SIGTERM to the group, then after the grace period
+    SIGKILL to the group, not just the leader: a child that ignores SIGTERM used to outlive its leader."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(popen.pid), "/T", "/F"], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return
+    try:
+        os.killpg(popen.pid, 15)
+    except OSError:
+        popen.terminate()
+    try:
+        popen.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(popen.pid, 9)
+    except OSError:
+        pass  # the group is already gone
+    try:
+        popen.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _owner() -> tuple[Optional[threading.Event], str]:
+    """The running turn's Stop event and session, for a process it starts (None and '' outside a turn)."""
+    from agent.lean import progress
+
+    try:
+        from agent.tools import _tool_execution_context
+
+        session = str((_tool_execution_context.get() or {}).get("session_id") or "")
+    except Exception:
+        session = ""
+    return progress.cancel_event(), session
+
+
+def stop_cancelled_processes() -> dict[str, Any]:
+    """After a Stop: end the stopped turns' own background work and list their servers, which keep running.
+
+    Called by the cancel routes, Stop everything and the loop when a turn ends stopped. Processes of turns
+    that weren't stopped are untouched.
+    """
+    stopped, servers = [], []
+    for proc in list(_PROCESSES.values()):
+        if proc.owner is None or not proc.owner.is_set() or not _process_alive(proc):
+            continue
+        if proc.server:
+            servers.append({"id": proc.id, "command": proc.command, "cwd": proc.cwd, "started_at": proc.started_at})
+            continue
+        try:
+            _stop(proc)
+            stopped.append(proc.id)
+        except Exception:
+            logger.debug("Stopping process {} failed", proc.id, exc_info=True)
+    return {"stopped": stopped, "servers_running": servers}
+
+
+def stop_servers(session_id: str = "") -> list[str]:
+    """The explicit way to end servers that Stop left running: those of one chat, or all of them."""
+    stopped = []
+    for proc in list(_PROCESSES.values()):
+        if proc.server and (not session_id or proc.session_id == session_id) and _process_alive(proc):
+            try:
+                _stop(proc)
+                stopped.append(proc.id)
+            except Exception:
+                logger.debug("Stopping server {} failed", proc.id, exc_info=True)
+    return stopped
 _PROC_DIR = Path(DATA_DIR) / "lean" / "processes"
 
 
@@ -794,18 +977,7 @@ def stop_all_processes() -> None:
 
 def _stop(proc: BackgroundProcess) -> None:
     if proc.mode == "host" and proc.popen is not None and proc.popen.poll() is None:
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(proc.popen.pid), "/T", "/F"], capture_output=True,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        else:
-            try:
-                os.killpg(proc.popen.pid, 15)  # the whole group: a dev server's children too
-            except OSError:
-                proc.popen.terminate()
-        try:
-            proc.popen.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.popen.kill()
+        _kill_group(proc.popen)  # the whole group: a dev server's children too
     elif proc.mode == "docker" and proc.container_pid:
         _SANDBOX.exec(f"kill -TERM -- -{proc.container_pid} 2>/dev/null || kill -TERM {proc.container_pid}", "/work", 15)
     _release_network(proc)
@@ -850,6 +1022,17 @@ class Terminal:
         return target, ""
 
     def describe(self) -> str:
+        if self.mode == "bwrap":
+            roots = ", ".join(str(r) for r in workspace_roots(self.project_root)) or "the project folder"
+            network = {
+                "on": "internet on",
+                "off": "no internet",
+                "ask": "offline by default; set network=true for commands that need the internet (npm/pip install, git clone)",
+            }[network_policy()]
+            return ("terminal runs bash on this computer inside a sandbox: you can write only in the workspace "
+                    f"({roots}), the rest of the system is read-only, credential folders are hidden, and {network}. "
+                    "Paths are the same as for the file tools. Only if a task truly needs the whole computer, set "
+                    "where=\"host\"; that asks the user first.")
         if self.mode == "host":
             if os.name != "nt":
                 return "terminal runs bash directly on this computer." + self._fallback_note()
@@ -886,12 +1069,12 @@ class Terminal:
 
     @staticmethod
     def _fallback_note() -> str:
-        return (" The Docker sandbox isn't running, so commands run here instead and each asks the user first (unless "
+        return (" No sandbox is available, so commands run here instead and each asks the user first (unless "
                 "they chose Always allow)." if execution_mode() == "auto" else "")
 
     def effective_where(self, args: dict[str, Any]) -> str:
-        """Use the same destination for policy checks and process launch."""
-        return "host" if self.mode == "host" or str(args.get("where") or "").lower() == "host" else "docker"
+        """Use the same destination for policy checks and process launch: "host", "docker" or "bwrap"."""
+        return "host" if self.mode == "host" or str(args.get("where") or "").lower() == "host" else self.mode
 
     @staticmethod
     def shell_for(args: dict[str, Any], where: str) -> str:
@@ -913,22 +1096,32 @@ class Terminal:
 
     def _launch(self, command: str, cwd: Path, wait: int, where: str, *, network: bool = False, shell: str = "") -> Launch:
         proc_id = uuid.uuid4().hex[:8]
-        if where == "host":
+        if where in {"host", "bwrap"}:
             _PROC_DIR.mkdir(parents=True, exist_ok=True)
             log, err = _PROC_DIR / f"{proc_id}.log", _PROC_DIR / f"{proc_id}.err"
-            popen = _host_launch(command, cwd, log, err, shell)
+            confine = (workspace_roots(self.project_root) or [cwd]) if where == "bwrap" else None
+            # A bwrap command is a local process like a host one (same logs, same stop); its network is per command.
+            popen = _host_launch(command, cwd, log, err, shell, confine=confine, network=network)
             # Wait in short slices, showing the newest output line under the step as it runs.
             from agent.lean import progress
 
             deadline = time.monotonic() + wait
+            stopped = False
             while True:
                 try:
                     code = popen.wait(timeout=max(0.05, min(0.6, deadline - time.monotonic())))
                     break
                 except subprocess.TimeoutExpired:
+                    if progress.stop_requested():
+                        # Stop ends the command now (C3): it used to run on for up to 900 s, then carry on
+                        # in the background.
+                        _kill_group(popen)
+                        code, stopped = popen.returncode if popen.returncode is not None else -15, True
+                        break
                     if time.monotonic() >= deadline:
+                        owner, session = _owner()
                         proc = BackgroundProcess(id=proc_id, command=command, cwd=str(cwd), mode="host", log_path=log,
-                                                 err_path=err, popen=popen)
+                                                 err_path=err, popen=popen, owner=owner, session_id=session)
                         return Launch(False, proc=proc)
                     latest = _last_line(log) or _last_line(err)
                     if latest:
@@ -939,14 +1132,18 @@ class Terminal:
                     path.unlink()
                 except OSError:
                     pass
+            if stopped:
+                error = (error + "\n" if error else "") + "Stopped by the user: the command and everything it started were ended."
             return Launch(True, code, out, error)
         plan = mount_plan(self.project_root)
         workdir = to_container_path(cwd, plan) or "/work"
         finished, code, out, error = _SANDBOX.launch(translate_windows_paths(command, plan), workdir, wait, proc_id)
         if finished:
             return Launch(True, code, out, error)
+        owner, session = _owner()
         proc = BackgroundProcess(id=proc_id, command=command, cwd=str(cwd), mode="docker",
-                                 log_path=Path(f"/tmp/es-proc-{proc_id}.log"), container_pid=str(code), network=network)
+                                 log_path=Path(f"/tmp/es-proc-{proc_id}.log"), container_pid=str(code), network=network,
+                                 owner=owner, session_id=session)
         return Launch(False, proc=proc)
 
     def _start(self, command: str, args: dict[str, Any], wait: int) -> tuple[Optional[Launch], str, Path, str]:
@@ -967,6 +1164,19 @@ class Terminal:
             return None, ("Error: not run. Git Bash isn't installed on this PC, so bash commands can't run here. Write "
                           "it for PowerShell instead. " + POWERSHELL_EQUIVALENTS), cwd, where
         want_net = False
+        if where == "bwrap":
+            from agent.lean import linux_sandbox
+
+            ok, detail = linux_sandbox.available()
+            if not ok:
+                # Never fall back to running unconfined: the owner (or Auto) chose the sandbox.
+                return None, (f"Error: not run, because the Linux sandbox can't start: {detail}. Tell the user; they can "
+                              "install bubblewrap, or switch Terminal to This PC in Settings > Terminal (each command "
+                              "then asks first)."), cwd, where
+            policy = network_policy()
+            if args.get("network") and policy == "off":
+                return None, "Error: internet access is turned off for the sandbox in Settings > Terminal.", cwd, where
+            want_net = policy == "on" or (bool(args.get("network")) and policy == "ask")
         if where == "docker":
             ok, detail = _SANDBOX.ensure_container(mount_plan(self.project_root))
             if not ok:
@@ -981,7 +1191,7 @@ class Terminal:
                 _SANDBOX.set_network(True)
         self._checkpoint_redirects(command, cwd)
         launch = self._launch(command, cwd, wait, where, network=want_net, shell=self.shell_for(args, where))
-        if want_net and launch.finished:
+        if want_net and launch.finished and where == "docker":
             _SANDBOX.set_network(False)
         return launch, "", cwd, where
 
@@ -997,6 +1207,7 @@ class Terminal:
             return (f"[stopped after {wait}s · {label} · {cwd}]\n{_clip(so_far, 3000) or '(no output)'}\n"
                     f"It was stopped because {len(running)} background processes are already running: {others}. "
                     "Stop ones you no longer need with process_stop, then try again.")
+        proc.server = server  # servers outlive a Stop and are reported; other background work stops with its turn
         _PROCESSES[proc.id] = proc
         so_far = _clip(_tail(proc, 4000), 4000) or "(no output yet)"
         headline = ("started in the background (it keeps running)" if server
@@ -1092,8 +1303,8 @@ class Terminal:
                     "background": {"type": "boolean", "description": "Start it in the background right away and return its first output."},
                     **({
                         "network": {"type": "boolean", "description": "Separate tool argument: true if the command needs internet (installs, git clone). Never put network=true inside command."},
-                        "where": {"type": "string", "enum": ["sandbox", "host"], "description": "Separate tool argument, never a shell prefix. Use host for installed Windows apps/tools when this PC is needed; default sandbox."},
-                    } if self.mode == "docker" else {}),
+                        "where": {"type": "string", "enum": ["sandbox", "host"], "description": "Separate tool argument, never a shell prefix. Use host only when the task needs the whole computer (installed apps, system settings); it asks the user. Default sandbox."},
+                    } if self.mode in {"docker", "bwrap"} else {}),
                     **({
                         "shell": {"type": "string", "enum": ["powershell", "bash"], "description": (
                             "This PC only: powershell (default) or bash, which runs Git Bash here for bash commands "
@@ -1124,6 +1335,12 @@ def terminal_status() -> dict[str, Any]:
     mode = execution_mode()
     info: dict[str, Any] = {"mode": mode, "network": docker_network()}
     info["docker"] = _SANDBOX.status()
+    if os.name == "posix":
+        from agent.lean import linux_sandbox
+
+        ok, detail = linux_sandbox.available()
+        info["bwrap"] = {"available": ok, "detail": detail}
+    info["resolved"] = resolved_mode()  # where commands run right now: "bwrap", "docker" or "host"
     info["host_shell"] = "PowerShell 7" if shutil.which("pwsh") else "Windows PowerShell" if os.name == "nt" else "bash"
     info["git_bash"] = git_bash()
     info["host_programs"] = sorted(host_programs())

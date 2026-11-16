@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'">
+<title>EchoSpeak — Chat harness and rich responses</title><style>
+:root{color-scheme:dark;--bg:#0a0a0b;--panel:#111112;--soft:#18181b;--line:#29292e;--ink:#e8e8ec;--muted:#a5a5af;--accent:#8da8ff;--good:#8acda5;--warn:#e2be84}
+@media(prefers-color-scheme:light){:root{color-scheme:light;--bg:#fafafa;--panel:#fff;--soft:#f0f0f4;--line:#dcdce2;--ink:#25252c;--muted:#62626f;--accent:#3556b5;--good:#22623c;--warn:#795416}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.65 "Segoe UI Variable","Segoe UI",system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:24px clamp(18px,4vw,44px) 48px}header{border-bottom:1px solid var(--line);padding-bottom:16px}h1{font-size:21px;letter-spacing:-.02em;margin:0;font-weight:550}h2{font-size:20px;margin:0 0 12px;font-weight:550;letter-spacing:-.02em}h3{font-size:14px;margin:0 0 7px}p{margin:7px 0 15px}small,.muted,header p{color:var(--muted)}small,header p{font-size:12px}.lead{font-size:26px;line-height:1.35;letter-spacing:-.025em;max-width:800px;margin:22px 0 12px}a{color:var(--accent);text-underline-offset:3px}nav{display:flex;flex-wrap:wrap;gap:8px 18px;margin:16px 0 22px;font-size:12px}section{margin:38px 0;scroll-margin-top:18px}.note{background:var(--panel);padding:13px 16px;border-left:2px solid var(--accent);font-size:13px;color:var(--muted)}.note strong{color:var(--ink)}.legend{display:flex;gap:9px;flex-wrap:wrap;margin:17px 0}.badge{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:5px;padding:3px 8px;max-width:100%}.current{color:var(--good)}.proposed{color:var(--accent)}.documented{color:var(--warn)}.grid2,.grid3{display:grid;gap:14px}.grid2{grid-template-columns:repeat(2,minmax(0,1fr))}.grid3{grid-template-columns:repeat(3,minmax(0,1fr))}.box{min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:17px}.box p{font-size:13px;color:var(--muted);margin-bottom:0}.diagram{margin:18px 0 12px;padding:22px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}figcaption{font-size:12px;color:var(--muted);margin-top:16px}.node{min-width:0;border:1px solid var(--line);border-radius:9px;background:var(--bg);padding:13px 15px;text-align:center}.node strong{display:block;font-weight:550}.node span{display:block;font-size:12px;color:var(--muted);margin-top:4px}.accent{border-color:var(--accent)}.spine{display:flex;flex-direction:column;align-items:center;gap:10px}.spine>.node{width:100%;max-width:610px}.spine>.grid2,.spine>.grid3{width:100%}.arrow{text-align:center;color:var(--muted);font-size:19px;line-height:1.1;margin:8px 0}.rule{margin:13px 0 0;background:var(--soft);border-radius:7px;padding:11px 14px;font-size:12px;color:var(--muted)}.phases{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;counter-reset:phase}.phase{min-width:0;padding:14px;background:var(--bg);border:1px solid var(--line);border-radius:9px;font-size:13px}.phase:before{counter-increment:phase;content:counter(phase,decimal-leading-zero);font-size:11px;color:var(--accent);display:block;margin-bottom:7px}.phase b{display:block;font-weight:550}.phase span{font-size:12px;color:var(--muted);display:block;margin-top:4px}.comparison{border:1px solid var(--line);border-radius:11px;overflow:auto}table{border-collapse:collapse;width:100%;min-width:650px;font-size:13px}th,td{padding:14px 16px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}thead{background:var(--soft)}thead th{color:var(--muted);font-size:12px}tbody tr:last-child>*{border:0}td{color:var(--muted)}details{border-top:1px solid var(--line);padding:13px 0}summary{cursor:pointer;font-weight:550}details p{font-size:13px;color:var(--muted)}footer{border-top:1px solid var(--line);padding-top:15px;font-size:12px;color:var(--muted)}code{font:12px Consolas,monospace;overflow-wrap:anywhere}
+@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.phases{grid-template-columns:repeat(2,minmax(0,1fr))}.diagram{padding:15px}.lead{font-size:22px}section{margin:30px 0}h1{font-size:19px}}@media(max-width:440px){.phases{grid-template-columns:1fr}.legend{gap:6px}}
+figure{margin:0}.shot{border:1px solid var(--line);border-radius:11px;overflow:hidden;background:var(--panel)}.shot img{display:block;width:100%;height:auto}.shot figcaption{padding:10px 14px;margin:0}.phone{max-width:240px}
+.bad{color:var(--warn)}.mono{font:12px Consolas,monospace}
+</style>
+<body><main>
+<header><h1>EchoSpeak / Chat: harness, intelligence and rich responses</h1><p>28 October 2026 · technical record: docs/research/chat-harness.md</p></header>
+<nav aria-label="Report sections"><a href="#render">Diagrams fixed</a><a href="#causes">Why they broke</a><a href="#harness">The harness</a><a href="#boundary">What Chat can do</a><a href="#memory">Memory</a><a href="#check">How it's checked</a></nav>
+<p class="lead">The model didn't get worse.<br>Rendering bugs and a harness written for agents did.</p>
+<p class="note"><strong>Evidence:</strong> every screenshot comes from the browser check: the real production build, real Mermaid and KaTeX, and the backend's real event and history format replayed from a fixture. Prompt sizes come from requests captured by a local fake model server. No real model was called. Live answer quality is the owner's evaluation.</p>
+<div class="legend"><span class="badge current">Fixed and checked</span><span class="badge documented">Was broken</span><span class="badge proposed">Your check</span></div>
+
+<section id="render"><h2>Diagrams draw while the reply streams, after it finishes, and after a reload</h2>
+<div class="grid2">
+<figure class="shot"><img src="../media/chat-harness/chat-render-streaming-dark.png" alt="A Chat reply still streaming: a flowchart with User (browser), Route: /chat, Postgres and Cache: redis is already drawn and marked syntax fixed, while the paragraph below is still being written."><figcaption><b>While streaming</b> · the diagram draws as soon as its block closes. The model's syntax slip was fixed and marked.</figcaption></figure>
+<figure class="shot"><img src="../media/chat-harness/chat-render-reload-light.png" alt="The same reply after a reload in the light theme: the diagram is drawn with light nodes and dark text."><figcaption><b>After reload, light theme</b> · the same drawing from saved history, in the light palette</figcaption></figure>
+</div>
+<div class="grid2" style="margin-top:14px">
+<figure class="shot"><img src="../media/chat-harness/before-plain-fallback.png" alt="Before: the same reply rendered as plain text, with raw math delimiters, a chart's JSON, an unstyled table and Mermaid source."><figcaption><b class="bad">Before</b> · the fallback renderer showed Mermaid source, raw <span class="mono">\(</span> math and chart JSON</figcaption></figure>
+<figure class="shot phone"><img src="../media/chat-harness/chat-render-phone-light.png" alt="Phone width: the reply's diagram keeps readable labels and scrolls sideways inside its card."><figcaption><b>Phone</b> · readable labels; the diagram scrolls inside its card, never the page</figcaption></figure>
+</div></section>
+
+<section id="causes"><h2>Five causes, none of them the model</h2>
+<div class="comparison"><table><thead><tr><th>What you saw</th><th>Cause</th><th>Fix</th></tr></thead><tbody>
+<tr><td>Mermaid as source code</td><td class="documented">Mermaid rejects common slips: <span class="mono">A[User (you)]</span>, <span class="mono">A --> B: text</span>, <span class="mono">→</span>, a node called <span class="mono">end</span>, prose in the block (6 of 20 realistic outputs)</td><td>Conservative repair, tried only if the original fails; marked "syntax fixed"; Source shows the original</td></tr>
+<tr><td>Mermaid as source, part 2</td><td class="documented">A reply shown from its final text (for example a queued follow-up) used a second, plain Markdown renderer</td><td>One renderer for every assistant message</td></tr>
+<tr><td>Diagrams only at the very end</td><td class="documented">New renderers every token remounted each diagram, cancelling its render</td><td>Stable renderers; draw as soon as the block closes; cached drawings</td></tr>
+<tr><td>Raw <span class="mono">\( … \)</span> math</td><td class="documented">Only <span class="mono">$$</span> was read, but OpenAI's Model Spec has models default to <span class="mono">\( \)</span> and <span class="mono">\[ \]</span></td><td>Both are rendered (never inside code); a <span class="mono">$5</span> price stays text</td></tr>
+<tr><td>Dark diagrams in light mode</td><td class="documented">Mermaid ignores custom colours unless the theme is "base"; re-rendering under a visible id edited the shown diagram</td><td>Base theme with light and dark palettes, redrawn on theme change</td></tr>
+</tbody></table></div>
+<p class="rule">A diagram that still can't be drawn shows Mermaid's message, the line with a caret pointing at the problem, the source and a Copy button, instead of silently showing code.</p></section>
+
+<section id="harness"><h2>Chat now has its own instructions</h2>
+<div class="diagram" role="img" aria-label="Captured system prompts: Echo 14,894 characters with SOUL guidance and agent rules; Chat in 11.11.0 10,273 characters with agent rules but only three generic sentences of guidance; Chat now 7,104 characters with its own answer, tool and formatting rules.">
+<div class="grid3">
+<div class="node"><strong>Echo (Agents)</strong><span>14,894 chars · SOUL: answer, why, example; form a view · agent rules · 27 tools</span></div>
+<div class="node"><strong class="bad">Chat in 11.11.0</strong><span>10,273 chars · 3 generic sentences · still "keep going until finished", computer control, "find this agent… Edit" · screen capture</span></div>
+<div class="node accent"><strong>Chat now</strong><span>7,104 chars · How to answer · When to use tools · Formatting · no agent rules · 23 tools, no screen capture</span></div>
+</div>
+<div class="rule">Same model, same provider, same temperature, same message (captured by a fake model server). Chat had kept the agent rules that push toward acting and lost the guidance that makes answers good. That's a harness regression, not the model.</div>
+</div>
+<div class="grid3" style="margin-top:14px">
+<div class="box"><h3>How to answer</h3><p>Answer first, then the why, then an example. Calibrate depth. Form a view. Say what's uncertain. Assume sensibly instead of asking. Don't flatter.</p></div>
+<div class="box"><h3>When to use tools</h3><p>Stable knowledge: answer. Current or niche: search. Research: several searches, read pages, cross-check, cite the pages actually read.</p></div>
+<div class="box"><h3>Formatting</h3><p>Markdown that fits the answer; Mermaid with quoted labels; <span class="mono">\( \)</span> and <span class="mono">\[ \]</span> math; chart and table blocks the app draws.</p></div>
+</div>
+<p class="rule">Following OpenAI's public Model Spec and web-search guide as an engineering reference, not as a copy of ChatGPT's private system. Smart model choice never swaps the model you picked in Chat.</p></section>
+
+<section id="boundary"><h2>What Chat can do, enforced in code</h2>
+<div class="grid2">
+<div class="box"><h3 class="current">Chat can</h3><p>Search and read the web · live cards · read files you point at · read images you share · memory and past Chat conversations · calculate · artifacts, images and video · reminders · connected apps (they ask first) · <b>open an app by name</b> (asks first, no arguments, never a shell)</p></div>
+<div class="box"><h3 class="documented">Agents and Code do</h3><p>Run commands · change files · mouse and keyboard · capture the screen · drive a browser · send email · delegate and spawn workers</p></div>
+</div>
+<p class="rule">Two layers: tools outside Chat's allowlist are never offered (even with every permission switched on), and a run-time guard refuses them anyway, including aliases such as "bash" and names a model invents.</p></section>
+
+<section id="memory"><h2>Memory: your facts and your Chat history</h2>
+<div class="phases">
+<div class="phase"><b>Your facts</b><span>Account and project memories, as ChatGPT's saved memories</span></div>
+<div class="phase"><b>Not specialists' notes</b><span>Facts an agent keeps for its own work stay with that agent</span></div>
+<div class="phase"><b>Chat history</b><span>"Last time…" recall and chat_search look only at Chat conversations</span></div>
+<div class="phase"><b>Continuity</b><span>The last 30 messages verbatim, older turns summarised</span></div>
+</div></section>
+
+<section id="check"><h2>How it's checked</h2>
+<p>The browser check renders the reply live, after it finishes and after a reload, in dark and light themes and at desktop and phone widths, and fails on any page error or stray network call. Unit tests pin the repair rules and math handling. Backend tests pin Chat's tools (with every permission on), its run-time guard, its prompt and its memory scope.</p>
+<p class="proposed">Your check: ask a real model for a diagram, a formula and a comparison table in Chat; try a quick question (it should answer without searching) and a research question (several sources, cited).</p></section>
+<footer>Technical record: docs/research/chat-harness.md · Screenshots: apps/desktop/scripts/check-chat-render-browser.cjs on the production build.</footer>
+</main></body></html>

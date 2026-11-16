@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentModels, agentModelName, canStartSession, CodeRequestError, createCodeSession, runtimeStatus, type CodeRuntime, type CodeWorkspace } from "./model";
+import { agentModels, agentModelName, agentModelRow, canStartSession, CodeRequestError, createCodeSession, runtimeStatus, type CodeRuntime, type CodeWorkspace } from "./model";
 
 const native: CodeRuntime = { id: "echo", name: "Echo native", protocol: "native", implemented: true, installed: true, authentication: "existing_model_settings", can_start: true, blockers: [], description: "" };
 const workspace = { can_start_native: true } as CodeWorkspace;
@@ -7,8 +7,16 @@ const workspace = { can_start_native: true } as CodeWorkspace;
 describe("reported coding models", () => {
   it("keeps valid reported models and excludes malformed catalog entries", () => {
     expect(agentModels([null, { model: 7 }, { model: "" }, { id: "one", model: "native-model", displayName: "Native model", isDefault: true }]))
-      .toEqual([{ id: "one", model: "native-model", displayName: "Native model", isDefault: true }]);
+      .toEqual([{ id: "one", model: "native-model", displayName: "Native model", isDefault: true, efforts: [], defaultEffort: "" }]);
     expect(agentModels(null)).toEqual([]);
+  });
+  it("keeps each model's own effort levels and drops malformed ones (11.12)", () => {
+    const [row] = agentModels([{ model: "gpt-x", efforts: ["low", "high", "<script>", 7, "x".repeat(30)], defaultEffort: "high" }]);
+    expect(row.efforts).toEqual(["low", "high"]);
+    expect(row.defaultEffort).toBe("high");
+    const rows = agentModels([{ model: "a", isDefault: true, efforts: ["medium"] }, { model: "b", efforts: ["low"] }]);
+    expect(agentModelRow(rows, "", "")?.model).toBe("a");
+    expect(agentModelRow(rows, "b", "a")?.efforts).toEqual(["low"]);
   });
   it("uses selection, then reported model, then the advertised default without inventing one", () => {
     const models = [{ id: "a", model: "a", displayName: "Model A", isDefault: true }, { id: "b", model: "b", displayName: "Model B" }];
@@ -28,7 +36,7 @@ describe("Echo Code runtime admission", () => {
     expect(canStartSession({ ...native, can_start: false }, workspace)).toBe(false);
   });
   it("cannot route an external runtime through the native query path", () => {
-    for (const id of ["codex", "claude_code", "acp"]) expect(canStartSession({ ...native, id }, workspace)).toBe(false);
+    for (const id of ["codex", "claude_cli", "acp"]) expect(canStartSession({ ...native, id }, workspace)).toBe(false);
   });
   it("does not turn a discovered CLI into an authenticated or executable integration", () => {
     expect(runtimeStatus({ ...native, id: "codex", implemented: false })).toBe("CLI found · execution planned");

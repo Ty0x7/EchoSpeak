@@ -38,6 +38,8 @@ ALWAYS_ASK_TOOLS = {"github_create_pull_request"}
 # them is obeyed in every later chat, so a bad write persists (Hermes gates its
 # SOUL.md the same way): always shown to the user first, unless approvals are off.
 IDENTITY_TOOLS = {"soul_update"}
+# Native tools that act (change files, run commands) without a ToolRegistry entry: "always" mode asks for them too.
+NATIVE_ACTIONS = {"file_edit", "terminal", "terminal_run", "process_start"}
 
 # Tools that act on the desktop as if they were the user.
 DESKTOP_CONTROL_TOOLS = {
@@ -78,7 +80,46 @@ _DANGEROUS_COMMAND = re.compile(
 
 def dangerous_command(command: str) -> bool:
     """A shell command that can change or delete things on this PC."""
-    return bool(_DANGEROUS_COMMAND.search(command or ""))
+    # The pattern list grew from PowerShell; the floor below also covers Linux disk and system wipes.
+    return bool(_DANGEROUS_COMMAND.search(command or "")) or catastrophic_command(command)
+
+
+# ── the floor: commands that always ask, even with approvals set to "never" ──
+#
+# Approval modes are the owner's choice; this short list is not. Each entry can destroy the
+# system, a disk or the home folder in one step and can't be undone. It asks rather than
+# refuses, so the owner stays in charge; where nobody can answer, asks are refused anyway.
+# Kept deliberately narrow: an ordinary `rm -rf build/` never matches.
+_CATASTROPHIC = re.compile(
+    r"""(?ix)
+    --no-preserve-root
+    |\bmkfs(?:\.\w+)?\b|\bmkswap\b|\bwipefs\b
+    |\bdd\b[^|;&]*\bof=/dev/(?:sd|nvme|hd|vd|xvd|mmcblk|disk)
+    |>\s*/dev/(?:sd|nvme|hd|vd|xvd|mmcblk)\w*
+    |:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:
+    |\b(?:chmod|chown)\s+(?:-\w*R\w*\s+)\S+\s+/(?:\s|$)
+    |\bformat-volume\b|\bformat\s+[a-z]:
+    """
+)
+# Recursive deletes aimed at the root, the home folder or a system folder.
+_RM_RECURSIVE = re.compile(r"(?i)\b(?:rm\s+(?:-{1,2}[\w-]+\s+)*-{1,2}(?:[a-z]*r[a-z]*|recursive)\b|remove-item\b[^|;&]*-r(?:ecurse)?\b|rd\s+/s\b|rmdir\s+/s\b)")
+_PRECIOUS = re.compile(
+    r"""(?ix)(?:^|\s)["']?(?:
+        /\*?|~/?\*?|\$\{?home\}?/?\*?|\$env:userprofile\\?\*?|[a-z]:\\?\*?|
+        /(?:home|etc|usr|boot|var|bin|sbin|lib|lib64|opt|root|srv|sys|proc|dev)/?\*?
+    )["']?(?=\s|$|;|&|\|)"""
+)
+
+
+def catastrophic_command(command: str) -> bool:
+    """A command on the floor: destroys the system, a disk or the home folder in one step."""
+    text = command or ""
+    if _CATASTROPHIC.search(text):
+        return True
+    for segment in re.split(r"&&|\|\||[;|&\n]", text):
+        if _RM_RECURSIVE.search(segment) and _PRECIOUS.search(segment[_RM_RECURSIVE.search(segment).end():]):
+            return True
+    return False
 
 
 # ── approval scopes: what "Always allow" and autonomous mode may cover ────
@@ -202,6 +243,8 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
         return True, "this sends a task to an independent agent"
     if name in ALWAYS_ASK_TOOLS:
         return True, "this opens a pull request under your GitHub account"
+    if name in {"terminal_run", "terminal", "process_start"} and catastrophic_command(str((args or {}).get("command") or "")):
+        return True, "this could wipe your system, a disk or your home folder, so it always asks"
     mode = settings.approval_mode()
     if mode == "never":
         return False, ""
@@ -210,7 +253,8 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
     if name in DESKTOP_CONTROL_TOOLS:
         return True, "this controls your desktop"
     if mode == "always":
-        return bool(getattr(entry, "is_action", False)), "action tool"
+        # Native file_edit and terminal have no registry entry, but they act like file_write does.
+        return bool(getattr(entry, "is_action", False)) or name in NATIVE_ACTIONS, "action tool"
     if name in {"terminal_run", "terminal", "process_start"}:
         # Sandbox: ask only to leave it, to go online, or to delete project files.
         # This PC: ask for dangerous commands (terminal.approval_for).
@@ -248,9 +292,11 @@ class PendingApproval:
     grantable: bool = True
     # The class "Always allow" would grant (approvals.scope_for), or None when it can't.
     scope: Optional[Scope] = None
+    # File tools: the change it would make (agent/lean/file_changes.py, status "proposed").
+    file_change: Optional[dict[str, Any]] = None
 
     def public(self) -> dict[str, Any]:
-        return {
+        out = {
             "id": self.id,
             "session_id": self.session_id,
             "request_id": self.request_id,
@@ -269,6 +315,9 @@ class PendingApproval:
             "persistable": self.scope is not None,
             "scope_label": self.scope.label if self.scope else "",
         }
+        if self.file_change:
+            out["file_change"] = self.file_change
+        return out
 
 
 class ApprovalBroker:
@@ -283,7 +332,8 @@ class ApprovalBroker:
             return tool in self._session_grants.get(session_id, set())
 
     def open(self, *, session_id: str, request_id: str, tool: str, summary: str, args: dict[str, Any], reason: str,
-             grantable: bool = True, scope: Optional[Scope] = None) -> PendingApproval:
+             grantable: bool = True, scope: Optional[Scope] = None,
+             file_change: Optional[dict[str, Any]] = None) -> PendingApproval:
         approval = PendingApproval(
             id=f"apr_{uuid.uuid4().hex[:12]}",
             session_id=session_id,
@@ -294,6 +344,7 @@ class ApprovalBroker:
             reason=reason,
             grantable=grantable,
             scope=scope,
+            file_change=file_change,
         )
         with self._lock:
             self._pending[approval.id] = approval

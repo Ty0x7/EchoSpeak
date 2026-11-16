@@ -241,6 +241,34 @@ def uncertain_after(exc: BaseException) -> bool:
     return not isinstance(exc, _REJECTED_BEFORE_EFFECT)
 
 
+# MCP errors agent/mcp_client.py reports before anything reached the server: nothing ran.
+_MCP_NOT_SENT = {"mcp_server_unavailable", "invalid_mcp_tool_name"}
+
+
+def _mcp_outcome(raw: Any, output: str) -> tuple[bool, bool, str]:
+    """(ok, uncertain, output) for an MCP result that arrived as JSON text.
+
+    mcp_client returns its own failures as a JSON string ({"isError": true, "error": {...}}), and a server's
+    error result can arrive the same way. Read as text it looked like success, and the work ledger recorded
+    the action as completed (C1). A call that raised in flight (timeout, lost connection) may have acted on
+    the server, so its effect is unknown; one stopped before sending, or reported by the server, failed.
+    """
+    payload = raw
+    if isinstance(raw, str) and raw.lstrip().startswith("{"):
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            return True, False, output
+    if not isinstance(payload, dict) or not payload.get("isError"):
+        return True, False, output
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    code = str(error.get("code") or "")
+    message = str(error.get("message") or "").strip()
+    if not code:  # the server's own error result: the tool ran and said it failed
+        return False, False, output
+    return False, code not in _MCP_NOT_SENT, f"Error: the MCP call failed ({code}){': ' + message if message else ''}.\n{output}"
+
+
 @dataclass
 class ToolResult:
     ok: bool
@@ -684,10 +712,62 @@ class Toolbox:
             return ToolResult(False, f"Blocked by the user's privacy setting: {blocked} This is intended, not a fault: "
                               "don't retry it or look for another way around it. Continue without it, or tell the "
                               "user what it would need.", 0, outcome="refused")
+        snap = self._file_snapshot(name, args)
         # Connections the tool makes count as its component's (agent/privacy.py backstop).
         with privacy.scope(privacy.tool_component(name, args)):
             result = self._run(name, args)
-        return self._observe(name, args, result)
+        result = self._observe(name, args, result)
+        # A project's secrets files are shown without their values (agent/lean/secret_files.py).
+        from agent.lean.secret_files import guard_output
+        result.output = guard_output(name, args, result.output)
+        if snap is not None and result.ok:
+            self._attach_file_change(snap, result)
+        return result
+
+    # ── structured file changes (agent/lean/file_changes.py) ────────────
+    def _in_tool_context(self, fn: Callable[[], Any]) -> Any:
+        from agent.tools import _tool_execution_context
+
+        token = _tool_execution_context.set(self.tool_context())
+        try:
+            return fn()
+        finally:
+            _tool_execution_context.reset(token)
+
+    def _file_snapshot(self, name: str, args: dict[str, Any]):
+        from agent.lean import file_changes
+
+        if name not in file_changes.TRACKED:
+            return None
+        try:
+            return self._in_tool_context(lambda: file_changes.snapshot(name, args))
+        except Exception:
+            logger.debug("file_change snapshot for {} failed", name, exc_info=True)
+            return None
+
+    def _attach_file_change(self, snap: Any, result: ToolResult) -> None:
+        from agent.lean import file_changes
+
+        try:
+            change = self._in_tool_context(lambda: file_changes.applied(snap, str(self.project_root or "")))
+        except Exception:
+            logger.debug("file_change for {} failed", snap.name, exc_info=True)
+            return
+        if change:
+            result.meta = {**(result.meta or {}), "file_change": change}
+
+    def file_change_preview(self, name: str, args: dict[str, Any]) -> Optional[dict[str, Any]]:
+        """The change a file tool call would make, for its approval card. A dry run: nothing is written."""
+        from agent.lean import file_changes
+
+        name = self.resolve_name(name)
+        if name not in file_changes.TRACKED:
+            return None
+        try:
+            return self._in_tool_context(lambda: file_changes.proposed(name, args, str(self.project_root or "")))
+        except Exception:
+            logger.debug("Proposed file_change for {} failed", name, exc_info=True)
+            return None
 
     def _unavailable(self, name: str) -> ToolResult:
         """A call to a tool this turn doesn't have: the owner's setting (refused) or a name that doesn't exist (skipped)."""
@@ -763,12 +843,17 @@ class Toolbox:
         return self._run_entry(name, args)
 
     def _search_and_read(self, args: dict[str, Any]) -> ToolResult:
-        """web_search, then (for comparisons, prices, 'best X', or when asked) read the top results.
+        """web_search, then read the best results, recovering when a page can't answer.
 
-        Snippets are leads; reading two or three pages is what makes a comparison or a price
-        trustworthy, and small models rarely open them on their own. Each page goes through
-        safe_web_fetch, so it is fetched safely and kept in the chat's research notebook.
+        - A URL in the query is read directly (source-aware: GitHub, PyPI, … through their
+          APIs), not replaced by a generic search for its words.
+        - Results arrive ranked (agent/search_rank.py). Off-topic results aren't opened.
+        - Each page is graded (agent/source_router.py). A failed, blocked, JavaScript-only,
+          sign-in or off-topic page is skipped and the next candidate is read instead, so
+          the requested number of usable pages is reached when it exists.
+        Snippets are leads; pages read here are inspected evidence, kept in the research notebook.
         """
+        from agent import search_rank
         from agent.lean import progress, steps
 
         started = time.perf_counter()
@@ -779,27 +864,63 @@ class Toolbox:
             read = steps.default_reads(query) if raw_read in (None, "") else int(raw_read)
         except (TypeError, ValueError):
             read = 0
-        read = max(0, min(3, read)) if "safe_web_fetch" in self.entries else 0
+        can_read = "safe_web_fetch" in self.entries
+        read = max(0, min(3, read)) if can_read else 0
+        given = search_rank.urls_in(query) if can_read else []
+        pages: list[str] = []
+        skipped: list[str] = []
+        widgets: list[dict[str, Any]] = []
+
+        def open_page(url: str) -> bool:
+            progress.report(f"Reading {steps.short_url(url)}")
+            page = self._run_entry("safe_web_fetch", {"url": url, "objective": query, "max_text_chars": 3500})
+            # The specific reason (timeout, blocked, sign-in, off-topic) beats a generic "couldn't be read".
+            reason = steps.page_problem(page.output) or ("" if page.ok else "couldn't be read")
+            if reason:
+                skipped.append(f"- {url}: {reason}")
+                return False
+            pages.append(f"### {url}\n{page.output.strip()}")
+            widgets.extend(page.widgets)
+            return True
+
+        for url in given[:3]:
+            open_page(url)
+        rest = search_rank.urls_in(query) and re.sub(r"https?://\S+", " ", query).strip(" ?")
+        if given and (not rest or len(rest.split()) < 2):
+            # The question was the URL: what it says is the answer, no generic search needed.
+            result = ToolResult(True, "", 0, widgets=widgets)
+            result.output = (f"Read the address given directly instead of searching.\n\n## Pages read (inspected, not just snippets)\n\n"
+                             + "\n\n".join(pages) if pages else "The address given couldn't be read:\n" + "\n".join(skipped))
+            result.ok = bool(pages)
+            result.meta = {"results": 0, "pages": len(pages), "skipped": len(skipped), "direct": len(given)}
+            result.duration_ms = int((time.perf_counter() - started) * 1000)
+            return result
+
         progress.report(f"Searching for “{query[:70]}”")
         result = self._run_entry("web_search", args)
-        urls = steps.result_urls(result.output) if result.ok else []
-        result.meta = {"results": len(urls)}
-        if not urls or not read:
-            return result
-        targets = urls[:read]
-        progress.report(f"{len(urls)} results · reading the top {len(targets)}")
-        pages: list[str] = []
-        widgets = list(result.widgets)
-        for index, url in enumerate(targets, 1):
-            progress.report(f"Reading {steps.short_url(url)} ({index} of {len(targets)})")
-            page = self._run_entry("safe_web_fetch", {"url": url, "objective": query, "max_text_chars": 3500})
-            if page.ok and "safe_fetch_error" not in page.output:
-                pages.append(f"### {url}\n{page.output.strip()}")
-                widgets.extend(page.widgets)
-        result.meta["pages"] = len(pages)
+        blocks = steps.result_blocks(result.output) if result.ok else []
+        result.meta = {"results": len(blocks)}
+        widgets = list(result.widgets) + widgets
+        wanted = read
+        if blocks and wanted:
+            candidates = [url for url, text in blocks if search_rank.coverage(query, text) > 0 and url not in given]
+            progress.report(f"{len(blocks)} results · reading the best {min(wanted, len(candidates))}")
+            reads = 0
+            for url in candidates[:wanted + 2]:  # two spares, for pages that fail or don't answer
+                if reads >= wanted:
+                    break
+                reads += open_page(url)
+            off_topic = len(blocks) - len(candidates)
+            if off_topic:
+                skipped.append(f"- {off_topic} result(s) didn't mention the question's terms and weren't opened")
+        result.meta.update({"pages": len(pages), "skipped": len(skipped), "direct": len(given)})
         if pages:
-            result.output += ("\n\n## Pages read from the top results (inspected, not just snippets)\n\n"
-                              + "\n\n".join(pages))
+            result.output += ("\n\n## Pages read (inspected, not just snippets)\n\n" + "\n\n".join(pages))
+        if skipped:
+            result.output += "\n\n## Not used\n" + "\n".join(skipped)
+        if wanted and not pages and blocks:
+            result.output += ("\n\nNone of the results could be read as evidence. Try a more specific query, "
+                              "a source you know is authoritative (safe_web_fetch), or say what you couldn't confirm.")
         result.widgets = widgets
         result.duration_ms = int((time.perf_counter() - started) * 1000)
         return result
@@ -835,6 +956,8 @@ class Toolbox:
                 visual = [observations.reference(item) for item in images]
             output = raw if isinstance(raw, str) else json.dumps(raw, default=str, ensure_ascii=False)
             ok = not looks_failed(output) and not (isinstance(raw, dict) and raw.get("isError"))
+            if ok and str(getattr(entry, "origin", "")) == "mcp":
+                ok, uncertain, output = _mcp_outcome(raw, output)
             if ok and str(getattr(entry, "origin", "")) == "mcp":
                 from agent import mcp_apps
                 view = mcp_apps.for_result(self.session_id, name, args, raw)  # the server's interactive view, if any
@@ -888,6 +1011,8 @@ def describe_call(name: str, args: dict[str, Any]) -> str:
         from agent.lean.steps import short_url
 
         return f"Reading {short_url(pick('url', 'link'))}"
+    if name == "calculate":
+        return f"Calculating {pick('expression', 'expr', 'query')[:80]}".rstrip()
     if name in {"file_read", "file_list"}:
         return f"{'Reading' if name == 'file_read' else 'Listing'} {pick('path') or '.'}"
     if name == "file_write":

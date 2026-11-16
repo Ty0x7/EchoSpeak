@@ -135,6 +135,16 @@ def approve(name: str, raw: dict[str, Any]) -> None:
         _save(data)
 
 
+def forget(name: str) -> bool:
+    """Drop a removed server's pin, so a later server with the same name needs approval again."""
+    with _lock:
+        data = _load()
+        removed = (data.setdefault("servers", {})).pop(str(name), None) is not None
+        if removed:
+            _save(data)
+        return removed
+
+
 def describe(raw: dict[str, Any]) -> str:
     """What the owner is approving, in one line (secrets left out)."""
     raw = dict(raw or {})

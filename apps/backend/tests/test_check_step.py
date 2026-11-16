@@ -21,6 +21,10 @@ def _permissions_on(monkeypatch):
 
     for name in ("enable_system_actions", "allow_file_write", "allow_terminal_commands"):
         monkeypatch.setattr(config, name, True)
+    # Commands here run in the sandbox, so they don't ask. Without this pin the result depended on whether
+    # Docker happened to be running on the test machine (auto mode falls back to the host, which asks).
+    from agent.lean import terminal
+    monkeypatch.setattr(terminal, "resolved_mode", lambda: "docker")
     # The fake file tools here don't touch disk; the on-disk check has its own tests (test_execution_evidence.py).
     from agent.lean import evidence
 
@@ -72,7 +76,7 @@ def test_unrun_code_gets_one_check_before_done():
     assert ran == ["pytest -q"]
     assert result.text.endswith("Done, and the tests pass (3 passed).") and "calc.py is ready" not in result.text
     nudge = client.calls[2][-1]["content"]
-    assert nudge.startswith("You changed calc.py but haven't run anything to check it since.")
+    assert "<echospeak-note>You changed calc.py but haven't run anything to check it since." in nudge  # from the app, not the user
     assert any(e["type"] == "check_nudge" and e["files"] == ["calc.py"] for e in events)
 
 

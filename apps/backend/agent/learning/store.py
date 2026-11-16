@@ -27,6 +27,13 @@ MAX_EPISODES = 5000
 # Outcomes kept per tool or search provider for "how is it doing lately".
 RECENT_WINDOW = 20
 
+# Why an episode turned out as it did (agent/learning/episodes.py classify_cause). Some causes aren't the
+# agent's strategy at work, so they never count for or against a lesson or an agent: a missing dependency or
+# an outage says nothing about whether "reproduce the bug first" helps, and counting it would retire good
+# lessons (negative transfer). The owner's feedback can reclassify an episode (feedback_cause).
+NOT_ATTRIBUTABLE = frozenset({"environment", "authorization", "tool_failure", "information_gap", "model_error", "misunderstood"})
+LOSS_CAUSES = frozenset({"failed_check", "false_success", "action_failed", "stalled", "verifier_gap", "owner_failed"})
+
 LESSON_STATUSES = ("pending_review", "probation", "established", "retired", "quarantined")
 # Lessons an agent may read: approved ones only. pending_review waits for the owner.
 ACTIVE_STATUSES = ("probation", "established")
@@ -74,25 +81,55 @@ class Episode:
     tokens: int = 0  # new tokens: input added plus replies (agent/lean/loop.py "fresh")
     role: str = "solo"  # solo | lead | worker
     routed: str = "user"  # who picked the model: the user's setting, or the router (auto mode)
+    # The verification ledger's completion record (agent/lean/verification.py), for measured engineering work.
+    verification: dict[str, Any] = field(default_factory=dict)
+    # Why it turned out this way, from the evidence (episodes.classify_cause), and as the owner's
+    # feedback reclassified it (episodes.feedback_cause); the owner's word wins while it stands.
+    cause: str = ""
+    feedback_cause: str = ""
+    # owner: pressed Worked / Didn't work. implicit: their next message said so ("that worked", "that's wrong").
+    feedback_source: str = ""
+    # Where the work happened: chat | agents | code, and the project it was about (for project-scoped lessons).
+    environment: str = ""
+    project_id: str = ""
+    # Proven lessons from another agent read on this task (transfer; counted apart from the home agent's results).
+    lessons_shared: list[str] = field(default_factory=list)
+    # Transferable lessons held back at random on this task: the control group for transfer.
+    lessons_shared_withheld: list[str] = field(default_factory=list)
+    # on | control (evaluation: placebo notes instead of lessons), and how many characters of lessons it read.
+    learning_mode: str = "on"
+    lesson_chars: int = 0
+
+    @property
+    def effective_cause(self) -> str:
+        return self.feedback_cause or self.cause
+
+    @property
+    def confirmed(self) -> bool:
+        """The owner said it worked with the button. A casual "thanks, that worked" isn't proof (implicit)."""
+        return self.feedback > 0 and self.feedback_source != "implicit"
 
     @property
     def verified_success(self) -> bool:
         """Success backed by a check after the work (V2+), or the owner said it worked."""
         if self.feedback < 0 or self.outcome == "error":
             return False
-        if self.feedback > 0:
+        if self.confirmed:
             return self.outcome in {"success", "answered"}
+        if self.effective_cause in LOSS_CAUSES or self.effective_cause in NOT_ATTRIBUTABLE:
+            return False  # a passing read-back doesn't outweigh a test that still fails
         return self.outcome == "success" and self.level >= 2
 
     @property
     def failed(self) -> bool:
-        """The agent's work fell short. A failed model call is nobody's lesson."""
-        if self.outcome == "error":
+        """The agent's work fell short. A failed model call, a broken environment or a refusal is nobody's lesson."""
+        if self.outcome == "error" or self.effective_cause in NOT_ATTRIBUTABLE:
             return False
-        return self.feedback < 0 or self.outcome in {"failure", "stopped"}
+        return self.feedback < 0 or self.outcome in {"failure", "stopped"} or self.effective_cause in LOSS_CAUSES
 
     def to_dict(self) -> dict[str, Any]:
-        return {**asdict(self), "verified_success": self.verified_success, "failed": self.failed}
+        return {**asdict(self), "verified_success": self.verified_success, "failed": self.failed,
+                "effective_cause": self.effective_cause}
 
 
 @dataclass
@@ -120,6 +157,20 @@ class Lesson:
     updated_at: float = field(default_factory=time.time)
     edited: bool = False
     note: str = ""  # why it has its status (shown to the owner)
+    # Set when it was learned about one project: only read in that project.
+    project_id: str = ""
+    # Uses by other agents once proven (transfer), counted apart from its home results. Transfer stops
+    # when it fails there (negative transfer), without touching the lesson's standing with its own agent.
+    shared_uses: int = 0
+    shared_wins: int = 0
+    shared_losses: int = 0
+    transfer: bool = True
+    # Matching tasks in other agents' work where it was held back at random: transfer's control group.
+    shared_held_wins: int = 0
+    shared_held_losses: int = 0
+    # What a waiting lesson waits for: "owner" (risky: only the owner releases it) or "confirmation"
+    # (learned while reading outside content: released when work in another conversation independently teaches it).
+    awaiting: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -150,6 +201,9 @@ class ExperienceStore:
         with self._lock, self._conn:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(_SCHEMA)
+            columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(reflections)")}
+            if "priority" not in columns:  # databases from before 11.11.7
+                self._conn.execute("ALTER TABLE reflections ADD COLUMN priority INTEGER NOT NULL DEFAULT 4")
             self._conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', ?)", (str(SCHEMA_VERSION),))
 
     def close(self) -> None:
@@ -176,9 +230,10 @@ class ExperienceStore:
         return _episode_from(row) if row else None
 
     def _episode_filter(self, agent_id: str, task_kind: str, since: float, execution_id: str,
-                        role: str) -> tuple[str, list[Any]]:
+                        role: str, session_id: str = "") -> tuple[str, list[Any]]:
         clauses, params = ["created_at >= ?"], [since]
-        for column, value in (("agent_id", agent_id), ("task_kind", task_kind), ("execution_id", execution_id)):
+        for column, value in (("agent_id", agent_id), ("task_kind", task_kind), ("execution_id", execution_id),
+                              ("session_id", session_id)):
             if value:
                 clauses.append(f"{column} = ?")
                 params.append(value)
@@ -189,8 +244,8 @@ class ExperienceStore:
         return " AND ".join(clauses), params
 
     def episodes(self, *, agent_id: str = "", task_kind: str = "", since: float = 0.0, limit: int = 50,
-                 execution_id: str = "", offset: int = 0, role: str = "") -> list[Episode]:
-        where, params = self._episode_filter(agent_id, task_kind, since, execution_id, role)
+                 execution_id: str = "", offset: int = 0, role: str = "", session_id: str = "") -> list[Episode]:
+        where, params = self._episode_filter(agent_id, task_kind, since, execution_id, role, session_id)
         with self._lock:
             rows = self._conn.execute(
                 f"SELECT body FROM episodes WHERE {where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
@@ -202,6 +257,15 @@ class ExperienceStore:
         where, params = self._episode_filter(agent_id, "", 0.0, "", role)
         with self._lock:
             return int(self._conn.execute(f"SELECT COUNT(*) FROM episodes WHERE {where}", params).fetchone()[0])
+
+    def reset(self) -> None:
+        """Forget everything learned: episodes, lessons and their history, statistics, queued reviews.
+
+        Per-agent pauses are kept: they are the owner's settings, not something learned.
+        """
+        with self._lock, self._conn:
+            for table in ("episodes", "lessons", "lesson_events", "reliability", "reflections"):
+                self._conn.execute(f"DELETE FROM {table}")
 
     def prune(self, keep: int = MAX_EPISODES) -> int:
         """Drop the oldest episodes beyond ``keep``. Lessons keep their ids as provenance."""
@@ -314,19 +378,20 @@ class ExperienceStore:
         return [dict(row) for row in rows]
 
     # ── reflection queue ────────────────────────────────────────────────
-    def queue_reflection(self, episode_id: str, agent_id: str) -> None:
+    def queue_reflection(self, episode_id: str, agent_id: str, priority: int = 4) -> None:
+        """Queue (or re-queue) a review. Lower ``priority`` is reviewed sooner (reflector.priority)."""
         with self._lock, self._conn:
             self._conn.execute(
-                "INSERT INTO reflections(episode_id, agent_id, status, created_at) VALUES (?,?, 'pending', ?)"
-                " ON CONFLICT(episode_id) DO UPDATE SET status = 'pending'"
-                " WHERE reflections.status IN ('done', 'skipped')",
-                (episode_id, agent_id, time.time()),
+                "INSERT INTO reflections(episode_id, agent_id, status, created_at, priority) VALUES (?,?, 'pending', ?, ?)"
+                " ON CONFLICT(episode_id) DO UPDATE SET status = 'pending', priority = MIN(reflections.priority, excluded.priority)"
+                " WHERE reflections.status IN ('done', 'skipped', 'pending')",
+                (episode_id, agent_id, time.time(), int(priority)),
             )
 
     def pending_reflections(self, limit: int = 5) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM reflections WHERE status = 'pending' ORDER BY created_at LIMIT ?", (max(1, limit),)
+                "SELECT * FROM reflections WHERE status = 'pending' ORDER BY priority, created_at LIMIT ?", (max(1, limit),)
             ).fetchall()
         return [dict(row) for row in rows]
 

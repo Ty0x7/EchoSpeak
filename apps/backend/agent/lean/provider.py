@@ -254,16 +254,25 @@ class ModelTurn:
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str = ""
     usage: dict[str, int] = field(default_factory=dict)
+    # An error the server sent inside an HTTP 200 stream (it ends the stream; there is no finish_reason).
+    stream_error: str = ""
+    # Set by the chat-completions stream when it ended with neither a finish reason nor a cancel: the reply
+    # broke off or the server couldn't produce it (e.g. a tool call its parser rejected). Other adapters leave it False.
+    incomplete: bool = False
     provider_blocks: list[dict[str, Any]] = field(default_factory=list)
     provider_state: dict[str, Any] = field(default_factory=dict)
     audio: list[dict[str, Any]] = field(default_factory=list)
 
 
 _TEXT_TOOL_PATTERNS = (
-    re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S),
+    # <tool_call>, and the near-misses deepseek-r1:8b writes in prompted mode (<toolcall>, <tool-call>, <function_call>).
+    re.compile(r"<(tool_call|toolcall|tool-call|function_call)>\s*(\{.*?\})\s*</\1>", re.S),
     re.compile(r"<\|tool_call\|>\s*(\{.*?\})\s*(?:<\|/tool_call\|>|$)", re.S),
-    re.compile(r"```(?:json|tool_call)?\s*(\{\s*\"name\".*?\})\s*```", re.S),
+    # A fenced JSON object; only a known tool with an arguments object counts (example JSON in an answer doesn't).
+    re.compile(r"```(?:json|tool_call)?\s*(\{.*?\})\s*```", re.S),
 )
+_NAME_KEYS = ("name", "tool", "tool_name", "function", "command")
+_ARGS_KEYS = ("arguments", "parameters", "args", "input")
 
 
 # Other shapes small local models print instead of calling a tool natively:
@@ -281,6 +290,11 @@ _PY_CALL_BLOCKS = (
     re.compile(r"```tool_code\s*(.*?)```", re.S),
 )
 _PIPE_TOOL = re.compile(r"\|TOOL\|\s*([\w.\-]+)\s*(\{.*\})", re.S)
+# DeepSeek's own format (how its template renders past calls, so the model may write it back):
+#   <｜tool▁call▁begin｜>function<｜tool▁sep｜>file_read\n```json\n{"path": "a"}\n```<｜tool▁call▁end｜>
+_DEEPSEEK_CALL = re.compile(r"<｜tool▁call▁begin｜>\s*\w*\s*<｜tool▁sep｜>\s*([\w.\-]+)\s*(?:```(?:json)?\s*)?(\{.*?\})\s*(?:```)?\s*"
+                            r"(?:<｜tool▁call▁end｜>|$)", re.S)
+_DEEPSEEK_WRAPPER = re.compile(r"<｜tool▁calls▁(?:begin|end)｜>|<｜end▁of▁sentence｜>")
 _LIQUID_TOOL = re.compile(r"<\|tool_call_start\|>(.*?)<\|tool_call_end\|>", re.S)
 _NAME_ALIASES = {"terminal_run": "terminal", "run_terminal": "terminal", "shell": "terminal", "run_command": "terminal"}
 _ARG_ALIASES = {"file_path": "path", "filepath": "path", "filename": "path"}
@@ -436,17 +450,23 @@ def extract_text_tool_calls(content: str, known_tools: set[str]) -> tuple[list[T
 
     for index, pattern in enumerate(_TEXT_TOOL_PATTERNS):
         for match in list(pattern.finditer(cleaned)):
-            payload = _repair_json(match.group(1))
+            payload = _repair_json(match.group(match.lastindex or 1))
+            if isinstance(payload, dict) and isinstance(payload.get("function"), dict):
+                payload = payload["function"]  # {"function": {"name": …, "arguments": …}}
             if not isinstance(payload, dict):
                 continue
-            name = str(payload.get("name") or payload.get("tool") or "").strip()
-            # A ```json {"name": …}``` block may just be example JSON in an answer;
-            # only the explicit tool-call tags count for unknown names.
-            if index == 2 and _canonical_tool(name, known_tools) not in known_tools:
+            name_key = next((k for k in _NAME_KEYS if isinstance(payload.get(k), str) and payload.get(k).strip()), "")
+            name = str(payload.get(name_key) or "").strip()
+            args_key = next((k for k in _ARGS_KEYS if k in payload), "")
+            # A ```json``` block may just be example JSON in an answer: only a known tool with arguments counts.
+            # "command" names the tool only beside an arguments object ({"command": "ls"} is a terminal argument).
+            if index == 2 and (_canonical_tool(name, known_tools) not in known_tools or not args_key):
+                continue
+            if name_key == "command" and not args_key:
                 continue
             if not name:
                 continue
-            args = payload.get("arguments", payload.get("parameters", payload.get("args", {})))
+            args = payload.get(args_key, {}) if args_key else {}
             if isinstance(args, str):
                 args = _repair_json(args) or {}
             add(name, args)
@@ -462,6 +482,11 @@ def extract_text_tool_calls(content: str, known_tools: set[str]) -> tuple[list[T
     for match in list(_PIPE_TOOL.finditer(cleaned)):
         add(match.group(1), _repair_json(match.group(2)) or {})
         cleaned = cleaned.replace(match.group(0), "")
+    for match in list(_DEEPSEEK_CALL.finditer(cleaned)):
+        add(match.group(1), _repair_json(match.group(2)) or {})
+        cleaned = cleaned.replace(match.group(0), "")
+    if calls:
+        cleaned = _DEEPSEEK_WRAPPER.sub("", cleaned)
     return calls, cleaned.strip()
 
 
@@ -640,6 +665,11 @@ class ChatClient:
                     chunk = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
+                if chunk.get("error"):
+                    # Kept, not skipped: without it a broken reply looks like an empty one.
+                    err = chunk["error"]
+                    turn.stream_error = str(err.get("message") if isinstance(err, dict) else err)[:300]
+                    continue
                 usage = chunk.get("usage")
                 if isinstance(usage, dict):
                     turn.usage = {
@@ -700,6 +730,7 @@ class ChatClient:
         emit_content(visible)
         turn.content = "".join(content_parts)
         turn.reasoning = "".join(reasoning_parts)
+        turn.incomplete = bool(turn.stream_error) or not turn.finish_reason
         if partial_calls and turn.finish_reason not in {"tool_calls", "stop", "cancelled"}:
             raise ProviderError(502, "Tool-call stream did not finish completely; no tool calls from this turn were executed.", self.endpoint.provider)
         for index in sorted(partial_calls):

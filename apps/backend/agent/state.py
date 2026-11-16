@@ -467,6 +467,8 @@ class ThreadSessionState(BaseModel):
     # Set by Stop, cleared by the owner's next message or "Run next": queued follow-ups
     # never start by themselves after a Stop, even after a reconnect or restart.
     queue_paused: bool = False
+    # Owner inbox choice, tied to the exact Code activity it acknowledged.
+    code_inbox: dict[str, str] = Field(default_factory=dict)
     pending_approval_id: str = ""
     last_execution_id: str = ""
     last_trace_id: str = ""
@@ -1040,6 +1042,29 @@ class StateStore:
             self._persist_runtime_activity(item_ids=[item.id], tool_run_ids=[])
         return RuntimeItem(**item.model_dump())
 
+    def discard_turn(self, turn_id: str) -> bool:
+        """Remove one finished turn and what it recorded (an Echo check-in that had nothing to say).
+
+        Only finished turns go; the chat's search index follows the removed items.
+        """
+        with self._lock:
+            record = self._executions.get(turn_id)
+            if record is None or record.status not in {"completed", "failed", "canceled", "superseded"}:
+                return False
+            self._executions.pop(turn_id, None)
+            for key in [key for key, item in self._items.items() if item.turn_id == turn_id]:
+                self._items.pop(key, None)
+            for key in [key for key, run in self._tool_runs.items() if run.turn_id == turn_id]:
+                self._tool_runs.pop(key, None)
+            state = self._thread_state.get(record.thread_id)
+            if state is not None and turn_id in {state.current_execution_id, state.active_turn_id}:
+                state.current_execution_id = state.active_turn_id = ""
+                self._persist_records("thread_state", self._thread_state, [record.thread_id])
+            self._persist_records("executions", self._executions)
+            self._persist_records("items", self._items)
+            self._persist_records("tool_runs", self._tool_runs)
+        return True
+
     # Terminal ToolRun statuses — once set, finish_tool_run is idempotent.
     TOOL_RUN_TERMINAL = frozenset({
         "complete", "completed", "success", "failed", "error",
@@ -1460,13 +1485,16 @@ class StateStore:
                         messages[-1].update({
                             "agent_id": str(item.payload.get("agent_id") or ""),
                             "agent_name": str(item.payload.get("agent_name") or ""),
+                            "provider": str(item.payload.get("provider") or ""),
                             "message_id": str(item.payload.get("message_id") or ""),
                             "timeline": list(item.payload.get("timeline") or []),
                             "delegated_by": item.payload.get("delegated_by") or None,
                             "agent_role": str(item.payload.get("role") or ""),
                             "stop_reason": str(item.payload.get("stop_reason") or ""),
                         })
-        if not any(m["role"] == "user" for m in messages) and execution.query:
+        # Older turns kept no user item, so their query stands in. A check-in's prompt is Echo's own
+        # context, marked hidden_prompt, and never shown as something the owner said.
+        if not any(m["role"] == "user" for m in messages) and execution.query and not (execution.metadata or {}).get("hidden_prompt"):
             messages.insert(0, {
                 "role": "user",
                 "text": execution.query,
@@ -1856,6 +1884,29 @@ class StateStore:
             if changed:
                 self._persist_thread_state()
         return changed
+
+    def code_inbox_snapshot(self, thread_id: str, *, waiting: Optional[bool] = None) -> dict[str, Any]:
+        """Read Code status without creating state or loading a transcript."""
+        from agent.code_inbox import native_snapshot
+        with self._lock:
+            if waiting is None:
+                waiting = any(row["session_id"] == thread_id and row["status"] == "pending"
+                              for row in self.coordination.view("approvals"))
+            state = self._thread_state.get(thread_id)
+            execution_id = (state.active_turn_id or state.current_execution_id or state.last_execution_id) if state else ""
+            approval = self._approvals.get(state.pending_approval_id) if state else None
+            waiting = waiting or bool(approval and approval.status == "pending")
+            return native_snapshot(state, self._executions.get(execution_id), waiting=waiting)
+
+    def update_code_inbox(self, thread_id: str, action: str, activity: str, *, waiting: bool = False, snooze_seconds: int = 0, automatic: bool = False) -> dict[str, Any]:
+        from agent.code_inbox import triage_choice
+        with self._lock:
+            snapshot = self.code_inbox_snapshot(thread_id, waiting=True if waiting else None)
+            if automatic and snapshot["state"] != "ready_to_review":
+                raise ValueError("A newer owner choice or work state prevents automatic settlement")
+            choice = triage_choice(snapshot, action, activity, snooze_seconds)
+            self.update_thread_state(thread_id, code_inbox=choice)
+            return self.code_inbox_snapshot(thread_id, waiting=True if waiting else None)
 
     def list_thread_states(self) -> list[ThreadSessionState]:
         """Return Session state snapshots for UI projections and maintenance."""

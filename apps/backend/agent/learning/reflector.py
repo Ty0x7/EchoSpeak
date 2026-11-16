@@ -31,6 +31,8 @@ from agent.learning.store import Episode, get_experience_store
 
 MAX_ATTEMPTS = 3
 MAX_AGE_DAYS = 7
+# The most informative experiences (priority 0-2) wait longer for a review than routine ones.
+MAX_AGE_DAYS_VALUABLE = 30
 CONTRAST_DAYS = 90
 
 ClientFactory = Callable[[Episode], Any]
@@ -40,8 +42,13 @@ def skip_reason(episode: Episode) -> str:
     """Why an episode isn't worth a reflection, or ''."""
     if episode.outcome == "error":
         return "the model request failed, so there is no work to learn from"
-    if episode.feedback:
-        return ""
+    cause = episode.effective_cause
+    if cause == "misunderstood":
+        return "the owner said the request was misunderstood: that's about this request, not a strategy"
+    if cause in {"environment", "authorization", "tool_failure"}:
+        return f"blocked by {cause.replace('_', ' ')}, so the strategy itself wasn't tested"
+    if episode.feedback and not (episode.feedback > 0 and episode.feedback_source == "implicit"):
+        return ""  # the owner's word (or their correction) is worth a review; a casual "thanks" alone isn't
     ran = [t for t in episode.tools if not t.get("not_run")]
     if not ran:
         return "nothing ran"
@@ -49,6 +56,9 @@ def skip_reason(episode: Episode) -> str:
         return "a plain answer"
     if episode.outcome == "success" and episode.level < 2:
         return "succeeded, but nothing checked it"
+    if (episode.effective_cause == "effective" and episode.lessons_used and episode.attribution == "win"
+            and not episode.feedback and not (episode.verification or {}).get("recovered")):
+        return "a routine success already covered by the lessons it used"
     return ""
 
 
@@ -68,15 +78,33 @@ def _tool_log(episode: Episode, limit: int = 25) -> str:
     return "\n".join(lines) or "(no tool calls)"
 
 
+_CAUSES = {
+    "effective": "checked, and it worked",
+    "failed_check": "the checks still failed at the end",
+    "false_success": "it said the work was done, but the evidence showed otherwise",
+    "action_failed": "its last action failed",
+    "stalled": "it stopped improving and ran out of steps",
+    "information_gap": "it couldn't find what it needed",
+    "verifier_gap": "the checks passed, but the owner says it didn't work, so the checks missed something",
+    "owner_failed": "the owner says it didn't work",
+    "confirmed": "the owner says it worked",
+}
+
+
 def _describe(episode: Episode, label: str) -> str:
     feedback = {1: "The owner said it worked.", -1: "The owner said it didn't work."}.get(episode.feedback, "")
+    if episode.feedback_source == "implicit" and feedback:
+        feedback = {1: "The owner's next message suggested it worked (a casual remark, not a check).",
+                    -1: "The owner's next message said it was wrong."}[episode.feedback]
     if feedback and episode.feedback_note:
         feedback += f' Their note: "{episode.feedback_note[:300]}"'
+    cause = _CAUSES.get(episode.effective_cause, "")
     return (
         f"{label}\nThe user asked: {episode.goal[:800]}\n"
         f"What ran (tool log):\n{wrap_untrusted('tool log', _tool_log(episode))}\n"
         f"Result: {episode.outcome} ({episode.summary[:300] or 'no summary'}). "
         f"How well it was checked: V{episode.level}, {'; '.join(episode.reasons)[:300]}.\n"
+        + (f"Why, from the evidence: {cause}.\n" if cause else "")
         + (feedback + "\n" if feedback else "")
     )
 
@@ -109,9 +137,30 @@ def prompt_for(episode: Episode, contrast: Optional[Episode]) -> str:
         "- is never about permissions, approvals, safety rules, secrets, or changing tests or checks;\n"
         "- has a title under 80 characters and text under 300 characters.\n"
         "If there is nothing general to learn, return no lessons.\n"
-        'Answer with JSON only: {"lessons": [{"title": "...", "text": "...", "kind": "do" or "avoid"}]}'
+        + ('- set "scope" to "project" only when it is true of this project alone (its tooling or conventions); '
+           'otherwise "general".\n' if episode.project_id else "")
+        + 'Answer with JSON only: {"lessons": [{"title": "...", "text": "...", "kind": "do" or "avoid"'
+        + (', "scope": "general" or "project"' if episode.project_id else "") + "}]}"
     )
     return "\n\n".join(parts)
+
+
+def priority(episode: Episode) -> int:
+    """Which queued reviews teach most, first (lower is sooner): a bounded daily budget goes where it counts.
+
+    Checks that missed something and contradicted claims first, then recoveries (a strategy that turned
+    a failing check into a passing one), then the owner's word, then other checked work.
+    """
+    cause = episode.effective_cause
+    if cause in {"verifier_gap", "false_success"}:
+        return 0
+    if (episode.verification or {}).get("recovered"):
+        return 1
+    if episode.feedback < 0 or episode.confirmed:
+        return 2
+    if cause == "effective":
+        return 3
+    return 4
 
 
 def _default_client(episode: Episode) -> Any:
@@ -159,17 +208,22 @@ def run_pending(*, limit: int = 3, cap: Optional[int] = None,
     factory = client_factory or _default_client
     paused = store.paused_agents()
     done: list[dict[str, Any]] = []
-    for row in store.pending_reflections(limit=limit * 3):
+    rows = store.pending_reflections(limit=limit * 6)
+    episodes = {row["episode_id"]: store.get_episode(row["episode_id"]) for row in rows}
+    rows.sort(key=lambda row: (priority(episodes[row["episode_id"]]) if episodes[row["episode_id"]] else 9,
+                               float(row["created_at"])))
+    for row in rows:
         if len(done) >= limit:
             break
-        episode = store.get_episode(row["episode_id"])
+        episode = episodes[row["episode_id"]]
         if episode is None:
             store.finish_reflection(row["episode_id"], "skipped", "episode no longer exists")
             continue
         if episode.agent_id in paused:
             store.finish_reflection(episode.id, "skipped", "learning is paused for this agent")
             continue
-        if time.time() - float(row["created_at"]) > MAX_AGE_DAYS * 86400 or int(row["attempts"]) >= MAX_ATTEMPTS:
+        max_age = MAX_AGE_DAYS_VALUABLE if int(row.get("priority", 4)) <= 2 else MAX_AGE_DAYS
+        if time.time() - float(row["created_at"]) > max_age * 86400 or int(row["attempts"]) >= MAX_ATTEMPTS:
             store.finish_reflection(episode.id, "skipped", "too old or failed too often")
             continue
         reason = skip_reason(episode)

@@ -56,6 +56,7 @@ def fake(monkeypatch, mode):
 
 
 def create(service, item, runtime="codex", key="one", **kwargs):
+    kwargs.setdefault('workspace_mode', 'worktree')  # Existing isolation/rollback coverage stays explicit.
     return service.call(service.create(item.id, runtime, key, **kwargs))
 
 
@@ -102,16 +103,74 @@ def test_stream_approval_and_rollback(setup, monkeypatch, runtime, mode):
         service.call(service.connect(sid))
 
 
-def test_claude_reported_model_is_retained_and_redacted(setup):
+def test_claude_code_reported_model_is_retained_and_redacted(setup):
     service, item, _ = setup
-    row = create(service, item, runtime="claude_code")
+    row = create(service, item, runtime="claude_cli")
     session = service.sessions[row["id"]]
-    adapter = adapters.Claude(session)
-    service.call(adapter.event("sdk/event", {"kind": "SystemMessage", "data": {"data": {"model": "fixture-claude-model"}}}))
-    assert session.public()["model"] == "fixture-claude-model"
-    session.api_key = "fixture-secret-model-key-12345"
-    service.call(adapter.event("sdk/event", {"kind": "AssistantMessage", "data": {"model": session.api_key}}))
-    assert session.api_key not in (session.directory / "session.json").read_text()
+    adapter = adapters.ClaudeCli(session)
+    adapter._message({"type": "system", "subtype": "init", "session_id": "native-1", "model": "fixture-claude-model"})
+    assert session.public()["model"] == "fixture-claude-model" and session.row["native_id"] == "native-1"
+    session.redaction_values = ["fixture-secret-model-key-12345"]
+    adapter._message({"type": "system", "subtype": "init", "model": "fixture-secret-model-key-12345"})
+    assert "fixture-secret-model-key-12345" not in (session.directory / "session.json").read_text()
+
+
+def test_inbox_follows_real_protocol_activity_and_survives_reconnect(setup, monkeypatch):
+    service, item, _ = setup
+    fake(monkeypatch, "codex")
+    sid = create(service, item)["id"]
+    summary = lambda: service.call(service.list(item.id, summary=True))[0]["inbox"]
+    service.call(service.connect(sid))
+    service.call(service.prompt(sid, "Fixture inbox task"))
+    waiting = wait_for(service, sid, lambda row: bool(row["approvals"]))
+    assert summary()["state"] == "needs_attention" and not summary()["can_triage"]
+    with pytest.raises(ValueError, match="changed or is working"):
+        service.call(service.triage(sid, "snoozed", summary()["activity"]))
+    service.call(service.decide(sid, waiting["approvals"][0]["id"], True))
+    wait_for(service, sid, lambda row: row["state"] == "completed" and not row["turn_active"])
+    value = summary()
+    assert value["state"] == "ready_to_review" and value["verification"] == "Runtime-owned checks"
+    service.call(service.triage(sid, "snoozed", value["activity"]))
+    service.call(service.stop(sid))
+    assert summary()["state"] == "snoozed"
+    # A process restart reloads from disk without connecting or replaying anything.
+    async def reload():
+        service.sessions.clear()
+        await service._load()
+    service.call(reload())
+    assert summary()["state"] == "snoozed"
+    assert not service.call(service.poll(sid, 0))["connected"]
+    rows = service.call(service.list(item.id, summary=True))
+    assert "events" not in rows[0] and "approvals" not in rows[0] and "worktree" not in rows[0]
+    service.call(service.connect(sid))
+    service.call(service.prompt(sid, "Second fixture task"))
+    assert summary()["state"] in {"working", "needs_attention"}
+    with pytest.raises(ValueError):
+        service.call(service.triage(sid, "settled", value["activity"]))
+
+
+def test_rollback_remains_terminal_after_process_restart(setup):
+    service, item, _ = setup
+    sid = create(service, item)["id"]
+    session = service.sessions[sid]
+    session.row["state"] = "rolled_back"
+    session.save()
+    service.call(service._load())
+    assert service.sessions[sid].row["state"] == "rolled_back"
+    with pytest.raises(ValueError, match="rolled back"):
+        service.call(service.connect(sid))
+
+
+
+
+
+
+def test_plan_agents_only_the_api_key_runtime_is_gone(setup):
+    """Echo Code runs your plans; Claude by API key belongs to Chat (the old SDK runtime is refused)."""
+    service, item, _ = setup
+    with pytest.raises(ValueError, match="external runtime"):
+        create(service, item, runtime="claude_code")
+
 
 
 def test_acp_second_turn_retains_reported_model_without_new_session(setup, monkeypatch):
@@ -237,12 +296,13 @@ def test_deny_does_not_change_files_and_pending_decisions_expire(setup, monkeypa
 
 def test_credentials_are_not_persisted_or_replayed(setup):
     service, item, _ = setup
-    sid = create(service, item, runtime="claude_code")["id"]
+    sid = create(service, item, runtime="codex")["id"]
     session = service.sessions[sid]
-    session.api_key = "fixture-secret-never-expose"
-    session.emit("sdk/event", {"text": session.api_key})
-    assert session.api_key not in json.dumps(session.public())
-    assert session.api_key not in (session.directory / "session.json").read_text()
+    session.redaction_values = ["fixture-secret-never-expose"]
+    session.emit("item/agentMessage/delta", {"delta": "fixture-secret-never-expose"})
+    assert "fixture-secret-never-expose" not in json.dumps(session.public())
+    assert "fixture-secret-never-expose" not in (session.directory / "session.json").read_text()
+
 
 
 def test_restart_keeps_native_identity_but_never_starts_runtime(setup):
@@ -286,40 +346,6 @@ def test_failed_privacy_save_keeps_admission_closed(setup, monkeypatch):
         pass
     assert create(service, item)["state"] == "stopped"
 
-
-def test_official_claude_sdk_options_and_every_tool_gate(monkeypatch):
-    sdk = pytest.importorskip("claude_agent_sdk")
-    from agent.code_claude_worker import Worker
-    captured = {}
-    class FakeClient:
-        def __init__(self, options):
-            captured["options"] = options
-        async def __aenter__(self): return self
-        async def __aexit__(self, *args): pass
-        async def query(self, text): pass
-        async def receive_response(self):
-            from claude_agent_sdk import ResultMessage
-            yield ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1, is_error=False,
-                                num_turns=1, session_id="fixture-claude", total_cost_usd=0, usage={}, result="fixture")
-    monkeypatch.setattr(sdk, "ClaudeSDKClient", FakeClient)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "fixture-sdk-key")
-    worker = Worker()
-    monkeypatch.setattr(worker, "send", lambda value: None)
-    async def approve(tool, inputs): return tool == "Read"
-    monkeypatch.setattr(worker, "approval", approve)
-    async def check():
-        result = await worker.prompt({"text": "Fixture", "resume": "native-claude"})
-        options = captured["options"]
-        assert options.resume == "native-claude" and options.permission_mode == "default"
-        assert options.setting_sources == [] and options.strict_mcp_config
-        assert not options.allowed_tools and options.mcp_servers == {}
-        gate = options.hooks["PreToolUse"][0].hooks[0]
-        allowed = await gate({"tool_name": "Read", "tool_input": {}}, "one", {})
-        denied = await gate({"tool_name": "Bash", "tool_input": {}}, "two", {})
-        assert allowed["hookSpecificOutput"]["permissionDecision"] == "allow"
-        assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
-        assert result["session_id"] == "fixture-claude" and not result["is_error"]
-    asyncio.run(check())
 
 
 def test_external_api_requires_acknowledgement_and_never_creates_native_thread(setup, monkeypatch):

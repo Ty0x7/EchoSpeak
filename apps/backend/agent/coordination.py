@@ -453,7 +453,14 @@ class Coordinator:
             if row["status"] != "waiting_approval" or row["agent_id"] != record.get("owner_agent_id", record["agent_id"]) or record["tool"] not in (row["tools"] or []):
                 raise PermissionError("Approval owner or original capability grant changed")
             active = data["attempts"].get(record["attempt_id"], {}).get("status") == "running"
-            row.update(status=("running" if active else "ready") if decision == "allow" else "blocked", revision=row["revision"] + 1)
+            # A denial during a live run goes back to the model as a tool result ("continue without
+            # it"), so the work stays running and the agent can follow the owner's alternative.
+            # Only a denial nobody is running for (a recovered approval) blocks the work.
+            if decision == "allow":
+                status = "running" if active else "ready"
+            else:
+                status = "running" if active else "blocked"
+            row.update(status=status, revision=row["revision"] + 1)
             return record
         return self._tx(change)
 

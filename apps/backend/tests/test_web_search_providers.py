@@ -9,6 +9,7 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent.web_search_providers import (
+    DuckDuckGoProvider,
     SearchHit,
     SearchProviderResult,
     SearXNGProvider,
@@ -100,6 +101,8 @@ def test_run_web_search_uses_searxng_provider(monkeypatch):
         )
 
     monkeypatch.setattr(SearXNGProvider, "search", fake_search)
+    # The cascade falls through to DuckDuckGo below its hit target: keep the test off the real internet.
+    monkeypatch.setattr(DuckDuckGoProvider, "search", lambda self, query, **k: SearchProviderResult(provider="duckduckgo", queries_used=[query]))
     cfg = SimpleNamespace(
         brave_search_api_key="",
         searxng_base_url="http://localhost:8080",

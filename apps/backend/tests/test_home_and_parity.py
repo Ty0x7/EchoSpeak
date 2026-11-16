@@ -152,6 +152,7 @@ def test_failure_hints_turn_bash_habits_into_powershell(monkeypatch):
     assert "PowerShell" not in terminal.failure_hint(127, "bash: grep: command not found", "host", "grep x", shell="bash")
 
 
+@pytest.mark.skipif(os.name != "nt", reason="fakes os.name == nt, which breaks pathlib off Windows")
 def test_bash_runs_on_this_pc_only_when_git_bash_is_there(monkeypatch, workspace):
     tmp_path = workspace
     monkeypatch.setattr(terminal.os, "name", "nt")

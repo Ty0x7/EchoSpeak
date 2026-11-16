@@ -204,5 +204,146 @@
     ],
     "reference": "https://agentclientprotocol.com/protocol/v1/session-setup",
     "boundary": "ACP optional model metadata is read when provided; no model-setting RPC or fabricated catalog is introduced. No live account/model test."
+  },
+  "codex_continuation_2026_10_29": {
+    "research_date_utc": "2026-10-29",
+    "echospeak_base_commit": "416fd8de89db90355c4351e176d563c1d3a28db5",
+    "github_main": "36835a09ffa2479cd274e6c2db280cc151de6dba",
+    "branch": "codex/code-inbox",
+    "t3_commit": "b6fbd181cae49d38927360913851121cc35ec4ff",
+    "method": "Read primary docs and relevant source portions via GitHub connector; no upstream scripts, dependencies or instructions executed.",
+    "reuse_status": "Conceptual adaptation only. No T3 runtime code ported.",
+    "reviewed_sources": [
+      {
+        "path": "docs/internals/overview.md",
+        "git_blob_sha": "9e5cf6c9d8a6ca66423a964b3a52c131b919e5fa",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/docs/internals/overview.md",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "docs/internals/providers.md",
+        "git_blob_sha": "42f0a70101b3a8d6bde88d8ecd79a6a679743370",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/docs/internals/providers.md",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "docs/internals/web-ui.md",
+        "git_blob_sha": "13b7d9df99fd01bc718d05c24b59d5ca4cd11012",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/docs/internals/web-ui.md",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "docs/internals/remote.md",
+        "git_blob_sha": "0c328c50317c54b3d81725e029b30e325a116326",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/docs/internals/remote.md",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "docs/internals/devices.md",
+        "git_blob_sha": "5273f7942e9e0cb95842a8e7f3f92547fc0d984e",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/docs/internals/devices.md",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "docs/user/outside-agents.md",
+        "git_blob_sha": "f040f2218058d7816d85e4182300130fffc346fc",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/docs/user/outside-agents.md",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "docs/user/source-control.md",
+        "git_blob_sha": "815e5dd0668fadfafe207d59bdef2292f79fc0a0",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/docs/user/source-control.md",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "apps/server/src/orchestration-v2/Orchestrator.ts",
+        "git_blob_sha": "76bcc00bbcb4e25dba189d04a0b8183552e38467",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/apps/server/src/orchestration-v2/Orchestrator.ts",
+        "review_scope": "Relevant command, ownership and settlement portions"
+      },
+      {
+        "path": "apps/server/src/orchestration-v2/EventSink.ts",
+        "git_blob_sha": "b210d3c9840ae250161b649b5fb1af26c8ce2b7f",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/apps/server/src/orchestration-v2/EventSink.ts",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "apps/server/src/orchestration-v2/EffectWorker.ts",
+        "git_blob_sha": "d174db2fb3a29b2297212bd5c3e14cec3d0310dd",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/apps/server/src/orchestration-v2/EffectWorker.ts",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "apps/server/src/orchestration-v2/ThreadSettlementService.ts",
+        "git_blob_sha": "509dcd0307dc2b7e1a9de8524f1ee572db5e0396",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/apps/server/src/orchestration-v2/ThreadSettlementService.ts",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "packages/provider-core/src/server/ProviderAdapter.ts",
+        "git_blob_sha": "e168512736c7ce81a4d3b5e6e3d67b678ba712f2",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/packages/provider-core/src/server/ProviderAdapter.ts",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      },
+      {
+        "path": "apps/server/src/checkpointing/CheckpointStore.ts",
+        "git_blob_sha": "3d180e9c66c4e177abb064224adf15dbfc78857f",
+        "url": "https://github.com/pingdotgg/t3code/blob/b6fbd181cae49d38927360913851121cc35ec4ff/apps/server/src/checkpointing/CheckpointStore.ts",
+        "review_scope": "Architecture, contracts and relevant implementation portions"
+      }
+    ]
+  },
+  "parallel_inbox_followup": {
+    "date_utc": "2026-10-30",
+    "t3_commit": "cba30591f95859bc76154e5be97891ea4ae1b85a",
+    "scope": "Sidebar screenshot follow-up, outside agents, usage and triage. Concepts adapted; no runtime source copied or executed.",
+    "sources": [
+      {
+        "path": "docs/user/triage.md",
+        "git_blob_sha": "c66bac0738e28b020c9d2e2e1ee06b3dbf4bc665",
+        "url": "https://github.com/pingdotgg/t3code/blob/cba30591f95859bc76154e5be97891ea4ae1b85a/docs/user/triage.md"
+      },
+      {
+        "path": "apps/server/src/cli/triage.ts",
+        "git_blob_sha": "b040054748ca718d29ce45dba9174072976e5daf",
+        "url": "https://github.com/pingdotgg/t3code/blob/cba30591f95859bc76154e5be97891ea4ae1b85a/apps/server/src/cli/triage.ts"
+      },
+      {
+        "path": "docs/user/thread-sidebar.md",
+        "git_blob_sha": "fb5e12b08372b816f49dc830b0e5433ee23778c3",
+        "url": "https://github.com/pingdotgg/t3code/blob/cba30591f95859bc76154e5be97891ea4ae1b85a/docs/user/thread-sidebar.md"
+      },
+      {
+        "path": "apps/server/src/orchestration-v2/ThreadSettlementService.ts",
+        "git_blob_sha": "6a3d4fffb0399f31531cced01d600067f87fc39a",
+        "url": "https://github.com/pingdotgg/t3code/blob/cba30591f95859bc76154e5be97891ea4ae1b85a/apps/server/src/orchestration-v2/ThreadSettlementService.ts"
+      },
+      {
+        "path": "apps/server/src/mcp/McpToolAccess.ts",
+        "git_blob_sha": "b82d9bb5ae59cd97f81dbe2443d31a7e98c9085a",
+        "url": "https://github.com/pingdotgg/t3code/blob/cba30591f95859bc76154e5be97891ea4ae1b85a/apps/server/src/mcp/McpToolAccess.ts"
+      },
+      {
+        "path": "apps/web/src/components/Sidebar.snooze.ts",
+        "git_blob_sha": "888f3a67ee3cbcf2f0ee293568a46efcdcb45118",
+        "url": "https://github.com/pingdotgg/t3code/blob/cba30591f95859bc76154e5be97891ea4ae1b85a/apps/web/src/components/Sidebar.snooze.ts"
+      },
+      {
+        "path": "docs/user/outside-agents.md",
+        "git_blob_sha": "f040f2218058d7816d85e4182300130fffc346fc",
+        "url": "https://github.com/pingdotgg/t3code/blob/cba30591f95859bc76154e5be97891ea4ae1b85a/docs/user/outside-agents.md"
+      },
+      {
+        "path": "docs/user/usage.md",
+        "git_blob_sha": "af1fc02352f838e1a0a711cbbad2b10e15ca79eb",
+        "url": "https://github.com/pingdotgg/t3code/blob/cba30591f95859bc76154e5be97891ea4ae1b85a/docs/user/usage.md"
+      },
+      {
+        "path": "apps/web/src/components/Sidebar.logic.ts",
+        "git_blob_sha": "efd8244f8c2b21d5c9d15f7c137550a7ca015437",
+        "url": "https://github.com/pingdotgg/t3code/blob/cba30591f95859bc76154e5be97891ea4ae1b85a/apps/web/src/components/Sidebar.logic.ts"
+      }
+    ]
   }
 }

@@ -3,6 +3,8 @@ import { create } from "zustand";
 export type SurfaceKind = "surfaces" | "files" | "file" | "diff" | "terminal" | "browser" | "pull_requests" | "linked_prs" | "device" | "usage" | "research" | "activity" | "artifact" | "screen";
 export type Surface = { id: string; kind: SurfaceKind; title: string; path?: string; terminalId?: string };
 export type WorkbenchContext = { project_id: string; external_session_id: string };
+/** The open conversation, for Workspace details: its id and how much of the model's context it uses. */
+export type ConversationMeter = { session_id: string; used: number; window: number; model: string };
 export const surfaceTitle: Record<SurfaceKind, string> = { surfaces: "Open a surface", files: "Files", file: "File", diff: "Changes", terminal: "Terminal", browser: "Browser", pull_requests: "Pull requests", linked_prs: "Linked pull requests", device: "Device", usage: "Usage", research: "Research", activity: "Activity", artifact: "Artifact", screen: "Screen" };
 export const contextKey = (context: WorkbenchContext) => `${context.project_id}:${context.external_session_id}`;
 
@@ -13,6 +15,7 @@ type State = {
   select(id: string): void; close(id: string): void; toggleRight(): void; toggleBottom(): void;
   toggleDetails(): void; setBottomHeight(value: number): void; refresh(): void;
   addTerminal(id: string, context?: WorkbenchContext): void; removeTerminal(id: string, context?: WorkbenchContext): void;
+  meter: ConversationMeter; setMeter(meter: ConversationMeter): void;
 };
 
 function height(): number {
@@ -23,6 +26,12 @@ function height(): number {
 export const useWorkbench = create<State>((set, get) => ({
   context: { project_id: "", external_session_id: "" }, tabs: [], active: "", rightOpen: false,
   bottomOpen: false, detailsOpen: false, bottomHeight: height(), terminalIds: {}, revision: 0,
+  meter: { session_id: "", used: 0, window: 0, model: "" },
+  setMeter(meter) {
+    const current = get().meter;
+    if (current.session_id === meter.session_id && current.used === meter.used && current.window === meter.window && current.model === meter.model) return;
+    set({ meter });
+  },
   setContext(context) {
     if (contextKey(context) === contextKey(get().context)) return;
     // Resource tabs cannot silently follow a different repository or agent.

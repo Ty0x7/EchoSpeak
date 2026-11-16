@@ -151,8 +151,8 @@ test("sidecar lifetime has both graceful and crash recovery ownership", () => {
 
 test("native contract is reproducible and supports disposable acceptance data", () => {
   for (const version of [
-    'tauri-build = { version = "=2.6.3"',
-    'tauri = { version = "=2.11.6"',
+    'tauri-build = { version = "=2.7.3"',
+    'tauri = { version = "=2.12.4"',
     'tauri-plugin-shell = "=2.3.5"',
     'tauri-plugin-single-instance = "=2.4.2"',
     'tauri-plugin-window-state = "=2.4.1"',
@@ -187,7 +187,7 @@ test("in-app updates verify signed GitHub releases and stop the service before i
   assert.equal(updater.requireSignedVersion, true);
   // Ordinary builds must not need the private signing key; only the release script turns this on.
   assert.notEqual(config.bundle.createUpdaterArtifacts, true);
-  assert.ok(cargo.includes('tauri-plugin-updater = "=2.12.0"'));
+  assert.ok(cargo.includes('tauri-plugin-updater = "=2.14.1"'));
   assert.ok(host.includes("tauri_plugin_updater::Builder::new().build()"));
   assert.ok(host.includes("updates::check_for_update") && host.includes("updates::install_update"));
   assert.ok(permissions.includes('"check_for_update"') && permissions.includes('"install_update"'));
@@ -195,4 +195,42 @@ test("in-app updates verify signed GitHub releases and stop the service before i
   assert.ok(updates.indexOf("shutdown_backend") < updates.indexOf("update.install("));
   // No updater: permissions for the renderer; it goes through the two commands above.
   assert.ok(!capability.permissions.some((permission) => String(permission).startsWith("updater:")));
+});
+
+test("Linux packages are deb, rpm and AppImage without Windows wording or updater artefacts", async () => {
+  const linux = JSON.parse(await readFile(new URL("../src-tauri/tauri.linux.conf.json", import.meta.url), "utf8"));
+  assert.deepEqual(linux.bundle.targets, ["deb", "rpm", "appimage"]);
+  assert.equal(linux.bundle.createUpdaterArtifacts, false, "Linux builds must never need the updater signing key");
+  assert.doesNotMatch(linux.bundle.shortDescription, /windows/i);
+  assert.ok(linux.bundle.icon.every((icon) => icon.endsWith(".png")), "Linux icons are PNGs");
+  // Tauri itself adds libwebkit2gtk-4.1-0, libgtk-3-0 and libayatana-appindicator3-1 to the .deb.
+  assert.equal(linux.bundle.linux.deb.depends, undefined, "listing them again duplicates Depends");
+  assert.ok(linux.bundle.linux.rpm.depends.includes("webkit2gtk4.1"));
+  // The overlay only adds Linux settings; Windows keeps its own targets and resources.
+  assert.equal(linux.bundle.resources, undefined);
+  assert.equal(linux.bundle.windows, undefined);
+  const updates = await readFile(new URL("../src-tauri/src/updates.rs", import.meta.url), "utf8");
+  assert.match(updates, /cfg!\(target_os = "linux"\)/, "Linux reports that the package manager owns updates");
+});
+
+test("Linux host attaches to a shared backend instead of fighting its data-folder lock", async () => {
+  const endpoint = await readFile(new URL("../src-tauri/src/endpoint.rs", import.meta.url), "utf8");
+  assert.ok(host.includes("#[cfg(unix)]\nmod endpoint;"));
+  for (const rule of ["ECHOSPEAK_RUNTIME_DIR", "XDG_RUNTIME_DIR", "O_NOFOLLOW", "0o077", "auth_required", "127.0.0.1"]) {
+    assert.ok(endpoint.includes(rule), `endpoint reader must check ${rule}`);
+  }
+  assert.ok(rust.includes("fn try_attach"));
+  assert.ok(rust.includes("readiness_instance("), "attach requires an accepted key on /startup/readiness");
+  assert.ok(rust.includes(".filter(|_| !attached)"), "quitting never stops a backend the app did not start");
+  assert.ok(rust.includes("libc::SIGTERM"), "spawned backends get a graceful stop on POSIX");
+  assert.ok(rust.includes('"echospeak-backend.exe"') && rust.includes('"echospeak-backend"'));
+});
+
+test("Linux webview starts on NVIDIA/Wayland and reveals the main window without animation frames", () => {
+  // Without it WebKitGTK's DMA-BUF renderer ends the Wayland connection (Error 71) at first paint.
+  assert.ok(host.includes('set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1")'));
+  assert.ok(host.includes('var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none()'), "a user's own choice wins");
+  // WebKitGTK runs no requestAnimationFrame for an unmapped window, so the renderer's reveal never fires.
+  assert.match(host, /#\[cfg\(target_os = "linux"\)\]\s*let builder = builder\.on_page_load/);
+  assert.ok(host.includes("PageLoadEvent::Finished"));
 });

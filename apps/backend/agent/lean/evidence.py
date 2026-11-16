@@ -133,3 +133,37 @@ def written_files(effects: list[dict[str, Any]]) -> set[str]:
     """Lower-cased names of files observed on disk after a write, copy or move."""
     return {Path(str(e["path"])).name.lower() for e in effects
             if e.get("kind") == "file" and e.get("action") in {"wrote", "made"} and e.get("exists")}
+
+
+# ── quoted evidence ────────────────────────────────────────────────────
+# Lines that read as copied from a log or data file: a timestamp, a log level, or file_read's "123| " prefix.
+_DATA_LINE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}|\b(ERROR|WARN(ING)?|INFO|DEBUG|FATAL|CRITICAL)\b|^\s*\d+\|")
+_FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.S)
+_LINE_NO = re.compile(r"^\s*\d+\|\s?")
+
+
+def _squash(text: str) -> str:
+    return " ".join(str(text or "").split())
+
+
+def unseen_quotes(answer: str, seen: str, limit: int = 3) -> list[str]:
+    """Log or data lines the answer quotes that appear in nothing the model was shown.
+
+    ministral-3:8b answered a log question with "Seq 891 … `891| … ERROR Failed to process request`", a line
+    that exists nowhere: it had read only part of the file and searched nothing (five-model evaluation, D2).
+    Only lines in code fences or quote blocks that look like copied data count; code the model writes
+    itself (a suggested fix) has no timestamp, level or line-number prefix and is never checked.
+    """
+    quoted = [line for block in _FENCE.findall(answer or "") for line in block.splitlines()]
+    quoted += [line.lstrip("> ") for line in str(answer or "").splitlines() if line.startswith(">")]
+    haystack = _squash(seen)
+    missing: list[str] = []
+    for line in quoted:
+        body = _squash(_LINE_NO.sub("", line))
+        if len(body) < 20 or not _DATA_LINE.search(line):
+            continue
+        if body not in haystack and body not in missing:
+            missing.append(body)
+        if len(missing) >= limit:
+            break
+    return missing

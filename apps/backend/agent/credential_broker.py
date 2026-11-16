@@ -1,4 +1,7 @@
-"""Opaque credential storage backed by the Windows Data Protection API.
+"""Opaque credential storage bound to the signed-in user.
+
+Windows: the Data Protection API. Linux and other POSIX systems: AES-256-GCM under a key
+held in the desktop keyring (agent/credential_posix.py), failing closed without one.
 
 Runtime configuration and Connection records persist only ``credential://``
 references.  Plaintext exists only for the duration of a broker call and is
@@ -33,7 +36,9 @@ class CredentialNotFoundError(CredentialBrokerError):
     pass
 
 
-_REFERENCE = re.compile(r"^credential://dpapi/([a-f0-9]{32})$")
+# The middle part names where a credential was first sealed. The index entry's "backend" decides how it opens.
+_REFERENCE = re.compile(r"^credential://(?:dpapi|keyring)/([a-f0-9]{32})$")
+_WINDOWS_BACKEND = "windows_dpapi_current_user"
 _SCHEMA_VERSION = 1
 _CRYPTPROTECT_UI_FORBIDDEN = 0x1
 
@@ -58,7 +63,7 @@ def _blob(value: bytes) -> tuple[_DataBlob, Any]:
 
 def _protect_windows(value: bytes, description: str) -> bytes:
     if os.name != "nt":
-        raise CredentialBrokerError("The production credential broker requires Windows DPAPI")
+        raise CredentialBrokerError("This credential was protected by Windows for another account; enter it again here")
     source, source_buffer = _blob(value)
     entropy, entropy_buffer = _blob(b"EchoSpeak.ConnectionCredential.v1")
     output = _DataBlob()
@@ -87,7 +92,7 @@ def _protect_windows(value: bytes, description: str) -> bytes:
 
 def _unprotect_windows(value: bytes) -> bytes:
     if os.name != "nt":
-        raise CredentialBrokerError("The production credential broker requires Windows DPAPI")
+        raise CredentialBrokerError("This credential was protected by Windows for another account; enter it again here")
     source, source_buffer = _blob(value)
     entropy, entropy_buffer = _blob(b"EchoSpeak.ConnectionCredential.v1")
     output = _DataBlob()
@@ -155,7 +160,7 @@ class CredentialBroker:
         self.root.mkdir(parents=True, exist_ok=True)
         temp = self.index_path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
         try:
-            with temp.open("w", encoding="utf-8", newline="\n") as handle:
+            with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8", newline="\n") as handle:
                 json.dump(self._index, handle, ensure_ascii=False, indent=2)
                 handle.write("\n")
                 handle.flush()
@@ -166,6 +171,25 @@ class CredentialBroker:
                 temp.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    def _seal(self, identifier: str, payload: bytes, label: str) -> tuple[bytes, str]:
+        if os.name == "nt":
+            return _protect_windows(payload, label), _WINDOWS_BACKEND
+        from agent import credential_posix
+        try:
+            return credential_posix.seal(self.root, identifier, payload)
+        except credential_posix.WrappingKeyUnavailable as exc:
+            raise CredentialBrokerError(str(exc)) from exc
+
+    def _open(self, identifier: str, ciphertext: bytes, backend: str) -> bytes:
+        if backend == _WINDOWS_BACKEND:
+            # A data folder copied from Windows: DPAPI ciphertext only opens for that Windows user.
+            return _unprotect_windows(ciphertext)
+        from agent import credential_posix
+        try:
+            return credential_posix.open_sealed(self.root, identifier, ciphertext, backend)
+        except credential_posix.WrappingKeyUnavailable as exc:
+            raise CredentialBrokerError(str(exc)) from exc
 
     @staticmethod
     def _identifier(reference: str) -> str:
@@ -182,19 +206,22 @@ class CredentialBroker:
         reference: str = "",
     ) -> str:
         identifier = self._identifier(reference) if reference else uuid.uuid4().hex
-        ref = f"credential://dpapi/{identifier}"
+        ref = str(reference).strip() if reference else f"credential://{'dpapi' if os.name == 'nt' else 'keyring'}/{identifier}"
         payload = json.dumps(
             {"schema_version": 1, "value": value},
             ensure_ascii=False,
             separators=(",", ":"),
         ).encode("utf-8")
-        ciphertext = _protect_windows(payload, label)
         with self._lock:
+            ciphertext, backend = self._seal(identifier, payload, label)
             self.root.mkdir(parents=True, exist_ok=True)
+            if os.name != "nt":
+                os.chmod(self.root, 0o700)
             path = self.root / f"{identifier}.bin"
             temp = path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
             try:
-                with temp.open("wb") as handle:
+                # 0600 from creation: POSIX has no per-user ACL default like %LOCALAPPDATA%.
+                with os.fdopen(os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "wb") as handle:
                     handle.write(ciphertext)
                     handle.flush()
                     os.fsync(handle.fileno())
@@ -208,7 +235,7 @@ class CredentialBroker:
             prior = dict(self._index["items"].get(identifier) or {})
             self._index["items"][identifier] = {
                 "label": str(label or "EchoSpeak credential")[:200],
-                "backend": "windows_dpapi_current_user",
+                "backend": backend,
                 "created_at": float(prior.get("created_at") or now),
                 "updated_at": now,
             }
@@ -225,8 +252,9 @@ class CredentialBroker:
             if not path.is_file():
                 raise CredentialNotFoundError("Credential ciphertext is missing")
             ciphertext = path.read_bytes()
+            backend = str((self._index["items"].get(identifier) or {}).get("backend") or _WINDOWS_BACKEND)
         try:
-            envelope = json.loads(_unprotect_windows(ciphertext).decode("utf-8"))
+            envelope = json.loads(self._open(identifier, ciphertext, backend).decode("utf-8"))
             if not isinstance(envelope, dict) or envelope.get("schema_version") != 1:
                 raise ValueError("unsupported credential payload")
             return envelope.get("value")

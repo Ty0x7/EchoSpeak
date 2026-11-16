@@ -47,6 +47,7 @@ function bucketOf(name: string): [string, number, (n: number) => string] | null 
     case "terminal": case "terminal_run": case "process_start": case "process_output": case "process_stop":
       return ["run", 7, (n) => `Ran ${plural(n, "command")}`];
     case "memory_search": case "memory_save": return ["memory", 8, () => "Checked memory"];
+    case "calculate": return ["math", 8, (n) => (n > 1 ? `Did ${n} calculations` : "Did a calculation")];
     case "create_artifact": case "update_artifact": return ["artifact", 9, (n) => (n > 1 ? `Built ${n} artifacts` : "Built an artifact")];
     case "delegate_to_agent": return ["team", 10, () => "Asked a teammate"];
     default: return null;
@@ -97,4 +98,64 @@ export function phaseOf(msg: LeanMessageData): string {
   if (kind === "read" || kind === "look") return "Reading through it…";
   if (kind === "team") return "Waiting on the team…";
   return "Deciding what to do next…";
+}
+
+/** A stretch of work between pieces of the answer: thinking and tool steps, in order. */
+export type ActivityItem = { kind: "activity"; key: string; parts: StepItem[] };
+export type MessageItem = StepItem | ActivityItem;
+
+const isWork = (item: StepItem) => item.kind === "steps" || (item.kind === "seg" && item.seg.kind === "thinking");
+
+/**
+ * Gather consecutive thinking and tool steps into one activity item, so a finished stretch of work can
+ * read as a single quiet line ("Worked for 42s · Read 3 files · Ran 2 commands") with the detail one
+ * click away, the way Claude and ChatGPT show it. Answers, questions, approvals and notes stay in place.
+ */
+export function groupActivity(items: StepItem[]): MessageItem[] {
+  const out: MessageItem[] = [];
+  for (const item of items) {
+    const last = out[out.length - 1];
+    if (!isWork(item)) { out.push(item); continue; }
+    if (last && last.kind === "activity") last.parts.push(item);
+    else out.push({ kind: "activity", key: `a${item.kind === "steps" ? item.key : item.index}`, parts: [item] });
+  }
+  return out;
+}
+
+/** The tools in an activity item, in order. */
+export function activityTools(parts: StepItem[]): ToolSeg[] {
+  return parts.flatMap((part) => (part.kind === "steps" ? part.tools : []));
+}
+
+/** Whether anything in the activity is still going. */
+export function activityRunning(parts: StepItem[]): boolean {
+  return parts.some((part) => (part.kind === "steps" ? part.tools.some((t) => t.status === "running")
+    : part.seg.kind === "thinking" && !part.seg.endedAt));
+}
+
+/** How long the stretch of work took, in ms (thinking start to the last step's end). */
+export function activityDuration(parts: StepItem[], now = Date.now()): number {
+  let start = Infinity;
+  let end = 0;
+  for (const part of parts) {
+    if (part.kind === "steps") {
+      for (const tool of part.tools) {
+        const began = tool.startedAt || now;
+        start = Math.min(start, began);
+        end = Math.max(end, tool.status === "running" ? now : began + (tool.durationMs || 0));
+      }
+    } else if (part.seg.kind === "thinking") {
+      start = Math.min(start, part.seg.startedAt);
+      end = Math.max(end, part.seg.endedAt || now);
+    }
+  }
+  return start === Infinity ? 0 : Math.max(0, end - start);
+}
+
+/** "Worked for 42s" (or "Thought for 8s" when it was only thinking), then what the steps did. */
+export function activityHeadline(parts: StepItem[], seconds: (ms: number) => string): { title: string; detail: string } {
+  const tools = activityTools(parts);
+  const ms = activityDuration(parts);
+  const time = ms >= 1000 ? ` for ${seconds(ms)}` : "";
+  return { title: tools.length ? `Worked${time}` : `Thought${time}`, detail: stepsSummary(tools) };
 }

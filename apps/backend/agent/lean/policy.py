@@ -152,6 +152,35 @@ def wrap_untrusted(name: str, output: str) -> str:
 _SECRET_CACHE: dict[str, Any] = {"at": 0.0, "values": []}
 
 
+_SECRET_NAME = re.compile(r"(?i)(key|token|secret|passw|credential|auth|cookie|session)")
+
+
+def _mcp_secret_values() -> list[str]:
+    """Secrets configured for MCP servers (their env and request headers). A server that echoes its own token,
+    or a tool that prints the environment, would otherwise pass it to the model. Only secret-looking entries
+    count, so ordinary values such as paths aren't masked."""
+    try:
+        from agent import mcp_client
+
+        manager = mcp_client._MANAGER  # only one that already exists; never start MCP just to read secrets
+    except Exception:
+        return []
+    if manager is None:
+        return []
+    out: list[str] = []
+    for state in list(getattr(manager, "servers", {}).values()):
+        for name, value in list((getattr(state, "env", None) or {}).items()):
+            if _SECRET_NAME.search(str(name)):
+                out.append(str(value))
+        for name, value in list((getattr(state, "headers", None) or {}).items()):
+            if _SECRET_NAME.search(str(name)):
+                text = str(value)
+                out.append(text)
+                if " " in text:  # "Bearer <token>": the bare token too
+                    out.append(text.split(" ", 1)[1])
+    return out
+
+
 def _secret_values() -> list[str]:
     """Values of the configured credentials (API keys, tokens, passwords), cached briefly.
 
@@ -168,6 +197,7 @@ def _secret_values() -> list[str]:
         raw = [getattr(config, key, "") for key in SECRET_TOP_LEVEL_SETTINGS if not key.endswith("_path")]
         for group in ("openai", "gemini", "anthropic", "xai"):
             raw.append(getattr(getattr(config, group, None), "api_key", ""))
+        raw.extend(_mcp_secret_values())
         values = sorted({str(v).strip() for v in raw if isinstance(v, str) and len(v.strip()) >= 12})
     except Exception:
         logger.debug("Could not read configured secrets for the policy check", exc_info=True)
@@ -204,6 +234,28 @@ def redact_payload(value: Any, secrets: Optional[list[str]] = None) -> Any:
     return value
 
 
+# ── downloading code and running it ────────────────────────────────────
+
+_URL = r"(https?://[^\s'\"|;&)]+)"
+_DOWNLOAD_RUN = (
+    # curl … URL … | sudo bash, wget -O- URL | python3, iwr URL | iex
+    # (An interpreter runs piped input only with no script: `| python3 -m json.tool` just formats it.)
+    re.compile(r"(?i)\b(?:curl|wget|iwr|invoke-webrequest|fetch)\b[^|;&]*?" + _URL + r"[^|;&]*\|\s*(?:sudo\s+)?"
+               r"(?:(?:(?:ba|z|da|k)?sh|iex|invoke-expression)\b|(?:python3?|perl|ruby|node)\s*(?:-(?:\s|$)|$|[;&|)]))"),
+    # bash <(curl URL), sh -c "$(wget -qO- URL)"
+    re.compile(r"(?i)\b(?:(?:ba|z|da|k)?sh|python3?)\b[^|;&]*(?:<\(|\$\()\s*(?:curl|wget)\b[^)]*?" + _URL),
+)
+
+
+def download_and_run(command: str) -> str:
+    """The address a command downloads code from to run it at once, or ""."""
+    for pattern in _DOWNLOAD_RUN:
+        match = pattern.search(str(command or ""))
+        if match:
+            return match.group(1)
+    return ""
+
+
 # ── the decision ────────────────────────────────────────────────────────
 
 # Tools whose argument is a shell command.
@@ -229,6 +281,18 @@ def evaluate(
         if not interactive:
             return Decision("deny", reason + ". Nobody can approve it from here", "rule_of_two")
         return Decision("ask", reason, "rule_of_two")
+    if name in COMMAND_TOOLS:
+        # A command that uses a project's secrets file and isn't a plain read can move its values somewhere else
+        # without the model ever seeing them (`cat secrets.env >> README.md`). It asks, and no grant covers it.
+        from agent.lean.secret_files import secret_paths_in_command
+        from agent.learning.episodes import command_kind
+
+        command = str(args.get("command") or args.get("cmd") or "")
+        secret_paths = secret_paths_in_command(command)
+        if secret_paths and command_kind(command) != "read":
+            reason = (f"this command uses {', '.join(sorted(set(secret_paths)))[:120]}, a secrets file, and could copy or "
+                      "send its values")
+            return Decision("ask" if interactive else "deny", reason, "secret_file")
     if name in COMMAND_TOOLS:
         # Blocked apps hold on every route, not only open_application: no approval can lift them here.
         from agent.app_launcher import blocked_in_command

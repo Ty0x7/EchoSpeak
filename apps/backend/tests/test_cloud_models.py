@@ -413,6 +413,22 @@ def test_generic_switch_model_is_preserved(monkeypatch, tmp_path):
     assert result["model"] == "gemini-custom"
 
 
+def test_an_echo_code_conversation_cannot_switch_to_an_api_key_model(monkeypatch, tmp_path):
+    """Plans for code, APIs for chat: the switch API refuses before touching the binding."""
+    import pytest
+    from fastapi import HTTPException
+    from agent import echo_code
+    from api.routes import settings as routes
+    monkeypatch.setattr(routes, "_is_lmstudio_only_enabled", lambda: False)
+    monkeypatch.setattr(routes, "_assert_provider_available", lambda provider: None)
+    monkeypatch.setattr(echo_code, "is_code_thread", lambda session_id: session_id == "code-thread")
+    monkeypatch.setattr(routes, "_ensure_session_model_binding", lambda session: pytest.fail("binding must not be touched"))
+    for provider in ("openai", "anthropic", "gemini", "xai"):
+        with pytest.raises(HTTPException) as refused:
+            asyncio.run(routes.switch_provider(routes.SwitchProviderRequest(provider=provider, model="m", session_id="code-thread", expected_revision=1)))
+        assert refused.value.status_code == 403 and "Codex" in refused.value.detail
+
+
 def test_new_provider_secrets_are_redacted_and_not_inherited(monkeypatch):
     from agent.lean import policy
     from agent.child_env import child_env

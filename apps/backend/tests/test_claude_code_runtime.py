@@ -49,7 +49,7 @@ def signed_in(monkeypatch):
     monkeypatch.setattr(code_accounts, "claude_status", lambda: {"installed": True, "signed_in": True, "method": "claude.ai", "plan": "pro"})
     monkeypatch.setattr(code_executables, "executable", lambda runtime: sys.executable)
     real_argv = ClaudeCli.argv
-    monkeypatch.setattr(ClaudeCli, "argv", lambda self, model: [sys.executable, str(FIXTURE), *real_argv(self, model)[1:]])
+    monkeypatch.setattr(ClaudeCli, "argv", lambda self, model, effort="": [sys.executable, str(FIXTURE), *real_argv(self, model, effort)[1:]])
 
 
 def run(coroutine):
@@ -77,7 +77,7 @@ def test_a_turn_uses_the_owners_sign_in_and_resumes_claude_codes_own_session(tmp
         return first
 
     first = run(scenario())
-    assert session.result == "completed" and session.row["model"] == "claude-fake"
+    assert session.result == "completed" and session.row["model"] == "sonnet"  # selected model persists on resume
     assert session.row["native_id"] == first == "fake-session-1"
     assert "hello acceptEdits|user own-sign-in" in session.text()  # no API key: Claude Code uses its own login
 
@@ -135,10 +135,71 @@ def test_claude_status_keeps_only_sign_in_method_and_plan(monkeypatch):
     payload = {"loggedIn": True, "authMethod": "claude.ai", "subscriptionType": "max", "email": "owner@example.com",
                "orgId": "org-1", "orgName": "Owner's Organization"}
     monkeypatch.setattr(code_accounts, "_claude", lambda *a, **k: subprocess.CompletedProcess([], 0, json.dumps(payload), ""))
+    monkeypatch.setattr(code_accounts, "claude_models", lambda: [{"model":"claude-opus-5-5","displayName":"Opus 5.5"}])
     status = code_accounts.claude_status()
-    assert status == {"installed": True, "source": "installed app", "problem": "", "signed_in": True,
-                      "method": "claude.ai", "plan": "max", "uses_plan": True}
-    assert "owner@example.com" not in json.dumps(status) and "org" not in json.dumps(status).lower()
+    assert {k: status[k] for k in ("installed", "signed_in", "method", "plan", "uses_plan")} == {
+        "installed": True, "signed_in": True, "method": "claude.ai", "plan": "max", "uses_plan": True}
+    assert status["models"][0]["model"] == "claude-opus-5-5"
+    saved = json.dumps(code_accounts.remembered("claude_cli"))
+    for private in ("owner@example.com", "org-1", "Organization"):
+        assert private not in json.dumps(status) and private not in saved
+    assert code_accounts.remembered("claude_cli")["signed_in"] is True  # survives a restart: read from disk
+
+
+def test_codex_lists_the_plans_models_and_leaves_out_hidden_ones():
+    rows = [{"model": "gpt-6.1-sol", "displayName": "GPT-6.1-Sol", "isDefault": True, "description": "Best",
+             "supportedReasoningEfforts": [{"reasoningEffort": "high"}]},
+            {"model": "gpt-reserve", "hidden": True}, {"model": "codex-auto-review", "hidden": True},
+            {"model": "gpt-6-luna", "displayName": "GPT-6-Luna"}, "junk", {"model": ""}]
+    models = code_accounts.codex_models(rows)
+    assert [m["model"] for m in models] == ["gpt-6.1-sol", "gpt-6-luna"]
+    assert models[0]["isDefault"] and models[0]["efforts"] == ["high"] and models[0]["description"] == "Best"
+
+
+def test_echo_code_status_is_remembered_and_marked_stale_without_running_anything(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api.routes.echo_code import router
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("reading the status must not run a program"))
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+    code_accounts._remember("codex", {"installed": True, "signed_in": True, "plan": "plus", "models": [{"model": "gpt-6.1-sol"}]})
+    fresh = client.get("/echo-code/runtimes/codex/account").json()
+    assert fresh["signed_in"] and fresh["plan"] == "plus" and fresh["stale"] is False
+    monkeypatch.setattr(code_accounts.time, "time", lambda: 9e12)
+    assert client.get("/echo-code/runtimes/codex/account").json()["stale"] is True
+
+
+def test_native_code_supports_api_and_local_models(monkeypatch):
+    """Native Chat and Code admit configured local and API endpoints."""
+    from types import SimpleNamespace
+
+    from agent import echo_code
+    from agent.lean import runtime
+    from agent.lean.personas import AgentPersona
+    from agent.lean.provider import Endpoint
+
+    surfaces = {"code-1": "code", "chat-1": "chat"}
+    monkeypatch.setattr(echo_code, "is_code_thread", lambda session_id: surfaces.get(session_id) == "code")
+    for provider in ("openai", "anthropic", "gemini", "xai"):
+        assert echo_code.code_provider_problem("code-1", provider) == ""
+        assert echo_code.code_provider_problem("chat-1", provider) == ""
+    for provider in ("lmstudio", "ollama", "llama_cpp"):
+        assert echo_code.code_provider_problem("code-1", provider) == ""
+
+    monkeypatch.setattr(runtime, "resolve_endpoint", lambda provider, model: Endpoint(
+        base_url="https://api.example", api_key="k", model=model or "m", provider=provider, local=provider == "lmstudio"))
+    session = SimpleNamespace(session_id="code-1", _route_overrides={"echo": ("openai", "gpt")},
+                              agent=SimpleNamespace(llm_provider=SimpleNamespace(value="lmstudio"), model_runtime=SimpleNamespace(model_id="qwen")))
+    persona = AgentPersona(id="echo", name="Echo")
+    assert runtime.LeanSession._endpoint_for(session, persona).provider == "openai"
+    session._route_overrides = {}
+    assert runtime.LeanSession._endpoint_for(session, persona).provider == "lmstudio"
+    session.session_id = "chat-1"
+    session._route_overrides = {"echo": ("openai", "gpt")}
+    assert runtime.LeanSession._endpoint_for(session, persona).provider == "openai"  # Chat may use API keys
 
 
 def test_codex_from_the_desktop_app_is_found_without_being_on_path(tmp_path, monkeypatch):
@@ -200,3 +261,35 @@ def test_settings_checks_run_only_when_asked_and_stay_closed_in_private_mode(mon
     blocked["value"] = True
     assert client.post("/echo-code/runtimes/codex/check").status_code == 403
     assert calls == ["codex", "claude-login"]
+
+
+def test_effort_reaches_claude_code_as_its_own_flag_and_codex_as_turn_effort(tmp_path, signed_in):
+    """11.12: Code's effort control uses each agent's documented control, nothing else."""
+    from agent.code_runtimes import Codex
+
+    session = Stub(tmp_path)
+    adapter = ClaudeCli(session)
+    argv = adapter.argv("opus", "xhigh")
+    assert argv[argv.index("--effort") + 1] == "xhigh"
+    assert "--effort" not in adapter.argv("opus", "") and "--effort" not in adapter.argv("opus", "ludicrous")
+
+    sent = {}
+
+    class Rpc:
+        closed = False
+
+        async def request(self, method, params, timeout=None):
+            sent[method] = params
+            if method in {"thread/start", "thread/resume"}:
+                return {"thread": {"id": "t1"}, "model": "gpt-x"}
+            return {"turn": {"id": "turn-1"}}
+
+    codex_session = Stub(tmp_path)
+    codex_session.models = [{"model": "gpt-x", "isDefault": True, "efforts": ["low", "medium", "high"]}]
+    codex_session.turn_finished.set()
+    codex = Codex(codex_session)
+    codex.rpc = Rpc()
+    run(codex.prompt("fix it", "gpt-x", "high"))
+    assert sent["turn/start"]["effort"] == "high"
+    run(codex.prompt("again", "gpt-x", "max"))  # not one of this model's efforts: Codex's default applies
+    assert "effort" not in sent["turn/start"]

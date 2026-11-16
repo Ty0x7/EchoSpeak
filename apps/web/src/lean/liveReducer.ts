@@ -9,6 +9,8 @@ export const LEAN_EVENT_TYPES = new Set([
   "reasoning_delta",
   "agent_token",
   "text_replace",
+  "answer_note",
+  "answer_continue",
   "tool_start",
   "tool_end",
   "tool_progress",
@@ -120,7 +122,7 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
       const agent = evt.agent || { id: evt.agent_id, name: evt.agent_id };
       const msg: LeanMessageData = {
         messageId: id,
-        agent: { id: String(agent.id || ""), name: String(agent.name || ""), title: agent.title, initials: agent.initials },
+        agent: { id: String(agent.id || ""), name: String(agent.name || ""), title: agent.title, initials: agent.initials, provider: agent.provider },
         // Smart model choice says which model it used and why (backend: agent/learning/routing.py).
         segments: evt.model_route ? [{ kind: "note" as const, step: 0, text: String(evt.model_route) }] : [],
         status: "streaming",
@@ -145,6 +147,13 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
       return patchMessage(state, id, (m) => ({
         ...m,
         segments: [...m.segments, { kind: "note", step: Number(evt.step || 0), text: String(evt.note || "Outside content contained instructions; they were left out."), at }],
+      }));
+    case "answer_note":
+      // The answer was checked once it was written (unverified links, figures not in the sources): a note
+      // under it, never a rewrite.
+      return patchMessage(state, id, (m) => ({
+        ...m,
+        segments: [...m.segments, { kind: "note", step: Number(evt.step || 0), text: String(evt.note || ""), at }],
       }));
     case "claim_unverified":
       // The agent kept claiming something no tool did: say so under its message.
@@ -271,9 +280,11 @@ export function leanReducer(state: LeanLiveState, evt: LeanEvent): LeanLiveState
         const { [id]: _dropped, ...rest } = state.messages;
         return { ...state, order: state.order.filter((x) => x !== id), messages: rest };
       }
+      // A run the owner stopped is not a failure (the outcome says "Stopped"); only real errors fail.
+      const stoppedByOwner = ["cancelled", "canceled"].includes(String(evt.error || "").trim().toLowerCase());
       return patchMessage(state, id, (m) => ({
         ...m,
-        status: evt.success === false && evt.error ? "failed" : "done",
+        status: evt.success === false && evt.error && !stoppedByOwner ? "failed" : "done",
         text: String(evt.text || ""),
         stopReason: evt.stop_reason ? String(evt.stop_reason) : undefined,
         endedAt: at,
@@ -293,6 +304,7 @@ export function messageFromTimeline(args: {
   agentName: string;
   initials?: string;
   title?: string;
+  provider?: string;
   text: string;
   timeline: any[];
   at: number;
@@ -351,7 +363,7 @@ export function messageFromTimeline(args: {
   if (!segments.some((s) => s.kind === "text") && args.text) segments.push({ kind: "text", step: 0, text: args.text });
   return {
     messageId: args.messageId,
-    agent: { id: args.agentId, name: args.agentName || "Echo", initials: args.initials, title: args.title },
+    agent: { id: args.agentId, name: args.agentName || "Echo", initials: args.initials, title: args.title, provider: args.provider },
     segments,
     status: args.success === false ? "failed" : "done",
     text: args.text,

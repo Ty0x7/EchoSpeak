@@ -179,6 +179,7 @@ export function projectSessionHistory(
               agentName: String(leanPersona?.name || msg.agent_name || "Echo"),
               initials: leanPersona?.initials,
               title: leanPersona?.title,
+              provider: msg.provider ? String(msg.provider) : undefined,
               text,
               timeline: Array.isArray(msg.timeline) ? msg.timeline : [],
               at: atMs,
@@ -307,7 +308,8 @@ export function projectSessionHistory(
     }
 
     // Durable verification / denial errors as activity rows under the Turn timestamps
-    if (turn.error && String(turn.error).trim()) {
+    // Stopping a run is the owner's choice, not an error; its outcome already reads "Stopped".
+    if (turn.error && String(turn.error).trim() && !["cancelled", "canceled"].includes(String(turn.error).trim().toLowerCase())) {
       const errId = `hist-err-${executionId}`;
       if (!loadedActs.some((a) => a.id === errId)) {
         loadedActs.push({

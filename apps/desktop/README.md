@@ -17,3 +17,4 @@ Report the app version and threat name through [GitHub issues](https://github.co
 Do not include credentials or private conversations.
 
 For the system design, see [Architecture](../../docs/ARCHITECTURE.md).
+Linux packages (.deb, .rpm, AppImage), their build and limitations: [LINUX.md](LINUX.md).

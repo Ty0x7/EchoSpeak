@@ -35,6 +35,8 @@ _PUBLIC_AUTH_PATHS = {
     "/.well-known/jwks.json",
     # Other agents can't hold EchoSpeak's API key; the route requires its own A2A key (api/routes/channels.py).
     "/a2a",
+    # Separate, revocable project/agent grant; this route rejects owner keys and browser origins.
+    "/echo-code/control/invoke",
 }
 
 

@@ -1,0 +1,95 @@
+{
+  "version": "11.13.0",
+  "checked_on_utc": "2026-10-30",
+  "build_command": "powershell -NoProfile -ExecutionPolicy Bypass -File apps/desktop/scripts/release-windows.ps1",
+  "status": "Local EXE and MSI produced; updater signing incomplete",
+  "build_exit_code": 1,
+  "stages": {
+    "locked_python": "passed",
+    "packaged_backend_imports": "passed",
+    "production_web": "passed",
+    "rust_release": "passed",
+    "nsis": "produced",
+    "msi": "produced",
+    "updater_signing": "failed: encrypted private key password unavailable to this noninteractive run"
+  },
+  "signatures": {
+    "updater": "not produced or verified; enter the existing key password locally for a signed release",
+    "windows_authenticode": "NotSigned; publisher signing was not configured"
+  },
+  "artifacts": [
+    {
+      "path": "release/v11.13.0/EchoSpeak_11.13.0_x64-setup.exe",
+      "bytes": 174657882,
+      "sha256": "3d4c8305c19585cef0f4c5beb61b3d4412dd2eb1c55ce0f86829935c930b841f",
+      "product_version": "11.13.0"
+    },
+    {
+      "path": "release/v11.13.0/EchoSpeak_11.13.0_x64_en-US.msi",
+      "bytes": 252404196,
+      "sha256": "361610b565486df24d6a40155ae56db26218733921a78244db23cf041909994f",
+      "product_version": "11.13.0"
+    }
+  ],
+  "desktop_exe_product_version": "11.13.0",
+  "msi_database_product_version": "11.13.0",
+  "packaged_api": {
+    "version": "11.13.0",
+    "status": "passed",
+    "health": true,
+    "owner_auth": true,
+    "grant_read": true,
+    "readonly_denial": true,
+    "owner_key_not_client_grant": true,
+    "revoked_denial": true,
+    "model_prompts_sent": 0,
+    "scope": "Compiled backend API using disposable state; no desktop UI, provider login or model prompts."
+  },
+  "packaged_mcp": {
+    "version": "11.13.0",
+    "status": "passed",
+    "transport": "compiled backend --control-mcp; real SDK stdio initialize/list/call; owned loopback peer",
+    "tools": 8,
+    "calls": [
+      "projects",
+      "send"
+    ],
+    "denied_mutation": true,
+    "provider_calls": 0,
+    "scope": "Packaging/transport only. Source tests separately cover real grants and original harness dispatch."
+  },
+  "source_tests": {
+    "backend": 57,
+    "web": 35,
+    "desktop_contracts": 16,
+    "typecheck": "passed"
+  },
+  "browser": {
+    "version": "11.13.0",
+    "checks": [
+      "left sidebar placement",
+      "flat active rows",
+      "collapsed Working/Snoozed/Settled shelves",
+      "local provider image assets",
+      "search",
+      "visible Shift range selection",
+      "bulk timed snooze",
+      "stale action rejection",
+      "errors survive refresh",
+      "dark/light themes",
+      "Ctrl+S stash and restore",
+      "Ctrl+Enter background submit",
+      "image stash",
+      "MCP panel read-only create, hide token and revoke",
+      "390px without overflow",
+      "no page errors",
+      "research report, versioned release report and atlas wide/narrow with scripts disabled"
+    ],
+    "model_calls": 0,
+    "request_count": 29
+  },
+  "installation": "Not performed",
+  "github_release": "Not published",
+  "merge": "Not performed",
+  "note": "Local test installers are retained without updater signatures. No latest.json or public updater release was generated."
+}

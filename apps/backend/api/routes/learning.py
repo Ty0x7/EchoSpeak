@@ -148,6 +148,14 @@ def learning_episodes(agent_id: str = "", limit: int = Query(30, ge=1, le=200), 
             "offset": offset}
 
 
+@router.get("/learning/evaluation")
+def learning_evaluation(agent_id: str = "", days: int = Query(30, ge=1, le=365)) -> dict[str, Any]:
+    """Is learning helping: verified completion, false success, recovery, and each lesson against its holdout."""
+    from agent.learning.evaluation import report
+
+    return report(agent_id=agent_id, days=days)
+
+
 @router.get("/learning/reliability")
 def learning_reliability() -> dict[str, Any]:
     from agent.learning.reliability import summary
@@ -161,6 +169,13 @@ def learning_pause(agent_id: str, payload: PausePayload) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail="Agent not found")
     learning.set_paused(agent_id, payload.paused)
     return {"agent_id": agent_id, "paused": payload.paused}
+
+
+@router.post("/learning/reset")
+def learning_reset() -> dict[str, Any]:
+    """Forget everything learned (lessons, experiences, statistics). Personal memory is separate and untouched."""
+    learning.reset()
+    return {"ok": True}
 
 
 @router.post("/learning/reflect")

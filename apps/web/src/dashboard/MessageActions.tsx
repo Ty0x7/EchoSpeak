@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import type { Message } from "../app/types";
 
-export function ActionIcon({ name }: { name: "copy" | "edit" | "retry" | "sound" | "stop" | "mic" | "voice" | "think" | "more" | "up" | "down" }) {
+export function ActionIcon({ name }: { name: "copy" | "edit" | "retry" | "sound" | "stop" | "mic" | "voice" | "think" | "more" | "up" | "down" | "send" }) {
   const paths: Record<string, React.ReactNode> = {
     copy: <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h4" /></>,
     edit: <><path d="m15 4 5 5M4 20l4-1L20 7a2 2 0 0 0-4-4L4 15z" /></>,
@@ -14,6 +14,7 @@ export function ActionIcon({ name }: { name: "copy" | "edit" | "retry" | "sound"
     more: <><circle cx="4" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="20" cy="12" r="1" /></>,
     up: <><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1zM7 10l4-7a2 2 0 0 1 3 2l-1 4h6a2 2 0 0 1 2 2.3l-1.4 8A2 2 0 0 1 17.6 21H7" /></>,
     down: <><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1zM17 14l-4 7a2 2 0 0 1-3-2l1-4H5a2 2 0 0 1-2-2.3l1.4-8A2 2 0 0 1 6.4 3H17" /></>,
+    send: <><path d="M4 12h12M12 6l6 6-6 6" /><path d="M20 5v14" /></>,
   };
   return <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{paths[name]}</svg>;
 }
@@ -25,6 +26,9 @@ export type MessageActionProps = {
   onFeedback?(message: Message, value: -1 | 0 | 1, note?: string): Promise<void>;
   readingId?: string;
   actionBusy?: boolean;
+  /** Chat → Agents: hand this reply to an agent as a draft in its conversation (never the whole chat). */
+  agentTargets?: { id: string; name: string }[];
+  onSendToAgent?(message: Message, agentId: string): void;
 };
 
 type Vote = -1 | 0 | 1;
@@ -44,8 +48,9 @@ function storeVote(message: Message, value: Vote) {
   } catch { /* storage unavailable: the vote still counts on the server */ }
 }
 
-export function MessageActions({ message, disabled = false, onRevise, onRead, onFeedback, readingId, actionBusy, meta }: MessageActionProps & { message: Message; disabled?: boolean; meta?: React.ReactNode }) {
+export function MessageActions({ message, disabled = false, onRevise, onRead, onFeedback, readingId, actionBusy, meta, agentTargets, onSendToAgent }: MessageActionProps & { message: Message; disabled?: boolean; meta?: React.ReactNode }) {
   const [editing, setEditing] = useState(false);
+  const [choosingAgent, setChoosingAgent] = useState(false);
   const canRate = message.role === "assistant" && Boolean(message.executionId) && Boolean(onFeedback);
   const [vote, setVote] = useState<Vote>(() => (canRate ? storedVote(message) : 0));
   const [noting, setNoting] = useState(false);
@@ -109,6 +114,14 @@ export function MessageActions({ message, disabled = false, onRevise, onRead, on
           setNote(""); setNoting(true); void rate(-1);
         }}><ActionIcon name="down" /></button>
       </> : null}
+      {message.role === "assistant" && onSendToAgent && agentTargets?.length ? (choosingAgent
+        ? <select autoFocus aria-label="Send this reply to an agent" defaultValue="" onBlur={() => setChoosingAgent(false)}
+            onChange={e => { setChoosingAgent(false); if (e.target.value) onSendToAgent(message, e.target.value); }}>
+            <option value="" disabled>Send to…</option>
+            {agentTargets.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}
+          </select>
+        : <button type="button" title="Send to an agent: opens its conversation with this reply as a draft you can edit"
+            aria-label="Send to an agent" onClick={() => setChoosingAgent(true)}><ActionIcon name="send" /></button>) : null}
       {meta ? <span className="message-meta">{meta}</span> : null}
       {notice ? <span role="status">{notice}</span> : null}
     </div>

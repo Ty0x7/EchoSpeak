@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Harness execution reliability</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--soft:#f0f0f0;--accent:#2f6fde;--ok:#1f7a3f;--warn:#a86a00;--bad:#b42318}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--soft:#222;--accent:#8fb4ff;--ok:#5cc983;--warn:#d6a955;--bad:#ff8a7a}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 40px}header{padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 4px}header p{margin:0;font-size:13px;color:var(--muted)}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 6px}section{margin:34px 0}.lead{font-size:13.5px;color:var(--muted);margin:0 0 14px;max-width:820px}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:12.5px system-ui,sans-serif}svg .m{fill:var(--muted);font-size:11.5px}svg .box{fill:var(--panel);stroke:var(--line)}svg .new{fill:var(--panel);stroke:var(--accent);stroke-width:1.6}svg .ln{stroke:var(--muted);stroke-width:1.4;fill:none;marker-end:url(#a)}svg .bk{stroke:var(--warn);stroke-width:1.4;fill:none;stroke-dasharray:4 3;marker-end:url(#a)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:14px 16px;min-width:0}.node h3{font-size:14px;margin:0 0 4px}.node p{font-size:13px;color:var(--muted);margin:0}code{font:12px ui-monospace,monospace}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:0 8px;margin-right:6px}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}.tag.bad{color:var(--bad)}.note{font-size:12.5px;color:var(--muted);margin:10px 0 0}.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}th{font-weight:600;color:var(--muted)}footer{font-size:12px;color:var(--muted);margin-top:30px;border-top:1px solid var(--line);padding-top:12px}@media(max-width:760px){.grid2,.grid3{grid-template-columns:1fr}.diagram svg{min-width:760px}}
+</style></head><body><main>
+<header><h1>EchoSpeak / harness execution reliability</h1><p>16 November 2026 · research for review · <b>update: C1–C5 fixed, each with a regression test (see the technical record)</b> · branch <code>five-model-harness</code> · technical record: <code>docs/research/harness-execution-reliability.md</code></p></header>
+
+<section><h2>Proposed turn lifecycle</h2>
+<p class="lead">Blue boxes are proposed changes; the rest exists today. The model proposes, the harness decides, and only checked effects count as progress. After a crash, a turn resumes from its last completed step, never by re-running an effect whose outcome is unknown.</p>
+<div class="wrap diagram"><svg viewBox="0 0 980 430" role="img" aria-label="Turn lifecycle: model call, validation, policy and approval, durable intent, ordered execution, one result contract, effect checks, recorded result and persisted step, back to the model; final replies pass the claim checks and ledger">
+<defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" style="fill:var(--muted)"/></marker></defs>
+<rect class="box" x="10" y="20" width="150" height="56" rx="8"/><text x="22" y="44">Owner request</text><text class="m" x="22" y="62">admission: slots, budget</text>
+<path class="ln" d="M160 48 H200"/>
+<rect class="new" x="200" y="20" width="170" height="56" rx="8"/><text x="212" y="44">Model call</text><text class="m" x="212" y="62">transient errors retried (V1)</text>
+<path class="ln" d="M370 48 H410"/>
+<rect class="box" x="410" y="20" width="130" height="56" rx="8"/><text x="422" y="44">Reply</text><text class="m" x="422" y="62">text or tool calls</text>
+<path class="ln" d="M475 76 V110 H180 V130"/><text class="m" x="300" y="104">text only</text>
+<path class="ln" d="M540 48 H590"/><text class="m" x="546" y="40">tools</text>
+<rect class="box" x="40" y="130" width="280" height="62" rx="8"/><text x="52" y="154">Final-reply checks + Verification Ledger</text><text class="m" x="52" y="174">claims held against observed evidence</text>
+<path class="bk" d="M60 130 V100 H285 V76"/><text class="m" x="70" y="122">fails: note, next step</text>
+<path class="ln" d="M180 192 V232"/>
+<rect class="new" x="40" y="232" width="280" height="50" rx="8"/><text x="52" y="262">Done · typed end reason (V6)</text>
+<rect class="new" x="590" y="20" width="370" height="50" rx="8"/><text x="602" y="50">Validate arguments after repair · per-tool timeout (V3)</text>
+<path class="ln" d="M775 70 V90"/>
+<rect class="new" x="590" y="90" width="370" height="50" rx="8"/><text x="602" y="112">Policy: deny / ask / allow</text><text class="m" x="602" y="130">every "ask" reaches approval, parallel too (C2)</text>
+<path class="ln" d="M775 140 V160"/>
+<rect class="box" x="590" y="160" width="370" height="42" rx="8"/><text x="602" y="186">Intent recorded durably (work ledger)</text>
+<path class="ln" d="M775 202 V222"/>
+<rect class="new" x="590" y="222" width="370" height="50" rx="8"/><text x="602" y="244">Run: reads in parallel, writes in order (C2)</text><text class="m" x="602" y="262">Stop kills the running process group (C3)</text>
+<path class="ln" d="M775 272 V292"/>
+<rect class="new" x="590" y="292" width="370" height="50" rx="8"/><text x="602" y="314">One result: ok · error · timeout · uncertain · refused (C1)</text><text class="m" x="602" y="332">effects checked: hashes, exit codes, stale writes (V2)</text>
+<path class="ln" d="M775 342 V362"/>
+<rect class="new" x="590" y="362" width="370" height="50" rx="8"/><text x="602" y="384">Result + ledger recorded · step persisted (V5)</text><text class="m" x="602" y="402">logged with arguments redacted (C5)</text>
+<path class="bk" d="M590 387 H450 V76"/><text class="m" x="456" y="300">observation → next step</text>
+<rect class="box" x="40" y="330" width="360" height="82" rx="8"/><text x="52" y="354">Crash or restart</text><text class="m" x="52" y="374">journal "interrupted" · in-flight actions "unknown"</text><text class="m" x="52" y="392">owner reconciles → resume from last step (V5)</text>
+</svg></div>
+</section>
+
+<section><h2>Defects confirmed in the code</h2>
+<p class="lead">Each was read in the code; the first two were re-read by hand. They are independent of the model in use.</p>
+<div class="grid2">
+<div class="node"><span class="tag bad">C1</span><h3>MCP failures recorded as success</h3><p>A transport error or timeout comes back as a JSON string with <code>isError</code>. The success test checks only dicts and prose prefixes, so the action is recorded <em>completed</em>, and a real retry is then refused. <code>mcp_client.py:498</code>, <code>toolbox.py:930</code></p></div>
+<div class="node"><span class="tag bad">C2</span><h3>Parallel reads skip approval and jump the queue</h3><p>Two or more read-only calls run in a pool before the step's other calls, and that path never calls <code>_approve</code>. An "ask" decision is recorded but not enforced. <code>loop.py:959-975</code>, <code>:1329</code></p></div>
+<div class="node"><span class="tag bad">C3</span><h3>Stop doesn't stop running work</h3><p>A foreground command ignores cancel for up to 900 s. Background processes survive Stop and "stop everything", and are lost track of after a crash. <code>terminal.py:924</code>, <code>api/server.py:323</code></p></div>
+<div class="node"><span class="tag bad">C4 · C5</span><h3>Unapproved tool changes; unredacted arguments</h3><p>An MCP <code>list_changed</code> re-registers tools without the trust check. Tool arguments reach the journal and <code>state.db</code> unredacted. <code>mcp_client.py:699</code>, <code>loop.py:1552</code></p></div>
+</div></section>
+
+<section><h2>Already strong, and kept</h2>
+<div class="grid3">
+<div class="node"><span class="tag ok">kept</span><h3>Claims vs evidence</h3><p>The Verification Ledger and the final-reply checks hold "done" against what commands actually showed. This is stricter than any framework surveyed.</p></div>
+<div class="node"><span class="tag ok">kept</span><h3>Intent → result → unknown</h3><p>The work ledger records intent before effects, marks the in-between as unknown, and requires reconciliation. This is the pattern LangGraph and OpenAI document as best practice.</p></div>
+<div class="node"><span class="tag ok">kept</span><h3>Scripted model tests</h3><p><code>ScriptedClient</code> already drives about 20 test files. It needs fault injection (V7), not replacing.</p></div>
+</div></section>
+
+<section><h2>Improvements, ranked</h2>
+<div class="wrap"><table>
+<tr><th></th><th>Change</th><th>Size</th></tr>
+<tr><td><span class="tag bad">critical</span></td><td>C1 one result contract · C2 ordered, approved parallel calls · C3 Stop stops · C4 MCP re-trust · C5 redact arguments</td><td>S–M each</td></tr>
+<tr><td><span class="tag warn">valuable</span></td><td>V1 retry transient model errors · V2 write only what was read · V3 validation and timeouts per tool · V4 safe checkpoints · V5 resumable turns · V6 trace IDs and end reasons on events · V7 fault-injecting scripted client</td><td>S–L</td></tr>
+<tr><td><span class="tag">optional</span></td><td>Stuck patterns (OpenHands) · OTel GenAI names · MCP 2026-07-28 · audit-log rotation</td><td>S–M</td></tr>
+<tr><td><span class="tag">not advised</span></td><td>A workflow engine (Temporal, DBOS) · LLM risk analysers · time-travel replay of effects · replacing the loop with a framework</td><td></td></tr>
+</table></div>
+<p class="note">Remove: the dead <code>stream_events</code> route and the legacy <code>terminal_run</code> path to <code>agent/sandbox.py</code>. Merge: two cancel registries into one, and three approval stores into one authority with views.</p>
+</section>
+
+<footer>Sources: Claude Agent SDK and Claude Code docs, OpenAI Agents SDK and Codex docs and source, OpenHands SDK docs, LangGraph docs, MCP specification 2026-07-28 and the Tasks extension, and the OpenTelemetry GenAI conventions. All links are in the technical record. No code was changed and nothing was run against the model evaluation.</footer>
+</main></body></html>

@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import contextmanager
-import importlib.util
-from importlib import metadata
 import json
 import os
 from pathlib import Path
@@ -19,25 +17,36 @@ import time
 import uuid
 
 from agent import code_worktree as wt, privacy, project_workspace
-from agent.code_runtimes import Acp, Claude, ClaudeCli, Codex
+from agent.code_runtimes import Acp, ClaudeCli, Codex
 
 
-# The owner's own coding agents, each run in its original harness (never Echo's model router).
-RUNTIMES = {"codex", "claude_code", "claude_cli", "acp"}
+# External coding agents use their original harness and authentication. Native
+# Code's local/API models have a separate path through the shared Lean runtime.
+RUNTIMES = {"codex", "claude_cli", "acp"}
 
 
-def sdk_installed():
-    try:
-        return importlib.util.find_spec("claude_agent_sdk") is not None and metadata.version("claude-agent-sdk") == "0.2.174"
-    except metadata.PackageNotFoundError:
-        return False
+def _disconnected_row(row):
+    """Retain the last outcome when recovering transport state, without replaying work."""
+    if row["state"] in {"running", "preparing", "connecting"}:
+        row["last_turn_state"] = "interrupted"
+    elif row["state"] in {"completed", "failed", "interrupted"}:
+        row.setdefault("last_turn_state", row["state"])
+    if row["state"] != "rolled_back":
+        row["state"] = "stopped"
+    return row
 
 
 class Session:
     def __init__(self, manager, row):
         self.manager, self.row = manager, row
         self.root = Path(row["worktree"])
-        self.directory = self.root.parent
+        # Session metadata always belongs to app data, including direct folders.
+        self.directory = manager.directory / row["id"]
+        self.workspace_mode = row.get("workspace_mode", "worktree")  # Legacy sessions stay isolated.
+        if self.workspace_mode not in {"folder", "worktree"}:
+            raise ValueError("Unknown coding workspace mode")
+        self.folder_lease = None
+        self.workspace_checked = 0.0
         self.adapter = None
         self.task = None
         self.lease = None
@@ -49,7 +58,6 @@ class Session:
         self.turn_id = None
         self.turn_finished = asyncio.Event()
         self.result = "failed"
-        self.api_key = ""
         self.redaction_values = []
         self.stop_lock = asyncio.Lock()
 
@@ -57,6 +65,10 @@ class Session:
         item = project_workspace.project(self.row["project_id"])
         if item.trust_state != "trusted" or str(project_workspace.root_for(item)) != self.row["source_root"]:
             raise PermissionError("Project trust or folder binding changed; this session is unavailable")
+        if self.workspace_mode == "folder":
+            if self.root != Path(self.row["source_root"]) or not self.root.is_dir() or self.root.resolve() != self.root:
+                raise ValueError("Project folder binding changed")
+            return  # Git initialization/branch changes must not invalidate a folder session.
         expected = self.manager.directory / self.row["id"] / "tree"
         if self.root != expected or self.root.is_symlink() or self.root.resolve() != expected:
             raise ValueError("Owned worktree path changed")
@@ -84,21 +96,57 @@ class Session:
             raise ValueError("Another EchoSpeak process owns this coding worktree") from None
         try:
             latest = json.loads((self.directory / "session.json").read_text(encoding="utf-8"))
-            if any(latest[key] != self.row[key] for key in ("id", "project_id", "runtime_id", "worktree", "source_root", "git_marker")):
+            if (any(latest[key] != self.row[key] for key in ("id", "project_id", "runtime_id", "worktree", "source_root", "git_marker"))
+                    or latest.get("workspace_mode", "worktree") != self.workspace_mode):
                 raise ValueError("Worktree session binding changed")
-            self.row = latest
+            self.row = _disconnected_row(latest) if not self.adapter and not self.task else latest
         except (OSError, ValueError, KeyError):
             handle.close()
             raise ValueError("Worktree session metadata changed or is unavailable") from None
         self.lease = handle
 
+    def acquire_folder(self):
+        if self.workspace_mode != "folder" or self.folder_lease:
+            return
+        # Share the workbench's root-scoped writer lock across sessions/processes.
+        import hashlib
+        folder = self.manager.directory.parent / "workbench"
+        folder.mkdir(parents=True, exist_ok=True)
+        handle = (folder / (hashlib.sha256(str(self.root).encode()).hexdigest() + ".lock")).open("a+b")
+        try:
+            if not os.fstat(handle.fileno()).st_size:
+                handle.write(b"0"); handle.flush()
+            handle.seek(0)
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            handle.close()
+            raise ValueError("This project folder is in use by another coding session or workspace terminal. Stop that writer before connecting.") from None
+        self.folder_lease = handle
+
     def save(self):
         wt.atomic_json(self.directory / "session.json", self.row)
+
+    async def refresh_folder_git(self):
+        if self.workspace_mode != "folder" or time.monotonic() - self.workspace_checked < 5:
+            return
+        self.workspace_checked = time.monotonic()
+        try:
+            branch = (await asyncio.to_thread(wt.git, self.root, "symbolic-ref", "--short", "HEAD")).decode().strip()
+        except (ValueError, OSError):
+            branch = ""
+        if self.row.get("branch") != branch:
+            self.row["branch"] = branch
+            self.save()
 
     def record_model(self, value):
         if isinstance(value, str) and value and len(value) <= 200 and value != self.row.get("model"):
             from agent.lean.policy import redact_secrets
-            self.row["model"] = redact_secrets(redact_secrets(value), self.redaction_values + ([self.api_key] if self.api_key else []))
+            self.row["model"] = redact_secrets(redact_secrets(value), self.redaction_values)
             self.save()
 
     def emit(self, kind, data):
@@ -106,7 +154,7 @@ class Session:
         self.sequence += 1
         # Bound individual events and the replay window. Auth responses never use
         # this channel. Native transcript remains owned by the original harness.
-        safe = redact_payload(redact_payload(data), self.redaction_values + ([self.api_key] if self.api_key else []))
+        safe = redact_payload(redact_payload(data), self.redaction_values)
         raw = json.dumps(safe, ensure_ascii=False, default=str)
         if len(raw) > 64_000:
             safe = {"notice": "Large runtime event omitted; inspect native history and worktree", "preview": raw[:4000]}
@@ -115,19 +163,25 @@ class Session:
             self.events.pop(0)
 
     def public(self, cursor=0):
-        return {**{key: value for key, value in self.row.items() if key not in {"command", "git_marker", "creation_context", "creation_key"}},
+        return {**{key: value for key, value in self.row.items() if key not in {"command", "git_marker", "creation_context", "creation_key", "control_requests"}},
+                "workspace_mode": self.workspace_mode, "workspace_root": str(self.root),
                 "account": self.account, "models": self.models, "turn_active": bool(self.task),
                 "events": [event for event in self.events if event["seq"] > cursor], "cursor": self.sequence,
                 "replay_gap": bool(self.events and cursor < self.events[0]["seq"] - 1),
                 "approvals": [{"id": key, "kind": row["kind"], "details": row["details"]} for key, row in self.approvals.items()],
-                "rollback_available": (self.directory / "checkpoint.json").is_file() and not self.task,
+                "rollback_available": self.workspace_mode == "worktree" and (self.directory / "checkpoint.json").is_file() and not self.task,
                 "connected": bool(self.adapter and self.adapter.rpc and not self.adapter.rpc.closed and self.row["state"] != "connecting")}
+
+    def inbox(self):
+        from agent.code_inbox import external_snapshot
+        return external_snapshot(self.row, active=bool(self.task),
+                                 waiting=any(not row["future"].done() for row in self.approvals.values()))
 
     async def approval(self, kind, details):
         if self.manager.suspended or privacy.mode() != "standard" or not self.task or len(self.approvals) >= 8:
             return False
         from agent.lean.policy import contains_secret, redact_payload
-        if len(json.dumps(details)) > 32_000 or contains_secret(details) or (self.api_key and contains_secret(details, [self.api_key])):
+        if len(json.dumps(details)) > 32_000 or contains_secret(details) or (self.redaction_values and contains_secret(details, self.redaction_values)):
             self.emit("permission_denied", {"reason": "Request is too large or contains a stored secret"})
             return False
         request_id = uuid.uuid4().hex
@@ -147,7 +201,7 @@ class Session:
             await self._stop(reason)
 
     async def _stop(self, reason):
-        if not self.adapter and not self.task and not self.lease:
+        if not self.adapter and not self.task and not self.lease and not self.folder_lease:
             return
         # Deny every pending prompt before terminating the complete owned job.
         for request in list(self.approvals.values()):
@@ -168,12 +222,14 @@ class Session:
                 pass
         self.task = None
         self.adapter = None
-        self.api_key = ""
         self.row["state"] = "stopped"
         self.save()
         if self.lease:
             self.lease.close()
             self.lease = None
+        if self.folder_lease:
+            self.folder_lease.close()
+            self.folder_lease = None
         self.emit("session/stopped", {"reason": reason})
 
 
@@ -208,7 +264,7 @@ class Sessions:
                 if not session.adapter:
                     continue
                 try:
-                    self.admit()
+                    self.admit_external()
                     session.validate()
                 except (ValueError, OSError, KeyError, PermissionError):
                     await session.stop("Runtime admission or project trust changed")
@@ -233,10 +289,22 @@ class Sessions:
             try:
                 row = json.loads((directory / "session.json").read_text(encoding="utf-8"))
                 if row["id"] == directory.name and row["runtime_id"] in RUNTIMES:
-                    row["state"] = "stopped"  # never auto-reconnect/replay after restart
+                    row = _disconnected_row(row)  # never auto-reconnect/replay after restart
                     self.sessions[row["id"]] = Session(self, row)
             except (OSError, ValueError, KeyError):
                 continue
+
+    def admit_external(self):
+        """admit(), plus: in the one-assistant mode no external harness is launched, connected or prompted.
+
+        Echo's own workbench (terminal, Git review, scripts) uses admit() only, so it keeps working.
+        Saved external sessions, their worktrees and diffs stay on disk and readable.
+        """
+        from agent import environments
+        if environments.unified():
+            raise PermissionError(
+                "EchoSpeak no longer starts Codex, Claude Code or ACP agents. Run them beside EchoSpeak in their own apps.")
+        self.admit()
 
     def admit(self):
         from agent.lean.stop import paused
@@ -252,22 +320,48 @@ class Sessions:
         session.validate()
         return session
 
-    async def list(self, project_id):
-        return [session.public() for session in self.sessions.values() if session.row["project_id"] == project_id]
+    async def list(self, project_id, summary=False):
+        # Sidebar polling needs identity and activity, never the event replay or approval details.
+        if not summary:
+            return [session.public() for session in self.sessions.values() if session.row["project_id"] == project_id]
+        return [{**{key: session.row[key] for key in ("id", "project_id", "runtime_id", "state", "created_at")},
+                 "title": session.row.get("title", ""), "branch": session.row.get("branch", ""), "workspace_mode": session.workspace_mode,
+                 "inbox": session.inbox()} for session in self.sessions.values() if session.row["project_id"] == project_id]
 
-    async def create(self, project_id, runtime_id, key, acknowledge_dirty=False, command=None):
-        self.admit()
+    async def triage(self, session_id, action, activity, snooze_seconds=0, automatic=False):
+        from agent.code_inbox import triage_choice
+        session = self.get(session_id)
+        # Share the worktree's existing inter-process writer lease. No provider launches.
+        owned = bool(session.lease)
+        session.acquire()
+        try:
+            if automatic and session.inbox()["state"] != "ready_to_review":
+                raise ValueError("A newer owner choice or work state prevents automatic settlement")
+            session.row["code_inbox"] = triage_choice(session.inbox(), action, activity, snooze_seconds)
+            session.save()
+            return session.inbox()
+        finally:
+            if not owned:
+                session.lease.close()
+                session.lease = None
+
+    async def create(self, project_id, runtime_id, key, acknowledge_dirty=False, command=None, workspace_mode="folder"):
+        self.admit_external()
         if runtime_id not in RUNTIMES:
             raise ValueError("Select an external runtime")
+        if workspace_mode not in {"folder", "worktree"}:
+            raise ValueError("Choose Project folder or Isolated Git worktree")
+        if workspace_mode == "folder":
+            acknowledge_dirty = False
         item = project_workspace.project(project_id)
         source = project_workspace.root_for(item)
         if item.trust_state != "trusted":
             raise PermissionError("Mark the project trusted before launching an external harness")
         context = {"project_id": project_id, "runtime_id": runtime_id, "source_root": str(source),
-                   "command": command or [], "acknowledge_dirty": acknowledge_dirty}
+                   "command": command or [], "acknowledge_dirty": acknowledge_dirty, "workspace_mode": workspace_mode}
         for session in self.sessions.values():
             if session.row["creation_key"] == key:
-                if session.row["creation_context"] != context:
+                if {"workspace_mode": "worktree", **session.row["creation_context"]} != context:
                     raise ValueError("Creation identity was already used for a different request")
                 session.validate()
                 return session.public()
@@ -279,21 +373,27 @@ class Sessions:
         session_id = uuid.uuid4().hex
         directory = self.directory / session_id
         try:
-            workspace = await asyncio.to_thread(wt.create, source, directory, acknowledge_dirty=acknowledge_dirty)
+            if workspace_mode == "worktree":
+                workspace = await asyncio.to_thread(wt.create, source, directory, acknowledge_dirty=acknowledge_dirty)
+                marker = (Path(workspace["worktree"]) / ".git").read_text(encoding="utf-8")
+            else:
+                directory.mkdir(parents=True, exist_ok=False)
+                workspace = {"source_root": str(source), "worktree": str(source), "base_head": "", "source_dirty": None, "branch": ""}
+                marker = ""
             # Provisioning performs local Git/blob reads only. Retain the stopped
             # session even if privacy changed while Git worked; connection has
             # its own admission check and can never auto-launch from creation.
             row = {"id": session_id, "project_id": project_id, "runtime_id": runtime_id, "creation_key": key,
                    "creation_context": context, "command": command or [], "state": "stopped", "created_at": time.time(),
-                   "native_id": None, **workspace, "git_marker": (Path(workspace["worktree"]) / ".git").read_text(encoding="utf-8")}
+                   "native_id": None, **workspace, "workspace_mode": workspace_mode, "git_marker": marker}
             session = self.sessions[session_id] = Session(self, row)
             session.save()
             return session.public()
         finally:
             self.starting.discard(key)
 
-    async def connect(self, session_id, api_key=""):
-        self.admit()
+    async def connect(self, session_id):
+        self.admit_external()
         if session_id in self.tool_loans:
             raise ValueError("Close this worktree's terminals before reconnecting the coding runtime")
         session = self.get(session_id)
@@ -304,23 +404,17 @@ class Sessions:
         if session.adapter and session.adapter.rpc and not session.adapter.rpc.closed:
             return session.public()
         runtime = session.row["runtime_id"]
-        if runtime == "claude_code":
-            if not sdk_installed():
-                raise ValueError("Install the optional Claude Agent SDK runtime before connecting")
-            session.api_key = api_key or os.environ.get("ECHOSPEAK_CLAUDE_AGENT_API_KEY", "")
-            if not session.api_key:
-                raise ValueError("Supply this harness's Anthropic API key. Subscription OAuth tokens are not supported.")
-            session.redaction_values = list(set(session.redaction_values + [session.api_key]))
         session.acquire()
         if session.row["state"] == "rolled_back":
             session.lease.close()
             session.lease = None
             raise ValueError("This session was rolled back. Start a new session so native history cannot disagree with restored files.")
-        session.row["state"] = "connecting"
-        session.adapter = {"codex": Codex, "claude_code": Claude, "claude_cli": ClaudeCli, "acp": Acp}[runtime](session)
         try:
+            session.acquire_folder()
+            session.row["state"] = "connecting"
+            session.adapter = {"codex": Codex, "claude_cli": ClaudeCli, "acp": Acp}[runtime](session)
             await session.adapter.connect()
-            self.admit()
+            self.admit_external()
             session.row["state"] = "ready"
             session.save()
         except BaseException:
@@ -329,7 +423,7 @@ class Sessions:
         return session.public()
 
     async def login(self, session_id, method_id=""):
-        self.admit()
+        self.admit_external()
         session = self.get(session_id)
         if not session.adapter or session.adapter.rpc.closed or session.task:
             raise ValueError("Connect an idle runtime first")
@@ -339,12 +433,10 @@ class Sessions:
             # Authentication may outlive an HTTP request. Expose pending state,
             # retaining a single controlled operation in this session.
             raise ValueError("Authenticate this ACP executable in its own terminal before connecting. Interactive ACP auth is not enabled.")
-        if session.row["runtime_id"] == "claude_cli":
-            raise ValueError("Claude Code signs in with its own `claude auth login`: Settings › Models › Coding agents › Claude Code › Sign in")
-        raise ValueError("Claude uses the dedicated API key supplied at connection")
+        raise ValueError("Claude Code signs in with its own `claude auth login`: Settings › Models › Coding agents › Claude Code › Sign in")
 
-    async def prompt(self, session_id, text, model=""):
-        self.admit()
+    async def prompt(self, session_id, text, model="", effort=""):
+        self.admit_external()
         session = self.get(session_id)
         if session.task or session.row["state"] == "connecting" or not session.adapter or session.adapter.rpc.closed:
             raise ValueError("Connect an idle runtime before sending")
@@ -353,16 +445,49 @@ class Sessions:
         if session.row["runtime_id"] == "codex" and not session.account.get("connected"):
             raise ValueError("Sign into Codex before sending a task")
         session.row["state"] = "preparing"
+        if not session.row.get("title"):
+            session.row["title"] = text.strip().splitlines()[0][:120]
+        session.row["inbox_revision"] = session.row.get("inbox_revision", 0) + 1
+        session.row["last_activity_at"] = time.time()
+        session.save()
         # Set the writer task BEFORE awaiting a checkpoint: simultaneous requests
         # cannot both start a turn in the same worktree.
-        session.task = asyncio.create_task(self._turn(session, text, model))
+        session.task = asyncio.create_task(self._turn(session, text, model, effort))
         return session.public()
 
-    async def _turn(self, session, text, model):
+    async def control_prompt(self, session_id, text, request_id):
+        import hashlib
+        session = self.get(session_id)
+        if not 8 <= len(request_id) <= 128:
+            raise ValueError("Provide a stable request identity")
+        fingerprint = hashlib.sha256(text.encode()).hexdigest()
+        receipts = dict(session.row.get("control_requests", {}))
+        if request_id in receipts:
+            if receipts[request_id] != fingerprint:
+                raise ValueError("Request identity was already used for another task")
+            return {"id": session_id, "status": "already_accepted", "request_id": request_id}
+        if len(receipts) >= 1024:
+            raise ValueError("This session's control receipt budget is exhausted; start a new session")
+        self.admit_external()
+        if not text.strip() or len(text) > 60000:
+            raise ValueError("Enter a bounded coding task")
+        if session.row["runtime_id"] == "codex" and not session.account.get("connected"):
+            raise ValueError("Sign into Codex before sending")
+        if session.task or not session.adapter or session.adapter.rpc.closed:
+            raise ValueError("Connect an idle runtime before sending")
+        # Intent is durable before prompt dispatch. A lost reply never replays the task.
+        receipts[request_id] = fingerprint
+        session.row["control_requests"] = receipts
+        session.save()
+        await self.prompt(session_id, text)
+        return {"id": session_id, "status": "accepted", "request_id": request_id}
+
+    async def _turn(self, session, text, model, effort=""):
         before = None
         try:
-            before = await asyncio.to_thread(wt.snapshot, session.root)
-            self.admit()
+            if session.workspace_mode == "worktree":
+                before = await asyncio.to_thread(wt.snapshot, session.root)
+            self.admit_external()
             session.validate()
             session.turn_id = None
             session.turn_finished.clear()
@@ -370,7 +495,7 @@ class Sessions:
             session.row["state"] = "running"
             session.emit("user/message", {"text": text})
             session.save()
-            task = asyncio.create_task(session.adapter.prompt(text, model))
+            task = asyncio.create_task(session.adapter.prompt(text, model, effort))
             try:
                 while not task.done():
                     await asyncio.sleep(0.15)
@@ -400,6 +525,9 @@ class Sessions:
                 except Exception:
                     (session.directory / "checkpoint.json").unlink(missing_ok=True)
                     session.emit("rollback/unavailable", {"reason": "Worktree changed beyond checkpoint limits"})
+            session.row["last_turn_state"] = session.row["state"]
+            session.row["last_activity_at"] = time.time()
+            await session.refresh_folder_git()
             session.emit("turn/finished", {"state": session.row["state"]})
             session.save()
             session.task = None
@@ -426,11 +554,19 @@ class Sessions:
             await session.stop("Privacy mode changed")
         if session.adapter and session.adapter.rpc.closed and session.row["state"] == "ready":
             await session.stop("Runtime exited")
+        if session.row['runtime_id'] == 'codex' and session.adapter:
+            await session.adapter.refresh_usage()
+        await session.refresh_folder_git()
         return session.public(cursor)
 
     async def inspect(self, session_id):
         session = self.get(session_id)
         from agent.lean.policy import redact_payload
+        if session.workspace_mode == "folder":
+            try:
+                return redact_payload(await asyncio.to_thread(wt.inspect, session.root), session.redaction_values)
+            except (ValueError, OSError):
+                return {"status": "", "diff": "", "note": "Project folder mode edits this folder directly. Git changes are available after a repository and initial commit exist; Files and Terminal work without them."}
         return redact_payload(await asyncio.to_thread(wt.inspect, session.root), session.redaction_values)
 
     async def stop(self, session_id):
@@ -442,6 +578,8 @@ class Sessions:
 
     async def rollback(self, session_id):
         session = self.get(session_id)
+        if session.workspace_mode != "worktree":
+            raise ValueError("Automatic rollback is available only for isolated worktree sessions. Folder sessions edit the project directly.")
         if session_id in self.tool_loans:
             raise ValueError("Close this worktree's terminals before rollback")
         if session.task or session.adapter:

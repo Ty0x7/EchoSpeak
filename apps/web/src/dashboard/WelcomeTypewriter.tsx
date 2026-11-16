@@ -1,17 +1,19 @@
 import React, { useEffect, useState } from "react";
 
+// Chat is model-first: the model you chose answers, so it never promises Echo.
 const PHRASES = [
-  "Chat with Echo, ask a question, or explore an idea.",
+  "Ask a question, search the web, or explore an idea.",
   "Write, research, and turn a thought into something useful.",
-  "Build with your projects, plan tasks, and work through problems.",
+  "Drop in a file or folder and work through it together.",
 ];
+const AGENT_PHRASES = ["Give your agent a task, or just catch up.", "Your agents remember, follow up, and check in with you.", "Hand off research, building, or anything you repeat."];
 
 const CODE_PHRASES = ["Build a feature, fix a bug, or explore your code.", "Review changes and work through ideas with your agent.", "Keep your project, tools, and progress in one workspace."];
-export function WelcomeTypewriter({ coding = false }: { coding?: boolean }) {
-  const phrases = coding ? CODE_PHRASES : PHRASES;
+export function WelcomeTypewriter({ coding = false, agents = false }: { coding?: boolean; agents?: boolean }) {
+  const phrases = coding ? CODE_PHRASES : agents ? AGENT_PHRASES : PHRASES;
   const [reduced, setReduced] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const [frame, setFrame] = useState({ phrase: 0, count: 0, deleting: false });
-  useEffect(() => setFrame({ phrase: 0, count: 0, deleting: false }), [coding]);
+  useEffect(() => setFrame({ phrase: 0, count: 0, deleting: false }), [coding, agents]);
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setReduced(media.matches);

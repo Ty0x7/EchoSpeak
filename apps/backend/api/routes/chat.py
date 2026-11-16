@@ -287,13 +287,23 @@ async def cancel_query(request: QueryCancelRequest):
     event.set()
     # Stop means stop: queued follow-ups (and steers moved to the queue) wait for the owner.
     get_state_store().set_queue_paused(owner_session, True)
-    from agent.query_journal import get_query_journal
-    get_query_journal().finish(request.request_id, "cancelled")
+    # The journal is not marked here: the run's collector marks it "cancelled" when the turn has actually stopped
+    # (below, after its last events). Marking it now let a reader stop before the final events arrived.
+    # The stopped turn's own background work ends now (a foreground command ends with its turn). Servers it
+    # started keep running and are listed, so the app can offer to stop them (POST /lean/terminal/stop-servers).
+    try:
+        from agent.lean.terminal import stop_cancelled_processes
+
+        processes = stop_cancelled_processes()
+    except Exception:
+        processes = {"stopped": [], "servers_running": []}
     return {
         "cancelled": True,
         "request_id": request.request_id,
         "execution_id": execution_id,
         "thread_id": owner_session,
+        "processes_stopped": processes["stopped"],
+        "servers_running": processes["servers_running"],
     }
 
 
@@ -313,6 +323,9 @@ async def query(request: QueryRequest):
     _register_query_cancellation(
         request_id, request.thread_id or "default", cancel_event
     )
+    from agent.code_tasks import was_cancelled
+    if was_cancelled(request_id):
+        cancel_event.set()
     _metric_inc("requests", 1)
     try:
         source = _prepare_query_transport(request, request_id)
@@ -421,29 +434,6 @@ def _record_session_message(thread_id: Optional[str], message: str) -> None:
 
 
 # ── Observability Dashboard (v6.0.0) ────────────────────────────────
-
-# ── NDJSON Streaming (v6.0.0) ────────────────────────────────────────
-
-@router.get("/stream/{request_id}")
-async def stream_events(request_id: str):
-    """Stream tool-execution events as NDJSON for real-time UI updates.
-
-    Returns a StreamingResponse with Content-Type: application/x-ndjson.
-    Each line is a JSON object with event_type, timestamp, tool_name, data, etc.
-    """
-    from starlette.responses import StreamingResponse
-    from agent.stream_events import get_stream_buffer
-
-    buffer = get_stream_buffer(request_id)
-    return StreamingResponse(
-        buffer.stream(),
-        media_type="application/x-ndjson",
-        headers={
-            "X-Request-Id": request_id,
-            "Cache-Control": "no-cache",
-        },
-    )
-
 
 @router.post("/query/stream")
 async def query_stream(request: QueryRequest):
@@ -574,6 +564,11 @@ def _journal_response(request_id: str, session: str, after: int, replay: bool = 
             if not items:
                 run = journal.get(request_id, session)
                 if not run or run["status"] != "running":
+                    # The collector finishes a run only after its last event, so a read after seeing that status misses
+                    # nothing. Without it, events written between the read above and this check were dropped: the
+                    # reply's end, agent_done and final (harness evaluation: 4 of 84 live turns ended early).
+                    if run and await anyio.to_thread.run_sync(lambda: journal.read(request_id, cursor)):
+                        continue
                     yield (json.dumps({"type": "journal_done", "status": run["status"] if run else "expired", "_replay_seq": cursor}) + "\n").encode()
                     return
                 await anyio.sleep(0.2)

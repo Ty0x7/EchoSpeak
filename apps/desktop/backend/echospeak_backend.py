@@ -168,6 +168,14 @@ def _self_check() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    if (argv if argv is not None else sys.argv[1:]) == ["--control-mcp"]:
+        # A stdio-only client bridge; it does not start or weaken the desktop API.
+        backend_root = Path(__file__).resolve().parents[2] / "backend"
+        if backend_root.exists() and str(backend_root) not in sys.path:
+            sys.path.insert(0, str(backend_root))
+        from agent.control_mcp import server
+        server().run(transport="stdio")
+        return 0
     if (argv if argv is not None else sys.argv[1:]) == ["--self-check"]:
         return _self_check()
     # Windows packaged logs often default to a legacy code page; force UTF-8
@@ -214,9 +222,6 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--workbench-worker"]:
         from agent.workbench_worker import main as workbench_worker
         workbench_worker()
-    elif sys.argv[1:] == ["--code-sdk-worker"]:
-        from agent.code_claude_worker import main as sdk_worker
-        sdk_worker()
     elif sys.argv[1:] == ["--code-claude-hook"]:
         from agent.code_claude_hook import main as claude_hook
         raise SystemExit(claude_hook())

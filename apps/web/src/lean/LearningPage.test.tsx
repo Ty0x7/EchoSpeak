@@ -91,6 +91,20 @@ describe("Learning records", () => {
     expect(html.includes("Did this work?")).toBe(true);
   });
 
+  it("shows a blocker as the setup's fault and a contradicted claim as a failure, with what was verified", () => {
+    const blocked = episode(3, { outcome: "failure", failed: false, verified_success: false, level: 1, effective_cause: "environment",
+      verification: { status: "blocked", detail: "", bottleneck: "environment" } });
+    expect(_learningText.outcomeOf(blocked)).toEqual({ label: "Blocked by the setup", tone: "neutral" });
+    const html = renderToStaticMarkup(<ExperienceDetail episode={blocked} lessonById={new Map()} api={api} act={act} go={go} back={go} />);
+    expect(html.includes("count for or against any lesson")).toBe(true);
+    expect(html.includes("Blocked before it could be verified.")).toBe(true);
+    const claimed = episode(4, { failed: true, verified_success: false, effective_cause: "false_success",
+      verification: { status: "failing", last: "test `pytest -q`: 1 failed, 4 passed, exit 1", attempts: 2 } });
+    expect(_learningText.outcomeOf(claimed).label).toBe("Said done, but the checks disagreed");
+    const detail = renderToStaticMarkup(<ExperienceDetail episode={claimed} lessonById={new Map()} api={api} act={act} go={go} back={go} />);
+    expect(detail.includes("The last check failed. test `pytest -q`: 1 failed, 4 passed, exit 1 (2 attempts)")).toBe(true);
+  });
+
   it("pages long lesson lists instead of rendering them all", () => {
     const lessons = Array.from({ length: 45 }, (_, i) => lesson(i, { uses: 1 }));
     const html = renderToStaticMarkup(<LessonList data={{ status: status(0), profiles, lessons, recent: [] }} names={names} go={go} back={go} />);

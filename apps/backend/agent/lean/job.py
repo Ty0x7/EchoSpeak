@@ -31,13 +31,20 @@ from typing import Any, Optional
 
 # Phrases that announce work instead of doing it. Matched only on short replies
 # that end the turn without a tool call or handoff.
+# Verbs of work an agent announces. Reading and searching verbs included: "I will now check the next log file,
+# billing.log." ended gemma4's turn with nothing done (five-model evaluation, H6).
+_WORK = (r"do|handle|take|get|start|write|make|build|fix|look|check|run|create|update|set|work|go|put|add|have|read|search|"
+         r"open|review|inspect|examine|scan|analy[sz]e|verify|test|try|proceed|continue|move|list|fetch|find|install|edit|apply|"
+         r"append|show|save|delete|remove|rename|copy|replace|send|post|change|modify|write")
+# One adverb may sit in between: "I'll now read", "I will next check", "Let me quickly look".
+_SOON = r"(?:(?:now|next|then|also|quickly|first|go\s+ahead\s+and)\s+)?"
 _PROMISE = re.compile(
-    r"""(?ix)
+    rf"""(?ix)
     # First person, anywhere in the reply: "Sure, I'll write it", "Let me check".
     (^|[\s,.!])(
-        i'?ll\s+(?:do|handle|take|get|start|write|make|build|fix|look|check|run|create|update|set|work|go|put|add|have)\b|
-        i\s+will\s+(?:do|handle|take|get|start|write|make|build|fix|look|check|run|create|update|set|work|go|put|add|have)\b|
-        let\s+me\s+(?:do|handle|take|get|start|write|make|build|fix|look|check|run|create|update|set|see|find|grab|pull|try|put|add)\b|
+        i'?ll\s+{_SOON}(?:{_WORK})\b|
+        i\s+will\s+{_SOON}(?:{_WORK})\b|
+        let\s+me\s+{_SOON}(?:{_WORK}|see|grab|pull)\b|
         i'?m\s+(?:going\s+to|gonna|on\s+it|starting|working\s+on)\b|
         leave\s+it\s+(?:to|with)\s+me\b|
         give\s+me\s+a\s+(?:sec|second|moment|minute)\b
@@ -65,8 +72,13 @@ def is_promise_without_action(text: str) -> bool:
 
 
 # Claims that something was already done ("I've saved it", "has been updated").
+# The verbs a coding model uses after a fix count too: gemma4-12b-it said "I have corrected the `average` function
+# in `calc.py`" (and "- Modified `calc.py` …") with no write at all, and passed (two-model campaign, 16 Nov 2026).
 _DONE_VERBS = (r"saved|updated|added|wrote|written|created|deleted|removed|sent|stored|changed|edited|installed|"
-               r"committed|recorded|renamed|moved|copied|scheduled|posted|uploaded|downloaded")
+               r"committed|recorded|renamed|moved|copied|scheduled|posted|uploaded|downloaded|"
+               r"fixed|corrected|modified|patched|replaced|rewritten|rewrote|applied|implemented|appended|inserted")
+# A summary line that starts with such a verb and names a file ("- Modified `calc.py` to …") is the same claim.
+_LINE_CLAIM = re.compile(rf"(?i)^\W*(?:{_DONE_VERBS})\b")
 _ACTION_CLAIM = re.compile(
     rf"""(?ix)
     \b(?:i'?ve|i\s+have|i\s+just|i'?ve\s+just|i\s+(?:now\s+)?(?:also\s+)?)\s*(?:now\s+|also\s+|successfully\s+)?(?:{_DONE_VERBS})\b
@@ -113,7 +125,7 @@ def unbacked_file_claim(text: str, written: set[str]) -> str:
     plus names that appeared in commands that ran (a redirect can create a file).
     """
     for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")):
-        if not sentence.strip() or _EARLIER.search(sentence) or not _ACTION_CLAIM.search(sentence):
+        if not sentence.strip() or _EARLIER.search(sentence) or not (_ACTION_CLAIM.search(sentence) or _LINE_CLAIM.search(sentence)):
             continue
         missing = named_files(sentence) - written
         if missing:
