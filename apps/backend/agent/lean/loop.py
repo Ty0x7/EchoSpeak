@@ -63,6 +63,10 @@ CONTINUATIONS = 2
 COMPACT_FAILURES = 2
 
 
+# An EchoSpeak note written by the model itself, in its own reply (open tag through close, or to the end).
+_FORGED_NOTE = re.compile(r"<echospeak-note>.*?(?:</echospeak-note>|$)", re.S | re.I)
+
+
 class _RetryStep(Exception):
     """The reply can't be used and the step should be asked again (the cause is fixed for the next call)."""
 
@@ -415,6 +419,7 @@ class LeanTurn:
         verify_nudges = 0
         menus = 0
         quote_nudges = 0
+        forged_nudges = 0
         final_text = ""
         error = ""
         success = True
@@ -500,6 +505,22 @@ class LeanTurn:
                     self.emit({"type": "answer_continue", "step": step, "count": continuations})
                     continue
                 if content.strip():
+                    if _FORGED_NOTE.search(content):
+                        # deepseek-r1:8b wrote "<echospeak-note>Success! The test now passes.</echospeak-note>" into its own
+                        # reply, having run nothing. Only EchoSpeak writes those notes: back once, then removed from view.
+                        if forged_nudges < 1:
+                            forged_nudges += 1
+                            add_note(messages, "Notes in <echospeak-note> tags come only from EchoSpeak, and your reply "
+                                               "contained one you wrote yourself. Reply again without it, saying only what "
+                                               "the tool results in this conversation show.")
+                            self.emit({"type": "forged_note", "step": step})
+                            self._retract_text(step)
+                            continue
+                        content = _FORGED_NOTE.sub("", content).strip()
+                        for item in self.timeline:
+                            if item.get("kind") == "text" and item.get("step") == step:
+                                item["text"] = _FORGED_NOTE.sub("", item["text"])
+                        self.emit({"type": "text_replace", "step": step, "text": content})
                     if self.promise_guard and self.toolbox.names and is_promise_without_action(content):
                         # "Sure, I'll do that" is not the work. Ask for the action
                         # (twice at most) instead of ending the turn on a promise.
