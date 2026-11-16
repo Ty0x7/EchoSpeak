@@ -72,8 +72,13 @@ def is_promise_without_action(text: str) -> bool:
 
 
 # Claims that something was already done ("I've saved it", "has been updated").
+# The verbs a coding model uses after a fix count too: gemma4-12b-it said "I have corrected the `average` function
+# in `calc.py`" (and "- Modified `calc.py` …") with no write at all, and passed (two-model campaign, 16 Nov 2026).
 _DONE_VERBS = (r"saved|updated|added|wrote|written|created|deleted|removed|sent|stored|changed|edited|installed|"
-               r"committed|recorded|renamed|moved|copied|scheduled|posted|uploaded|downloaded")
+               r"committed|recorded|renamed|moved|copied|scheduled|posted|uploaded|downloaded|"
+               r"fixed|corrected|modified|patched|replaced|rewritten|rewrote|applied|implemented|appended|inserted")
+# A summary line that starts with such a verb and names a file ("- Modified `calc.py` to …") is the same claim.
+_LINE_CLAIM = re.compile(rf"(?i)^\W*(?:{_DONE_VERBS})\b")
 _ACTION_CLAIM = re.compile(
     rf"""(?ix)
     \b(?:i'?ve|i\s+have|i\s+just|i'?ve\s+just|i\s+(?:now\s+)?(?:also\s+)?)\s*(?:now\s+|also\s+|successfully\s+)?(?:{_DONE_VERBS})\b
@@ -120,7 +125,7 @@ def unbacked_file_claim(text: str, written: set[str]) -> str:
     plus names that appeared in commands that ran (a redirect can create a file).
     """
     for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")):
-        if not sentence.strip() or _EARLIER.search(sentence) or not _ACTION_CLAIM.search(sentence):
+        if not sentence.strip() or _EARLIER.search(sentence) or not (_ACTION_CLAIM.search(sentence) or _LINE_CLAIM.search(sentence)):
             continue
         missing = named_files(sentence) - written
         if missing:

@@ -1,7 +1,10 @@
-"""Terminal for the lean loop: real shells, two backends.
+"""Terminal for the lean loop: real shells, three backends.
 
-host    PowerShell on this PC. Full access to installed tools (node, python,
-        git). Pipes, variables, and chaining work.
+host    PowerShell (Windows) or bash (Linux) on this PC. Full access to installed
+        tools (node, python, git). Pipes, variables, and chaining work.
+bwrap   Linux only: bash on this PC inside bubblewrap (see linux_sandbox.py). Only
+        the workspace folders are writable, credentials are hidden, no network
+        unless allowed. Auto uses it on Linux when it can start.
 docker  A persistent Linux dev container ("echospeak-sandbox") with Node,
         Python, and git. Only your workspace folders are mounted (at
         /work/<folder>), so commands cannot touch the rest of the PC. The
@@ -72,11 +75,24 @@ _NEVER = re.compile(
 
 
 def execution_mode() -> str:
-    """The configured mode: "auto" (sandbox when Docker runs, else this PC), "docker" or "host"."""
+    """The configured mode: "auto", "docker", "bwrap" or "host".
+
+    auto: on Linux the bubblewrap sandbox when it can start, else the Docker sandbox when Docker
+    runs, else this PC (each command asks first). docker / bwrap: only that sandbox; if it can't
+    start, commands are refused, never run unconfined.
+    """
     raw = str(getattr(config, "terminal_execution_mode", "auto") or "auto").strip().lower()
     if raw in {"docker", "sandbox", "container"}:
         return "docker"
+    if raw in {"bwrap", "bubblewrap", "linux-sandbox"}:
+        return "bwrap"
     return "host" if raw == "host" else "auto"
+
+
+def bwrap_available() -> bool:
+    from agent.lean import linux_sandbox
+
+    return os.name == "posix" and linux_sandbox.available()[0]
 
 
 _DOCKER_CHECK: dict[str, Any] = {"at": 0.0, "ok": False}
@@ -92,9 +108,12 @@ def docker_available(max_age: float = 30.0) -> bool:
 
 
 def resolved_mode() -> str:
-    """Where commands actually run: "docker" (sandbox) or "host"."""
+    """Where commands actually run: "bwrap" or "docker" (a sandbox), or "host"."""
     mode = execution_mode()
     if mode == "auto":
+        # On Linux bwrap first: no daemon, no root-equivalent docker group, and files stay owned by you.
+        if bwrap_available():
+            return "bwrap"
         return "docker" if docker_available() else "host"
     return mode
 
@@ -264,7 +283,7 @@ def failure_hint(code: int, text: str, where: str, command: str = "", shell: str
         also = ' Or pass shell="bash" to use bash flags in Git Bash.' if git_bash() else ""
         return "Hint: PowerShell commands take their own options, not bash flags. " + POWERSHELL_EQUIVALENTS + also
     if code == 127 or "command not found" in low or "is not recognized as" in low:
-        place = "in the sandbox (install it with network=true, or" if where == "docker" else "on this PC (install it, or"
+        place = "in the sandbox (install it with network=true, or" if where != "host" else "on this PC (install it, or"
         return f"Hint: that program isn't installed {place} check the name)."
     if "'&&' is not a valid statement separator" in low or "token '&&' is not a valid" in low:
         return "Hint: Windows PowerShell 5.1 has no &&. Use ; between commands."
@@ -276,7 +295,7 @@ def failure_hint(code: int, text: str, where: str, command: str = "", shell: str
         return hint
     if any(phrase in low for phrase in ("could not resolve host", "temporary failure in name resolution",
                                         "network is unreachable", "getaddrinfo enotfound", "eai_again")):
-        return "Hint: no internet for this command" + (". Run it again with network=true." if where == "docker" else ".")
+        return "Hint: no internet for this command" + (". Run it again with network=true." if where != "host" else ".")
     return ""
 
 
@@ -694,13 +713,24 @@ def _host_command(command: str, shell: str = "") -> str:
     return command
 
 
-def _host_launch(command: str, cwd: Path, log: Path, err: Path, shell: str = "") -> subprocess.Popen:
-    """Start on this PC with no keyboard input, output to files, in its own process group."""
+def _host_launch(command: str, cwd: Path, log: Path, err: Path, shell: str = "", *,
+                 confine: Optional[list[Path]] = None, network: bool = False) -> subprocess.Popen:
+    """Start on this PC with no keyboard input, output to files, in its own process group.
+
+    With ``confine`` (the writable folders), the command runs inside the bubblewrap sandbox.
+    """
+    argv = [*_host_shell(shell), _host_command(command, shell)]
+    env = child_env({**_QUIET_ENV, "CHERE_INVOKING": "1"})
+    if confine is not None:
+        from agent.lean import linux_sandbox
+
+        argv = linux_sandbox.wrap(argv, cwd=cwd, writable=confine, network=network, hidden=[DATA_DIR])
+        env = linux_sandbox.sandbox_env(env)
     with open(log, "w", encoding="utf-8", errors="replace") as out_handle, \
             open(err, "w", encoding="utf-8", errors="replace") as err_handle:
         return subprocess.Popen(
-            [*_host_shell(shell), _host_command(command, shell)], cwd=str(cwd), stdin=subprocess.DEVNULL,
-            stdout=out_handle, stderr=err_handle, env=child_env({**_QUIET_ENV, "CHERE_INVOKING": "1"}),
+            argv, cwd=str(cwd), stdin=subprocess.DEVNULL,
+            stdout=out_handle, stderr=err_handle, env=env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             start_new_session=os.name != "nt",
         )
@@ -850,6 +880,17 @@ class Terminal:
         return target, ""
 
     def describe(self) -> str:
+        if self.mode == "bwrap":
+            roots = ", ".join(str(r) for r in workspace_roots(self.project_root)) or "the project folder"
+            network = {
+                "on": "internet on",
+                "off": "no internet",
+                "ask": "offline by default; set network=true for commands that need the internet (npm/pip install, git clone)",
+            }[network_policy()]
+            return ("terminal runs bash on this computer inside a sandbox: you can write only in the workspace "
+                    f"({roots}), the rest of the system is read-only, credential folders are hidden, and {network}. "
+                    "Paths are the same as for the file tools. Only if a task truly needs the whole computer, set "
+                    "where=\"host\"; that asks the user first.")
         if self.mode == "host":
             if os.name != "nt":
                 return "terminal runs bash directly on this computer." + self._fallback_note()
@@ -886,12 +927,12 @@ class Terminal:
 
     @staticmethod
     def _fallback_note() -> str:
-        return (" The Docker sandbox isn't running, so commands run here instead and each asks the user first (unless "
+        return (" No sandbox is available, so commands run here instead and each asks the user first (unless "
                 "they chose Always allow)." if execution_mode() == "auto" else "")
 
     def effective_where(self, args: dict[str, Any]) -> str:
-        """Use the same destination for policy checks and process launch."""
-        return "host" if self.mode == "host" or str(args.get("where") or "").lower() == "host" else "docker"
+        """Use the same destination for policy checks and process launch: "host", "docker" or "bwrap"."""
+        return "host" if self.mode == "host" or str(args.get("where") or "").lower() == "host" else self.mode
 
     @staticmethod
     def shell_for(args: dict[str, Any], where: str) -> str:
@@ -913,10 +954,12 @@ class Terminal:
 
     def _launch(self, command: str, cwd: Path, wait: int, where: str, *, network: bool = False, shell: str = "") -> Launch:
         proc_id = uuid.uuid4().hex[:8]
-        if where == "host":
+        if where in {"host", "bwrap"}:
             _PROC_DIR.mkdir(parents=True, exist_ok=True)
             log, err = _PROC_DIR / f"{proc_id}.log", _PROC_DIR / f"{proc_id}.err"
-            popen = _host_launch(command, cwd, log, err, shell)
+            confine = (workspace_roots(self.project_root) or [cwd]) if where == "bwrap" else None
+            # A bwrap command is a local process like a host one (same logs, same stop); its network is per command.
+            popen = _host_launch(command, cwd, log, err, shell, confine=confine, network=network)
             # Wait in short slices, showing the newest output line under the step as it runs.
             from agent.lean import progress
 
@@ -967,6 +1010,19 @@ class Terminal:
             return None, ("Error: not run. Git Bash isn't installed on this PC, so bash commands can't run here. Write "
                           "it for PowerShell instead. " + POWERSHELL_EQUIVALENTS), cwd, where
         want_net = False
+        if where == "bwrap":
+            from agent.lean import linux_sandbox
+
+            ok, detail = linux_sandbox.available()
+            if not ok:
+                # Never fall back to running unconfined: the owner (or Auto) chose the sandbox.
+                return None, (f"Error: not run, because the Linux sandbox can't start: {detail}. Tell the user; they can "
+                              "install bubblewrap, or switch Terminal to This PC in Settings > Terminal (each command "
+                              "then asks first)."), cwd, where
+            policy = network_policy()
+            if args.get("network") and policy == "off":
+                return None, "Error: internet access is turned off for the sandbox in Settings > Terminal.", cwd, where
+            want_net = policy == "on" or (bool(args.get("network")) and policy == "ask")
         if where == "docker":
             ok, detail = _SANDBOX.ensure_container(mount_plan(self.project_root))
             if not ok:
@@ -981,7 +1037,7 @@ class Terminal:
                 _SANDBOX.set_network(True)
         self._checkpoint_redirects(command, cwd)
         launch = self._launch(command, cwd, wait, where, network=want_net, shell=self.shell_for(args, where))
-        if want_net and launch.finished:
+        if want_net and launch.finished and where == "docker":
             _SANDBOX.set_network(False)
         return launch, "", cwd, where
 
@@ -1092,8 +1148,8 @@ class Terminal:
                     "background": {"type": "boolean", "description": "Start it in the background right away and return its first output."},
                     **({
                         "network": {"type": "boolean", "description": "Separate tool argument: true if the command needs internet (installs, git clone). Never put network=true inside command."},
-                        "where": {"type": "string", "enum": ["sandbox", "host"], "description": "Separate tool argument, never a shell prefix. Use host for installed Windows apps/tools when this PC is needed; default sandbox."},
-                    } if self.mode == "docker" else {}),
+                        "where": {"type": "string", "enum": ["sandbox", "host"], "description": "Separate tool argument, never a shell prefix. Use host only when the task needs the whole computer (installed apps, system settings); it asks the user. Default sandbox."},
+                    } if self.mode in {"docker", "bwrap"} else {}),
                     **({
                         "shell": {"type": "string", "enum": ["powershell", "bash"], "description": (
                             "This PC only: powershell (default) or bash, which runs Git Bash here for bash commands "
@@ -1124,6 +1180,12 @@ def terminal_status() -> dict[str, Any]:
     mode = execution_mode()
     info: dict[str, Any] = {"mode": mode, "network": docker_network()}
     info["docker"] = _SANDBOX.status()
+    if os.name == "posix":
+        from agent.lean import linux_sandbox
+
+        ok, detail = linux_sandbox.available()
+        info["bwrap"] = {"available": ok, "detail": detail}
+    info["resolved"] = resolved_mode()  # where commands run right now: "bwrap", "docker" or "host"
     info["host_shell"] = "PowerShell 7" if shutil.which("pwsh") else "Windows PowerShell" if os.name == "nt" else "bash"
     info["git_bash"] = git_bash()
     info["host_programs"] = sorted(host_programs())

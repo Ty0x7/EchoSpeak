@@ -12,8 +12,8 @@ estimated tokens, and a 43,104-token prompt reached the model as 8,194 tokens wi
 
 Two defences, both cheap:
 
-- ``served(endpoint)``: the loaded model's real window (Ollama ``/api/ps`` → ``context_length``),
-  cached briefly. ``settings.context_tokens`` takes the smaller of this and what is configured.
+- ``served(endpoint)``: the loaded model's real window (Ollama ``/api/ps`` → ``context_length``;
+  LM Studio ``/api/v1/models`` → ``loaded_instances[].config.context_length``), cached briefly. ``settings.context_tokens`` takes the smaller of this and what is configured.
 - ``truncated(...)``: after a call, the server's own prompt count compared with what was sent. A
   count far below the estimate (or exactly half the known window) means the prompt was cut. The
   loop then discards that reply, never runs its tool calls, trims harder and asks again; the
@@ -63,6 +63,27 @@ def _fetch_ollama(base: str, model: str) -> int:
     return 0
 
 
+def _fetch_lmstudio(base: str, model: str) -> int:
+    """The window LM Studio loaded `model` with (REST v1 ``/api/v1/models`` →
+    ``loaded_instances[].config.context_length``), 0 if not loaded. LM Studio picks the window at
+    load time (its default is often 4,096), and its OpenAI endpoint doesn't say. Unloaded models
+    report only ``max_context_length``, the trained maximum, which is not what is served."""
+    request = urllib.request.Request(base + "/api/v1/models", headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=1.0) as response:
+        data = json.loads(response.read() or b"{}")
+    wanted = model.casefold()
+    for row in data.get("models") or []:
+        instances = [i for i in row.get("loaded_instances") or [] if isinstance(i, dict)]
+        names = {str(row.get("key") or "").casefold(), str(row.get("selected_variant") or "").casefold()}
+        names |= {str(i.get("id") or "").casefold() for i in instances}
+        if wanted in names:
+            for instance in instances:
+                value = int((instance.get("config") or {}).get("context_length") or 0)
+                if value:
+                    return value
+    return 0
+
+
 def served(endpoint: Any) -> int:
     """The context window the local server is actually serving for this model, or 0 if unknown."""
     if endpoint is None or not getattr(endpoint, "local", False):
@@ -74,10 +95,11 @@ def served(endpoint: Any) -> int:
         learned = _learned.get(key)
     if cached is None or cached[1] < now:
         value = 0
-        if str(getattr(endpoint, "provider", "")) == "ollama" and _loopback(key[0]) and key[1]:
+        fetch = {"ollama": _fetch_ollama, "lmstudio": _fetch_lmstudio}.get(str(getattr(endpoint, "provider", "")))
+        if fetch and _loopback(key[0]) and key[1]:
             try:
-                value = _fetch_ollama(*key)
-            except (OSError, ValueError):
+                value = fetch(*key)
+            except (OSError, ValueError, TypeError):
                 value = 0
         cached = (value, now + (POSITIVE_TTL if value else NEGATIVE_TTL))
         with _lock:

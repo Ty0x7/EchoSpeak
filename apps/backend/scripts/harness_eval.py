@@ -304,8 +304,13 @@ class Api:
 class Stack:
     """The recorder plus an isolated backend, torn down together."""
 
-    def __init__(self, run_dir: Path, model: str, upstream: str, extra_env: dict[str, str]) -> None:
+    def __init__(self, run_dir: Path, model: str, upstream: str, extra_env: dict[str, str],
+                 agents_md: str = "", skills: tuple[str, ...] = ()) -> None:
         self.run_dir, self.model, self.upstream, self.extra_env = run_dir, model, upstream, extra_env
+        # A/B variables (one experiment arm): the owner's AGENTS.md text, and skills imported + approved through
+        # the real API. Both go in through EchoSpeak's own mechanisms, not a test-only prompt path.
+        self.agents_md, self.skills = agents_md, skills
+        self.variant: dict[str, Any] = {}
         self.procs: list[subprocess.Popen] = []
         self.key = "eval-" + secrets.token_hex(16)
         self.data = run_dir / "backend-data"
@@ -320,6 +325,9 @@ class Stack:
         dirs = {name: self.run_dir / name for name in ("backend-data", "backend-logs", "backend-home", "backend-rt")}
         for d in dirs.values():
             d.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.agents_md:
+            (dirs["backend-home"] / "AGENTS.md").write_text(self.agents_md, encoding="utf-8")
+            self.variant["agents_md_sha256"] = hashlib.sha256(self.agents_md.encode()).hexdigest()[:16]
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ECHOSPEAK_", "API_", "XDG_RUNTIME", "LOCAL_MODEL", "LEAN_"))}
         env.update({
             "ECHOSPEAK_DATA_DIR": str(dirs["backend-data"]), "ECHOSPEAK_LOGS_DIR": str(dirs["backend-logs"]),
@@ -351,6 +359,12 @@ class Stack:
                 if time.monotonic() > deadline:
                     raise RuntimeError("backend did not start")
                 time.sleep(0.5)
+        for text in self.skills:
+            imported = self.api.call("POST", "/lean/agent-skills/import", {"text": text})["skill"]
+            approved = self.api.call("POST", f"/lean/agent-skills/{imported['name']}/approve",
+                                     {"digest": imported.get("digest", "")})["skill"]
+            self.variant.setdefault("skills", []).append({"name": approved["name"], "status": approved.get("status"),
+                                                          "sha256": hashlib.sha256(text.encode()).hexdigest()[:16]})
         return self
 
     def __exit__(self, *_: Any) -> None:
@@ -511,6 +525,8 @@ def main() -> int:
     parser.add_argument("--label", default="run")
     parser.add_argument("--repeat", type=int, default=1, help="Run each case this many times (variance)")
     parser.add_argument("--env", action="append", default=[], help="Extra backend env KEY=VALUE (e.g. LOCAL_MODEL_CONTEXT=16384)")
+    parser.add_argument("--agents-md", default="", help="A/B arm: file used as the owner's AGENTS.md in the eval backend")
+    parser.add_argument("--skill", action="append", default=[], help="A/B arm: SKILL.md to import and approve (repeatable)")
     args = parser.parse_args()
     chosen = {c.strip() for c in args.only.split(",") if c.strip()}
     cases = [c for c in SETS["all" if chosen else args.set] if not chosen or c.id in chosen]
@@ -518,12 +534,19 @@ def main() -> int:
     (run_dir / "projects").mkdir(parents=True)
     extra = dict(item.split("=", 1) for item in args.env)
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
-    dirty = bool(subprocess.run(["git", "status", "--porcelain", "--", "agent", "api"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
+    # Everything that changes what is measured: the harness, the eval scripts and the configuration.
+    tracked = ["agent", "api", "scripts", "config.py", "prompts"]
+    status = subprocess.run(["git", "status", "--porcelain", "--", *tracked], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    diff = subprocess.run(["git", "diff", "HEAD", "--", *tracked], cwd=ROOT, capture_output=True, text=True).stdout
     meta = {"label": args.label, "model": args.model, "set": args.set, "cases": [c.id for c in cases], "repeat": args.repeat,
-            "commit": commit + ("+dirty" if dirty else ""), "started": time.time()}
+            "commit": commit + ("+dirty" if status else ""), "started": time.time(),
+            "dirty": {"files": status.splitlines()[:40], "diff_sha256": hashlib.sha256(diff.encode()).hexdigest()[:16]} if status else {}}
+    agents_md = Path(args.agents_md).read_text(encoding="utf-8") if args.agents_md else ""
+    skills = tuple(Path(p).read_text(encoding="utf-8") for p in args.skill)
     print(f"Harness eval {args.label} · {args.model} · {len(cases)} cases × {args.repeat} · {run_dir}", flush=True)
-    with Stack(run_dir, args.model, args.upstream, extra) as stack:
+    with Stack(run_dir, args.model, args.upstream, extra, agents_md, skills) as stack:
         meta["env"] = stack.env_used
+        meta["variant"] = stack.variant
         try:
             meta["provider"] = stack.api.call("GET", "/provider")
         except Exception:

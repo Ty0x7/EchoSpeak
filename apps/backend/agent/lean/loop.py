@@ -58,7 +58,36 @@ NUDGE_REASONING_SPENT = ("Your reasoning used the whole output budget before you
 # Reasoning, then an empty reply that stopped normally: the answer was written as reasoning. Answer it, thinking off.
 NUDGE_THOUGHT_ONLY = ("You worked out your reply in your reasoning but didn't write it for the user. Write the reply "
                       "now, from what you already worked out; don't mention this note.")
+# The stream ended without a finish (or with an error inside it). Seen live: Ollama's qwen3.5 parser rejected a
+# malformed tool call ("XML syntax error … <function> closed by </parameter>") and still answered HTTP 200 with
+# no tool call, no finish_reason and no usage. Nothing ran; saying "you wrote it in your reasoning" (the
+# thought-only note) led the model to claim the edit was done.
+NUDGE_INCOMPLETE = ("Your last reply didn't come through complete: if it contained a tool call, the server couldn't "
+                    "read it, so nothing was run. Do the next step again; if it needs a tool, call it with valid "
+                    "arguments. Don't say anything was done that wasn't run.")
+NUDGE_WINDOW_SPENT = ("Your reasoning filled the model's context window before you wrote the answer. Write the answer "
+                      "now, directly and concisely, from what you already worked out. Don't deliberate again.")
 CONTINUATIONS = 2
+
+
+def empty_cause(turn: Any, window: int) -> str:
+    """Why a reply has no text and no tool calls, from the server's own evidence.
+
+    incomplete_stream: the stream ended with no finish reason, or carried an error (the provider says so;
+        adapters that don't track this never produce it).
+    context_window: stopped for length with prompt + reply filling the served window (not the output limit).
+    output_limit: stopped for length below the window, i.e. the max_tokens sent.
+    reasoning_only: no text after reasoning (stopped normally, or an adapter that reports no finish).
+    empty: nothing at all.
+    """
+    finish = str(getattr(turn, "finish_reason", "") or "")
+    if getattr(turn, "incomplete", False) or getattr(turn, "stream_error", ""):
+        return "incomplete_stream"
+    if finish == "length":
+        usage = getattr(turn, "usage", None) or {}
+        used = int(usage.get("total") or 0) or int(usage.get("prompt") or 0) + int(usage.get("completion") or 0)
+        return "context_window" if window and used >= window - 64 else "output_limit"
+    return "reasoning_only" if str(getattr(turn, "reasoning", "") or "").strip() else "empty"
 # Failed summaries in one turn before compaction stops being tried (the loop trims instead).
 COMPACT_FAILURES = 2
 
@@ -222,6 +251,7 @@ class LeanTurn:
         self._handed_off = False
         self.compactions = 0
         self._compact_failures = 0
+        self._empty_cause = ""  # why the last reply was empty (see empty_cause)
         # Extra fields on agent_start, e.g. who handed this work over.
         self.meta = dict(meta or {})
         self.client = client
@@ -601,13 +631,19 @@ class LeanTurn:
                     # The teammate already answered; nothing more is needed.
                     final_text = ""
                     break
+                cause = empty_cause(turn, settings.context_tokens(getattr(self.client, "endpoint", None)))
+                self._empty_cause = cause
                 if nudges < 2:
                     nudges += 1
                     messages.pop()
                     tail = self._reasoning_tail(step)
-                    if turn.finish_reason == "length":
+                    if cause == "incomplete_stream":
+                        # Ask for the same step again as it was; thinking wasn't the problem.
+                        add_note(messages, NUDGE_INCOMPLETE)
+                    elif turn.finish_reason == "length":
                         # Reasoning used the whole budget: answer from it (thinking off), don't reason again.
-                        add_note(messages, NUDGE_REASONING_SPENT + (f" Your reasoning ended with: \"{tail}\"" if tail else ""))
+                        spent = NUDGE_WINDOW_SPENT if cause == "context_window" else NUDGE_REASONING_SPENT
+                        add_note(messages, spent + (f" Your reasoning ended with: \"{tail}\"" if tail else ""))
                         self._no_think_next = True
                     elif tail:
                         # Thought but said nothing: the answer is often written in the reasoning and the turn
@@ -615,11 +651,17 @@ class LeanTurn:
                         # replay of such a call came back empty, every replay with thinking off answered).
                         add_note(messages, NUDGE_THOUGHT_ONLY + f" Your reasoning ended with: \"{tail}\"")
                         self._no_think_next = True
-                        self.emit({"type": "empty_reply", "step": step, "retry": "thinking_off"})
                     else:
                         add_note(messages, NUDGE_EMPTY)
+                    # The cause and the server's raw evidence, beside the retry (the judge and the journal read these).
+                    self.emit({"type": "empty_reply", "step": step, "cause": cause, "finish": turn.finish_reason,
+                               "stream_error": getattr(turn, "stream_error", ""), "usage": dict(turn.usage or {}),
+                               "reasoning_chars": len(turn.reasoning or ""),
+                               "retry": "thinking_off" if self._no_think_next else "as_is"})
                     continue
                 final_text = ""
+                # No answer after the bounded retries: say so in the outcome instead of an empty "success".
+                stop_reason = "no_answer"
                 break
 
             self._run_tools(calls, messages, step, call_counts)
@@ -685,7 +727,15 @@ class LeanTurn:
             elif error:
                 visible = _friendly_error(error)
             else:
-                visible = "I couldn't put together a reply this time. Try asking again or rephrasing."
+                visible = {
+                    "incomplete_stream": ("The model's replies kept arriving incomplete (the server couldn't read them), "
+                                          "so nothing more was done. Try again, or try another model."),
+                    "context_window": ("The model filled its context window while thinking and never wrote an answer. "
+                                       "Try a shorter request, a new chat, or a model with a larger window."),
+                    "output_limit": ("The model used its whole output allowance thinking and never wrote an answer. "
+                                     "Try again, or turn thinking down for this model."),
+                }.get(self._empty_cause if stop_reason == "no_answer" else "",
+                      "I couldn't put together a reply this time. Try asking again or rephrasing.")
             self._append_text("text", step, visible)
             self.emit({"type": "agent_token", "step": step, "data": visible})
         self.emit({
@@ -697,6 +747,7 @@ class LeanTurn:
             "usage": dict(self.usage),
             "empty": empty,
             "stop_reason": stop_reason,
+            "empty_cause": self._empty_cause if stop_reason == "no_answer" else "",
             # Approvals autonomous mode held for the owner: the actionable exceptions of a walk-away run.
             "held": list(self.held),
             "completed": self.completed_summary or "",

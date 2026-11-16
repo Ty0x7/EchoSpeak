@@ -192,6 +192,9 @@ def test_auto_mode_uses_the_sandbox_only_when_docker_runs(monkeypatch):
     from agent.lean import terminal
 
     monkeypatch.setattr(config, "terminal_execution_mode", "auto", raising=False)
+    # Without bubblewrap (Windows, macOS, or Linux where it can't start); with it, Auto prefers it on Linux
+    # (tests/test_linux_sandbox.py).
+    monkeypatch.setattr(terminal, "bwrap_available", lambda: False)
     monkeypatch.setattr(terminal, "docker_available", lambda max_age=30.0: True)
     assert terminal.resolved_mode() == "docker"
     monkeypatch.setattr(terminal, "docker_available", lambda max_age=30.0: False)

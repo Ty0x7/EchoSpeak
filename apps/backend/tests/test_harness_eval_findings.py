@@ -348,3 +348,121 @@ def test_after_repeated_setup_failures_the_note_says_to_stop_and_report():
         notes.append(ledger.feedback(f"t{i}"))
     assert "This is the environment" in notes[0]
     assert "Stop working on the environment" in notes[2] and "don't search outside the project" in notes[2]
+
+
+# ── 6. Why a reply came back empty (two-model campaign, 16 Nov 2026) ───────────────────────────
+# Seen live with deepseek-v4-qwen3.5-heretic:9b on Ollama 0.40.16:
+# - Ollama's qwen3.5 parser rejected a malformed tool call ("XML syntax error … <function> closed by
+#   </parameter>") and still answered HTTP 200 with no tool call, no finish_reason and no usage. The harness
+#   took it for an answer written as reasoning; with thinking off the model then said the edit was done.
+# - A "length" stop at prompt 8,525 + reply 7,859 = 16,384: the served window filled, not max_tokens (8,192).
+from agent.lean.loop import NUDGE_INCOMPLETE, NUDGE_WINDOW_SPENT, empty_cause  # noqa: E402
+
+
+def test_empty_reply_causes_come_from_the_servers_evidence():
+    assert empty_cause(ModelTurn(reasoning="I'll use file_edit", incomplete=True), 16384) == "incomplete_stream"
+    assert empty_cause(ModelTurn(stream_error="parse failed", finish_reason="stop"), 16384) == "incomplete_stream"
+    window = ModelTurn(reasoning="…", finish_reason="length", usage={"prompt": 8525, "completion": 7859, "total": 16384})
+    assert empty_cause(window, 16384) == "context_window"
+    limit = ModelTurn(reasoning="…", finish_reason="length", usage={"prompt": 900, "completion": 8192, "total": 9092})
+    assert empty_cause(limit, 16384) == "output_limit"
+    assert empty_cause(ModelTurn(reasoning="the answer is 4", finish_reason="stop"), 16384) == "reasoning_only"
+    assert empty_cause(ModelTurn(finish_reason="stop"), 16384) == "empty"
+    # Adapters that report no finish at all aren't called broken: only the stream that tracks it says so.
+    assert empty_cause(ModelTurn(reasoning="hmm"), 16384) == "reasoning_only"
+
+
+def test_an_unreadable_tool_call_is_asked_for_again_not_taken_for_an_answer(tmp_path):
+    box, _ran = _project(tmp_path)
+    client = Client([
+        ModelTurn(reasoning="I'll append beta with file_write, then show the file.", incomplete=True),
+        ModelTurn(tool_calls=[ToolCall("w", "file_write", '{"path": "notes.md", "content": "alpha\\nbeta\\n"}')],
+                  finish_reason="tool_calls"),
+        ModelTurn(content="notes.md now reads alpha, then beta.", finish_reason="stop"),
+    ])
+    events: list[dict[str, Any]] = []
+    result = _turn(box, client, ["approve"], events).run("Add a second line, beta, to notes.md")
+    note = client.calls[1][-1]["content"]
+    assert NUDGE_INCOMPLETE in note and NUDGE_THOUGHT_ONLY not in note
+    assert client.efforts[:2] == ["medium", "medium"]  # asked again as it was: thinking wasn't the problem
+    cause = next(e for e in events if e["type"] == "empty_reply")
+    assert cause["cause"] == "incomplete_stream" and cause["retry"] == "as_is"
+    assert (tmp_path / "notes.md").read_text() == "alpha\nbeta\n" and "beta" in result.text
+
+
+def test_a_filled_context_window_is_named_as_such(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "context_tokens", lambda endpoint=None: 16384)  # the served window in that run
+    box, _ran = _project(tmp_path)
+    client = Client([
+        ModelTurn(reasoning="Let me think about this differently…", finish_reason="length",
+                  usage={"prompt": 8525, "completion": 7859, "total": 16384}),
+        ModelTurn(content="The test can't pass: it expects a frozen clock.", finish_reason="stop"),
+    ])
+    events: list[dict[str, Any]] = []
+    _turn(box, client, [], events).run("Make the clock test pass")
+    assert NUDGE_WINDOW_SPENT in client.calls[1][-1]["content"]
+    assert client.efforts == ["medium", "none"]
+    assert next(e for e in events if e["type"] == "empty_reply")["cause"] == "context_window"
+
+
+def test_no_answer_after_the_bounded_retries_is_an_explicit_outcome(tmp_path):
+    box, _ran = _project(tmp_path)
+    broken = lambda: ModelTurn(reasoning="I'll call file_read", incomplete=True)  # noqa: E731
+    client = Client([broken(), broken(), broken()])
+    events: list[dict[str, Any]] = []
+    result = _turn(box, client, [], events).run("Read notes.md")
+    done = next(e for e in events if e["type"] == "agent_done")
+    assert done["stop_reason"] == "no_answer" and done["empty_cause"] == "incomplete_stream"
+    assert result.stop_reason == "no_answer" and "incomplete" in result.text
+    assert len(client.calls) == 3  # bounded: the first try and two retries, no more
+
+
+def test_an_error_inside_the_stream_is_kept(monkeypatch):
+    """Ollama can end an HTTP 200 stream with an error object instead of a finish; it used to be skipped."""
+    import http.server
+    import threading as _threading
+    from agent.lean.provider import ChatClient, Endpoint
+
+    lines = [
+        'data: {"choices":[{"delta":{"reasoning":"I will call file_read"}}]}',
+        'data: {"error":{"message":"qwen3.5 tool call parsing failed"}}',
+        "data: [DONE]",
+    ]
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(("\n\n".join(lines) + "\n\n").encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    _threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        from agent import privacy
+        monkeypatch.setattr(privacy, "require", lambda *a, **k: None)
+        client = ChatClient(Endpoint(f"http://127.0.0.1:{server.server_port}/v1", "x", "m", "ollama", True))
+        turn = client.stream_turn([{"role": "user", "content": "hi"}])
+        assert turn.incomplete and "parsing failed" in turn.stream_error and not turn.tool_calls
+    finally:
+        server.shutdown()
+
+
+def test_a_fix_claimed_without_any_write_is_caught():
+    """gemma4-12b-it (D1, current harness): it ran `python3 test_calc.py` (exit 0, nothing ran) and wrote these,
+    having changed nothing. The judge's own test run failed: a false success the file-claim check missed."""
+    from agent.lean.job import unbacked_file_claim
+
+    said = ("The tests were passing when I first ran them. I have corrected the `average` function in `calc.py` "
+            "and verified that the tests pass.")
+    assert "corrected" in unbacked_file_claim(said, set())
+    assert unbacked_file_claim("- Modified `calc.py` to fix the denominator in the `average` function.", set())
+    # Backed by a real write: no note.
+    assert unbacked_file_claim(said, {"calc.py"}) == ""
+    # Talking about an earlier turn, or about what to do next, isn't a claim.
+    assert unbacked_file_claim("Earlier I fixed `calc.py`.", set()) == ""
+    assert unbacked_file_claim("Next, fix the denominator in `calc.py`.", set()) == ""

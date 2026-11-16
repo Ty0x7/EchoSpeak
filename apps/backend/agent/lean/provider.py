@@ -254,6 +254,11 @@ class ModelTurn:
     tool_calls: list[ToolCall] = field(default_factory=list)
     finish_reason: str = ""
     usage: dict[str, int] = field(default_factory=dict)
+    # An error the server sent inside an HTTP 200 stream (it ends the stream; there is no finish_reason).
+    stream_error: str = ""
+    # Set by the chat-completions stream when it ended with neither a finish reason nor a cancel: the reply
+    # broke off or the server couldn't produce it (e.g. a tool call its parser rejected). Other adapters leave it False.
+    incomplete: bool = False
     provider_blocks: list[dict[str, Any]] = field(default_factory=list)
     provider_state: dict[str, Any] = field(default_factory=dict)
     audio: list[dict[str, Any]] = field(default_factory=list)
@@ -660,6 +665,11 @@ class ChatClient:
                     chunk = json.loads(payload)
                 except json.JSONDecodeError:
                     continue
+                if chunk.get("error"):
+                    # Kept, not skipped: without it a broken reply looks like an empty one.
+                    err = chunk["error"]
+                    turn.stream_error = str(err.get("message") if isinstance(err, dict) else err)[:300]
+                    continue
                 usage = chunk.get("usage")
                 if isinstance(usage, dict):
                     turn.usage = {
@@ -720,6 +730,7 @@ class ChatClient:
         emit_content(visible)
         turn.content = "".join(content_parts)
         turn.reasoning = "".join(reasoning_parts)
+        turn.incomplete = bool(turn.stream_error) or not turn.finish_reason
         if partial_calls and turn.finish_reason not in {"tool_calls", "stop", "cancelled"}:
             raise ProviderError(502, "Tool-call stream did not finish completely; no tool calls from this turn were executed.", self.endpoint.provider)
         for index in sorted(partial_calls):

@@ -195,3 +195,37 @@ def test_a_prompt_that_cannot_fit_ends_the_turn_honestly(monkeypatch):
     result = turn.run("Hello?")
     assert not result.success and "context window" in result.text and "?" != result.text
     assert len(client.calls) == 3 and ran == []  # two retries, then an honest error, never the cut reply
+
+
+def test_lmstudio_served_window_comes_from_the_loaded_instance(monkeypatch):
+    """LM Studio picks the window at load time and its OpenAI endpoint doesn't say; REST v1 does."""
+    import http.server
+    import json as _json
+    import threading as _threading
+
+    body = _json.dumps({"models": [
+        {"type": "llm", "key": "other/model", "max_context_length": 131072, "loaded_instances": []},
+        {"type": "llm", "key": "qwen/qwen3.5-9b", "max_context_length": 262144,
+         "loaded_instances": [{"id": "qwen/qwen3.5-9b", "config": {"context_length": 8192}}]},
+    ]}).encode()
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            ok = self.path == "/api/v1/models"
+            self.send_response(200 if ok else 404)
+            self.end_headers()
+            self.wfile.write(body if ok else b"{}")
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    _threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        base = f"http://127.0.0.1:{server.server_port}"
+        loaded = Endpoint(base + "/v1", "lm-studio", "qwen/qwen3.5-9b", "lmstudio", True)
+        unloaded = Endpoint(base + "/v1", "lm-studio", "other/model", "lmstudio", True)
+        assert window.served(loaded) == 8192
+        assert window.served(unloaded) == 0  # the trained maximum is not what is served
+    finally:
+        server.shutdown()
