@@ -285,6 +285,29 @@ prompt or the full message list.
    server-initiated requests, no SSE resumability). EchoSpeak's client depends on the SDK following it. No
    framework documents file-conflict detection between agents beyond serialising writes and using worktrees.
 
+## Update, 16 November 2026: C1–C5 fixed
+
+Each fix has a regression test in `tests/test_execution_reliability.py`. Every test was run against the unfixed
+code first and failed there, reproducing the original defect, then passed after the fix.
+
+| # | Fix | Test(s) |
+|---|---|---|
+| C1 | `toolbox._mcp_outcome`: an MCP `isError` result arriving as JSON text is a failure. A call that raised in flight (`mcp_tool_error`: timeout, lost connection) is **uncertain**, so the work ledger reconciles it rather than recording "completed". A server being unavailable, or an invalid tool name, is a plain failure (nothing was sent). | `test_c1_*` (4) |
+| C2 | `loop._run_tools`: read-only calls share the pool only when every call in the step is read-only and nothing would ask (`_may_run_unasked_in_parallel`). Otherwise all calls run one by one, in the model's order, each through `_approve`. A step made only of reads stays parallel (`test_lean_group` still passes). | `test_c2_*` (2) |
+| C3 | The owner's rule. Stop kills a running foreground command and its process group (`progress.stop_requested`). Background processes record their owning turn's Stop event, their session, and whether they're a server. When a turn is stopped (by the loop's end, `/query/cancel` or `/lean/stop-all`), its own non-server work stops; its servers keep running and are listed (`servers_running`, plus a `processes_stopped` event). They stop explicitly through `POST /lean/terminal/stop-servers` or `POST /lean/stop-all?servers=true`. Kill escalates to SIGKILL for the **group** after a 3 s grace. | `test_c3_*` (3, POSIX) |
+| C4 | `mcp_client._inventory_changed` applies the startup trust check (`mcp_trust.tools_ok`) to `list_changed`. Changed tools register nothing, and the server waits for re-approval (`approval: tools_changed`). | `test_c4_*` (2) |
+| C5 | The `tool_start` event input, the saved tool-run arguments and both approval-request events carry redacted arguments. The tool and the approval binding still get the real values. | `test_c5_*` (1) |
+
+**Still open from this report:**
+- **Orphans after a crash.** `_PROCESSES` is in memory only, so host processes outlive a backend crash. The fix would
+  persist process groups and reap them at startup.
+- **The journal marks a run `cancelled` before the loop has stopped** (`chat.py`).
+- **A Docker exec that times out keeps running** in the container.
+- The valuable and optional items V1–V7 and O1–O4.
+
+**Test run:** 1,509 passed and 50 skipped across the 109 test files touching these areas. The 3 failures also fail
+on `05209a6`: one fails on its own, two depend on test order.
+
 ## 3. Proposal: prioritised improvements
 
 **Critical:** correctness or safety defects confirmed in code. Each is small and testable with the existing

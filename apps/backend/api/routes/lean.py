@@ -856,11 +856,22 @@ def resolve_contradiction(request: ContradictionResolveRequest) -> dict[str, Any
 
 
 @router.post("/stop-all")
-def stop_all() -> dict[str, Any]:
-    """Stop everything: cancel every running agent and pause routines, channels and A2A."""
+def stop_all(servers: bool = False) -> dict[str, Any]:
+    """Stop everything: cancel every running agent and pause routines, channels and A2A.
+
+    Agents' own background work stops; dev servers keep running and are listed unless ``servers=true``.
+    """
     from agent.lean import stop
 
-    return stop.stop_everything("Stopped from the app")
+    return stop.stop_everything("Stopped from the app", include_servers=servers)
+
+
+@router.post("/terminal/stop-servers")
+def stop_terminal_servers(session_id: str = "") -> dict[str, Any]:
+    """The explicit way to end servers agents started (one chat's, or all), which Stop leaves running."""
+    from agent.lean.terminal import stop_servers
+
+    return {"stopped": stop_servers(session_id)}
 
 
 @router.post("/resume")

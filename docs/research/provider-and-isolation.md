@@ -53,6 +53,23 @@ controls are set, which is where a harness gets surprised.
 - Read the server log for `truncating input prompt`.
 - Replay the recorded call (`scripts/replay_call.py`) with one variable changed.
 
+### 2.1 Embeddings, RAG, streaming and capability handling in EchoSpeak (code audit, 16 November)
+
+| Area | What EchoSpeak does | Gap and action |
+|---|---|---|
+| Embeddings: LM Studio | `OpenAICompatibleEmbeddings` posts strings to `<base>/v1/embeddings` (`agent/vector_store.py:254-269`; selected in `agent/memory.py` when the embedding provider is LM Studio). | The embedding-model picker read LM Studio's **deprecated REST v0** listing (`/api/v0/models`). **Fixed:** it reads REST v1 first (`type: "embedding"`, `loaded_instances`), then v0, then name matching for other servers. Tested against stubs of both shapes (`tests/test_search_models.py`). |
+| Embeddings: Ollama | Not used. An Ollama embedding provider falls back to the local ONNX models (MiniLM or EmbeddingGemma; `agent/embeddings.py`), which work offline with nothing extra loaded. | Ollama serves `/api/embed` and `/v1/embeddings`, and the same class could call it. No Ollama embedding model is installed here, so this is untested and left as an option. |
+| RAG and documents | Vector store with ONNX or provider embeddings, plus an optional ONNX cross-encoder reranker; keyword recall when embeddings are off. | No provider dependency beyond the embeddings above. |
+| Streaming | One SSE parser for both servers. It reads `reasoning` (Ollama) and `reasoning_content` (LM Studio), content with `<think>` scrubbing, tool-call fragments, `finish_reason`, and usage in the last chunk. It now also keeps an error object sent inside the stream, and marks a stream that ended without a finish reason as incomplete (`05209a6`). | Live-verified on Ollama only. |
+| Tools | `tools` + `tool_choice: "auto"` on `/v1`; lenient recovery of text-form calls; an incomplete tool-call stream is refused (no partial calls run). | Same path for both servers. LM Studio not live-tested. |
+| Context window | Served window from `/api/ps` (Ollama) and `/api/v1/models` `loaded_instances[].config.context_length` (LM Studio, `05209a6`). | LM Studio tested against a stub only. |
+| Capability discovery | Thinking controls come from model-name rules plus capability-profile metadata (`provider.thinking_controls`). Model load and readiness use LM Studio's REST v1 (`model_runtime.ensure_selected_model_ready`). | LM Studio reports `capabilities.trained_for_tool_use` and `reasoning.allowed_options` per model, and EchoSpeak doesn't read them yet. Reading them would replace name guesses for LM Studio models. Proposed, not done (no live LM Studio to verify against). |
+| Reasoning control | `reasoning_effort` (or `chat_template_kwargs.enable_thinking` where a profile says so), retried without it if rejected. | LM Studio reportedly ignores thinking-off on `/v1` for Qwen 3.5 ([bug #1990](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1990)). Its native `/api/v1/chat` is the documented alternative. Untested here. |
+
+**Evidence status.** Ollama is measured live. LM Studio comes from its documentation, with EchoSpeak's code tested
+against stubs of the documented responses. LM Studio isn't installed on this machine, and nothing was downloaded to
+test it.
+
 These checks are written into the skill.
 
 **Sources:**

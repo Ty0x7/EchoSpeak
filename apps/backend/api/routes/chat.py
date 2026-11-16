@@ -289,11 +289,21 @@ async def cancel_query(request: QueryCancelRequest):
     get_state_store().set_queue_paused(owner_session, True)
     from agent.query_journal import get_query_journal
     get_query_journal().finish(request.request_id, "cancelled")
+    # The stopped turn's own background work ends now (a foreground command ends with its turn). Servers it
+    # started keep running and are listed, so the app can offer to stop them (POST /lean/terminal/stop-servers).
+    try:
+        from agent.lean.terminal import stop_cancelled_processes
+
+        processes = stop_cancelled_processes()
+    except Exception:
+        processes = {"stopped": [], "servers_running": []}
     return {
         "cancelled": True,
         "request_id": request.request_id,
         "execution_id": execution_id,
         "thread_id": owner_session,
+        "processes_stopped": processes["stopped"],
+        "servers_running": processes["servers_running"],
     }
 
 

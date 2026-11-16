@@ -767,9 +767,87 @@ class BackgroundProcess:
     container_pid: str = ""
     # Sandbox internet was switched on for it ("ask" policy): off again once it ends.
     network: bool = False
+    # Who it belongs to (C3). `owner` is the Stop event of the turn that started it: when that turn is stopped,
+    # its own work stops too. A server (a dev server or watcher, or anything started with process_start) is
+    # kept running and reported instead, and stops only when asked (stop_servers).
+    owner: Optional[threading.Event] = field(default=None, repr=False)
+    session_id: str = ""
+    server: bool = False
 
 
 _PROCESSES: dict[str, BackgroundProcess] = {}
+
+
+def _kill_group(popen: subprocess.Popen, grace: float = 3.0) -> None:
+    """Stop a process and everything it started. POSIX: SIGTERM to the group, then after the grace period
+    SIGKILL to the group, not just the leader: a child that ignores SIGTERM used to outlive its leader."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(popen.pid), "/T", "/F"], capture_output=True,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        return
+    try:
+        os.killpg(popen.pid, 15)
+    except OSError:
+        popen.terminate()
+    try:
+        popen.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(popen.pid, 9)
+    except OSError:
+        pass  # the group is already gone
+    try:
+        popen.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def _owner() -> tuple[Optional[threading.Event], str]:
+    """The running turn's Stop event and session, for a process it starts (None and '' outside a turn)."""
+    from agent.lean import progress
+
+    try:
+        from agent.tools import _tool_execution_context
+
+        session = str((_tool_execution_context.get() or {}).get("session_id") or "")
+    except Exception:
+        session = ""
+    return progress.cancel_event(), session
+
+
+def stop_cancelled_processes() -> dict[str, Any]:
+    """After a Stop: end the stopped turns' own background work and list their servers, which keep running.
+
+    Called by the cancel routes, Stop everything and the loop when a turn ends stopped. Processes of turns
+    that weren't stopped are untouched.
+    """
+    stopped, servers = [], []
+    for proc in list(_PROCESSES.values()):
+        if proc.owner is None or not proc.owner.is_set() or not _process_alive(proc):
+            continue
+        if proc.server:
+            servers.append({"id": proc.id, "command": proc.command, "cwd": proc.cwd, "started_at": proc.started_at})
+            continue
+        try:
+            _stop(proc)
+            stopped.append(proc.id)
+        except Exception:
+            logger.debug("Stopping process {} failed", proc.id, exc_info=True)
+    return {"stopped": stopped, "servers_running": servers}
+
+
+def stop_servers(session_id: str = "") -> list[str]:
+    """The explicit way to end servers that Stop left running: those of one chat, or all of them."""
+    stopped = []
+    for proc in list(_PROCESSES.values()):
+        if proc.server and (not session_id or proc.session_id == session_id) and _process_alive(proc):
+            try:
+                _stop(proc)
+                stopped.append(proc.id)
+            except Exception:
+                logger.debug("Stopping server {} failed", proc.id, exc_info=True)
+    return stopped
 _PROC_DIR = Path(DATA_DIR) / "lean" / "processes"
 
 
@@ -824,18 +902,7 @@ def stop_all_processes() -> None:
 
 def _stop(proc: BackgroundProcess) -> None:
     if proc.mode == "host" and proc.popen is not None and proc.popen.poll() is None:
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(proc.popen.pid), "/T", "/F"], capture_output=True,
-                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        else:
-            try:
-                os.killpg(proc.popen.pid, 15)  # the whole group: a dev server's children too
-            except OSError:
-                proc.popen.terminate()
-        try:
-            proc.popen.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.popen.kill()
+        _kill_group(proc.popen)  # the whole group: a dev server's children too
     elif proc.mode == "docker" and proc.container_pid:
         _SANDBOX.exec(f"kill -TERM -- -{proc.container_pid} 2>/dev/null || kill -TERM {proc.container_pid}", "/work", 15)
     _release_network(proc)
@@ -964,14 +1031,22 @@ class Terminal:
             from agent.lean import progress
 
             deadline = time.monotonic() + wait
+            stopped = False
             while True:
                 try:
                     code = popen.wait(timeout=max(0.05, min(0.6, deadline - time.monotonic())))
                     break
                 except subprocess.TimeoutExpired:
+                    if progress.stop_requested():
+                        # Stop ends the command now (C3): it used to run on for up to 900 s, then carry on
+                        # in the background.
+                        _kill_group(popen)
+                        code, stopped = popen.returncode if popen.returncode is not None else -15, True
+                        break
                     if time.monotonic() >= deadline:
+                        owner, session = _owner()
                         proc = BackgroundProcess(id=proc_id, command=command, cwd=str(cwd), mode="host", log_path=log,
-                                                 err_path=err, popen=popen)
+                                                 err_path=err, popen=popen, owner=owner, session_id=session)
                         return Launch(False, proc=proc)
                     latest = _last_line(log) or _last_line(err)
                     if latest:
@@ -982,14 +1057,18 @@ class Terminal:
                     path.unlink()
                 except OSError:
                     pass
+            if stopped:
+                error = (error + "\n" if error else "") + "Stopped by the user: the command and everything it started were ended."
             return Launch(True, code, out, error)
         plan = mount_plan(self.project_root)
         workdir = to_container_path(cwd, plan) or "/work"
         finished, code, out, error = _SANDBOX.launch(translate_windows_paths(command, plan), workdir, wait, proc_id)
         if finished:
             return Launch(True, code, out, error)
+        owner, session = _owner()
         proc = BackgroundProcess(id=proc_id, command=command, cwd=str(cwd), mode="docker",
-                                 log_path=Path(f"/tmp/es-proc-{proc_id}.log"), container_pid=str(code), network=network)
+                                 log_path=Path(f"/tmp/es-proc-{proc_id}.log"), container_pid=str(code), network=network,
+                                 owner=owner, session_id=session)
         return Launch(False, proc=proc)
 
     def _start(self, command: str, args: dict[str, Any], wait: int) -> tuple[Optional[Launch], str, Path, str]:
@@ -1053,6 +1132,7 @@ class Terminal:
             return (f"[stopped after {wait}s · {label} · {cwd}]\n{_clip(so_far, 3000) or '(no output)'}\n"
                     f"It was stopped because {len(running)} background processes are already running: {others}. "
                     "Stop ones you no longer need with process_stop, then try again.")
+        proc.server = server  # servers outlive a Stop and are reported; other background work stops with its turn
         _PROCESSES[proc.id] = proc
         so_far = _clip(_tail(proc, 4000), 4000) or "(no output yet)"
         headline = ("started in the background (it keeps running)" if server

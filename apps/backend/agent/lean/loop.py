@@ -92,6 +92,11 @@ def empty_cause(turn: Any, window: int) -> str:
 COMPACT_FAILURES = 2
 
 
+def _redacted_card(card: dict[str, Any]) -> dict[str, Any]:
+    """An approval card as emitted (and journaled): configured secrets in its arguments are masked (C5)."""
+    return {**card, "args": policy.redact_payload(card.get("args"))} if card.get("args") else card
+
+
 # An EchoSpeak note written by the model itself, in its own reply (open tag through close, or to the end).
 _FORGED_NOTE = re.compile(r"<echospeak-note>.*?(?:</echospeak-note>|$)", re.S | re.I)
 
@@ -738,6 +743,16 @@ class LeanTurn:
                       "I couldn't put together a reply this time. Try asking again or rephrasing.")
             self._append_text("text", step, visible)
             self.emit({"type": "agent_token", "step": step, "data": visible})
+        if self.cancel.is_set():
+            # Stop ends this turn's own background work too; its servers keep running and are listed (C3).
+            try:
+                from agent.lean.terminal import stop_cancelled_processes
+
+                swept = stop_cancelled_processes()
+                if swept["stopped"] or swept["servers_running"]:
+                    self.emit({"type": "processes_stopped", "step": step, **swept})
+            except Exception:
+                logger.debug("Stopping the turn's processes failed", exc_info=True)
         self.emit({
             "type": "agent_done",
             "text": visible,
@@ -1007,7 +1022,12 @@ class LeanTurn:
 
         results: dict[str, tuple[bool, str]] = {}
         visual_results: dict[str, list[dict]] = {}
-        parallel = [item for item in prepared if not item[3] and self.toolbox.is_parallel_safe(item[1])]
+        # Read-only calls run together only when the whole step is such calls and none needs the owner: the pool
+        # doesn't go through _approve, and it ran before the step's other calls. An "ask" on a read went unasked,
+        # and a read listed after a write saw the state before it (C2). Anything else runs one by one, in order.
+        parallel = [item for item in prepared if not item[3] and self._may_run_unasked_in_parallel(*item[:3])]
+        if len(parallel) != len(prepared):
+            parallel = []
         sequential = [item for item in prepared if item not in parallel]
 
         if len(parallel) > 1:
@@ -1363,6 +1383,14 @@ class LeanTurn:
         self.timeline.append({"kind": "note", "step": step, "text": text, "at": time.time()})
         self.emit({"type": "auto_approved", "step": step, "note": text})
 
+    def _may_run_unasked_in_parallel(self, call: Any, name: str, args: dict[str, Any]) -> bool:
+        """A read-only call nothing would ask about: no policy ask and no approval rule (lost-work checks
+        concern writes, which never run in parallel)."""
+        if not self.toolbox.is_parallel_safe(name) or call.id in self._policy_reasons:
+            return False
+        needs, _reason = tool_needs_approval(self.toolbox.entry(name), name, args)
+        return not needs and settings.approval_mode() not in {"always"}
+
     def _approve(self, call: Any, name: str, args: dict[str, Any], step: int) -> tuple[bool, str, str]:
         """(allowed, the result text when not, and its outcome: refused, denied, held or skipped)."""
         entry = self.toolbox.entry(name)
@@ -1468,7 +1496,7 @@ class LeanTurn:
                 summary=approval.summary, reason=reason)
         self.timeline.append({"kind": "approval", "step": step, "id": approval.id, "tool_call_id": call.id,
                               "summary": approval.summary, "reason": reason, "decision": "", "at": time.time()})
-        self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **approval.public()})
+        self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **_redacted_card(approval.public())})
         with self._span("approval.wait", step=step, tool=name, rule=self._policy_rules.get(call.id, "") or "approval") as span:
             decision = broker.wait(approval, self.cancel)
             span.set(decision=decision)
@@ -1515,7 +1543,7 @@ class LeanTurn:
         self.timeline.append({"kind": "approval", "step": step, "id": pending.id, "tool_call_id": call.id,
                               "tool": ask.ASK_USER, "summary": question, "question": question, "options": options,
                               "allow_other": allow_other, "reason": "", "decision": "", "answer": "", "at": time.time()})
-        self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **pending.public()})
+        self.emit({"type": "approval_request", "step": step, "tool_call_id": call.id, **_redacted_card(pending.public())})
         decision = broker.wait(pending, self.cancel)
         for item in self.timeline:
             if item.get("kind") == "approval" and item.get("id") == pending.id:
@@ -1600,15 +1628,17 @@ class LeanTurn:
         # A short, redacted copy of the arguments, so a saved chat can become a replay case (agent/lean/replays.py).
         item["args"] = policy.redact_payload(safe_args_preview(args, 200))
         self.timeline.append(item)
+        # The event is journaled and the tool run is saved, so both get the redacted copy too (C5); only the
+        # tool itself, and the approval binding's hash, see the real values.
         self.emit({"type": "tool_start", "step": step, "id": call.id, "name": name, "label": label,
-                   "input": json.dumps(safe_args_preview(args, 200), ensure_ascii=False)[:400]})
+                   "input": json.dumps(policy.redact_payload(safe_args_preview(args, 200)), ensure_ascii=False)[:400]})
         if self.persist_tool_runs:
             try:
                 from agent.state import get_state_store
 
                 get_state_store().create_tool_run(
                     turn_id=self.execution_id, tool_name=name, session_id=self.session_id,
-                    run_id=call.id, canonical_arguments=safe_args_preview(args, 2000),
+                    run_id=call.id, canonical_arguments=policy.redact_payload(safe_args_preview(args, 2000)),
                 )
             except Exception:
                 logger.debug("Lean tool run persistence failed", exc_info=True)

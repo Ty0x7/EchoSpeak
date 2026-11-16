@@ -348,8 +348,10 @@ def local_reranker() -> Optional[OnnxCrossEncoder]:
 def lmstudio_embedding_models(base_url: str, timeout: float = 3.0) -> list[dict[str, Any]]:
     """Embedding models the local model server knows about: [{id, loaded}]. Empty when it isn't running.
 
-    LM Studio's /api/v0/models says which models are embedding models and whether they're loaded;
-    other OpenAI-compatible servers only list ids, so names containing "embed" stand in there.
+    LM Studio's REST API says which models are embedding models and whether they're loaded: v1
+    (``/api/v1/models``: ``type: "embedding"``, ``loaded_instances``) since 0.4, and the deprecated v0
+    (``/api/v0/models``: ``type: "embeddings"``, ``state``) on older versions. Other OpenAI-compatible
+    servers only list ids, so names containing "embed" stand in there.
     """
     import httpx
 
@@ -358,6 +360,11 @@ def lmstudio_embedding_models(base_url: str, timeout: float = 3.0) -> list[dict[
         root = root[:-3]
     try:
         with httpx.Client(timeout=timeout) as client:
+            response = client.get(f"{root}/api/v1/models")
+            if response.status_code == 200 and isinstance(response.json().get("models"), list):
+                return [{"id": str(m.get("key")), "loaded": bool(m.get("loaded_instances"))}
+                        for m in response.json()["models"]
+                        if isinstance(m, dict) and str(m.get("type") or "") == "embedding" and m.get("key")]
             response = client.get(f"{root}/api/v0/models")
             if response.status_code == 200:
                 rows = response.json().get("data") or []

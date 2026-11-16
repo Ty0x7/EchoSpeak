@@ -61,6 +61,11 @@ def stop_requested() -> bool:
     return bool(event is not None and event.is_set())
 
 
+def cancel_event() -> Optional[threading.Event]:
+    """The running turn's Stop event itself, for work that outlives the call (terminal background processes)."""
+    return _cancel.get()
+
+
 @contextmanager
 def reporting(emit: Callable[[str], None], cancel: Optional[threading.Event] = None,
               emit_state: Optional[Callable[[dict], None]] = None,

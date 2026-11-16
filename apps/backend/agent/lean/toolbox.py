@@ -241,6 +241,34 @@ def uncertain_after(exc: BaseException) -> bool:
     return not isinstance(exc, _REJECTED_BEFORE_EFFECT)
 
 
+# MCP errors agent/mcp_client.py reports before anything reached the server: nothing ran.
+_MCP_NOT_SENT = {"mcp_server_unavailable", "invalid_mcp_tool_name"}
+
+
+def _mcp_outcome(raw: Any, output: str) -> tuple[bool, bool, str]:
+    """(ok, uncertain, output) for an MCP result that arrived as JSON text.
+
+    mcp_client returns its own failures as a JSON string ({"isError": true, "error": {...}}), and a server's
+    error result can arrive the same way. Read as text it looked like success, and the work ledger recorded
+    the action as completed (C1). A call that raised in flight (timeout, lost connection) may have acted on
+    the server, so its effect is unknown; one stopped before sending, or reported by the server, failed.
+    """
+    payload = raw
+    if isinstance(raw, str) and raw.lstrip().startswith("{"):
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            return True, False, output
+    if not isinstance(payload, dict) or not payload.get("isError"):
+        return True, False, output
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    code = str(error.get("code") or "")
+    message = str(error.get("message") or "").strip()
+    if not code:  # the server's own error result: the tool ran and said it failed
+        return False, False, output
+    return False, code not in _MCP_NOT_SENT, f"Error: the MCP call failed ({code}){': ' + message if message else ''}.\n{output}"
+
+
 @dataclass
 class ToolResult:
     ok: bool
@@ -928,6 +956,8 @@ class Toolbox:
                 visual = [observations.reference(item) for item in images]
             output = raw if isinstance(raw, str) else json.dumps(raw, default=str, ensure_ascii=False)
             ok = not looks_failed(output) and not (isinstance(raw, dict) and raw.get("isError"))
+            if ok and str(getattr(entry, "origin", "")) == "mcp":
+                ok, uncertain, output = _mcp_outcome(raw, output)
             if ok and str(getattr(entry, "origin", "")) == "mcp":
                 from agent import mcp_apps
                 view = mcp_apps.for_result(self.session_id, name, args, raw)  # the server's interactive view, if any
