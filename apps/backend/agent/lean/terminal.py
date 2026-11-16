@@ -728,12 +728,87 @@ def _host_launch(command: str, cwd: Path, log: Path, err: Path, shell: str = "",
         env = linux_sandbox.sandbox_env(env)
     with open(log, "w", encoding="utf-8", errors="replace") as out_handle, \
             open(err, "w", encoding="utf-8", errors="replace") as err_handle:
-        return subprocess.Popen(
+        popen = subprocess.Popen(
             argv, cwd=str(cwd), stdin=subprocess.DEVNULL,
             stdout=out_handle, stderr=err_handle, env=env,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
             start_new_session=os.name != "nt",
         )
+    _remember(popen, command)
+    return popen
+
+
+# ── processes left behind by a crash ─────────────────────────────────────
+# Each command runs in its own session, so a backend that crashes leaves them running, and the in-memory
+# process list that could stop them is gone. Every host or bubblewrap process is recorded here (pid and the
+# kernel's start time, so a recycled pid never matches); the next start of this backend ends what is still
+# running from the last one (reap_orphans). POSIX only: Windows keeps its old behaviour.
+_REGISTRY_LOCK = threading.Lock()
+
+
+def _registry() -> Path:
+    return Path(DATA_DIR) / "lean" / "processes" / "running.json"
+
+
+def _start_time(pid: int) -> str:
+    """The kernel's start time of ``pid`` (field 22 of /proc/<pid>/stat), or '' if it isn't running."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+        return stat.rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return ""
+
+
+def _load_registry() -> dict[str, dict[str, str]]:
+    try:
+        data = json.loads(_registry().read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _remember(popen: subprocess.Popen, command: str) -> None:
+    if os.name != "posix":
+        return
+    start = _start_time(popen.pid)
+    if not start:
+        return
+    with _REGISTRY_LOCK:
+        live = {pid: row for pid, row in _load_registry().items() if _start_time(int(pid)) == row.get("start")}
+        live[str(popen.pid)] = {"start": start, "command": command[:160]}
+        try:
+            _registry().parent.mkdir(parents=True, exist_ok=True)
+            _registry().write_text(json.dumps(live), encoding="utf-8")
+        except OSError:
+            logger.debug("Could not record process {}", popen.pid, exc_info=True)
+
+
+def reap_orphans() -> list[dict[str, str]]:
+    """At startup: end the process groups a previous run of this backend left running. Returns what was ended."""
+    if os.name != "posix":
+        return []
+    with _REGISTRY_LOCK:
+        rows = _load_registry()
+        ended = []
+        for pid, row in rows.items():
+            if _start_time(int(pid)) != row.get("start"):
+                continue  # gone, or the pid now belongs to something else
+            for sig in (15, 9):
+                try:
+                    os.killpg(int(pid), sig)
+                except OSError:
+                    break
+                if sig == 15:
+                    time.sleep(1.0)
+            ended.append({"pid": pid, "command": row.get("command", "")})
+        try:
+            _registry().unlink()
+        except OSError:
+            pass
+    if ended:
+        logger.warning("Ended {} command(s) left running by EchoSpeak's last run: {}", len(ended),
+                       "; ".join(r["command"][:60] for r in ended))
+    return ended
 
 
 def _read(path: Optional[Path], chars: int = 0) -> str:

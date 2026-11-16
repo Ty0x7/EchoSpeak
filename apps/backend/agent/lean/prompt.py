@@ -136,10 +136,9 @@ def _environment(*, project_root: str, notes: list[str], terminal_note: str = ""
                  computer_note: str = "", can_write: bool = True) -> str:
     from agent.tools import _file_tool_roots, _tool_execution_context
 
-    now = datetime.now().astimezone()
     lines = [
         "## Environment",
-        f"- Now: {now.strftime('%A, %B %d, %Y %I:%M %p %Z').strip()}",
+        # The time is at the very end of the prompt (_right_now): it changes every minute.
         f"- Computer: {platform.system()} {platform.release()}; home folder {os.path.expanduser('~')}",
     ]
     if project_root:
@@ -245,7 +244,7 @@ def build_system_prompt(
         WRITING_REPLIES,
         "" if code else _for_tools(SHOWING_ANSWERS, tool_names),
         "" if code else _team(persona, list(teammates or []), room_name),
-        _environment(project_root=project_root, notes=list(notes or []) + ([git_note] if git_note else []),
+        _environment(project_root=project_root, notes=list(notes or []),
                      terminal_note=terminal_note, project_overview=project_overview, computer_note=computer_note,
                      can_write=can_write),
         # What is on and off this turn, from the live toolbox and settings (agent/lean/capabilities.py).
@@ -265,5 +264,21 @@ def build_system_prompt(
         ("## From past conversations (they match what the user is referring to)\n"
          + "\n".join(f"- {line}" for line in past_chats)) if past_chats else "",
         ("## Who you're talking to\n" + caller_note.strip()) if caller_note.strip() else "",
+        # Last, because these change between turns. Model servers reuse the longest unchanged start of a prompt
+        # (llama.cpp's prompt cache, providers' prompt caching): with the minute clock and git status near the top,
+        # everything after them was processed again on every turn.
+        _right_now(git_note),
     ]
     return "\n\n".join(section for section in sections if section).strip()
+
+
+def now_line() -> str:
+    """The current local time as a prompt line. Both prompt builders put it last (it changes every minute)."""
+    return f"- Now: {datetime.now().astimezone().strftime('%A, %B %d, %Y %I:%M %p %Z').strip()}"
+
+
+def _right_now(git_note: str = "") -> str:
+    lines = ["## Right now", now_line()]
+    if git_note:
+        lines.append(f"- Note: {git_note}")
+    return "\n".join(lines)

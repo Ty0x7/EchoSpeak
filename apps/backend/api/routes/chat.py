@@ -287,8 +287,8 @@ async def cancel_query(request: QueryCancelRequest):
     event.set()
     # Stop means stop: queued follow-ups (and steers moved to the queue) wait for the owner.
     get_state_store().set_queue_paused(owner_session, True)
-    from agent.query_journal import get_query_journal
-    get_query_journal().finish(request.request_id, "cancelled")
+    # The journal is not marked here: the run's collector marks it "cancelled" when the turn has actually stopped
+    # (below, after its last events). Marking it now let a reader stop before the final events arrived.
     # The stopped turn's own background work ends now (a foreground command ends with its turn). Servers it
     # started keep running and are listed, so the app can offer to stop them (POST /lean/terminal/stop-servers).
     try:
@@ -434,29 +434,6 @@ def _record_session_message(thread_id: Optional[str], message: str) -> None:
 
 
 # ── Observability Dashboard (v6.0.0) ────────────────────────────────
-
-# ── NDJSON Streaming (v6.0.0) ────────────────────────────────────────
-
-@router.get("/stream/{request_id}")
-async def stream_events(request_id: str):
-    """Stream tool-execution events as NDJSON for real-time UI updates.
-
-    Returns a StreamingResponse with Content-Type: application/x-ndjson.
-    Each line is a JSON object with event_type, timestamp, tool_name, data, etc.
-    """
-    from starlette.responses import StreamingResponse
-    from agent.stream_events import get_stream_buffer
-
-    buffer = get_stream_buffer(request_id)
-    return StreamingResponse(
-        buffer.stream(),
-        media_type="application/x-ndjson",
-        headers={
-            "X-Request-Id": request_id,
-            "Cache-Control": "no-cache",
-        },
-    )
-
 
 @router.post("/query/stream")
 async def query_stream(request: QueryRequest):

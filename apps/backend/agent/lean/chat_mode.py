@@ -257,11 +257,10 @@ def build_prompt(
     comes last, with the clock (which changes every minute) at the very end. ``sizes`` receives
     each section's length for the run trace.
     """
-    from agent.lean.prompt import _environment, _memory, identity_section
+    from agent.lean.prompt import _environment, _memory, identity_section, now_line
 
     environment = _environment(project_root=project_root, notes=list(notes or []), can_write=False)
-    clock = next((line for line in environment.split("\n") if line.startswith("- Now:")), "")
-    environment = "\n".join(line for line in environment.split("\n") if line != clock)
+    clock = now_line()  # _environment no longer carries it: both builders put the clock last
     compact = profile == "compact"
     sections = [
         # Stable for the life of the chat.

@@ -68,6 +68,15 @@ NUDGE_INCOMPLETE = ("Your last reply didn't come through complete: if it contain
 NUDGE_WINDOW_SPENT = ("Your reasoning filled the model's context window before you wrote the answer. Write the answer "
                       "now, directly and concisely, from what you already worked out. Don't deliberate again.")
 CONTINUATIONS = 2
+# A model call that failed for a passing reason (rate limit, server error, dropped connection, a local runner
+# that crashed and reloads) is retried this many times per turn, after these pauses, before the turn ends with
+# the error. One hiccup used to end a long task outright. Only calls that streamed nothing visible are retried,
+# and no tool has run at that point, so a retry has no side effect.
+TRANSIENT_RETRIES = 2
+TRANSIENT_PAUSES = (2.0, 5.0)
+_TRANSIENT_STATUS = {408, 429, 500, 502, 503, 504}
+_TRANSIENT_ERRORS = ("ConnectError", "ConnectTimeout", "ReadError", "RemoteProtocolError", "WriteError",
+                     "ConnectionResetError", "ConnectionRefusedError", "BrokenPipeError")
 
 
 def empty_cause(turn: Any, window: int) -> str:
@@ -459,6 +468,7 @@ class LeanTurn:
         error = ""
         success = True
         overflow_retries = 0
+        transient_retries = 0
         continuations = 0
         step = 0
         planned = self.prefetch() if self.prefetch is not None else []
@@ -496,10 +506,25 @@ class LeanTurn:
                     self._fit_context(messages, tools, aggressive=True)
                     step -= 1
                     continue
+                if transient_retries < TRANSIENT_RETRIES and self._retry_transient(exc, step, transient_retries):
+                    transient_retries += 1
+                    step -= 1
+                    continue
                 error = str(exc)
                 success = False
                 break
             except Exception as exc:  # network errors, model unloaded, etc.
+                if isinstance(exc, PermissionError) and "budget exhausted" in str(exc).lower():
+                    # A limit reached, not a crash: it used to be logged as a failed model call with a traceback.
+                    stop_reason = "budget"
+                    error = ("This task reached its work budget (tokens or time), so I stopped here. What's done so far is "
+                             "kept; ask me to continue if you want more.")
+                    success = False
+                    break
+                if transient_retries < TRANSIENT_RETRIES and self._retry_transient(exc, step, transient_retries):
+                    transient_retries += 1
+                    step -= 1
+                    continue
                 logger.exception("Lean model call failed")
                 error = f"{type(exc).__name__}: {exc}"
                 success = False
@@ -820,7 +845,10 @@ class LeanTurn:
             self._append_text("thinking", step, text)
             self.emit({"type": "reasoning_delta", "step": step, "text": text})
 
+        self._answer_streamed = False
+
         def on_content(text: str) -> None:
+            self._answer_streamed = True  # visible answer text: a retry would repeat it, so none is made
             self._append_text("text", step, text)
             self.emit({"type": "agent_token", "step": step, "data": text})
 
@@ -1383,6 +1411,19 @@ class LeanTurn:
         self.timeline.append({"kind": "note", "step": step, "text": text, "at": time.time()})
         self.emit({"type": "auto_approved", "step": step, "note": text})
 
+    def _retry_transient(self, exc: BaseException, step: int, attempt: int) -> bool:
+        """Wait and say so when ``exc`` is a passing failure worth one more try (see TRANSIENT_RETRIES)."""
+        status = int(getattr(exc, "status", 0) or 0)
+        passing = status in _TRANSIENT_STATUS or type(exc).__name__ in _TRANSIENT_ERRORS
+        if not passing or getattr(self, "_answer_streamed", False) or self.cancel.is_set():
+            return False
+        pause = TRANSIENT_PAUSES[min(attempt, len(TRANSIENT_PAUSES) - 1)]
+        reason = f"HTTP {status}" if status else type(exc).__name__
+        logger.info("Model call failed ({}); retrying in {}s", reason, pause)
+        self.emit({"type": "model_retry", "step": step, "attempt": attempt + 1, "reason": reason, "detail": str(exc)[:300],
+                   "pause_s": pause})
+        return not self.cancel.wait(pause)  # Stop during the pause ends the turn instead
+
     def _may_run_unasked_in_parallel(self, call: Any, name: str, args: dict[str, Any]) -> bool:
         """A read-only call nothing would ask about: no policy ask and no approval rule (lost-work checks
         concern writes, which never run in parallel)."""
@@ -1854,10 +1895,12 @@ class LeanTurn:
 
 def _friendly_error(error: str) -> str:
     low = error.lower()
+    if "work budget" in low:
+        return error  # already written for the owner (the budget stop above)
     if "connect" in low or "connection" in low:
-        return "I couldn't reach the model server. Is LM Studio (or your provider) running with a model loaded?"
+        return "I couldn't reach the model server. Is it running (Ollama, LM Studio or your provider) with a model available?"
     if "failed to load model" in low or "model unloaded" in low or "no models loaded" in low:
-        return "The model server couldn't load the selected model. Load it in LM Studio and try again."
+        return "The model server couldn't load the selected model. Check that it's installed and fits in memory, then try again."
     if "context" in low and ("length" in low or "window" in low or "n_ctx" in low):
         return "This conversation is larger than the model's context window. Start a new chat or raise the context length."
     if "timeout" in low or "timed out" in low:

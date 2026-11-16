@@ -152,6 +152,35 @@ def wrap_untrusted(name: str, output: str) -> str:
 _SECRET_CACHE: dict[str, Any] = {"at": 0.0, "values": []}
 
 
+_SECRET_NAME = re.compile(r"(?i)(key|token|secret|passw|credential|auth|cookie|session)")
+
+
+def _mcp_secret_values() -> list[str]:
+    """Secrets configured for MCP servers (their env and request headers). A server that echoes its own token,
+    or a tool that prints the environment, would otherwise pass it to the model. Only secret-looking entries
+    count, so ordinary values such as paths aren't masked."""
+    try:
+        from agent import mcp_client
+
+        manager = mcp_client._MANAGER  # only one that already exists; never start MCP just to read secrets
+    except Exception:
+        return []
+    if manager is None:
+        return []
+    out: list[str] = []
+    for state in list(getattr(manager, "servers", {}).values()):
+        for name, value in list((getattr(state, "env", None) or {}).items()):
+            if _SECRET_NAME.search(str(name)):
+                out.append(str(value))
+        for name, value in list((getattr(state, "headers", None) or {}).items()):
+            if _SECRET_NAME.search(str(name)):
+                text = str(value)
+                out.append(text)
+                if " " in text:  # "Bearer <token>": the bare token too
+                    out.append(text.split(" ", 1)[1])
+    return out
+
+
 def _secret_values() -> list[str]:
     """Values of the configured credentials (API keys, tokens, passwords), cached briefly.
 
@@ -168,6 +197,7 @@ def _secret_values() -> list[str]:
         raw = [getattr(config, key, "") for key in SECRET_TOP_LEVEL_SETTINGS if not key.endswith("_path")]
         for group in ("openai", "gemini", "anthropic", "xai"):
             raw.append(getattr(getattr(config, group, None), "api_key", ""))
+        raw.extend(_mcp_secret_values())
         values = sorted({str(v).strip() for v in raw if isinstance(v, str) and len(v.strip()) >= 12})
     except Exception:
         logger.debug("Could not read configured secrets for the policy check", exc_info=True)

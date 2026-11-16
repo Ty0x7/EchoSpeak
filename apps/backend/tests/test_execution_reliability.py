@@ -308,3 +308,157 @@ def test_c3_a_process_that_ignores_sigterm_is_still_stopped(monkeypatch, tmp_pat
         assert not _alive(stubborn, wait=10)
     finally:
         term.stop_all_processes()
+
+
+# ── Upgrade round, 16 November: transient retries, orphans, the cancel journal, a dead route ─────────────
+from agent.lean.provider import ProviderError  # noqa: E402
+
+
+class _Flaky:
+    """Fails the first `fails` calls with `exc`; optionally streams answer text before failing."""
+
+    def __init__(self, fails, exc, stream_first=False):
+        self.fails, self.exc, self.stream_first, self.calls = fails, exc, stream_first, 0
+        self.reasoning_effort = "medium"
+
+    def stream_turn(self, messages, **kw):
+        self.calls += 1
+        if self.calls <= self.fails:
+            if self.stream_first and kw.get("on_content"):
+                kw["on_content"]("Partial answer")
+            raise self.exc
+        return ModelTurn(content="All done.", finish_reason="stop")
+
+
+def _plain_turn(client, events):
+    box = Toolbox(toolsets=["none"], session_id="u1")
+    return LeanTurn(client=client, persona=AgentPersona(id="echo", name="Echo"), system_prompt="s", history=[],
+                    toolbox=box, session_id="u1", request_id="r", execution_id="e", emit=events.append,
+                    cancel=threading.Event())
+
+
+def test_a_passing_model_failure_is_retried_instead_of_ending_the_task(monkeypatch):
+    """A 503 (or a local runner that crashed and reloads) used to end a long task on the spot."""
+    import agent.lean.loop as loop_mod
+
+    monkeypatch.setattr(loop_mod, "TRANSIENT_PAUSES", (0.0, 0.0))
+    events = []
+    client = _Flaky(1, ProviderError(503, "model runner restarting", "ollama"))
+    result = _plain_turn(client, events).run("hi")
+    assert result.success and result.text == "All done." and client.calls == 2
+    assert [e["attempt"] for e in events if e["type"] == "model_retry"] == [1]
+
+
+def test_model_retries_are_bounded(monkeypatch):
+    import agent.lean.loop as loop_mod
+
+    monkeypatch.setattr(loop_mod, "TRANSIENT_PAUSES", (0.0, 0.0))
+    events = []
+    client = _Flaky(9, ProviderError(429, "rate limited", "openai"))
+    result = _plain_turn(client, events).run("hi")
+    assert not result.success and client.calls == 1 + loop_mod.TRANSIENT_RETRIES
+
+
+def test_no_retry_after_answer_text_was_shown_or_for_a_real_error(monkeypatch):
+    import agent.lean.loop as loop_mod
+
+    monkeypatch.setattr(loop_mod, "TRANSIENT_PAUSES", (0.0, 0.0))
+    shown = _Flaky(1, ProviderError(502, "stream dropped", "ollama"), stream_first=True)
+    assert not _plain_turn(shown, []).run("hi").success and shown.calls == 1  # the text would repeat
+    bad_key = _Flaky(1, ProviderError(401, "invalid key", "openai"))
+    assert not _plain_turn(bad_key, []).run("hi").success and bad_key.calls == 1
+
+
+@posix_only
+def test_commands_left_running_by_a_crashed_run_are_ended_at_the_next_start(monkeypatch, tmp_path):
+    """Commands run in their own session; after a crash the in-memory list that could stop them was gone."""
+    import subprocess
+    from agent.lean import terminal as term
+
+    monkeypatch.setattr(term, "DATA_DIR", tmp_path)
+    log, err = tmp_path / "o.log", tmp_path / "o.err"
+    orphan = term._host_launch("sleep 60", tmp_path, log, err)
+    unrelated = subprocess.Popen(["sleep", "60"], start_new_session=True)  # not EchoSpeak's: never touched
+    try:
+        rows = json.loads(term._registry().read_text())
+        assert str(orphan.pid) in rows
+        rows[str(unrelated.pid)] = {"start": "1", "command": "a recycled pid"}  # start time doesn't match
+        term._registry().write_text(json.dumps(rows))
+        ended = term.reap_orphans()
+        assert [r["pid"] for r in ended] == [str(orphan.pid)]
+        assert orphan.wait(timeout=5) is not None
+        assert unrelated.poll() is None
+        assert not term._registry().exists()
+    finally:
+        for p in (orphan, unrelated):
+            if p.poll() is None:
+                p.kill()
+
+
+def test_cancel_leaves_the_journal_to_the_run_that_actually_stops(monkeypatch):
+    """/query/cancel marked the journal "cancelled" at once, so a reader could stop before the final events."""
+    import asyncio
+
+    import agent.query_journal as journal_mod
+    import api.routes.chat as chat_routes
+    from api import deps
+
+    finished = []
+    monkeypatch.setattr(journal_mod, "get_query_journal", lambda: SimpleNamespace(finish=lambda *a, **k: finished.append(a)))
+    event = threading.Event()
+    monkeypatch.setitem(deps._ACTIVE_QUERY_CANCELLATIONS, "request-77", ("session-a", event, "execution-a"))
+    result = asyncio.run(chat_routes.cancel_query(chat_routes.QueryCancelRequest(
+        request_id="request-77", thread_id="session-a", execution_id="execution-a")))
+    assert result["cancelled"] is True and event.is_set()
+    assert finished == []
+
+
+def test_the_dead_stream_route_is_gone():
+    """GET /stream/{request_id} read a buffer nothing ever wrote to; the apps use /query/stream."""
+    from api.server import app
+    from tests.route_paths import iter_routes
+
+    assert not [p for p, _r in iter_routes(app) if p.startswith("/stream/")]
+
+
+def test_an_exhausted_work_budget_is_a_stop_reason_not_a_crash():
+    """coordination.check raises "Work budget exhausted"; it was logged as a failed model call with a traceback and
+    shown as "The model request failed: …"."""
+    class Budgeted:
+        reasoning_effort = "medium"
+
+        def stream_turn(self, messages, **kw):
+            raise PermissionError("Work budget exhausted")
+
+    events = []
+    result = _plain_turn(Budgeted(), events).run("keep going")
+    done = next(e for e in events if e["type"] == "agent_done")
+    assert done["stop_reason"] == "budget" and not result.success
+    assert "work budget" in result.text and "model request failed" not in result.text
+
+
+def test_mcp_server_secrets_are_redacted_from_tool_output(monkeypatch):
+    """Only EchoSpeak's own keys were redacted; an MCP server's token (env or header) passed through."""
+    from agent import mcp_client
+
+    manager = mcp_client.MCPManager()
+    manager.servers["shop"] = mcp_client.MCPServerState(
+        name="shop", env={"SHOP_API_TOKEN": "shp_live_9f8e7d6c5b4a", "WORK_DIR": "/home/someone/projects/shop"},
+        headers={"Authorization": "Bearer abcdef0123456789abcdef"})
+    monkeypatch.setattr(mcp_client, "_MANAGER", manager)
+    monkeypatch.setitem(policy._SECRET_CACHE, "at", 0.0)
+    out = policy.redact_secrets("token shp_live_9f8e7d6c5b4a, header abcdef0123456789abcdef, dir /home/someone/projects/shop")
+    assert "shp_live_9f8e7d6c5b4a" not in out and "abcdef0123456789abcdef" not in out
+    assert "/home/someone/projects/shop" in out  # not a secret: left alone
+    monkeypatch.setitem(policy._SECRET_CACHE, "at", 0.0)
+
+
+def test_the_clock_and_git_status_come_last_in_the_system_prompt():
+    """They change between turns; near the top, they made model servers reprocess the whole prompt every turn."""
+    from agent.lean.prompt import build_system_prompt
+
+    prompt = build_system_prompt(persona=AgentPersona(id="echo", name="Echo"), soul_text="", project_root="",
+                                 notes=[], git_note="git: branch main · clean", tool_names={"terminal", "file_read"})
+    last = prompt.rsplit("\n\n", 1)[-1]
+    assert last.startswith("## Right now") and "- Now: " in last and "git: branch main" in last
+    assert prompt.count("- Now: ") == 1

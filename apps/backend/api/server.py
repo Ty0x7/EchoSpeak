@@ -156,6 +156,12 @@ async def lifespan(app: FastAPI):
     threading.Thread(target=_autoconfigure_local_provider, name="local-model-autoconfig", daemon=True).start()
     from agent.query_journal import get_query_journal
     get_query_journal()  # Mark interrupted transport logs before any new run can claim an ID.
+    try:
+        from agent.lean.terminal import reap_orphans
+
+        reap_orphans()  # commands a crashed previous run left going, before any new one starts
+    except Exception:
+        logger.warning("Could not end commands left running by the last run", exc_info=True)
     from agent.generation_service import recover_pending_jobs
     threading.Thread(target=recover_pending_jobs, name="creation-recovery", daemon=True).start()
     build_id = (
