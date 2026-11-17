@@ -197,3 +197,37 @@ runs are present in each. The before run is `20261116-080108-upgrade-baseline-qw
     but unmeasured live.
 - **D7 (hard-coding an impossible test's answer) remains the model's weakest case.** The rule-and-skill experiment
   showed advice doesn't fix it. The next candidate is a harness action (§4).
+
+
+## 8. Identity/TUI follow-up across the 20 areas (16 November 2026)
+
+This follow-up maps the owner's reported defects to the existing 20-area review. It is a scoped source and
+regression review, not a new whole-system security certification. Historical scores above remain historical.
+Implementation and focused live evidence: [interfaces.md](interfaces.md#16-november-2026-identity-terminal-and-memory-follow-up).
+
+| # | Area | Follow-up disposition and relevant source |
+|---|---|---|
+| 1 | Providers | Retain: qwen3.5:9b tested through the existing Ollama adapter and recorder; no model-specific branch. |
+| 2 | Instructions/configuration | Fixed: unified default, common Echo soul, owner/project instructions in unified Chat (`config.py`, `runtime.py`, both prompt builders). Explicit legacy mode remains. |
+| 3 | Context | Retain: compact Chat now receives skill names and bounded descriptions; existing context fitting still governs the full request (`chat_mode.py`, `agent_skills.py`, `window.py`). |
+| 4 | Loop | Retain: false-action checks remain; description of stored knowledge is no longer mistaken for an action (`job.py`, `loop.py`). |
+| 5 | Tasks/goals | Retain: single-memory work gets evidence-based completion; durable task-board consolidation remains open (`runtime.py`, `job.py`, `coordination.py`). |
+| 6 | Execution state | Upgrade: typed memory readback evidence survives into the work record (`runtime.py`). No conversation migration. |
+| 7 | Registry/discovery | Fixed gap: approved skills are visible to compact Chat and were actually read live (`agent_skills.py`). Legacy tool duplicates remain open. |
+| 8 | Execution/validation | Retain: native memory tool uses existing ToolResult metadata; failed and missing readbacks are not verified (`toolbox.py`, `runtime.py`). |
+| 9 | Observations | Upgrade: durable memory readback supplies the receipt, instead of inferring verification from model prose. File/process/screen observations remain unchanged. |
+| 10 | Verification | Fixed: read descriptions versus new saves; memory-only completion versus engineering checks. Mixed-action work cannot inherit memory verification (`job.py`, `runtime.py`). |
+| 11 | Recovery | Retain: bounded retries and correction nudges; related model-compatibility tests exercised. |
+| 12 | Memory/persistence | Fixed: save and duplicate-save readback metadata, receipt deduplication. Store/history retention and duplicate-store architecture remain open. |
+| 13 | Security policy | Retain: common personality does not expand tools. Legacy Chat, untrusted projects and named agents have regression coverage (`chat_mode.py`, `environments.py`). |
+| 14 | Sandbox | Retain: no sandbox changes. Tests needing local event-loop sockets ran outside the Codex filesystem/network sandbox. |
+| 15 | Credentials | Retain: no credential changes or owner secrets in evaluation fixtures. Earlier OAuth/token-redaction findings remain separate work. |
+| 16 | Approvals | Retain: approval and stopping status still visible during a running tool. One pre-existing approval-preview test fails identically on the baseline. |
+| 17 | Orchestration | Retain: named agents keep their souls/rooms; group-completion regressions passed. A2A cancellation and durable-board gaps remain open. |
+| 18 | Resource limits | Retain: served 16,384-token context and partial GPU fit recorded; no paid calls or downloads. No new broad campaign. |
+| 19 | Observability | Fixed: one active step line, one memory receipt, truthful identity label; recorder captures model input/output. No event schema redesign. |
+| 20 | Lifecycle/termination | Retain: input stays at bottom, Stop remains visible, private-tmux resize test has no duplicate composer history. Restart/rebuild paths are documented. |
+
+The requested identity, input position, duplicate activity and memory-warning fixes are implemented. This review
+also explains how soul and skills reach the model. The broader architectural gaps in §4 are not claimed fixed
+by this focused change.

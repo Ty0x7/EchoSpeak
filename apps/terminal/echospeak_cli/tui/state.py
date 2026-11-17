@@ -417,6 +417,10 @@ class Run:
             return [B.Note("!", f"{one_line(evt.get('tool'), 60)} failed {one_line(evt.get('count'), 6)} times in a row",
                            "bold", 2)]
         if kind == "memory_saved":
+            # The executing memory tool emits this before its tool_end receipt. Show that one
+            # durable success row; keep standalone events visible for older backends.
+            if any(t.name == "memory_save" for t in self.tools.values()):
+                return []
             return [B.Note("·", "Saved to memory", "dim", 2)]
         if kind == "job_continue":
             return [B.Note(g.ellipsis, f"Not done yet: {one_line(evt.get('reason') or 'work remains', 300)}. "
@@ -495,6 +499,8 @@ class Run:
             status = "fail"
         label = one_line(evt.get("done_label") or (tool.label if tool else name), 200)
         summary = one_line(evt.get("summary") or "", 160)
+        if name == "memory_save" and ok and summary == "Saved":
+            summary = "verified on disk" if (evt.get("meta") or {}).get("memory_verified") else ""
         if status == "denied":
             summary = "you denied it" if decision == "deny" else (summary or outcome)
         elif status == "held":

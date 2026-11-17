@@ -41,13 +41,13 @@ ASSISTANT_MODES = ("environments", "unified")
 
 
 def assistant_mode() -> str:
-    """"environments" (three tabs, 11.13 behaviour) or "unified" (one assistant). Unknown values keep the default."""
+    """One assistant by default; explicit "environments" keeps the legacy profiles."""
     try:
         from config import config
         value = str(getattr(config, "assistant_mode", "") or "").strip().lower()
     except Exception:
         value = ""
-    return value if value in ASSISTANT_MODES else "environments"
+    return value if value in ASSISTANT_MODES else "unified"
 
 
 def unified() -> bool:

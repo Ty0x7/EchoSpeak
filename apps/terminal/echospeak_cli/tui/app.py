@@ -438,6 +438,9 @@ class EchoTUI:
             Window(FormattedTextControl(self._dialog_footer), dont_extend_height=True),
         ])
         root = HSplit([
+            # Grow above the live conversation, keeping the composer at the terminal's bottom.
+            # Preferred height stays zero: inline output and terminal scrollback still work.
+            Window(height=D(min=0, preferred=0, weight=1)),
             ConditionalContainer(Window(FormattedTextControl(self._tail_text), dont_extend_height=True),
                                  filter=shown("tail")),
             ConditionalContainer(Window(FormattedTextControl(self._steps_text), dont_extend_height=True),
@@ -471,19 +474,17 @@ class EchoTUI:
 
     @staticmethod
     def _fit_live_region(app: Application) -> None:
-        """Keep the live region exactly as tall as its content.
+        """Keep available terminal height, with spare rows above the live conversation.
 
-        prompt_toolkit's inline renderer claims every row below the cursor (from the CPR answer) and
-        never shrinks (it keeps the last height). For an inline chat that means blank space under the
-        composer and output pushed into scrollback when the region is redrawn. Ignore the CPR height,
-        and erase/redraw once whenever the content gets shorter (a menu or dialog closes).
+        CPR reports the space below the scrollback cursor. Preserve it so a short conversation
+        already has its input at the bottom; reserve row zero for the inline resize/scrollback rule.
         """
         renderer = app.renderer
         original = renderer.report_absolute_cursor_row
 
         def report(row: int) -> None:
             original(row)
-            renderer._min_available_height = 0
+            renderer._min_available_height = min(renderer._min_available_height, L.budget(app.output.get_size().rows))
 
         renderer.report_absolute_cursor_row = report
 
@@ -492,7 +493,9 @@ class EchoTUI:
             if last is None:
                 return
             size = app.output.get_size()
-            want = min(size.rows, app.layout.container.preferred_height(size.columns, size.rows).preferred)
+            renderer._min_available_height = min(renderer._min_available_height, L.budget(size.rows))
+            want = min(L.budget(size.rows), max(renderer._min_available_height,
+                       app.layout.container.preferred_height(size.columns, size.rows).preferred))
             if want < last.height:
                 renderer.erase(leave_alternate_screen=False)
 
@@ -508,6 +511,17 @@ class EchoTUI:
         prompt_toolkit's own erase.
         """
         renderer = app.renderer
+        if self.env.get("TMUX") or str(self.env.get("TERM", "")).startswith(("tmux", "screen")):
+            # tmux treats erase-to-bottom at the top-left as a screen clear and archives it.
+            # A bottom-anchored region can reach that row after a height shrink. Clear each
+            # physical line instead, preserving the cursor and the real conversation history.
+            output = app.output
+
+            def erase_lines() -> None:
+                rows = max(1, output.get_size().rows)
+                output.write_raw("\x1b7\x1b[0K" + "\x1b[1B\r\x1b[0K" * (rows - 1) + "\x1b8")
+
+            output.erase_down = erase_lines
 
         def on_resize() -> None:
             last = renderer._last_screen
@@ -574,7 +588,9 @@ class EchoTUI:
             tools = len(run.running_tools())
             if tools:
                 wants.append(L.Want("steps", min(3, tools) + (1 if tools > 3 else 0), 1, 4))
-            wants.append(L.Want("status", 1, 1, 1))
+            # A single running step already names the activity and shows its elapsed time.
+            if not tools or run.stopping or run.needs_ok() or len(run.working()) > 1:
+                wants.append(L.Want("status", 1, 1, 1))
         if self.pending:
             wants.append(L.Want("pending", len(self._pending_lines()), 1, 3))
         if run is not None or self.pending:
@@ -1893,6 +1909,8 @@ class EchoTUI:
         if handler is None:
             self.note(f"unknown command {one_line(name, 40)}")
             return
+        # Echo the command into scrollback (as Claude Code does), so its output never looks spontaneous.
+        self.emit(B.UserLine(text))
         try:
             await handler(args)
         except (ApiError, ConnectError, LookupError) as exc:
@@ -2142,11 +2160,12 @@ class EchoTUI:
         if ref_l in {"-", "none", "echo", "chat", "default"}:
             changed = bool(self.core.agent_id)
             self.core.agent_id = ""
-            self.agent_name, self.agent_title = "Echo", "Personal agent"
+            self.agent_name, self.agent_title = "Echo", "Personal assistant"
             if changed and (self.core.session or {}).get("environment") == "agents":
                 self.core.session = None
+            self._sync_default_identity()
             if announce:
-                self.note("talking to Echo" + (" · your next message starts a new session" if changed and not self.sid else ""))
+                self.note(f"talking to {self.agent_name}" + (" · your next message starts a new session" if changed and not self.sid else ""))
             self.app.invalidate()
             return
         hit = next((a for a in self.agents if str(a.get("id")).lower() == ref_l or str(a.get("name")).lower() == ref_l), None)
@@ -2212,7 +2231,7 @@ class EchoTUI:
         self.app.invalidate()
 
     async def cmd_mode(self, args) -> None:
-        current = str(self.settings.get("assistant_mode") or "environments")
+        current = str(self.settings.get("assistant_mode") or "unified")
         if args:
             choice = args[0].lower()
             if choice not in control.ASSISTANT_MODES:
@@ -2480,6 +2499,7 @@ class EchoTUI:
         self.settings = await self.call(control.settings_of, self.client)
         mode = str(self.settings.get("lean_approval_mode") or "smart").lower()
         self.approval_mode = mode if mode in control.APPROVAL_MODES else "smart"
+        self._sync_default_identity()
         self.app.invalidate()
 
     async def _load_agents(self) -> None:
@@ -2498,7 +2518,17 @@ class EchoTUI:
             self.provider, self.model = str(info.get("provider") or ""), str(info.get("model") or "")
         else:
             self.provider, self.model = provider, model
+        self._sync_default_identity()
         self.app.invalidate()
+
+    def _sync_default_identity(self) -> None:
+        if self.core.agent_id or (self.core.session or {}).get("environment") == "agents":
+            return
+        if self.settings.get("assistant_mode", "unified") == "environments":
+            self.agent_name = one_line((self.model or "Assistant").rsplit("/", 1)[-1], 60)
+            self.agent_title = "Code" if (self.core.session or {}).get("environment") == "code" else "Chat"
+        else:
+            self.agent_name, self.agent_title = "Echo", "Personal assistant"
 
     def _model_line(self) -> str:
         provider, default = control.current_model(self.settings)

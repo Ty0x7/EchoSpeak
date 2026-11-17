@@ -254,3 +254,53 @@ def test_memory_save_is_verified_on_disk(monkeypatch, tmp_path, soul_file, lose,
     session, _ = _session(monkeypatch, scripts, agent=agent)
     session.run("I take my coffee black, remember that")
     assert _tool_results(scripts["echo"], 1)[0].startswith(expected)
+
+
+@pytest.mark.parametrize("text", [
+    "That's the only thing I have saved about you for now.",
+    "Here is what I have stored about you.",
+    "The facts that I have recorded are your name and preferences.",
+])
+def test_describing_existing_memory_is_not_a_new_write_claim(text):
+    assert unbacked_claim(text, {"memory_search"}) == ""
+
+
+@pytest.mark.parametrize("text", [
+    "I have saved your name.",
+    "I've stored that in memory.",
+    "That's what I have saved; I have also updated your profile.",
+    "Here is what I have stored. I have saved your new address.",
+])
+def test_memory_lookup_still_does_not_back_a_new_save(text):
+    assert unbacked_claim(text, {"memory_search"})
+
+
+def test_memory_work_is_verified_only_after_readback(monkeypatch, tmp_path, soul_file):
+    agent = type("Agent", (_Agent,), {"memory": _FakeMemory(tmp_path)})()
+    scripts = {"echo": ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("m1", "memory_save", '{"fact": "The user takes coffee black."}')]),
+        ModelTurn(content="I've saved your preference."),
+    ])}
+    session, events = _session(monkeypatch, scripts, agent=agent)
+    result = session.run("Remember that I take my coffee black.")
+    assert result["work"]["verification"] == "verified"
+    receipt = next(e for e in events if e["type"] == "tool_end" and e["name"] == "memory_save")
+    assert receipt["meta"]["memory_verified"] is True
+    assert not any(e["type"] == "claim_unverified" for e in events)
+
+
+@pytest.mark.parametrize("lose", [False, True])
+def test_already_remembered_fact_requires_a_durable_readback(monkeypatch, tmp_path, soul_file, lose):
+    memory = _FakeMemory(tmp_path, lose_writes=lose)
+    memory.add_memory_item("The user takes coffee black.")
+    memory._records = memory.records
+    agent = type("Agent", (_Agent,), {"memory": memory})()
+    scripts = {"echo": ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("m1", "memory_save", '{"fact": "The user takes coffee black."}')]),
+        ModelTurn(content="Noted."),
+    ])}
+    session, events = _session(monkeypatch, scripts, agent=agent)
+    result = session.run("Remember that I take my coffee black.")
+    receipt = next(e for e in events if e["type"] == "tool_end" and e["name"] == "memory_save")
+    assert bool(receipt["meta"].get("memory_verified")) is not lose
+    assert (result["work"]["verification"] == "verified") is not lose

@@ -411,7 +411,7 @@ def propose_skill_tool() -> NativeTool:
 
 # ── what agents see ──────────────────────────────────────────────────
 
-def prompt_section(skills: Optional[list[AgentSkill]] = None) -> str:
+def prompt_section(skills: Optional[list[AgentSkill]] = None, *, compact: bool = False) -> str:
     skills = approved() if skills is None else skills
     if not skills:
         return ""
@@ -420,7 +420,7 @@ def prompt_section(skills: Optional[list[AgentSkill]] = None) -> str:
         "Approved instructions for specific kinds of tasks. When a task matches one, call read_skill with its name "
         "first and follow it. Files a skill mentions can be read with read_skill(name, file).",
     ]
-    lines += [f"- {skill.name}: {skill.description}" for skill in skills[:40]]
+    lines += [f"- {skill.name}: {skill.description[:160] if compact else skill.description}" for skill in skills[:40]]
     return "\n".join(lines)
 
 
