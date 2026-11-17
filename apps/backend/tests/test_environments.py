@@ -21,6 +21,8 @@ _TEAM_TOOLS = {"delegate_to_agent", "soul_update", "spawn_workers", "work_status
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    from config import config
+    monkeypatch.setattr(config, "assistant_mode", "environments")
     chats = threads.ThreadManager(tmp_path / "threads.json")
     monkeypatch.setattr(threads, "get_thread_manager", lambda: chats)
     room_store = rooms.RoomStore(tmp_path / "rooms.json")

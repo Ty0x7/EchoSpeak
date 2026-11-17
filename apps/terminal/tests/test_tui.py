@@ -515,3 +515,15 @@ def test_several_edits_to_one_file_count_as_one_changed_file():
     tools = [{"name": "file_edit", "path": "/p/stats.py"}, {"name": "file_edit", "path": "/p/stats.py"},
              {"name": "file_write", "path": "/p/test_stats.py"}, {"name": "terminal"}]
     assert steps_summary(tools) == "Changed 2 files · Ran 1 command"
+
+
+def test_memory_receipt_replaces_intermediate_saved_event():
+    run, out = run_of([(0, start()),
+        (1, {"type": "tool_start", "message_id": "m1", "id": "mem", "name": "memory_save", "label": "Saving to memory"}),
+        (2, {"type": "memory_saved", "memory_count": 1}),
+        (3, {"type": "tool_end", "message_id": "m1", "id": "mem", "name": "memory_save", "ok": True,
+             "done_label": "Saved to memory", "summary": "Saved", "meta": {"memory_verified": True}})])
+    receipts = [b for b in out if isinstance(b, B.ToolLine)]
+    assert len(receipts) == 1 and receipts[0].summary == "verified on disk"
+    assert not any(isinstance(b, B.Note) and b.text == "Saved to memory" for b in out)
+    assert run.feed({"type": "memory_saved"}, 4)  # old backend, standalone event

@@ -1,7 +1,7 @@
 """ASSISTANT_MODE=unified: one assistant whose capability profile follows the conversation's project.
 
 Real ThreadManager, RoomStore and StateStore in a temp folder; no model calls.
-The default ("environments") is covered by tests/test_environments.py and must stay unchanged.
+The explicit legacy mode is covered by tests/test_environments.py.
 """
 from __future__ import annotations
 
@@ -59,11 +59,13 @@ def _attach(store, session_id: str, project_id: str) -> None:
     store.update_thread_state(session_id, active_project_id=_IDS.get(project_id, project_id))
 
 
-def test_mode_is_opt_in_and_unknown_values_keep_the_default(monkeypatch):
+def test_unified_is_the_default_and_legacy_mode_remains_explicit(monkeypatch):
     monkeypatch.setattr(config, "assistant_mode", "environments", raising=False)
     assert not environments.unified()
     monkeypatch.setattr(config, "assistant_mode", "nonsense", raising=False)
-    assert environments.assistant_mode() == "environments"
+    assert environments.assistant_mode() == "unified"
+    monkeypatch.delattr(config, "assistant_mode")
+    assert environments.unified()
     monkeypatch.setattr(config, "assistant_mode", " Unified ", raising=False)
     assert environments.unified()
 
@@ -140,3 +142,30 @@ def test_no_sign_in_nags_for_tools_echo_no_longer_hosts(env, monkeypatch):
     assert attention._coding_agents() == []
     monkeypatch.setattr(config, "assistant_mode", "environments", raising=False)
     assert len(attention._coding_agents()) == 2  # the default mode still reminds the owner
+
+
+@pytest.mark.parametrize("trusted", [False, True])
+def test_unified_echo_uses_the_same_soul_without_granting_extra_tools(env, monkeypatch, trusted):
+    chats, _, store = env
+    chat = chats.create_thread(title="Identity", source="web")
+    if trusted:
+        _attach(store, chat.thread_id, "p_trusted")
+    session = _session(monkeypatch, chat.thread_id)
+    monkeypatch.setattr(session, "_soul", lambda: "Speak calmly and call the owner Captain.")
+    monkeypatch.setattr(session, "_endpoint_label", lambda: "qwen3.5:9b")
+    persona = session._code_persona() if trusted else session._chat_persona()
+    turn = session._build_turn(persona, "Who are you?", history=[], depth=0)
+    assert "Speak calmly and call the owner Captain." in turn.system_prompt
+    assert "You are Echo" in turn.system_prompt
+    assert not set(turn.toolbox.names) & _TEAM_TOOLS
+    if not trusted:
+        assert not set(turn.toolbox.names) & _ENGINEERING
+
+
+def test_compact_chat_lists_approved_skills(monkeypatch):
+    from agent.lean import chat_mode
+    from agent.lean.personas import chat_persona
+    monkeypatch.setattr(config, "assistant_mode", "unified")
+    prompt = chat_mode.build_prompt(persona=chat_persona(), model="qwen3.5:9b", profile="compact",
+        skills="## Skills\n- planning: Plan a project. Use read_skill first.")
+    assert "planning" in prompt and "read_skill" in prompt

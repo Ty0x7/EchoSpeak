@@ -243,6 +243,8 @@ def build_prompt(
     past_chats: Optional[list[str]] = None,
     project_brief: str = "",
     skills: str = "",
+    assistant_soul: str = "",
+    instructions: str = "",
     tool_names: Optional[set[str]] = None,
     has_external: bool = False,
     profile: str = "full",
@@ -265,12 +267,15 @@ def build_prompt(
     sections = [
         # Stable for the life of the chat.
         ("identity", identity_text(model_label(model))),
+        ("soul", ("## Echo's personality (capabilities and permissions still follow this profile)\n" + assistant_soul.strip())
+         if assistant_soul.strip() else ""),
         ("about", identity_section(persona) + ("\n" + app_facts() if not compact else "\n" + app_facts(short=True))),
         ("rules", CHAT_RULES_COMPACT if compact else CHAT_RULES),
         ("format", "" if compact else CHAT_FORMAT),
         ("capabilities", capability_section(tool_names or set(), has_external)),
         ("environment", environment),
-        ("skills", "" if compact else skills.strip()),
+        ("skills", skills.strip()),
+        ("instructions", instructions.strip()),
         ("project", ("## Project brief\n" + project_brief) if project_brief else ""),
         # Changes as the chat goes on.
         ("memory", _memory(list(memories or []))),

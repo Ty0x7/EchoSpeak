@@ -150,7 +150,7 @@ def render_live(tui: A.EchoTUI, out: SizedOutput, width: int, height: int) -> tu
     with set_app(tui.app):
         container = tui.app.layout.container
         want = container.preferred_height(width, height).preferred
-        h = min(want, height)
+        h = min(max(want, tui.app.renderer._min_available_height), height)
         screen = Screen()
         container.write_to_screen(screen, MouseHandlers(), WritePosition(xpos=0, ypos=0, width=width, height=h),
                                   parent_style="", erase_bg=False, z_index=None)
@@ -233,3 +233,57 @@ if __name__ == "__main__":
             print("  ", it)
     print(f"\n{fails} of {len(CASES)} cases fail")
     sys.exit(1 if fails else 0)
+
+
+@pytest.mark.parametrize("state", ["idle", "slash-menu", "running", "question"])
+@pytest.mark.parametrize("width,height", [(24, 8), (40, 16), (80, 24), (120, 40)])
+def test_composer_stays_at_bottom_with_space_from_cursor_report(state, width, height):
+    with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+        tui, out = make_tui()
+        out.size = Size(rows=height, columns=width)
+        tui.app.renderer.report_absolute_cursor_row(2)
+        available = tui.app.renderer._min_available_height
+        assert available == budget(height)
+        with set_app(tui.app):
+            STATES[state](tui)
+        rows, _ = render_live(tui, out, width, height)
+        assert len(rows) == available
+        if tui.dialog is None or height >= 12:
+            assert any(tui.model[:4] in row for row in rows[-3:])
+        if tui.dialog is None:
+            prompt = next(i for i, row in enumerate(rows) if row.lstrip().startswith(tui.caps.glyphs.prompt))
+            assert prompt >= len(rows) - 4
+        assert "Window too small" not in "\n".join(rows)
+
+
+def test_running_search_has_one_activity_line_and_keeps_stop_visible():
+    with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+        tui, out = make_tui()
+        out.size = Size(rows=24, columns=80)
+        run = Run("search", time.monotonic(), glyphs=tui.caps.glyphs)
+        run.feed({"type": "agent_start", "message_id": "m", "agent": {"id": "echo", "name": "Echo"}}, tui.now())
+        run.feed({"type": "tool_start", "message_id": "m", "id": "s", "name": "web_search", "label": "Searching Oilers schedule"}, tui.now())
+        tui.run = run
+        rows, _ = render_live(tui, out, 80, 24)
+        assert sum("Searching Oilers" in row for row in rows) == 1
+        assert tui._rows("status") == 0
+        run.stopping = True
+        tui._forget_plan()
+        rows, _ = render_live(tui, out, 80, 24)
+        assert tui._rows("status") == 1
+        assert "Stopping" in "\n".join(rows)
+
+
+def test_header_tracks_explicit_legacy_mode_and_preserves_named_agents():
+    with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+        tui, _ = make_tui()
+        tui.settings = {"assistant_mode": "environments"}
+        tui._sync_default_identity()
+        assert (tui.agent_name, tui.agent_title) == ("qwen3.5:9b", "Chat")
+        tui.settings["assistant_mode"] = "unified"
+        tui._sync_default_identity()
+        assert tui.agent_name == "Echo"
+        tui.core.agent_id = "scout"
+        tui.agent_name, tui.agent_title = "Jarvis", "Researcher"
+        tui._sync_default_identity()
+        assert (tui.agent_name, tui.agent_title) == ("Jarvis", "Researcher")

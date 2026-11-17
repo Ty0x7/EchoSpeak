@@ -35,7 +35,7 @@ from agent import a2a_trust, home, mcp_apps
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
 from agent.lean.terminal import Terminal
-from agent.lean.toolbox import BUILDER_FOCUS, CHAT_FOCUS, DEFAULT_TOOLSETS, NativeTool, Toolbox, project_root_for_session
+from agent.lean.toolbox import BUILDER_FOCUS, CHAT_FOCUS, DEFAULT_TOOLSETS, NativeTool, Toolbox, ToolResult, project_root_for_session
 from agent.stopwords import keywords
 
 Emit = Callable[[dict[str, Any]], None]
@@ -317,9 +317,16 @@ class LeanSession:
             raise
         if self.work_context:
             evidence = [{"agent_id": r.agent_id, "execution_id": self.execution_id,
-                         "tools": [{"name": item.get("name"), "status": item.get("status"), "outcome": item.get("outcome")}
+                         "tools": [{"name": item.get("name"), "status": item.get("status"), "outcome": item.get("outcome"),
+                                    "memory_verified": bool((item.get("meta") or {}).get("memory_verified"))}
                                    for item in r.timeline if item.get("kind") == "tool"]} for r in self.results]
             checked = any(tool.get("status") == "done" for row in evidence for tool in row["tools"])
+            from agent.lean.job import READ_ONLY_TOOLS
+            actions = [tool for row in evidence for tool in row["tools"]
+                       if tool["name"] not in READ_ONLY_TOOLS]
+            memory_verified = bool(actions) and all(
+                tool["name"] == "memory_save" and tool["status"] == "done" and tool["outcome"] == "ok"
+                and tool["memory_verified"] for tool in actions)
             measured = self._verification_record()
             for agent_id, ledger in self._verifiers.items():
                 if ledger.active():
@@ -330,7 +337,7 @@ class LeanSession:
             lead = measured.get(self._lead_id) or next(iter(measured.values()), {})
             work = coordinator.finish(self.work_context, status=status, result=result.get("response", ""), evidence=evidence,
                                       verification=(verification.STATUS_LABELS[lead["status"]].lower() if lead
-                                                    else "observed" if checked else "unverified"))
+                                                    else "verified" if memory_verified else "observed" if checked else "unverified"))
             result["work"] = work
             if work["status"] == "completed" and self.source not in INTERACTIVE_SOURCES:
                 # An interactive reply already streamed into its chat; only unattended runs need an outbox row.
@@ -1173,7 +1180,9 @@ class LeanSession:
                 caller_note=caller_note(self.source, self.caller_role, _owner_name()),
                 past_chats=[] if guest or not _remembers_chats() else self._past_chats(),
                 project_brief=project_brief,
-                skills=agent_skills.prompt_section(),
+                skills=agent_skills.prompt_section(compact=compact_chat),
+                assistant_soul=self._unified_soul() if not guest else "",
+                instructions=home.instructions_section(self.project_root) if not guest and self._unified() else "",
                 tool_names=set(toolbox.names),
                 has_external=any(str(getattr(toolbox.entry(n), "origin", "")) in chat_mode.ALLOWED_ORIGINS for n in toolbox.names),
                 profile=chat_run.profile if chat_run is not None else "full",
@@ -1197,6 +1206,7 @@ class LeanSession:
             prompt = build_system_prompt(
                 persona=persona,
                 soul_text=self._soul() if persona.id == "echo" else "",
+                assistant_soul=self._unified_soul() if self.code_first and not guest else "",
                 project_root=self.project_root,
                 notes=list(toolbox.notes) + learned.notes + ([] if guest else [n for n in [mcp_apps.context_note(self.session_id)] if n]),
                 terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
@@ -1443,7 +1453,7 @@ class LeanSession:
         if self.caller_role == "owner" and self.source in INTERACTIVE_SOURCES and depth == 0:
             tools.append(agent_skills.propose_skill_tool())
         if memory is not None:
-            def memory_save(args: dict[str, Any]) -> str:
+            def memory_save(args: dict[str, Any]) -> str | ToolResult:
                 from agent.state import get_state_store
                 fact = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))
                 problem = memory_quality.check_fact(fact)
@@ -1460,6 +1470,12 @@ class LeanSession:
                         and str(record.get("scope") or "account") == "account"
                     ))
                     if existing is not None:
+                        stored = _memory_on_disk(memory, str(existing.get("id") or ""))
+                        if isinstance(stored, str):
+                            return ToolResult(True, f"Already remembered (verified on disk): {stored}", 0,
+                                              meta={"memory_verified": True})
+                        if stored is False:
+                            return "Failed: the remembered fact is no longer on disk. It could not be verified."
                         return f"Already remembered: {existing.get('text')}"
                 memory_id = memory.add_memory_item(
                     fact,
@@ -1481,9 +1497,11 @@ class LeanSession:
                 if stored is False:
                     return "Failed: the memory store reported a save, but it isn't on disk. Tell the user it did not save."
                 self.emit({"type": "memory_saved", "memory_count": int(memory.count_items() or 0)})
-                if isinstance(stored, str) and " ".join(stored.split()) != " ".join(fact.split()):
-                    return f"Already remembered (verified on disk): {stored}"
-                return f"Saved and verified: {fact}"
+                if isinstance(stored, str):
+                    text = (f"Already remembered (verified on disk): {stored}" if " ".join(stored.split()) != " ".join(fact.split())
+                            else f"Saved and verified: {fact}")
+                    return ToolResult(True, text, 0, meta={"memory_verified": True})
+                return f"Saved: {fact}"
 
             def memory_search(args: dict[str, Any]) -> str:
                 query = str(args.get("query") or "").strip()
@@ -1943,6 +1961,17 @@ class LeanSession:
             return float(cloud_config(provider).temperature if provider in CLOUD_PROVIDERS else config.local.temperature)
         except Exception:
             return None
+
+    @staticmethod
+    def _unified() -> bool:
+        from agent import environments
+        return environments.unified()
+
+    def _unified_soul(self) -> str:
+        if not self._unified():
+            return ""
+        echo = self.personas.get("echo")
+        return (echo.soul if echo and echo.soul.strip() else self._soul()).strip()
 
     def _soul(self) -> str:
         if self._soul_text is None:

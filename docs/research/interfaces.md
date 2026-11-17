@@ -1,6 +1,6 @@
 # One harness, two interfaces: what the desktop app and the terminal expose
 
-> **Status, 15 November 2026.** This is a review, not a plan that has been built. It covers the
+> **Original review, 15 November 2026.** The tables below describe that snapshot; see the implementation update at the end. It covers the
 > desktop/web UI (`apps/web`) and the Echo terminal (`apps/terminal`) on branch
 > `harness-first-rearchitecture`. Both run against **one backend and one data folder**
 > (`~/.local/share/ai.echospeak.desktop/runtime`).
@@ -57,3 +57,91 @@
 | 7 | **One "Needs you" view** (approvals, held work, questions, failed deliveries) in both | Durable work is hard to find | M |
 | 8 | **Terminal coverage**: create and edit agents, routines and privacy mode from the terminal (`/agent new`, `/routines`, `/privacy`) | Lets the terminal fully control EchoSpeak | M |
 | 9 | **Backend file root without a project**: not the source checkout | Avoids Echo reading its own code by default | S |
+
+
+## 16 November 2026: identity, terminal and memory follow-up
+
+Branch `echo-identity-tui`, extending Claude's slash-command receipt fix in PR #118. Source version remains
+11.14.0; a commit ID identifies these changes more precisely than the unchanged version label.
+
+### One identity, different capabilities
+
+Unified mode is now the default for a missing/empty/invalid assistant mode. An explicitly saved `environments`
+choice stays available. Unified ordinary conversations answer as Echo, naming the selected model as the engine.
+Attaching a **trusted** project changes the next turn to the engineering profile. Detaching it removes those
+engineering tools. Named contacts such as Jarvis and Glados retain their own personas and room conversations.
+No permission switch is enabled by this change.
+
+The relevant wiring is:
+
+| Input | Where it goes | Meaning |
+|---|---|---|
+| Model selection | `lean/provider.py`, `LeanSession._client_for` | The inference engine, e.g. qwen3.5:9b; separate from the assistant's name. |
+| Echo's configured persona soul, else SOUL.md | `LeanSession._unified_soul`; both prompt builders | Shared personality for unified conversation and engineering. It does not expand the toolbox. |
+| A named agent's soul | `lean/personas.py`, `lean/prompt.py` | That contact's own role and instructions. |
+| Saved owner facts | `memory_save`, `memory_search`, `lean/memory_quality.py` | Durable personal facts, with scoped recall; separate from personality. |
+| Approved skills | `agent_skills.prompt_section` → `read_skill` | Names/descriptions are listed, including compact local-model Chat. Bodies are read when applicable. Compact descriptions are bounded to 160 characters. |
+| Owner/project AGENTS.md | `home.instructions_section` | Included in unified Chat as well as engineering. These instructions cannot grant tool permissions. |
+| Trust, toolsets, policy, approvals | `environments.py`, toolbox, policy, approval broker | Trusted code decides which actions can run. Soul and skills never bypass it. |
+
+Unified profiles continue to have different tools. Conversation can answer, research, read and remember; it has
+no direct terminal or file mutation tools. A trusted project enables engineering. Named agent/team workflows
+remain in Agents. Desktop navigation still has Chat/Agents/Code labels; this change is not a sidebar redesign.
+
+### Terminal behavior
+
+- The available terminal height is retained; spare rows appear **above** the live conversation. The input and
+  footer sit at the bottom from the start, including short conversations.
+- A single running tool has one live activity row. Multi-agent work, approvals and stopping can still have
+  a separate status row because it communicates different information.
+- A memory save's intermediate event is folded into its final tool receipt. A verified receipt says
+  "verified on disk" rather than repeating "Saved".
+- Under tmux, clearing the live region uses per-line erase with cursor preservation. This avoids tmux
+  archiving the live input as history when a resize puts its origin at the top-left corner.
+- Explicit legacy mode labels the ordinary assistant with the selected model; named agents keep their names.
+
+### Memory verification
+
+The action-claim guard now distinguishes a description such as "the only thing I have saved" from a new-write
+claim such as "I have saved your name". Searching memory still cannot justify a new-write claim. Mixed sentences
+that include both a description and a claimed write are still checked.
+
+A successful memory save returns a typed `memory_verified` receipt **only after durable readback**. A completed
+work record whose mutations consist entirely of verified memory saves can be marked verified. Mixed work,
+failed saves, stores without a readable durable record and engineering changes still need their own evidence.
+The engineering verification ledger takes precedence; no failed build becomes verified through a memory save.
+
+### Verification and limits
+
+- Live qwen3.5:9b, Q4_K_M, Ollama qwen3.5 renderer/parser, served context 16,384: five smoke turns passed
+  (identity, durable memory save, recall without a false warning, actual `read_skill`, identity after project attachment).
+  The configured personality appeared in replies. Learning was off; all data and the backend were isolated.
+- Ollama reported model size 6,488,305,168 bytes and VRAM size 5,544,943,286 bytes: **partial GPU fit**, not all-GPU.
+- Terminal suite: **2,694 passed, 1 skipped**. Real private-tmux captures cover idle, menu, streaming and resize.
+  The first resize run exposed a regression; the second run passed all 24 captured states at 80×24 and 40×16,
+  including shrinking to 14 columns and 8 rows. Device/terminal combinations outside these checks remain unmeasured.
+- Related backend run: 181 passed; one approval-preview test failed identically on the original `bdde48f`
+  baseline in a temporary copy. It is an existing failure, not counted as passing.
+- Desktop: web build, packaged backend self-check and AppImage build passed. The explanation HTML was rendered
+  and visually inspected at 1440px and 390px widths. GUI interaction after installation is an owner acceptance check.
+- This is a focused smoke test, not a new 9/10 score or a repeated five-model campaign. Other models and paid
+  cloud APIs were not evaluated. Source/build tests do not certify every installed-desktop interaction.
+
+Recorded model requests/responses, per-turn events and GPU metadata are in the local evaluation workspace
+`evaluations/2026-11-16-identity-tui`. No real owner memory was used in those fixtures.
+
+### How Git reaches each interface on this machine
+
+1. An agent edits files in its checkout/worktree. Other worktrees have separate files and branches.
+2. `git commit` records a snapshot locally. `git push` uploads the branch to GitHub.
+3. A pull request proposes integrating that branch. Creating or pushing it does not change `main`.
+4. Merging updates GitHub's `main`. In the primary checkout, `git pull --ff-only` updates its files.
+5. The terminal launcher points into the primary checkout. Close and reopen the terminal client after an
+   update; Python processes already running have imported the previous source.
+6. The backend is shared by the terminal and desktop. Restart it after backend changes, when no task is running.
+7. The Apps-menu entry opens `EchoSpeak.AppImage`, a packaged copy. Rebuild and replace that package to update
+   its bundled frontend/backend. Merely pushing, merging or pulling does not rewrite an existing AppImage.
+
+Check with `git status -sb`, `git log -1 --oneline`, `readlink -f ~/.local/bin/echospeak`, and
+`echospeak backend status`. The app version is not a commit ID: two different source snapshots can both say
+11.14.0. A local test package is not a published updater release.

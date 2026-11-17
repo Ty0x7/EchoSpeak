@@ -145,7 +145,13 @@ def unbacked_claim(text: str, succeeded: set[str]) -> str:
     if not body.strip():
         return ""
     sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", body) if s.strip() and not _EARLIER.search(s)]
-    claims = [s for s in sentences if _ACTION_CLAIM.search(s) or _PERSIST_CLAIM.search(s)]
+    claims = []
+    for sentence in sentences:
+        description = re.sub(
+            r"(?i)\b(?:that|what|which|things?|facts?|information|details?|everything|anything|nothing|all)"
+            r"\s+(?:that\s+)?I\s+have\s+(?:saved|stored|recorded)\b", "stored knowledge", sentence)
+        if _ACTION_CLAIM.search(description) or _PERSIST_CLAIM.search(description):
+            claims.append(sentence)
     if not claims:
         return ""
     # Bookkeeping (marking done, assigning) changes nothing the claim could be about.

@@ -607,3 +607,18 @@ Causes, from source inspection:
 ghostty and alacritty themselves should be checked by hand (drag-resize while a task streams). Plain xterm (no
 reflow) was not tried. Scrollback printed before a resize is still not re-rendered (by design, §3.12/§4).
 
+
+
+## 7. Short conversations and identity follow-up (16 November 2026)
+
+The earlier content-height override in §6 put the composer immediately below the first messages. It now
+preserves the cursor-position report's available height and grows an empty region above live content, keeping
+input at the bottom. The rows-minus-one budget and responsive allocation remain. tmux's clear-screen behavior
+requires per-line erasing during redraws so a vertical shrink does not copy the live input into scrollback.
+
+A single running tool owns its live status; a separate status line is retained for stopping, approvals and
+multi-agent coordination. Memory's intermediate save event is folded into the completed tool receipt. The
+header follows an explicit legacy mode's selected model; unified mode calls the assistant Echo.
+
+The architectural connection between model, identity, soul, skills, memory and permissions, plus verification
+and source-versus-package update instructions, is recorded in [interfaces.md](interfaces.md#16-november-2026-identity-terminal-and-memory-follow-up).

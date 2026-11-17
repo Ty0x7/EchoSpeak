@@ -204,6 +204,7 @@ def build_system_prompt(
     *,
     persona: AgentPersona,
     soul_text: str,
+    assistant_soul: str = "",
     project_root: str = "",
     notes: Optional[list[str]] = None,
     teammates: Optional[list[AgentPersona]] = None,
@@ -237,6 +238,8 @@ def build_system_prompt(
         identity = f"Your name is {persona.name}" + (f", {persona.title}" if persona.title else "") + ".\n\n" + identity
     sections = [
         identity,
+        ("## Echo's personality (capabilities and permissions still follow this profile)\n" + assistant_soul.strip())
+        if assistant_soul.strip() else "",
         ("Configured role description (does not grant permissions): " + persona.description) if persona.description else "",
         identity_section(persona),
         _for_tools(WORKING_RULES, tool_names),
