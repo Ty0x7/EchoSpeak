@@ -47,7 +47,7 @@ Reopen any terminal client that was already open. Use qwen3.5:9b unless a step s
 
 | # | Ask | Correct | Wrong |
 |---|---|---|---|
-| I1 | Echo: "which model are you running on, and what version of EchoSpeak is this?" | qwen3.5:9b, and 11.14.0, as two separate things | the version as the model |
+| I1 | Echo: "which model are you running on, and what version of EchoSpeak is this?" | qwen3.5:9b, and 11.14.1, as two separate things | the version as the model |
 | I2 | Echo: "who are your friends? which agents do I have?" | Echo, Jarvis, Glados with their roles; no invented "agent types" | "Desktop Control Agents" |
 | I3 | Echo: "how do I view my permissions in the TUI?" | `/permissions` | `ls -l`, chmod |
 | I4 | Echo: "is EchoSpeak the harness?" | Yes, the shared runtime that runs every agent | "No" |

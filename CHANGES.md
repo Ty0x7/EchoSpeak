@@ -1,5 +1,32 @@
 # Changes
 
+## v11.14.1 — One assistant, one list of conversations (branch `agent-first-sessions`; not merged, not published)
+
+* **One assistant:**
+  * A trusted project adds file and terminal tools to Echo instead of switching to a separate engineering
+    assistant.
+  * Live data, reminders and the research checks stay.
+* **What agents know:** every agent is told the full roster, the model writing its replies (never the app
+  version), what EchoSpeak is, and the real commands.
+* **Terminal:**
+  * ← on an empty input opens the session manager: who answers, project, state, search, filters, Enter to resume.
+  * The terminal reconnects after a backend restart.
+* **Desktop:**
+  * One conversation list with the terminal's filters, in place of the Chat / Agents / Code switch.
+  * A header with agent, model, project and approval mode.
+  * A trust question when attaching a folder.
+* **Honest outcomes:**
+  * Question cards can't offer permissions.
+  * Work records say when a requested file was not created, or a fallback was accepted.
+  * Code in replies is syntax-checked and labelled "Not run" when nothing ran it.
+* **Agents:**
+  * An agent in its own conversation can delegate to the roster.
+  * Each-agent questions in a group aren't merged into a third reply.
+  * `agent_sessions` reads the real Claude Code and Codex logs.
+* **Default folder:** without a project, it's Documents when running from source too.
+* **Evidence:** D1–D8 on `qwen3.5:9b`: 8.96 → 9.12, 0 critical; the audit conversations 6/9 → 9/9.
+* See the [release notes](docs/releases/v11.14.1.md) and the [agent-first report](docs/research/agent-first.md).
+
 ## v11.14.0 — A harness you can check: sandboxed, honest about failures, measured (source; installer not yet built)
 
 * **Linux sandbox:** terminal commands run in bubblewrap.
