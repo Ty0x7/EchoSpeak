@@ -80,9 +80,9 @@ def test_chat_offers_no_agent_tools_even_with_every_permission_on(env, monkeypat
 
 
 def test_chat_refuses_agent_tools_at_run_time_even_by_alias():
-    assert "isn't available in Chat" in chat_mode.call_problem("terminal", {"command": "dir"})
-    assert "isn't available in Chat" in chat_mode.call_problem("computer_action", {})
-    assert "isn't available in Chat" in chat_mode.call_problem("some_new_tool", {})  # unlisted means denied
+    assert "isn't available in" in chat_mode.call_problem("terminal", {"command": "dir"})
+    assert "isn't available in" in chat_mode.call_problem("computer_action", {})
+    assert "isn't available in" in chat_mode.call_problem("some_new_tool", {})  # unlisted means denied
     assert chat_mode.call_problem("open_application", {"app": "Spotify"}) == ""
     assert "without arguments" in chat_mode.call_problem("open_application", {"app": "chrome", "args": "--incognito"})
     for shell in ("cmd", "PowerShell", "wt.exe", "python3", "regedit", "Windows Terminal"):
@@ -116,7 +116,7 @@ def test_chat_refuses_agent_tools_at_run_time_even_by_alias():
     result = turn.run("delete my files")
     assert ran == []
     refusal = client.calls[1][-1]["content"]
-    assert "Running commands isn't available in Chat" in refusal
+    assert "Running commands isn't available in" in refusal
     assert result.text == "I can't run that here."
 
 

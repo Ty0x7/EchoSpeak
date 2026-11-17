@@ -102,7 +102,7 @@ def chat_persona(model_label: str = "") -> AgentPersona:
     return AgentPersona(
         id=CHAT_AGENT_ID,
         name="Echo" if _unified() else label or "Assistant",
-        title="Chat",
+        title="Personal assistant" if _unified() else "Chat",  # one assistant: no mode name in the header
         # Chat's instructions live in agent/lean/chat_mode.py, not in a persona soul.
         soul="",
         avatar="",
@@ -125,7 +125,7 @@ def code_persona(model_label: str = "") -> AgentPersona:
     return AgentPersona(
         id=CODE_AGENT_ID,
         name="Echo" if _unified() else label or "Code",
-        title="Code",
+        title="Personal assistant" if _unified() else "Code",
         # The engineering workflow lives in agent/lean/code_mode.py; the identity names the model.
         soul=code_mode.identity(label),
         avatar="",

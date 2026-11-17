@@ -29,6 +29,17 @@
 | 32 | Long runs, a repeated explanation, an earlier contradictory statement kept | Covered by 25 (budget, repeats, interim narration) | Covered by 25 | Covered by 25 |
 | 33 | What worked: Echo's name, remembering the owner, OS facts, terminal-off honesty | — | Preserved; the tests above assert Echo's identity in both profiles | — |
 
+## Found in the review against the original request (17 November)
+
+Two leftovers of the old modes were still reaching the model and the screen in unified mode:
+
+- **Echo's rules** said to suggest "using Code", and that "Agents and Code" do what it can't. Its refusals for
+  terminal and file tools said the same. They now name the real route: attach a trusted project (`/project`, the
+  desktop project chip) or ask one of the agents. Legacy mode keeps the old wording.
+  Test: `test_echo_never_points_the_user_to_a_code_mode_that_no_longer_exists`.
+- **Echo's header title** read "Chat" or "Code" depending on whether a project was attached. In unified mode both
+  read "Personal assistant", like the terminal banner.
+
 ## What was deliberately not changed
 
 - **Permission enforcement.** Switches, toolsets, the policy check, approvals, Private/Offline mode and the

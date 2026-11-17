@@ -122,6 +122,28 @@ def test_commands_the_agents_are_told_about_exist_in_the_terminal():
     assert [row["name"] for row in snapshot["terminal_commands"]] == [name for name, _ in app_facts.TERMINAL_COMMANDS]
 
 
+def test_echo_never_points_the_user_to_a_code_mode_that_no_longer_exists(env, monkeypatch):
+    """The review against the original prompt found these left over: in unified mode Echo was still told to
+    suggest "using Code" and that "Agents and Code" do what it can't."""
+    from agent.lean import chat_mode
+    _, talking = _echo_turn(env, monkeypatch, "run ls in my home folder", project=False)
+    prompt = talking.system_prompt
+    assert "using Code" not in prompt and "Agents and Code" not in prompt
+    assert "a trusted project (/project) adds files and commands" in prompt          # the compact rules (9B model)
+    assert "attaching a trusted project folder (/project in the terminal" in chat_mode.rules()   # the full rules
+    assert "they come with a trusted project" in prompt
+    refusal = chat_mode.call_problem("terminal", {})
+    assert "Code" not in refusal and "/project" in refusal and "in this conversation" in refusal
+    monkeypatch.setattr(config, "assistant_mode", "environments", raising=False)
+    assert "Agents and Code can do it" in chat_mode.call_problem("terminal", {})
+    assert "using Code" in chat_mode.rules()
+    from agent.lean.personas import chat_persona, code_persona
+    assert chat_persona("m").title == "Chat" and code_persona("m").title == "Code"
+    monkeypatch.setattr(config, "assistant_mode", "unified", raising=False)
+    # The header shows who is answering, not a mode: the same title with or without a project.
+    assert chat_persona("m").title == code_persona("m").title == "Personal assistant"
+
+
 def test_the_legacy_layout_is_described_as_what_it_is(monkeypatch):
     monkeypatch.setattr(config, "assistant_mode", "environments", raising=False)
     assert "three areas" in app_facts.section(name="Echo", model="m")

@@ -73,16 +73,34 @@ def restrict(toolbox: Any) -> None:
     toolbox.deferred &= keep
 
 
+# Where work this conversation can't do goes instead. One assistant has no "Code" to switch to: a trusted
+# project adds file and terminal tools to this same conversation (docs/research/agent-first.md).
+_ELSEWHERE_LEGACY = "Agents and Code can do it; the user can send this to an agent"
+_ELSEWHERE_UNIFIED = ("the user can attach a trusted project folder to this conversation (/project in the terminal, "
+                      "the project chip in the desktop app) for files and commands, or ask one of their agents")
+
+
+def _unified() -> bool:
+    from agent import environments
+
+    return environments.unified()
+
+
+def elsewhere() -> str:
+    return _ELSEWHERE_UNIFIED if _unified() else _ELSEWHERE_LEGACY
+
+
 def call_problem(name: str, args: dict[str, Any], entry: Any = None) -> str:
     """Why Chat refuses this call (checked at run time, after alias resolution), or ""."""
+    here = "in this conversation" if _unified() else "in Chat"
     if not allowed(name, entry):
         what = ELSEWHERE.get(name, "That tool")
-        return f"{what} isn't available in Chat. Agents and Code can do it; the user can send this to an agent"
+        return f"{what} isn't available {here}; {elsewhere()}"
     if name == "open_application":
         if str(args.get("args") or "").strip():
             return "In Chat, apps open without arguments"
         if _COMMAND_APPS.match(str(args.get("app") or "")):
-            return "Chat doesn't open command shells or system tools; Agents and Code run commands"
+            return f"Opening command shells or system tools isn't available {here}; {elsewhere()}"
     return ""
 
 
@@ -167,8 +185,13 @@ def capability_section(names: Iterable[str], has_external: bool) -> str:
     if ready:
         lines.append("- Ready: " + "; ".join(dict.fromkeys(ready)) + ".")
     lines.append("- These are tools to call by name, not skills to load.")
-    lines.append("- Not in Chat: desktop control, running commands, changing files or settings, capturing the screen, "
-                 "creating PDF or Office files. Agents and Code do most of those.")
+    if _unified():
+        lines.append("- Not in this conversation yet: running commands and changing files (they come with a trusted "
+                     "project: /project in the terminal, the project chip in the desktop app), desktop control, "
+                     "capturing the screen, creating PDF or Office files.")
+    else:
+        lines.append("- Not in Chat: desktop control, running commands, changing files or settings, capturing the screen, "
+                     "creating PDF or Office files. Agents and Code do most of those.")
     return "\n".join(lines)
 
 
@@ -190,6 +213,20 @@ def chat_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if seen[session]:
             out.append(hit)
     return out
+
+
+_TO_CODE = "suggest sending it to an agent (the Send to an agent button on a reply) or using Code"
+_TO_PROJECT = ("say that attaching a trusted project folder (/project in the terminal, the project chip in the "
+               "desktop app) adds files and commands to this conversation, or that one of their agents can do it")
+
+
+def rules(compact: bool = False) -> str:
+    """The answer rules, naming where unavailable work really goes in the current assistant mode."""
+    if compact:
+        line = "make PDF or Excel files; say so in one sentence if asked."
+        return CHAT_RULES_COMPACT.replace(line, line[:-1] + ", and that a trusted project (/project) adds files and "
+                                          "commands to this conversation.") if _unified() else CHAT_RULES_COMPACT
+    return CHAT_RULES.replace(_TO_CODE, _TO_PROJECT) if _unified() else CHAT_RULES
 
 
 # Small local models (agent/lean/chat_run.py profile "compact") get the same contract in fewer words:
@@ -262,7 +299,7 @@ def build_prompt(
         ("soul", ("## Echo's personality (capabilities and permissions still follow this profile)\n" + assistant_soul.strip())
          if assistant_soul.strip() else ""),
         ("about", identity_section(persona, model, provider, short=compact)),
-        ("rules", CHAT_RULES_COMPACT if compact else CHAT_RULES),
+        ("rules", rules(compact)),
         ("format", "" if compact else CHAT_FORMAT),
         ("capabilities", capability_section(tool_names or set(), has_external)),
         ("environment", environment),
