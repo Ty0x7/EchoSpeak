@@ -15,9 +15,22 @@ Claude Code and ACP execution is implemented in `agent/code_sessions.py` and
 **Direction from 10 November 2026:** [Harness-first](research/harness-first.md) ([visual](../artifacts/research/harness-first.html))
 replaces the three-environment and hosted-harness direction. Echo becomes one assistant whose capability
 profile follows the conversation's trusted project. The GUI and a terminal client share this backend.
-Codex and Claude Code run beside EchoSpeak, not inside it. The first step is opt-in, via
-`ASSISTANT_MODE=unified`. Linux credential storage is `agent/credential_posix.py`. The sections below
-still describe the default (`environments`) behaviour.
+Codex and Claude Code run beside EchoSpeak, not inside it. Linux credential storage is
+`agent/credential_posix.py`.
+
+**Current state, 17 November 2026** ([agent-first.md](research/agent-first.md),
+[visual](../artifacts/research/agent-first.html)):
+
+- **Unified mode is the default;** `ASSISTANT_MODE=environments` keeps the old layout.
+- **A trusted project adds file and terminal tools to Echo;** it does not swap the assistant. Research
+  safeguards (`lean/chat_run.py`) run in both profiles.
+- **Every agent gets the same app facts** (`lean/app_facts.py`): the roster, its model, and the real commands.
+- **Both interfaces describe conversations once,** via `GET /sessions/overview` (`agent/session_overview.py`):
+  the terminal's ← session manager and the desktop's single list with All / Echo / Agents / This project.
+- **Work records track what was asked to be created** (`lean/deliverable.py`).
+- **Question cards can't offer permissions** (`lean/ask.py`).
+
+The sections below predate this and still describe the `environments` routing in places.
 
 ## Environment ownership
 

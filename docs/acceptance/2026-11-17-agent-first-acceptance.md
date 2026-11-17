@@ -5,20 +5,30 @@ these address: [conversation-audit-2026-11-16.md](../research/conversation-audit
 
 ## Before you start
 
-The normal `echospeak` command runs `~/Projects/echospeak` (main), so this branch isn't in it until the work is
-merged and pulled. To test the branch without merging:
+The branch is already installed for testing (17 November):
 
-1. Stop the shared backend while nothing is running: `echospeak backend stop` (add `--any` if the desktop app started it).
-2. Start the branch's terminal client:
-   `~/Work/echospeak-five-model-harness/apps/terminal/echospeak new`
-   It starts a backend from the branch with your normal data folder. Your conversations, memories and settings
-   are read, not migrated.
-3. Afterwards, stop that backend (`echospeak backend stop`). The normal `echospeak` then starts main's again.
+- **Terminal:** `echospeak` runs the branch (`~/.local/bin/echospeak` → this worktree's launcher).
+- **Desktop:** the Apps-menu EchoSpeak entry opens the AppImage built from the branch.
+- **Backend:** the shared backend was restarted from the branch. Both clients use it.
+- **Your data is untouched:** the same conversations, memories and settings, read by the new code. Nothing was
+  migrated.
+- **To go back:** run
+  `~/Work/echospeak-model-testing-2026/evaluations/2026-11-17-agent-first-campaign/rollback-owner-testing.sh`.
+  It restores the previous `echospeak` link and AppImage, both kept as `*.before-agent-first`.
 
-The desktop AppImage was **not** rebuilt for this branch. Desktop checks below use the desktop app attached to
-the branch's backend: open the AppImage *while the branch backend is running*, and it attaches to it.
+Reopen any terminal client that was already open. Use qwen3.5:9b unless a step says otherwise.
 
-Use qwen3.5:9b (your reference model) unless a step says otherwise.
+## Desktop
+
+| # | Do | Correct | Wrong |
+|---|---|---|---|
+| W1 | Open EchoSpeak from the Apps menu | The sidebar has **New conversation**, the pages, **Workbench**, the Agents list, and one **Conversations** list with filters All / Echo / Agents / This project. No Chat / Agents / Code switch | The old three-way switch |
+| W2 | Look at the rows | Each says who answers (Echo, Jarvis, a group) and the project; waiting ones say "Needs your answer" or "Needs approval" | Rows without who/project |
+| W3 | Open a conversation | The header reads e.g. "Echo · qwen3.5:9b · Work · Ask for risky actions" | "Chat / title" |
+| W4 | Open a Jarvis conversation | The header starts with Jarvis | It still says Echo |
+| W5 | Attach a folder (composer folder button or drop) | "Let Echo work in “folder”?" — OK trusts it; Cancel attaches it read-only | It attaches without asking |
+| W6 | Start a conversation in the terminal, then look at the desktop | It appears in the list within about 15 seconds | It never appears |
+| W7 | Send a message in the desktop, then `echospeak` → ← → that conversation | The same messages in both | Different histories |
 
 ## Terminal: sessions
 
@@ -62,5 +72,14 @@ Turn **Create and edit files** off first (`/permissions`).
 | D2 | Turn file creation **on** and ask again | An approval card for the write (if your approval mode asks), then the file exists | A question card instead of an approval |
 | D3 | Ask Echo: "check what my latest Codex session did" | It reads the actual session log (tool `agent_sessions`) and says when it was last written | It reads docs or a summary and presents that as the log |
 | D4 | Look at Activity › Agent work for D1 | One item, named as a question or as not delivered | The same item twice, as approval and as question |
+
+## Agents, restarts and folders
+
+| # | Do | Correct | Wrong |
+|---|---|---|---|
+| G1 | Glados (`/agent Glados`): "ask Jarvis to find the latest stable Python release" | Glados hands it to Jarvis (a delegation step), Jarvis answers with a source | "I can't delegate", or Glados researches it herself |
+| G2 | A group with Jarvis and Glados: "each of you, say who you are" | Two short answers, each in its own voice | A third "merged" reply |
+| G3 | With the terminal open, run `echospeak backend stop` in another terminal, then `echospeak backend start`, then send a message in the first | "the backend restarted; reconnected" (send it again if asked), then a normal answer | "cannot reach the backend" until you restart the terminal |
+| G4 | Without a project: "which folder can you work in?" | Your Documents folder | The EchoSpeak source folder |
 
 Write down what you see, especially anything in the *Wrong* column. Those observations choose the next fixes.

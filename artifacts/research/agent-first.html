@@ -65,12 +65,23 @@
 <p class="muted">Isolated backend, learning off, file writing and terminal off as in the recordings. One run each. Small differences are within a 9B model's run-to-run noise; the Jarvis, harness and sports differences are the failure the audit recorded, reproduced and then gone. The baseline passed 6 of 9 cases. The first post-change run passed 8 of 9: an artifact made in place of the requested file was counted as delivered. With that and a needless version prefetch fixed, the second run passed 9 of 9, and so did a third on the final code. The Oilers schedule was checked against ESPN separately.</p>
 </section>
 
+<section><h2>The D1–D8 regression campaign, qwen3.5:9b</h2>
+<div class="scroll"><table>
+<thead><tr><th>Run</th><th>Score</th><th>Success</th><th>Critical</th><th>Model calls</th></tr></thead>
+<tbody>
+<tr><td>Baseline <code>aefc279</code></td><td>8.96</td><td>88%</td><td>0</td><td>136</td></tr>
+<tr><td>Branch, first run <code>9986e0e</code></td><td class="bad">8.57</td><td class="bad">75%</td><td>0</td><td>166</td></tr>
+<tr><td>Branch, fixed <code>08ccbc6</code></td><td class="ok">9.12</td><td class="ok">96%</td><td class="ok">0</td><td>191</td></tr>
+</tbody></table></div>
+<p class="muted">The first run was a real regression. The new "about EchoSpeak" facts added about 2,000 characters to every model call, and the 6,000-line-log case hit the 16,384-token window. The facts were rewritten (932 characters for small models) and the re-run scored 9.12, above the baseline and the 9/10 target. Efficiency is still lower, because the branch inspects before acting. Three runs per case at temperature 0.7: differences under about a point are noise.</p>
+</section>
+
 <section><h2>What was actually checked</h2><div class="grid">
-<div class="box"><h3>Automated</h3><p>Backend: 40 audit regression tests; related suites 329 passed, plus 3 check-in failures that are identical on the base commit. The full backend run's 48 failures are the same tests with the same errors on the base commit (external-runtime tests that unified mode refuses, and earlier check-in and preview failures).</p><p>Terminal: 4,204 passed (session manager model, key bindings, every size).</p></div>
-<div class="box"><h3>Real interfaces</h3><p>Session lab: the real TUI in tmux, a real backend, 14 of 14 checks, including where a message lands after switching. Live qwen3.5:9b replay above. Not run: the rebuilt desktop app, cloud models, other local models, real ghostty/alacritty.</p></div>
+<div class="box"><h3>Automated</h3><p>Backend: 46 audit regression tests. The full suite's 48 failures are exactly those failing on the base commit (external-runtime tests that unified mode refuses, and earlier check-in and preview failures). Desktop: 245 tests and a type-check. Terminal: 4,209 passed.</p></div>
+<div class="box"><h3>Real interfaces</h3><p>Desktop lab in Chromium: 15/15. Terminal command lab, every command and a backend restart: 34/34. Session lab: 14/14.</p><p>Live qwen3.5:9b with file writing on: code fix (tests re-run independently), file creation, write approved and denied, delegation (fixed), group, cancel, backend restart, session logs. The rebuilt app is installed for your testing.</p></div>
 </div></section>
 
-<section><h2>Still open</h2><p>The desktop sidebar still groups by Chat / Agents / Code and doesn't yet use the shared session list or show which profile answered. A deliverable is recognised from the request's wording. The code check parses but doesn't run code, so a game whose score never changes still passes it (and is labelled "not run"). Your manual tests choose what comes next.</p></section>
+<section><h2>Still open</h2><p>The sandbox's system Python has no pytest, so EchoSpeak can't verify Python fixes itself here; <code>sudo pacman -S python-pytest</code> would fix that. A deliverable is recognised from the request's wording. The code check parses but doesn't run code. The held-out cases (H1–H7) and other models weren't run. Your manual tests choose what comes next.</p></section>
 
 <footer><a href="../../docs/research/agent-first.md">Technical record</a> · <a href="../../docs/research/conversation-audit-2026-11-16.md">Audit findings → causes → fixes → tests</a> · <a href="../../docs/acceptance/2026-11-17-agent-first-acceptance.md">Your acceptance checklist</a></footer>
 </main></body></html>
