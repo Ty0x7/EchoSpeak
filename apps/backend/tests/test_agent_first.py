@@ -92,13 +92,14 @@ def test_every_profile_is_told_the_same_facts_about_the_app(env, monkeypatch):
     for prompt in (talking.system_prompt, working.system_prompt, named.system_prompt):
         # The whole roster, in a direct conversation too, where the team section lists nobody.
         assert "The agents, all of them: Echo" in prompt and "Jarvis (Researcher)" in prompt and "Glados (Builder)" in prompt
-        assert "are tools an agent may have, not agents" in prompt
+        assert "not agents" in prompt
         # The model and the app version are different facts and are told apart.
         assert "The model writing your replies is qwen3.5:9b" in prompt
         assert f"{APP_VERSION} is EchoSpeak's app version, never a model name" in prompt
+        assert len(prompt.split("## About EchoSpeak", 1)[1].split("\n## ", 1)[0]) < 1900   # it is sent on every call
         # What EchoSpeak is, and the real commands.
-        assert "EchoSpeak is the harness" in prompt and "the terminal client (`echospeak`)" in prompt
-        assert "/permissions" in prompt and "never invent a command" in prompt
+        assert "EchoSpeak is the harness" in prompt and "(`echospeak`)" in prompt
+        assert "/permissions" in prompt and "never invent a command" in prompt.lower()
     assert "Jarvis (Researcher) (this is you, the agent writing this reply" in named.system_prompt and "You are Jarvis." in named.system_prompt
     assert "How it is organised: one assistant." in talking.system_prompt
 

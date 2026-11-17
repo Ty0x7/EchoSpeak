@@ -40,6 +40,14 @@
 <p class="muted">With text in the input, ← is the ordinary cursor key. Esc clears a search, then returns; → returns. Tab filters All / Echo / Agents / This project.</p>
 </section>
 
+<section><h2>The desktop says the same thing</h2>
+<div class="grid">
+<figure class="box wide"><img src="../media/agent-first-desktop-echo.png" alt="Desktop app: the sidebar lists New conversation, pages, Workbench, the agents, and one Conversations list with All, Echo, Agents and This project filters. The open conversation's header reads Echo, fake-scripted-model, work, Ask for risky actions." style="width:100%;height:auto;border-radius:6px"><figcaption>Actual Chromium capture of the desktop UI against a real backend and a scripted model (desktop lab, 15/15 checks). No Chat / Agents / Code switch: one list, the terminal's filters, and a header with who answers, the model, the project and the approval mode.</figcaption></figure>
+<figure class="box"><img src="../media/agent-first-desktop-agents-filter.png" alt="Desktop app with the Agents filter selected: only the Jarvis conversation is listed." style="width:100%;height:auto;border-radius:6px"><figcaption>The Agents filter: only conversations with agents.</figcaption></figure>
+<div class="box"><h3>Also checked in the browser</h3><p>A message typed in the desktop lands in the open conversation and no other. A conversation started through the terminal's API appears in the list. Attaching a folder asks "Let Echo work in …?", and Cancel stores it read-only, so only a trusted folder gives Echo file and terminal tools.</p></div>
+</div>
+</section>
+
 <section><h2>The audit's conversations, replayed on qwen3.5:9b</h2>
 <div class="scroll"><table>
 <thead><tr><th>Case (from the recording)</th><th>Before (base <code>aefc279</code>)</th><th>After</th></tr></thead>

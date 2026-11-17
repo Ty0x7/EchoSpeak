@@ -1283,6 +1283,8 @@ class LeanSession:
                 can_write=capabilities.can_write_files(toolbox),
                 model=facts_model,
                 provider=facts_provider,
+                # Small local models: the short app facts (their window is the tightest).
+                short_facts=not guest and self._local_model(persona) and chat_run_mod.profile_for(facts_model, local=True) == "compact",
             )
             if research_run is not None:
                 research_run.user_message = goal

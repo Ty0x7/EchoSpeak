@@ -103,10 +103,17 @@ def test_installed_app_defaults_to_documents_not_its_install_folder(monkeypatch,
     assert Path(config_module._workspace_root(str(mine))) == mine.resolve()
 
 
-def test_source_checkout_keeps_the_repo_as_its_workspace(monkeypatch):
+def test_source_checkout_defaults_to_documents_not_its_own_code(monkeypatch, tmp_path):
+    """Running from source is the owner's everyday app: its default folder is theirs, not EchoSpeak's source."""
     monkeypatch.delattr(sys, "frozen", raising=False)
+    home = tmp_path / "home"
+    (home / "Documents").mkdir(parents=True)
+    monkeypatch.setattr(config_module.Path, "home", classmethod(lambda cls: home))
     assert config_module.app_install_dir() is None
-    assert config_module.default_workspace() == config_module.REPO_ROOT
+    assert config_module.default_workspace() == home / "Documents"
+    assert Path(config_module._workspace_root("")) == (home / "Documents").resolve()
+    # A developer's explicit FILE_TOOL_ROOT (the checkout, say) is kept.
+    assert Path(config_module._workspace_root(str(config_module.REPO_ROOT))) == config_module.REPO_ROOT.resolve()
 
 
 def test_project_status_refuses_to_call_the_install_folder_a_project(monkeypatch, tmp_path):

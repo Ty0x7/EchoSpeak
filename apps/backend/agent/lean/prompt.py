@@ -224,6 +224,7 @@ def build_system_prompt(
     environment: str = "",
     model: str = "",
     provider: str = "",
+    short_facts: bool = False,
 ) -> str:
     """An agent's (or native Code's) system prompt. ``environment`` "code": the engineering workflow
     (agent/lean/code_mode.py) instead of rich-answer and team sections."""
@@ -238,7 +239,7 @@ def build_system_prompt(
         ("## Echo's personality (capabilities and permissions still follow this profile)\n" + assistant_soul.strip())
         if assistant_soul.strip() else "",
         ("Configured role description (does not grant permissions): " + persona.description) if persona.description else "",
-        identity_section(persona, model, provider),
+        identity_section(persona, model, provider, short=short_facts),
         _for_tools(WORKING_RULES, tool_names),
         _code_rules() if code else "",
         WRITING_REPLIES,

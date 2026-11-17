@@ -344,6 +344,8 @@ class Stack:
             # 10 calls") carried from one case into the next. Each case should stand alone. Turn it on with
             # --env LEARNING_ENABLED=true to measure learning itself.
             "LEARNING_ENABLED": "false",
+            # Without a project the default folder is the owner's Documents; an evaluation must never see it.
+            "FILE_TOOL_ROOT": str(dirs["backend-home"]),
         })
         env.update(self.extra_env)
         self.env_used = {k: v for k, v in env.items() if k.startswith(("LOCAL_MODEL", "LEAN_", "ASSISTANT", "USE_LOCAL", "LEARNING",

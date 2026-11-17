@@ -76,8 +76,8 @@ def model_line(name: str, model: str, provider: str) -> str:
         return (f"- You are {name}. EchoSpeak could not read which model you run on this turn: say so if asked, "
                 f"and never answer with the app version ({APP_VERSION}).")
     engine = f"{model} (served by {provider})" if provider else model
-    return (f"- You are {name}. The model writing your replies is {engine}. Asked \"what model are you\", answer "
-            f"with that model. {APP_VERSION} is EchoSpeak's app version, never a model name.")
+    return (f"- You are {name}. The model writing your replies is {engine}; {APP_VERSION} is EchoSpeak's app "
+            "version, never a model name.")
 
 
 def _where() -> str:
@@ -86,10 +86,13 @@ def _where() -> str:
     return "the EchoSpeak desktop app" if is_packaged() else "EchoSpeak running from source (a development build)"
 
 
-def _mode_line() -> str:
+def _mode_line(short: bool = False) -> str:
     from agent import environments
 
     if environments.unified():
+        if short:
+            return ("- How it is organised: one assistant. A trusted project folder adds file and terminal work to "
+                    "the same conversation; there are no separate chat and code assistants.")
         return ("- How it is organised: one assistant. Echo converses, researches and remembers in any conversation; "
                 "a trusted project folder attached to a conversation adds file and terminal work in that folder, "
                 "and changes nothing else. Each named agent has its own conversations. There are no separate chat "
@@ -99,34 +102,44 @@ def _mode_line() -> str:
 
 
 def section(*, name: str, model: str = "", provider: str = "", short: bool = False) -> str:
-    """The "About EchoSpeak" prompt section for the agent called ``name`` on ``model``."""
+    """The "About EchoSpeak" prompt section for the agent called ``name`` on ``model``.
+
+    ``short`` is for small local models, whose window is the tightest: every line here is sent on every call.
+    The D1-D8 campaign of 17 November 2026 measured the first, longer version (about 2,000 characters) pushing
+    the 6,000-line-log case to the 16,384-token window; the short form keeps the facts the audit needed.
+    """
     from version import APP_VERSION
 
-    lines = [
+    commands = " ".join(name for name, _ in TERMINAL_COMMANDS)
+    if short:
+        return "\n".join([
+            "## About EchoSpeak (from the running app)",
+            model_line(name, model, provider),
+            f"- EchoSpeak is the harness: one runtime that runs every agent; the desktop app and the terminal "
+            f"(`echospeak`) share its conversations. Version {APP_VERSION}, by Ty (ty0x7), {SOURCE_URL}; never take a "
+            "version number from memory, files or the web.",
+            f"- The agents, all of them: {roster_line(name)}. Tools are not agents.",
+            _mode_line(short=True),
+            f"- Terminal commands: {commands} (← on an empty input lists sessions). Never invent a command.",
+        ])
+    return "\n".join([
         "## About EchoSpeak (from the running app)",
         model_line(name, model, provider),
-        f"- You are running in {_where()}, version {APP_VERSION}, on {platform.system()} {platform.release()}.",
-        f"- EchoSpeak was created by Ty (ty0x7). Source code: {SOURCE_URL}",
-        f"- {APP_VERSION} is read from the running app and is always current. Version numbers in saved memories, past "
-        "chats, files, app or shortcut names, and web pages are older or about something else: never answer "
+        f"- You are running in {_where()}, version {APP_VERSION}, on {platform.system()} {platform.release()}. "
+        f"EchoSpeak was created by Ty (ty0x7); source, releases and pull requests: {SOURCE_URL} (other apps share "
+        "the name).",
+        f"- {APP_VERSION} is read from the running app and is always current. Version numbers in saved memories, "
+        "past chats, files, app or shortcut names, and web pages are older or about something else: never answer "
         "\"what version are you\" from them.",
-        "- EchoSpeak is the harness: one shared runtime (the model loop, tools, memory, approvals, verification and "
-        "sessions) that runs every agent. The desktop app and the terminal client (`echospeak`) are two windows onto "
-        "the same backend and the same conversations; voice is optional.",
-        f"- The agents, all of them: {roster_line(name)}. Web search, live-data cards, desktop control and the like "
-        "are tools an agent may have, not agents.",
-    ]
-    # The compact prompt keeps this too: the small local models are the ones that guessed at it.
-    lines.append(_mode_line())
-    commands = ", ".join(name for name, _ in TERMINAL_COMMANDS)
-    lines.append(
+        "- EchoSpeak is the harness: one shared runtime (model loop, tools, memory, approvals, verification, "
+        "sessions) that runs every agent. The desktop app and the terminal client (`echospeak`) are two windows "
+        "onto the same backend and conversations.",
+        f"- The agents, all of them: {roster_line(name)}. Web search, live-data cards and desktop control are tools "
+        "an agent may have, not agents.",
+        _mode_line(),
         f"- Finding things. Terminal: {commands}; the left arrow on an empty input opens the session list. "
-        f"Desktop: {DESKTOP_PLACES}. These are the real ones: never invent a command, a mode or a setting. "
-        "If you aren't sure one exists, say /help lists them."
-    )
-    if not short:
-        lines.append(f"- EchoSpeak's own releases and pull requests: {SOURCE_URL} (other apps share the name).")
-    return "\n".join(lines)
+        f"Desktop: {DESKTOP_PLACES}. Never invent a command, a mode or a setting; /help lists them.",
+    ])
 
 
 def snapshot(*, name: str = "Echo", model: str = "", provider: str = "") -> dict[str, Any]:

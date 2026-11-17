@@ -224,9 +224,9 @@ terminal is the same record the desktop shows. The desktop sidebar does not yet 
 
 ## 7. Limits and what is still open
 
-- **Desktop:** the sidebar still groups by Chat/Agents/Code and doesn't read `/sessions/overview` or show which
-  profile answered. That is the next step for UI consistency, together with the desktop trust question on attach
-  ([interfaces.md](interfaces.md) table, items 1–3).
+- **Desktop (closed on 17 November, §9):** the desktop now has the shared conversation list, the header and the
+  trust question. What remains is a per-turn "which profile answered" marker in the timeline; the header already
+  names the agent, model and project.
 - **At 40 columns and below,** session rows show only the title (and the highlight). The agent, project and state
   columns need 60+.
 - **Search** is substring, not fuzzy.
@@ -249,6 +249,88 @@ terminal is the same record the desktop shows. The desktop sidebar does not yet 
   - other local models (only qwen3.5:9b);
   - the installed AppImage (not rebuilt for this branch);
   - real ghostty/alacritty drag-resizing (tmux only).
+
+## 9. Completion pass (17 November 2026)
+
+The remaining scope: the desktop app, the outstanding live tests, every terminal command, the D1–D8 regression
+campaign, and a build installed for owner testing. qwen3.5:9b was the only model used.
+
+### 9.1 Desktop: the same one assistant
+
+In unified mode (`GET /app/facts`), the desktop app now uses the backend's conversation description, the same one
+the terminal's session manager uses:
+
+- **One list.** The sidebar shows every conversation from `GET /sessions/overview`: who answers (Echo, an agent,
+  a group), the project (marked read-only when untrusted) and the state (running, needs your answer, needs
+  approval, last run failed).
+- **The same filters as the terminal:** All / Echo / Agents / This project, in place of the Chat / Agents / Code
+  switch. The page links are all listed, plus a **Workbench** entry for project files, changes and terminals. A
+  new conversation is with Echo; agents are opened from the Agents list.
+- **The header** says who answers, the model writing the replies, the project (and whether it is trusted) and the
+  approval mode, in the order the terminal footer uses (`identityParts`).
+- **Attaching a folder asks about trust**, as `/project` does in the terminal. Cancel attaches it read-only, and
+  only a trusted folder gives Echo file and terminal tools. The desktop used to attach every folder as trusted
+  without asking.
+- **Legacy mode** (`assistant_mode = environments`, or a backend without these routes) keeps the old layout.
+
+**Code:**
+
+- `apps/web/src/app/sessionOverview.ts`: rows, filters, search order, header, trust text; tested in
+  `sessionOverview.test.ts`.
+- `components/ProjectSidebar.tsx` (`unified` prop) and `index.tsx` (loading, wiring, header, trust).
+- **Refresh:** the list reloads when conversations change and every 15 s, so a conversation started in the
+  terminal appears without reopening the app.
+
+**Desktop lab** (`apps/web/tooling/desktop_lab.py`): the real app in Chromium (Playwright), a real backend and a
+scripted model. **15/15** checks passed:
+
+- no mode switch; one list with Echo, project and Jarvis conversations; rows say who answers and the project;
+- the filters, and the Agents filter shows only agent conversations;
+- the header for Echo ("Echo · model · work · Ask for risky actions") and for Jarvis;
+- a message typed in the desktop lands in the open conversation and no other (read back from the backend);
+- a conversation created through the API the terminal uses appears in the list;
+- attaching a folder shows the trust question, and Cancel stores it untrusted;
+- no page errors.
+
+Only the native folder picker was stubbed. Screenshots at 1440 px and 390 px are in the evaluation folder.
+
+### 9.2 Live checks with writes on (qwen3.5:9b)
+
+`agent-first-engineering.py`: isolated backends, file writing and terminal on. Every result was checked from disk
+or the API, never from the reply.
+
+| Case | Result | Evidence |
+|---|---|---|
+| A1 fix a failing test | **pass** | `pricing.py`'s bug fixed; pytest re-run here passes; test file hash unchanged. The run says "not verified" because the sandbox's Python had no pytest ("No module named pytest", an environment cause), which is the honest label |
+| A2 create RELEASE.md | **pass** | file exists with three checklist items |
+| A3 how to reach other conversations | **pass** | "the left arrow on an empty input" |
+| A4 delegation from Glados to Jarvis | **fail, then fixed, then pass** | first: no `delegate_to_agent` (a direct conversation's team was only Glados); after the fix: delegated, Jarvis found Python 3.15.2 (25 Oct 2026) on python.org, confirmed independently |
+| A5 group, each agent introduces itself | **pass, then improved** | both answered as themselves; a third "merged" reply in Jarvis's voice is now skipped for each-agent questions (23 s → 7.5 s) |
+| A6 cancel mid-run, then continue | **pass** | cancel accepted, run recorded cancelled, next message answered (144) |
+| R1 backend restart | **pass** | after a new process on the same data: conversation listed, project attached, history kept, follow-up named `pricing.py` and the bug |
+| B1 write approved | **pass** | approval card shown for the write; file exists |
+| B2 write denied | **pass** | no file; reply doesn't claim it; work "failed / not delivered" |
+| C1 read the latest Codex session | **pass** | `agent_sessions` read the log; the reply reported the install and checksum it contains |
+
+### 9.3 Every terminal command
+
+`apps/terminal/tests/commandlab.py`: the real TUI in tmux, a real backend and a scripted model. **34/34**, covering:
+
+- `?`, Esc and every slash command: `/help`, `/status`, `/usage`, `/model`, `/agents`, `/agent NAME`,
+  `/agent -`, `/permissions`, `/mode`, `/memory`, `/approvals`, `/project` (trust question, then `y`),
+  `/project -`, `/sessions`, `/verbose`, `/new`, `/clear`;
+- Shift+Tab through all three approval modes;
+- Esc stopping a run ("Stopped");
+- a backend restart on a new port while the terminal is open.
+
+The restart found a defect. The terminal kept the old address, so commands said "cannot reach the backend" and a
+followed run gave up. It now re-reads the endpoint file on a lost connection and switches to the new address and
+key, unless the address was given with `--url` or `ECHOSPEAK_URL` (`EchoTUI._rediscover`, `Client.retarget`;
+5 unit tests).
+
+### 9.4 D1–D8 regression campaign
+
+_Filled in when the campaign finishes._
 
 ## 8. Owner acceptance
 

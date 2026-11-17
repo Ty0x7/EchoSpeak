@@ -226,9 +226,13 @@ def app_install_dir() -> Optional[Path]:
 
 
 def default_workspace() -> Path:
-    """The default file folder: the source checkout when developing, Documents when installed."""
-    if not is_packaged():
-        return REPO_ROOT
+    """The default file folder when no project is attached: the owner's Documents (else home).
+
+    The same whether EchoSpeak is installed or runs from source. From source it used to be the source checkout:
+    the owner's everyday `echospeak` command runs from source, so every agent without a project was told its files
+    were EchoSpeak's own code ("I can only work in …/echospeak-five-model-harness", live re-test, 17 November 2026).
+    A developer who wants the checkout sets FILE_TOOL_ROOT.
+    """
     documents = Path.home() / "Documents"
     return documents if documents.is_dir() else Path.home()
 
