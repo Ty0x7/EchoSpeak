@@ -29,9 +29,17 @@ IDENTITY = (
 # One assistant (agent/environments.py): Echo does the engineering, in whichever conversation has the project.
 IDENTITY_UNIFIED = (
     "You are Echo, the user's personal AI assistant in EchoSpeak, running on {model}. "
-    "This conversation has a trusted project attached, so you work as its engineer: "
-    "in the user's project on this computer, with file, terminal and search tools."
+    "You answer, research and remember as you do in any conversation. This conversation also has a trusted "
+    "project folder attached, so you can work in it as its engineer, with file and terminal tools. "
+    "The project is context, not the subject of every message: a greeting, a question about the news, sports, "
+    "the weather or EchoSpeak itself gets a normal answer, without touching the project."
 )
+
+RULES_HEADING = "## How you work in Echo Code"
+# One assistant: the same workflow, named for when it applies.
+RULES_HEADING_UNIFIED = ("## When the request is work in the project\n"
+                         "Use this workflow for engineering requests. For anything else, answer directly and use the "
+                         "research rules above; don't inspect the project to answer an unrelated question.")
 
 RULES = """## How you work in Echo Code
 Understand the request → inspect the project → plan when it's not trivial → edit files → run commands → verify → adapt → report.
@@ -55,6 +63,39 @@ _NOT_IN_CODE = {
 # Small local models see these up front; the rest load through find_tools (agent/lean/toolbox.py focus).
 CODE_FOCUS = BUILDER_FOCUS | {"web_search", "safe_web_fetch", "memory_search", "set_objective", "read_output"}
 
+# One assistant (docs/research/agent-first.md): attaching a project adds engineering tools to Echo; it
+# doesn't take the conversation ones away. Before, a trusted project swapped Echo for the Code profile,
+# and "when do the Oilers play next?" was answered without sports_live, by eight web calls, with no
+# evidence ledger and no citation review (conversation audit, 16 November 2026).
+CONVERSATION_TOOLS = frozenset({
+    "set_reminder", "list_reminders", "cancel_reminder", "create_media", "creation_status", "create_artifact",
+    "update_artifact", "product_search", "video_search", "image_search", "stock_history", "weather_live", "sports_live",
+})
+# Still not offered beside a project: research workers, the desktop and the screen, and the real browser.
+_NOT_BESIDE_A_PROJECT = (_NOT_IN_CODE - CONVERSATION_TOOLS) | {"browse_task"}
+UNIFIED_FOCUS = CODE_FOCUS | {"sports_live", "weather_live", "calculate", "memory_save"}
+
+
+def _unified() -> bool:
+    from agent import environments
+
+    return environments.unified()
+
+
+def toolsets() -> list[str]:
+    return CODE_TOOLSETS + ["live"] if _unified() else list(CODE_TOOLSETS)
+
+
+def focus() -> set[str]:
+    return set(UNIFIED_FOCUS if _unified() else CODE_FOCUS)
+
+
+def rules() -> str:
+    if not _unified():
+        return RULES
+    return RULES.replace(RULES_HEADING, RULES_HEADING_UNIFIED, 1).replace(
+        "; no charts or cards.", ".")
+
 
 def identity(model: str) -> str:
     from agent import environments
@@ -64,6 +105,7 @@ def identity(model: str) -> str:
 
 def restrict(toolbox: Any) -> None:
     """Code's tool boundary, in trusted code: what isn't for engineering is never offered."""
-    toolbox.entries = {name: entry for name, entry in toolbox.entries.items() if name not in _NOT_IN_CODE}
-    toolbox.native = {name: tool for name, tool in toolbox.native.items() if name not in _NOT_IN_CODE}
-    toolbox.deferred -= _NOT_IN_CODE
+    out = _NOT_BESIDE_A_PROJECT if _unified() else _NOT_IN_CODE
+    toolbox.entries = {name: entry for name, entry in toolbox.entries.items() if name not in out}
+    toolbox.native = {name: tool for name, tool in toolbox.native.items() if name not in out}
+    toolbox.deferred -= out

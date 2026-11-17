@@ -39,6 +39,8 @@ UNTRUSTED_SOURCES = {
     "stock_history", "product_search", "video_search", "image_search",
     # Uploaded documents can come from anywhere (a downloaded PDF, a forwarded email).
     "document_search", "research_notebook", "project_workspace",
+    # Another agent's session log: its words, and whatever it read from the web.
+    "agent_sessions",
     # MCP registry listings and third-party servers' error text (agent/integrations.py), and
     # the tool descriptions those servers wrote, as find_tools returns them.
     "find_integrations", "check_integration", "find_tools",

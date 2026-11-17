@@ -129,7 +129,7 @@ def code_persona(model_label: str = "") -> AgentPersona:
         # The engineering workflow lives in agent/lean/code_mode.py; the identity names the model.
         soul=code_mode.identity(label),
         avatar="",
-        toolsets=list(code_mode.CODE_TOOLSETS),
+        toolsets=code_mode.toolsets(),
         context_scope="project",
         builtin=True,
         created_at=0.0,

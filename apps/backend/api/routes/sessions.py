@@ -389,6 +389,32 @@ async def list_threads(
     return [_thread_response(t, rooms) for t in threads]
 
 
+@router.get("/sessions/overview")
+async def sessions_overview(
+    include_archived: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    """Every conversation with who answers in it, its project, status and last reply.
+
+    One description for both interfaces (agent/session_overview.py): the terminal's session
+    manager reads this, and so can the desktop's sidebar.
+    """
+    from agent import session_overview
+    return {"items": session_overview.overview(limit=limit, include_archived=include_archived)}
+
+
+@router.get("/app/facts")
+async def app_facts():
+    """What the running app is: version, mode, the agent roster and the terminal's commands.
+
+    The same facts every agent is told (agent/lean/app_facts.py), so an interface and an agent's
+    answer about "which agents exist" come from one place. The model is per conversation and per
+    agent; clients already read it from the provider and agent routes.
+    """
+    from agent.lean import app_facts as facts
+    return facts.snapshot()
+
+
 @router.post("/threads", response_model=ThreadResponse)
 async def create_thread(request: ThreadCreateRequest):
     """Create a new conversation thread."""

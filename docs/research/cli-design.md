@@ -622,3 +622,24 @@ header follows an explicit legacy mode's selected model; unified mode calls the 
 
 The architectural connection between model, identity, soul, skills, memory and permissions, plus verification
 and source-versus-package update instructions, is recorded in [interfaces.md](interfaces.md#16-november-2026-identity-terminal-and-memory-follow-up).
+
+## 8. Session manager (17 November 2026)
+
+**←** on an empty input (or `/sessions`, `/resume` without an id) opens the session manager in the composer's
+place. It follows Codex CLI's resume picker (a list by activity, keyboard filters, type to search, Enter resumes,
+a position counter), adapted to named agents:
+
+- each row shows who answers there, the project and the state;
+- the filters are All / Echo / Agents / This project;
+- the selected conversation's last exchange is shown under the list.
+
+With text in the input, ← stays the cursor key. Esc clears a search, then returns; → returns. Shift+Tab steps the
+filter instead of the approval mode while the list is open.
+
+- **Code:** `tui/sessions.py` (model and drawing) and `tui/app.py` (`open_sessions`, `_browser_key`, `_switch`).
+- **Data:** `GET /sessions/overview` (`agent/session_overview.py`), with a fallback to `/threads` on older backends.
+- **Height:** the manager is priority 0 in the height plan, so the layout matrix covers it at every size.
+- **Live check:** `tests/sessionlab.py` drives the real TUI in a private tmux against a real backend (14 checks,
+  including that a message after resuming lands in the chosen conversation).
+
+Design and results: [agent-first.md](agent-first.md) §4–§5.

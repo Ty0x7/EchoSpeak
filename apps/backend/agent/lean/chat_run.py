@@ -44,13 +44,20 @@ _URL = re.compile(r"https?://[^\s)<>\]\"'`]+")
 _TRACKING = re.compile(r"^(utm_[a-z]+|fbclid|gclid|ref|ref_src)$", re.I)
 SELF_REPO = "https://github.com/Ty0x7/EchoSpeak"
 _SELF = re.compile(r"(?i)\becho ?speak\b")
-_SELF_UPDATES = re.compile(r"(?i)\b(latest|newest|recent|new|updates?|changes?|changelog|releases?|version|pull requests?|prs?|what'?s new)\b")
+# Not a bare "version": "what version is this?" is about the running app, which the prompt already states.
+# Fetching the releases page for it cost two calls and 20 seconds (live audit replay, 17 November 2026).
+_SELF_UPDATES = re.compile(r"(?i)\b(latest|newest|recent|new|updates?|changes?|changelog|releases?|pull requests?|prs?|what'?s new)\b")
 # A page that covers less than this share of the question's terms doesn't support an answer to it.
 RELEVANT = 0.34
 SEARCH_TOOLS = {"web_search", "image_search", "video_search", "product_search"}
 PAGE_TOOLS = {"safe_web_fetch", "youtube_transcript"}
-FILE_TOOLS = {"file_read", "file_search", "file_find", "file_list", "document_search"}
+FILE_TOOLS = {"file_read", "file_search", "file_find", "file_list", "document_search", "agent_sessions"}
 MEMORY_TOOLS = {"memory_search", "chat_search"}
+# Work in the attached project. Once a turn does any of it, the turn is engineering and the research
+# step budget no longer applies (ChatRun.step_limit); a turn that only looks things up keeps it.
+PROJECT_TOOLS = FILE_TOOLS | {"terminal", "process_output", "process_stop", "file_write", "file_edit", "file_delete",
+                              "file_move", "file_copy", "checkpoint_undo", "set_objective", "project_status"}
+_YEAR = re.compile(r"(?<!\d)(20\d\d)(?!\d)")
 
 
 def model_billions(model: str) -> Optional[float]:
@@ -175,10 +182,50 @@ class ChatRun:
     context: dict[str, Any] = field(default_factory=dict)
     audit: dict[str, Any] = field(default_factory=dict)
     started: float = field(default_factory=time.time)
+    # Echo with a trusted project attached (docs/research/agent-first.md): the same evidence ledger,
+    # citation review and research budget as any conversation, until the turn starts project work.
+    engineering: bool = False       # engineering tools are offered this turn
+    project_work: bool = False      # the turn has used one
+    page_reads: dict[str, int] = field(default_factory=dict)
+    advice: list[str] = field(default_factory=list)
 
     @property
     def budget(self) -> int:
         return BUDGETS.get(self.profile, BUDGETS["full"])
+
+    def step_limit(self) -> int:
+        """The step limit for a turn that can also engineer (LeanTurn.step_limit): the research budget
+        while it only looks things up, and no limit of its own (0) once it works in the project."""
+        return 0 if self.project_work else self.budget
+
+    # ── advice under a tool result ───────────────────────────────────────
+    def advise(self, name: str, args: dict[str, Any], ok: bool) -> str:
+        """A note EchoSpeak adds under one result (LeanTurn.result_note), or "".
+
+        Two failures from one recorded answer (conversation audit, 16 November 2026): a search for
+        "Edmonton Oilers next game 2024" asked in November 2026, and the same schedule page read three
+        times. The clock is in the prompt, but a small model searches from its training year; the
+        check is made here, where the query is known.
+        """
+        notes: list[str] = []
+        if name in SEARCH_TOOLS:
+            query = str(args.get("query") or args.get("q") or "")
+            stale = stale_years(query, self.user_message)
+            if stale:
+                from datetime import datetime
+                now = datetime.now().astimezone()
+                notes.append(f"Today is {now.strftime('%B %d, %Y')}. This search asked for {', '.join(stale)}, which the "
+                             "user did not mention. If they want what is current, these results are out of date: "
+                             f"search again with {now.year} (or without a year) before you answer.")
+        if name in PAGE_TOOLS:
+            key = normalize_url(str(args.get("url") or args.get("video") or ""))
+            if key:
+                self.page_reads[key] = self.page_reads.get(key, 0) + 1
+                if self.page_reads[key] == 2:
+                    notes.append("You already read this page in this request; the text above is the same page. "
+                                 "It won't change by reading it again: answer from it, or say what it doesn't show.")
+        self.advice.extend(note[:200] for note in notes)
+        return " ".join(notes)
 
     # ── evidence ─────────────────────────────────────────────────────────
     # ── deterministic retrieval of what the user pointed at ─────────────
@@ -258,9 +305,15 @@ class ChatRun:
             path = str(args.get("path") or args.get("pattern") or args.get("query") or "")
             row["path"] = path[:200]
             self.evidence.append(Evidence("file", path[:200], name, step, ok))
+            if ok and self.engineering:
+                self._keep(text)  # a number quoted from a file the turn read is not an unverified figure
         elif name in MEMORY_TOOLS:
             row["query"] = str(args.get("query") or "")[:200]
             self.evidence.append(Evidence("memory", row["query"], name, step, ok))
+        if name in PROJECT_TOOLS:
+            self.project_work = True
+            if ok and name in {"terminal", "process_output"}:
+                self._keep(text)  # test counts and timings from a command's own output are evidence too
         self.calls.append(row)
 
     def _keep(self, text: str) -> None:
@@ -398,10 +451,31 @@ class ChatRun:
             },
             "citations": {key: (value[:20] if isinstance(value, list) else value) for key, value in self.audit.items()},
             "corrections": list(self.nudges),
+            "advice": list(self.advice)[:8],
+            "engineering": {"offered": self.engineering, "used": self.project_work},
             "review": dict(self.reviewed),
             "usage": {k: int(v) for k, v in dict(usage or {}).items() if isinstance(v, (int, float))},
             "seconds": round(time.time() - self.started, 2),
         }
+
+
+def stale_years(query: str, user_message: str, *, this_year: Optional[int] = None) -> list[str]:
+    """Past years in a search query that the user never asked about.
+
+    A year the user wrote is theirs ("who won in 2019"). A past year the model added on its own is a
+    stale assumption about what "now" is.
+    """
+    if this_year is None:
+        from datetime import datetime
+        this_year = datetime.now().year
+    asked = set(_YEAR.findall(user_message or ""))
+    years = [y for y in dict.fromkeys(_YEAR.findall(query or "")) if y not in asked]
+    reached = [int(y) for y in _YEAR.findall(query or "")]
+    # A season written "2025-26" ends in 2026.
+    reached += [int(start[:2] + end) for start, end in re.findall(r"(?<!\d)(20\d\d)\s?[-–/]\s?(\d\d)(?!\d)", query or "")]
+    if any(year >= this_year for year in reached):
+        return []  # "2025-26 season", "2024 vs 2026": the query already reaches the present
+    return [y for y in years if this_year - 6 <= int(y) < this_year]
 
 
 def earlier_sources(session_id: str, limit: int = 8) -> list[dict[str, str]]:

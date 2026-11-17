@@ -23,6 +23,7 @@ from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
 from agent.lean.personas import CHAT_AGENT_ID, CODE_AGENT_ID, AgentPersona, chat_persona, code_persona, get_persona_store
 from agent.lean import chat_mode
 from agent.lean import chat_run as chat_run_mod
+from agent.lean import session_logs
 from agent.lean.prompt import build_system_prompt
 from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoint
 from agent.lean.rooms import Room, get_room_store, mentioned_agents
@@ -335,9 +336,21 @@ class LeanSession:
                                      "verification": {**measured.get(agent_id, {}), "ledger": ledger.to_dict()}})
             status = "cancelled" if self.cancel.is_set() else "completed" if result.get("success") else "failed"
             lead = measured.get(self._lead_id) or next(iter(measured.values()), {})
-            work = coordinator.finish(self.work_context, status=status, result=result.get("response", ""), evidence=evidence,
-                                      verification=(verification.STATUS_LABELS[lead["status"]].lower() if lead
-                                                    else "verified" if memory_verified else "observed" if checked else "unverified"))
+            # The run ending is not the deliverable existing: a file that was asked for and never written
+            # is "not delivered", and something the owner settled for instead is recorded as that fallback.
+            from agent.lean import deliverable
+            delivered = result.get("deliverable")
+            status = deliverable.work_status(delivered, status)
+            undelivered = deliverable.VERIFICATION.get(delivered["status"]) if delivered else None
+            if delivered:
+                evidence.append({"agent_id": self._lead_id, "execution_id": self.execution_id, "tools": [],
+                                 "deliverable": delivered})
+            response = str(result.get("response", ""))
+            if undelivered:
+                response = delivered["note"] + "\n\n" + response
+            work = coordinator.finish(self.work_context, status=status, result=response, evidence=evidence,
+                                      verification=(undelivered or (verification.STATUS_LABELS[lead["status"]].lower() if lead
+                                                    else "verified" if memory_verified else "observed" if checked else "unverified")))
             result["work"] = work
             if work["status"] == "completed" and self.source not in INTERACTIVE_SOURCES:
                 # An interactive reply already streamed into its chat; only unattended runs need an outbox row.
@@ -445,6 +458,15 @@ class LeanSession:
 
         final_text = next((r.text for r in reversed(self.results) if r.text), "")
         cancelled = self.cancel.is_set()
+        # Was what the owner asked to be created actually created (agent/lean/deliverable.py)? From the
+        # tools that ran, never from the reply. Only the owner's own request is a deliverable.
+        delivered = None
+        if not cancelled and success and self.caller_role == "owner" and self.source != "heartbeat":
+            from agent.lean import deliverable
+            delivered = deliverable.assess(message, [r.timeline for r in self.results])
+            if delivered and delivered["status"] != "delivered":
+                self.emit({"type": "answer_note", "note": delivered["note"], "check": "deliverable"})
+                self.emit({"type": "deliverable", **delivered})
         outcome = self.job.outcome if self.job is not None else None
         if cancelled and self._job_needs_closing():
             outcome = self.job.stop("you stopped it")
@@ -461,6 +483,7 @@ class LeanSession:
             error=error[:1000],
             metadata={**dict(execution.metadata or {}), **({"outcome": outcome} if outcome else {}),
                       **({"chat_run": self._chat_trace(final_text)} if self._chat_run is not None else {}),
+                      **({"deliverable": delivered} if delivered else {}),
                       **({"verification": measured} if (measured := self._verification_record()) else {})},
         )
         self._learn(cancelled)
@@ -487,6 +510,7 @@ class LeanSession:
             ],
             "error": error,
             "outcome": outcome,
+            "deliverable": delivered,
         }
 
     def _learn(self, cancelled: bool) -> None:
@@ -1070,12 +1094,15 @@ class LeanSession:
                 + terminal.tools()
                 + integration_tools(self.session_id)
                 + computer_tools(self.session_id, self.cancel)
-                + [tool_outputs.tool(self.session_id)]
+                + [tool_outputs.tool(self.session_id), session_logs.tool()]
                 + a2a_trust.tool(),
                 session_id=self.session_id,
                 project_root=self.project_root,
             )
         chat_run = None
+        # Echo with a project attached keeps a conversation's research safeguards (chat_run.ChatRun)
+        # beside the engineering ledger; ``chat_run`` stays Chat's own run, which also shapes its prompt.
+        research_run = None
         if self.model_first:
             # Chat's capability boundary, in trusted code: what it may not use is never offered.
             chat_mode.restrict(toolbox)
@@ -1085,6 +1112,10 @@ class LeanSession:
             # Code's boundary, in trusted code: engineering tools only (agent/lean/code_mode.py).
             from agent.lean import code_mode
             code_mode.restrict(toolbox)
+            if self._unified() and depth == 0 and not guest:
+                # The same evidence ledger and answer review as a conversation without a project.
+                research_run = self._new_chat_run(persona)
+                research_run.engineering = True
         ledger = None
         if chat_run is None and not guest and not read_only and "terminal" in toolbox.names:
             # Echo-native engineering (Agents and Code): checks are measured against the objective, with progress,
@@ -1101,7 +1132,7 @@ class LeanSession:
         elif not guest and self.code_first and self._local_model(persona):
             # Native Code on a local model: engineering tools up front; the rest load through find_tools.
             from agent.lean import code_mode
-            toolbox.focus(code_mode.CODE_FOCUS)
+            toolbox.focus(code_mode.focus())
         elif not guest and self._small_builder(persona):
             # A builder on a local model sees its file, terminal and team tools; the rest load on demand.
             toolbox.focus(BUILDER_FOCUS)
@@ -1168,6 +1199,14 @@ class LeanSession:
                 self._lessons_shared.setdefault(persona.id, []).extend(learned.shared_ids)
         # Where the repo stands (branch, ahead/behind, changes), like a coding agent's git status.
         repo_note = git_context.summary(self.project_root) if self.project_root and "terminal" in toolbox.names else ""
+        # Which model writes this agent's replies, for the shared app facts (agent/lean/app_facts.py).
+        try:
+            from agent.lean import app_facts
+            facts_model, facts_provider = app_facts.endpoint_names(self._endpoint_for(persona))
+        except PermissionError:
+            raise
+        except Exception:
+            facts_model, facts_provider = "", ""
         if self.model_first:
             sections: dict[str, int] = {}
             prompt = chat_mode.build_prompt(
@@ -1186,6 +1225,7 @@ class LeanSession:
                 tool_names=set(toolbox.names),
                 has_external=any(str(getattr(toolbox.entry(n), "origin", "")) in chat_mode.ALLOWED_ORIGINS for n in toolbox.names),
                 profile=chat_run.profile if chat_run is not None else "full",
+                provider=facts_provider,
                 earlier_sources=chat_run_mod.earlier_sources_section(chat_run.earlier_sources) if chat_run is not None else "",
                 sizes=sections,
                 # The lessons prepare_turn counted as used are the ones Chat actually reads.
@@ -1220,7 +1260,7 @@ class LeanSession:
                 # Teammates start with a clean history, not without the story so far.
                 chat_summary=summaries.summary_text(self.session_id),
                 caller_note=caller_note(self.source, self.caller_role, _owner_name()),
-                past_chats=[] if guest or self.code_first or not self._owner_side(persona) or delegated_by or not _remembers_chats() else self._past_chats(),
+                past_chats=[] if guest or (self.code_first and not self._unified()) or not self._owner_side(persona) or delegated_by or not _remembers_chats() else self._past_chats(),
                 project_brief=project_brief,
                 project_evidence=project_evidence,
                 playbook=learned.section,
@@ -1231,7 +1271,13 @@ class LeanSession:
                 capabilities="" if guest else capabilities.report(toolbox),
                 tool_names=set(toolbox.names),
                 can_write=capabilities.can_write_files(toolbox),
+                model=facts_model,
+                provider=facts_provider,
             )
+            if research_run is not None:
+                research_run.user_message = goal
+                if research_run.earlier_sources:
+                    prompt += "\n\n" + chat_run_mod.earlier_sources_section(research_run.earlier_sources)
         turn = LeanTurn(
             client=self._client_for(persona),
             persona=persona,
@@ -1259,6 +1305,7 @@ class LeanSession:
             # A budget sized to the model that still ends in an answer, an evidence ledger,
             # and one citation correction before an answer is accepted.
             turn.tool_observer = chat_run.observe
+            turn.result_note = chat_run.advise
             if "safe_web_fetch" in toolbox.names:
                 turn.prefetch = chat_run.prefetch
             # Reviewed once it's written, never regenerated (no second thinking phase, no erased answer).
@@ -1268,6 +1315,17 @@ class LeanSession:
             turn.final_grace = True
             turn.grace_prompt = chat_run_mod.GRACE_PROMPT
             self._chat_run = chat_run
+        if research_run is not None:
+            turn.tool_observer = research_run.observe
+            turn.result_note = research_run.advise
+            if "safe_web_fetch" in toolbox.names:
+                turn.prefetch = research_run.prefetch
+            turn.answer_review = research_run.review
+            # A question that only needs looking up gets the research budget and still ends in an answer;
+            # the first file or terminal call lifts it to the engineering budget (ChatRun.step_limit).
+            turn.step_limit = research_run.step_limit
+            turn.grace_prompt = chat_run_mod.GRACE_PROMPT
+            self._chat_run = research_run
         if ledger is not None:
             turn.verifier = ledger
             if ledger.resumed and ledger.active():
@@ -1813,7 +1871,7 @@ class LeanSession:
 
     def _chat_trace(self, answer: str) -> dict[str, Any]:
         """The Chat run record saved on the execution (chat_run.ChatRun.trace)."""
-        last = next((r for r in reversed(self.results) if r.agent_id == CHAT_AGENT_ID), None)
+        last = next((r for r in reversed(self.results) if r.agent_id in {CHAT_AGENT_ID, CODE_AGENT_ID}), None)
         steps = max([int(item.get("step") or 0) for item in (last.timeline if last else [])] or [0])
         try:
             return self._chat_run.trace(steps=steps, stop_reason=last.stop_reason if last else "",

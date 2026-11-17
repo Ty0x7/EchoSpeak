@@ -154,7 +154,7 @@ def test_capabilities_name_real_tools_and_files_are_described_truthfully():
     assert "creating PDF or Office files" in section
     assert "Chat can't create PDF, Word or Excel files" in chat_mode.CHAT_RULES
     facts = chat_mode.app_facts()
-    assert "Echo coordinates" in facts and "https://github.com/Ty0x7/EchoSpeak" in facts
+    assert "The agents, all of them: Echo" in facts and "is the harness" in facts and "https://github.com/Ty0x7/EchoSpeak" in facts
 
 
 def test_official_sources_win_for_rules_and_regulation():

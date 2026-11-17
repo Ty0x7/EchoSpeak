@@ -145,3 +145,17 @@ Recorded model requests/responses, per-turn events and GPU metadata are in the l
 Check with `git status -sb`, `git log -1 --oneline`, `readlink -f ~/.local/bin/echospeak`, and
 `echospeak backend status`. The app version is not a commit ID: two different source snapshots can both say
 11.14.0. A local test package is not a published updater release.
+
+## 17 November 2026: one agent, one session list
+
+The table above (items 1–3) still describes the desktop. In the backend and the terminal:
+
+- **A trusted project adds engineering to Echo, without swapping profiles.** Echo keeps the conversation tools
+  and the research safeguards.
+- **Every agent gets the same app facts:** the roster, its model, and the real commands.
+- **Question cards can't offer permissions.**
+- **Work records say when a requested file was not created.**
+
+The terminal has a session manager (← on an empty input). `GET /sessions/overview` describes every conversation
+once for both interfaces; the desktop sidebar doesn't use it yet. See [agent-first.md](agent-first.md) and
+[conversation-audit-2026-11-16.md](conversation-audit-2026-11-16.md).

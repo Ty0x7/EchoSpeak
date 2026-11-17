@@ -59,6 +59,8 @@ ABILITIES: tuple[Ability, ...] = (
     Ability("Live data cards (weather, sports, stocks, products, videos, images)",
             ("weather_live", "sports_live", "stock_history", "product_search", "video_search", "image_search"), "live"),
     Ability("Reading files", ("file_read", "file_list", "file_find", "file_search"), "core"),
+    Ability("Reading the real session logs of Claude Code and Codex on this computer", ("agent_sessions",), "core",
+            only_if_requested=True),
     Ability("Creating and editing files", ("file_edit", "file_write"), "core"),
     Ability("Terminal commands", ("terminal",), "terminal"),
     Ability("Screenshots and reading images", ("take_screenshot", "read_image"), "vision"),
@@ -221,6 +223,22 @@ def report(toolbox: Any) -> str:
         lines += [f"  - {item}" for item in off]
     lines.append("- Approvals: " + _approval_line())
     return "\n".join(lines)
+
+
+def off_summary(toolbox: Any) -> str:
+    """What is off for this toolbox and why, in one line ('' when nothing relevant is off)."""
+    names = set(getattr(toolbox, "names", []) or [])
+    requested = set(getattr(toolbox, "requested", set()) or set())
+    off: list[str] = []
+    for ability in ABILITIES:
+        if any(tool in names for tool in ability.tools):
+            continue
+        if ability.only_if_requested and not any(tool in requested for tool in ability.tools):
+            continue
+        reason = next((r for tool in ability.tools if (r := why_off(tool, toolbox))), "")
+        if reason:
+            off.append(f"{ability.label} ({reason})")
+    return "; ".join(off[:5])
 
 
 def can_write_files(toolbox: Any) -> bool:

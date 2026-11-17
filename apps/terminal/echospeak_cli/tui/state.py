@@ -120,6 +120,10 @@ VERIFICATION = {
     "unverified": "Not verified",
     "blocked": "Blocked",
     "observed": "Not verified: steps ran, but no check measured the result",
+    # agent/lean/deliverable.py: the run ended, the thing asked for was never created.
+    "fallback accepted": "You accepted something else; the original request is not done",
+    "not delivered": "What you asked to be created was not created",
+    "not where asked": "Made as an artifact in EchoSpeak, not as a file where you asked",
 }
 VERIFIED = {"verified", "checks pass"}
 
@@ -143,6 +147,12 @@ def outcome_blocks(*, outcome: Optional[dict], work: Optional[dict], journal: st
         if verified:
             return [B.Outcome(g.done, f"Done: {summary}", "accent", label)]
         return [B.Outcome(g.unverified, f"Done (not verified): {summary}", "bold", label or "Not verified")]
+    if verification == "not delivered":
+        return [B.Outcome(g.fail, "Not delivered: nothing was created", "error", label)]
+    if verification == "not where asked" and work and str(work.get("status") or "") == "completed":
+        return [B.Outcome(g.unverified, "Made, but not where you asked", "bold", label)]
+    if verification == "fallback accepted" and work and str(work.get("status") or "") == "completed":
+        return [B.Outcome(g.unverified, "Finished with a fallback", "bold", label)]
     if work and str(work.get("status") or "") == "completed":
         if verified:
             return [B.Outcome(g.done, f"Done · {label}", "accent")]

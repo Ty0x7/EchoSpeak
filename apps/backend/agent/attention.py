@@ -39,16 +39,32 @@ def _approvals() -> list[Item]:
     from agent.state import get_state_store
     from agent.lean.approvals import get_approval_broker
 
-    items = []
+    # One pending card is one item, named for what it is. A question card is not an approval: answering
+    # it grants nothing. The same card used to be announced as "an action waiting for your approval"
+    # (from the live broker) and as "a task waiting for your answer" (from its work record) at once.
+    items: dict[str, Item] = {}
     for row in get_approval_broker().pending_for(""):
-        items.append(Item(f"approval:{row.get('id')}", "approval", "now", "An action is waiting for your approval",
-                          str(row.get("summary") or row.get("tool") or "")[:200], "the chat that asked"))
+        question = row.get("kind") == "question" or row.get("tool") == "ask_user"
+        label = "A question is waiting for your answer" if question else "An action is waiting for your approval"
+        text = row.get("question") if question else None
+        items[str(row.get("id"))] = Item(f"approval:{row.get('id')}", "approval", "now", label,
+                                         str(text or row.get("summary") or row.get("tool") or "")[:200], "the chat that asked")
     for row in get_state_store().coordination.view("approvals"):
-        if row.get("status") == "pending":
+        if row.get("status") == "pending" and str(row.get("id")) not in items:
             label = "A question is waiting for your answer" if row.get("kind") == "question" else "An action is waiting for your approval"
-            items.append(Item(f"approval:{row.get('id')}", "approval", "now", label, str(row.get("summary") or "")[:200],
-                              "Activity › Agent work"))
-    return items
+            items[str(row.get("id"))] = Item(f"approval:{row.get('id')}", "approval", "now", label,
+                                             str(row.get("summary") or "")[:200], "Activity › Agent work")
+    return list(items.values())
+
+
+def _pending_questions() -> set[str]:
+    """Ids of question cards that are already listed as waiting (so their work isn't listed again)."""
+    from agent.state import get_state_store
+    from agent.lean.approvals import get_approval_broker
+
+    ids = {str(row.get("id")) for row in get_approval_broker().pending_for("")}
+    ids |= {str(row.get("id")) for row in get_state_store().coordination.view("approvals") if row.get("status") == "pending"}
+    return ids
 
 
 def _work() -> list[Item]:
@@ -56,9 +72,15 @@ def _work() -> list[Item]:
 
     now = time.time()
     items = []
+    try:
+        asked = _pending_questions()
+    except Exception:
+        asked = set()
     for row in get_state_store().coordination.view("works"):
         status = row.get("status")
         objective = " ".join(str(row.get("objective") or "").split())[:160]
+        if status == "waiting_input" and str((row.get("wake") or {}).get("id") or "") in asked:
+            continue  # its question card is already on the list
         if status in {"unknown", "blocked", "waiting_input", "interrupted"}:
             title = {"unknown": "A task stopped and its last action needs checking",
                      "blocked": "A task is blocked", "waiting_input": "A task is waiting for your answer",

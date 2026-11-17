@@ -52,6 +52,7 @@ from . import layout as L
 from . import motion as M
 from .commands import COMMANDS, KEYS_HELP, SHORTCUTS, filter_commands, lookup, visible
 from .dialog import Action, Dialog, Option, approval_options, question_options
+from .sessions import SessionBrowser, from_thread
 from .state import Run
 from .theme import Caps
 
@@ -65,6 +66,8 @@ TWO_COL_MIN_H = 20
 TWO_COL_LEFT = 44
 STACKED_DIFF_ROWS = 10
 DIFF_MARK = "__diff__"
+# Messages shown when a conversation is resumed: the last exchanges, so you see where it stood.
+RECAP_MESSAGES = 6
 
 
 
@@ -298,6 +301,8 @@ class EchoTUI:
         self.pending: list[PendingInput] = []
         self.dialogs: list[Dialog] = []
         self.dialog: Optional[Dialog] = None
+        # The session manager (tui/sessions.py): open in the composer's place, or None.
+        self.browser: Optional[SessionBrowser] = None
         self.deferred: list[str] = []
         self.last_answer = ""
         self.session_tokens = {"prompt": 0, "completion": 0, "runs": 0}
@@ -415,6 +420,8 @@ class EchoTUI:
                                     dont_extend_height=True, wrap_lines=False,
                                     width=lambda: D.exact(self._left_w()) if self._two_col() else D())
         self.diff_window = Window(FormattedTextControl(self._diff_pane_text), dont_extend_height=True, wrap_lines=False)
+        self.browser_window = Window(FormattedTextControl(self._browser_text, focusable=True, show_cursor=False),
+                                     dont_extend_height=True, wrap_lines=False)
         self.dialog_text_window = Window(BufferControl(self.dialog_buffer), height=1,
                                          get_line_prefix=lambda _l, _w: [("class:attention", f" {self._dialog_prompt()} ")])
 
@@ -424,6 +431,8 @@ class EchoTUI:
         is_running = Condition(lambda: self.running)
         dialog_open = Condition(lambda: self.dialog is not None)
         text_mode = Condition(lambda: self.dialog is not None and self.dialog.text_mode)
+        # A dialog (an approval, a question) always wins: it takes the place the manager had.
+        browser_open = Condition(lambda: self.browser is not None and self.dialog is None)
 
         composer = HSplit([
             ConditionalContainer(Window(FormattedTextControl(self._top_rule), height=1), filter=shown("top_rule")),
@@ -454,11 +463,12 @@ class EchoTUI:
             ConditionalContainer(Window(FormattedTextControl(self._shortcuts_text), dont_extend_height=True),
                                  filter=shown("shortcuts")),
             ConditionalContainer(dialog, filter=dialog_open),
-            ConditionalContainer(composer, filter=~dialog_open),
+            ConditionalContainer(self.browser_window, filter=browser_open),
+            ConditionalContainer(composer, filter=~dialog_open & ~browser_open),
             ConditionalContainer(Window(FormattedTextControl(self._footer_text), dont_extend_height=True),
                                  filter=shown("footer")),
         ])
-        kb = self._key_bindings(dialog_open, text_mode, is_running)
+        kb = self._key_bindings(dialog_open, text_mode, is_running, browser_open)
         color_depth = None if self.caps.color else ColorDepth.DEPTH_1_BIT
         app = Application(layout=Layout(root, focused_element=self.composer_window),
                           key_bindings=merge_key_bindings([load_key_bindings(), kb]),
@@ -595,7 +605,9 @@ class EchoTUI:
             wants.append(L.Want("pending", len(self._pending_lines()), 1, 3))
         if run is not None or self.pending:
             wants.append(L.Want("spacer", 1, 0, 9))     # only from leftover rows
-        if self.dialog is None:
+        if self.dialog is None and self.browser is not None:
+            wants.append(L.Want("sessions", self.browser.natural_rows(h), self.browser.minimum_rows(), 0))
+        elif self.dialog is None:
             items = self._menu_items()
             if items:
                 wants.append(L.Want("menu", len(items), min(3, len(items)), 2))
@@ -857,7 +869,7 @@ class EchoTUI:
         agent = self.agent_name if self.core.agent_id else ""
         return M.FooterInput(model=self.model, agent=agent, project=self.project_name, approval_mode=self.approval_mode,
                              context_pct=ctx, held=self.held, running=self.running and self.dialog is None,
-                             notice=notice, quiet=self.dialog is not None)
+                             notice=notice, quiet=self.dialog is not None or self.browser is not None)
 
     def _footer_text(self) -> StyleAndTextTuples:
         lines = M.footer_lines(self._footer_input(), self.width(), self.caps)
@@ -1098,11 +1110,42 @@ class EchoTUI:
         return ([("", "\n")] if blank else []) + line
 
     # ── key bindings ─────────────────────────────────────────────────
-    def _key_bindings(self, dialog_open, text_mode, is_running) -> KeyBindings:
+    def _key_bindings(self, dialog_open, text_mode, is_running, browser_open=None) -> KeyBindings:
         kb = KeyBindings()
         composer = has_focus(self.buffer)
         nav = dialog_open & ~text_mode
         empty = Condition(lambda: self.buffer.text == "")
+        browsing = browser_open if browser_open is not None else Condition(lambda: False)
+
+        # ── the session manager (tui/sessions.py) ──
+        # Left on an empty input has nothing to move over, so it opens the list of conversations.
+        # With any text in the input it is the ordinary cursor key.
+        @kb.add("left", filter=composer & empty & ~dialog_open)
+        def _sessions_open(event) -> None:
+            self.open_sessions()
+
+        @kb.add("up", filter=browsing)
+        @kb.add("down", filter=browsing)
+        @kb.add("pageup", filter=browsing)
+        @kb.add("pagedown", filter=browsing)
+        @kb.add("home", filter=browsing)
+        @kb.add("end", filter=browsing)
+        @kb.add("tab", filter=browsing)
+        @kb.add("s-tab", filter=browsing)
+        @kb.add("enter", filter=browsing)
+        @kb.add("right", filter=browsing)
+        @kb.add("left", filter=browsing)
+        @kb.add("backspace", filter=browsing)
+        @kb.add("c-n", filter=browsing)
+        @kb.add("escape", filter=browsing, eager=True)
+        def _sessions_keys(event) -> None:
+            self._browser_key(event.key_sequence[0].key)
+
+        @kb.add(Keys.Any, filter=browsing)
+        def _sessions_char(event) -> None:
+            if self.browser is not None and event.data and event.data.isprintable():
+                self.browser.type(event.data)
+                self.app.invalidate()
 
         @kb.add("enter", filter=composer)
         def _enter(event) -> None:
@@ -1139,7 +1182,7 @@ class EchoTUI:
                 text = self._take_input()
                 self._spawn(self._queue(text))
 
-        @kb.add("s-tab")
+        @kb.add("s-tab", filter=~browsing)
         def _cycle(event) -> None:
             if self.dialog is not None:
                 return
@@ -1174,6 +1217,9 @@ class EchoTUI:
             self._ctrl_c_mode = mode
             if self.dialog is not None:
                 self._close_dialog(Action("cancel", self.dialog.escape_value if self.dialog.kind != "approval" else None))
+                return
+            if self.browser is not None:
+                self.close_sessions()
                 return
             if self.running:
                 if twice:
@@ -1336,6 +1382,112 @@ class EchoTUI:
             self.menu_dismissed = None
         self.menu_index = 0 if token is None else self.menu_index
 
+    # ── the session manager ──────────────────────────────────────────
+    def open_sessions(self) -> None:
+        """Show every conversation in the composer's place (← on an empty input, /sessions)."""
+        if self.dialog is not None:
+            return
+        self.browser = SessionBrowser(current_id=self.sid or "", project_id=self.core.project_id or "")
+        self.show_shortcuts = False
+        try:
+            self.app.layout.focus(self.browser_window)
+        except ValueError:
+            pass
+        self.app.invalidate()
+        self._spawn(self._load_sessions())
+
+    def close_sessions(self) -> None:
+        """Back to the conversation you were in, untouched."""
+        if self.browser is None:
+            return
+        self.browser = None
+        if self.dialog is None:
+            try:
+                self.app.layout.focus(self.composer_window)
+            except ValueError:
+                pass
+        self.app.invalidate()
+
+    async def _load_sessions(self) -> None:
+        browser = self.browser
+        if browser is None:
+            return
+        try:
+            try:
+                rows = (await self.call(self.client.get, "/sessions/overview", limit=200) or {}).get("items") or []
+            except ApiError as exc:
+                if exc.status not in {404, 405}:
+                    raise
+                # An older backend: the plain thread list, without agents, projects or status.
+                rows = [from_thread(t) for t in await self.call(self.client.threads, 200) if not t.get("archived")]
+        except (ApiError, ConnectError) as exc:
+            if self.browser is browser:
+                browser.loading, browser.error = False, f"could not load conversations: {one_line(str(exc), 120)}"
+                self.app.invalidate()
+            return
+        if self.browser is browser:
+            browser.load(rows)
+            self.app.invalidate()
+
+    def _browser_text(self) -> StyleAndTextTuples:
+        if self.browser is None:
+            return []
+        return self._join(self.browser.lines(self.width(), max(1, self._rows("sessions")), self.caps))
+
+    def _browser_key(self, key) -> None:
+        browser = self.browser
+        if browser is None:
+            return
+        page = max(1, self._rows("sessions") - 6)
+        if key == Keys.Up:
+            browser.move(-1)
+        elif key == Keys.Down:
+            browser.move(1)
+        elif key == Keys.PageUp:
+            browser.move(-page)
+        elif key == Keys.PageDown:
+            browser.move(page)
+        elif key == Keys.Home:
+            browser.jump(False)
+        elif key == Keys.End:
+            browser.jump(True)
+        elif key == Keys.Tab:
+            browser.cycle_scope(1)
+        elif key == Keys.BackTab:
+            browser.cycle_scope(-1)
+        elif key == Keys.Backspace:
+            browser.backspace()
+        elif key == Keys.Escape:
+            if not browser.clear_query():
+                self.close_sessions()
+                return
+        elif key == Keys.Right:
+            self.close_sessions()
+            return
+        elif key == Keys.ControlN:
+            self.close_sessions()
+            self._spawn(self.cmd_new([]))
+            return
+        elif key in {Keys.Enter, Keys.ControlM}:
+            row = browser.chosen()
+            if row is None:
+                return
+            self.close_sessions()
+            if row.get("thread_id") == self.sid:
+                self.say_notice("you are already in this conversation")
+            else:
+                self._spawn(self._resume_row(row))
+            return
+        self.app.invalidate()
+
+    async def _resume_row(self, row: dict) -> None:
+        # The thread record is what the rest of the client holds; the overview row only chose it.
+        try:
+            session = await self.call(self.client.thread, str(row.get("thread_id")))
+        except ApiError:
+            session = row
+        await self._switch(session)
+
     # ── dialogs ──────────────────────────────────────────────────────
     def open_dialog(self, d: Dialog) -> None:
         self.dialogs.append(d)
@@ -1348,6 +1500,7 @@ class EchoTUI:
         self.dialog = self.dialogs.pop(0)
         self.dialog.opened_at = self.now()
         self.show_shortcuts = False
+        self.browser = None   # something needs a decision: the list gives way
         try:
             self.app.layout.focus(self.dialog_window)
         except ValueError:
@@ -2102,35 +2255,14 @@ class EchoTUI:
         self.emit(B.Table(rows, title="Usage"))
 
     async def cmd_sessions(self, args) -> None:
-        threads = await self.call(self.client.threads, 200)
-        rows = [["", "id", "title", "kind", "msgs", "active"]]
-        for t in threads[:20]:
-            mark = "*" if t.get("thread_id") == self.sid else ""
-            rows.append([mark, str(t.get("thread_id"))[:8], one_line(t.get("title") or "(untitled)", 40),
-                         one_line(t.get("environment"), 8), str(int(t.get("message_count") or 0)),
-                         _ago(t.get("last_active_at"))])
-        if len(rows) == 1:
-            self.note("no sessions yet")
-            return
-        self.emit(B.Table(rows, header=True, title="Sessions · /resume to switch"))
+        self.open_sessions()
 
     async def cmd_resume(self, args) -> None:
         if args:
             session = await self.call(self.core.find_session, args[0])
             await self._switch(session)
             return
-        threads = [t for t in await self.call(self.client.threads, 200) if not t.get("archived")]
-        if not threads:
-            self.note("no sessions to resume yet")
-            return
-        opts = [Option(one_line(t.get("title") or "(untitled)", 50),
-                       t, hint=f"{one_line(t.get('environment'), 8)} · {int(t.get('message_count') or 0)} msgs · "
-                               f"{_ago(t.get('last_active_at'))}") for t in threads[:60]]
-        current = next((i for i, t in enumerate(threads[:60]) if t.get("thread_id") == self.sid), 0)
-        action = await self.ask("Resume a session", opts, filterable=True, selected=current,
-                                footer=f"{self.caps.glyphs.arrow_up_down} choose · enter resume · type to filter · esc cancel")
-        if action.kind == "choose" and action.value:
-            await self._switch(action.value)
+        self.open_sessions()
 
     async def cmd_agents(self, args) -> None:
         await self._load_agents()
@@ -2430,10 +2562,19 @@ class EchoTUI:
         self.core.session = session
         self.core.project_id = str(session.get("project_id") or "")
         self.project_name = await self._project_name(self.core.project_id)
+        # What belonged to the conversation you left stays with it: its context meter, its token
+        # count, its file changes and its queued follow-ups are not this one's.
         self.context = None
+        self.session_tokens = {"prompt": 0, "completion": 0, "runs": 0}
+        self.changes = []
+        self.last_answer = ""
+        self.pending = []
+        self.held = 0
         await self._sync_agent_from_session(session)
         await self._refresh_model()
-        self.emit(B.RuleLine(f"Resumed {one_line(session.get('title') or '(untitled)', 60)}"))
+        who = f" {self.caps.glyphs.sep} {self.agent_name}" if self.core.agent_id else ""
+        where = f" {self.caps.glyphs.sep} {self.project_name}" if self.project_name else ""
+        self.emit(B.RuleLine(f"Resumed {one_line(session.get('title') or '(untitled)', 60)}{who}{where}"))
         await self._show_recent()
         await self._catch_up()
 
@@ -2460,7 +2601,7 @@ class EchoTUI:
             hist = (await self.call(self.client.get, "/history", thread_id=self.sid) or {}).get("history") or []
         except (ApiError, ConnectError):
             return
-        tail = [h for h in hist if isinstance(h, str)][-2:]
+        tail = [h for h in hist if isinstance(h, str)][-RECAP_MESSAGES:]
         for h in tail:
             if h.startswith("Human: "):
                 self.emit(B.Note(self.caps.glyphs.prompt, one_line(h[7:], 300), "dim", 0))

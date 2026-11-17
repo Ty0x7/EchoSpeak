@@ -119,7 +119,8 @@ def test_full_round_trip_render_history_and_attach_replay(backend):
     # Another client attaches to the finished run: the journal replays the same text.
     res = cli(backend, "attach", sid[:8], "--run", rid)
     assert res.returncode == 0, res.stderr
-    assert REPLY in res.stdout and "fake-scripted-model" in res.stdout
+    # One assistant: the header names Echo (the model is in the footer and /status), not the model as the speaker.
+    assert REPLY in res.stdout and "Echo" in res.stdout
     # From a cursor past the tokens, the text is not replayed again.
     res = cli(backend, "attach", sid, "--run", rid, "--after", "9")
     assert REPLY not in res.stdout

@@ -484,6 +484,8 @@ _RATE_LIMIT_SAFE_GET_PREFIXES = (
     "/projects",
     "/history",
     "/soul",
+    "/sessions/overview",
+    "/app/facts",
 )
 
 

@@ -116,20 +116,15 @@ def _for_tools(text: str, tool_names: Optional[set[str]]) -> str:
 SOURCE_URL = "https://github.com/Ty0x7/EchoSpeak"
 
 
-def identity_section(persona: AgentPersona) -> str:
-    """Who and what the agent is, from the running app: never from memory or a hardcoded prompt."""
-    from config import is_packaged
-    from version import APP_VERSION
+def identity_section(persona: AgentPersona, model: str = "", provider: str = "", short: bool = False) -> str:
+    """Who and what the agent is, from the running app: never from memory or a hardcoded prompt.
 
-    where = "the EchoSpeak desktop app" if is_packaged() else "EchoSpeak running from source (a development build)"
-    return (
-        "## About EchoSpeak (from the running app)\n"
-        f"- You are {persona.name}, running in {where}, version {APP_VERSION}, on {platform.system()} {platform.release()}.\n"
-        f"- EchoSpeak was created by Ty (ty0x7). Source code: {SOURCE_URL}\n"
-        f"- {APP_VERSION} is read from the running app and is always current. Version numbers in saved memories, past "
-        "chats, files, app or shortcut names, and web pages are older or about something else: never answer "
-        "\"what version are you\" from them."
-    )
+    The same section for every profile (agent/lean/app_facts.py): the agent's name, the model that
+    writes its replies, the app version, the real agent roster and where things are in each interface.
+    """
+    from agent.lean import app_facts
+
+    return app_facts.section(name=persona.name, model=model, provider=provider, short=short)
 
 
 def _environment(*, project_root: str, notes: list[str], terminal_note: str = "", project_overview: str = "",
@@ -197,7 +192,7 @@ def _memory(memories: list[dict[str, Any]]) -> str:
 def _code_rules() -> str:
     from agent.lean import code_mode
 
-    return code_mode.RULES
+    return code_mode.rules()
 
 
 def build_system_prompt(
@@ -227,6 +222,8 @@ def build_system_prompt(
     can_write: bool = True,
     instructions: str = "",
     environment: str = "",
+    model: str = "",
+    provider: str = "",
 ) -> str:
     """An agent's (or native Code's) system prompt. ``environment`` "code": the engineering workflow
     (agent/lean/code_mode.py) instead of rich-answer and team sections."""
@@ -241,7 +238,7 @@ def build_system_prompt(
         ("## Echo's personality (capabilities and permissions still follow this profile)\n" + assistant_soul.strip())
         if assistant_soul.strip() else "",
         ("Configured role description (does not grant permissions): " + persona.description) if persona.description else "",
-        identity_section(persona),
+        identity_section(persona, model, provider),
         _for_tools(WORKING_RULES, tool_names),
         _code_rules() if code else "",
         WRITING_REPLIES,

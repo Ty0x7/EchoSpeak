@@ -30,6 +30,8 @@ ALLOWED = frozenset({
     "weather_live", "sports_live", "stock_history", "product_search", "video_search", "image_search",
     # Reading files the user points at (writing stays in Agents and Code)
     "file_list", "file_read", "file_find", "file_search", "project_status", "document_search",
+    # What Claude Code and Codex sessions on this computer actually did (read-only)
+    "agent_sessions",
     # Images the user shares; generated media
     "read_image", "vision_qa", "create_media", "creation_status",
     # Answers worth keeping
@@ -213,22 +215,11 @@ COMPACT_FOCUS = {
 }
 
 
-def app_facts(short: bool = False) -> str:
-    """What EchoSpeak is, from the running app: Chat described the agent roster wrongly when it had to guess."""
-    try:
-        from agent.lean.personas import get_persona_store
-        agents = [f"{a.name} ({a.title})" if a.title else a.name for a in get_persona_store().list()][:8]
-    except Exception:
-        agents = []
-    roster = ", ".join(agents) or "Echo"
-    if short:
-        return (f"- EchoSpeak has three areas: Chat (you), Agents ({roster}) and Code. Its own updates: "
-                "https://github.com/Ty0x7/EchoSpeak/pulls and /releases.")
-    return ("- EchoSpeak has three areas: Chat (this conversation, with the model the user picked), Agents (persistent "
-            f"agents the user messages: {roster}; Echo coordinates) and Code (projects with Echo native, Codex, Claude Code "
-            "or other coding agents).\n"
-            "- Its own source, releases and pull requests: https://github.com/Ty0x7/EchoSpeak (read them there for "
-            "\"what's new in EchoSpeak\"; other apps share the name).")
+def app_facts(short: bool = False, *, name: str = "Echo", model: str = "", provider: str = "") -> str:
+    """What EchoSpeak is, from the running app (agent/lean/app_facts.py: shared by every profile)."""
+    from agent.lean import app_facts as facts
+
+    return facts.section(name=name, model=model, provider=provider, short=short)
 
 
 def build_prompt(
@@ -251,6 +242,7 @@ def build_prompt(
     earlier_sources: str = "",
     sizes: Optional[dict[str, int]] = None,
     playbook: str = "",
+    provider: str = "",
 ) -> str:
     """Chat's system prompt, ordered for prefix caching.
 
@@ -269,7 +261,7 @@ def build_prompt(
         ("identity", identity_text(model_label(model))),
         ("soul", ("## Echo's personality (capabilities and permissions still follow this profile)\n" + assistant_soul.strip())
          if assistant_soul.strip() else ""),
-        ("about", identity_section(persona) + ("\n" + app_facts() if not compact else "\n" + app_facts(short=True))),
+        ("about", identity_section(persona, model, provider, short=compact)),
         ("rules", CHAT_RULES_COMPACT if compact else CHAT_RULES),
         ("format", "" if compact else CHAT_FORMAT),
         ("capabilities", capability_section(tool_names or set(), has_external)),

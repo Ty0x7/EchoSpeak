@@ -106,6 +106,7 @@ READ_ONLY_TOOLS = {
     "stock_history", "product_search", "video_search", "image_search", "take_screenshot", "analyze_screen", "vision_qa",
     # Research workers only look things up: their findings back no "I've written…" claim.
     "spawn_workers", "read_image", "read_output", "find_tools", "document_search", "research_notebook", "list_reminders",
+    "agent_sessions",
 }
 
 # "mics.md", "notes/plan.txt": a file named in a claim must be one a tool actually wrote.

@@ -125,7 +125,48 @@ def _question(tui: A.EchoTUI) -> None:
                     "Keep the hand-written code"], "allow_other": True})
 
 
+def session_rows(count: int = 14) -> list[dict]:
+    """Conversations as GET /sessions/overview returns them: Echo, named agents, a group, projects, statuses."""
+    now = time.time()
+    rows = []
+    for i in range(count):
+        kind = ("echo", "agent", "echo", "group")[i % 4]
+        agents = {"echo": [{"id": "echo", "name": "Echo"}], "agent": [{"id": "scout", "name": "Jarvis"}],
+                  "group": [{"id": "scout", "name": "Jarvis"}, {"id": "builder", "name": "Glados"}]}[kind]
+        rows.append({
+            "thread_id": ("t" * 32) if i == 2 else f"thread-{i:02d}", "kind": kind, "agents": agents,
+            "title": ("Fix the parser so dates in ISO week 53 round-trip", "Pong in a single file",
+                      "When do the Oilers play next", "Release notes for 11.14")[i % 4] + (f" ({i})" if i > 3 else ""),
+            "room_name": "Release crew" if kind == "group" else "",
+            "last_active_at": now - 90 * (i + 1) ** 2, "created_at": now - 86400, "message_count": 4 + i,
+            "environment": "agents" if kind != "echo" else "chat", "archived": False, "pinned": False,
+            "project_id": "p1" if i % 3 == 0 else "", "project": {"id": "p1", "name": "echospeak", "root": "/p", "trusted": True} if i % 3 == 0 else None,
+            "status": ("idle", "running", "needs_answer", "idle", "needs_approval", "failed")[i % 6],
+            "last_request": "can you check why the week 53 test fails on the CI runner but passes locally",
+            "preview": "The ISO week calculation treats week 53 as always belonging to the previous year.",
+            "model": "qwen3.5:9b"})
+    return rows
+
+
+def _sessions(tui: A.EchoTUI, count: int = 14, query: str = "", scope: str = "all", running: bool = False) -> None:
+    if running:
+        _running(tui, tools=1, pending=0)
+    tui.core.project_id = "p1"
+    tui.browser = A.SessionBrowser(current_id=tui.sid or "", project_id="p1")
+    tui.browser.load(session_rows(count))
+    tui.browser.scope = scope
+    for ch in query:
+        tui.browser.type(ch)
+    tui.app.layout.focus(tui.browser_window)
+
+
 STATES: dict[str, Callable[[A.EchoTUI], None]] = {
+    "sessions": _sessions,
+    "sessions-many": lambda t: _sessions(t, count=80),
+    "sessions-few": lambda t: _sessions(t, count=2),
+    "sessions-search": lambda t: _sessions(t, query="oilers"),
+    "sessions-no-match": lambda t: _sessions(t, query="nothing matches this"),
+    "sessions-while-running": lambda t: _sessions(t, running=True),
     "idle": lambda t: None,
     "idle-autonomous": lambda t: setattr(t, "approval_mode", "autonomous"),
     "draft-multiline": lambda t: t.buffer.set_document(
@@ -166,7 +207,8 @@ def fragment_overflow(tui: A.EchoTUI, width: int) -> list[str]:
     """Lines produced by the live-region text functions that are wider than the terminal."""
     bad = []
     for name in ("_top_rule", "_bottom_rule", "_tail_text", "_steps_text", "_status_text", "_pending_text",
-                 "_menu_text", "_shortcuts_text", "_footer_text", "_dialog_footer", "_dialog_text", "_diff_pane_text"):
+                 "_menu_text", "_shortcuts_text", "_footer_text", "_dialog_footer", "_dialog_text", "_diff_pane_text",
+                 "_browser_text"):
         frags = getattr(tui, name)()
         text = "".join(t for _s, t in frags)
         for line in text.split("\n"):
@@ -192,13 +234,15 @@ def check(state: str, width: int, height: int, caps: Caps = DEFAULT_CAPS) -> lis
             problems += fragment_overflow(tui, width)
         draft_rows = tui.buffer.text.count("\n") + 1   # a long draft scrolls; its first row may be off screen
         prompt_shown = any(r.lstrip().startswith(tui.caps.glyphs.prompt) for r in rows)
-        if tui.dialog is None and draft_rows <= 1 and not prompt_shown:
+        if tui.dialog is None and tui.browser is None and draft_rows <= 1 and not prompt_shown:
             problems.append("no prompt row")
+        if tui.browser is not None and not any(r.strip() for r in rows):
+            problems.append("empty session manager")
         if tui.dialog is not None and not any(r.strip() for r in rows):
             problems.append("empty dialog")
         marks = (tui.model[:4], "Pres") if state == "notice" else (tui.model[:4],)   # a notice may crowd out the model
         # Under 12 rows a dialog's options outrank the footer (you are deciding, not reading the model name).
-        footer_due = height >= (12 if tui.dialog is not None else 8)
+        footer_due = height >= (12 if tui.dialog is not None or tui.browser is not None else 8)
         if width >= 12 and footer_due and not any(m in r for r in rows[-3:] for m in marks):
             problems.append("no footer")
         return problems

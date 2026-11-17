@@ -33,6 +33,8 @@ TOOLSETS: dict[str, list[str]] = {
         "project_status", "project_workspace", "save_project_image", "create_artifact", "update_artifact",
         "create_media", "creation_status",
         "set_reminder", "list_reminders", "cancel_reminder",
+        # The real logs of Claude Code and Codex sessions on this computer (agent/lean/session_logs.py).
+        "agent_sessions",
     ],
     # Looking things up on the web.
     "web": ["web_search", "safe_web_fetch", "youtube_transcript", "research_notebook", "spawn_workers"],

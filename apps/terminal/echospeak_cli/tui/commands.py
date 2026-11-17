@@ -19,8 +19,8 @@ COMMANDS: tuple[Command, ...] = (
     Command("/agents", "list agents and talk to one", needs="agents"),
     Command("/agent", "talk to an agent in a new direct session (- for Echo)", "<name|->", needs="agents"),
     Command("/new", "start a new session with your next message", "[--agent NAME]"),
-    Command("/resume", "pick a session to resume", "[id]"),
-    Command("/sessions", "list recent sessions"),
+    Command("/sessions", "browse conversations and switch to one (also: ← on an empty input)"),
+    Command("/resume", "resume a session by id, or open the session list", "[id]"),
     Command("/project", "attach this folder (or a path) as a project", "[PATH|-]", needs="projects"),
     Command("/mode", "assistant mode: unified or environments", "[unified|environments]", needs="settings"),
     Command("/permissions", "show and change permission switches and the approval mode", "[mode]", needs="settings"),
@@ -67,6 +67,7 @@ def filter_commands(token: str, commands: tuple[Command, ...]) -> list[Command]:
 
 SHORTCUTS = (
     ("/ for commands", "shift+tab to cycle approval mode", "ctrl+o for the transcript"),
+    ("← for your sessions", "enter to resume one", "→ or esc to come back"),
     ("? for shortcuts", "esc to stop a running task", "ctrl+g to edit in $EDITOR"),
     ("\\ + enter for a newline", "enter while running to steer", "ctrl+r to search history"),
     ("ctrl+j for a newline", "tab while running to queue", "ctrl+c twice to exit"),
@@ -80,6 +81,7 @@ KEYS_HELP = (
     ("Ctrl+D", "exit on an empty line · while running: detach"),
     ("Shift+Tab", "cycle approval mode: smart → autonomous → always ask"),
     ("↑ / ↓", "history · while running, ↑ on empty input takes back the last queued message"),
+    ("←", "on an empty input: your sessions (browse, search, enter to resume, → or esc to come back)"),
     ("Ctrl+O", "transcript in the pager"),
     ("Ctrl+R", "search history"),
     ("Ctrl+G", "edit the draft in $EDITOR · in a dialog: full arguments or the full diff"),

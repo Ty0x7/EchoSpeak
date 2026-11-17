@@ -20,7 +20,8 @@ ASK_USER_DESCRIPTION = (
     "Ask the user a short question with 2-4 concrete choices and wait for their answer. "
     "Use it when you are blocked (a tool keeps failing, something isn't set up) or when the choice is "
     "genuinely theirs (which option, whether to go ahead). Don't use it for things you can decide or look up. "
-    "Each option is a short action, e.g. 'Read a news site directly', 'Set up a search key', 'Skip it'."
+    "Each option is a short action, e.g. 'Read a news site directly', 'Set up a search key', 'Skip it'. "
+    "A question is not a permission: an answer never turns on a tool or a setting that is off."
 )
 
 PARAMETERS: dict[str, Any] = {
@@ -101,6 +102,45 @@ def menu_in_text(text: str) -> dict[str, Any] | None:
     elif not question.endswith("?"):
         question += "?"
     return {"question": question[:MAX_QUESTION], "options": options}
+
+
+# An option that asks the user to hand over a permission or switch something on.
+_GRANT = re.compile(
+    r"(?i)\b(give|grant|allow|enable|turn(?:ing)? on|switch(?:ing)? on|unlock|approve|authori[sz]e)\b[^.?!]{0,60}"
+    r"\b(permissions?|access|file (?:creation|writing|writes?|edits?)|creat(?:e|ing) files|writ(?:e|ing) files|"
+    r"terminal|commands?|desktop control|capabilit(?:y|ies)|tools?|switch(?:es)?|settings?)\b"
+    r"|\b(permissions?)\b[^.?!]{0,30}\b(to|for)\b[^.?!]{0,40}\b(creat|writ|edit|run|execut|control|sav|delet|build)")
+
+
+def asks_for_permission(question: str, options: list[str]) -> str:
+    """The option that asks the user to grant a permission, or "".
+
+    A question card collects a choice. It cannot turn on a switch in Settings › Permissions, and it is
+    not an approval of an action: those come from the approval card EchoSpeak shows when a tool that
+    needs one is called. Glados offered "Give me permission to create files and I'll build it right
+    now", the owner picked it, and nothing changed (conversation audit, 16 November 2026).
+    """
+    for text in options:
+        if _GRANT.search(text or ""):
+            return text
+    return ""
+
+
+def permission_refusal(off: str) -> str:
+    state = (f"Off right now: {off}." if off else
+             "Nothing you need is switched off: an action that needs approval asks by itself when you call its tool.")
+    return ("Not shown. A question card can't grant a permission or switch a capability on, and choosing an option "
+            f"changes no setting. {state} Only the owner can change a switch: Settings › Permissions in the desktop app, "
+            "or /permissions in the terminal. In your reply, say plainly what is off and where to turn it on, then "
+            "offer only what you can do as things are. Don't ask for permission in a question again.")
+
+
+def answer_caveat(answer: str) -> str:
+    """Appended to an answer that reads like a grant ("yes, you have my permission")."""
+    if _GRANT.search(answer or "") or re.search(r"(?i)\b(you have|i give|i grant)\b[^.]{0,20}\bpermission", answer or ""):
+        return ("\n(EchoSpeak: this answer is a choice, not a permission. No switch changed; tools that were off "
+                "are still off, and actions that need approval still ask.)")
+    return ""
 
 
 def ask_user_tool() -> NativeTool:

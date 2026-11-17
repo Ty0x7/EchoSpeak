@@ -79,6 +79,10 @@ _TRANSIENT_ERRORS = ("ConnectError", "ConnectTimeout", "ReadError", "RemoteProto
                      "ConnectionResetError", "ConnectionRefusedError", "BrokenPipeError")
 
 
+# Narration beside tool calls shorter than this is progress, not part of the answer (LeanTurn._answer_text).
+INTERIM_KEEP_CHARS = 600
+
+
 def empty_cause(turn: Any, window: int) -> str:
     """Why a reply has no text and no tool calls, from the server's own evidence.
 
@@ -290,6 +294,13 @@ class LeanTurn:
         # call, adds structured feedback to check results, and states completion under the answer.
         self.verifier: Optional[Any] = None
         self.grace_prompt = ""
+        # A smaller step limit that applies while the turn is only looking things up (agent/lean/chat_run.py
+        # ChatRun.step_limit): returns 0 for "no limit of its own". Echo with a project attached keeps the
+        # engineering budget for engineering and the research budget for a question about tonight's game.
+        self.step_limit: Optional[Callable[[], int]] = None
+        # A note EchoSpeak adds under one tool result (name, args, ok) -> text: a search for a past year the
+        # user never mentioned, a page already read in this request.
+        self.result_note: Optional[Callable[[str, dict[str, Any], bool], str]] = None
         self.persona = persona
         self.system_prompt = system_prompt
         self.history = history
@@ -337,12 +348,12 @@ class LeanTurn:
         final answer (the live-test double-thinking came from regenerating after streaming).
         """
         try:
-            notes, replacement = self.answer_review(self._visible_text())
+            notes, replacement = self.answer_review(self._answer_text())
         except Exception:
             logger.debug("Answer review failed", exc_info=True)
             return
-        if replacement and replacement != self._visible_text():
-            texts = [item for item in self.timeline if item.get("kind") == "text"]
+        if replacement and replacement != self._answer_text():
+            texts = [item for item in self.timeline if item.get("kind") == "text" and not item.get("interim")]
             if len(texts) == 1:
                 texts[0]["text"] = replacement
                 self.emit({"type": "text_replace", "step": texts[0].get("step", step), "text": replacement})
@@ -396,6 +407,40 @@ class LeanTurn:
         return "\n\n".join(
             item["text"].strip() for item in self.timeline if item.get("kind") == "text" and item.get("text", "").strip()
         ).strip()
+
+    def _steps_allowed(self, max_steps: int) -> int:
+        """The step limit right now: the turn's own, or a smaller one its environment sets while it only looks things up."""
+        if self.step_limit is None:
+            return max_steps
+        try:
+            limit = int(self.step_limit() or 0)
+        except Exception:
+            logger.debug("Step limit hook failed", exc_info=True)
+            return max_steps
+        return min(max_steps, limit) if limit > 0 else max_steps
+
+    def _mark_interim(self, step: int) -> None:
+        """Text written beside tool calls is progress narration ("let me check the schedule"), not the answer."""
+        for item in self.timeline:
+            if item.get("kind") == "text" and item.get("step") == step:
+                item["interim"] = True
+
+    def _answer_text(self) -> str:
+        """What the agent answered: the text it wrote after its last tool call.
+
+        Short narration written beside tool calls stays in the timeline, where it reads as progress,
+        but is left out of the answer that is saved, searched and fed back as history. A guess made
+        before checking ("the next game is tonight against San Jose. Let me verify.") otherwise sat
+        in the saved answer above the checked one and contradicted it (conversation audit, 16 Nov 2026).
+        Long interim text and anything with code stays: an agent that shows a file and then says
+        "save it as pong.html" answered with both.
+        """
+        texts = [item for item in self.timeline if item.get("kind") == "text" and item.get("text", "").strip()]
+        if not any(not item.get("interim") for item in texts):
+            return self._visible_text()
+        kept = [item["text"].strip() for item in texts
+                if not item.get("interim") or len(item["text"]) > INTERIM_KEEP_CHARS or "```" in item["text"]]
+        return "\n\n".join(kept).strip()
 
     def _seal_for_handoff(self, step: int) -> None:
         """Close the current message so a teammate's reply lands after it.
@@ -481,7 +526,7 @@ class LeanTurn:
                 {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}} for call in calls]})
             self._run_tools(calls, messages, step, call_counts)
 
-        while step < max_steps:
+        while step < self._steps_allowed(max_steps):
             if self.cancel.is_set():
                 error = "cancelled"
                 success = False
@@ -694,6 +739,7 @@ class LeanTurn:
                 stop_reason = "no_answer"
                 break
 
+            self._mark_interim(step)
             self._run_tools(calls, messages, step, call_counts)
             file_claim = (unbacked_file_claim(content, self._written)
                           if self.promise_guard and content and messages[-1].get("role") == "tool" else "")
@@ -726,7 +772,9 @@ class LeanTurn:
             # Out of steps: stop honestly instead of forcing a rushed answer.
             # The note lists what was done so a "Continue" turn has context.
             stop_reason = "max_steps"
-            grace = self._grace_answer(messages, step + 1) if getattr(self, "final_grace", False) else ""
+            # A turn stopped by its research limit (step_limit) still ends in an answer from what it found.
+            limited = self._steps_allowed(max_steps) < max_steps
+            grace = self._grace_answer(messages, step + 1) if getattr(self, "final_grace", False) or limited else ""
             if grace:
                 final_text = grace
             else:
@@ -736,13 +784,22 @@ class LeanTurn:
 
         if self.answer_review is not None and success and not error and self._visible_text():
             self._review_answer(step)
+        if success and not error and "```" in self._answer_text():
+            # Code that exists only as text in the answer: a syntax check, and an honest "not run".
+            try:
+                from agent.lean import code_check
+                for note in code_check.notes(self._answer_text(), ran=set(self.succeeded), wrote=bool(self._written)):
+                    self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
+                    self.emit({"type": "answer_note", "step": step, "note": note, "check": "code"})
+            except Exception:
+                logger.debug("Code check failed", exc_info=True)
         verification = self.verifier.completion() if self.verifier is not None and self.verifier.active() else {}
         if verification and error != "cancelled":
             note = self.verifier.summary_note()
             if note:
                 self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
                 self.emit({"type": "answer_note", "step": step, "note": note, "verification": verification["status"]})
-        visible = self._visible_text()
+        visible = self._answer_text()
         if not visible:
             visible = final_text
         if not visible and self.completed_summary:
@@ -1208,6 +1265,15 @@ class LeanTurn:
                 self.emit({"type": "fail_streak", "step": step, "tool": name, "count": streak})
             if not refused:
                 text += self._screen_progress(name, ok, outcome, step)
+            if self.result_note is not None and not refused:
+                try:
+                    advice = self.result_note(name, _args, ok)
+                except Exception:
+                    logger.debug("Result note hook failed", exc_info=True)
+                    advice = ""
+                if advice:
+                    text += "\n\n" + app_note(advice)
+                    self.emit({"type": "result_note", "step": step, "tool": name, "note": advice[:300]})
             measured = self.verifier.feedback(call.id) if self.verifier is not None else ""
             if measured:
                 # Expected vs actual, progress against the best result, and the bottleneck, on the check's own result.
@@ -1359,6 +1425,10 @@ class LeanTurn:
 
     @staticmethod
     def _sig(name: str, args: dict[str, Any]) -> str:
+        if name == "safe_web_fetch" and str(args.get("url") or "").strip():
+            # One page is one call, whatever "objective" it is read with: the same schedule page was fetched
+            # three times in one answer under three wordings of the same question.
+            args = {"url": str(args.get("url")).strip().rstrip("/").lower()}
         return hashlib.sha1(f"{name}:{json.dumps(args, sort_keys=True, default=str)}".encode()).hexdigest()
 
     def _note_source(self, name: str, args: dict[str, Any], ok: bool) -> None:
@@ -1563,6 +1633,11 @@ class LeanTurn:
         question, options, allow_other, problem = ask.parse(args)
         if problem:
             return False, problem
+        if ask.asks_for_permission(question, options):
+            # Answering a question grants nothing: only the owner's switches and the approval cards do.
+            from agent.lean import capabilities
+            self.emit({"type": "question_refused", "step": step, "reason": "permission"})
+            return False, ask.permission_refusal(capabilities.off_summary(self.toolbox))
         if self.ensure_work and self.work_context is None:
             self.work_context = self.ensure_work()
         context = self.work_context
@@ -1595,7 +1670,7 @@ class LeanTurn:
         if decision == "answered":
             if context:
                 context.coordinator.consume_answer(context, args)
-            return True, f"The user answered: {pending.answer}"
+            return True, f"The user answered: {pending.answer}" + ask.answer_caveat(pending.answer)
         if decision == "cancelled":
             return False, "The user stopped this request."
         return False, ("The user didn't answer. Don't ask again right away: go ahead with the safest option, "
