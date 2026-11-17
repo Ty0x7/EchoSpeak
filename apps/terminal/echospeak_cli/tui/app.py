@@ -1893,6 +1893,8 @@ class EchoTUI:
         if handler is None:
             self.note(f"unknown command {one_line(name, 40)}")
             return
+        # Echo the command into scrollback (as Claude Code does), so its output never looks spontaneous.
+        self.emit(B.UserLine(text))
         try:
             await handler(args)
         except (ApiError, ConnectError, LookupError) as exc:
