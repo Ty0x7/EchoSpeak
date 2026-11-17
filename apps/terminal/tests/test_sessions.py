@@ -407,3 +407,24 @@ def test_an_older_backend_falls_back_to_the_thread_list():
         assert ("/threads", {}) in tui.client.calls
         assert all(r["status"] == "idle" for r in tui.browser.rows)
     session(go, RecordingClient(overview=False))
+
+
+# ── a backend that restarts on another port (command lab: the terminal kept the old address) ──
+@pytest.mark.parametrize("source, follows", [("endpoint-file", True), ("started", True), ("default", True),
+                                             ("flag", False), ("env", False)])
+def test_the_terminal_follows_a_restarted_backend_unless_its_address_was_given(monkeypatch, source, follows):
+    from echospeak_cli.client import Client
+
+    async def go(tui):
+        tui.client = Client("http://127.0.0.1:41000", "old-key")
+        tui.endpoint = discovery.Endpoint("http://127.0.0.1:41000", "old-key", source)
+        moved = discovery.Endpoint("http://127.0.0.1:42000", "new-key", "endpoint-file")
+        monkeypatch.setattr(discovery, "discover", lambda **_kw: moved)
+        assert tui._rediscover() is follows
+        assert (tui.client.base_url, tui.client.key) == (("http://127.0.0.1:42000", "new-key") if follows
+                                                          else ("http://127.0.0.1:41000", "old-key"))
+        # Nothing moved: nothing changes.
+        monkeypatch.setattr(discovery, "discover", lambda **_kw: discovery.Endpoint(tui.client.base_url, tui.client.key,
+                                                                                    "endpoint-file"))
+        assert tui._rediscover() is False
+    session(go)

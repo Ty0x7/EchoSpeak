@@ -45,6 +45,17 @@ class Client:
         self.timeout = timeout
         self.stream_idle = stream_idle
 
+    def retarget(self, base_url: str, key: str) -> None:
+        """Point at a backend that came back on another port (a restart publishes a new endpoint file)."""
+        parts = urlsplit(base_url)
+        if parts.scheme not in {"http", "https"} or not parts.hostname:
+            raise ValueError(f"Not an http(s) URL: {base_url!r}")
+        self.base_url = base_url.rstrip("/")
+        self.scheme, self.host = parts.scheme, parts.hostname
+        self.port = parts.port or (443 if parts.scheme == "https" else 80)
+        self.prefix = parts.path.rstrip("/")
+        self.key = key
+
     # ── plumbing ──────────────────────────────────────────────────────
     def _conn(self, timeout: float) -> http.client.HTTPConnection:
         cls = http.client.HTTPSConnection if self.scheme == "https" else http.client.HTTPConnection

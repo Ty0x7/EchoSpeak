@@ -1590,7 +1590,32 @@ class EchoTUI:
 
         task.add_done_callback(done)
 
+    def _rediscover(self) -> bool:
+        """After a lost connection: is the backend back on another port? If so, use it. True when switched.
+
+        A restarted backend publishes a new endpoint file (port and key). The terminal used to keep the old
+        address until it was restarted too. Only an address found in that file is followed: one given with
+        --url or ECHOSPEAK_URL is the owner's choice.
+        """
+        if self.endpoint.source in {"flag", "env"}:
+            return False
+        try:
+            found = discovery.discover(env=self.env)
+        except Exception:  # noqa: BLE001
+            return False
+        if found.source != "endpoint-file" or (found.url == self.client.base_url and found.key == self.client.key):
+            return False
+        try:
+            self.client.retarget(found.url, found.key)
+        except ValueError:
+            return False
+        self.endpoint = found
+        return True
+
     def _report(self, exc: BaseException) -> None:
+        if isinstance(exc, ConnectError) and self._rediscover():
+            self.emit(B.Note(self.caps.glyphs.ok, "the backend restarted; reconnected to it. Send that again.", "dim", 2))
+            return
         if isinstance(exc, ApiError):
             self.emit(B.Note(self.caps.glyphs.fail, one_line(exc.detail, 300), "error", 2))
         elif isinstance(exc, ConnectError):
@@ -1671,6 +1696,11 @@ class EchoTUI:
                         self.client.health()
                         dead = 0
                     except (ConnectError, ApiError):
+                        if self._rediscover():
+                            # The backend restarted on another port; the run's journal is in the same data folder.
+                            put(("notice", "the backend restarted; reconnected"))
+                            dead = 0
+                            continue
                         dead += 1
                         put(("notice", f"connection lost ({one_line(exc, 80)}); retrying"))
                         if dead >= 5:
