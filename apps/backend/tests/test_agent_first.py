@@ -103,6 +103,34 @@ def test_every_profile_is_told_the_same_facts_about_the_app(env, monkeypatch):
     assert "How it is organised: one assistant." in talking.system_prompt
 
 
+def test_an_agent_in_its_own_conversation_can_hand_work_to_the_roster(env, monkeypatch):
+    """Live check A4: Glados, asked in her direct conversation to hand a lookup to Jarvis, had no
+    delegate_to_agent (the room's only member is Glados) and called propose_agent_change three times."""
+    glados = next(p for p in env.people.list() if p.name == "Glados")
+    jarvis = next(p for p in env.people.list() if p.name == "Jarvis")
+    direct = env.rooms.direct(glados.id, "Glados")
+    session = _session(monkeypatch, direct.thread_id)
+    turn = session._build_turn(glados, "ask Jarvis to look something up", history=[], depth=0, allow_handoff=True)
+    assert "delegate_to_agent" in turn.toolbox.names
+    assert "Jarvis" in turn.system_prompt.split("## Your team", 1)[1][:400]
+    assert {p.id for p in session._handoff_pool()} >= {glados.id, jarvis.id, "echo"}
+    # A group still hands work only to its members.
+    group = env.rooms.create(name="Pair", agent_ids=[glados.id, jarvis.id])
+    paired = _session(monkeypatch, group.thread_id)
+    assert {p.id for p in paired._handoff_pool()} == {glados.id, jarvis.id}
+
+
+@pytest.mark.parametrize("message, merge", [
+    ("@Jarvis and @Glados: each of you, say in one sentence who you are and what you do.", False),
+    ("Jarvis, Glados, introduce yourselves", False),
+    ("@Jarvis @Glados which is faster for this, Rust or Go?", True),
+    ("@Jarvis @Glados is this regex right? ^a+$", True),
+])
+def test_answers_about_each_agent_are_not_merged(message, merge):
+    """Live group check: "each of you, say who you are" was followed by a merged reply in Jarvis's voice."""
+    assert lean_runtime._each_for_themselves(message) is not merge
+
+
 def test_an_unresolved_model_is_said_not_replaced_by_the_version():
     from version import APP_VERSION
 

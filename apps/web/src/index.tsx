@@ -45,6 +45,10 @@ import { EchoCodeWorkspace, type CodeOpenRequest } from "./code/EchoCodeWorkspac
 import { CodeTree } from "./code/CodeTree";
 import { AgentsHome, directRoom } from "./lean/AgentsHome";
 import { environmentOf, handoffDraft, loadEnvironment, saveEnvironment, type Environment } from "./app/environments";
+import {
+  identityParts, loadAssistantMode, loadOverview, trustQuestion, visibleRows, who as conversationWho,
+  type AssistantMode, type OverviewRow, type Scope,
+} from "./app/sessionOverview";
 import { WorkbenchContent, WorkbenchTabs } from "./workbench/Workbench";
 import { TerminalDock } from "./workbench/Terminal";
 import { useWorkbench } from "./workbench/store";
@@ -238,6 +242,12 @@ export const Dashboard: React.FC<{
   const projectionRevisionRef = useRef<Map<string, number>>(new Map());
   const sessionProjectionRef = useRef<Map<string, { messages: Message[]; activities: ActivityItem[] }>>(new Map());
   const [inFlightSessionIds, setInFlightSessionIds] = useState<Set<string>>(() => new Set());
+  // One assistant (app/sessionOverview.ts): the backend's mode, its one list of conversations, the filter,
+  // and the approval mode the header shows. "environments" keeps the old Chat / Agents / Code layout.
+  const [assistantMode, setAssistantMode] = useState<AssistantMode>("unified");
+  const [overviewRows, setOverviewRows] = useState<OverviewRow[] | null>(null);
+  const [conversationScope, setConversationScope] = useState<Scope>("all");
+  const [approvalMode, setApprovalMode] = useState("");
 
   const setSessionInFlight = useCallback((threadId: string, active: boolean) => {
     setInFlightSessionIds((current) => {
@@ -692,9 +702,12 @@ export const Dashboard: React.FC<{
       }
     }
     if (!path) return;
+    // Trust gives Echo file and terminal tools in this folder, so it is asked, as the terminal asks it.
+    // The legacy layout keeps its old behaviour.
+    const trust = assistantMode === "unified" ? (window.confirm(trustQuestion(path)) ? "trusted" : "untrusted") : "trusted";
     const response = await fetch(`${apiBase}/projects/attach-folder`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path, session_id: activeThreadId, trust_state: "trusted" }),
+      body: JSON.stringify({ path, session_id: activeThreadId, trust_state: trust }),
     });
     if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || "Could not attach folder");
     const project = await response.json();
@@ -1655,6 +1668,58 @@ export const Dashboard: React.FC<{
     setMainPage(coding ? "code" : "chat");
     if (coding) setCodeProjectId(thread.projectId || "");
   }, [activeThreadId, threads, roomThreadIds]);
+  // ── One assistant: the mode, the conversation list and the approval mode ──
+  useEffect(() => {
+    let alive = true;
+    void loadAssistantMode(apiBase, fetchWithTimeout).then(mode => { if (alive) setAssistantMode(mode); });
+    const settingsRead = () => fetchWithTimeout(`${apiBase}/settings`, undefined, 6000)
+      .then(response => (response.ok ? response.json() : null))
+      .then(data => { if (alive && data) setApprovalMode(String(data.lean_approval_mode || "smart")); })
+      .catch(() => { /* the header simply leaves it out */ });
+    void settingsRead();
+    const onFocus = () => void settingsRead();   // changed in Settings or with /permissions in the terminal
+    window.addEventListener("focus", onFocus);
+    return () => { alive = false; window.removeEventListener("focus", onFocus); };
+  }, [apiBase]);
+  const unifiedLayout = assistantMode === "unified" && overviewRows !== null;
+  const overviewKey = `${threads.length}:${threads.map(t => t.id + t.name + t.messageCount).join("|").length}:${rooms.length}:${[...inFlightSessionIds].join(",")}:${activeProjectId}`;
+  useEffect(() => {
+    if (assistantMode !== "unified") return;
+    let alive = true;
+    const load = () => loadOverview(apiBase, fetchWithTimeout)
+      .then(rows => { if (alive) setOverviewRows(rows); })
+      .catch(() => { /* keep the last list; the next refresh tries again */ });
+    const soon = window.setTimeout(load, 250);
+    const every = window.setInterval(load, 15000);   // a terminal or a routine may have changed something
+    return () => { alive = false; window.clearTimeout(soon); window.clearInterval(every); };
+  }, [apiBase, assistantMode, overviewKey]);
+  const conversationRows = useMemo(() => {
+    if (!overviewRows) return [];
+    // An empty conversation is a draft: it stays out unless it is the one open (as with /threads).
+    const rows = overviewRows.filter(row => row.message_count > 0 || row.thread_id === activeThreadId);
+    return visibleRows(rows, conversationScope, activeProjectId, "").map(row => ({
+      id: row.thread_id,
+      name: row.title || (row.thread_id === activeThreadId ? "New conversation" : "Conversation"),
+      at: normalizeTimestampMs(row.last_active_at || row.created_at || Date.now()),
+      projectId: row.project_id,
+      who: conversationWho(row),
+      status: row.status,
+      projectName: row.project?.name || "",
+      projectTrusted: row.project ? Boolean(row.project.trusted) : undefined,
+    }));
+  }, [overviewRows, conversationScope, activeProjectId, activeThreadId]);
+  // The header, in the terminal footer's order: who answers here, the model, the project and its trust, approvals.
+  const conversationIdentity = useMemo(() => {
+    const direct = activeRoom?.kind === "direct" ? roomMembers[0] : undefined;
+    const agent = direct?.name || (activeRoom?.kind === "group" ? activeRoom.name : "Echo");
+    const model = direct?.model?.model_id || (activeRoom?.kind === "group" ? "" : String(providerInfo?.model || ""));
+    const row = overviewRows?.find(item => item.thread_id === activeThreadId);
+    const project = row?.project || (() => {
+      const item = projects.find(entry => entry.id === activeProjectId) as (typeof projects[number] & { trust_state?: string }) | undefined;
+      return item ? { name: item.name, trusted: item.trust_state === "trusted" } : null;
+    })();
+    return identityParts({ agent, model, project, approvalMode });
+  }, [activeRoom, roomMembers, providerInfo?.model, overviewRows, activeThreadId, projects, activeProjectId, approvalMode]);
   // Remember the agent conversation you were in, so coming back to Agents opens it again.
   useEffect(() => {
     if (!activeThreadId || environment !== "agents") return;
@@ -1901,13 +1966,14 @@ export const Dashboard: React.FC<{
           hydrating={!initialHydrationComplete}
           collapsed={sidebarCollapsed || narrowLayout}
           projects={projects}
-          sessions={environment === "agents"
+          sessions={unifiedLayout ? conversationRows : environment === "agents"
             // Groups, then conversations agents started (routine results, channels). Contacts are listed above.
             ? [...rooms.filter((room) => room.kind === "group").map((room) => ({ id: room.thread_id, name: room.name, at: Math.max(room.last_message_at || 0, room.updated_at || 0) * 1000 })),
                ...threads.filter((thread) => environmentOf(thread, roomThreadIds) === "agents" && !roomThreadIds.has(thread.id))]
             : threads.filter((thread) => environmentOf(thread, roomThreadIds) === "chat")}
           environment={environment}
-          onEnvironment={switchEnvironment}
+          onEnvironment={unifiedLayout ? undefined : switchEnvironment}
+          unified={unifiedLayout ? { scope: conversationScope, onScope: setConversationScope, projectId: activeProjectId } : undefined}
           codeQuery={codeQuery} onCodeQuery={setCodeQuery}
           codeTree={<CodeTree searchQuery={codeQuery} apiBase={apiBase} revision={codeTreeRevision + threads.filter(thread => thread.surface === "code").length} workingSessionIds={inFlightSessionIds}
             activeThreadId={mainPage === "code" && codeConversationOpen ? activeThreadId : ""}
@@ -1938,6 +2004,14 @@ export const Dashboard: React.FC<{
           activeView="chat"
           onToggleCollapsed={() => setSidebarCollapsed(v => !v)}
           onNewSession={(projectId) => {
+            if (unifiedLayout) {
+              // One assistant: a new conversation is with Echo; agents are opened from the Agents list.
+              setEnvironment("chat");
+              setCodeConversationOpen(false);
+              setMainPage("chat");
+              void createNewThread(projectId);
+              return;
+            }
             if (environment === "agents") { setAgentEditor({ open: true, agent: null }); return; }
             if (environment === "code") { setCodeOpen(null); setCodeConversationOpen(false); setMainPage("code"); return; }
             setMainPage("chat");
@@ -2201,7 +2275,7 @@ export const Dashboard: React.FC<{
                   <PausedNotice apiBase={apiBase} />
                   <SystemCheckNotice apiBase={apiBase} onOpen={() => openSettingsAt("system")} />
                   <ChatThread
-                    contextBar={<div className="ec-conversation-bar"><strong className="workspace-breadcrumb"><span>{mainPage === "code" ? "Code · Echo native" : environment === "agents" ? "Agents" : "Chat"}</span><i aria-hidden>/</i>{threads.find(thread => thread.id === activeThreadId)?.name || "New chat"}</strong><div className="workspace-header-actions">{mainPage === "code" ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setCodeConversationOpen(false)}>Workspace</button> : null}{environment === "agents" && activeRoom?.kind === "direct" && roomMembers[0] ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setAgentEditor({ open: true, agent: roomMembers[0] })}>{roomMembers[0].name}'s profile</button> : null}{!rightOpen && !voiceConversationMode && activeThreadId ? (
+                    contextBar={<div className="ec-conversation-bar">{unifiedLayout ? <><strong className="workspace-breadcrumb">{threads.find(thread => thread.id === activeThreadId)?.name || "New conversation"}</strong><span className="es-identity" aria-label="Who is answering, the model, the project and the approval mode">{conversationIdentity.map(part => <span key={part.key} className={`es-identity-${part.key}`} title={part.hint}>{part.text}</span>)}</span></> : <strong className="workspace-breadcrumb"><span>{mainPage === "code" ? "Code · Echo native" : environment === "agents" ? "Agents" : "Chat"}</span><i aria-hidden>/</i>{threads.find(thread => thread.id === activeThreadId)?.name || "New chat"}</strong>}<div className="workspace-header-actions">{mainPage === "code" ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setCodeConversationOpen(false)}>Workspace</button> : null}{environment === "agents" && activeRoom?.kind === "direct" && roomMembers[0] ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setAgentEditor({ open: true, agent: roomMembers[0] })}>{roomMembers[0].name}'s profile</button> : null}{!rightOpen && !voiceConversationMode && activeThreadId ? (
                     <button
                       type="button"
                       className="rp-toggle workspace-research-button"

@@ -254,6 +254,16 @@ class LeanSession:
         members = [self.personas.get(agent_id) for agent_id in self.room.agent_ids]
         return [m for m in members if m is not None]
 
+    def _handoff_pool(self) -> list[AgentPersona]:
+        """Who an agent may hand work to: a group's members; anywhere else, the whole roster.
+
+        A direct conversation's only member is the agent itself, so "room members" left Glados with nobody to
+        delegate to (live check A4, 17 November 2026) and Jarvis unable to see Echo (conversation audit).
+        """
+        if self.room is not None and self.room.kind == "group":
+            return self._members()
+        return self.personas.list()
+
     def _is_group(self) -> bool:
         return bool(self.room and self.room.kind == "group" and len(self._members()) >= 2)
 
@@ -1025,7 +1035,7 @@ class LeanSession:
             error = error or result.error
             if result.success and result.text:
                 answers.append((persona, result))
-        if len(answers) >= 2 and settings.group_merge() and not self.cancel.is_set():
+        if len(answers) >= 2 and settings.group_merge() and not self.cancel.is_set() and not _each_for_themselves(prompt_text):
             merged = self._merge(answers, prompt_text, history)
             success = success and merged.success
             error = error or merged.error
@@ -1076,7 +1086,7 @@ class LeanSession:
         guest = self.caller_role != "owner"
         # Chat and Code have no team: delegation, rosters and hand-offs are Agents' (agent/environments.py).
         can_hand_off = allow_handoff and depth < MAX_DELEGATION_DEPTH and not guest and self.environment == "agents"
-        teammates = [] if self.environment != "agents" else self._members() if self.room else [p for p in self.personas.list() if p.id != persona.id]
+        teammates = [] if self.environment != "agents" else [p for p in self._handoff_pool() if p.id != persona.id]
         if guest:
             toolbox = Toolbox(toolsets=GUEST_TOOLS[self.caller_role], extra_tools=rich_tools(), session_id=self.session_id)
         else:
@@ -1671,7 +1681,7 @@ class LeanSession:
             ))
 
         if allow_handoff and depth < MAX_DELEGATION_DEPTH:
-            candidates = self._members() if self.room else self.personas.list()
+            candidates = self._handoff_pool()
             # Never offer a hand-back to whoever handed this work over.
             excluded = {persona.id, delegated_by.id if delegated_by else ""}
             candidates = [c for c in candidates if c.id not in excluded]
@@ -2209,6 +2219,16 @@ _TOOLSET_ABILITIES = {
     "vision": "see the screen", "desktop": "control desktop apps", "comms": "email and Discord",
     "memory": "recall memory", "self": "edit EchoSpeak itself", "skills": "installed skills",
 }
+
+
+# "Each of you, say who you are": answers about each agent itself, nothing to compare or merge. A merge of
+# them read "Both agents correctly identified themselves: I'm Jarvis …" (live group check, 17 November 2026).
+_EACH_OWN = re.compile(r"(?i)\b(each of you|both of you|each one of you|every one of you|all of you|introduce yourselves|"
+                       r"about yourselves|for yourselves|(?:each|both)\s*[,:]?\s*(?:say|tell|describe|introduce))\b")
+
+
+def _each_for_themselves(message: str) -> bool:
+    return bool(_EACH_OWN.search(str(message or "")))
 
 
 def _roster_line(persona: AgentPersona) -> str:

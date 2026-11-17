@@ -15,9 +15,11 @@ import { SplitHandle, type SplitGeometry } from "./SplitHandle";
 import { useDesktopUpdate } from "../dashboard/useDesktopUpdate";
 import "./sidebar.css";
 import { ENVIRONMENTS, ENVIRONMENT_PAGES, NEW_LABEL, type Environment } from "../app/environments";
+import { SCOPE_LABEL, STATUS_LABEL, scopes as scopeList, type Scope } from "../app/sessionOverview";
 
 type Project = { id: string; name: string; workspace_root?: string; archived?: boolean; git_metadata?: Record<string, any> };
-type Session = { id: string; name: string; at: number; projectId?: string };
+/** A conversation row. The overview's extra facts (who answers, state) are shown when present. */
+type Session = { id: string; name: string; at: number; projectId?: string; who?: string; status?: string; projectName?: string; projectTrusted?: boolean };
 export type ChatSearchHit = { session_id: string; title: string; snippet: string; role: string; agent: string; created_at: number; matches: number };
 
 type SidebarProps = {
@@ -60,6 +62,11 @@ type SidebarProps = {
   codeTree?: React.ReactNode;
   codeQuery?: string;
   onCodeQuery?(query: string): void;
+  /**
+   * One assistant (unified mode, app/sessionOverview.ts): no Chat / Agents / Code switch. Every
+   * conversation is in one list, filtered like the terminal's session manager.
+   */
+  unified?: { scope: Scope; onScope(scope: Scope): void; projectId: string };
 };
 
 // Learning isn't a page: it runs on its own; its diagnostics are in Settings › Advanced.
@@ -296,11 +303,12 @@ export function ProjectSidebar(props: SidebarProps) {
     };
   }, [query, searching, onSearchChats]);
   const iconOnly = props.collapsed;
-  const environment: Environment = props.environment || "chat";
-  // Each environment lists its own pages; the shell stays the same.
-  const shownNav = ENVIRONMENT_PAGES[environment].map(id => NAV_ITEMS.find(item => item.id === id)!);
+  const unified = props.unified;
+  const environment: Environment = unified ? "chat" : props.environment || "chat";
+  // Each environment lists its own pages; the shell stays the same. One assistant lists them all.
+  const shownNav = unified ? NAV_ITEMS : ENVIRONMENT_PAGES[environment].map(id => NAV_ITEMS.find(item => item.id === id)!);
   const sessions = props.sessions;
-  const switcher = props.onEnvironment ? (
+  const switcher = props.onEnvironment && !unified ? (
     <div className={`es-env-switch${iconOnly ? " is-rail" : ""}`} role="tablist" aria-label="Environment" aria-orientation={iconOnly ? "vertical" : "horizontal"}>
       {ENVIRONMENTS.map((item) => (
         <button key={item.id} type="button" role="tab" aria-selected={environment === item.id} title={item.hint}
@@ -388,7 +396,11 @@ export function ProjectSidebar(props: SidebarProps) {
         <span style={iconSlot(props.activeSessionId === session.id)}>
           <Icon name="session" size={iconOnly ? 16 : 15} active={props.activeSessionId === session.id} />
         </span>
-        {!iconOnly && <span className="es-session-copy"><span className="es-session-title">{session.name}</span><small>{props.projects.find(p => p.id === session.projectId)?.name || (environment === "agents" ? "Agent conversation" : "Conversation")}<time>{new Date(session.at).toLocaleDateString(undefined, {month:"short",day:"numeric"})}</time></small></span>}
+        {!iconOnly && <span className="es-session-copy"><span className="es-session-title">{session.name}</span><small>{session.who
+          // One assistant: who answers there and the project, as the terminal's session manager shows them.
+          ? <>{session.who}{session.projectName ? ` · ${session.projectName}${session.projectTrusted === false ? " (read-only)" : ""}` : ""}</>
+          : props.projects.find(p => p.id === session.projectId)?.name || (environment === "agents" ? "Agent conversation" : "Conversation")}<time>{new Date(session.at).toLocaleDateString(undefined, {month:"short",day:"numeric"})}</time></small>
+          {session.status && STATUS_LABEL[session.status] && !props.workingSessionIds?.has(session.id) ? <span className={`es-session-state is-${session.status}`}>{STATUS_LABEL[session.status]}</span> : null}</span>}
         {props.workingSessionIds?.has(session.id) ? <span className="echo-side-working" role="status" aria-label="Working">
           <span className="echo-side-working-dot" aria-hidden />{!iconOnly ? <span className="echo-side-working-text">Working</span> : null}</span> : null}
       </button>
@@ -424,7 +436,7 @@ export function ProjectSidebar(props: SidebarProps) {
   // space by flex-grow, so the browser sizes them and changes animate; only a
   // drag needs to measure.
   const SECTION_HEAD_PX = 30;
-  const present: SectionKey[] = environment === "agents" && props.agents ? ["agents", "chats"] : ["chats"];
+  const present: SectionKey[] = (environment === "agents" || unified) && props.agents ? ["agents", "chats"] : ["chats"];
   const listArea = Math.max(0, splitHeight - SECTION_HEAD_PX * present.length - 9 * (present.length - 1));
   const effective = fitLayout(layout, props.agents?.count || 0, listArea);
   const fractions = sectionFractions(effective, present);
@@ -451,7 +463,7 @@ export function ProjectSidebar(props: SidebarProps) {
         onClick={() => setLayout((value) => toggleSection(value, key))}
       >
         <span className="es-sec-chev" aria-hidden><Icon name="chevron" size={12} /></span>
-        <span className="es-sec-title">{sectionTitle(key, environment)}</span>
+        <span className="es-sec-title">{unified && key === "chats" ? "Conversations" : sectionTitle(key, environment)}</span>
         <span className="es-sec-count">{count}</span>
       </button>
       {actions}
@@ -493,13 +505,24 @@ export function ProjectSidebar(props: SidebarProps) {
 
             </>
           ))}
+          {unified && layout.open.chats ? (
+            <div className="es-scope-chips" role="radiogroup" aria-label="Show conversations">
+              {scopeList(unified.projectId).map((scope) => (
+                <button key={scope} type="button" role="radio" aria-checked={unified.scope === scope}
+                  className={unified.scope === scope ? "is-active" : ""} onClick={() => unified.onScope(scope)}>
+                  {SCOPE_LABEL[scope]}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="es-sec-list" id="es-sec-chats" hidden={!layout.open.chats}>
             {props.hydrating ? (
               <div role="status" className="es-sec-empty">Restoring chats…</div>
             ) : sessions.length ? (
               sessions.map((session) => sessionRow(session))
             ) : (
-              <div className="es-sec-empty">{environment === "agents" ? "Group chats and conversations your agents start appear here." : "No chats yet. Start one with +."}</div>
+              <div className="es-sec-empty">{unified ? (unified.scope === "all" ? "No conversations yet. Start one with +." : "Nothing here with this filter.")
+                : environment === "agents" ? "Group chats and conversations your agents start appear here." : "No chats yet. Start one with +."}</div>
             )}
           </div>
         </section>
@@ -687,10 +710,10 @@ export function ProjectSidebar(props: SidebarProps) {
                     }
                     props.onNewSession();
                   }}
-                  title={NEW_LABEL[environment]}
+                  title={unified ? "New conversation" : NEW_LABEL[environment]}
                 >
                   <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
-                  <span>{NEW_LABEL[environment]}</span>
+                  <span>{unified ? "New conversation" : NEW_LABEL[environment]}</span>
                 </button> : null}
                 {shownNav.map((item) => {
                   const active = props.page === item.id;
@@ -710,6 +733,16 @@ export function ProjectSidebar(props: SidebarProps) {
                     </button>
                   );
                 })}
+                {unified ? (
+                  // The project workbench (files, changes, terminal tabs) is a tool, not a separate assistant.
+                  <button type="button" className={`es-nav-item${props.page === "code" ? " is-active" : ""}`}
+                    aria-current={props.page === "code" ? "page" : undefined}
+                    onClick={() => props.onPage?.(props.page === "code" ? "chat" : "code")}
+                    title="Project files, changes and terminals">
+                    <NavIcon name="code" />
+                    <span>Workbench</span>
+                  </button>
+                ) : null}
               </nav>
             ) : null}
           </div>

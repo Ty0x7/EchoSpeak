@@ -96,6 +96,13 @@
 .ec-conversation-bar { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; flex-shrink:0; min-height:42px; padding:8px 20px; color:var(--es-text-2); font:12px var(--es-font); }
 .ec-conversation-bar strong { font-weight:500; }
 .ec-conversation-bar .es-btn { white-space:nowrap; }
+/* One assistant: who answers, the model, the project, approvals (app/sessionOverview.ts identityParts). */
+.ec-conversation-bar .es-identity { display:flex; align-items:center; gap:0; min-width:0; overflow:hidden; color:var(--es-text-3); font-size:11.5px; white-space:nowrap; margin-right:auto; }
+.ec-conversation-bar .es-identity > span { overflow:hidden; text-overflow:ellipsis; }
+.ec-conversation-bar .es-identity > span + span::before { content:"·"; padding:0 7px; color:var(--es-text-3); }
+.ec-conversation-bar .es-identity-agent { color:var(--es-text); font-weight:550; }
+.ec-conversation-bar .workspace-breadcrumb { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:38%; }
+@media (max-width: 720px) { .ec-conversation-bar .es-identity-approvals, .ec-conversation-bar .es-identity-model { display:none; } }
 @media(max-width:650px) {
  .ec-page .es-page { padding:14px 16px 28px; }
  .ec-page .es-page-head { gap:8px; }
