@@ -189,7 +189,7 @@ def render(block: Block, width: int, caps: Caps, verbose: bool = False) -> str:
     if isinstance(block, Raw):
         return block.ansi
     if isinstance(block, Banner):
-        return _banner(block, width, caps)
+        return "\n" + _banner(block, width, caps)
     if isinstance(block, UserLine):
         body = Text(sanitize(block.text).rstrip("\n"))
         if block.queued:
