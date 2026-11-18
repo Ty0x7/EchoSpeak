@@ -467,3 +467,59 @@ def test_a_fix_claimed_without_any_write_is_caught():
     # Talking about an earlier turn, or about what to do next, isn't a claim.
     assert unbacked_file_claim("Earlier I fixed `calc.py`.", set()) == ""
     assert unbacked_file_claim("Next, fix the denominator in `calc.py`.", set()) == ""
+
+
+# ── 4. a location the user named and the folder boundary refused (W1) ───
+def _bounded_write(project: Path):
+    """The real file_write's boundary refusal (agent/tools.py) for anything outside `project`."""
+    def write(args: dict[str, Any]) -> str:
+        path = Path(args["path"]) if Path(args["path"]).is_absolute() else project / args["path"]
+        if not path.resolve().is_relative_to(project.resolve()):
+            return f"Path not allowed. Allowed roots: {project}. Prefer Desktop/<project>/filename for user projects."
+        path.write_text(args.get("content") or "")
+        return f"Wrote {len(args.get('content') or '')} chars to {path}"
+    return NativeTool("file_write", "write", {"type": "object", "properties": {}}, write)
+
+
+def test_a_refused_requested_location_is_not_silently_replaced_by_another(tmp_path):
+    """W1 (atf cycle 1): "write a summary into <outside>/summary.txt". The folder boundary refused the write,
+    the model saved the summary inside the project instead and replied "Done!" (2 of 2 runs). The refusal
+    says this was the user's location, and a reply that hides the refusal goes back once."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    outside = tmp_path / "proj-shared" / "summary.txt"
+    box, _ran = _project(project)
+    box.native = {**box.native, "file_write": _bounded_write(project)}
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("w1", "file_write", '{"path": "%s", "content": "Two lines."}' % outside)]),
+        ModelTurn(tool_calls=[ToolCall("w2", "file_write", '{"path": "summary.txt", "content": "Two lines."}')]),
+        ModelTurn(content="Done! The summary has been written to summary.txt in your project folder."),
+        ModelTurn(content=f"I couldn't write to {outside}: it's outside the folders I'm allowed to change. "
+                          "I saved the summary as summary.txt in the project instead."),
+    ])
+    events: list[dict[str, Any]] = []
+    result = _turn(box, client, [], events).run(f"Write a two-line summary of README.md into {outside}.")
+
+    assert not outside.exists()
+    refusal = client.calls[1][-1]["content"]  # what the model saw right after the refused write
+    assert "the user asked for" in refusal and "somewhere else" in refusal
+    assert "couldn't write" in result.text and "Done!" not in result.text
+    assert sum(e["type"] == "requested_location_nudge" for e in events) == 1
+
+
+def test_a_refused_path_the_model_made_up_gets_no_extra_note(tmp_path):
+    """A boundary refusal for a location the user never named stays an ordinary, recoverable error."""
+    project = tmp_path / "proj"
+    project.mkdir()
+    box, _ran = _project(project)
+    box.native = {**box.native, "file_write": _bounded_write(project)}
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("w1", "file_write", '{"path": "/elsewhere/notes.txt", "content": "x"}')]),
+        ModelTurn(tool_calls=[ToolCall("w2", "file_write", '{"path": "notes.txt", "content": "x"}')]),
+        ModelTurn(content="Saved notes.txt."),
+    ])
+    events: list[dict[str, Any]] = []
+    result = _turn(box, client, [], events).run("Write x into notes.txt.")
+    assert "the user asked for" not in client.calls[1][-1]["content"]
+    assert result.text == "Saved notes.txt."
+    assert not any(e["type"] == "requested_location_nudge" for e in events)
