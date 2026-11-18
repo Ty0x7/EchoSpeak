@@ -113,6 +113,10 @@ def _redacted_card(card: dict[str, Any]) -> dict[str, Any]:
 
 # An EchoSpeak note written by the model itself, in its own reply (open tag through close, or to the end).
 _FORGED_NOTE = re.compile(r"<echospeak-note>.*?(?:</echospeak-note>|$)", re.S | re.I)
+# Tools that put content at a location, and a reply that says a location couldn't be used (W1, below).
+_PLACING_TOOLS = frozenset({"file_write", "file_copy", "file_move"})
+_SAYS_NOT_WRITTEN = re.compile(r"(?i)\b(not allowed|outside|couldn['’]t|could not|can['’]t|cannot|unable|refused|"
+                               r"blocked|denied|not permitted|wasn['’]t able|no permission)\b")
 
 
 class _RetryStep(Exception):
@@ -250,6 +254,8 @@ class LeanTurn:
         # mode held) in this turn: later changes to them ask again, whatever tool they come through.
         self._denied_targets: set[str] = set()
         self._owner_denied_targets: set[str] = set()
+        # Locations the user named that the folder boundary refused to write (W1): the reply must say so.
+        self._unwritable_requested: list[str] = []
         # Failures in a row per tool, whatever the arguments: after a few, say so.
         self._fail_streak: dict[str, int] = {}
         # Approvals autonomous mode held for the owner instead of waiting ({tool, summary, reason}).
@@ -515,6 +521,7 @@ class LeanTurn:
         claim_nudges = 0
         check_nudges = 0
         verify_nudges = 0
+        location_nudges = 0
         menus = 0
         quote_nudges = 0
         forged_nudges = 0
@@ -675,6 +682,18 @@ class LeanTurn:
                         check_nudges += 1
                         add_note(messages, check_nudge(list(self._unchecked)))
                         self.emit({"type": "check_nudge", "step": step, "files": list(self._unchecked)[:5]})
+                        self._retract_text(step)
+                        continue
+                    if (self._unwritable_requested and not stop_reason and location_nudges < 1 and step < max_steps
+                            and not _SAYS_NOT_WRITTEN.search(content)):
+                        # "Done!" after the user's own location was refused and the work landed elsewhere (W1, 2 of 2).
+                        location_nudges += 1
+                        add_note(messages, f"The location the user asked for, {self._unwritable_requested[0]}, was refused: "
+                                           "it is outside the folders you may change, and your reply doesn't say so. "
+                                           "Reply again: tell the user it couldn't be written there, and name any other "
+                                           "place you put it instead.")
+                        self.emit({"type": "requested_location_nudge", "step": step,
+                                   "location": self._unwritable_requested[0][:200]})
                         self._retract_text(step)
                         continue
                     problem = (self.verifier.unfinished(content) if self.verifier is not None and not stop_reason
@@ -1308,6 +1327,13 @@ class LeanTurn:
                          "variations of it. Read the errors above, then take a different approach or tell the user "
                          "what is blocking you.]")
                 self.emit({"type": "fail_streak", "step": step, "tool": name, "count": streak})
+            if not ok and (requested := self._requested_location(name, _args, output)):
+                # The boundary's "Path not allowed" reads as an error to fix; for the user's own location, writing
+                # somewhere else isn't a fix (W1: the summary went into the project and the reply said "Done!").
+                self._unwritable_requested.append(requested)
+                text += "\n\n" + app_note(f"{requested} is the location the user asked for, and it is outside the folders "
+                                          "EchoSpeak may change. Don't put it somewhere else instead: tell the user it "
+                                          "couldn't be written there and that the folder isn't one EchoSpeak may change.")
             if not refused:
                 text += self._screen_progress(name, ok, outcome, step)
             if self.result_note is not None and not refused:
@@ -1448,6 +1474,28 @@ class LeanTurn:
             except (OSError, ValueError):
                 continue
         return found
+
+    def _requested_location(self, name: str, args: dict[str, Any], output: str) -> str:
+        """The destination the folder boundary just refused, when the user's request named it (or its folder), or ""."""
+        if name not in _PLACING_TOOLS:
+            return ""
+        text = str(output or "").strip().lower()
+        if not text.removeprefix("error: ").startswith("path not allowed"):
+            return ""
+        request = f"{getattr(self, '_goal', '')}\n{self.goal or ''}"
+        for key in ("path", "file_path", "dst", "destination"):
+            raw = str(args.get(key) or "").strip().rstrip("/")
+            if not raw:
+                continue
+            path = Path(raw).expanduser()
+            named = {raw, str(path)}
+            folder = str(path.parent)
+            if "/" in folder and folder != "/":
+                # A folder counts only as a real path ("/srv/shared"), not a bare word the request may contain.
+                named.add(folder)
+            if any(item in request for item in named):
+                return raw
+        return ""
 
     def _after_denial(self, name: str, args: dict[str, Any], targets: Optional[set[str]] = None) -> str:
         """The refused target this call would change (shown to the owner), or ""."""
