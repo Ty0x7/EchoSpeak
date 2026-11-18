@@ -220,6 +220,36 @@ def test_writing_the_tests_expected_value_into_the_code_is_caught():
     assert not ledger.special_cased
 
 
+def test_an_undone_special_case_is_not_written_back():
+    """D7 (qwen3.5:9b, 2 of 3 runs): told the edit hard-codes the test's value, the model ran checkpoint_undo, then
+    made the identical edit again and replied that it was a valid fix. The undo also left the ledger saying the
+    file still returned the value."""
+    from agent.lean.verification import VerificationLedger
+
+    ledger = VerificationLedger()
+    ledger.observe("file_read", {"path": "test_clock.py"}, True,
+                   "test_clock.py (6 lines)\n6|     assert now_ms() == 1700000000000", 1, 5, {}, call_id="r")
+    hack = {"path": "clock.py", "old_text": "    return int(time.time() * 1000)", "new_text": "    return 1700000000000"}
+    assert ledger.undone_special_case("file_edit", hack) == ""  # nothing undone yet: the edit runs and is flagged
+    ledger.observe("file_edit", hack, True, "Edited clock.py", 2, 5, {}, call_id="e")
+    assert ledger.special_cased
+    ledger.observe("checkpoint_undo", {}, True, "Successfully reverted clock.py to last checkpoint.", 3, 5, {}, call_id="u")
+    assert not ledger.special_cased  # the file no longer returns it
+    refused = ledger.undone_special_case("file_edit", hack)
+    assert "1700000000000" in refused and "can't pass as written" in refused
+    # The same value written back another way, or with ./ in the path, is the same change.
+    variant = {"path": "./clock.py", "content": "import time\n\ndef now_ms():\n    return (1700000000000)\n"}
+    assert ledger.undone_special_case("file_write", variant)
+    # A real fix, another file, and an undo of an unflagged change are untouched.
+    assert ledger.undone_special_case("file_edit", {**hack, "new_text": "    return time.time_ns() // 1_000_000"}) == ""
+    assert ledger.undone_special_case("file_edit", {**hack, "path": "other.py"}) == ""
+    plain = VerificationLedger()
+    plain.observe("file_read", {"path": "test_clock.py"}, True, "6|     assert now_ms() == 1700000000000", 1, 5, {}, call_id="r")
+    plain.observe("file_edit", {"path": "clock.py", "old_text": "a", "new_text": "b"}, True, "Edited", 2, 5, {}, call_id="e")
+    plain.observe("checkpoint_undo", {}, True, "Successfully reverted clock.py to last checkpoint.", 3, 5, {}, call_id="u")
+    assert plain.undone_special_case("file_edit", hack) == ""
+
+
 def test_a_docstring_mentioning_the_expected_value_is_not_special_casing():
     from agent.lean.verification import VerificationLedger
 
