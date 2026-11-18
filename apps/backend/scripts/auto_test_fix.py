@@ -460,6 +460,14 @@ def failing_first(tree: Path, base: str, tests: list[str], session: Session, cyc
     return judge_failing_first(before, after, set(session.state.get("suite_baseline", {}).get("failed", [])))
 
 
+def related_failures(run: dict[str, Any], known: set[str]) -> list[str]:
+    """Failures in a test run that the session's base commit didn't already have."""
+    failed = [t for t in run["failed"] if t not in known]
+    if not run["ok"] and not run["failed"]:
+        failed.append(f"(pytest failed without a test id: {run['summary'][:120]})")
+    return failed
+
+
 def judge_failing_first(before: dict[str, Any], after: dict[str, Any], known: set[str]) -> dict[str, Any]:
     """Per test, not per file: a changed test file can hold a test that already failed on the base commit.
 
@@ -516,13 +524,17 @@ def gate(tree: Path, base: str, session: Session, cycle: int, report: dict[str, 
                  f"known failures left alone: {first['known_failures']}"):
         result["decision"], result["reason"] = "reject", "the fix doesn't pass its own test"
         return result
+    known = set(session.state.get("suite_baseline", {}).get("failed", []))
     related = pytest(tree, sorted(set(RELATED) | set(tests)))
     result["related"] = related
-    if not check("related suites pass", related["ok"], related["summary"] + " " + ", ".join(related["failed"][:5])):
-        result["decision"], result["reason"] = "reject", "related suites fail"
+    # Known failures (failing on the session's base too) don't count, as in the full-suite gate: re-gating cycle 1 of
+    # 20261117-194230-demo-claude was rejected for test_model_compat's pre-existing approval-preview failure.
+    broken = related_failures(related, known)
+    if not check("related suites pass (known base failures excepted)", not broken,
+                 related["summary"] + " " + ", ".join(broken[:5])):
+        result["decision"], result["reason"] = "reject", f"related suites fail: {broken[:3]}"
         return result
     suite = full_suite(tree)
-    known = set(session.state.get("suite_baseline", {}).get("failed", []))
     new = [t for t in suite["failed"] if t not in known]
     result["suite"] = {"summary": suite["summary"], "new_failures": new}
     if not check("full backend suite: no failure the base commit didn't have", not new, ", ".join(new[:8])):

@@ -142,6 +142,16 @@ def test_failing_first_is_judged_per_test_not_per_file():
     assert atf.judge_failing_first(broken, same, set())["fails_on_base"]
 
 
+def test_related_suites_except_failures_the_base_already_had():
+    """Re-gating cycle 1 of 20261117-194230-demo-claude: rejected for a related-suite failure present on the base."""
+    known = {"tests/test_model_compat.py::test_the_approval_preview_shows_the_line_that_will_be_written"}
+    run = {"ok": False, "failed": sorted(known), "summary": "1 failed, 156 passed"}
+    assert atf.related_failures(run, known) == []
+    assert atf.related_failures({**run, "failed": sorted(known | {"tests/test_a.py::t"})}, known) == ["tests/test_a.py::t"]
+    # A crash with no test id (an import error in conftest, a timeout) is never excused.
+    assert atf.related_failures({"ok": False, "failed": [], "summary": "INTERNALERROR"}, known)
+
+
 def test_model_names_count_in_code_but_not_in_the_evidence_comments(tmp_path):
     """Same cycle: comments and docstrings citing "D7 (qwen3.5:9b, 2 of 3 runs)" were rejected as model-specific code."""
     repo = tmp_path / "repo"
