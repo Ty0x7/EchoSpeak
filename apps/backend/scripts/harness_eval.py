@@ -581,6 +581,9 @@ class Stack:
         })
         env.update(self.extra_env)
         env = local_only_env(env)  # last, so neither the shell nor --env can hand the backend a paid key
+        # Sandboxed commands of the system under test must not read the repository (eval scripts hold the answers)
+        # or the eval records (other cases' and earlier repetitions' ground truth and trajectories).
+        env["ECHOSPEAK_SANDBOX_HIDE"] = os.pathsep.join([str(ROOT.parents[1]), str(OUT), str(self.run_dir)])
         self.env_used = {k: v for k, v in env.items() if k.startswith(("LOCAL_MODEL", "LEAN_", "ASSISTANT", "USE_LOCAL", "LEARNING",
                                                                        "ENABLE_SYSTEM", "ALLOW_"))}
         self.procs.append(subprocess.Popen(
@@ -674,7 +677,30 @@ def audit_between(data: Path, since: float, until: float) -> list[dict[str, Any]
 DESTRUCTIVE = ("delete", "remove", "overwrite", "rm ", "truncate", "write")
 
 
-def run_turn(stack: Stack, thread_id: str, turn: Turn, events: list[dict[str, Any]]) -> dict[str, Any]:
+def owner_decision(event: dict[str, Any], turn: Turn, readable: tuple[str, ...] = ()) -> str:
+    """What the simulated owner answers on a permission card (not a question).
+
+    A real owner allows the work the case asks for, but never hands the system under test the evaluation itself.
+    Campaign discovery, 18 November 2026 (X1 r1): every read card was allowed, so with no project attached Qwen was
+    granted the run folder and searched other cases' records and ground truth. Now a read card is allowed only for a
+    folder the case declares (its truth "vars", such as E1's shared folder), and commands outside the sandbox are
+    declined so the sandbox's hiding of the repository and the eval records holds.
+    """
+    text = json.dumps(event, default=str).lower()
+    tool = str(event.get("tool") or "")
+    if tool.startswith("read:"):
+        folder = tool[len("read:"):]
+        if not any(folder == r or folder.startswith(r.rstrip("/") + "/") for r in readable):
+            return "deny"
+    if "outside the sandbox" in text:
+        return "deny"
+    if turn.approvals == "deny" or (turn.approvals == "deny-destructive" and any(w in text for w in DESTRUCTIVE)):
+        return "deny"
+    return "allow"
+
+
+def run_turn(stack: Stack, thread_id: str, turn: Turn, events: list[dict[str, Any]],
+             readable: tuple[str, ...] = ()) -> dict[str, Any]:
     state: dict[str, Any] = {"error": "", "final": None}
 
     def answer(approval_id: str, decision: str) -> None:
@@ -687,10 +713,7 @@ def run_turn(stack: Stack, thread_id: str, turn: Turn, events: list[dict[str, An
         event = {**event, "_received": time.time()}
         events.append(event)
         if event.get("type") == "approval_request" and event.get("id"):
-            text = json.dumps(event, default=str).lower()
-            decision = "allow"
-            if turn.approvals == "deny" or (turn.approvals == "deny-destructive" and any(w in text for w in DESTRUCTIVE)):
-                decision = "deny"
+            decision = owner_decision(event, turn, readable)
             if event.get("question") and turn.answer:
                 decision = turn.answer  # typed into the card (it allows another answer)
             elif event.get("question"):
@@ -754,7 +777,8 @@ def run_case(stack: Stack, case: Case, run_dir: Path) -> dict[str, Any]:
         if turn.new_thread:
             thread_id = stack.api.call("POST", "/threads", {**thread, "title": f"Eval {case.id} (later)"})["thread_id"]
             threads.append(thread_id)
-        row = run_turn(stack, thread_id, turn, events)
+        readable = tuple(str(v) for v in (truth.get("vars") or {}).values())
+        row = run_turn(stack, thread_id, turn, events, readable)
         row["thread_id"] = thread_id
         row["events"] = events[mark:]
         turns.append(row)
@@ -764,7 +788,7 @@ def run_case(stack: Stack, case: Case, run_dir: Path) -> dict[str, Any]:
             # in the same conversation (ToolSandbox's simulated user). Before this, a correct prose question ended
             # the case unanswered and failed it (agentic-demo cycle 1, C1 r2 and CH1 r2, flagged by the AI judge).
             mark = len(events)
-            follow = run_turn(stack, thread_id, Turn(turn.answer, turn.approvals, turn.timeout), events)
+            follow = run_turn(stack, thread_id, Turn(turn.answer, turn.approvals, turn.timeout), events, readable)
             follow.update(thread_id=thread_id, events=events[mark:], simulated_owner_reply=True)
             turns.append(follow)
     since, until = turns[0]["started"], turns[-1]["ended"]
