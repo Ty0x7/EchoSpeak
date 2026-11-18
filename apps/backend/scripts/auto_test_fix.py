@@ -237,6 +237,7 @@ def diagnose(run: Path, targets: list[str], target: float) -> dict[str, Any]:
             continue  # at target: minor failed checks are noise, not a reason to change the harness
         case = json.loads((run / "cases" / f"{v['id']}-r{v['rep']}.json").read_text(encoding="utf-8"))
         layer, why = layer_of(case, v)
+        why = " ".join(why.split())
         items.append({"case": v["id"], "rep": v["rep"], "score": v["score"], "layer": layer, "why": why,
                       "critical": v["critical"], "failed_checks": [c["label"] for c in v["checks"] if not c["ok"]],
                       "trail": trail(case), "model_calls": v["metrics"]["model_calls"],
@@ -525,7 +526,9 @@ def run(args: argparse.Namespace) -> int:
 
     rejected_in_a_row = 0
     while True:
-        cycle = len(st["cycles"]) + 1
+        # A cycle left awaiting a manual fix continues first (`run --resume`): it is not a new cycle.
+        pending = st["cycles"][-1] if st["cycles"] and st["cycles"][-1].get("decision") == "awaiting_fix" else None
+        cycle = pending["cycle"] if pending else len(st["cycles"]) + 1
         reason = ""
         if cycle > st["limits"]["cycles"]:
             reason = "cycle budget used"
@@ -542,7 +545,6 @@ def run(args: argparse.Namespace) -> int:
             session.save()
             session.log("stop", reason=reason)
             break
-        pending = st["cycles"][-1] if st["cycles"] and st["cycles"][-1].get("decision") == "awaiting_fix" else None
         if pending is not None:
             # `run --resume` after a manual fix: the same cycle, from the gates on, against the same base.
             record, cycle = pending, pending["cycle"]
