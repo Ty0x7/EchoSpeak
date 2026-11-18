@@ -73,7 +73,7 @@ RELATED = ["tests/test_environment_access.py", "tests/test_lean_harness.py", "te
            "tests/test_harness_eval_findings.py", "tests/test_model_compat.py", "tests/test_capabilities.py"]
 WEIGHTS = {"completion": 0.30, "tools": 0.25, "efficiency": 0.20, "recovery": 0.15, "security": 0.10}
 NOISE = 0.5          # three repetitions move a case mean by up to about 1 point; require more than half of it
-MIN_FREE_GB = 3.0
+MIN_FREE_GB = float(os.environ.get("ATF_MIN_FREE_GB") or 2.0)
 REPORT_NAME = ".atf-report.json"
 
 
@@ -375,6 +375,50 @@ def full_diff(tree: Path, base: str) -> str:
             git(tree, "reset", "-q", "--", *untracked)
 
 
+def added_line_numbers(tree: Path, base: str, path: str) -> set[int]:
+    if path not in git(tree, "diff", "--name-only", base, "--", path).splitlines():
+        text = (tree / path).read_text(encoding="utf-8", errors="ignore")
+        return set(range(1, text.count("\n") + 2))  # a new file: every line is added
+    numbers: set[int] = set()
+    for match in re.finditer(r"^@@ -\S+ \+(\d+)(?:,(\d+))? @@", git(tree, "diff", "-U0", base, "--", path), re.M):
+        start, count = int(match.group(1)), int(match.group(2) or 1)
+        numbers.update(range(start, start + count))
+    return numbers
+
+
+def model_names_in_code(tree: Path, base: str, files: list[str]) -> list[str]:
+    """Model names in added *executable* code: names and non-docstring strings. Comments and docstrings that cite
+    the evidence ("D7, qwen3.5:9b, 2 of 3 runs") are how this code base records why a behaviour exists, and were
+    rejected by the first version of this gate (demo session 20261117-194230-demo-claude, cycle 1)."""
+    import io
+    import tokenize
+
+    found: list[str] = []
+    for path in files:
+        if not path.endswith(".py") or path.startswith(("apps/backend/tests/", "apps/terminal/tests/")):
+            continue
+        source = tree / path
+        if not source.is_file():
+            continue
+        added = added_line_numbers(tree, base, path)
+        try:
+            tokens = list(tokenize.generate_tokens(io.StringIO(source.read_text(encoding="utf-8")).readline))
+        except (tokenize.TokenError, SyntaxError):
+            continue
+        significant = [t for t in tokens if t.type not in {tokenize.COMMENT, tokenize.NL}]
+        for i, tok in enumerate(significant):
+            if tok.start[0] not in added or tok.type not in {tokenize.NAME, tokenize.STRING}:
+                continue
+            if tok.type == tokenize.STRING:
+                prev = significant[i - 1].type if i else tokenize.NEWLINE
+                nxt = significant[i + 1].type if i + 1 < len(significant) else tokenize.NEWLINE
+                if prev in {tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.ENCODING} and nxt == tokenize.NEWLINE:
+                    continue  # a docstring
+            if MODEL_NAMES.search(tok.string):
+                found.append(f"{path}:{tok.start[0]}: {tok.line.strip()[:100]}")
+    return found
+
+
 def pytest(tree: Path, tests: list[str], timeout: float = 1800) -> dict[str, Any]:
     backend = tree / "apps" / "backend"
     tests = [t for t in tests if (backend / t).exists()]
@@ -382,7 +426,8 @@ def pytest(tree: Path, tests: list[str], timeout: float = 1800) -> dict[str, Any
         return {"ok": True, "passed": 0, "failed": [], "summary": "no tests"}
     out = sh([str(backend / ".venv" / "bin" / "python"), "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider", *tests],
              backend, timeout=timeout)
-    failed = sorted({re.sub(r" - .*", "", l[7:]) for l in out.stdout.splitlines() if l.startswith("FAILED ")})
+    failed = sorted({re.sub(r" - .*", "", l.split(" ", 1)[1]) for l in out.stdout.splitlines()
+                     if l.startswith(("FAILED ", "ERROR "))})
     summary = next((l for l in reversed(out.stdout.splitlines()) if re.search(r"\d+ (passed|failed)", l)), out.stdout[-200:])
     passed = int(m.group(1)) if (m := re.search(r"(\d+) passed", summary)) else 0
     return {"ok": out.returncode == 0, "passed": passed, "failed": failed, "summary": summary.strip("= ")}
@@ -411,7 +456,25 @@ def failing_first(tree: Path, base: str, tests: list[str], session: Session, cyc
     finally:
         git(tree, "worktree", "remove", "--force", str(probe))
     after = pytest(tree, tests)
-    return {"fails_on_base": not before["ok"], "passes_on_fix": after["ok"], "base": before, "fix": after}
+    return judge_failing_first(before, after, set(session.state.get("suite_baseline", {}).get("failed", [])))
+
+
+def judge_failing_first(before: dict[str, Any], after: dict[str, Any], known: set[str]) -> dict[str, Any]:
+    """Per test, not per file: a changed test file can hold a test that already failed on the base commit.
+
+    Demo session 20261117-194230-demo-claude, cycle 1: both new tests failed on the base and passed with the fix,
+    and the cycle was still rejected because test_model_compat.py also holds a test in the suite's known failures.
+    """
+    def collection_error(run: dict[str, Any]) -> bool:
+        return any(t.endswith(".py") for t in run["failed"])  # "ERROR tests/x.py": the file didn't import
+
+    fixed = sorted(set(before["failed"]) - set(after["failed"]))
+    if collection_error(before) and not collection_error(after):
+        fixed = fixed or ["(the test file doesn't import on the base: it uses what the fix adds)"]
+    still = sorted(t for t in after["failed"] if t not in known)
+    return {"fails_on_base": bool(fixed), "passes_on_fix": not still, "fixed_by_change": fixed,
+            "still_failing": still, "known_failures": sorted(t for t in after["failed"] if t in known),
+            "base": before, "fix": after}
 
 
 def gate(tree: Path, base: str, session: Session, cycle: int, report: dict[str, Any]) -> dict[str, Any]:
@@ -430,8 +493,7 @@ def gate(tree: Path, base: str, session: Session, cycle: int, report: dict[str, 
         result["decision"], result["reason"] = "reject", f"changed paths outside the allowed scope: {outside}"
         return result
     lines = added_lines(tree, base, files)
-    code = [(f, l) for f, l in lines if not f.startswith(("apps/backend/tests/", "apps/terminal/tests/", "docs/"))]
-    named = [f"{f}: {l.strip()[:100]}" for f, l in code if MODEL_NAMES.search(l)]
+    named = model_names_in_code(tree, base, files)
     check("no model names in code", not named, "; ".join(named[:5]))
     secrets = [f for f, l in lines if SECRET.search(l)]
     if not check("no secrets in the diff", not secrets, ", ".join(secrets)):
@@ -444,10 +506,13 @@ def gate(tree: Path, base: str, session: Session, cycle: int, report: dict[str, 
         return result
     first = failing_first(tree, base, tests, session, cycle)
     result["failing_first"] = first
-    if not check("failing first: the new test fails on the base commit", first["fails_on_base"], first["base"]["summary"]):
+    if not check("failing first: the new test fails on the base commit", first["fails_on_base"],
+                 f"{first['base']['summary']}; fixed by the change: {first['fixed_by_change']}"):
         result["decision"], result["reason"] = "reject", "the test passes without the fix, so it proves nothing"
         return result
-    if not check("the new test passes with the fix", first["passes_on_fix"], first["fix"]["summary"]):
+    if not check("the new test passes with the fix", first["passes_on_fix"],
+                 f"{first['fix']['summary']}; still failing: {first['still_failing']}; "
+                 f"known failures left alone: {first['known_failures']}"):
         result["decision"], result["reason"] = "reject", "the fix doesn't pass its own test"
         return result
     related = pytest(tree, sorted(set(RELATED) | set(tests)))
@@ -552,7 +617,8 @@ def run(args: argparse.Namespace) -> int:
             st["status"] = "running"
             base = record["base"]
             before = record["before"]
-            agent = {"status": "fixed", "case": "", "fix": "manual or resumed fix"}
+            # Keep the engineering agent's own report when the cycle is re-gated; a manual fix has none.
+            agent = record.get("agent_report") or {"status": "fixed", "case": "", "fix": "manual or resumed fix"}
             session.log("resume", cycle=cycle, base=base[:8])
         else:
             record = {"cycle": cycle, "started": now()}

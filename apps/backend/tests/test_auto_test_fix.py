@@ -119,3 +119,41 @@ def test_out_of_scope_changes_are_rejected_before_any_test_runs(tmp_path):
     session.dir.mkdir()
     result = atf.gate(repo, base, session, 1, {})
     assert result["decision"] == "reject" and "scope" in result["reason"], result
+
+
+def test_failing_first_is_judged_per_test_not_per_file():
+    """Demo session 20261117-194230-demo-claude, cycle 1: both new tests went from failing to passing, and the fix was
+    rejected because the same file holds a test that already failed on the base commit (a known suite failure)."""
+    known = {"tests/test_model_compat.py::test_the_approval_preview_shows_the_line_that_will_be_written"}
+    before = {"ok": False, "failed": sorted(known | {"tests/test_model_compat.py::test_new",
+                                                     "tests/test_verified_engineering.py::test_new"}), "summary": "3 failed"}
+    after = {"ok": False, "failed": sorted(known), "summary": "1 failed"}
+    verdict = atf.judge_failing_first(before, after, known)
+    assert verdict["fails_on_base"] and verdict["passes_on_fix"], verdict
+    assert len(verdict["fixed_by_change"]) == 2 and verdict["known_failures"] == sorted(known)
+    # A test the change leaves failing that wasn't failing before still rejects.
+    worse = {"ok": False, "failed": sorted(known | {"tests/test_x.py::test_new"}), "summary": "2 failed"}
+    assert not atf.judge_failing_first(before, worse, known)["passes_on_fix"]
+    # A test that passes on the base too proves nothing.
+    same = {"ok": True, "failed": [], "summary": "3 passed"}
+    assert not atf.judge_failing_first(same, same, set())["fails_on_base"]
+    # A test file that can't import on the base (it uses what the fix adds) fails there.
+    broken = {"ok": False, "failed": ["tests/test_x.py"], "summary": "1 error"}
+    assert atf.judge_failing_first(broken, same, set())["fails_on_base"]
+
+
+def test_model_names_count_in_code_but_not_in_the_evidence_comments(tmp_path):
+    """Same cycle: comments and docstrings citing "D7 (qwen3.5:9b, 2 of 3 runs)" were rejected as model-specific code."""
+    repo = tmp_path / "repo"
+    module = repo / "apps" / "backend" / "agent" / "lean" / "x.py"
+    module.parent.mkdir(parents=True)
+    module.write_text("def f():\n    return 1\n")
+    for args in (["init", "-q"], ["add", "-A"], ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "base"]):
+        subprocess.run(["git", *args], cwd=repo, check=True)
+    base = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+    module.write_text('def f():\n    """D7 r2 (qwen3.5:9b): undone special cases were written back."""\n'
+                      '    # granite4.2:8b did the same in the five-model evaluation\n    return 1\n')
+    assert atf.model_names_in_code(repo, base, ["apps/backend/agent/lean/x.py"]) == []
+    module.write_text('def f(model):\n    if model.startswith("qwen3"):\n        return 2\n    return 1\n')
+    named = atf.model_names_in_code(repo, base, ["apps/backend/agent/lean/x.py"])
+    assert len(named) == 1 and "qwen3" in named[0]
