@@ -721,6 +721,11 @@ class Toolbox:
         with privacy.scope(privacy.tool_component(name, args)):
             result = self._run(name, args)
         result = self._observe(name, args, result)
+        from agent.lean import file_access
+        if not result.ok and name in file_access.READ_TOOLS and file_access.is_refusal(result.output):
+            # The folder boundary said no (a never-readable place, or outside with nobody to ask): a policy result,
+            # not a tool fault, so learning and the judge don't count it as a failure to recover from.
+            result.outcome = "refused"
         # A project's secrets files are shown without their values (agent/lean/secret_files.py).
         from agent.lean.secret_files import guard_output
         result.output = guard_output(name, args, result.output)

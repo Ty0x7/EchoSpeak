@@ -180,5 +180,16 @@ def explain(raw: str, roots: Iterable[Path], *, can_ask: bool = False) -> str:
     return f"Path not allowed: {raw}. The folders this conversation can read are: {listed}."
 
 
+_REFUSALS = ("Not readable:", "Not allowed yet:")
+
+
+def is_refusal(output: str) -> bool:
+    """Whether a read tool's result is the folder boundary's refusal (explain()), as opposed to a fault."""
+    text = str(output or "").strip()
+    if text.startswith("Error: "):
+        text = text[len("Error: "):]
+    return text.startswith(_REFUSALS)
+
+
 def describe_grant(folder: Path | str) -> str:
     return f"Read files in {folder} (read-only)"

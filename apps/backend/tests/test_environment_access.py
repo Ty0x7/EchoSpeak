@@ -243,6 +243,9 @@ def test_credentials_are_refused_without_a_card(machine):
     _turn(client, events, session="s-ssh").run("read my ssh key")
     assert not any(e.get("type") == "approval_request" for e in events)
     assert not any("PRIVATE KEY" in text for text in _tool_texts(client))
+    # A policy refusal, not a tool fault (live smoke run: the judge counted it as an unresolved failure).
+    ends = [e for e in events if e.get("type") == "tool_end"]
+    assert ends and ends[0]["outcome"] == "refused", ends
 
 
 def test_a_read_grant_does_not_open_writes(machine):
