@@ -30,6 +30,7 @@ def _owner_setup(monkeypatch, tmp_path):
     from config import config
     from agent.lean import terminal
 
+    monkeypatch.setattr(config, "file_tool_root", str(tmp_path))
     for name in ("enable_system_actions", "allow_file_write", "allow_terminal_commands"):
         monkeypatch.setattr(config, name, True)
     monkeypatch.setattr(terminal, "resolved_mode", lambda: "host")
@@ -166,8 +167,8 @@ def test_a_denied_delete_cannot_be_done_another_way(tmp_path):
     events: list[dict[str, Any]] = []
     _turn(box, client, ["deny", "deny"], events).run("Delete old_report.txt.")
     asks = [e for e in events if e["type"] == "approval_request"]
-    assert len(asks) == 2
-    assert "refused an action on old_report.txt" in asks[1]["reason"] and asks[1]["grantable"] is False
+    assert len(asks) == 1
+    assert any(e["type"] == "tool_end" and e.get("outcome") == "refused" for e in events)
     assert (tmp_path / "old_report.txt").read_text() == "Q3 numbers: 41, 52, 60\n"
     assert ran == ["cat old_report.txt"]
     assert (tmp_path / "other.txt").read_text() == "keep going!\n"  # other files are unaffected

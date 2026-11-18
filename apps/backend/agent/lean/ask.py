@@ -126,6 +126,32 @@ def asks_for_permission(question: str, options: list[str]) -> str:
     return ""
 
 
+def prose_action_confirmation(goal: str, reply: str) -> bool:
+    """A narrow case: one unconditionally requested file removal, followed by a prose confirmation."""
+    request = re.fullmatch(r"(?:please\s+)?(?:delete|remove)\s+[`\"']?([\w./-]+\.[\w-]+)[`\"']?"
+                           r"(?: (?:from|in) the (?:project|workspace))?[.!]?", goal.strip(), re.I)
+    if not request:
+        return False
+    target = re.escape(request[1].rstrip("."))
+    return bool(re.search(r"(?:would you like me to|do you want me to|should I)\s+(?:proceed with\s+)?"
+                          r"(?:delet(?:e|ing)|remov(?:e|ing))\s+[`\"']?(?:it|" + target + r")[`\"']?[:, ]*"
+                          r"(?:or would you prefer to keep it)?\?", reply, re.I))
+
+
+def repeats_action_request(question: str, options: list[str], goal: str) -> bool:
+    """A binary confirmation of the owner's explicit action belongs on the tool's approval card."""
+    choices = [o.strip().casefold() for o in options]
+    if not (any(re.match(r"yes\b", o) for o in choices) and any(re.match(r"no\b", o) for o in choices)):
+        return False
+    action = re.fullmatch(r"(?:do you want (?:me )?to|should I|shall I)\s+"
+                          r"((?:delete|remove|overwrite|replace|send|publish|install)\s+[^?]+)\?", question.strip(), re.I)
+    if not action:
+        return False
+    requested = goal.strip().casefold().removeprefix("please ")
+    target = action.group(1).casefold().strip()
+    return re.fullmatch(re.escape(target) + r"(?: (?:from|in|under) the project)?[.!]?", requested) is not None
+
+
 def permission_refusal(off: str) -> str:
     state = (f"Off right now: {off}." if off else
              "Nothing you need is switched off: an action that needs approval asks by itself when you call its tool.")

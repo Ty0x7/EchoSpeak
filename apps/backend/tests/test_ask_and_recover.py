@@ -158,3 +158,19 @@ def test_prompt_says_try_a_fallback_then_ask():
 
     assert "try one other route" in WORKING_RULES and "call ask_user with 2-4 concrete options" in WORKING_RULES
     assert "Never end on just an apology" in WORKING_RULES
+
+
+def test_reconfirming_an_explicit_action_uses_its_tool_card():
+    from agent.lean.ask import repeats_action_request
+    assert repeats_action_request("Do you want to delete old_report.txt?", ["Yes, delete it", "No, keep it"],
+                                  "Delete old_report.txt from the project.")
+    assert not repeats_action_request("Do you want to delete the backups?", ["Yes", "No"], "Inspect the backups.")
+    assert not repeats_action_request("Which file should I delete?", ["Draft", "Backup"], "Delete the old file.")
+
+
+def test_setup_for_a_file_approval_preserves_real_questions():
+    from agent.lean.ask import prose_action_confirmation as check
+    assert check("Delete receipt.txt from the project.", "It contains numbers. Would you like me to delete it?")
+    assert not check("Inspect receipt.txt.", "Would you like me to delete it?")
+    assert not check("Delete receipt.txt.", "Which copy should I delete?")
+    assert not check("Delete receipt.txt if it is empty.", "Would you like me to delete it?")

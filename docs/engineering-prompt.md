@@ -1,6 +1,37 @@
-# Engineering task prompts: Objective → Research → Environment → Verification → Adaptation → Completion
+# EchoSpeak Evidence-Driven Engineering Cycle
 
-A compact convention for giving substantial engineering work to Claude Code, Codex or Echo Native. It says what success means and how it will be measured. It doesn't say how to implement it. The six stages are a checklist for the prompt, not six model calls: each agent runs them inside its own loop. The [verified-engineering report](research/verified-engineering.md) explains how Echo Native measures them.
+**Objective → Research → Environment → Verification → Adaptation → Completion**
+
+Claude Code and Codex use this cycle for EchoSpeak development, each with its own tools and approvals. Echo Native applies the same stages inside its execution loop. See the [verified-engineering report](research/verified-engineering.md).
+
+Start substantial work by checking the branch, worktree, Git status and acceptance criteria. Read the latest relevant Claude and Codex session records alongside the code, engineering reports and Obsidian notes. Check which findings still reproduce on the target revision and which fixes have already landed. Choose the loops that answer the open questions. For a small change, the objective and a direct check can fit in one sentence.
+
+## Twelve engineering loops
+
+| Loop | When and how to use it |
+|---|---|
+| 1. Engineering Loop | Define the outcome, research existing behavior, inspect the environment, establish a baseline, adapt from evidence and verify completion. |
+| 2. Agent Execution Loop | Understand the next action, select a tool, execute, observe the result and verify whether to continue or stop. |
+| 3. Harness Optimization Loop | Establish a baseline, run a real model, capture the trace, judge independently, diagnose the cause, improve the harness and retest under comparable conditions. |
+| 4. Verification Ladder | Use the existing V0–V4 evidence levels and independent scoring. Trace a completion claim to the tool result, artifact, rerun or owner acceptance that supports it. |
+| 5. Regression Loop | Reproduce the defect, observe a focused test fail, fix the cause, rerun the test and check affected behavior. |
+| 6. Architecture Review Loop | Inspect the component and its callers, research alternatives, then decide whether to keep, upgrade, replace or remove it. Verify the decision against its existing responsibilities. |
+| 7. Security & Environment Loop | Identify trust boundaries, check permissions and isolation, exercise the relevant allowed and denied paths, and verify that any fix preserves approvals and sandbox boundaries. |
+| 8. Skills & Learning Loop | Propose a skill, rule or lesson, run a controlled experiment and compare with the baseline. Retain or discard it based on observed behavior. |
+| 9. Delegation Loop | Give each delegate a bounded task, relevant context and an acceptance check. Verify returned evidence before integrating the work. |
+| 10. Conversation Audit Loop | Inspect recent real sessions, trace behavior to execution records, reproduce the defect, fix its cause and replay the relevant case. |
+| 11. Knowledge Preservation Loop | Record decisions, checks and limitations in the relevant project document and Obsidian note. Link evaluation results from the existing vault index so later work can reuse them. |
+| 12. Release & Acceptance Loop | Verify, commit and back up the change, integrate when authorized, then build, install and record owner acceptance when it occurs. |
+
+## Model evaluations and handoff
+
+Reuse the native harness, execution loop, permissions, sandbox, delegation, skills, memory and provider integrations. Start with existing regression tests, conversation evidence and architecture reviews. A change to the architecture or prompt needs a demonstrated cause and a measurable improvement.
+
+For a model evaluation, use Qwen 3.5 9B (`qwen3.5:9b`) as the reference unless the owner specifies otherwise. Use the existing campaign runner, model recorder and independent judge. Weight completion **30%**, tool execution **25%**, efficiency **20%**, recovery **15%** and security **10%**. Report failures, security findings and regressions alongside the score. Choose cases that exercise the behavior being changed. See the [model-harness-testing skill](../.agents/skills/model-harness-testing/SKILL.md).
+
+At handoff, name the change and its cause, record the baseline and final checks with their outcomes, and identify remaining limitations and the steps ready for owner testing. Preserve user data, conversations, credentials and existing work. Pushing, merging, publishing and destructive operations require authorization.
+
+**Research → Execute → Measure → Learn → Improve → Verify → Preserve → Repeat.**
 
 **Hill climbing, in one line:** define the target, measure a baseline, try an improvement, verify it, keep the best result, and stop when the target is met or progress stops. It is a disciplined way to measure progress and know when to stop or ask. It doesn't promise the optimum, and it isn't "repeat until it works".
 

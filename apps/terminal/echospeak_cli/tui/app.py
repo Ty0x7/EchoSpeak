@@ -2256,7 +2256,17 @@ class EchoTUI:
         rows.append(["agent", f"{self.agent_name} · {self.agent_title}" if self.agent_title else self.agent_name])
         rows.append(["session", f"{self.sid[:8]} · {self._title()}" if self.sid else "new (starts with your next message)"])
         rows.append(["project", self.project_name or "none"])
+        persona = next((a for a in self.agents if a.get("id") == (self.core.agent_id or "echo")), {})
+        toolsets = persona.get("toolsets")
+        if isinstance(toolsets, list) and toolsets:
+            rows.append(["configured toolsets", ", ".join(one_line(t, 32) for t in toolsets)])
         rows.append(["approvals", control.APPROVAL_MODES.get(self.approval_mode, self.approval_mode)])
+        try:
+            terminal = await self.call(c.get, "/lean/terminal") or {}
+            if terminal.get("resolved") in {"host", "docker", "bwrap"}:
+                rows.append(["command environment", terminal["resolved"] + " (when terminal access is allowed)"])
+        except (ApiError, ConnectError):
+            pass
         mode = str(self.settings.get("assistant_mode") or "")
         if mode:
             rows.append(["assistant", mode])

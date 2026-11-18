@@ -159,6 +159,8 @@ def test_a_failing_model_is_retried_once_then_reported_without_stopping_the_othe
 
 
 def test_the_shared_token_budget_stops_the_swarm(monkeypatch):
+    # Keep the last worker queued until the first worker reports its token use.
+    monkeypatch.setattr(settings, "swarm_parallel", lambda local: 1)
     monkeypatch.setattr(settings, "swarm_token_budget", lambda: 10_000)
     Scripted.scripts = {f"Expensive question {i}": _research(f"Expensive question {i}", f"https://x.example/{i}", "x", tokens=9_000)
                         for i in range(3)}

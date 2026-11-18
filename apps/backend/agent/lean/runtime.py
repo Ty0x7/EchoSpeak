@@ -16,7 +16,7 @@ from typing import Any, Callable, Optional
 
 from loguru import logger
 
-from agent.lean import agent_skills, capabilities, git_context, memory_quality, recall, settings, soul, summaries
+from agent.lean import agent_skills, capabilities, git_context, memory_quality, policy, recall, settings, soul, summaries
 from agent.lean.job import (ASSIGN_TASKS_DESCRIPTION, COMPLETE_TASK_DESCRIPTION, Job, Subtask, is_promise_without_action,
                             needs_action, parse_review)
 from agent.lean.loop import LeanTurn, TurnResult, _friendly_error
@@ -556,8 +556,6 @@ class LeanSession:
         )
         if self.work_context and episodes:
             from agent.learning.store import get_experience_store
-            from agent.lean import agent_skills
-            skills = {s.name: s.digest for s in agent_skills.approved()}
             for episode in episodes:
                 episode.work_id = self.work_context.work_id
                 episode.attempt_id = self.work_context.attempt_id
@@ -565,7 +563,12 @@ class LeanSession:
                 if agent_result:
                     episode.work_id = agent_result.work_context.work_id
                     episode.attempt_id = agent_result.work_context.attempt_id
-                episode.skill_versions = skills
+                episode.skill_versions = {
+                    item["meta"]["skill_name"]: item["meta"]["skill_digest"]
+                    for result in self.results if result.agent_id == episode.agent_id
+                    for item in result.timeline if item.get("name") == "read_skill" and item.get("outcome") == "ok"
+                    and item.get("meta", {}).get("skill_digest") and item["meta"].get("skill_name")
+                }
                 get_experience_store().update_episode(episode)
 
     # ── completion: when is the job done? ───────────────────────────────
@@ -1172,6 +1175,8 @@ class LeanSession:
         # Recall from what is actually being asked (the user's request, plus the task this
         # agent was given), never from a "[System]: ..." brief full of boilerplate words.
         goal = self._goal(message, task)
+        if delegated_by:
+            goal = policy.redact_secrets(goal)
         from agent.lean.swarm import wants_workers
 
         if "spawn_workers" in toolbox.native and not wants_workers(goal, self.reasoning_effort):
@@ -1227,9 +1232,9 @@ class LeanSession:
                 memories=memories,
                 chat_summary=summaries.summary_text(self.session_id),
                 caller_note=caller_note(self.source, self.caller_role, _owner_name()),
-                past_chats=[] if guest or not _remembers_chats() else self._past_chats(),
+                past_chats=[] if guest or delegated_by or not self._owner_side(persona) or not _remembers_chats() else self._past_chats(),
                 project_brief=project_brief,
-                skills=agent_skills.prompt_section(compact=compact_chat),
+                skills=agent_skills.prompt_section(compact=compact_chat) if not guest and "read_skill" in toolbox.names else "",
                 assistant_soul=self._unified_soul() if not guest else "",
                 instructions=home.instructions_section(self.project_root) if not guest and self._unified() else "",
                 tool_names=set(toolbox.names),
@@ -1275,7 +1280,7 @@ class LeanSession:
                 project_evidence=project_evidence,
                 playbook=learned.section,
                 environment="code" if self.code_first else "",
-                skills="" if guest else agent_skills.prompt_section(),
+                skills=agent_skills.prompt_section() if not guest and "read_skill" in toolbox.names else "",
                 instructions="" if guest else home.instructions_section(self.project_root),
                 # Guests get no description of the owner's settings.
                 capabilities="" if guest else capabilities.report(toolbox),
@@ -1338,6 +1343,11 @@ class LeanSession:
             turn.step_limit = research_run.step_limit
             turn.grace_prompt = chat_run_mod.GRACE_PROMPT
             self._chat_run = research_run
+        if not guest and "read_skill" in toolbox.names:
+            selected = agent_skills.matching_skill(goal, agent_skills.approved())
+            if selected:
+                retrieval = turn.prefetch
+                turn.prefetch = lambda: [("read_skill", {"name": selected}), *(retrieval() if retrieval else [])]
         if ledger is not None:
             turn.verifier = ledger
             if ledger.resumed and ledger.active():
@@ -1377,6 +1387,8 @@ class LeanSession:
             # The reflector later uses the same model this agent worked with.
             with self._state_lock:
                 self._endpoints[persona.id] = (str(endpoint.provider or ""), str(endpoint.model or ""))
+        if delegated_by:
+            turn.system_prompt = policy.redact_secrets(turn.system_prompt)
         return turn
 
     def _record(self, persona: AgentPersona, part: TurnResult, depth: int, meta: dict[str, Any]) -> None:
@@ -1640,7 +1652,8 @@ class LeanSession:
             if self.model_first:
                 hits = chat_mode.chat_hits(hits)
             if not hits:
-                return "No past messages match."
+                return ("No matching messages in this conversation. Ask the user to share the relevant excerpt here."
+                        if scoped else "No past messages match.")
             lines = []
             for hit in hits:
                 when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
@@ -1675,7 +1688,7 @@ class LeanSession:
         if _remembers_chats():
             tools.append(NativeTool(
                 name="chat_search",
-                description="Search the words of every past conversation with the user (all chats, including group chats). "
+                description="Search past messages visible to this agent. A delegated task searches only its current chat. "
                 "Use it when the user refers to something discussed before. For saved facts about the user, use memory_search.",
                 parameters={"type": "object", "properties": {"query": {"type": "string", "description": "A few keywords."}}, "required": ["query"]},
                 func=chat_search,
@@ -1708,7 +1721,7 @@ class LeanSession:
                     if problem.startswith("Error"):
                         return problem
                     target = self.personas.find_by_name(str(args.get("agent") or ""))
-                    task = str(args.get("task") or "").strip()
+                    task = policy.redact_secrets(str(args.get("task") or "").strip())
                     with self._state_lock:
                         self._handoffs += 1
                     self.emit({"type": "delegation", "from": persona.id, "to": target.id, "task": task[:400]})
@@ -1719,7 +1732,7 @@ class LeanSession:
                         "summary of what you delivered. If you can't finish it, say what is blocking you."
                     )
                     if self._user_message:
-                        brief += f"\n\nFor context, the user's message was:\n{self._user_message[:800]}"
+                        brief += f"\n\nFor context, the user's message was:\n{policy.redact_secrets(self._user_message)[:800]}"
                     previous_active, self._active_subtask = self._active_subtask, subtask
                     parent_work = current_work() or self._ensure_work(persona)
                     owner = parent_work.coordinator.get(parent_work.work_id, principal=parent_work.principal)

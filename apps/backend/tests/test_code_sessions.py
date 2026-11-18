@@ -28,6 +28,8 @@ def wait_for(service, session_id, predicate, seconds=12):
 
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
+    # This fixture exercises the explicitly supported legacy external-runtime mode.
+    monkeypatch.setattr(config, "assistant_mode", "environments")
     root = tmp_path / "source"
     root.mkdir()
     wt.git(root, "init")

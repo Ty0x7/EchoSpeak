@@ -133,8 +133,8 @@ def network_policy() -> str:
 
 
 def docker_network() -> str:
-    """Network the container is created on. It is disconnected when the policy is not "on"."""
-    return "none" if network_policy() == "off" else "bridge"
+    """Default network for a command without an explicit network request."""
+    return "bridge" if network_policy() == "on" else "none"
 
 
 # In the sandbox the workspace folders are still your real files.
@@ -331,7 +331,9 @@ def _timeout(value: Any, default: int = 120) -> int:
 # ── workspace mounts (docker) ───────────────────────────────────────────
 def workspace_roots(project_root: str = "") -> list[Path]:
     roots: list[Path] = []
-    candidates = [project_root, getattr(config, "file_tool_root", "")] + list(getattr(config, "file_tool_extra_roots", None) or [])
+    candidates = [project_root] if project_root else [
+        getattr(config, "file_tool_root", ""), *(getattr(config, "file_tool_extra_roots", None) or [])
+    ]
     for raw in candidates:
         if not str(raw or "").strip():
             continue
@@ -416,10 +418,20 @@ def translate_windows_paths(command: str, plan: list[tuple[Path, str]]) -> str:
 
 # ── docker backend ──────────────────────────────────────────────────────
 class DockerSandbox:
-    def __init__(self) -> None:
+    def __init__(self, name: str = CONTAINER_NAME, network: str = "none") -> None:
+        self.name = name
+        self.network = network
         self._lock = threading.RLock()
         self.docker = shutil.which("docker") or str(Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe")
         self.image = ""
+
+    def for_workspace(self, plan: list[tuple[Path, str]], *, network: bool, temporary: bool = False) -> DockerSandbox:
+        mounts = [(str(root.resolve()), target) for root, target in plan]
+        identity = json.dumps([mounts, network, str(getattr(config, "terminal_docker_image", ""))])
+        suffix = uuid.uuid4().hex if temporary else hashlib.sha256(identity.encode()).hexdigest()[:24]
+        scoped = DockerSandbox(f"{CONTAINER_NAME}-{suffix}", "bridge" if network else "none")
+        scoped._lock = self._lock
+        return scoped
 
     def _run(self, args: list[str], timeout: float = 60, input_text: Optional[str] = None) -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -437,7 +449,7 @@ class DockerSandbox:
             return False, f"Docker did not respond ({type(exc).__name__})."
         if proc.returncode == 0 and proc.stdout.strip():
             return True, f"Docker {proc.stdout.strip()}"
-        return False, "Docker Desktop is not running."
+        return False, (proc.stderr or "Docker daemon is unavailable.").strip()[-300:]
 
     def ensure_daemon(self, wait_seconds: float = 90) -> tuple[bool, str]:
         ok, detail = self.daemon_ok()
@@ -485,21 +497,23 @@ class DockerSandbox:
                 return False, detail
             image = self.ensure_image()
             signature = hashlib.sha1(json.dumps(
-                {"image": image, "mounts": [(str(r), t) for r, t in plan], "net": docker_network()}, sort_keys=True,
+                {"image": image, "mounts": [(str(r), t) for r, t in plan], "net": self.network}, sort_keys=True,
             ).encode()).hexdigest()[:12]
-            state = self._run(["inspect", "-f", "{{.State.Running}} {{index .Config.Labels \"echospeak.sig\"}}", CONTAINER_NAME], timeout=15)
+            state = self._run(["inspect", "-f", "{{.State.Running}} {{index .Config.Labels \"echospeak.sig\"}}", self.name], timeout=15)
             if state.returncode == 0:
                 running, _, sig = state.stdout.strip().partition(" ")
                 if sig == signature and running == "true":
                     return True, "ready"
                 if sig == signature:
-                    started = self._run(["start", CONTAINER_NAME], timeout=60)
+                    started = self._run(["start", self.name], timeout=60)
                     if started.returncode == 0:
                         return True, "ready"
-                self._run(["rm", "-f", CONTAINER_NAME], timeout=60)
+                if self.name != CONTAINER_NAME:
+                    return False, "Existing container configuration differs; use Reset sandbox to recreate it."
+                self._run(["rm", "-f", self.name], timeout=60)
             args = [
-                "run", "-d", "--name", CONTAINER_NAME, "--init", "--label", f"echospeak.sig={signature}",
-                "--network", docker_network(), "--memory", _limit("terminal_docker_memory", "512m", "4g"),
+                "run", "-d", "--name", self.name, "--init", "--label", "echospeak.terminal=1", "--label", f"echospeak.sig={signature}",
+                "--network", self.network, "--memory", _limit("terminal_docker_memory", "512m", "4g"),
                 "--cpus", _limit("terminal_docker_cpus", "1.0", "2"),
                 "--security-opt", "no-new-privileges", "-w", "/work",
             ]
@@ -509,22 +523,11 @@ class DockerSandbox:
             created = self._run(args, timeout=180)
             if created.returncode != 0:
                 return False, f"Could not start the sandbox container: {created.stderr.strip()[-400:]}"
-            if network_policy() == "ask":
-                # Offline until a command asks for the internet (and you approve).
-                self.set_network(False)
             return True, "ready"
-
-    def set_network(self, on: bool) -> bool:
-        """Connect or disconnect the sandbox from the internet (bridge network)."""
-        verb = "connect" if on else "disconnect"
-        proc = self._run(["network", verb, "bridge", CONTAINER_NAME], timeout=30)
-        text = (proc.stderr or "") + (proc.stdout or "")
-        # Already in the wanted state is fine.
-        return proc.returncode == 0 or "already exists" in text or "is not connected" in text
 
     def exec(self, command: str, workdir: str, timeout: int) -> tuple[int, str]:
         try:
-            proc = self._run(["exec", "-w", workdir, CONTAINER_NAME, "bash", "-lc", command], timeout=timeout + 5)
+            proc = self._run(["exec", "-w", workdir, self.name, "bash", "-lc", command], timeout=timeout + 5)
             out = (proc.stdout or "") + (("\n" + proc.stderr) if proc.stderr else "")
             return proc.returncode, out
         except subprocess.TimeoutExpired:
@@ -538,22 +541,34 @@ class DockerSandbox:
         never stopped them anyway.
         """
         try:
-            proc = self._run(["exec", "-w", workdir, CONTAINER_NAME, "bash", "-c", LAUNCH_SCRIPT, "_", proc_id, str(wait), command],
+            proc = self._run(["exec", "-w", workdir, self.name, "bash", "-c", LAUNCH_SCRIPT, "_", proc_id, str(wait), command],
                              timeout=wait + 30)
         except subprocess.TimeoutExpired:
-            return False, 0, "", "The sandbox did not answer."
+            return True, 124, "", "Docker did not acknowledge launch; command status is unknown."
         return parse_launch(proc.stdout or "", proc.stderr or "")
 
     def remove_container(self) -> None:
         with self._lock:
-            self._run(["rm", "-f", CONTAINER_NAME], timeout=60)
+            self._run(["rm", "-f", self.name], timeout=60)
+
+    def reset(self) -> None:
+        with self._lock:
+            listed = self._run(["ps", "-aq", "--filter", "label=echospeak.terminal=1"])
+            listed.check_returncode()
+            ids = listed.stdout.split()
+            # Older installations used one unlabelled name with a signature label.
+            legacy = self._run(["ps", "-aq", "--filter", f"name=^/{CONTAINER_NAME}$", "--filter", "label=echospeak.sig"])
+            legacy.check_returncode()
+            ids = sorted(set(ids + legacy.stdout.split()))
+            if ids:
+                self._run(["rm", "-f", *ids]).check_returncode()
 
     def status(self) -> dict[str, Any]:
         ok, detail = self.daemon_ok()
         info: dict[str, Any] = {"docker_installed": "not installed" not in detail, "docker_running": ok, "detail": detail}
         if ok:
-            state = self._run(["inspect", "-f", "{{.State.Running}}", CONTAINER_NAME], timeout=10)
-            info["container_running"] = state.returncode == 0 and state.stdout.strip() == "true"
+            state = self._run(["ps", "-q", "--filter", "label=echospeak.terminal=1"], timeout=10)
+            info["container_running"] = state.returncode == 0 and bool(state.stdout.strip())
             image = self._run(["image", "inspect", IMAGE_TAG], timeout=10)
             info["image_ready"] = image.returncode == 0
         return info
@@ -840,6 +855,9 @@ class BackgroundProcess:
     started_at: float = field(default_factory=time.time)
     popen: Optional[subprocess.Popen] = None
     container_pid: str = ""
+    sandbox: Optional[DockerSandbox] = None
+    final_output: Optional[str] = None
+    final_code: Optional[int] = None
     # Sandbox internet was switched on for it ("ask" policy): off again once it ends.
     network: bool = False
     # Who it belongs to (C3). `owner` is the Stop event of the turn that started it: when that turn is stopped,
@@ -929,14 +947,18 @@ _PROC_DIR = Path(DATA_DIR) / "lean" / "processes"
 def _process_alive(proc: BackgroundProcess) -> bool:
     if proc.mode == "host":
         return proc.popen is not None and proc.popen.poll() is None
-    code, out = _SANDBOX.exec(f"kill -0 {proc.container_pid} 2>/dev/null && echo alive", "/work", 10)
+    if proc.final_output is not None or not proc.sandbox:
+        return False
+    code, out = proc.sandbox.exec(f"kill -0 {proc.container_pid} 2>/dev/null && echo alive", "/work", 10)
     return "alive" in out
 
 
 def _exit_code(proc: BackgroundProcess) -> Optional[int]:
     if proc.mode == "host":
         return proc.popen.poll() if proc.popen is not None else None
-    _, out = _SANDBOX.exec(f"cat /tmp/es-proc-{proc.id}.exit 2>/dev/null", "/work", 10)
+    if proc.final_output is not None or not proc.sandbox:
+        return proc.final_code
+    _, out = proc.sandbox.exec(f"cat /tmp/es-proc-{proc.id}.exit 2>/dev/null", "/work", 10)
     try:
         return int(out.strip().splitlines()[-1])
     except (IndexError, ValueError):
@@ -945,11 +967,13 @@ def _exit_code(proc: BackgroundProcess) -> Optional[int]:
 
 def _tail(proc: BackgroundProcess, chars: int = 6000) -> str:
     """Recent stdout, then recent stderr under its own label."""
+    if proc.final_output is not None:
+        return proc.final_output[-chars:]
     if proc.mode == "host":
         out, err = _read(proc.log_path, chars), _read(proc.err_path, chars // 3)
     else:
-        _, out = _SANDBOX.exec(f"tail -c {chars} /tmp/es-proc-{proc.id}.log 2>/dev/null", "/work", 15)
-        _, err = _SANDBOX.exec(f"tail -c {chars // 3} /tmp/es-proc-{proc.id}.err 2>/dev/null", "/work", 15)
+        _, out = proc.sandbox.exec(f"tail -c {chars} /tmp/es-proc-{proc.id}.log 2>/dev/null", "/work", 15)
+        _, err = proc.sandbox.exec(f"tail -c {chars // 3} /tmp/es-proc-{proc.id}.err 2>/dev/null", "/work", 15)
     out, err = out.strip(), err.strip()
     return out + (f"\n[stderr]\n{err}" if err else "")
 
@@ -963,8 +987,10 @@ def _release_network(proc: BackgroundProcess) -> None:
     if not proc.network:
         return
     proc.network = False
-    if not any(p.network and _process_alive(p) for p in _PROCESSES.values()):
-        _SANDBOX.set_network(False)
+    if proc.sandbox:
+        proc.final_code = _exit_code(proc)
+        proc.final_output = _tail(proc)
+        proc.sandbox.remove_container()
 
 
 def stop_all_processes() -> None:
@@ -978,8 +1004,8 @@ def stop_all_processes() -> None:
 def _stop(proc: BackgroundProcess) -> None:
     if proc.mode == "host" and proc.popen is not None and proc.popen.poll() is None:
         _kill_group(proc.popen)  # the whole group: a dev server's children too
-    elif proc.mode == "docker" and proc.container_pid:
-        _SANDBOX.exec(f"kill -TERM -- -{proc.container_pid} 2>/dev/null || kill -TERM {proc.container_pid}", "/work", 15)
+    elif proc.mode == "docker" and proc.container_pid and proc.sandbox and proc.final_output is None:
+        proc.sandbox.exec(f"kill -TERM -- -{proc.container_pid} 2>/dev/null || kill -TERM {proc.container_pid}", "/work", 15)
     _release_network(proc)
 
 
@@ -1005,6 +1031,8 @@ class Terminal:
         from agent.tools import _format_file_tool_roots, _safe_file_path
 
         value = str(raw or "").strip()
+        if self.project_root and not workspace_roots(self.project_root):
+            return None, "Error: the attached project is not an available workspace folder."
         if not value or value == ".":
             base = self.project_root or str(getattr(config, "file_tool_root", "") or "")
             path = Path(base) if base else None
@@ -1017,6 +1045,8 @@ class Terminal:
         target = _safe_file_path(value)
         if target is None:
             return None, f"Error: folder not allowed: {value}. Allowed: {_format_file_tool_roots()}"
+        if self.project_root and not target.resolve().is_relative_to(Path(self.project_root).resolve()):
+            return None, "Error: choose a working directory inside the attached project."
         if not target.exists() or not target.is_dir():
             return None, f"Error: folder not found: {target}"
         return target, ""
@@ -1029,10 +1059,10 @@ class Terminal:
                 "off": "no internet",
                 "ask": "offline by default; set network=true for commands that need the internet (npm/pip install, git clone)",
             }[network_policy()]
-            return ("terminal runs bash on this computer inside a sandbox: you can write only in the workspace "
-                    f"({roots}), the rest of the system is read-only, credential folders are hidden, and {network}. "
+            return ("terminal runs bash inside Bubblewrap. Writable workspaces: "
+                    f"{roots}. Temporary files and package caches are writable. Other unmasked files may be readable; {network}. "
                     "Paths are the same as for the file tools. Only if a task truly needs the whole computer, set "
-                    "where=\"host\"; that asks the user first.")
+                    "where=\"host\"; host approval policy applies.")
         if self.mode == "host":
             if os.name != "nt":
                 return "terminal runs bash directly on this computer." + self._fallback_note()
@@ -1050,11 +1080,14 @@ class Terminal:
             "off": "no internet",
             "ask": "offline by default; set network=true for commands that need the internet (npm/pip install, git clone)",
         }[policy]
+        if os.name != "nt":
+            return (f"Terminal runs bash in a Docker container ({network}). Workspace mounts: {mounts}. "
+                    "Use host workspace paths for file tools. Host commands run separately under host approval policy.")
         return ("terminal runs bash in a Linux sandbox container (Node 22, Python 3, git; "
                 f"{network}). Your folders are mounted: {mounts}. "
                 "Windows paths in commands are translated automatically. The /work paths exist only inside the "
                 "terminal: give file_read, file_write and the other file tools the Windows paths. Only if a task truly needs this PC "
-                "(Windows apps, installed tools), set where=\"host\"; that asks the user first. On this PC commands run "
+                "(Windows apps, installed tools), set where=\"host\"; host approval policy applies. On this PC commands run "
                 f"in PowerShell{self._bash_note(host_only=True)}")
 
     @staticmethod
@@ -1099,7 +1132,7 @@ class Terminal:
         if where in {"host", "bwrap"}:
             _PROC_DIR.mkdir(parents=True, exist_ok=True)
             log, err = _PROC_DIR / f"{proc_id}.log", _PROC_DIR / f"{proc_id}.err"
-            confine = (workspace_roots(self.project_root) or [cwd]) if where == "bwrap" else None
+            confine = workspace_roots(self.project_root) if where == "bwrap" else None
             # A bwrap command is a local process like a host one (same logs, same stop); its network is per command.
             popen = _host_launch(command, cwd, log, err, shell, confine=confine, network=network)
             # Wait in short slices, showing the newest output line under the step as it runs.
@@ -1137,12 +1170,24 @@ class Terminal:
             return Launch(True, code, out, error)
         plan = mount_plan(self.project_root)
         workdir = to_container_path(cwd, plan) or "/work"
-        finished, code, out, error = _SANDBOX.launch(translate_windows_paths(command, plan), workdir, wait, proc_id)
+        temporary = network and network_policy() != "on"
+        sandbox = _SANDBOX.for_workspace(plan, network=network, temporary=temporary)
+        ok, detail = sandbox.ensure_container(plan)
+        if not ok:
+            return Launch(True, 125, "", f"Docker sandbox unavailable: {detail}")
+        try:
+            finished, code, out, error = sandbox.launch(translate_windows_paths(command, plan), workdir, wait, proc_id)
+        except Exception:
+            if temporary:
+                sandbox.remove_container()
+            raise
+        if finished and temporary:
+            sandbox.remove_container()
         if finished:
             return Launch(True, code, out, error)
         owner, session = _owner()
         proc = BackgroundProcess(id=proc_id, command=command, cwd=str(cwd), mode="docker",
-                                 log_path=Path(f"/tmp/es-proc-{proc_id}.log"), container_pid=str(code), network=network,
+                                 log_path=Path(f"/tmp/es-proc-{proc_id}.log"), container_pid=str(code), sandbox=sandbox, network=temporary,
                                  owner=owner, session_id=session)
         return Launch(False, proc=proc)
 
@@ -1178,21 +1223,12 @@ class Terminal:
                 return None, "Error: internet access is turned off for the sandbox in Settings > Terminal.", cwd, where
             want_net = policy == "on" or (bool(args.get("network")) and policy == "ask")
         if where == "docker":
-            ok, detail = _SANDBOX.ensure_container(mount_plan(self.project_root))
-            if not ok:
-                return None, (f"Error: the Docker sandbox is not available: {detail} "
-                              "Tell the user to start Docker Desktop, or switch Terminal to Auto or This PC in Settings > Terminal."), cwd, where
             policy = network_policy()
-            want_net = bool(args.get("network"))
-            if want_net and policy == "off":
+            if args.get("network") and policy == "off":
                 return None, "Error: internet access is turned off for the sandbox in Settings > Terminal.", cwd, where
-            want_net = want_net and policy == "ask"
-            if want_net:
-                _SANDBOX.set_network(True)
+            want_net = policy == "on" or (policy == "ask" and bool(args.get("network")))
         self._checkpoint_redirects(command, cwd)
         launch = self._launch(command, cwd, wait, where, network=want_net, shell=self.shell_for(args, where))
-        if want_net and launch.finished and where == "docker":
-            _SANDBOX.set_network(False)
         return launch, "", cwd, where
 
     def _background(self, launch: Launch, wait: int, label: str, cwd: Path, *, server: bool) -> str:
@@ -1203,7 +1239,7 @@ class Terminal:
         if len(running) >= MAX_BACKGROUND:
             so_far = _tail(proc, 3000)
             _stop(proc)
-            others = ", ".join(f"{p.id} ({p.command[:40]})" for p in running)
+            others = ", ".join(f"{p.id} ({p.command[:40]})" for p in running if p.session_id == proc.session_id)
             return (f"[stopped after {wait}s · {label} · {cwd}]\n{_clip(so_far, 3000) or '(no output)'}\n"
                     f"It was stopped because {len(running)} background processes are already running: {others}. "
                     "Stop ones you no longer need with process_stop, then try again.")
@@ -1262,9 +1298,8 @@ class Terminal:
 
     def process_output(self, args: dict[str, Any]) -> str:
         proc = _PROCESSES.get(str(args.get("process_id") or args.get("id") or ""))
-        if proc is None:
-            running = ", ".join(f"{p.id}: {p.command[:60]}" for p in _PROCESSES.values()) or "none"
-            return f"Error: no process with that process_id. Known processes: {running}"
+        if proc is None or proc.session_id != _owner()[1]:
+            return "Error: no process with that process_id in this session."
         if _process_alive(proc):
             state = f"still running ({int(time.time() - proc.started_at)}s so far)"
         else:
@@ -1275,8 +1310,8 @@ class Terminal:
 
     def process_stop(self, args: dict[str, Any]) -> str:
         proc = _PROCESSES.get(str(args.get("process_id") or args.get("id") or ""))
-        if proc is None:
-            return "Error: no process with that process_id."
+        if proc is None or proc.session_id != _owner()[1]:
+            return "Error: no process with that process_id in this session."
         _stop(proc)
         return f"Stopped process {proc.id}."
 

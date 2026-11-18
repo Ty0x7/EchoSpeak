@@ -96,9 +96,12 @@ def test_handoff_brief_carries_the_users_message_and_marks_who_handed_off(monkey
         "scout": ScriptedClient([ModelTurn(content="3-1.")]),
     }
     session, events = _session(monkeypatch, scripts)
-    session.run("what was the score last night?", persona_id="echo")
+    from agent.lean import policy
+    monkeypatch.setattr(policy, "_secret_values", lambda: ["private-fixture-credential"])
+    session.run("what was the score last night? private-fixture-credential", persona_id="echo")
 
     brief = scripts["scout"].calls[0][-1]["content"]
+    assert "private-fixture-credential" not in brief
     assert "check the score" in brief and "what was the score last night?" in brief
     scout_start = next(e for e in events if e["type"] == "agent_start" and e["agent_id"] == "scout")
     assert scout_start["delegated_by"] == {"id": "echo", "name": "Echo"}

@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
-from agent.lean.toolbox import NativeTool
+from agent.lean.toolbox import NativeTool, ToolResult
 
 NAME_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 MAX_NAME = 64
@@ -411,6 +411,27 @@ def propose_skill_tool() -> NativeTool:
 
 # ── what agents see ──────────────────────────────────────────────────
 
+def matching_skill(goal: str, skills: list[AgentSkill]) -> str:
+    """Select one approved workflow on a clear title or description match; abstain on ties."""
+    stop = {"this", "that", "when", "with", "from", "into", "your", "user", "task",
+            "project", "review", "request", "using", "please", "should", "before", "after"}
+    def words(text: str) -> set[str]:
+        return set(re.findall(r"[a-z0-9]+", text.lower()))
+    tokens = words(goal)
+    if re.search(r"\b[\w-]+\.\w+\b", goal):
+        tokens.add("file")
+    scores = []
+    for skill in skills:
+        if skill.status != "approved":
+            continue
+        title = words(skill.name)
+        overlap = {w for w in tokens & words(skill.description) if len(w) >= 4} - stop
+        if title <= tokens or len(overlap) >= 2:
+            scores.append(((title <= tokens, len(overlap)), skill.name))
+    scores.sort(reverse=True)
+    return scores[0][1] if scores and (len(scores) == 1 or scores[0][0] > scores[1][0]) else ""
+
+
 def prompt_section(skills: Optional[list[AgentSkill]] = None, *, compact: bool = False) -> str:
     skills = approved() if skills is None else skills
     if not skills:
@@ -418,15 +439,19 @@ def prompt_section(skills: Optional[list[AgentSkill]] = None, *, compact: bool =
     lines = [
         "## Skills",
         "Approved instructions for specific kinds of tasks. When a task matches one, call read_skill with its name "
-        "first and follow it. Files a skill mentions can be read with read_skill(name, file).",
+        "first and follow it within your available permissions. Files a skill mentions can be read with read_skill(name, file).",
     ]
     lines += [f"- {skill.name}: {skill.description[:160] if compact else skill.description}" for skill in skills[:40]]
     return "\n".join(lines)
 
 
 def read_skill(args: dict[str, Any]) -> str:
+    skill = get(str(args.get("name") or "").strip())
+    return _skill_text(args, skill)
+
+
+def _skill_text(args: dict[str, Any], skill: Optional[AgentSkill]) -> str:
     name = str(args.get("name") or "").strip()
-    skill = get(name)
     if skill is None or skill.status != "approved":
         names = ", ".join(s.name for s in approved()) or "none"
         return f"Error: no approved skill named '{name}'. Approved skills: {names}."
@@ -443,6 +468,12 @@ def read_skill(args: dict[str, Any]) -> str:
 
 
 def read_skill_tool() -> NativeTool:
+    def load(args: dict[str, Any]) -> ToolResult:
+        skill = get(str(args.get("name") or "").strip())
+        text = _skill_text(args, skill)
+        ok = skill is not None and skill.status == "approved" and not text.startswith("Error:")
+        return ToolResult(ok, text, 0, meta={"skill_name": skill.name, "skill_digest": skill.digest} if ok else {})
+
     return NativeTool(
         name="read_skill",
         description=("Load an approved skill's instructions (or one of its files) before doing a task it covers. "
@@ -451,7 +482,7 @@ def read_skill_tool() -> NativeTool:
             "name": {"type": "string", "description": "The skill's name, exactly as listed."},
             "file": {"type": "string", "description": "Optional: a file inside the skill, e.g. reference.md."},
         }, "required": ["name"]},
-        func=read_skill,
+        func=load,
         parallel_safe=True,
         always=True,
     )

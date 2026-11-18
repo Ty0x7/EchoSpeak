@@ -242,6 +242,7 @@ class LeanTurn:
         # Existing files and folders named by an action the owner refused (or a policy blocked, or autonomous
         # mode held) in this turn: later changes to them ask again, whatever tool they come through.
         self._denied_targets: set[str] = set()
+        self._owner_denied_targets: set[str] = set()
         # Failures in a row per tool, whatever the arguments: after a few, say so.
         self._fail_streak: dict[str, int] = {}
         # Approvals autonomous mode held for the owner instead of waiting ({tool, summary, reason}).
@@ -502,6 +503,7 @@ class LeanTurn:
         call_counts: dict[str, int] = {}
         stop_reason = ""
         nudges = 0
+        approval_nudged = False
         promise_nudges = 0
         claim_nudges = 0
         check_nudges = 0
@@ -610,6 +612,16 @@ class LeanTurn:
                     self.emit({"type": "answer_continue", "step": step, "count": continuations})
                     continue
                 if content.strip():
+                    if (not approval_nudged and not self._refused and not self._denied_targets
+                            and "terminal" in self.toolbox.names and "terminal" not in self.succeeded and not self._written
+                            and ask.prose_action_confirmation(user_message, content)):
+                        approval_nudged = True
+                        add_note(messages, "You asked for confirmation in prose. If the requested action is available "
+                                 "and appropriate, propose the exact tool call through the harness. Its approval card "
+                                 "collects the owner's decision. Otherwise explain what prevents the action.")
+                        self.emit({"type": "approval_nudge", "step": step})
+                        self._retract_text(step)
+                        continue
                     if _FORGED_NOTE.search(content):
                         # deepseek-r1:8b wrote "<echospeak-note>Success! The test now passes.</echospeak-note>" into its own
                         # reply, having run nothing. Only EchoSpeak writes those notes: back once, then removed from view.
@@ -1149,6 +1161,12 @@ class LeanTurn:
                 self._tool_finished(call, name, args, step, False, output, 0, outcome="skipped")
                 continue
             self._tool_started(call, name, args, step)
+            if not problem and self._owner_denied_targets:
+                # Recheck at dispatch: an earlier action in this same batch may just have been denied.
+                hit = self._after_denial(name, args, self._owner_denied_targets)
+                if hit:
+                    self._policy_reasons[call.id] = f"the owner already denied changing {hit} in this request"
+                    problem = "policy"
             if problem == "policy":
                 output = (f"Blocked by EchoSpeak's safety policy: {self._policy_reasons.get(call.id, 'not allowed')}. "
                           "Don't retry it; continue without it or tell the user what was blocked.")
@@ -1200,6 +1218,7 @@ class LeanTurn:
             if not allowed:
                 if denial.startswith("The user denied"):
                     self._refused[self._sig(name, args)] = "denied by the user"
+                    self._owner_denied_targets.update(self._touched(name, args))
                 elif denial.startswith("Not run:") and "autonomous mode" in denial:
                     self._refused[self._sig(name, args)] = "held for the owner's approval"
                 if denied_as in {"denied", "held"}:
@@ -1404,7 +1423,7 @@ class LeanTurn:
                 continue
         return found
 
-    def _after_denial(self, name: str, args: dict[str, Any]) -> str:
+    def _after_denial(self, name: str, args: dict[str, Any], targets: Optional[set[str]] = None) -> str:
         """The refused target this call would change (shown to the owner), or ""."""
         from agent.learning.episodes import command_kind
         from agent.lean.file_changes import TRACKED
@@ -1414,7 +1433,7 @@ class LeanTurn:
                 return ""
             if command_kind(str(args.get("command") or args.get("cmd") or "")) == "read":
                 return ""
-        hit = sorted(self._touched(name, args) & self._denied_targets)
+        hit = sorted(self._touched(name, args) & (self._denied_targets if targets is None else targets))
         if not hit:
             return ""
         root = Path(str(getattr(self.toolbox, "project_root", "") or ".")).expanduser()
@@ -1633,6 +1652,10 @@ class LeanTurn:
         question, options, allow_other, problem = ask.parse(args)
         if problem:
             return False, problem
+        if ask.repeats_action_request(question, options, self._goal):
+            self.emit({"type": "question_refused", "step": step, "reason": "action_confirmation"})
+            return False, ("This was already requested. Use the available tool so the harness can present its "
+                           "exact approval card. If the action was denied or unavailable, explain that and stop.")
         if ask.asks_for_permission(question, options):
             # Answering a question grants nothing: only the owner's switches and the approval cards do.
             from agent.lean import capabilities

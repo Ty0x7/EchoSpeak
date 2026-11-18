@@ -74,6 +74,7 @@ ABILITIES: tuple[Ability, ...] = (
     Ability("Image and video generation", ("create_media",), "core"),
     Ability("Reminders (one-time or repeating, in this chat and as Windows notifications)",
             ("set_reminder", "list_reminders", "cancel_reminder"), "core"),
+    Ability("Reading approved workflow instructions (read_skill)", ("read_skill",), "skills", only_if_requested=True),
     Ability("Drafting skills from work that worked (the user approves them in Settings › Skills)",
             ("propose_skill",), "skills"),
     Ability("Editing EchoSpeak's own code", ("self_edit", "self_read"), "self", only_if_requested=True),
@@ -100,9 +101,6 @@ def _switches_off(name: str) -> list[str]:
     """The owner's switches that keep ``name`` off, as they read in the app ('' entries dropped)."""
     config = _config()
     off = [flag for flag in _flags_for(name) if not bool(getattr(config, flag.lower(), False))]
-    # The master switch greys out the others in Settings, so name it alone when it is off.
-    if "ENABLE_SYSTEM_ACTIONS" in off:
-        off = ["ENABLE_SYSTEM_ACTIONS"]
     return off
 
 
@@ -192,7 +190,7 @@ def report(toolbox: Any) -> str:
     for ability in ABILITIES:
         present = [tool for tool in ability.tools if tool in names]
         if present:
-            blocks = {tool: reason for tool in present if (reason := _privacy_block(tool))}
+            blocks = {tool: reason for tool in present if (reason := why_off(tool, toolbox))}
             if blocks and len(blocks) == len(present):
                 off.append(f"{ability.label}: {next(iter(blocks.values())).rstrip('.')}")
             elif blocks:
@@ -231,7 +229,7 @@ def off_summary(toolbox: Any) -> str:
     requested = set(getattr(toolbox, "requested", set()) or set())
     off: list[str] = []
     for ability in ABILITIES:
-        if any(tool in names for tool in ability.tools):
+        if any(tool in names and not why_off(tool, toolbox) for tool in ability.tools):
             continue
         if ability.only_if_requested and not any(tool in requested for tool in ability.tools):
             continue
@@ -243,7 +241,7 @@ def off_summary(toolbox: Any) -> str:
 
 def can_write_files(toolbox: Any) -> bool:
     names = set(getattr(toolbox, "names", []) or [])
-    return bool(names & {"file_write", "file_edit"})
+    return any(not why_off(tool, toolbox) for tool in names & {"file_write", "file_edit"})
 
 
 def snapshot(toolbox: Any) -> dict[str, Optional[str]]:
@@ -251,7 +249,7 @@ def snapshot(toolbox: Any) -> dict[str, Optional[str]]:
     names = set(getattr(toolbox, "names", []) or [])
     result: dict[str, Optional[str]] = {}
     for ability in ABILITIES:
-        if any(tool in names for tool in ability.tools):
+        if any(tool in names and not why_off(tool, toolbox) for tool in ability.tools):
             result[ability.label] = None
         else:
             result[ability.label] = next((r for tool in ability.tools if (r := why_off(tool, toolbox))), "") or "unavailable"

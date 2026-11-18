@@ -1672,12 +1672,16 @@ export const Dashboard: React.FC<{
   useEffect(() => {
     let alive = true;
     void loadAssistantMode(apiBase, fetchWithTimeout).then(mode => { if (alive) setAssistantMode(mode); });
-    const settingsRead = () => fetchWithTimeout(`${apiBase}/settings`, undefined, 6000)
-      .then(response => (response.ok ? response.json() : null))
-      .then(data => { if (alive && data) setApprovalMode(String(data.lean_approval_mode || "smart")); })
-      .catch(() => { /* the header simply leaves it out */ });
-    void settingsRead();
-    const onFocus = () => void settingsRead();   // changed in Settings or with /permissions in the terminal
+    const refreshApprovalMode = async () => {
+      let mode = "";
+      try {
+        const response = await fetchWithTimeout(`${apiBase}/lean/status`, undefined, 6000);
+        if (response.ok) mode = String((await response.json()).approval_mode || "");
+      } catch { /* An unavailable backend cannot describe the current policy. */ }
+      if (alive) setApprovalMode(mode);
+    };
+    void refreshApprovalMode();
+    const onFocus = () => void refreshApprovalMode();
     window.addEventListener("focus", onFocus);
     return () => { alive = false; window.removeEventListener("focus", onFocus); };
   }, [apiBase]);

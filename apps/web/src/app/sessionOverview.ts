@@ -131,12 +131,12 @@ export function identityParts(args: {
       key: "project",
       text: args.project.name + (args.project.trusted ? "" : " (read-only)"),
       hint: args.project.trusted
-        ? "Attached and trusted: files and commands in this folder are available, with your permission switches"
+        ? "Trusted workspace. File edits and commands also require the active agent’s tools and your permission settings."
         : "Attached, not trusted: it can be read but not changed",
     });
   }
   if (args.approvalMode) {
-    parts.push({ key: "approvals", text: APPROVAL_LABEL[args.approvalMode] || args.approvalMode, hint: "Approval mode (Settings › General)" });
+    parts.push({ key: "approvals", text: APPROVAL_LABEL[args.approvalMode] || args.approvalMode, hint: "Controls when actions ask for approval. Available tools depend on the agent and Settings › Permissions." });
   }
   return parts;
 }

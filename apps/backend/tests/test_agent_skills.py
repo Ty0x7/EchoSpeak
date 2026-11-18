@@ -120,3 +120,14 @@ def test_bundled_documentation_skill_is_optional_reviewed_and_never_overwritten(
         agent_skills.import_documentation_skill()
     assert "User modifications" in source.read_text(encoding="utf-8")
     assert agent_skills.get(skill.name).status == "changed"
+
+
+def test_selection_requires_an_unambiguous_approved_workflow(skills_home):
+    from dataclasses import replace
+    skill = agent_skills.import_text(SKILL)
+    assert not agent_skills.matching_skill("prepare the weekly report", [skill])
+    skill = agent_skills.approve(skill.name, skill.digest)
+    assert agent_skills.matching_skill("prepare the weekly report", [skill]) == skill.name
+    assert not agent_skills.matching_skill("hello", [skill])
+    ambiguous = replace(skill, name="report-weekly")
+    assert not agent_skills.matching_skill("prepare the weekly report", [skill, ambiguous])

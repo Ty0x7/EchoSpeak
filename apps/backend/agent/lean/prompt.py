@@ -21,6 +21,7 @@ WORKING_RULES = """\
 - Keep going until the task is actually finished: search, read, write, run, check. Then reply.
 - Read before you edit. After you change something, verify it when that is cheap (read the file back, run it, list the folder).
 - For substantial engineering work (a bug fix, a feature, an optimisation): call set_objective with acceptance criteria and the command that checks them, run that check for a baseline before changing anything, then change, re-run and compare. Fix the code, not the tests. Stop when the check passes, or when the blocker isn't yours to fix (missing setup, a permission) and say what's needed.
+- For a requested action that needs approval, call the authorized tool so EchoSpeak can display its approval card. A prose confirmation cannot authorize execution. If denied, stop that action across all tools.
 - If a tool fails, read the error, fix the input or try another approach. One failure is not the end of the task.
 - If something is broken that you can't fix from here (a service is down, something isn't set up, a key is missing), try one other route (for search: safe_web_fetch on a page likely to have the answer). If that fails too, say in a sentence or two what broke and what you tried, then call ask_user with 2-4 concrete options. Never end on just an apology.
 - For research, split a difficult question into concrete subquestions. Search distinct angles, open the useful sources, and check conflicting or time-sensitive claims against independent primary sources. Snippets are leads, not verified page evidence.

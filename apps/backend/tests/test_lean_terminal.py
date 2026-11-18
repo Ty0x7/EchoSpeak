@@ -235,3 +235,58 @@ def test_host_routing_after_screenshot_cannot_bypass_governed_authorization(monk
                     messages, 1, {})
     assert "Blocked by EchoSpeak's safety policy" in messages[-1]["content"]
     assert any(event["type"] == "tool_end" and not event["ok"] for event in events)
+
+
+def test_docker_destinations_separate_projects_and_network(tmp_path):
+    from agent.lean.terminal import DockerSandbox
+    a = [(tmp_path / "a", "/work/a")]
+    b = [(tmp_path / "b", "/work/b")]
+    sandbox = DockerSandbox()
+    offline = sandbox.for_workspace(a, network=False)
+    assert offline.name == sandbox.for_workspace(a, network=False).name
+    assert len({offline.name, sandbox.for_workspace(b, network=False).name,
+                sandbox.for_workspace(a, network=True).name}) == 3
+    assert offline.network == "none"
+
+
+def test_process_tools_hide_foreign_session_processes(monkeypatch, tmp_path):
+    from agent.lean import terminal as t
+    process = t.BackgroundProcess("other-id", "private task", str(tmp_path), "host", tmp_path / "log",
+                                  session_id="other-session")
+    monkeypatch.setattr(t, "_PROCESSES", {process.id: process})
+    monkeypatch.setattr(t, "_owner", lambda: (None, "my-session"))
+    terminal = t.Terminal(str(tmp_path))
+    for tool in (terminal.process_output, terminal.process_stop):
+        for process_id in ("unknown", process.id):
+            result = tool({"process_id": process_id})
+            assert "no process" in result and "private task" not in result
+
+
+def test_docker_launch_and_poll_address_the_selected_container(monkeypatch, tmp_path):
+    import subprocess
+    from agent.lean import terminal as t
+    calls = []
+
+    def record(self, args, **kwargs):
+        calls.append(args)
+        code = 1 if args[0] == "inspect" else 0
+        return subprocess.CompletedProcess(args, code, "", "")
+
+    monkeypatch.setattr(t.DockerSandbox, "_run", record)
+    monkeypatch.setattr(t.DockerSandbox, "ensure_daemon", lambda self: (True, "ready"))
+    monkeypatch.setattr(t.DockerSandbox, "ensure_image", lambda self: "fixture:1")
+    manager = t.DockerSandbox()
+    plans = [[(tmp_path / key, "/work/" + key)] for key in ("a", "b")]
+    sandboxes = [manager.for_workspace(plan, network=False) for plan in plans]
+    for sandbox, plan in zip(sandboxes, plans):
+        assert sandbox.ensure_container(plan)[0]
+        created = calls[-1]
+        assert created[created.index("--network") + 1] == "none"
+        assert created[created.index("-v") + 1] == f"{plan[0][0]}:{plan[0][1]}"
+        assert created[created.index("--name") + 1] == sandbox.name
+    for sandbox in reversed(sandboxes):
+        sandbox.launch("pwd", "/work", 2, "probe")
+        assert calls[-1][3] == sandbox.name
+    assert all(c[0] != "rm" for c in calls)
+    assert manager.for_workspace(plans[0], network=True, temporary=True).name != manager.for_workspace(
+        plans[0], network=True, temporary=True).name

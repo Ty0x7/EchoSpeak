@@ -132,6 +132,11 @@ def test_ladder_from_claim_to_corroborated():
                  outcome="success", claim_failed=False)[0] == 3
 
 
+def test_reading_a_skill_then_a_file_is_observed_work():
+    tools = [_t("read_skill", "deletion-review"), _t("file_read", "report.txt")]
+    assert grade("review deletion", tools, outcome="blocked", claim_failed=False)[0] == 1
+
+
 def test_a_check_before_the_last_change_does_not_count():
     ok_run = "[ok · 0.2s · sandbox · /w]\nhi"
     tools = [_t("file_write", "a.py"), _t("terminal", "python a.py", output=ok_run), _t("file_write", "a.py")]

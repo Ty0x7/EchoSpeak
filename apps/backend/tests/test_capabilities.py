@@ -3,6 +3,7 @@ told what is on and off (and why), and the loop stops re-trying what was refused
 
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 from typing import Any
@@ -105,7 +106,11 @@ def test_sandbox_paths_given_to_file_tools_map_back_to_this_pc(tmp_path, switche
     name, args = box.normalize_call("file_write", {"path": "/work/Desktop/Game/index.html", "content": "<h1>DAWN</h1>"})
     assert args["path"] == str(desktop / "Game" / "index.html")
     monkeypatch.setattr(term, "resolved_mode", lambda: "docker")  # describe the sandbox, whatever this PC has
-    assert "give file_read, file_write and the other file tools the Windows paths" in Terminal(str(tmp_path)).describe()
+    description = Terminal(str(tmp_path)).describe()
+    if os.name == "nt":
+        assert "the Windows paths" in description
+    else:
+        assert "host workspace paths" in description and "PowerShell" not in description
 
 
 # ── the report the agent reads ──────────────────────────────────────────
@@ -270,3 +275,17 @@ def test_a_success_resets_the_failure_streak():
     events: list[dict[str, Any]] = []
     _turn(client, {"fetch": lambda a: next(outputs)}, events).run("go")
     assert not any(e["type"] == "fail_streak" for e in events)
+
+
+def test_capability_views_follow_a_revoked_switch(tmp_path, switches):
+    switches(master=True, files=True, terminal=True)
+    box = _box(tmp_path)
+    switches(master=True)
+    assert "Terminal commands: turned off" in capabilities.report(box)
+    assert capabilities.snapshot(box)["Terminal commands"]
+    assert not capabilities.can_write_files(box)
+
+
+def test_restricted_terminal_explains_both_switches(tmp_path, switches):
+    reason = capabilities.why_off("terminal", _box(tmp_path))
+    assert "Allow actions on this computer" in reason and "Run terminal commands" in reason

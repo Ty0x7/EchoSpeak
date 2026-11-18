@@ -222,7 +222,7 @@ def terminal_reset() -> dict[str, Any]:
     from agent.lean.terminal import get_sandbox
 
     try:
-        get_sandbox().remove_container()
+        get_sandbox().reset()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return {"ok": True}

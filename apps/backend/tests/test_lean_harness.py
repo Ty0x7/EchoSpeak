@@ -107,9 +107,10 @@ def test_workspace_roots_drop_nested_and_home(tmp_path, monkeypatch):
     inner.mkdir(parents=True)
     monkeypatch.setattr(config, "file_tool_root", str(outer), raising=False)
     monkeypatch.setattr(config, "file_tool_extra_roots", [str(inner), str(Path.home())], raising=False)
-    roots = workspace_roots(str(inner))
+    assert workspace_roots(str(inner)) == [inner.resolve()]
+    roots = workspace_roots()
     assert roots == [outer.resolve()]
-    assert [t for _r, t in mount_plan(str(inner))] == ["/work/work"]
+    assert [t for _r, t in mount_plan()] == ["/work/work"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="host shell test uses PowerShell")
