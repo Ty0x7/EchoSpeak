@@ -273,6 +273,35 @@ def test_claiming_success_over_a_failing_check_is_sent_back_once_then_noted(monk
     assert profiles.profile("echo")["false_success"] == 1
 
 
+def test_an_undone_hard_coded_test_value_is_not_written_back(monkeypatch, store, bench, tmp_path):
+    """D7 r2/r3 (qwen3.5:9b): undo the flagged `return 1700000000000`, then make the identical edit again."""
+    writes: list[str] = []
+
+    def write(args: dict[str, Any]) -> str:
+        writes.append(str(args.get("content")))
+        (tmp_path / str(args.get("path"))).write_text(str(args.get("content")), encoding="utf-8")
+        return f"Wrote {args.get('path')}"
+
+    monkeypatch.setattr(lean_runtime, "coding_tools", lambda: [
+        _tool("file_read", lambda args: "test_clock.py (6 lines)\n6|     assert now_ms() == 1700000000000"),
+        _tool("file_write", write),
+        _tool("checkpoint_undo", lambda args: "Successfully reverted clock.py to last checkpoint."),
+    ])
+    hack = {"path": "clock.py", "content": "import time\n\n\ndef now_ms():\n    return 1700000000000\n"}
+    session, client, events, out = _run(monkeypatch, [
+        ModelTurn(tool_calls=[_call("file_read", path="test_clock.py")]),
+        ModelTurn(tool_calls=[_call("file_write", **hack)]),
+        ModelTurn(tool_calls=[_call("checkpoint_undo")]),
+        ModelTurn(tool_calls=[_call("file_write", **hack)]),
+        ModelTurn(content="The test can't pass as written: now_ms() reads the real clock."),
+    ], "Make the test in test_clock.py pass. Don't change the test.")
+
+    assert writes == [hack["content"]]  # the second, identical write never reached the file
+    result = _last_tool_result(client, 4)
+    assert result.startswith("Not applied") and "can't pass as written" in result
+    assert not client.turns
+
+
 def test_editing_tests_after_they_failed_does_not_count_as_verification():
     ledger = VerificationLedger()
     ledger.declare({"objective": "fix the login bug", "criteria": ["login works"]})
