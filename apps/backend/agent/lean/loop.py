@@ -1311,6 +1311,14 @@ class LeanTurn:
                 if hit:
                     self._policy_reasons[call.id] = f"the owner already denied changing {hit} in this request"
                     problem = "policy"
+            undone = (self.verifier.undone_special_case(name, args)
+                      if problem in {"", "repeat"} and self.verifier is not None else "")
+            if undone:
+                # Writing back a test's hard-coded value the agent itself undid: not applied, and no approval card for it.
+                # Ahead of the repeat guard, whose "the result is above" would be false once the file was reverted.
+                results[call.id] = (False, undone)
+                self._tool_finished(call, name, args, step, False, undone, 0, outcome="skipped")
+                continue
             if problem == "policy":
                 output = (f"Blocked by EchoSpeak's safety policy: {self._policy_reasons.get(call.id, 'not allowed')}. "
                           "Don't retry it; continue without it or tell the user what was blocked.")

@@ -142,6 +142,21 @@ def _expected_literals(text: str) -> set[str]:
     return {match.group(1).strip("'\"") for match in _EXPECTED.finditer(str(text or ""))}
 
 
+def _as_value(literal: str) -> re.Pattern[str]:
+    """The literal used as a value (`return 1700000000000`, `FROZEN = "hello-world"`), not just mentioned in a docstring."""
+    return re.compile(r"(?:\breturn\b|[^=!<>]=)\s*[(\[]?\s*['\"]?" + re.escape(literal) + r"\b")
+
+
+def _new_old(name: str, args: dict[str, Any]) -> tuple[str, str]:
+    """(the text a file_write or file_edit puts in, the text it replaces)."""
+    new = str(args.get("content") if name == "file_write" else args.get("new_text") or args.get("new_string") or "")
+    return new, str(args.get("old_text") or args.get("old_string") or "")
+
+
+def _norm(path: str) -> str:
+    return re.sub(r"^(\./)+", "", str(path or "").strip().replace("\\", "/"))[:200]
+
+
 def check_kind(command: str) -> str:
     """test | build | typecheck | lint | bench for a command that runs a check, else ''.
 
@@ -319,7 +334,10 @@ class VerificationLedger:
     # Distinctive values the tests read this turn assert ({literal: test file}), and code changes that wrote one in.
     expected: dict[str, str] = field(default_factory=dict)
     special_cased: list[list[str]] = field(default_factory=list)
+    # Special-cases the agent undid with checkpoint_undo ([path, literal, test]): writing them back isn't applied.
+    undone_special: list[list[str]] = field(default_factory=list)
     _pending: dict[str, str] = field(default_factory=dict, repr=False)
+    _undo_log: list[tuple[str, str]] = field(default_factory=list, repr=False)  # (path, literal it wrote in) per change
 
     # ── the objective (set_objective) ──────────────────────────────────
     def declare(self, args: dict[str, Any]) -> str:
@@ -365,7 +383,11 @@ class VerificationLedger:
             if ok:
                 path = str(args.get("path") or args.get("destination") or args.get("file") or "")
                 self._changed(path)
-                self._watch_special_case(name, path, args, call_id)
+                if name == "checkpoint_undo":
+                    self._undone()
+                else:
+                    self._undo_log.append((_norm(path), self._watch_special_case(name, path, args, call_id)))
+                    del self._undo_log[:-40]
             return
         if name in _LOOKUP_TOOLS:
             if ok and name == "file_read" and _TEST_FILE.search(str(args.get("path") or "")):
@@ -410,22 +432,21 @@ class VerificationLedger:
             code = 1 if failed > 0 or errors > 0 else 0
         self._record(self._parse(step, kind, command, code, text), text, call_id or command)
 
-    def _watch_special_case(self, name: str, path: str, args: dict[str, Any], call_id: str) -> None:
-        """A code change that writes a test's expected value in, instead of computing it.
+    def _watch_special_case(self, name: str, path: str, args: dict[str, Any], call_id: str) -> str:
+        """A code change that writes a test's expected value in, instead of computing it: the value, or ''.
 
         Every model in the five-model evaluation turned `assert now_ms() == 1700000000000` into
         `return 1700000000000` and reported "the test passes": a pass that fixes nothing (METR's reward-hacking
         reports describe the same). Like tests edited after they fail, it makes the check worthless.
         """
         if not self.expected or _TEST_FILE.search(path) or name not in {"file_write", "file_edit"}:
-            return
-        new = str(args.get("content") if name == "file_write" else args.get("new_text") or args.get("new_string") or "")
-        old = str(args.get("old_text") or args.get("old_string") or "")
-        key = path[:200]
+            return ""
+        new, old = _new_old(name, args)
+        key, flagged = path[:200], ""
         for literal, test in self.expected.items():
-            # Used as a value (`return 1700000000000`, `FROZEN = "hello-world"`), not just mentioned in a docstring.
-            as_value = re.compile(r"(?:\breturn\b|[^=!<>]=)\s*[(\[]?\s*['\"]?" + re.escape(literal) + r"\b")
+            as_value = _as_value(literal)
             if as_value.search(new) and not as_value.search(old):
+                flagged = flagged or literal
                 if (key, literal) not in [tuple(s[:2]) for s in self.special_cased]:
                     self.special_cased.append([key, literal, test])
                 self._pending[call_id or key] = (
@@ -434,6 +455,38 @@ class VerificationLedger:
                     "tell the user plainly why the test can't pass as written.")
             elif not as_value.search(new) and (name == "file_write" or as_value.search(old)):
                 self.special_cased = [s for s in self.special_cased if not (s[0] == key and s[1] == literal)]
+        return flagged
+
+    def _undone(self) -> None:
+        """checkpoint_undo reverted the latest change. If that change wrote a test's value in, the file no longer
+        does, and the agent has shown it knows the change was wrong."""
+        if not self._undo_log:
+            return
+        path, literal = self._undo_log.pop()
+        if not literal:
+            return
+        for entry in [s for s in self.special_cased if _norm(s[0]) == path and s[1] == literal]:
+            self.special_cased.remove(entry)
+        if not any(_norm(s[0]) == path and s[1] == literal for s in self.undone_special):
+            self.undone_special.append([path, literal, self.expected.get(literal, "the test")])
+
+    def undone_special_case(self, name: str, args: dict[str, Any]) -> str:
+        """Why a change isn't applied: it writes back a special-case the agent itself undid in this request, or ''.
+
+        D7 (qwen3.5:9b, 2 of 3 runs): told the edit hard-codes the test's value, it ran checkpoint_undo, made the
+        identical edit again, and replied that it was a valid fix. Undo and redo only spends calls and approvals.
+        """
+        if not self.undone_special or name not in {"file_write", "file_edit"}:
+            return ""
+        path = _norm(str(args.get("path") or ""))
+        new, old = _new_old(name, args)
+        for undone_path, literal, test in self.undone_special:
+            if undone_path == path and _as_value(literal).search(new) and not _as_value(literal).search(old):
+                return (f"Not applied: this writes {literal}, the value {test} expects, back into {path}. You undid that "
+                        "change after EchoSpeak pointed out it makes the test pass without fixing anything, and writing "
+                        "it again fixes nothing either. Fix the real cause, or tell the user plainly why the test can't "
+                        "pass as written.")
+        return ""
 
     def _changed(self, target: str) -> None:
         self.changes += 1
@@ -672,6 +725,7 @@ class VerificationLedger:
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data.pop("_pending", None)
+        data.pop("_undo_log", None)
         return data
 
     @classmethod
