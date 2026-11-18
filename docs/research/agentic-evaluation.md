@@ -186,4 +186,98 @@ the AI judge ran over it with Haiku and a consensus of 2:
 
 ### 7.2 End-to-end demonstration
 
-_Below, after the session._
+Session `20261118-083210-agentic-demo` (`~/Work/echospeak-model-testing-2026/auto-test-fix/`):
+- **Base:** `4c6f5c2`.
+- **Engineering agent:** Claude Code.
+- **AI judge:** Haiku.
+- **System under test:** EchoSpeak on qwen3.5:9b.
+- **Dev cases:** X1, K1, C1, R1, G1 and M1 (six categories).
+- **Held-out:** XH1, MH1 and CH1, × 2 each.
+
+| | Dev mean | Dev task success | Held-out mean (success) | Weakest |
+|---|---:|---:|---|---|
+| Baseline | 8.58 | 58% | 8.03 (50%) | X1 6.15 (0/2), G1 7.90 (0/2), M1 8.40 (1/2) |
+| After cycle 1 | **9.20** | **75%** | **8.76 (67%)** | G1 7.90 (0/2); C1 8.75 (see below) |
+
+- **Layer 4 fed Layer 5.** The AI judge cost $0.010 for 8 baseline runs. Its cited findings went into the brief:
+  - for X1, "the find_tools result was truncated and the agent never re-searched";
+  - for G1, the agent "wrote the file itself instead of delegating to Glados, and the reply doesn't disclose it".
+- **Root cause found and fixed by Claude Code.** `Toolbox._find_tools` matched queries against tool names and
+  descriptions only, never the connected app a tool belongs to. "accounts service" returned "No tool matches" while
+  `accounts` was connected. The fix puts the app's name in front of the matched text, with the failing-first test
+  `test_find_tools_by_app_name.py`. The gates passed: scope, failing first per test, related suites, full suite.
+  - X1 went 6.15 (0/2) → **9.38 (2/2)**; held-out XH1 went 7.05 (0/2) → 7.97 (1/2).
+  - Engineering cost $0.73.
+- **Decision: `review`.** The retest passed the gates, but the AI judge flagged C1 r2 and CH1 r2 as confident
+  disagreements and likely verifier errors.
+  - **It was right.** Both runs had correctly asked "which file?" in plain text instead of on a card, and the eval's
+    simulated owner only answered cards, so the case ended unanswered and was failed.
+  - That eval defect is fixed (`9d11aa6`): a simulated owner now answers a text question in the same conversation.
+    A recheck of C1 and CH1 × 3 gave 5/6. **C1 r3 is a genuine failure**: told which file, Qwen claimed it "can't
+    directly delete files, only file_write".
+  - The fix commit `480a5b4` waits on `auto/20261118-083210-agentic-demo` for the owner. Nothing was merged.
+
+Total spend: $0.75 ($0.73 engineering, $0.02 AI judge), 1.05 M model-server tokens, about 17 minutes of wall time
+for the cycle.
+
+## 8. Improvements and regressions
+
+| Change | Where | Evidence |
+|---|---|---|
+| `find_tools` matches a connected app's name | `auto/20261118-083210-agentic-demo` `480a5b4` (owner review) | X1 0/2 → 2/2, XH1 0/2 → 1/2 |
+| D7 ledger fixes (17 November): undone special case not written back; truthful note | `auto/20261117-194230-demo-claude` `fb8e6b4`, `cc234aa` | Re-judged ×4: D7 1/4 → 4/4, H7 2/4 → 4/4 |
+| Lexical judge: option sentences aren't success claims | `env-intelligence` `4c6f5c2` | Calibration and the D7/H7 rejudge |
+| Simulated owner answers a text question | `9d11aa6` | C1/CH1 5/6 |
+| Service-state checks, minefields, pass^k, budgets, `review` path | `4c6f5c2` | Tests, demo |
+
+**Regressions.**
+- No new failures in the full backend suite, checked by the gates on each cycle. Pre-existing failures: 21.
+- C1's drop in the demo (9.68 → 8.75) was the eval defect above, not the fix.
+- The 17 November single-run sweep's four flips are explained in `auto-test-fix.md` §6.
+
+## 9. Limitations and next priorities
+
+1. **Calibration labels come from the engineering agent, not the owner.** The owner should confirm or correct
+   `evals/judge_calibration.jsonl`. 14 items is a start; Anthropic's guidance is 20–50.
+2. **AI flags are about 50% precise** (owner time, not wrong scores). Consensus helps with Haiku. Further steps:
+   per-dimension judges, and few-shot examples from confirmed labels.
+3. **Evidence doesn't record who initiated a tool call.** EchoSpeak's prefetch is shown as the agent's own call, so
+   the deterministic judge blames the agent and the AI judge can't tell. Next: an `origin` field on tool events.
+4. **Not covered in this pipeline:** browser and computer use (desktop lab and `echo_bench` cover it separately),
+   live web research, document RAG, multi-agent rooms, MCP error and permission paths.
+5. **Open agent defects, in priority order:**
+   - G1 delegation: Qwen does the work itself instead of delegating, and doesn't say so.
+   - Deferred tools are invisible to the model: `file_delete` in C1 r3, the same class as X1.
+   - EchoSpeak's self-prefetch on "echospeak" plus "release" (Codex's fix is preserved, inconclusive).
+   - Impossible-test hard-coding (improved, not gone).
+   - Inconsistent approvals.
+   - Skill selection among several skills.
+   - Restricted-environment recovery.
+6. **pass^k with k = 2** is a weak reliability signal. Use `--repeat 3–4` for acceptance and 8+ for release
+   reliability (Thinkingbox ran 20).
+
+## 10. Operating the system
+
+```bash
+cd ~/Work/echospeak-env-intelligence/apps/backend
+# Layers 1–3 (and 4 on demand) for any set: dev / heldout / env / cap / everything
+.venv/bin/python scripts/harness_eval.py --set cap --repeat 2 --label my-run --env LEARNING_ENABLED=false
+.venv/bin/python scripts/harness_judge.py data/evals/harness/<run>
+.venv/bin/python scripts/harness_ai_judge.py judge data/evals/harness/<run> --judge claude:haiku --consensus 2
+.venv/bin/python scripts/harness_ai_judge.py calibrate evals/judge_calibration.jsonl --judge claude:haiku
+# Layer 5: the autonomous loop (loop 13)
+.venv/bin/python scripts/auto_test_fix.py run --driver claude --ai-judge claude:haiku \
+    --cases X1,K1,C1,R1,G1,M1 --heldout XH1,MH1,CH1 --repeat 2 --cycles 2 --max-cost-usd 15
+.venv/bin/python scripts/auto_test_fix.py status | stop | review
+```
+
+- **Stops:**
+  - cycles, minutes, cost and token budgets;
+  - a STOP file;
+  - nothing below target, or two rejected cycles in a row;
+  - a security halt, `needs_authorization`, or an engineering agent that didn't finish;
+  - low memory;
+  - **`review`**: the checks pass, but the AI judge flagged the process.
+- **Review:** `auto_test_fix.py review` lists decisions, evidence and commits, and prints the all-case sweep to run
+  before keeping a session's commits.
+- **Keeping a fix:** cherry-pick it from its `auto/<session>` branch. Nothing is pushed or merged by the system.
