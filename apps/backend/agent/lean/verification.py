@@ -625,6 +625,13 @@ class VerificationLedger:
             return (f"Your reply says it works, but {path} now returns {literal}, the value {test} expects, instead of "
                     "computing it, so the test passing proves nothing. Undo that and fix the real cause, or say plainly "
                     "that the test can't pass as written and why.")
+        if self.undone_special and done["status"] not in {"verified", "checks_pass"}:
+            # D7 r1: it undid the hard-coded value, the write-back was refused, and it replied "the test passes". The
+            # generic "run the tests" note below was false (nothing it wrote is left) and sent it looping on the edit.
+            path, literal, test = self.undone_special[-1][:3]
+            return (f"Your reply says it works, but {path} doesn't return {literal} any more: you undid that, and "
+                    f"writing it back isn't applied, so {test} still fails. Don't try that edit again. Unless you "
+                    "can compute the value for real, tell the user plainly that the test can't pass as written and why.")
         setup = next((c.environment for c in reversed(self.checks) if c.environment), "")
         if done["status"] == "blocked" and setup and self.changes:
             # "The test passes" when the test never ran (found live: pytest wasn't installed, and the reply said the
