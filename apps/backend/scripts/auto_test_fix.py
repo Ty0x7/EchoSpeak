@@ -321,6 +321,24 @@ Failing layers by evidence: {layers}. The layer is a starting hypothesis; confir
 """
 
 
+def driver_outcome(agent: dict[str, Any], exit_code: Any, log: Path) -> tuple[str, str]:
+    """ok, incomplete (finished without a report) or driver_failed (didn't finish), with the reason.
+
+    Demo session 20261117-212847-demo-codex: Codex wrote a correct failing test, then stopped on "You've hit your
+    usage limit". With no report, its half-done change went to the gates and was rejected for an unrelated reason.
+    """
+    if agent and agent.get("status") not in {None, "unreadable"}:
+        return "ok", ""
+    text = log.read_text(encoding="utf-8", errors="ignore") if log.exists() else ""
+    lines = [l.strip() for l in text.splitlines() if re.search(r"(?i)\b(error|limit|quota|rate.?limit|exceeded)\b", l)]
+    detail = (lines[-1] if lines else "")[:200]
+    if exit_code == "timeout":
+        return "driver_failed", "the engineering agent ran out of time without a report"
+    if exit_code not in (0, None) or detail:
+        return "driver_failed", f"exit {exit_code}: {detail or 'no report'}"
+    return "incomplete", "the engineering agent finished without writing its report"
+
+
 def driver_command(kind: str, tree: Path, brief_path: Path, report: Path, budget: float, template: str) -> tuple[list[str], str]:
     """(argv, stdin) for the engineering agent. Model- and agent-independent: `command` takes any CLI."""
     brief = brief_path.read_text(encoding="utf-8")
@@ -561,9 +579,10 @@ def make_tree(session: Session, base: str) -> tuple[Path, str]:
         exclude = Path(git(tree, "rev-parse", "--git-path", "info/exclude"))
         exclude = exclude if exclude.is_absolute() else tree / exclude
         known = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
-        if REPORT_NAME not in known:
+        if ".atf-*" not in known:
+            # The loop's own files in the worktree (the agent's report, Codex's last message) are never "changes".
             with exclude.open("a", encoding="utf-8") as handle:
-                handle.write(f"\n{REPORT_NAME}\n")
+                handle.write("\n.atf-*\n")
         for venv in ("apps/backend/.venv", "apps/terminal/.venv"):
             src = REPO / venv
             if src.exists():
@@ -694,7 +713,30 @@ def run(args: argparse.Namespace) -> int:
                     except Exception:
                         agent = {"status": "unreadable"}
                     shutil.move(str(report_path), str(cdir / "agent-report.json"))
+                last = report_path.with_suffix(".last.txt")
+                if last.exists():
+                    shutil.move(str(last), str(cdir / "agent-last-message.txt"))
                 record["agent_report"] = agent
+                outcome, why = driver_outcome(agent, record.get("driver_exit"), cdir / "driver.log")
+                if outcome != "ok":
+                    # No report: the engineering agent didn't finish (a usage limit, a crash, a timeout). Its partial
+                    # change is kept in fix.diff and the worktree goes back to the cycle's base; nothing is gated.
+                    (cdir / "fix.diff").write_text(full_diff(tree, base), encoding="utf-8")
+                    git(tree, "reset", "--hard", base)
+                    git(tree, "clean", "-fdq", "-e", ".venv")
+                    record["decision"], record["reason"] = outcome, why
+                    if outcome == "driver_failed":
+                        st["status"], st["stopped"] = "stopped", f"the engineering agent failed: {why}"
+                    else:
+                        rejected_in_a_row += 1
+                    record["ended"] = now()
+                    session.save()
+                    write_cycle_report(session, record)
+                    session.log("decision", cycle=cycle, decision=outcome, reason=why[:160])
+                    if outcome == "driver_failed":
+                        session.log("stop", reason=st["stopped"])
+                        break
+                    continue
                 if agent.get("status") == "needs_authorization":
                     # Left as it is in the worktree for the owner to read; nothing is committed.
                     record["decision"] = "halt"

@@ -142,6 +142,21 @@ def test_failing_first_is_judged_per_test_not_per_file():
     assert atf.judge_failing_first(broken, same, set())["fails_on_base"]
 
 
+def test_an_engineering_agent_that_did_not_finish_is_not_gated(tmp_path):
+    """Demo session 20261117-212847-demo-codex: Codex wrote a correct failing test, hit its usage limit, wrote no
+    report, and the half-done change was gated and rejected for an unrelated reason (its own output file)."""
+    log = tmp_path / "driver.log"
+    log.write_text("tests pass?\nERROR: You've hit your usage limit. Try again at 10:03 PM.\n--- stderr ---\n")
+    outcome, why = atf.driver_outcome({}, 1, log)
+    assert outcome == "driver_failed" and "usage limit" in why
+    assert atf.driver_outcome({}, "timeout", log)[0] == "driver_failed"
+    clean = tmp_path / "clean.log"
+    clean.write_text("all done\n")
+    assert atf.driver_outcome({}, 0, clean)[0] == "incomplete"
+    assert atf.driver_outcome({"status": "fixed"}, 0, log) == ("ok", "")
+    assert atf.driver_outcome({"status": "no_change"}, 1, log) == ("ok", "")
+
+
 def test_related_suites_except_failures_the_base_already_had():
     """Re-gating cycle 1 of 20261117-194230-demo-claude: rejected for a related-suite failure present on the base."""
     known = {"tests/test_model_compat.py::test_the_approval_preview_shows_the_line_that_will_be_written"}
