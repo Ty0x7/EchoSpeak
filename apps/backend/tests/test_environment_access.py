@@ -248,6 +248,33 @@ def test_credentials_are_refused_without_a_card(machine):
     assert ends and ends[0]["outcome"] == "refused", ends
 
 
+def test_a_declined_folder_stays_closed_to_the_terminal_and_other_reads(machine):
+    """Live baseline (phase1-env-access, E1 r1–r2 on 6228e0d): file_read was refused, then `cat` and `cp` of the same
+    file through the sandboxed terminal (which mounts / read-only) read it anyway. After the owner declines a
+    folder, nothing in the same request may read it: not the terminal, not another file tool, and no second card."""
+    ran: list[str] = []
+    secret = machine / "Work" / "todo.txt"
+    client = ScriptedClient([
+        ModelTurn(content="", tool_calls=[_read(secret)]),
+        ModelTurn(content="", tool_calls=[ToolCall("c2", "terminal", json.dumps({"command": f"cat {secret}"}))]),
+        ModelTurn(content="", tool_calls=[ToolCall("c3", "file_list", json.dumps({"path": str(machine / "Work")}))]),
+        ModelTurn(content="I can't read it.")])
+    events: list = []
+    _answer_cards(events, "deny")
+    turn = _turn(client, events, session="s-bypass")
+    turn.toolbox.native["terminal"] = NativeTool("terminal", "run", {"type": "object", "properties": {}},
+                                                 lambda a: ran.append(a["command"]) or "ship it\n")
+    from agent.tools import file_list as registry_list
+    turn.toolbox.native["file_list"] = NativeTool("file_list", "list", {"type": "object", "properties": {}},
+                                                  lambda a: registry_list.func(path=a.get("path")), parallel_safe=True)
+    turn.run("what does ~/Work/todo.txt say?")
+    assert ran == [], ran
+    assert sum(e.get("type") == "approval_request" for e in events) == 1
+    texts = _tool_texts(client)
+    assert not any("ship it" in t for t in texts), texts      # the content never reached the model
+    assert sum("declined reading" in t for t in texts) == 2, texts  # the terminal and file_list were both refused
+
+
 def test_a_read_grant_does_not_open_writes(machine):
     client = ScriptedClient([
         ModelTurn(content="", tool_calls=[_read(machine / "Work" / "todo.txt")]),

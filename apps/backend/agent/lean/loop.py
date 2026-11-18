@@ -241,6 +241,8 @@ class LeanTurn:
         # open, keyed by call id, and the folders the owner allowed once for exactly that call.
         self._read_folders: dict[str, Any] = {}
         self._read_once: dict[str, str] = {}
+        # Folders the owner declined to open in this request: closed to every read, the terminal included.
+        self._declined_folders: set[str] = set()
         # Calls (by signature) the user denied or a policy blocked in this turn: never asked
         # or tried a second time. Persistence after a "no" is a failure mode, not diligence.
         self._refused: dict[str, str] = {}
@@ -1097,6 +1099,15 @@ class LeanTurn:
                 elif decision.action == "ask":
                     self._policy_reasons[call.id] = decision.reason
                     self._policy_rules[call.id] = decision.rule
+            if not problem and self._declined_folders and (closed := self._in_declined_folder(name, args)):
+                # The owner said no to this folder in this request: final, whatever tool comes next. The sandboxed
+                # terminal mounts / read-only, so `cat` would otherwise read what the card refused (live baseline).
+                reason = (f"the user declined reading {closed} earlier in this request. Don't try another way to "
+                          "read it; continue without it or tell the user what it would need")
+                policy.audit(policy.Decision("deny", reason, "declined_folder"), name=name, args=args,
+                             session_id=self.session_id, agent=self.persona.id, outcome="blocked")
+                self._policy_reasons[call.id] = reason
+                problem = "policy"
             if not problem and name in file_access.READ_TOOLS and call.id not in self._policy_reasons:
                 self._ask_for_read_access(call, name, args)
             fetched = (policy.download_and_run(str(args.get("command") or args.get("cmd") or ""))
@@ -1520,6 +1531,49 @@ class LeanTurn:
                    "pause_s": pause})
         return not self.cancel.wait(pause)  # Stop during the pause ends the turn instead
 
+    def _in_declined_folder(self, name: str, args: dict[str, Any]) -> str:
+        """The declined folder this call would read or touch (a file tool's path, a command's paths), or ""."""
+        paths: list[Path] = []
+        if name in file_access.READ_TOOLS or name in {"read_image"}:
+            try:
+                from agent.tools import _candidate_file_path, _file_tool_root
+                paths.append(_candidate_file_path(file_access.target(name, args), _file_tool_root()).resolve())
+            except Exception:
+                pass
+        elif name in policy.COMMAND_TOOLS:
+            command = str(args.get("command") or args.get("cmd") or "")
+            try:
+                tokens = shlex.split(command)
+            except ValueError:
+                tokens = command.split()
+            base = Path(str(args.get("cwd") or getattr(self.toolbox, "project_root", "") or ".")).expanduser()
+            for token in tokens:
+                token = token.lstrip("<>|&;")
+                if "/" in token or token.startswith("~"):
+                    try:
+                        paths.append((base / Path(token).expanduser()).resolve())
+                    except Exception:
+                        continue
+        else:
+            from agent.lean.file_changes import TRACKED
+            if name not in TRACKED:
+                return ""
+            for key in ("path", "file_path", "src", "source", "dst", "destination"):
+                if args.get(key):
+                    try:
+                        from agent.tools import _candidate_file_path, _file_tool_root
+                        paths.append(_candidate_file_path(str(args[key]), _file_tool_root()).resolve())
+                    except Exception:
+                        continue
+        for path in paths:
+            for folder in self._declined_folders:
+                try:
+                    path.relative_to(folder)
+                    return folder
+                except ValueError:
+                    continue
+        return ""
+
     def _granted_read_folders(self) -> list[str]:
         """Folders the owner allowed for reading: For this chat (this session), and Always allow (in the app only).
 
@@ -1694,6 +1748,8 @@ class LeanTurn:
             if self.work_context:
                 self.work_context.coordinator.consume_approval(self.work_context, name, args)
             return True, "", ""
+        if folder is not None and decision in {"deny", "timeout"}:
+            self._declined_folders.add(str(folder))
         if decision == "timeout":
             return False, f"The user did not respond to the approval request for {name}, so it was not run.", "denied"
         if decision == "cancelled":
