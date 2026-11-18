@@ -483,6 +483,14 @@ class Toolbox:
         tool = self.native.get(name)
         return str(tool.description if tool else getattr(self.entries.get(name), "description", "") or "")
 
+    def _app(self, name: str) -> str:
+        """The connected app a tool belongs to, followed by a space, or "" for EchoSpeak's own tools."""
+        entry = self.entries.get(name)
+        app = str(getattr(entry, "mcp_server", "") or "").split(":")[-1] if entry is not None else ""
+        if not app and name.startswith("mcp__") and name.count("__") >= 2:
+            app = name.split("__")[1]
+        return f"{app.replace('_', ' ')} " if app else ""
+
     def _find_tools(self, args: dict[str, Any]) -> str:
         words = [w for w in re.findall(r"[a-z0-9]+", str(args.get("query") or "").lower()) if len(w) > 1]
         if not words:
@@ -490,7 +498,9 @@ class Toolbox:
         from agent import semantic
 
         pool = sorted(self.deferred | {n for n in self.entries if n not in self.deferred and n.startswith("mcp__")})
-        texts = [f"{name.split('__')[-1].replace('_', ' ')}: {self._description(name)}" for name in pool]
+        # A connected app's name is part of what matches: "the accounts service" finds the accounts app's tools.
+        texts = [f"{self._app(name)}{name.split('__')[-1].replace('_', ' ')}: {self._description(name)}"
+                 for name in pool]
         # By meaning too, when the local embedding model is installed: "make the video brighter"
         # finds a tool called adjust_lumetri. Keywords alone otherwise (agent/semantic.py).
         meaning = semantic.similarities(str(args.get("query") or ""), texts) or [0.0] * len(pool)
