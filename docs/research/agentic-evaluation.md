@@ -256,7 +256,24 @@ for the cycle.
 6. **pass^k with k = 2** is a weak reliability signal. Use `--repeat 3–4` for acceptance and 8+ for release
    reliability (Thinkingbox ran 20).
 
-## 10. Operating the system
+## 10. Zero API billing (owner policy, 18 November 2026)
+
+"No paid API calls whatsoever. A $0.01 API charge is still unacceptable." Enforced in code, with no override.
+Tests: `tests/test_zero_api_billing.py` (9).
+
+| Path | How a paid call is prevented |
+|---|---|
+| System under test (EchoSpeak + Qwen) | Local Ollama through the recorder. `assert_local` refuses any non-localhost model server (`harness_eval`, `harness_campaign`). `local_only_env` strips every paid-provider key and switch (OpenAI, Anthropic, Gemini, xAI, Bedrock, Vertex, Brave, Tavily, ElevenLabs, Runway, MiniMax, tokens…) from the backend's environment, after `--env`. The isolated data folder has no stored credentials. |
+| Engineering agent | `claude` (claude.ai subscription) or `codex` (ChatGPT plan) only. `--driver command` is disabled. Before a session starts, `claude auth status` must say `claude.ai` and `codex login status` must say ChatGPT, or nothing runs. API-key variables are stripped from its environment. |
+| AI judge | `claude:<model>` (subscription), `codex` (plan) or `ollama:<model>` (local). `command:` is disabled. Same login check and environment stripping. |
+| Subscription exhausted or unavailable | A usage-limit, rate-limit or error reply, an empty reply, or any `fallback_credit` in Claude Code's usage stops the judge (`SubscriptionUnavailable`) or ends the cycle as `driver_failed`, which stops the session. There is no retry on another provider and no fallback. |
+
+**The dollar figures in these reports are estimates, not charges.** Claude Code's `total_cost_usd` prices the call's
+tokens at API list rates, even on a subscription; the calls counted against the plan's usage limits. Every Claude
+call here ran with `authMethod: claude.ai` and no API key in the environment. Every saved engineering run reports
+`fallback_credit: None`.
+
+## 11. Operating the system
 
 ```bash
 cd ~/Work/echospeak-env-intelligence/apps/backend

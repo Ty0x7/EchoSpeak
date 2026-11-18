@@ -479,6 +479,28 @@ SETS = {"dev": DEV, "heldout": HELDOUT, "all": DEV + HELDOUT, "env": ENV_DEV + E
         "cap-heldout": CAP_HELDOUT, "everything": DEV + HELDOUT + ENV_DEV + ENV_HELDOUT + CAP_DEV + CAP_HELDOUT}
 
 
+# ── zero API billing (owner policy, 18 November 2026: "No paid API calls whatsoever") ─────────────
+# The backend under test reads many paid-provider keys from its environment (config.py: OpenAI, Anthropic, Gemini,
+# xAI, Brave, Tavily, ElevenLabs, MiniMax, Runway, Odds, …). None may reach it, from the shell or from --env, and the
+# model server must be on this machine. There is no override.
+_PAID = re.compile(r"(?i)(API_KEY|APIKEY|_TOKEN|_SECRET|ACCESS_KEY|_PASSWORD|BEARER)$|^(ANTHROPIC|OPENAI|GEMINI|GOOGLE_API|"
+                   r"XAI|AZURE_OPENAI|AWS_|BEDROCK|VERTEX|CLAUDE_CODE_USE_|CODEX_|MISTRAL|COHERE|GROQ|TOGETHER|FIREWORKS|"
+                   r"OPENROUTER|DEEPSEEK|PERPLEXITY|REPLICATE|ELEVENLABS|TAVILY|BRAVE|SERP|MINIMAX|RUNWAY|FAL_|STABILITY)")
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def local_only_env(env: dict[str, str]) -> dict[str, str]:
+    """The environment with every route to a paid provider removed (keys, tokens, provider switches)."""
+    keep = {"API_AUTH_ENABLED", "API_AUTH_LOCALHOST_BYPASS", "API_AUTH_KEY"}  # the eval backend's own local auth
+    return {k: v for k, v in env.items() if k in keep or not _PAID.search(k)}
+
+
+def assert_local(url: str) -> None:
+    host = urllib.parse.urlsplit(url).hostname or ""
+    if host not in _LOCAL_HOSTS:
+        raise SystemExit(f"Refusing {url}: the model server must run on this machine (zero API billing policy).")
+
+
 # ── backend and recorder ────────────────────────────────────────────────
 def _free_port() -> int:
     with socket.socket() as s:
@@ -558,6 +580,7 @@ class Stack:
             "FILE_TOOL_ROOT": str(dirs["backend-home"]),
         })
         env.update(self.extra_env)
+        env = local_only_env(env)  # last, so neither the shell nor --env can hand the backend a paid key
         self.env_used = {k: v for k, v in env.items() if k.startswith(("LOCAL_MODEL", "LEAN_", "ASSISTANT", "USE_LOCAL", "LEARNING",
                                                                        "ENABLE_SYSTEM", "ALLOW_"))}
         self.procs.append(subprocess.Popen(
@@ -781,6 +804,7 @@ def main() -> int:
     parser.add_argument("--agents-md", default="", help="A/B arm: file used as the owner's AGENTS.md in the eval backend")
     parser.add_argument("--skill", action="append", default=[], help="A/B arm: SKILL.md to import and approve (repeatable)")
     args = parser.parse_args()
+    assert_local(args.upstream)
     chosen = {c.strip() for c in args.only.split(",") if c.strip()}
     cases = [c for c in SETS["everything" if chosen else args.set] if not chosen or c.id in chosen]
     run_dir = OUT / f"{time.strftime('%Y%m%d-%H%M%S')}-{args.label}"

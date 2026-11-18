@@ -57,9 +57,19 @@ folder), `halt` (left uncommitted in the worktree for the owner).
 halt, `needs_authorization` from the engineering agent, an engineering agent that stops without its report
 (`driver_failed`, e.g. a usage limit), under 2 GB free memory (`ATF_MIN_FREE_GB`), or a broken run.
 
+## Zero API billing (hard rule)
+
+- **No paid API call, ever.** The engineering agent and the judge run only through the owner's subscriptions
+  (`claude`, `codex`), or locally (`ollama:<model>`). `command` drivers and judges are disabled.
+- **Sessions check the logins and stop.** A session refuses to start unless `claude auth status` / `codex login
+  status` show the subscription. It stops, rather than falling back, on a usage limit or on any fallback credit.
+- **The system under test is local only:** a localhost model server, with paid-provider keys stripped.
+- **`cost_usd` / `--max-cost-usd` are estimates** of subscription usage at API list prices, not charges.
+- See `docs/research/agentic-evaluation.md` §10. Never add an override.
+
 ## Optional AI judge and budgets
 
-- **`--ai-judge claude:haiku`** (or `codex`, `ollama:<model>`, `command:…`) adds Layer 4 to every evaluation in the
+- **`--ai-judge claude:haiku`** (or `codex`, `ollama:<model>`; never a paid API) adds Layer 4 to every evaluation in the
   session.
   - Cited findings go into the engineering agent's brief.
   - A retest that passes the gates but is flagged for a suspicious process ends as **`review`**: committed on the

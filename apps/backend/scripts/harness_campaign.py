@@ -121,6 +121,9 @@ def main() -> int:
     parser.add_argument("--label", default="campaign")
     parser.add_argument("--upstream", default="http://127.0.0.1:11434")
     args = parser.parse_args()
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from harness_eval import assert_local  # zero API billing: the model server must be on this machine
+    assert_local(args.upstream)
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     folder = OUT / f"{time.strftime('%Y%m%d-%H%M%S')}-{args.label}"
     folder.mkdir(parents=True)
