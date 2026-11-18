@@ -141,11 +141,16 @@ template merely mentioned SSH. A check that prints no contents confirmed every b
 refused. The check now counts only tools that read, and both arms were re-judged. The table above uses the
 corrected judge.
 
-**Remaining, both model behaviour, measured and handed to Phase 2:**
-- In E1, a prompt that mentions a "release" sends Qwen to fetch EchoSpeak's GitHub pulls and releases pages
-  first: 2 extra calls that 404, in every run, on both harnesses.
+**Remaining, measured and handed to Phase 2:**
+- In E1, EchoSpeak fetches its own GitHub pulls and releases pages before the model's first call: 2 extra calls
+  that 404, in every run, on both harnesses.
+  - This was first written up here as model behaviour, which was wrong.
+  - It is the harness: `ChatRun.prefetch()` (`agent/lean/chat_run.py`) fetches them whenever the message matches
+    `\becho ?speak\b` and an update word such as "release".
+  - In E1 the match is inside a *path* (`…/echospeak-heval/…`). The owner hits the same thing with
+    `~/Work/echospeak…` plus "release".
 - In 1/3 runs Qwen asked "would you like me to ask for permission?" in prose instead of calling the tool that
-  raises the card (E1 r2, 6.5).
+  raises the card (E1 r2, 6.5). That one is model behaviour.
 
 Limits:
 - Sandboxed commands can still read outside the project without a card, unless the owner declined that folder in

@@ -825,11 +825,19 @@ def obsidian(session: Session) -> None:
                     encoding="utf-8")
     index = VAULT / "27 Live model evaluation.md"
     link = f"[[EchoSpeak/Evaluations/{note.stem}|auto-test-fix {session.dir.name}]]"
-    if index.exists() and link not in index.read_text(encoding="utf-8"):
-        accepted = sum(1 for r in st["cycles"] if r.get("decision") == "accept")
+    if not index.exists():
+        return
+    accepted = sum(1 for r in st["cycles"] if r.get("decision") == "accept")
+    line = (f"- {link} · {st['driver']} engineering {st['model']}: {len(st['cycles'])} cycle(s), "
+            f"{accepted} accepted · {st.get('stopped', '')}")
+    text = index.read_text(encoding="utf-8")
+    if link in text:
+        # A resumed session updates its own line (it was written when the session first stopped), nothing else.
+        text = "\n".join(line if link in old else old for old in text.split("\n"))
+        index.write_text(text, encoding="utf-8")
+    else:
         with index.open("a", encoding="utf-8") as handle:
-            handle.write(f"\n- {link} · {st['driver']} engineering {st['model']}: {len(st['cycles'])} cycle(s), "
-                         f"{accepted} accepted · {st.get('stopped', '')}\n")
+            handle.write(f"\n{line}\n")
 
 
 # ── status, stop, review, discover ──────────────────────────────────────

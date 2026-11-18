@@ -231,3 +231,42 @@ Implementation and focused live evidence: [interfaces.md](interfaces.md#16-novem
 The requested identity, input position, duplicate activity and memory-warning fixes are implemented. This review
 also explains how soul and skills reach the model. The broader architectural gaps in §4 are not claimed fixed
 by this focused change.
+
+## 9. Environment access and the engineering loop (17 November 2026)
+
+Branch `env-intelligence`. Records: `docs/research/environment-access.md` and `docs/research/auto-test-fix.md`.
+
+### Compared with Claude Code and Codex
+
+| Mechanism | Claude Code | Codex | EchoSpeak before | EchoSpeak now |
+|---|---|---|---|---|
+| Where reads may go without asking | Working dir + `/add-dir` additional directories | Sandbox `workspace-write` reads anywhere | File tools: the roots only, a hard refusal. Terminal in a project: `/` read-only via bwrap | Roots: no ask. Outside: the approval card, granted per folder, read-only |
+| Crossing the boundary | Permission prompt; "don't ask again" rules | Approval policy `on-request` escalates | Not possible for file tools; possible, unasked, through the terminal | Allow once / for this chat / always allow (`read:<folder>`, revocable); a declined folder stays closed, terminal included |
+| Credentials | `Read(...)` deny rules win over allows | Sandbox policy | Hidden from commands by bwrap only | The same hidden list enforced for file tools too, never grantable |
+| Environment facts | Bash on the host | Shell in the sandbox | Prompt said "Computer: Linux …"; no specs tool in conversations | `system_info` (CPU model, GPU, distro, RAM, disk) in every profile |
+| Refusal text | States the rule | States the sandbox | "Path not allowed" for missing, symlinked and outside paths alike | Not found / link to X outside / outside + how access is given / never readable |
+
+### Areas touched
+
+| # | Area | Verdict and change |
+|---|---|---|
+| 2 | Instructions | One ~150-char Environment line: other folders are asked for; credentials never readable. Enforcement doesn't rely on it. |
+| 7 | Registry/discovery | `system_info` allowed in conversations and offered to compact models. |
+| 8 | Execution/validation | Folder-boundary refusals are outcome `refused` (a policy result), not `failed`. |
+| 13 | Security policy | Upgrade: read grants through the existing approval broker and grant store; `declined_folder` policy rule. |
+| 14 | Sandbox | Retain for commands (`--ro-bind /` minus hidden list); file tools now hide the same places. Limit: unasked terminal reads of unhidden folders outside the project remain. |
+| 16 | Approvals | Retain: the same card, decisions and grant store; a new scope class "Read files in X (read-only)". |
+| 10, 19 | Verification, observability | The eval gained environment cases (E1–E3, EH1–EH2) and judge checks; `auto_test_fix.py` turns judge + V-ladder evidence into gated engineering cycles. |
+
+### The coding workflow, Understand → Complete
+
+| Step | Claude Code / Codex | EchoSpeak harness (where) | Gap seen in live runs |
+|---|---|---|---|
+| Understand | Read the request, AGENTS.md / CLAUDE.md | Prompt builders, owner and project instructions, app facts | The harness's own prefetch fetches EchoSpeak's GitHub when a message has "echospeak" (even in a path) and "release" (E1, every run) |
+| Plan | Todo list | `set_objective`, recall reminders | — |
+| Inspect | Read/Grep/Glob, `/add-dir` | `file_read/find/search`, project overview; now outside reads via the card | Fixed: out-of-root reads were a dead end |
+| Act | Edit with exact replace | `file_edit` (exact replace), checkpoints | — |
+| Execute | Bash in a sandbox | Terminal in bwrap, approvals for host commands | Terminal could read what file tools refused (fixed once declined) |
+| Verify | Tests, the model's own judgement | `VerificationLedger`, claim checks, V0–V4; independent judge in evals | D7/H7: special-casing an impossible test (open; first auto-test-fix target) |
+| Recover | Retries, user steering | Bounded nudges, transient retries, after-denial rules | Prose "shall I ask for permission?" instead of the tool (E1, 1/3) |
+| Complete | Final message | Typed end reasons, verification status in the answer note | — |
