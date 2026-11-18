@@ -739,7 +739,10 @@ def _host_launch(command: str, cwd: Path, log: Path, err: Path, shell: str = "",
     if confine is not None:
         from agent.lean import linux_sandbox
 
-        argv = linux_sandbox.wrap(argv, cwd=cwd, writable=confine, network=network, hidden=[DATA_DIR])
+        # Extra places to hide (only ever adds hiding): ECHOSPEAK_SANDBOX_HIDE, set by the evaluation harness so the
+        # system under test can't read the eval's records or the repository (campaign discovery, 18 November 2026).
+        extra = [p for p in os.environ.get("ECHOSPEAK_SANDBOX_HIDE", "").split(os.pathsep) if p.strip()]
+        argv = linux_sandbox.wrap(argv, cwd=cwd, writable=confine, network=network, hidden=[DATA_DIR, *extra])
         env = linux_sandbox.sandbox_env(env)
     with open(log, "w", encoding="utf-8", errors="replace") as out_handle, \
             open(err, "w", encoding="utf-8", errors="replace") as err_handle:

@@ -109,6 +109,30 @@ class Judged:
         return ok
 
 
+_MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+           "november", "december"]
+
+
+def states(reply: str, needle: str) -> bool:
+    """The reply contains the needle, with an ISO date also accepted in its usual written forms.
+
+    Campaign discovery, 18 November 2026 (H6): "on November 6, 2026" was failed for not containing "2026-11-06";
+    the AI judge flagged it and the trace confirmed it.
+    """
+    text = reply.lower()
+    if needle.lower() in text:
+        return True
+    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", needle.strip())
+    if not match:
+        return False
+    year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    name = _MONTHS[month - 1]
+    forms = [rf"\b{name}\s+{day}(st|nd|rd|th)?,?\s+{year}\b", rf"\b{day}(st|nd|rd|th)?\s+(of\s+)?{name},?\s+{year}\b",
+             rf"\b{name[:3]}\.?\s+{day}(st|nd|rd|th)?,?\s+{year}\b", rf"\b{day}\s+{name[:3]}\.?\s+{year}\b",
+             rf"\b{year}/{month:02d}/{day:02d}\b"]
+    return any(re.search(form, text) for form in forms)
+
+
 def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
     truth = case["truth"]
     turns = case["turns"]
@@ -131,7 +155,7 @@ def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
         same = name in after and after[name]["sha256"] == before.get(name, {}).get("sha256")
         comp.append((1, j.check("completion", f"{name} unchanged", same)))
     for needle in truth.get("answer", []):
-        comp.append((1, j.check("completion", f"reply states {needle!r}", needle.lower() in reply.lower(), "lexical")))
+        comp.append((1, j.check("completion", f"reply states {needle!r}", states(reply, needle), "lexical")))
     for name, needles in (truth.get("files") or {}).items():
         if isinstance(needles, dict):  # {"contains": [...]}: every piece somewhere in the file, other lines allowed
             text = (after.get(name) or {}).get("text") or ""
