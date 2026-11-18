@@ -54,7 +54,8 @@ Results: `accept` (commit), `reject` / `inconclusive` / `no_change` (worktree re
 folder), `halt` (left uncommitted in the worktree for the owner).
 
 **Stops:** cycle and minute budgets, `stop`, nothing below `--target`, two rejected cycles in a row, a security
-halt, `needs_authorization` from the engineering agent, under 3 GB free memory, or a broken run.
+halt, `needs_authorization` from the engineering agent, an engineering agent that stops without its report
+(`driver_failed`, e.g. a usage limit), under 2 GB free memory (`ATF_MIN_FREE_GB`), or a broken run.
 
 ## Before keeping a session's commits
 

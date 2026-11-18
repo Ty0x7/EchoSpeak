@@ -81,7 +81,8 @@ What each engineering agent can do:
 - every dev case at `--target`;
 - two rejected or inconclusive cycles in a row;
 - a security halt, or `needs_authorization` from the engineering agent;
-- under 3 GB of free memory;
+- under 2 GB of free memory (`ATF_MIN_FREE_GB`);
+- an engineering agent that stops without its report (`driver_failed`; a clean exit without a report is `incomplete`);
 - a broken run or gate.
 
 ## 4. Commands
@@ -208,6 +209,22 @@ second judge, case set or recorder was written.
 - D7 and H7 are still below 9. One special-casing variant isn't flagged (H7 r2, held-out). Repeated "Not
   applied" calls aren't stopped.
 - E1's harness prefetch, the Codex session's target, below.
+
+### Session `20261117-212847-demo-codex`
+
+- **Engineering agent:** Codex CLI 0.169.1, `exec -s workspace-write`.
+- **Dev case:** E1 at target 9.5, before mean 8.9.
+- **Held-out:** EH1 and H2, baseline 9.7.
+- **Base:** `91dbb5c`.
+
+**Codex found the root cause with no hint** in the brief. It wrote a failing-first test,
+`test_path_components_do_not_trigger_release_page_prefetch`, showing that a message naming a path such as
+`/work/echospeak-cache/…` or `C:\projects\EchoSpeak\…`, with an update word, makes `ChatRun.prefetch()` fetch
+EchoSpeak's GitHub pages. It then stopped on its ChatGPT plan's **usage limit**, without a fix or a report.
+
+The loop mishandled that. The half-done change went to the gates and was rejected because Codex's own `-o` file
+counted as an out-of-scope change. Fixed in `f17a3fa` (with a test), so a missing report is now `driver_failed` or
+`incomplete` and is never gated.
 
 **What the demonstration showed about the loop itself:**
 - Its first real cycle exposed three gate errors and a memory floor set too strictly. Each was fixed with a
