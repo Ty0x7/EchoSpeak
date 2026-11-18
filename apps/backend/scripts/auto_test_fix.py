@@ -369,7 +369,8 @@ def full_diff(tree: Path, base: str) -> str:
     if untracked:
         git(tree, "add", "-N", "--", *untracked)
     try:
-        return git(tree, "diff", base)
+        diff = git(tree, "diff", base)
+        return diff + "\n" if diff else ""  # git() strips; a patch needs its final newline to apply
     finally:
         if untracked:
             git(tree, "reset", "-q", "--", *untracked)
