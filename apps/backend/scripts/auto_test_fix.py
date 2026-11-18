@@ -169,13 +169,43 @@ def judged(run: Path) -> dict[str, Any]:
         by.setdefault(row["id"], []).append(row)
     cases = {cid: {"mean": round(statistics.mean(r["score"] for r in rs), 2), "runs": len(rs),
                    "success": round(sum(r["execution_success"] for r in rs) / len(rs), 2),
+                   # pass^k: every repetition succeeded (reliability); pass@k: at least one did (capability).
+                   "pass_all": all(r["execution_success"] for r in rs), "pass_any": any(r["execution_success"] for r in rs),
                    "critical": sorted({c for r in rs for c in r["critical"]}),
                    "failed_checks": sorted({c["label"] for r in rs for c in r["checks"] if not c["ok"]}),
                    "causes": sorted({c for r in rs for c in r["causes"]})}
              for cid, rs in by.items()}
     return {"run": str(run), "cases": cases,
             "mean": round(statistics.mean(r["score"] for r in rows), 2) if rows else 0.0,
-            "critical": sum(len(r["critical"]) for r in rows)}
+            "success": round(sum(r["execution_success"] for r in rows) / len(rows), 3) if rows else 0.0,
+            "critical": sum(len(r["critical"]) for r in rows),
+            "tokens": sum(int(r["metrics"].get("server_prompt_tokens") or 0) + int(r["metrics"].get("server_completion_tokens") or 0)
+                          for r in rows)}
+
+
+def ai_judge(run: str, session: "Session") -> dict[str, Any]:
+    """Layer 4 (scripts/harness_ai_judge.py) on the runs that need it; findings only, the score stands."""
+    backend = session.state.get("ai_judge") or ""
+    if not backend:
+        return {}
+    sys.path.insert(0, str(BACKEND / "scripts"))
+    import harness_ai_judge
+
+    report = harness_ai_judge.judge_run(Path(run), backend)
+    spend(session, cost=report["cost_usd"], what="ai_judge")
+    return {"judged": len(report["judged"]), "cost_usd": report["cost_usd"],
+            "flags": {f"{r['id']} r{r['rep']}": r["combined"]["flags"] for r in report["judged"] if r["combined"]["flags"]},
+            "findings": {f"{r['id']} r{r['rep']}": [f"{f['type']}: {f['explanation']}" for f in r["ai"]["findings"]]
+                         for r in report["judged"] if r["ai"]["findings"]}}
+
+
+def spend(session: "Session", cost: float = 0.0, tokens: int = 0, what: str = "") -> None:
+    """Running totals against the session's budgets (checked between stages)."""
+    spent = session.state.setdefault("spent", {"cost_usd": 0.0, "eval_tokens": 0, "by": {}})
+    spent["cost_usd"] = round(spent["cost_usd"] + cost, 4)
+    spent["eval_tokens"] += int(tokens)
+    if what:
+        spent["by"][what] = round(spent["by"].get(what, 0.0) + cost, 4)
 
 
 # ── diagnose: which layer failed, from the evidence ─────────────────────
@@ -603,7 +633,9 @@ def run(args: argparse.Namespace) -> int:
                          "cases": args.cases.split(","), "heldout": [c for c in args.heldout.split(",") if c],
                          "repeat": args.repeat, "target": args.target, "cycles": [], "status": "running",
                          "limits": {"cycles": args.cycles, "minutes": args.minutes, "driver_minutes": args.driver_minutes,
-                                    "driver_budget_usd": args.driver_budget}}
+                                    "driver_budget_usd": args.driver_budget, "max_cost_usd": args.max_cost_usd,
+                                    "max_eval_tokens": args.max_eval_tokens},
+                         "ai_judge": args.ai_judge}
         session.save()
         session.log("session", dir=str(session.dir), base=base, driver=args.driver, model=args.model)
     st = session.state
@@ -637,6 +669,10 @@ def run(args: argparse.Namespace) -> int:
             reason = "two rejected cycles in a row"
         elif free_gb() < MIN_FREE_GB:
             reason = f"low memory ({free_gb():.1f} GB available)"
+        elif st["limits"].get("max_cost_usd") and st.get("spent", {}).get("cost_usd", 0) >= st["limits"]["max_cost_usd"]:
+            reason = f"cost budget used (${st['spent']['cost_usd']} of ${st['limits']['max_cost_usd']})"
+        elif st["limits"].get("max_eval_tokens") and st.get("spent", {}).get("eval_tokens", 0) >= st["limits"]["max_eval_tokens"]:
+            reason = f"token budget used ({st['spent']['eval_tokens']} model tokens)"
         if reason:
             st["status"], st["stopped"] = "stopped", reason
             session.save()
@@ -664,6 +700,8 @@ def run(args: argparse.Namespace) -> int:
             if pending is None:
                 # Baseline: execute, capture, judge (the dev cases only; held-out stays unseen).
                 before = judged(run_eval(tree, st["cases"], st["repeat"], st["model"], f"atf-c{cycle}-before", session))
+                spend(session, tokens=before["tokens"])
+                before["ai"] = ai_judge(before["run"], session)
                 record["before"] = before
                 dx = diagnose(Path(before["run"]), st["cases"], st["target"])
                 record["diagnosis"] = {k: v for k, v in dx.items() if k != "items"} | {
@@ -684,6 +722,10 @@ def run(args: argparse.Namespace) -> int:
                     f"Critical: {i['critical'] or 'none'} · failed checks: {i['failed_checks']} · "
                     f"model calls {i['model_calls']} (careful ≈ {i['ideal_calls']})\n```\n" + "\n".join(i["trail"])[:3500] + "\n```"
                     for i in dx["items"][:4])
+                if before.get("ai", {}).get("findings"):
+                    # Layer 4's cited findings, for the engineering agent to confirm or reject against the trail.
+                    failures += "\n\n### What an independent model judge noticed (findings, not verdicts)\n" + "\n".join(
+                        f"- {run}: {item}" for run, items in before["ai"]["findings"].items() for item in items[:4])
                 brief = BRIEF.format(cycle=cycle, tree=tree, branch=branch, model=st["model"], base=base[:8], failures=failures,
                                      layers=dx["layers"], field="\n".join(f"- {r}" for r in field_evidence()) or "- none",
                                      related=" ".join(RELATED), report=report_path, allowed=", ".join(ALLOWED),
@@ -704,6 +746,10 @@ def run(args: argparse.Namespace) -> int:
                     out = sh(argv, tree, timeout=st["limits"]["driver_minutes"] * 60, stdin=stdin)
                     (cdir / "driver.log").write_text(out.stdout + "\n--- stderr ---\n" + out.stderr, encoding="utf-8")
                     record["driver_exit"] = out.returncode
+                    try:
+                        spend(session, cost=float(json.loads(out.stdout or "{}").get("total_cost_usd") or 0), what="engineering")
+                    except (ValueError, AttributeError):
+                        pass
                 except subprocess.TimeoutExpired:
                     record["driver_exit"] = "timeout"
                 agent = {}
@@ -753,12 +799,16 @@ def run(args: argparse.Namespace) -> int:
             if decision == "measure":
                 # Retest and judge: the same dev cases, then the held-out ones.
                 after = judged(run_eval(tree, st["cases"], st["repeat"], st["model"], f"atf-c{cycle}-after", session))
+                spend(session, tokens=after["tokens"])
+                after["ai"] = ai_judge(after["run"], session)
                 record["after"] = after
                 delta = round(after["mean"] - before["mean"], 2)
                 record["delta"] = delta
                 held = {}
                 if st["heldout"]:
                     held = judged(run_eval(tree, st["heldout"], st["repeat"], st["model"], f"atf-c{cycle}-heldout", session))
+                    spend(session, tokens=held["tokens"])
+                    held["ai"] = ai_judge(held["run"], session)
                     record["heldout"] = held
                 hb = st.get("heldout_baseline") or {}
                 held_ok = not held or (held["critical"] <= hb.get("critical", 0) and held["mean"] >= hb.get("mean", 0) - 2 * NOISE)
@@ -766,8 +816,15 @@ def run(args: argparse.Namespace) -> int:
                     decision, g["reason"] = "reject", "a new critical finding on the dev cases"
                 elif not held_ok:
                     decision, g["reason"] = "reject", f"held-out regressed ({hb.get('mean')} → {held.get('mean')})"
-                elif delta > NOISE or after["critical"] < before["critical"]:
-                    decision, g["reason"] = "accept", f"dev mean {before['mean']} → {after['mean']} (+{delta}); held-out {held.get('mean', 'not run')}"
+                elif delta > NOISE or after["critical"] < before["critical"] or (
+                        after["success"] > before["success"] and delta >= 0):
+                    decision, g["reason"] = "accept", (f"dev mean {before['mean']} → {after['mean']} ({delta:+}), success "
+                                                       f"{before['success']:.0%} → {after['success']:.0%}; held-out {held.get('mean', 'not run')}")
+                    flags = {**(after.get("ai", {}).get("flags") or {}), **(held.get("ai", {}).get("flags") or {} if held else {})}
+                    suspicious = {k: v for k, v in flags.items() if any("suspicious" in f or "disagreement" in f for f in v)}
+                    if suspicious:
+                        # The checks pass but an independent judge cites a doubtful process: a person decides.
+                        decision, g["reason"] = "review", g["reason"] + f"; AI judge flags for the owner: {suspicious}"
                 else:
                     decision, g["reason"] = "inconclusive", f"dev mean {before['mean']} → {after['mean']} ({delta:+}) is within noise"
             record["decision"], record["reason"] = decision, g.get("reason", "")
@@ -783,6 +840,12 @@ def run(args: argparse.Namespace) -> int:
                 git(tree, "commit", "-q", "-m", message)
                 record["commit"] = git(tree, "rev-parse", "--short", "HEAD")
                 rejected_in_a_row = 0
+            elif decision == "review":
+                git(tree, "add", "-A")
+                git(tree, "commit", "-q", "-m", f"auto-test-fix cycle {cycle} (OWNER REVIEW): {str(agent.get('fix') or '')[:60]}\n\n"
+                    f"{g['reason']}\nSession: {session.dir}\nEngineering-Agent: {st['driver']}")
+                record["commit"] = git(tree, "rev-parse", "--short", "HEAD")
+                st["status"], st["stopped"] = "review", "owner review: the checks pass but the AI judge flagged the process"
             elif decision == "halt":
                 # Uncommitted in the worktree, and saved as cycle-N/fix.diff: the owner decides.
                 st["status"], st["stopped"] = "halted", g["reason"]
@@ -798,7 +861,7 @@ def run(args: argparse.Namespace) -> int:
         session.save()
         write_cycle_report(session, record)
         session.log("decision", cycle=cycle, decision=record.get("decision"), reason=record.get("reason", "")[:160])
-        if st.get("status") in {"halted"} or record.get("decision") == "error":
+        if st.get("status") in {"halted", "review"} or record.get("decision") == "error":
             session.log("stop", reason=st.get("stopped"))
             break
     st["ended"] = now()
@@ -950,6 +1013,9 @@ def main() -> int:
     r.add_argument("--minutes", type=float, default=180)
     r.add_argument("--driver-minutes", type=float, default=30)
     r.add_argument("--driver-budget", type=float, default=5.0, help="USD limit per Claude call (--max-budget-usd)")
+    r.add_argument("--max-cost-usd", type=float, default=15.0, help="Session budget: engineering agent + AI judge")
+    r.add_argument("--max-eval-tokens", type=int, default=0, help="Session budget: model-server tokens (0 = no limit)")
+    r.add_argument("--ai-judge", default="", help="Layer 4 judge: claude:<model> | codex | ollama:<model> | command:<argv> (off if empty)")
     r.add_argument("--base", default="HEAD")
     r.add_argument("--label", default="")
     r.add_argument("--resume", action="store_true")
