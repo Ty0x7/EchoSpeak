@@ -870,6 +870,12 @@ def review(args: argparse.Namespace) -> int:
         print(f"\nCommits on {s.state.get('branch')} since {s.state['base'][:8]}:")
         print(git(Path(tree), "log", "--oneline", f"{s.state['base']}..HEAD") or "(none)")
         print(f"\nTo inspect: git -C {tree} show <commit>   ·   to discard: git worktree remove {tree}")
+        # A session's held-out set is small; check every case before keeping its commits. Demo session
+        # 20261117-194230-demo-claude passed its gates, and this sweep then showed four single-run flips to examine.
+        print("\nBefore keeping these commits, sweep every case (base against the session branch):\n"
+              f"  cd {tree}/apps/backend && .venv/bin/python scripts/harness_campaign.py --models {s.state['model']} "
+              f"--baseline-ref {s.state['base'][:8]} --set all --repeat 1 --label {s.dir.name}-sweep\n"
+              "Then repeat any case that flipped (--only <ids> --repeat 4) before calling it a regression or noise.")
     return 0
 
 

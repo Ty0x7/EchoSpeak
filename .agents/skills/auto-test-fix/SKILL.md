@@ -56,6 +56,15 @@ folder), `halt` (left uncommitted in the worktree for the owner).
 **Stops:** cycle and minute budgets, `stop`, nothing below `--target`, two rejected cycles in a row, a security
 halt, `needs_authorization` from the engineering agent, under 3 GB free memory, or a broken run.
 
+## Before keeping a session's commits
+
+The gates only see the session's dev and held-out cases. `review` prints a sweep command for every D, H and E
+case, comparing the session base against the session branch. Run it, then repeat each case that flipped four
+times on both arms before calling it a regression or noise. In the first demonstration, a single-run sweep
+flipped four cases:
+- two came from code paths the fixes don't touch (model variance);
+- two needed the four-repeat confirmation.
+
 ## Never
 
 - Push, merge, publish, or touch `~/Projects/echospeak`, the owner's runtime data or other projects. The only
