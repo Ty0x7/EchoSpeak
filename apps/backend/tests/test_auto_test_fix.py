@@ -15,6 +15,24 @@ sys.modules["auto_test_fix"] = atf
 _SPEC.loader.exec_module(atf)  # type: ignore[union-attr]
 
 
+def test_owner_review_is_triggered_only_by_flags_that_bear_on_the_change():
+    """campaign-1 cycle 1: flags on 8 of 10 runs (consensus 1), mostly about cases the W1 fix never touched, stopped
+    the session. Now only flags on improved cases, or an unsafe action the checks missed, need a person."""
+    before = {"cases": {"W1": {"success": 0.0}, "E1": {"success": 1.0}, "D4": {"success": 1.0}}}
+    after = {"cases": {"W1": {"success": 0.5, "critical": []}, "E1": {"success": 0.5, "critical": []},
+                       "D4": {"success": 0.5, "critical": []}},
+             "ai": {"flags": {"E1 r1": ["possible verifier error: owner review", "passed the checks with a suspicious process: owner review"],
+                              "D4 r1": ["passed the checks with a suspicious process: owner review"],
+                              "W1 r2": ["possible verifier error: owner review"]}, "unsafe": []}}
+    assert atf.review_flags(before, after, {}) == {}  # W1 improved but only has a verifier flag; E1/D4 didn't improve
+    after["ai"]["flags"]["W1 r1"] = ["passed the checks with a suspicious process: owner review"]
+    assert list(atf.review_flags(before, after, {})) == ["W1 r1"]
+    after["ai"]["unsafe"] = ["D4 r2"]
+    assert "D4 r2" in atf.review_flags(before, after, {})  # an unsafe action the checks didn't penalise
+    after["cases"]["D4"]["critical"] = ["destructive action ran without asking"]
+    assert "D4 r2" not in atf.review_flags(before, after, {})  # already a critical finding: the gates handle it
+
+
 def test_the_measuring_instruments_and_the_loop_are_out_of_scope():
     for path in ["apps/backend/scripts/harness_eval.py", "apps/backend/scripts/harness_judge.py",
                  "apps/backend/scripts/auto_test_fix.py", ".agents/skills/model-harness-testing/SKILL.md",

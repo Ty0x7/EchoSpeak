@@ -205,15 +205,40 @@ def ai_judge(run: str, session: "Session") -> dict[str, Any]:
     import harness_ai_judge
 
     try:
-        report = harness_ai_judge.judge_run(Path(run), backend)
+        # Consensus of 2: single judgements flagged 8 of 10 runs in campaign-1 cycle 1, mostly not about the change.
+        report = harness_ai_judge.judge_run(Path(run), backend, agree=int(session.state.get("ai_consensus") or 2))
     except harness_ai_judge.SubscriptionUnavailable as exc:
         session.state["billing_stop"] = str(exc)
         raise RuntimeError(f"stopped: the AI judge's subscription is unavailable ({exc}); no fallback is used") from exc
     spend(session, cost=report["cost_usd"], what="ai_judge")
     return {"judged": len(report["judged"]), "cost_usd": report["cost_usd"],
             "flags": {f"{r['id']} r{r['rep']}": r["combined"]["flags"] for r in report["judged"] if r["combined"]["flags"]},
+            "unsafe": [f"{r['id']} r{r['rep']}" for r in report["judged"]
+                       if any(f["type"] == "unsafe_action" for f in r["ai"]["findings"])],
             "findings": {f"{r['id']} r{r['rep']}": [f"{f['type']}: {f['explanation']}" for f in r["ai"]["findings"]]
                          for r in report["judged"] if r["ai"]["findings"]}}
+
+
+def review_flags(before: dict[str, Any], after: dict[str, Any], held: dict[str, Any]) -> dict[str, list[str]]:
+    """AI-judge flags that bear on the claimed improvement, which a person must look at before it is kept.
+
+    Only (a) a suspicious-process or disagreement flag on a run of a case whose success improved this cycle, or
+    (b) an unsafe action the judge cites on a run the deterministic security checks did not already penalise.
+    Campaign-1 cycle 1 stopped on flags about runs the change never touched (consensus 1, every flag counted).
+    """
+    improved = {cid for cid, v in after.get("cases", {}).items()
+                if v.get("success", 0) > before.get("cases", {}).get(cid, {}).get("success", 0)}
+    out: dict[str, list[str]] = {}
+    for run in (after, held or {}):
+        for key, flags in ((run.get("ai") or {}).get("flags") or {}).items():
+            relevant = [f for f in flags if ("suspicious" in f or "disagreement" in f)]
+            if relevant and key.split(" r")[0] in improved:
+                out[key] = relevant
+        for key in (run.get("ai") or {}).get("unsafe") or []:
+            cid = key.split(" r")[0]
+            if not (run.get("cases", {}).get(cid, {}).get("critical")):
+                out.setdefault(key, []).append("AI judge cites an unsafe action the checks didn't catch")
+    return out
 
 
 def spend(session: "Session", cost: float = 0.0, tokens: int = 0, what: str = "") -> None:
@@ -667,7 +692,7 @@ def run(args: argparse.Namespace) -> int:
                          "limits": {"cycles": args.cycles, "minutes": args.minutes, "driver_minutes": args.driver_minutes,
                                     "driver_budget_usd": args.driver_budget, "max_cost_usd": args.max_cost_usd,
                                     "max_eval_tokens": args.max_eval_tokens},
-                         "ai_judge": args.ai_judge}
+                         "ai_judge": args.ai_judge, "ai_consensus": args.ai_consensus}
         session.save()
         session.log("session", dir=str(session.dir), base=base, driver=args.driver, model=args.model)
     st = session.state
@@ -848,12 +873,11 @@ def run(args: argparse.Namespace) -> int:
                     decision, g["reason"] = "reject", "a new critical finding on the dev cases"
                 elif not held_ok:
                     decision, g["reason"] = "reject", f"held-out regressed ({hb.get('mean')} → {held.get('mean')})"
-                elif delta > NOISE or after["critical"] < before["critical"] or (
+                elif delta > NOISE or (after["critical"] < before["critical"] and delta >= -NOISE) or (
                         after["success"] > before["success"] and delta >= 0):
                     decision, g["reason"] = "accept", (f"dev mean {before['mean']} → {after['mean']} ({delta:+}), success "
                                                        f"{before['success']:.0%} → {after['success']:.0%}; held-out {held.get('mean', 'not run')}")
-                    flags = {**(after.get("ai", {}).get("flags") or {}), **(held.get("ai", {}).get("flags") or {} if held else {})}
-                    suspicious = {k: v for k, v in flags.items() if any("suspicious" in f or "disagreement" in f for f in v)}
+                    suspicious = review_flags(before, after, held)
                     if suspicious:
                         # The checks pass but an independent judge cites a doubtful process: a person decides.
                         decision, g["reason"] = "review", g["reason"] + f"; AI judge flags for the owner: {suspicious}"
@@ -1047,6 +1071,7 @@ def main() -> int:
     r.add_argument("--driver-budget", type=float, default=5.0, help="USD limit per Claude call (--max-budget-usd)")
     r.add_argument("--max-cost-usd", type=float, default=15.0, help="Session budget: engineering agent + AI judge")
     r.add_argument("--max-eval-tokens", type=int, default=0, help="Session budget: model-server tokens (0 = no limit)")
+    r.add_argument("--ai-consensus", type=int, default=2, help="independent AI judgements that must agree")
     r.add_argument("--ai-judge", default="", help="Layer 4 judge: claude:<model> | codex | ollama:<model> | command:<argv> (off if empty)")
     r.add_argument("--base", default="HEAD")
     r.add_argument("--label", default="")
