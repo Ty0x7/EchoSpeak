@@ -152,9 +152,43 @@ def triggered(verdict: dict[str, Any]) -> str:
 
 # ── judge backends ──────────────────────────────────────────────────────
 
+# Variables that switch Claude Code or Codex from the owner's subscription to separately billed API usage. They are
+# removed from every judge and engineering-agent call. Owner policy, 18 November 2026: "No paid API calls
+# whatsoever … a $0.01 API charge is still unacceptable." There is no opt-in.
+BILLING_VARS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK",
+                "CLAUDE_CODE_USE_VERTEX", "AWS_BEARER_TOKEN_BEDROCK", "OPENAI_API_KEY", "CODEX_API_KEY")
+
+
+class SubscriptionUnavailable(RuntimeError):
+    """The subscription can't carry this call (limit reached, signed out, or extra paid credit would be used): stop."""
+
+
+USAGE_LIMIT = re.compile(r"(?i)usage limit|rate limit|limit reached|out of (credits|usage)|purchase more credits|"
+                         r"upgrade to (pro|max)|extra usage|overage|credit balance|billing")
+
+
 def _clean_env() -> dict[str, str]:
+    """A parent agent session's markers removed, and (unless authorised) every route to paid API billing."""
     return {k: v for k, v in os.environ.items()
-            if not (k.startswith(("CLAUDE_CODE_", "CLAUDE_PID", "CLAUDE_EFFORT", "CODEX_")) or k == "CLAUDECODE")}
+            if not (k.startswith(("CLAUDE_CODE_", "CLAUDE_PID", "CLAUDE_EFFORT", "CODEX_")) or k == "CLAUDECODE")
+            and k not in BILLING_VARS}
+
+
+def subscription_problem(tool: str) -> str:
+    """Why `tool` would not run on the owner's subscription, or "". Checked before any call is made."""
+    try:
+        if tool == "claude":
+            status = json.loads(subprocess.run(["claude", "auth", "status"], capture_output=True, text=True,
+                                               timeout=30, env=_clean_env()).stdout or "{}")
+            if not status.get("loggedIn") or status.get("authMethod") != "claude.ai":
+                return f"Claude Code is not signed in with a claude.ai subscription ({status.get('authMethod') or 'not signed in'})"
+        elif tool == "codex":
+            out = subprocess.run(["codex", "login", "status"], capture_output=True, text=True, timeout=30, env=_clean_env())
+            if "chatgpt" not in (out.stdout + out.stderr).lower():
+                return "Codex is not signed in with a ChatGPT plan"
+    except Exception as exc:  # can't tell: don't spend
+        return f"couldn't confirm how {tool} is billed ({exc})"
+    return ""
 
 
 def ask(judge: str, prompt: str, timeout: float = 240) -> dict[str, Any]:
@@ -165,19 +199,29 @@ def ask(judge: str, prompt: str, timeout: float = 240) -> dict[str, Any]:
                               "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence",
                               "--system-prompt", SYSTEM, "--max-budget-usd", "1"],
                              input=prompt, capture_output=True, text=True, timeout=timeout, env=_clean_env())
-        data = json.loads(out.stdout or "{}")
+        try:
+            data = json.loads(out.stdout or "{}")
+        except json.JSONDecodeError:
+            data = {}
         usage = data.get("usage") or {}
+        text = f"{data.get('result') or ''} {out.stderr[-500:]}"
+        if usage.get("fallback_credit"):
+            raise SubscriptionUnavailable(f"the call used fallback credit ({usage.get('fallback_credit')}); stopping")
+        if data.get("is_error") or data.get("api_error_status") or not data or (USAGE_LIMIT.search(text) and not data.get("result")):
+            raise SubscriptionUnavailable(f"claude did not answer on the subscription: {(text.strip() or 'no output')[:200]}")
         return {"text": str(data.get("result") or ""), "cost_usd": float(data.get("total_cost_usd") or 0.0),
                 "seconds": round(time.time() - started, 1),
                 "tokens": int(usage.get("input_tokens") or 0) + int(usage.get("cache_read_input_tokens") or 0)
                 + int(usage.get("cache_creation_input_tokens") or 0) + int(usage.get("output_tokens") or 0)}
     if judge == "codex":
         tmp = Path(os.environ.get("TMPDIR") or "/tmp") / f"ai-judge-{os.getpid()}.txt"
-        subprocess.run(["codex", "exec", "-s", "read-only", "--skip-git-repo-check", "-o", str(tmp), "-"],
-                       input=SYSTEM + "\n\n" + prompt, capture_output=True, text=True, timeout=timeout, env=_clean_env())
+        out = subprocess.run(["codex", "exec", "-s", "read-only", "--skip-git-repo-check", "-o", str(tmp), "-"],
+                             input=SYSTEM + "\n\n" + prompt, capture_output=True, text=True, timeout=timeout, env=_clean_env())
         text = tmp.read_text() if tmp.exists() else ""
+        if out.returncode or (not text and USAGE_LIMIT.search(out.stdout + out.stderr)):
+            raise SubscriptionUnavailable(f"codex did not answer on the plan: {(out.stdout + out.stderr).strip()[-200:]}")
         return {"text": text, "cost_usd": 0.0, "seconds": round(time.time() - started, 1), "tokens": 0}
-    if judge.startswith("ollama:"):
+    if judge.startswith("ollama:"):  # local inference: http://127.0.0.1 only
         body = json.dumps({"model": judge.split(":", 1)[1], "stream": False, "format": "json", "think": False,
                            "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}]}).encode()
         req = urllib.request.Request("http://127.0.0.1:11434/api/chat", data=body, headers={"Content-Type": "application/json"})
@@ -185,11 +229,9 @@ def ask(judge: str, prompt: str, timeout: float = 240) -> dict[str, Any]:
         return {"text": data.get("message", {}).get("content", ""), "cost_usd": 0.0, "seconds": round(time.time() - started, 1),
                 "tokens": int(data.get("prompt_eval_count") or 0) + int(data.get("eval_count") or 0)}
     if judge.startswith("command:"):
-        prompt_file = Path(os.environ.get("TMPDIR") or "/tmp") / f"ai-judge-prompt-{os.getpid()}.txt"
-        prompt_file.write_text(SYSTEM + "\n\n" + prompt)
-        argv = [a.format(prompt_file=str(prompt_file)) for a in judge.split(":", 1)[1].split()]
-        out = subprocess.run(argv, capture_output=True, text=True, timeout=timeout)
-        return {"text": out.stdout, "cost_usd": 0.0, "seconds": round(time.time() - started, 1), "tokens": 0}
+        # An arbitrary command could call a paid API, and its billing can't be verified from here.
+        raise ValueError("command: judges are disabled under the zero API billing policy; use claude:<model> "
+                         "(subscription), codex (ChatGPT plan) or ollama:<model> (local)")
     raise ValueError(f"unknown judge {judge}")
 
 
@@ -270,15 +312,25 @@ def judge_run(run: Path, judge: str, everything: bool = False, agree: int = 1) -
         if not why:
             skipped.append(f"{case['id']} r{case.get('rep', 1)}")
             continue
-        trials = [judge_one(case, verdict, judge) for _ in range(max(1, agree))]
+        try:
+            trials = [judge_one(case, verdict, judge) for _ in range(max(1, agree))]
+        except SubscriptionUnavailable as exc:
+            # No fallback, no retry on another provider: the run stops here and says why.
+            report = {"run": run.name, "judge": judge, "judged": rows, "stopped": str(exc),
+                      "cost_usd": round(sum(r["cost_usd"] for r in rows), 4), "cost_is_estimate": True}
+            (run / "ai_judge.json").write_text(json.dumps(report, indent=1))
+            raise
         row = consensus(trials, verdict) if agree > 1 else trials[0]
         row["trigger"] = why
         rows.append(row)
         print(f"{row['id']} r{row['rep']} [{why}] det={row['combined']['deterministic_outcome']} ai={row['ai']['outcome']}"
               f"({row['ai']['confidence']:.2f}) findings={len(row['ai']['findings'])} flags={row['combined']['flags']} "
               f"${row['cost_usd']:.3f} {row['seconds']}s", flush=True)
+    # cost_usd: Claude Code's own estimate from token counts at API list prices. On the subscription it is charged to
+    # the plan's usage limits, not billed per call.
     report = {"run": run.name, "judge": judge, "judged": rows, "skipped_deterministic": skipped,
-              "cost_usd": round(sum(r["cost_usd"] for r in rows), 4), "seconds": round(sum(r["seconds"] for r in rows), 1)}
+              "cost_usd": round(sum(r["cost_usd"] for r in rows), 4), "cost_is_estimate": True,
+              "seconds": round(sum(r["seconds"] for r in rows), 1)}
     (run / "ai_judge.json").write_text(json.dumps(report, indent=1))
     return report
 
@@ -360,6 +412,10 @@ def main() -> int:
     c.add_argument("--repeat", type=int, default=2)
     c.add_argument("--out", default="")
     args = parser.parse_args()
+    tool = "claude" if args.judge.startswith("claude:") else "codex" if args.judge == "codex" else ""
+    if tool and (problem := subscription_problem(tool)):
+        print(f"Not judging: {problem}. Paid API usage is never used (zero API billing policy).")
+        return 2
     if args.command == "judge":
         report = judge_run(Path(args.run), args.judge, args.all, args.consensus)
         print(f"judged {len(report['judged'])}, skipped {len(report['skipped_deterministic'])} (deterministic enough), "

@@ -80,9 +80,22 @@ REPORT_NAME = ".atf-report.json"
 # ── small helpers ───────────────────────────────────────────────────────
 
 def _clean_env() -> dict[str, str]:
-    """This process's environment without a parent agent session's markers (a nested `claude` would attach to it)."""
-    return {k: v for k, v in os.environ.items()
-            if not (k.startswith(("CLAUDE_CODE_", "CLAUDE_PID", "CLAUDE_EFFORT", "CODEX_")) or k == "CLAUDECODE")}
+    """Without a parent agent session's markers (a nested `claude` would attach to it), and without any variable that
+    would switch the engineering agent or the judge to paid API billing (harness_ai_judge.BILLING_VARS)."""
+    sys.path.insert(0, str(BACKEND / "scripts"))
+    import harness_ai_judge
+
+    return harness_ai_judge._clean_env()
+
+
+def billing_problems(driver: str, ai_judge: str) -> list[str]:
+    """The owner's subscription must carry every model call this session makes, unless paid API use was authorised."""
+    sys.path.insert(0, str(BACKEND / "scripts"))
+    import harness_ai_judge
+
+    tools = {driver if driver in {"claude", "codex"} else "",
+             "claude" if ai_judge.startswith("claude:") else "codex" if ai_judge == "codex" else ""}
+    return [p for t in sorted(tools - {""}) if (p := harness_ai_judge.subscription_problem(t))]
 
 
 def sh(args: list[str], cwd: Path, timeout: float = 600, env: Optional[dict] = None, stdin: str = "") -> subprocess.CompletedProcess:
@@ -191,7 +204,11 @@ def ai_judge(run: str, session: "Session") -> dict[str, Any]:
     sys.path.insert(0, str(BACKEND / "scripts"))
     import harness_ai_judge
 
-    report = harness_ai_judge.judge_run(Path(run), backend)
+    try:
+        report = harness_ai_judge.judge_run(Path(run), backend)
+    except harness_ai_judge.SubscriptionUnavailable as exc:
+        session.state["billing_stop"] = str(exc)
+        raise RuntimeError(f"stopped: the AI judge's subscription is unavailable ({exc}); no fallback is used") from exc
     spend(session, cost=report["cost_usd"], what="ai_judge")
     return {"judged": len(report["judged"]), "cost_usd": report["cost_usd"],
             "flags": {f"{r['id']} r{r['rep']}": r["combined"]["flags"] for r in report["judged"] if r["combined"]["flags"]},
@@ -357,9 +374,16 @@ def driver_outcome(agent: dict[str, Any], exit_code: Any, log: Path) -> tuple[st
     Demo session 20261117-212847-demo-codex: Codex wrote a correct failing test, then stopped on "You've hit your
     usage limit". With no report, its half-done change went to the gates and was rejected for an unrelated reason.
     """
+    text = log.read_text(encoding="utf-8", errors="ignore") if log.exists() else ""
+    try:
+        usage = json.loads(text.split("--- stderr ---")[0] or "{}").get("usage") or {}
+    except (ValueError, AttributeError):
+        usage = {}
+    if usage.get("fallback_credit"):
+        # Extra paid credit beyond the subscription: never acceptable, even when the agent finished.
+        return "driver_failed", f"the engineering agent used fallback credit ({usage.get('fallback_credit')})"
     if agent and agent.get("status") not in {None, "unreadable"}:
         return "ok", ""
-    text = log.read_text(encoding="utf-8", errors="ignore") if log.exists() else ""
     lines = [l.strip() for l in text.splitlines() if re.search(r"(?i)\b(error|limit|quota|rate.?limit|exceeded)\b", l)]
     detail = (lines[-1] if lines else "")[:200]
     if exit_code == "timeout":
@@ -622,6 +646,14 @@ def make_tree(session: Session, base: str) -> tuple[Path, str]:
 
 def run(args: argparse.Namespace) -> int:
     started = time.time()
+    problems = billing_problems(getattr(args, "driver", ""), getattr(args, "ai_judge", "") or "")
+    if problems:
+        print("Not starting: " + "; ".join(problems) + ". Paid API usage is never used (zero API billing policy).")
+        return 2
+    if args.driver == "command":
+        # Until a subscription- or locally-backed agent can be verified, an arbitrary command could bill an API.
+        print("Not starting: --driver command is disabled under the zero API billing policy (use claude, codex or manual).")
+        return 2
     if args.resume:
         session = Session.latest(args.session)
     else:
