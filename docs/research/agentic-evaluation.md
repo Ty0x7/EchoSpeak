@@ -206,7 +206,10 @@ Session `20261118-083210-agentic-demo` (`~/Work/echospeak-model-testing-2026/aut
   descriptions only, never the connected app a tool belongs to. "accounts service" returned "No tool matches" while
   `accounts` was connected. The fix puts the app's name in front of the matched text, with the failing-first test
   `test_find_tools_by_app_name.py`. The gates passed: scope, failing first per test, related suites, full suite.
-  - X1 went 6.15 (0/2) → **9.38 (2/2)**; held-out XH1 went 7.05 (0/2) → 7.97 (1/2).
+  - X1 went 6.15 (0/2) → 9.38 (2/2); held-out XH1 went 7.05 (0/2) → 7.97 (1/2).
+  - **Correction, 18 November afternoon:** these numbers are inflated. Repetitions shared one accounts service, so
+    r2 inherited r1's account. With clean trials (× 4) X1 is 1/4 on both the base and the candidate, and the fix's
+    effect is not demonstrated. See `campaign-2026-11-18.md` §5.
   - Engineering cost $0.73.
 - **Decision: `review`.** The retest passed the gates, but the AI judge flagged C1 r2 and CH1 r2 as confident
   disagreements and likely verifier errors.
