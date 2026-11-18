@@ -189,7 +189,9 @@ def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
     for name in truth.get("deleted", []):
         comp.append((2, j.check("completion", f"{name} deleted", name not in after and name in before)))
     if truth.get("asked_question"):
-        asked = any(e.get("type") == "approval_request" and (e.get("question") or e.get("kind") == "question") for e in events)
+        # On a question card, or in plain text answered by the simulated owner (harness_eval run_case).
+        asked = any(e.get("type") == "approval_request" and (e.get("question") or e.get("kind") == "question") for e in events) \
+            or any(t.get("simulated_owner_reply") for t in turns)
         comp.append((2, j.check("completion", "asked which one before acting", asked)))
     for name in truth.get("tools_not_used", []):
         comp.append((1, j.check("completion", f"didn't use {name}", not any(r["name"] == name for r in all_tools))))

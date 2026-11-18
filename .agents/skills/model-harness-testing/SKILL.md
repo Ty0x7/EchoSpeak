@@ -70,11 +70,20 @@ have to rediscover it.
 | `harness_eval.py` | One run. Flags: `--model`, `--set dev\|heldout\|all` (**the default is `dev`, 8 cases; pass `--set all` for 15**), `--only D1,H3`, `--repeat`, `--label`, `--env KEY=VALUE`, plus the A/B arms `--agents-md <file>` (the owner's AGENTS.md) and `--skill <SKILL.md>` (imported and approved through the real API). Boots an isolated backend (own data folder, auth on, unified mode) behind the recorder; never the owner's. `meta.json` records the arm and a hash of the dirty diff. |
 | `model_recorder.py` | Proxy that records every chat call: messages, tool schemas, the server's own usage and timings, reasoning. Started by `harness_eval.py`. |
 | `harness_judge.py` | `<run> [--window N] [--compare <run>]`. Scores from evidence only: re-runs tests in a copy of the project, compares hashes, reads the Ollama log, and checks the harness's own verification status. |
+| `harness_ai_judge.py` | Optional Layer 4 (docs/research/agentic-evaluation.md). `judge <run> --judge claude:haiku [--consensus 2]` adds cited findings and owner-review flags to failed, critical or lexically-judged runs. It never changes the score. `calibrate evals/judge_calibration.jsonl` measures it against labelled runs. |
+| `eval_fixtures/accounts_mcp.py` | A disposable accounts MCP service (state file = outcome, minefield tools) for the X cases. Started by `harness_eval.py` when a case needs it. |
 | `replay_call.py` | Replays one recorded call N times under a variant (`no_think`, `note_as_user`, `drop_note`). Use it to test a hypothesis before changing code. |
 | `empty_replies.py`, `estimate_check.py` | Empty replies per case; the loop's token estimate vs the server's count. |
 
 Cases are D1–D8 (development) and H1–H7 (held-out): fix and verify, context, injection, permission, recovery,
-session, honesty, and context pressure.
+session, honesty, and context pressure. Two further sets:
+- `--set env`: E1–E3 and EH1–EH2, environment access.
+- `--set cap`: capability cases.
+  - Dev: M1 memory across chats, K1 skill, X1 account workflow over MCP, C1 clarification, R1 grounded research,
+    G1 delegation.
+  - Held-out: MH1, XH1, CH1.
+
+Report task success, pass^k and critical findings next to the weighted score, not inside it.
 - **Never look at held-out failures while designing a fix.** Fix from D cases, then confirm on H.
 - Approvals are answered as an owner would answer them.
 - A case can state what the owner says on a question card (`Turn.answer`).

@@ -57,6 +57,19 @@ folder), `halt` (left uncommitted in the worktree for the owner).
 halt, `needs_authorization` from the engineering agent, an engineering agent that stops without its report
 (`driver_failed`, e.g. a usage limit), under 2 GB free memory (`ATF_MIN_FREE_GB`), or a broken run.
 
+## Optional AI judge and budgets
+
+- **`--ai-judge claude:haiku`** (or `codex`, `ollama:<model>`, `command:…`) adds Layer 4 to every evaluation in the
+  session.
+  - Cited findings go into the engineering agent's brief.
+  - A retest that passes the gates but is flagged for a suspicious process ends as **`review`**: committed on the
+    session branch, and the loop stops for the owner.
+  - The judge never changes a score. Calibrate it first: `harness_ai_judge.py calibrate`.
+- **Budgets:**
+  - `--max-cost-usd`: engineering agent plus judge; default $15.
+  - `--max-eval-tokens`: model-server tokens.
+  - Spend is in `state.json` under `spent`.
+
 ## Before keeping a session's commits
 
 The gates only see the session's dev and held-out cases. `review` prints a sweep command for every D, H and E

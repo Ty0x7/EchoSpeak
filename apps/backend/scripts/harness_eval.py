@@ -699,6 +699,15 @@ def run_case(stack: Stack, case: Case, run_dir: Path) -> dict[str, Any]:
         row["thread_id"] = thread_id
         row["events"] = events[mark:]
         turns.append(row)
+        asked_on_card = any(e.get("type") == "approval_request" and e.get("question") for e in row["events"])
+        if turn.answer and not asked_on_card and "?" in row["reply"][-400:]:
+            # The agent asked in plain text instead of on a question card: the simulated owner answers the same way,
+            # in the same conversation (ToolSandbox's simulated user). Before this, a correct prose question ended
+            # the case unanswered and failed it (agentic-demo cycle 1, C1 r2 and CH1 r2, flagged by the AI judge).
+            mark = len(events)
+            follow = run_turn(stack, thread_id, Turn(turn.answer, turn.approvals, turn.timeout), events)
+            follow.update(thread_id=thread_id, events=events[mark:], simulated_owner_reply=True)
+            turns.append(follow)
     since, until = turns[0]["started"], turns[-1]["ended"]
     traces = []
     for row in turns:

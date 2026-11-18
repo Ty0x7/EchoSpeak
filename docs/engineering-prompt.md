@@ -6,7 +6,7 @@ Claude Code and Codex use this cycle for EchoSpeak development, each with its ow
 
 Start substantial work by checking the branch, worktree, Git status and acceptance criteria. Read the latest relevant Claude and Codex session records alongside the code, engineering reports and Obsidian notes. Check which findings still reproduce on the target revision and which fixes have already landed. Choose the loops that answer the open questions. For a small change, the objective and a direct check can fit in one sentence.
 
-## Twelve engineering loops
+## Thirteen engineering loops
 
 | Loop | When and how to use it |
 |---|---|
@@ -22,6 +22,7 @@ Start substantial work by checking the branch, worktree, Git status and acceptan
 | 10. Conversation Audit Loop | Inspect recent real sessions, trace behavior to execution records, reproduce the defect, fix its cause and replay the relevant case. |
 | 11. Knowledge Preservation Loop | Record decisions, checks and limitations in the relevant project document and Obsidian note. Link evaluation results from the existing vault index so later work can reuse them. |
 | 12. Release & Acceptance Loop | Verify, commit and back up the change, integrate when authorized, then build, install and record owner acceptance when it occurs. |
+| 13. Autonomous Engineering Loop | Orchestrate bounded, repeated improvement cycles. An engineering agent (Claude Code, Codex, later EchoSpeak) fixes what independent evaluation measured; only evidence keeps a change. Use `apps/backend/scripts/auto_test_fix.py` and the [auto-test-fix skill](../.agents/skills/auto-test-fix/SKILL.md). The evaluation layers are in [agentic evaluation](research/agentic-evaluation.md). |
 
 ## Model evaluations and handoff
 
