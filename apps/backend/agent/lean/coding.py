@@ -29,12 +29,16 @@ SKIP_DIRS = {
 MAX_FILE_BYTES = 2_000_000
 
 
-def _resolve(path: str) -> tuple[Optional[Path], str]:
-    from agent.tools import _format_file_tool_roots, _safe_file_path
+def _resolve(path: str, *, read: bool = False) -> tuple[Optional[Path], str]:
+    """``read=True`` for tools that only read: folders the owner granted for reading count too."""
+    from agent.tools import _file_access_refusal, _format_file_tool_roots, _safe_file_path
 
-    target = _safe_file_path(str(path or "").strip() or ".")
+    target = _safe_file_path(str(path or "").strip() or ".", read=read)
     if target is None:
-        return None, f"Error: path not allowed: {path}. Allowed folders: {_format_file_tool_roots()}"
+        if read:
+            return None, "Error: " + _file_access_refusal(str(path or "").strip() or ".")
+        return None, (f"Error: path not allowed: {path}. Changing files works only inside: {_format_file_tool_roots()}"
+                      " (a folder allowed for reading is read-only; attach a project to work in it).")
     return target, ""
 
 
@@ -88,7 +92,7 @@ def _diff(before: str, after: str, name: str, limit: int = 60) -> str:
 
 # ── file_read ───────────────────────────────────────────────────────────
 def file_read(args: dict[str, Any]) -> str:
-    target, error = _resolve(args.get("path") or args.get("file") or "")
+    target, error = _resolve(args.get("path") or args.get("file") or "", read=True)
     if error:
         return error
     if target.is_dir():
@@ -288,8 +292,12 @@ def file_edit(args: dict[str, Any]) -> str:
 
 # ── file_search ─────────────────────────────────────────────────────────
 def _walk(root: Path):
+    from agent.lean.file_access import hidden_below
+
+    hidden = {str(place) for place in hidden_below(root)}  # a granted / or ~ never walks into /proc or ~/.ssh
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in SKIP_DIRS and not d.startswith(".") or d in {".github"}]
+        dirnames[:] = [d for d in dirnames if (d not in SKIP_DIRS and not d.startswith(".") or d in {".github"})
+                       and os.path.join(dirpath, d) not in hidden]
         for name in filenames:
             yield Path(dirpath) / name
 
@@ -298,7 +306,7 @@ def file_search(args: dict[str, Any]) -> str:
     pattern = str(args.get("pattern") or args.get("query") or "")
     if not pattern:
         return "Error: give a pattern to search for."
-    root, error = _resolve(args.get("path") or ".")
+    root, error = _resolve(args.get("path") or ".", read=True)
     if error:
         return error
     glob = str(args.get("file_glob") or args.get("glob") or "").strip()
@@ -340,7 +348,7 @@ def file_search(args: dict[str, Any]) -> str:
 # ── file_find ───────────────────────────────────────────────────────────
 def file_find(args: dict[str, Any]) -> str:
     pattern = str(args.get("pattern") or args.get("glob") or "*").strip()
-    root, error = _resolve(args.get("path") or ".")
+    root, error = _resolve(args.get("path") or ".", read=True)
     if error:
         return error
     if not root.is_dir():

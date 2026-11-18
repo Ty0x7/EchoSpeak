@@ -36,8 +36,8 @@ ALLOWED = frozenset({
     "read_image", "vision_qa", "create_media", "creation_status",
     # Answers worth keeping
     "create_artifact", "update_artifact",
-    # Everyday operations
-    "set_reminder", "list_reminders", "cancel_reminder", "open_application",
+    # Everyday operations; this computer's specs (read-only)
+    "set_reminder", "list_reminders", "cancel_reminder", "open_application", "system_info",
     # Memory and past chats
     "memory_save", "memory_search", "chat_search",
     # Skills and connected apps (their actions still ask first)
@@ -248,7 +248,7 @@ CHAT_RULES_COMPACT = """## How to answer
 # What a small model sees up front; the rest wait behind find_tools (still callable by name).
 COMPACT_FOCUS = {
     "web_search", "safe_web_fetch", "calculate", "file_read", "file_list", "file_search", "research_notebook",
-    "memory_search", "memory_save", "chat_search", "read_image", "set_reminder", "create_artifact",
+    "memory_search", "memory_save", "chat_search", "read_image", "set_reminder", "create_artifact", "system_info",
 }
 
 

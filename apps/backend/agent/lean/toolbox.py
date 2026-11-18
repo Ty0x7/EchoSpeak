@@ -702,6 +702,8 @@ class Toolbox:
             # configured file roots (workspace, Desktop, extras) apply.
             "strict_scope": bool(root),
             "project_root": root,
+            # Folders the owner allowed for reading only (set by the loop per call, agent/lean/file_access.py).
+            "read_roots": list(getattr(self, "read_roots", None) or []),
             "lean_runtime": True,
         }
 

@@ -215,6 +215,20 @@ def _file_tool_extra_roots() -> list[Path]:
     return roots
 
 
+def _file_read_grants() -> list[Path]:
+    """Folders the owner allowed this call to read (agent/lean/file_access.py): read-only, never for writes."""
+    context = _tool_execution_context.get() or {}
+    out: list[Path] = []
+    for raw in context.get("read_roots") or []:
+        try:
+            path = Path(str(raw)).expanduser().resolve()
+        except Exception:
+            continue
+        if path not in out:
+            out.append(path)
+    return out
+
+
 def _file_tool_roots() -> list[Path]:
     context = _tool_execution_context.get() or {}
     if context.get("strict_scope"):
@@ -354,7 +368,13 @@ def _inside(path: Path, folder: Path) -> bool:
         return len(parts) >= len(base) and parts[: len(base)] == base
 
 
-def _safe_file_path(path: str) -> Optional[Path]:
+def _safe_file_path(path: str, *, read: bool = False) -> Optional[Path]:
+    """The resolved path when a file tool may use it, else None.
+
+    ``read=True`` (file_read, file_list, file_find, file_search) also accepts folders the owner granted for
+    reading (_file_read_grants). Credentials and other programs' private data are refused for every tool,
+    whatever the roots (agent/lean/file_access.py: the same places the bubblewrap sandbox hides).
+    """
     if not path:
         return None
     root = _file_tool_root()
@@ -371,9 +391,21 @@ def _safe_file_path(path: str) -> Optional[Path]:
             return None
     except Exception:
         return None
+    roots = _file_tool_roots()
+    try:
+        from agent.lean.file_access import sensitive
+
+        # ~/.ssh, ~/.aws, browser profiles, /proc/<pid>/environ: a root set to the home folder (the default
+        # when ~/Documents is missing) used to hand file_read the owner's private keys.
+        if sensitive(candidate.expanduser(), roots) or sensitive(resolved, roots):
+            return None
+    except Exception:
+        return None
+    if read:
+        roots = roots + [grant for grant in _file_read_grants() if grant not in roots]
     # Windows: compare case-insensitively and with normalized separators so
     # C:/Users/.../game.js and C:\Users\...\game.js under the same project root both pass.
-    for allowed_root in _file_tool_roots():
+    for allowed_root in roots:
         try:
             allowed_resolved = Path(allowed_root).expanduser().resolve()
         except Exception:
@@ -507,6 +539,14 @@ def _format_file_tool_roots() -> str:
     return "; ".join(str(p) for p in _file_tool_roots())
 
 
+def _file_access_refusal(path: str) -> str:
+    """Why a read was refused and what would allow it: missing, a link that leads out, outside, or never readable."""
+    from agent.lean.file_access import explain
+
+    roots = _file_tool_roots() + [grant for grant in _file_read_grants() if grant not in _file_tool_roots()]
+    return explain(str(path or "."), roots)
+
+
 def _run_wmic(args: list[str]) -> list[str]:
     try:
         output = subprocess.check_output(
@@ -531,6 +571,38 @@ def _format_gb(value: Optional[float]) -> str:
     if value is None:
         return ""
     return f"{value:.1f} GB"
+
+
+def _linux_system_info() -> dict[str, Any]:
+    """CPU model and threads, GPUs, distribution and home-disk space, from /proc, /etc and lspci (read-only)."""
+    out: dict[str, Any] = {}
+    try:
+        text = Path("/proc/cpuinfo").read_text(encoding="utf-8", errors="ignore")
+        model = next((line.split(":", 1)[1].strip() for line in text.splitlines() if line.startswith("model name")), "")
+        if model:
+            out["cpu"] = f"{model} ({os.cpu_count() or '?'} threads)"
+    except Exception:
+        pass
+    try:
+        listing = subprocess.run(["lspci"], capture_output=True, text=True, timeout=3).stdout
+        gpus = [line.split(": ", 1)[1].strip() for line in listing.splitlines()
+                if re.search(r"VGA compatible|3D controller|Display controller", line) and ": " in line]
+        if gpus:
+            out["gpus"] = gpus
+    except Exception:
+        pass
+    try:
+        for line in Path("/etc/os-release").read_text(encoding="utf-8", errors="ignore").splitlines():
+            if line.startswith("PRETTY_NAME="):
+                out["distro"] = line.split("=", 1)[1].strip().strip('"')
+    except Exception:
+        pass
+    try:
+        usage = shutil.disk_usage(Path.home())
+        out["disk_home"] = f"{_format_gb(usage.free / (1024 ** 3))} free of {_format_gb(usage.total / (1024 ** 3))}"
+    except Exception:
+        pass
+    return out
 
 
 def _collect_system_info() -> dict[str, str]:
@@ -563,8 +635,16 @@ def _collect_system_info() -> dict[str, str]:
 
             mem = psutil.virtual_memory()
             ram_gb = float(mem.total) / (1024 ** 3)
+            info["ram_available"] = _format_gb(float(mem.available) / (1024 ** 3))
         except Exception:
             ram_gb = None
+        if sys.platform.startswith("linux"):
+            # platform.processor() is just "x86_64" on Linux, and there was no GPU at all: "what are my computer
+            # specs?" could not be answered on the owner's PC (conversation 0d7b2dc9, 17 November 2026).
+            linux = _linux_system_info()
+            cpu = linux.pop("cpu", "") or cpu
+            gpus = linux.pop("gpus", []) or gpus
+            info.update(linux)
 
     if not cpu:
         cpu = os.environ.get("PROCESSOR_IDENTIFIER", "")
@@ -764,9 +844,9 @@ def desktop_list_windows(filter: Optional[str] = None, limit: int = 15) -> str:
 def file_list(path: Optional[str] = ".", limit: int = 50) -> str:
     if denied := _tool_scope_denial("file_list"):
         return denied
-    target = _safe_file_path(path or ".")
+    target = _safe_file_path(path or ".", read=True)
     if target is None:
-        return f"Path not allowed. Allowed roots: {_format_file_tool_roots()}"
+        return _file_access_refusal(path or ".")
     if not target.exists():
         return "Path not found."
     if not target.is_dir():
@@ -1619,16 +1699,17 @@ def notepad_write(content: str, filename: Optional[str] = None) -> str:
     return f"Opened Notepad, typed {len(data)} chars, and saved artifact: {artifact_path}"
 
 
-@tool(description="Return basic system hardware info (OS, CPU, GPU, RAM).")
+@tool(description="This computer's specs: OS and distribution, CPU, GPU, RAM (total and free), home-disk space.")
 def system_info() -> str:
     info = _collect_system_info()
     if not info:
         return "System info unavailable."
+    labels = {"os": "OS", "distro": "Distribution", "cpu": "CPU", "gpu": "GPU", "ram": "RAM",
+              "ram_available": "RAM available", "disk_home": "Home disk"}
     lines = []
-    for key in ("os", "cpu", "gpu", "ram"):
+    for key, label in labels.items():
         val = info.get(key)
         if val:
-            label = key.upper() if key != "os" else "OS"
             lines.append(f"{label}: {val}")
     return "\n".join(lines) if lines else "System info unavailable."
 

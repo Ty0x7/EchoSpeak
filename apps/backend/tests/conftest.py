@@ -33,5 +33,23 @@ os.environ.setdefault("LEAN_QUARANTINE_READER", "off")
 os.environ.setdefault("CHECKIN_MODE", "off")
 
 
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolated_tool_context():  # type: ignore[no-untyped-def]
+    """Each test starts from the tool context the previous one found, not the one it left.
+
+    ``agent.tools.set_active_project_root`` sets the context variable without a token, so a test that calls it
+    leaked ``strict_scope=True, project_root=''`` (no folder at all) into every later test in the process:
+    test_harness_eval_findings::test_lost_work_is_recognised failed only in a full ordered run (2026-11-17).
+    """
+    from agent.tools import _tool_execution_context
+
+    token = _tool_execution_context.set(_tool_execution_context.get())
+    yield
+    _tool_execution_context.reset(token)
+
+
 def pytest_sessionfinish(session, exitstatus):  # type: ignore[no-untyped-def]
     shutil.rmtree(_TEST_STATE_ROOT, ignore_errors=True)

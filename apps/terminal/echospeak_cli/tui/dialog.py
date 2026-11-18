@@ -51,6 +51,9 @@ def approval_options(evt: dict, agent: str = "Echo") -> list[Option]:
 
 def _scope_noun(evt: dict) -> str:
     tool = str(evt.get("tool") or "")
+    if tool.startswith("read:"):
+        # A read-only folder grant (backend agent/lean/file_access.py): the card names the folder it opens.
+        return f"reading {one_line(tool[5:], 60)}"
     if tool in {"terminal", "terminal_run", "process_start"}:
         return "terminal commands"
     if tool.startswith("file_"):

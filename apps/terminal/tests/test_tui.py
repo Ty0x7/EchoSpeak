@@ -302,6 +302,12 @@ def test_approval_options_match_backend_decisions():
     recovered = {"recovered": True, "grantable": True, "persistable": True, "scope_label": "x"}
     assert [o.value for o in approval_options(recovered)] == ["allow", "deny", "steer_deny"]
     assert approval_options({}, agent="Jarvis")[-1].label == "No, and tell Jarvis what to do instead"
+    # A read-only folder grant names the folder (backend agent/lean/file_access.py).
+    read = {"tool": "read:/home/dev/Work", "grantable": True, "persistable": True,
+            "scope_label": "Read files in /home/dev/Work (read-only)"}
+    labels = [o.label for o in approval_options(read)]
+    assert labels[1] == "Yes, and allow reading /home/dev/Work for this chat"
+    assert "(read-only)" in labels[2]
 
 
 def test_dialog_never_defaults_to_allow_and_guards_typeahead():

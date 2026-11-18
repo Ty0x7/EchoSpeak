@@ -53,8 +53,14 @@ def test_file_edit_explains_missing_and_ambiguous_text(project):
     assert file_edit({"path": "dup.txt", "old_text": "a", "new_text": "b", "replace_all": True}).startswith("Edited")
 
 
-def test_paths_outside_allowed_folders_are_refused(project):
-    assert file_read({"path": str(Path.home() / "secret.txt")}).startswith("Error: path not allowed")
+def test_paths_outside_allowed_folders_are_refused(project, tmp_path):
+    # Refused with the reason and the way forward (agent/lean/file_access.py), not with the file's text.
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "secret.txt").write_text("top secret\n", encoding="utf-8")
+    out = file_read({"path": str(elsewhere / "secret.txt")})
+    assert out.startswith("Error: Not allowed yet") and "top secret" not in out, out
+    assert file_read({"path": str(Path.home() / "no-such-secret.txt")}).startswith("Error: Not found")
 
 
 def test_search_and_find_skip_dependency_folders(project):

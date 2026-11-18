@@ -32,6 +32,7 @@ from loguru import logger
 from agent.lean import policy, settings
 from agent.lean import quarantine, tool_outputs, tool_prompting, tracing, window
 from agent.lean import approvals, steering
+from agent.lean import file_access
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, evidence, outbound
 from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
@@ -236,6 +237,10 @@ class LeanTurn:
         self.taint: list[str] = taint if taint is not None else []
         self._policy_reasons: dict[str, str] = {}
         self._policy_rules: dict[str, str] = {}
+        # Reads outside the conversation's folders (agent/lean/file_access.py): the folder each call would
+        # open, keyed by call id, and the folders the owner allowed once for exactly that call.
+        self._read_folders: dict[str, Any] = {}
+        self._read_once: dict[str, str] = {}
         # Calls (by signature) the user denied or a policy blocked in this turn: never asked
         # or tried a second time. Persistence after a "no" is a failure mode, not diligence.
         self._refused: dict[str, str] = {}
@@ -1092,6 +1097,8 @@ class LeanTurn:
                 elif decision.action == "ask":
                     self._policy_reasons[call.id] = decision.reason
                     self._policy_rules[call.id] = decision.rule
+            if not problem and name in file_access.READ_TOOLS and call.id not in self._policy_reasons:
+                self._ask_for_read_access(call, name, args)
             fetched = (policy.download_and_run(str(args.get("command") or args.get("cmd") or ""))
                        if not problem and name in policy.COMMAND_TOOLS else "")
             if fetched:
@@ -1513,6 +1520,44 @@ class LeanTurn:
                    "pause_s": pause})
         return not self.cancel.wait(pause)  # Stop during the pause ends the turn instead
 
+    def _granted_read_folders(self) -> list[str]:
+        """Folders the owner allowed for reading: For this chat (this session), and Always allow (in the app only).
+
+        A channel message or an unattended routine is never covered by a grant made on a card in the app.
+        """
+        folders = [key[len(file_access.GRANT_PREFIX):] for key in get_approval_broker().session_grants(self.session_id)
+                   if file_access.is_read_grant(key)]
+        if self.interactive:
+            folders += [str(item.get("key"))[len(file_access.GRANT_PREFIX):] for item in approvals.get_grant_store().list()
+                        if file_access.is_read_grant(str(item.get("key") or ""))]
+        return list(dict.fromkeys(folders))
+
+    def _ask_for_read_access(self, call: Any, name: str, args: dict[str, Any]) -> None:
+        """A read of an existing folder outside this conversation's folders goes to the owner's approval card.
+
+        Inside the folders, or already granted: nothing to ask. Missing, never-readable (credentials) or
+        unattended: the tool itself refuses with the reason and the way forward (agent/lean/file_access.py).
+        """
+        from agent.tools import _file_tool_roots, _tool_execution_context
+
+        if not self.interactive:
+            return
+        token = _tool_execution_context.set(self.toolbox.tool_context())
+        try:
+            roots = _file_tool_roots()
+            access = file_access.classify(file_access.target(name, args), roots, self._granted_read_folders())
+        except Exception:
+            return
+        finally:
+            _tool_execution_context.reset(token)
+        if access.kind != "outside" or access.folder is None:
+            return
+        via = f" through the link {access.link}" if access.link else ""
+        self._read_folders[call.id] = access.folder
+        self._policy_rules[call.id] = "read_outside"
+        self._policy_reasons[call.id] = (f"{access.folder}{via} is outside the folders this conversation can read. "
+                                         "Allowing it lets Echo read files there, not change them")
+
     def _may_run_unasked_in_parallel(self, call: Any, name: str, args: dict[str, Any]) -> bool:
         """A read-only call nothing would ask about: no policy ask and no approval rule (lost-work checks
         concern writes, which never run in parallel)."""
@@ -1536,9 +1581,14 @@ class LeanTurn:
             return True, "", ""
         broker = get_approval_broker()
         policy_reason = self._policy_reasons.get(call.id, "")
-        # Only screen-guided desktop control can be allowed for a whole chat; other outside content asks every time.
-        grantable = (not policy_reason or self._policy_rules.get(call.id) == "screen_control") and name not in approvals.ALWAYS_ASK_TOOLS
-        if policy_reason and grantable and broker.granted(self.session_id, policy.grant_name(name)):
+        rule = self._policy_rules.get(call.id, "")
+        folder = self._read_folders.get(call.id)
+        # A read outside the conversation's folders is granted per folder, read-only (agent/lean/file_access.py).
+        grant = file_access.grant_key(folder) if folder is not None else policy.grant_name(name)
+        # Only screen-guided desktop control and folder reads can be allowed for a whole chat; other outside
+        # content asks every time.
+        grantable = (not policy_reason or rule in {"screen_control", "read_outside"}) and name not in approvals.ALWAYS_ASK_TOOLS
+        if policy_reason and grantable and broker.granted(self.session_id, grant):
             policy.audit(policy.Decision("allow", policy_reason, "screen_control"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome="allowed for this chat")
             return True, "", ""
@@ -1547,7 +1597,8 @@ class LeanTurn:
             needs, reason = True, policy_reason
         elif not needs or (grantable and broker.granted(self.session_id, policy.grant_name(name))):
             return True, "", ""
-        scope = approvals.scope_for(name, args, reason, self._policy_rules.get(call.id, ""))
+        scope = (approvals.Scope(grant, file_access.describe_grant(folder)) if folder is not None
+                 else approvals.scope_for(name, args, reason, rule))
         # Grants were made on an approval card in the app and cover chats there. Channels
         # (Discord, Telegram) and unattended routines keep refusing below: a grant must not
         # widen what a channel message, or a routine nobody watches, can do on this PC.
@@ -1610,7 +1661,7 @@ class LeanTurn:
         approval = broker.open(
             session_id=self.session_id,
             request_id=self.request_id,
-            tool=policy.grant_name(name),  # one grant covers every computer action
+            tool=grant,  # one grant covers every computer action; a read grant covers its folder
             summary=describe_call(name, args),
             # The card shows these in full: a summary can hide "; iwr … | iex" after padding.
             args=args,
@@ -1638,6 +1689,8 @@ class LeanTurn:
                 item["decision"] = decision
         self.emit({"type": "approval_resolved", "id": approval.id, "decision": decision, "tool_call_id": call.id})
         if decision == "allow":
+            if folder is not None:
+                self._read_once[call.id] = str(folder)  # "Allow once": this call, this folder, reading only
             if self.work_context:
                 self.work_context.coordinator.consume_approval(self.work_context, name, args)
             return True, "", ""
@@ -1731,6 +1784,10 @@ class LeanTurn:
                 # The work ledger refused this action (a held resource, the work's grant or budget). That is
                 # a result the agent can read and explain, not a crash of the whole turn (review R2).
                 return ToolResult(False, f"Not run: {exc}", 0, outcome="refused")
+            if name in file_access.READ_TOOLS:
+                # Folders the owner allowed for reading reach the tool boundary (agent.tools._safe_file_path).
+                once = self._read_once.get(call.id)
+                self.toolbox.read_roots = [*self._granted_read_folders(), *([once] if once else [])]
             try:
                 with work_scope(context):
                     result = self.toolbox.run(name, args)

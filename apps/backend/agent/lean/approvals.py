@@ -331,6 +331,11 @@ class ApprovalBroker:
         with self._lock:
             return tool in self._session_grants.get(session_id, set())
 
+    def session_grants(self, session_id: str) -> set[str]:
+        """Every "For this chat" grant this session holds (tools, and read:<folder> grants)."""
+        with self._lock:
+            return set(self._session_grants.get(session_id, set()))
+
     def open(self, *, session_id: str, request_id: str, tool: str, summary: str, args: dict[str, Any], reason: str,
              grantable: bool = True, scope: Optional[Scope] = None,
              file_change: Optional[dict[str, Any]] = None) -> PendingApproval:

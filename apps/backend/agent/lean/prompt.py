@@ -151,6 +151,10 @@ def _environment(*, project_root: str, notes: list[str], terminal_note: str = ""
             lines.append("- You may read and write files under: " + "; ".join(roots[:6]))
         else:
             lines.append("- You may read files under: " + "; ".join(roots[:6]) + " (creating and editing files is off)")
+    # Enforced by the loop and the tool boundary (agent/lean/file_access.py), not by this line: it only tells the
+    # model that a folder elsewhere is a question for the owner, not a dead end (conversation 0d7b2dc9).
+    lines.append("- Other folders: call the file tool with the path and EchoSpeak asks the user to allow reading it. "
+                 "Credentials (~/.ssh, keys, browser profiles) are never readable.")
     if terminal_note:
         lines.append(f"- The {terminal_note}")
     if computer_note:
