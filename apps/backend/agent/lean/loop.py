@@ -30,7 +30,7 @@ from typing import Any, Callable, Optional
 from loguru import logger
 
 from agent.lean import policy, settings
-from agent.lean import quarantine, tool_outputs, tool_prompting, tracing, window
+from agent.lean import quarantine, read_outline, tool_outputs, tool_prompting, tracing, window
 from agent.lean import approvals, steering
 from agent.lean import file_access
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
@@ -104,6 +104,9 @@ def empty_cause(turn: Any, window: int) -> str:
     return "reasoning_only" if str(getattr(turn, "reasoning", "") or "").strip() else "empty"
 # Failed summaries in one turn before compaction stops being tried (the loop trims instead).
 COMPACT_FAILURES = 2
+# Where compaction's summary (one, replaced each time) and its list of files read sit in the user's message.
+SUMMARY_MARK = "\n\n[Progress so far on this task, summarized to fit the context window]:\n"
+FILES_MARK = "\n\n[Files read in this request (outlines; read the lines you need again with offset and limit)]:\n"
 
 
 def _redacted_card(card: dict[str, Any]) -> dict[str, Any]:
@@ -310,6 +313,13 @@ class LeanTurn:
         # changed or been summarised away (_forget_reads).
         self._call_counts: dict[str, int] = {}
         self._read_sigs: set[str] = set()
+        # Files read in this request, by path: how often while unchanged (file size and time), and their outline
+        # for compaction. Re-reads of an unchanged file aren't progress (_continue_past); the third one says why
+        # re-reading can't fit (owner's GTA session, 19 November 2026: 37 of 49 steps were re-reads).
+        self._path_reads: dict[str, tuple[int, tuple[int, int]]] = {}
+        self._read_shapes: dict[str, str] = {}
+        self._rereads = 0
+        self._segment_rereads = 0
         # Tools that brought outside content into this request (shared by every
         # agent working on it). Drives the Rule-of-Two policy in agent/lean/policy.py.
         self.taint: list[str] = taint if taint is not None else []
@@ -598,6 +608,7 @@ class LeanTurn:
         self._extended, self._segment = 0, (0, len(self._outcomes))
         call_counts: dict[str, int] = {}
         self._call_counts, self._read_sigs = call_counts, set()
+        self._path_reads, self._read_shapes, self._rereads, self._segment_rereads = {}, {}, 0, 0
         stop_reason = ""
         nudges = 0
         approval_nudged = False
@@ -1418,6 +1429,12 @@ class LeanTurn:
                 self.emit({"type": "fail_streak", "step": step, "tool": name, "count": streak})
             if not refused:
                 text += self._screen_progress(name, ok, outcome, step)
+            if ok and name == "file_read":
+                reread = self._note_reread(output)
+                if reread:
+                    text += "\n\n" + app_note(reread)
+                    self.emit({"type": "reread", "step": step, "path": read_outline.read_path(output)[-200:],
+                               "count": self._path_reads.get(read_outline.read_path(output), (0,))[0]})
             if self.result_note is not None and not refused:
                 try:
                     advice = self.result_note(name, _args, ok)
@@ -1490,6 +1507,49 @@ class LeanTurn:
             except OSError:
                 logger.warning("Could not save a long tool output; trimming it instead")
         return output[:limit] + f"\n…[{len(output) - limit} more characters trimmed]"
+
+    def _remember_shape(self, path: str, content: str, fresh: bool = False) -> None:
+        """Keep the widest outline seen of a file read in this request (newest last), for compaction's file list."""
+        parsed = read_outline.parse(content)
+        if parsed is None:
+            return
+        entries = read_outline.outline(parsed[2], path, limit=16)
+        shape = f"{path} ({parsed[1]} lines)" + (": " + " · ".join(entries) if entries else "")
+        old = self._read_shapes.pop(path, "")
+        self._read_shapes[path] = shape if fresh or len(shape) >= len(old) else old
+
+    def _note_reread(self, output: str) -> str:
+        """Count a read of a file while it stays unchanged. From the third, a note on why re-reading can't help."""
+        path = read_outline.read_path(output)
+        if not path:
+            return ""
+        try:
+            stat = Path(path).stat()
+            stamp = (int(stat.st_size), int(stat.st_mtime_ns))
+        except OSError:
+            stamp = (0, 0)
+        count, seen = self._path_reads.get(path, (0, stamp))
+        changed = seen != stamp
+        count = 1 if changed else count + 1
+        self._path_reads[path] = (count, stamp)
+        self._remember_shape(path, output, fresh=changed)
+        if count < 3:
+            return ""
+        self._rereads += 1
+        window = settings.context_tokens(getattr(self.client, "endpoint", None))
+        size = f"{window // 1024}K tokens" if window else "small"
+        return (f"You've read {Path(path).name} {count} times in this request and it hasn't changed since. The "
+                f"context window ({size}) holds about one file in full, so earlier reads are trimmed to an outline, "
+                "and reading every file again won't fit them all at once. Work from the outlines: read only the lines "
+                "you need (offset and limit), make the change, then run something to check it.")
+
+    def _shrink(self, message: dict[str, Any], keep: int, note: str) -> str:
+        """An older tool result made smaller: a file read keeps its path, size and outline; anything else its head."""
+        if message.get("name") == "file_read":
+            short = read_outline.summary(str(message.get("content") or ""), note)
+            if short is not None:
+                return short
+        return self._clear_note(message, keep, note)
 
     def _clear_note(self, message: dict[str, Any], keep: int, note: str) -> str:
         """Cut an old result to its head; when it can be saved, say how to reopen it."""
@@ -1641,8 +1701,10 @@ class LeanTurn:
             return False
         seen, outcomes = self._segment
         recent = self._outcomes[outcomes:]
-        new_actions = len(call_counts) - seen
+        # A re-read of an unchanged file has new arguments (another offset) but gets nothing done.
+        new_actions = len(call_counts) - seen - (self._rereads - self._segment_rereads)
         self._segment = (len(call_counts), len(self._outcomes))
+        self._segment_rereads = self._rereads
         if new_actions < max(2, max_steps // 6) or not recent or sum(recent) * 3 < len(recent):
             return False
         self._extended += max_steps
@@ -2174,7 +2236,7 @@ class LeanTurn:
             for index in tool_indexes[:-6]:
                 content = str(messages[index].get("content") or "")
                 if len(content) > 2000:
-                    messages[index]["content"] = self._clear_note(messages[index], 1500, "older tool output cleared")
+                    messages[index]["content"] = self._shrink(messages[index], 1500, "older tool output cleared")
         if size(messages, tools) <= budget:
             return
         # 1. Shrink older tool results, keeping the most recent ones intact.
@@ -2183,7 +2245,7 @@ class LeanTurn:
         for index in tool_indexes[:-keep_recent] if len(tool_indexes) > keep_recent else []:
             content = str(messages[index].get("content") or "")
             if len(content) > 600:
-                messages[index]["content"] = self._clear_note(messages[index], 500, "older tool output trimmed to save context")
+                messages[index]["content"] = self._shrink(messages[index], 500, "older tool output trimmed to save context")
             if size(messages, tools) <= budget:
                 return
         # 2. Drop the oldest history messages (plain text, never this turn's work).
@@ -2201,6 +2263,16 @@ class LeanTurn:
             for index in tool_indexes[:-1]:
                 if index < len(messages) and messages[index].get("role") == "tool":
                     content = str(messages[index].get("content") or "")
+                    if messages[index].get("name") == "file_read":
+                        # Path, size and a short outline (≤ 400 characters), never the file's first lines.
+                        short = read_outline.summary(content, "trimmed", max_chars=400)
+                        if short is not None:
+                            messages[index]["content"] = short
+                            continue
+                        if read_outline.is_summary(content):
+                            if len(content) > 450:
+                                messages[index]["content"] = content[:400] + " …"
+                            continue
                     if len(content) > 300:
                         messages[index]["content"] = content[:250] + "\n…[trimmed]"
 
@@ -2223,6 +2295,11 @@ class LeanTurn:
             return False
         cut = steps[-keep_steps]
         span = messages[user_index + 1:cut]
+        # The request as the user sent it, and the summary an earlier compaction left on it. A new summary replaces
+        # it, written from it: appended, they piled up (17 summaries, 15.5K characters by call 72 of live LT1) and
+        # took the room the work needed, so compaction came round more and more often.
+        request, _, earlier = str(messages[user_index].get("content") or "").partition(SUMMARY_MARK)
+        earlier = earlier.partition(FILES_MARK)[0].strip()
         lines: list[str] = []
         for message in span:
             if message.get("role") == "assistant":
@@ -2233,8 +2310,13 @@ class LeanTurn:
                 text = str(message.get("content") or "").strip()[:400]
                 lines.append("You: " + (text + " " if text else "") + (f"[called {calls}]" if calls else ""))
             elif message.get("role") == "tool":
-                lines.append(f"Result of {message.get('name') or 'tool'}: {str(message.get('content') or '')[:900]}")
+                content = str(message.get("content") or "")
+                if message.get("name") == "file_read" and (path := read_outline.read_path(content)):
+                    self._remember_shape(path, content)
+                lines.append(f"Result of {message.get('name') or 'tool'}: {content[:900]}")
         body = "\n".join(lines)[-14000:]
+        if earlier:
+            body = f"Progress summarized earlier:\n{earlier[-3000:]}\n\nSteps since then:\n{body}"
         prompt = (
             "Summarize the work done so far on this task so you can keep going without the full tool output. "
             "Keep: the goal, what was tried, concrete findings (values, file paths, links, errors), and what is "
@@ -2263,11 +2345,12 @@ class LeanTurn:
         if not summary:
             self._compact_failures += 1
             return False
-        messages[user_index] = {
-            **messages[user_index],
-            "content": str(messages[user_index].get("content") or "")
-            + f"\n\n[Progress so far on this task, summarized to fit the context window]:\n{summary}",
-        }
+        files = ""
+        if self._read_shapes:
+            # Which files were read and their shape, from the results themselves: a summary of a few words can't
+            # say where update() starts in game.js, and without it the model reads the whole file again.
+            files = FILES_MARK + "\n".join(f"- {shape[:360]}" for shape in list(self._read_shapes.values())[-6:])
+        messages[user_index] = {**messages[user_index], "content": request + SUMMARY_MARK + summary + files}
         del messages[user_index + 1:cut]
         self.compactions += 1
         self._forget_reads()  # their results are now a summary: reading again is not a repeat

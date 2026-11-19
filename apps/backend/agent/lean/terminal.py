@@ -260,6 +260,40 @@ def routing_argument_problem(command: str) -> str:
             "tools if computer_action is unavailable.")
 
 
+# Commands that hand a file, page or folder to a desktop app and return at once. Only as the command itself (or
+# after cd … &&, nohup, setsid), so `which chromium` or `npm start` aren't launches.
+_LAUNCHER = re.compile(
+    r"""(?x)(?:^|[;&|]\s*|\b(?:exec|nohup|setsid)\s+)\s*
+    (?:xdg-open|gio\s+open|gnome-open|kde-open5?|wslview|
+       chromium(?:-browser)?|google-chrome(?:-stable)?|firefox|brave(?:-browser)?|librewolf|microsoft-edge(?:-stable)?|
+       nautilus|thunar|dolphin|mpv|vlc|imv|eog|evince|zathura)\b(?!\s+--?(?:version|help)\b)""")
+# What a desktop app says when there is no desktop to open on: the sandbox has no session bus or display.
+_NO_DESKTOP = re.compile(
+    r"(?i)failed to connect to (?:user scope bus|the bus|bus)|dbus_session_bus_address|cannot open display|"
+    r"unable to open display|no display|missing x server or \$display|could not connect to wayland|wayland_display")
+
+
+def launcher_note(command: str, code: int, out: str, err: str, where: str) -> str:
+    """For a command that opens something on the desktop: whether it did. '' for any other command.
+
+    The owner's Pong session (19 November 2026): xdg-open in the sandbox printed a bus error and exited 0, so it
+    looked fine and nothing opened; then each `chromium …` on this PC exited within a second, handing the page to
+    the open browser, and "It already finished, so there is nothing running to check on" read as a failure. Echo
+    launched it five times, each behind an approval.
+    """
+    if not _LAUNCHER.search(command or ""):
+        return ""
+    if where != "host" and _NO_DESKTOP.search(f"{out}\n{err}"):
+        return ("Hint: nothing opened. The sandbox has no desktop session (no display or session bus), so apps and "
+                "browsers can't open from it. To open this for the user, run the opener once on this PC "
+                "(where=\"host\"), for example xdg-open with the file's full path.")
+    if code == 0 and not str(out or "").strip():
+        return ("This opener hands the file to the desktop app (or to a browser window that is already open) and "
+                "returns at once, so exit code 0 means it was opened. Don't launch it again: tell the user it should "
+                "be open now, and ask them to say if it isn't.")
+    return ""
+
+
 def failure_hint(code: int, text: str, where: str, command: str = "", shell: str = "") -> str:
     """One line on the usual cause of a failure small models get stuck on."""
     low = (text or "").lower()
@@ -1278,7 +1312,7 @@ class Terminal:
         if launch.err.strip():
             body = (body + "\n" if body else "") + "[stderr]\n" + _clip(launch.err.strip(), 6000)
         hint = (failure_hint(launch.code, launch.out + "\n" + launch.err, where, command, self.shell_for(args, where))
-                if launch.code != 0 else "")
+                if launch.code != 0 else launcher_note(command, launch.code, launch.out, launch.err, where))
         return f"[{status} · {elapsed:.1f}s · {label} · {cwd}]\n{body}" + (f"\n{hint}" if hint else "")
 
     def process_start(self, args: dict[str, Any]) -> str:
@@ -1296,8 +1330,10 @@ class Terminal:
         if not launch.finished:
             return self._background(launch, wait, label, cwd, server=True)
         output = (launch.out.strip() + (f"\n[stderr]\n{launch.err.strip()}" if launch.err.strip() else "")).strip()
+        ending = (launcher_note(command, launch.code, launch.out, launch.err, where)
+                  or "It already finished, so there is nothing running to check on.")
         return (f"[exited with code {launch.code} within {wait}s · {label} · {cwd}]\n{_clip(output, 6000) or '(no output)'}\n"
-                "It already finished, so there is nothing running to check on.")
+                + ending)
 
     def process_output(self, args: dict[str, Any]) -> str:
         proc = _PROCESSES.get(str(args.get("process_id") or args.get("id") or ""))

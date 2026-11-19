@@ -31,7 +31,7 @@ from agent.lean.coding import coding_tools, project_overview
 from agent.integrations import integration_tools
 from agent.lean.computer import tools as computer_tools
 from agent.project_workspace import tools as workspace_tools
-from agent.lean import tool_outputs, verification
+from agent.lean import tool_outputs, verification, work_record
 from agent import a2a_trust, home, mcp_apps
 from agent.lean.artifacts import artifact_tools
 from agent.lean.rich_tools import rich_tools
@@ -412,6 +412,8 @@ class LeanSession:
         from agent.state import get_state_store
         store = get_state_store()
         state = store.get_thread_state(self.session_id)
+        # "why stopped? and continue" carries on the unfinished work's objective (work_record.is_continuation).
+        objective = objective or (self._goal(self._user_message) if self._continued()[0] else "")
         row = store.coordination.create(objective=objective or self._user_message or "Native tool task", agent_id=persona.id,
             principal=self.principal_id, session_id=self.session_id, project_id=str(state.active_project_id or ""),
             key=f"request:{self.request_id}", tools=tools, taint=self._taint, budget=persona.budget)
@@ -1378,6 +1380,8 @@ class LeanSession:
         # What changes between turns (the time, the git status) rides on this request, not in the system prompt,
         # so the system prompt, the tools and the history stay byte-identical and the model server reuses them.
         turn.request_note = request_note("" if self.model_first else repo_note, context=recalled)
+        if depth == 0 and not guest and (continuing := self._continuation_note()):
+            turn.request_note = continuing + "\n" + turn.request_note
         # Only the agent the user is talking to reads steering; a teammate doing delegated work doesn't.
         turn.steerable = depth == 0
         # The agent the user talks to carries on past its step limit while it is still making progress (Chat has
@@ -2210,7 +2214,49 @@ class LeanSession:
         """What this agent is working toward: its task (if it was given one) and the user's request."""
         request = request_text(self._user_message or message).strip()
         task = str(task or "").strip()
+        if not task:
+            objective, _last = self._continued()
+            if objective and objective != request:
+                # "why stopped? and continue" is not an objective; the work it asks to carry on is.
+                return f"{objective}\n(The user asked to continue: {request})"
         return f"{task}\n(The user asked: {request})" if task and task not in request else request
+
+    def _continued(self) -> tuple[str, dict[str, Any]]:
+        """(objective, last turn) when this request only asks to carry on the last turn's project work or
+        unfinished work (agent/lean/work_record.py), otherwise ('', {}). Looked up once per request."""
+        cached = getattr(self, "_continued_cache", None)
+        message = request_text(getattr(self, "_user_message", "") or "")
+        if cached is not None and cached[0] == message:
+            return cached[1]
+        found: tuple[str, dict[str, Any]] = ("", {})
+        if work_record.is_continuation(message) and getattr(self, "caller_role", "owner") == "owner":
+            from agent.state import get_state_store
+
+            try:
+                turns = get_state_store().session_timeline(self.session_id, limit=8).get("turns") or []
+            except Exception:
+                turns = []
+            current = str(getattr(self, "execution_id", "") or "")
+            turns = [t for t in turns if str(t.get("execution_id") or "") != current]
+            if turns:
+                last = turns[-1]
+                done, commands = work_record.changes(last)
+                objective = work_record.objective_of(turns)
+                if objective and (work_record.unfinished(last) or done or commands):
+                    found = (objective, last)
+        self._continued_cache = (message, found)
+        return found
+
+    def _continuation_note(self) -> str:
+        """For the end of a "continue" request: what is being continued and why the last turn stopped."""
+        objective, last = self._continued()
+        if not objective:
+            return ""
+        ended = work_record.unfinished(last) or "it ended after the reply above"
+        return (f"[EchoSpeak: this request continues earlier work: \"{objective[:300]}\". How the last turn on it "
+                f"ended: {ended}. If the user asks why it stopped, tell them that in one sentence. Then carry on from "
+                "where it stopped: check what already exists (the record on that turn lists what it changed) and build "
+                "on it, in the same language and structure, instead of starting over.]")
 
     def _past_chats(self) -> list[str]:
         """When the user points back ("last time", "what we discussed"), the matching past messages.
@@ -2287,11 +2333,16 @@ class LeanSession:
         # Recent turns verbatim; older ones only if the chat summary doesn't cover them yet.
         covered = set(summaries.load(self.session_id).get("covered") or [])
         recent_start = max(0, len(turns) - summaries.RECENT_TURNS)
+        root = str(getattr(self, "project_root", "") or "")
         for index, turn in enumerate(turns):
             if str(turn.get("execution_id") or "") == exclude_execution:
                 continue
             if index < recent_start and str(turn.get("execution_id") or "") in covered:
                 continue
+            start = len(rows)
+            # What the turn changed and how it ended, on its reply: the reply alone often doesn't say, and the next
+            # turn can't see tool calls (owner's GTA session: a JavaScript game started beside an unseen Python one).
+            record = work_record.turn_line(turn, root) if self.caller_role == "owner" else ""
             for msg in turn.get("messages") or []:
                 text = str(msg.get("text") or "").strip()
                 refs = [{"id": w["data"]["id"], "session_id": self.session_id}
@@ -2311,6 +2362,11 @@ class LeanSession:
                     if refs:
                         rows[-1]["observations"] = refs[-3:]
                         rows[-1]["content"] += "\nSaved visual observations: " + ", ".join(ref["id"] for ref in refs[-3:])
+            if record and len(rows) > start:
+                if rows[-1]["role"] == "assistant":
+                    rows[-1]["content"] += "\n\n" + record
+                else:
+                    rows.append({"role": "assistant", "content": record})
         # Merge consecutive same-role messages: chat templates expect alternation.
         merged: list[dict[str, Any]] = []
         for row in rows[-_HISTORY_MESSAGES:]:
