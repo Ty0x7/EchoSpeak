@@ -98,11 +98,14 @@ class Recorder(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         captured = bytearray()
+        first_chunk = None   # Ollama streams nothing until the prompt is processed: this is (mostly) prefill time
         try:
             while True:
                 chunk = upstream.read1(65536) if hasattr(upstream, "read1") else upstream.read(65536)
                 if not chunk:
                     break
+                if first_chunk is None:
+                    first_chunk = time.time()
                 if record:
                     captured.extend(chunk)
                 self.wfile.write(f"{len(chunk):X}\r\n".encode() + chunk + b"\r\n")
@@ -123,6 +126,7 @@ class Recorder(BaseHTTPRequestHandler):
         with _lock:
             _seq += 1
             row = {"seq": _seq, "started": started, "ended": time.time(), "latency_s": round(time.time() - started, 3),
+                   "first_chunk_s": round(first_chunk - started, 3) if first_chunk else None,
                    "status": upstream.status, "request": request, "response": response}
             with self.out.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")

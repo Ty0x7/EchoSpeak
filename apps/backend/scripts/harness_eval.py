@@ -613,7 +613,9 @@ _FILLER = ["Unrelated: give me three tips for writing good commit messages.",
 def setup_multifact(p: Path) -> dict[str, Any]:
     import datetime as _dt
 
-    today = _dt.date(2026, 3, 2) + _dt.timedelta(days=random.randint(0, 40))
+    # The real date: the model is told the current time on every request, so a made-up "today" contradicted it
+    # (LS1 r1, 19 November: the model rightly asked which date was correct). Counting from the real today instead.
+    today = _dt.date.today()
     launch = today + _dt.timedelta(days=random.randint(18, 75))
     lead, codename = random.choice(_LEADS), random.choice(_CODENAMES)
     budget = random.choice([18, 24, 36, 42, 55]) * 1000
@@ -657,7 +659,7 @@ LONG_DEV = [
     Case("LS1", "Several facts in one chat, combined after unrelated turns", "long-session",
          [Turn("Project notes for {codename}: launch is {launch}, the budget is ${budget}, and the lead is {lead}. "
                "Just acknowledge."), Turn(_FILLER[0]), Turn(_FILLER[1]), Turn(_FILLER[2]),
-          Turn("Back to {codename}: who leads it, and how many days are there from today ({today}) to the launch?")],
+          Turn("Back to {codename}: who leads it, and how many days from today until the launch?")],
          setup_multifact, ideal_calls=5, attach=False),
     Case("LS2", "A fact that changes during the chat", "long-session",
          [Turn("The design review is on {day1} in room {room1}."),
