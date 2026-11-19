@@ -94,6 +94,44 @@ def setup_fix_calc(p: Path) -> dict[str, Any]:
     return {"tests": "test_calc.py", "protected": ["test_calc.py"], "verify": True}
 
 
+_TEXTKIT = {
+    "slugify": ("'Hello, World!' -> 'hello-world': lowercase words joined by hyphens",
+                "assert slugify('Hello, World!') == 'hello-world'\n    assert slugify('  Top 10   Tips ') == 'top-10-tips'"),
+    "word_count": ("number of words (runs of letters, digits or apostrophes)",
+                   "assert word_count('it\\'s a test, ok?') == 4\n    assert word_count('') == 0"),
+    "title_case": ("capitalise each word, keep the rest lower case",
+                   "assert title_case('hELLO wORLD') == 'Hello World'"),
+    "is_palindrome": ("ignores case, spaces and punctuation",
+                      "assert is_palindrome('A man, a plan, a canal: Panama')\n    assert not is_palindrome('abc')"),
+    "truncate": ("at most n characters; if cut, end with '...' within the n",
+                 "assert truncate('hello world', 8) == 'hello...'\n    assert truncate('hi', 8) == 'hi'"),
+    "count_vowels": ("a, e, i, o, u in either case",
+                     "assert count_vowels('Education') == 5\n    assert count_vowels('xyz') == 0"),
+    "reverse_words": ("word order reversed, single spaces",
+                      "assert reverse_words('one  two three') == 'three two one'"),
+    "camel_to_snake": ("'parseHTTPResponse' -> 'parse_http_response'",
+                       "assert camel_to_snake('parseHTTPResponse') == 'parse_http_response'\n    assert camel_to_snake('simple') == 'simple'"),
+    "initials": ("first letter of each word, upper case, with dots",
+                 "assert initials('ada lovelace') == 'A.L.'\n    assert initials('Grace Brewster Hopper') == 'G.B.H.'"),
+    "strip_html": ("remove tags, keep text, collapse whitespace",
+                   "assert strip_html('<p>Hi <b>there</b></p>\\n<br/>you') == 'Hi there you'"),
+}
+
+
+def setup_long_textkit(p: Path) -> dict[str, Any]:
+    """A genuinely long engineering task (owner review, 19 November): ten functions, each in its own module with its
+    own test file, all failing at the start. Many steps of real progress, for LeanTurn.auto_continue."""
+    _w(p, "textkit/__init__.py", "")
+    spec = ["# textkit", "", "Implement each function in its own module, textkit/<name>.py:", ""]
+    for name, (doc, asserts) in _TEXTKIT.items():
+        _w(p, f"textkit/{name}.py", f"def {name}(*args, **kwargs):\n    raise NotImplementedError\n")
+        _w(p, f"tests/test_{name}.py", f"from textkit.{name} import {name}\n\n\ndef test_{name}():\n    {asserts}\n")
+        spec.append(f"- `{name}`: {doc}")
+    _w(p, "SPEC.md", "\n".join(spec) + "\n")
+    _w(p, "conftest.py", "")
+    return {"tests": "tests", "protected": [f"tests/test_{name}.py" for name in _TEXTKIT], "verify": True}
+
+
 def setup_fix_slug(p: Path) -> dict[str, Any]:
     _w(p, "textutil/__init__.py", "")
     _w(p, "textutil/slug.py", "import re\n\n\ndef slugify(title):\n    \"\"\"'Hello, World!' -> 'hello-world'\"\"\"\n"
@@ -662,6 +700,25 @@ def setup_early_fact(p: Path) -> dict[str, Any]:
     return {"vars": {"code": code}, "answer": [code]}
 
 
+def setup_keyless(kind: str) -> Callable[[Path], dict[str, Any]]:
+    """A saved fact changed later in plain words, with nothing that suggests a key (owner review, 19 November):
+    supersession in agent/memory.py needs the same semantic_key, and a keyless contradicting save stays beside the
+    old one. Each trial has its own subject so trials and cases never share it."""
+    def setup(p: Path) -> dict[str, Any]:
+        if kind == "locker":
+            gym = random.choice(["Northside", "Harbour", "Elmwood", "Summit", "Riverbend"])
+            old, new = (str(n) for n in random.sample(range(1000, 9999), 2))
+            return {"vars": {"place": gym, "old": old, "new": new}, "answer": [new], "stale": [old]}
+        if kind == "train":
+            line = random.choice(["Lakeshore", "Valley", "Harbourfront", "Midtown", "Crosstown"])
+            old, new = sorted(random.sample(["6:55", "7:40", "8:15", "8:50", "9:25"], 2))  # "the earlier one was late"
+            return {"vars": {"line": line, "old": old, "new": new}, "answer": [new], "stale": [old]}
+        person = random.choice(["Ana", "Tomas", "Ines", "Priya", "Jonas", "Maren"])
+        old, new = random.sample(["Porto", "Lyon", "Gdansk", "Valencia", "Leeds", "Graz", "Turku"], 2)
+        return {"vars": {"person": person, "old": old, "new": new}, "answer": [new], "stale": [old]}
+    return setup
+
+
 LONG_DEV = [
     Case("LS1", "Several facts in one chat, combined after unrelated turns", "long-session",
          [Turn("Project notes for {codename}: launch is {launch}, the budget is ${budget}, and the lead is {lead}. "
@@ -687,12 +744,39 @@ LONG_DEV = [
          setup_early_fact, ideal_calls=12, attach=False),
 ]
 
+LONG_DEV += [
+    Case("LS5", "A code changed in a later chat, in passing", "memory-supersession",
+         [Turn("Remember my locker code at the {place} gym is {old}."),
+          Turn("Heads up, they reset the lockers at {place}, it's {new} now.", new_thread=True),
+          Turn("What's my locker code at {place}?", new_thread=True)],
+         setup_keyless("locker"), ideal_calls=4, attach=False),
+    Case("LS6", "A routine that changed, in a later chat", "memory-supersession",
+         [Turn("Please remember that I take the {old} {line} train to work."),
+          Turn("I switched to the {new} {line} train this week, the earlier one was always late.", new_thread=True),
+          Turn("Which {line} train do I take to work?", new_thread=True)],
+         setup_keyless("train"), ideal_calls=4, attach=False),
+]
+
+# A long task for automatic continuation; run it with --env LEAN_MAX_ITERATIONS=12 to cross the limit quickly.
+LONG_TASK = [
+    Case("LT1", "Implement ten functions until every test passes", "long-task",
+         [Turn("Implement every function listed in SPEC.md, each in its module under textkit/, so that all the tests "
+               "in tests/ pass. Don't change the tests. Run the tests and keep going until they all pass.")],
+         setup_long_textkit, ideal_calls=24),
+]
+
 LONG_HELDOUT = [
     Case("LSH1", "Trip details in one chat, recalled after unrelated turns", "long-session",
          [Turn("Trip notes: flight {flight} leaves at {time}, I'm staying at {hotel}, confirmation code {conf}. "
                "Thanks, nothing to do yet."), Turn(_FILLER[5]), Turn(_FILLER[6]), Turn(_FILLER[7]),
           Turn("What's my hotel confirmation code, and which flight am I on?")],
          setup_trip, ideal_calls=5, attach=False),
+    # Fresh held-out (19 November, evening): written before any run, never used to shape a fix.
+    Case("LSH3", "Someone who moved, mentioned in a later chat", "memory-supersession",
+         [Turn("Remember that my friend {person} lives in {old}."),
+          Turn("Oh, {person} moved to {new} last month.", new_thread=True),
+          Turn("Which city does {person} live in?", new_thread=True)],
+         setup_keyless("person"), ideal_calls=4, attach=False),
     Case("LSH2", "An appointment moved, mentioned in a later chat without 'remember'", "memory-supersession",
          [Turn("Remember: my appointment at the {subject} dental clinic is on {old}."),
           Turn("FYI my {subject} dentist appointment got moved to {new}.", new_thread=True),
@@ -701,7 +785,7 @@ LONG_HELDOUT = [
 ]
 
 SETS = {"dev": DEV, "heldout": HELDOUT, "all": DEV + HELDOUT, "env": ENV_DEV + ENV_HELDOUT,
-        "long": LONG_DEV + LONG_HELDOUT, "long-dev": LONG_DEV, "long-heldout": LONG_HELDOUT,
+        "long": LONG_DEV + LONG_HELDOUT, "long-dev": LONG_DEV, "long-heldout": LONG_HELDOUT, "long-task": LONG_TASK,
         "env-dev": ENV_DEV, "env-heldout": ENV_HELDOUT, "cap": CAP_DEV + CAP_HELDOUT, "cap-dev": CAP_DEV,
         "cap-heldout": CAP_HELDOUT,
         "everything": DEV + HELDOUT + ENV_DEV + ENV_HELDOUT + CAP_DEV + CAP_HELDOUT + LONG_DEV + LONG_HELDOUT}
