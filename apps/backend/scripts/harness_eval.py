@@ -587,9 +587,115 @@ ENV_HELDOUT = [
          [Turn("Show me what's in my ~/.ssh/config file.")],
          setup_credentials, ideal_calls=2, attach=False),
 ]
+# ── long sessions and changing facts (context and memory campaign, 19 November) ──────────────────────────
+# Several facts in one long chat, a fact that changes, and a remembered fact replaced in a later chat. Every trial
+# gets its own values; "stale" lists outdated values the reply must not give as the answer.
+_CODENAMES = ["Heron", "Juniper", "Basalt", "Quill", "Saffron", "Tundra", "Lumen", "Cobalt", "Marigold", "Vesper"]
+_LEADS = ["Nadia Okoro", "Felix Brandt", "Mei Tanaka", "Omar Haddad", "Zoe Clarke", "Ravi Iyer", "Lena Novak"]
+_ROOMS = ["Aspen", "Birch", "Cedar", "Maple", "Willow", "Rowan", "Hazel", "Alder"]
+_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+_FILLER = ["Unrelated: give me three tips for writing good commit messages.",
+           "Also unrelated: explain what a race condition is, in two sentences.",
+           "Draft a five-sentence paragraph on why code review matters.",
+           "In one sentence, what is the difference between a list and a tuple in Python?",
+           "Suggest a name for a small internal tool that tracks lunch orders.",
+           "What's a good way to structure a weekly team update? Three bullets.",
+           "Explain what an API rate limit is, in one sentence.",
+           "Give me two ideas for a team icebreaker.",
+           "In one sentence: why do people use virtual environments in Python?",
+           "What does idempotent mean, briefly?",
+           "List three common causes of flaky tests.",
+           "Write a one-line commit message for fixing a typo in the README.",
+           "Name two pros of pair programming.",
+           "What is a feature flag, in one sentence?"]
+
+
+def setup_multifact(p: Path) -> dict[str, Any]:
+    import datetime as _dt
+
+    today = _dt.date(2026, 3, 2) + _dt.timedelta(days=random.randint(0, 40))
+    launch = today + _dt.timedelta(days=random.randint(18, 75))
+    lead, codename = random.choice(_LEADS), random.choice(_CODENAMES)
+    budget = random.choice([18, 24, 36, 42, 55]) * 1000
+    return {"vars": {"codename": codename, "lead": lead, "budget": f"{budget:,}", "today": today.strftime("%B %d, %Y"),
+                     "launch": launch.strftime("%B %d, %Y")},
+            "answer": [lead.split()[0], str((launch - today).days)]}
+
+
+def setup_update_in_chat(p: Path) -> dict[str, Any]:
+    day1, day2 = random.sample(_DAYS, 2)
+    room1, room2 = random.sample(_ROOMS, 2)
+    return {"vars": {"day1": day1, "day2": day2, "room1": room1, "room2": room2},
+            "answer": [day2, room2], "stale": [day1, room1]}
+
+
+def setup_supersede(kind: str) -> Callable[[Path], dict[str, Any]]:
+    def setup(p: Path) -> dict[str, Any]:
+        if kind == "server":
+            old, new = (f"{random.choice(['orion', 'vega', 'lyra', 'atlas'])}-{n}" for n in random.sample(range(10, 99), 2))
+        else:
+            old, new = (f"{d} at {h}" for d, h in zip(random.sample(_DAYS, 2), random.sample(["9:30", "11:00", "14:15", "16:45"], 2)))
+        return {"vars": {"old": old, "new": new}, "answer": [new.split(" at ")[0] if kind != "server" else new],
+                "stale": [old.split(" at ")[0] if kind != "server" else old]}
+    return setup
+
+
+def setup_trip(p: Path) -> dict[str, Any]:
+    flight = f"{random.choice(['AC', 'LH', 'KL', 'BA'])}{random.randint(100, 999)}"
+    conf = "".join(random.choice("ABCDEFGHJKLMNPQRSTUVWXYZ23456789") for _ in range(6))
+    hotel = f"Hotel {random.choice(_VENUES)}"
+    return {"vars": {"flight": flight, "conf": conf, "hotel": hotel, "time": random.choice(["07:40", "13:15", "18:05"])},
+            "answer": [conf, flight]}
+
+
+def setup_early_fact(p: Path) -> dict[str, Any]:
+    code = f"{random.choice(_CODENAMES).lower()}-{random.randint(1000, 9999)}"
+    return {"vars": {"code": code}, "answer": [code]}
+
+
+LONG_DEV = [
+    Case("LS1", "Several facts in one chat, combined after unrelated turns", "long-session",
+         [Turn("Project notes for {codename}: launch is {launch}, the budget is ${budget}, and the lead is {lead}. "
+               "Just acknowledge."), Turn(_FILLER[0]), Turn(_FILLER[1]), Turn(_FILLER[2]),
+          Turn("Back to {codename}: who leads it, and how many days are there from today ({today}) to the launch?")],
+         setup_multifact, ideal_calls=5, attach=False),
+    Case("LS2", "A fact that changes during the chat", "long-session",
+         [Turn("The design review is on {day1} in room {room1}."),
+          Turn("Suggest a three-item agenda for it."),
+          Turn("Change of plan: the design review moved to {day2}, room {room2}."),
+          Turn(_FILLER[3]),
+          Turn("Remind me: when and where is the design review?")],
+         setup_update_in_chat, ideal_calls=5, attach=False),
+    Case("LS3", "A remembered fact replaced in a later chat", "memory-supersession",
+         [Turn("Remember that my build server is {old}."),
+          Turn("Update: my build server is now {new}. Please remember that instead.", new_thread=True),
+          Turn("What's my build server?", new_thread=True)],
+         setup_supersede("server"), ideal_calls=4, attach=False),
+    Case("LS4", "An early fact after a long run of other turns", "long-session",
+         [Turn("Note this, I'll ask later: the vault code for the demo is {code}.")]
+         + [Turn(f) for f in _FILLER[4:14]]
+         + [Turn("What was the vault code for the demo that I gave you at the start?")],
+         setup_early_fact, ideal_calls=12, attach=False),
+]
+
+LONG_HELDOUT = [
+    Case("LSH1", "Trip details in one chat, recalled after unrelated turns", "long-session",
+         [Turn("Trip notes: flight {flight} leaves at {time}, I'm staying at {hotel}, confirmation code {conf}. "
+               "Thanks, nothing to do yet."), Turn(_FILLER[5]), Turn(_FILLER[6]), Turn(_FILLER[7]),
+          Turn("What's my hotel confirmation code, and which flight am I on?")],
+         setup_trip, ideal_calls=5, attach=False),
+    Case("LSH2", "An appointment moved, mentioned in a later chat without 'remember'", "memory-supersession",
+         [Turn("Remember: my dentist appointment is on {old}."),
+          Turn("FYI my dentist appointment got moved to {new}.", new_thread=True),
+          Turn("When is my dentist appointment?", new_thread=True)],
+         setup_supersede("appointment"), ideal_calls=4, attach=False),
+]
+
 SETS = {"dev": DEV, "heldout": HELDOUT, "all": DEV + HELDOUT, "env": ENV_DEV + ENV_HELDOUT,
+        "long": LONG_DEV + LONG_HELDOUT, "long-dev": LONG_DEV, "long-heldout": LONG_HELDOUT,
         "env-dev": ENV_DEV, "env-heldout": ENV_HELDOUT, "cap": CAP_DEV + CAP_HELDOUT, "cap-dev": CAP_DEV,
-        "cap-heldout": CAP_HELDOUT, "everything": DEV + HELDOUT + ENV_DEV + ENV_HELDOUT + CAP_DEV + CAP_HELDOUT}
+        "cap-heldout": CAP_HELDOUT,
+        "everything": DEV + HELDOUT + ENV_DEV + ENV_HELDOUT + CAP_DEV + CAP_HELDOUT + LONG_DEV + LONG_HELDOUT}
 
 
 # ── zero API billing (owner policy, 18 November 2026: "No paid API calls whatsoever") ─────────────
