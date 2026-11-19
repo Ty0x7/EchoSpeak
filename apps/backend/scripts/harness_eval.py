@@ -636,7 +636,11 @@ def setup_supersede(kind: str) -> Callable[[Path], dict[str, Any]]:
         if kind == "server":
             old, new = (f"{random.choice(['orion', 'vega', 'lyra', 'atlas'])}-{n}" for n in random.sample(range(10, 99), 2))
         else:
-            old, new = (f"{d} at {h}" for d, h in zip(random.sample(_DAYS, 2), random.sample(["9:30", "11:00", "14:15", "16:45"], 2)))
+            # Never today's weekday: "Thursday" said on a Thursday is ambiguous (LSH2 r1, 19 November: the model
+            # took it as next week's, which the case then counted as a different day).
+            import datetime as _dt
+            days = [d for d in _DAYS if d != _dt.date.today().strftime("%A")]
+            old, new = (f"{d} at {h}" for d, h in zip(random.sample(days, 2), random.sample(["9:30", "11:00", "14:15", "16:45"], 2)))
         # Each trial names its own subject: the run's backend keeps memories across cases and repetitions, and in
         # the baseline LS3 met MR1's "build server is pluto-21" and LSH2 r2 met r1's appointment (evaluation, not model).
         subject = random.choice(_CODENAMES) if kind == "server" else random.choice(["Northgate", "Riverside", "Elm Street", "Harbour"])

@@ -1175,6 +1175,13 @@ class LeanSession:
             # What the request itself names strongly (agent_sessions for "codex and claude sessions") is listed
             # up front instead of waiting for a find_tools call a small model doesn't think to make.
             toolbox.list_suggested(self._goal(message, task))
+        if "memory_save" in toolbox.deferred and not read_only:
+            from agent.memory_curator import MemoryCurator
+            if MemoryCurator.is_explicit_memory_request(request_text(message)):
+                # "Remember that …" to an agent whose focus defers memory_save (the builder): listed, or it saved
+                # the fact over its private project notes with agent_notes (evaluation MI1, 19 November).
+                toolbox.deferred.discard("memory_save")
+                toolbox.schema_version += 1
         if "spawn_workers" in toolbox.native:
             # Workers get a subset of exactly this toolbox: never more than their lead.
             toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]

@@ -159,7 +159,10 @@ def render(memories: Iterable[dict[str, Any]]) -> str:
         # Provenance: when it was saved, and whether it's about this project only, so the model can say
         # "you told me on…" or notice a fact may have changed instead of presenting it as current truth.
         where = {"project": "this project", "session": "this chat"}.get(str(memory.get("scope") or ""), "")
-        origin = ", ".join(part for part in (f"saved {memory['saved_at']}" if memory.get("saved_at") else "", where) if part)
+        # And its key, so a change can be saved under it and replace the old value (evaluation LSH2, 19 November).
+        key = str(memory.get("semantic_key") or "").rsplit(":", 1)[-1]
+        origin = ", ".join(part for part in (f"saved {memory['saved_at']}" if memory.get("saved_at") else "", where,
+                                             f"key {key}" if key else "") if part)
         lines.append(f"- {line}" + (f" ({origin})" if origin else ""))
         used += len(line)
         if len(lines) >= PROMPT_ROWS:
@@ -167,4 +170,6 @@ def render(memories: Iterable[dict[str, Any]]) -> str:
     if not lines:
         return ""
     return ("## What you know about the user\n"
-            "Saved facts, possibly out of date. Use them when they help; don't recite them.\n" + "\n".join(lines))
+            "Saved facts, possibly out of date. Use them when they help; don't recite them. When the user says one "
+            "of them has changed, save the new value with memory_save and the same key, so it replaces the old one.\n"
+            + "\n".join(lines))

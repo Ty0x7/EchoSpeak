@@ -200,6 +200,18 @@ def test_recalled_memories_carry_when_and_where_they_were_saved():
     assert "Prefers metric units. (saved 2026-10-20)" in text and "Uses pnpm in this repo. (saved 2026-10-21, this project)" in text
 
 
+def test_recalled_memories_show_their_key_so_a_change_replaces_them():
+    """Evaluation LSH2 (19 November): "my appointment got moved to Thursday" set a reminder and left the saved
+    appointment as it was, so the next chat answered with the old day. The key is shown, and the section says a
+    change is saved under the same key (it replaces the old value: agent/memory.py supersession)."""
+    text = memory_quality.render([{"content": "Dental appointment at Northgate on Wednesday at 9:30.", "scope": "account",
+                                   "saved_at": "2026-11-19", "semantic_key": "dental_appointment"},
+                                  {"content": "Build key for forge.", "scope": "account", "semantic_key": "agent:forge:build_key"}])
+    assert "(saved 2026-11-19, key dental_appointment)" in text
+    assert "key build_key" in text and "agent:forge" not in text
+    assert "has changed" in text and "same key" in text
+
+
 def test_sports_times_say_whose_clock_they_are_on():
     from agent.sports_espn import _local_time
     assert _local_time("2026-10-30T01:00:00Z", zone=True).endswith("(your time)")

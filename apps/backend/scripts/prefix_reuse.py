@@ -93,12 +93,12 @@ def analyse(run_dir: Path) -> dict:
         # What the model server says it did: prompt tokens it processed versus those it took from its cache.
         total = sum(r["prompt_tokens"] for r in served)
         summary["server_prompt_tokens"] = total
-        summary["server_processed_tokens"] = sum(r["processed"] for r in served)
-        summary["server_cached_share"] = round(1 - summary["server_processed_tokens"] / total, 3) if total else None
         summary["server_prefill_ms_mean"] = round(statistics.mean(r["prompt_ms"] for r in served))
         summary["server_prefill_ms_median"] = round(statistics.median(r["prompt_ms"] for r in served))
         summary["server_prefill_ms_total"] = round(sum(r["prompt_ms"] for r in served))
-        summary["calls_mostly_reprocessed"] = sum(1 for r in served if r["processed"] > 0.5 * r["prompt_tokens"])
+        # Ollama reports prompt_n as the whole prompt even when most of it came from its cache, so prefill time
+        # is the measure: a cold 5K-token prompt takes ~2.7 s here, a cached one ~0.2 s.
+        summary["calls_prefill_over_1s"] = sum(1 for r in served if r["prompt_ms"] > 1000)
     timed = [r for r in main if r["first_chunk_s"] is not None]
     if timed:
         summary["main_first_chunk_s_mean"] = round(statistics.mean(r["first_chunk_s"] for r in timed), 2)
