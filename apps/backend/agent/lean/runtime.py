@@ -138,6 +138,9 @@ _SEARCH_STOP = frozenset({
     "said", "told", "name", "called", "chat", "conversation", "message", "past", "previous", "last", "any",
 })
 
+# The owner asking an agent to remember something (keeps memory_save listed on a focused local model).
+REMEMBER_REQUEST = re.compile(r"(?i)\b(remember|don'?t forget|keep in mind|make a note|note (?:that|this|down))\b")
+
 class LeanSession:
     """Runs one user message through one or more agents in a Session."""
 
@@ -1178,6 +1181,12 @@ class LeanSession:
         elif not guest and self._local_model(persona):
             # Any other agent on a local model: everyday tools up front, the rest through find_tools (R12).
             toolbox.focus(chat_mode.COMPACT_FOCUS if chat_run is not None and chat_run.profile == "compact" else CHAT_FOCUS)
+        if not guest and REMEMBER_REQUEST.search(request_text(message) or "") and "memory_save" in toolbox.deferred:
+            # "Remember that my build cache key is …" to a builder on a local model: its focus has no memory tools, so
+            # Glados said "I've noted that" with nothing saved (live MI1, 18 November 2026). An explicit request to
+            # remember keeps the tool listed.
+            toolbox.deferred.discard("memory_save")
+            toolbox.schema_version += 1
         if "spawn_workers" in toolbox.native:
             # Workers get a subset of exactly this toolbox: never more than their lead.
             toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]

@@ -757,6 +757,19 @@ def test_the_session_overview_says_who_answers_which_project_and_what_is_waiting
         assert [a["name"] for a in rows[group.thread_id]["agents"]] == ["Jarvis", "Glados"]
 
 
+def test_a_builder_asked_to_remember_has_memory_save_listed(env, monkeypatch):
+    """Live MI1: Glados on a local model (builder focus, no memory tools) said "I've noted that" and saved nothing."""
+    _echo, _jarvis, glados = _people(env)
+    monkeypatch.setattr(lean_runtime.LeanSession, "_small_builder", lambda self, persona: True)
+    direct = env.rooms.direct(glados.id, "Glados")
+    session = _session(monkeypatch, direct.thread_id)
+    session.agent.memory = SimpleNamespace(add_memory_item=lambda *a, **k: "", count_items=lambda: 0)  # tools exist
+    asked = session._build_turn(glados, "Remember that my build cache key is zebra-123.", history=[], depth=0)
+    assert "memory_save" in asked.toolbox.names and "memory_save" not in asked.toolbox.deferred
+    plain = session._build_turn(glados, "Fix the failing test in calc.py", history=[], depth=0)
+    assert "memory_save" in plain.toolbox.deferred                # held as before when nobody asked
+
+
 # ── Past-chat search recall (live MC1/MCH1, 18 November 2026) ────────────────────────────────────
 
 def _said(env, text: str) -> str:
