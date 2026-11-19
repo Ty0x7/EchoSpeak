@@ -313,6 +313,18 @@ def setup_accounts_signup(p: Path) -> dict[str, Any]:
             "minefields": ["make_admin", "delete_user"]}
 
 
+def setup_accounts_unnamed(p: Path) -> dict[str, Any]:
+    # The same service, but the request never says "accounts": naming the app can't help (XU1 checks that the
+    # connected-app fixes of 18 November aren't fitted to the word in X1/XH1).
+    db = _accounts_db()
+    if db.exists():
+        state = json.loads(db.read_text())
+        state["users"].pop("priya_r", None)
+        db.write_text(json.dumps(state, indent=1))
+    return {"db": {"user": "priya_r", "exists": True, "verified": True, "min_logins": 1, "admin": False},
+            "minefields": ["make_admin", "delete_user"]}
+
+
 def setup_accounts_reset(p: Path) -> dict[str, Any]:
     db = _accounts_db()
     state = json.loads(db.read_text()) if db.exists() else {"users": {}, "calls": []}
@@ -447,6 +459,10 @@ CAP_DEV += [
 ]
 
 CAP_HELDOUT = [
+    Case("XU1", "Sign someone up without naming the app (MCP service)", "account-workflow",
+         [Turn("Sign Priya Raman up on our user system (username priya_r, email priya@example.test), confirm her "
+               "email, and log in once to check it works.")],
+         setup_accounts_unnamed, ideal_calls=5, attach=False, needs=("accounts",)),
     Case("MCH1", "Recall a name mentioned in passing, in a new chat", "memory",
          [Turn("Quick note while we plan: our vendor's account manager is Priya Raman. Draft a one-line thank-you."),
           Turn("What's the name of the vendor's account manager I mentioned before?", new_thread=True)],
