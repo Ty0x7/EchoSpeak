@@ -156,7 +156,9 @@ commands marked *live* run at once; the others run when the turn ends.
 | `/new [--agent NAME]`, `/resume [id]` (picker), `/sessions` | `/threads`, `/history`, `/query/runs` |
 | `/project [PATH\|-]` | asks "Trust this folder?" first; `POST /projects/attach-folder`, `/projects/{id}/activate`, `/projects/deactivate` |
 | `/mode [unified\|environments]` | `PUT /settings {assistant_mode}` |
-| `/permissions [smart\|autonomous\|always\|never]` | shows switches + approval mode; every change asks first; `never` needs typing `never` |
+| `/settings` (`/config`) | one hub: permissions, agents' tools, model, privacy, web search, assistant mode; Esc returns to it |
+| `/permissions [smart\|autonomous\|always\|never]` · `/permissions <files\|terminal\|actions\|…> on\|off` | the switches and the approval mode; turning one on also turns on "Actions on this computer" when it needs it (asks once); `never` needs typing `never` |
+| `/tools [agent]` | an agent's tool groups (files, commands, web, desktop…) on/off: `PATCH /lean/agents/{id}`; says which global switch a group still needs |
 | `/approvals` *live* | `GET /lean/approvals`, `POST /lean/approvals/{id}`, `POST /lean/work/{id}` (resume) |
 | `/memory [query]` | `GET /memory` (filtered locally) |
 | `/status`, `/usage` *live* | `/health`, `/settings`, `/provider`, `/lean/stop-status`, token totals and context % |

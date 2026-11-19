@@ -1813,6 +1813,7 @@ class EchoTUI:
         if steers:
             # The backend moves unread steers to the durable queue when the turn ends.
             self.note("Your note arrived after the task finished; it runs next as a follow-up.")
+        await self._settings_hint(run)
         await self._refresh_title()
         await self._sync_queue()
         await self._sync_held()
@@ -2463,49 +2464,229 @@ class EchoTUI:
         await self._load_settings()
         self.note(f"assistant mode: {choice} · {control.ASSISTANT_MODES[choice]}")
 
-    async def cmd_permissions(self, args) -> None:
-        if args:
-            mode = args[0].lower()
-            if mode not in control.APPROVAL_MODES:
-                raise LookupError("approval modes: smart, autonomous, always, never")
-            await self._set_approval_mode(mode, confirm=True)
-            return
-        await self._load_settings()
-        s = self.settings
-        opts = [Option(f"Approval mode: {self.approval_mode}", ("mode", None),
-                       hint=control.APPROVAL_MODES.get(self.approval_mode, ""))]
-        for key, label, desc in control.PERMISSIONS:
-            on = bool(s.get(key))
-            opts.append(Option(f"{'[on] ' if on else '[off]'} {label}", ("switch", key), hint=desc,
-                               style="" if on else "dim"))
-        action = await self.ask("Permissions (global: the app uses them too)", opts,
-                                footer=f"{self.caps.glyphs.arrow_up_down} choose · enter to change (asks first) · esc close")
-        if action.kind != "choose":
-            return
-        kind, key = action.value
-        if kind == "mode":
-            modes = list(control.APPROVAL_MODES)
-            mopts = [Option(m, m, hint=control.APPROVAL_MODES[m]) for m in modes]
-            act = await self.ask("Approval mode", mopts, selected=modes.index(self.approval_mode) if self.approval_mode in modes else 0)
-            if act.kind == "choose":
-                await self._set_approval_mode(act.value, confirm=True)
-            return
-        label, desc = next((lbl, d) for k, lbl, d in control.PERMISSIONS if k == key)
-        on = bool(s.get(key))
-        verb = "off" if on else "ON"
-        body = [("", f"{label}: {desc}."),
-                ("class:dim", "This is a global switch: the desktop app and every agent use it. "
-                              + ("Agents still ask before risky actions." if not on else ""))]
-        act = await self.ask(f"Turn {verb} {label}?", [Option("No, keep it as it is", False, "n"),
-                                                     Option(f"Yes, turn it {verb.lower()}", True, "y")],
-                             body=body, attention=not on, selected=-1, kind="confirm",
-                             footer="y/n or ↑↓ then enter · esc cancel")
-        if act.kind == "choose" and act.value is True:
-            await self.call(control.put_setting, self.client, key, not on)
+    # ── settings and permissions (cli-design.md §10) ──────────────────
+    async def cmd_settings(self, args) -> None:
+        """One place for what the app's Settings changes most: each section opens, and Esc comes back here."""
+        selected = 0
+        while True:
             await self._load_settings()
-            self.note(f"{label}: {'on' if self.settings.get(key) else 'off'}", "bold")
-        else:
+            await self._load_agents()
+            s = self.settings
+            allowed = sum(1 for k, _l, _d in control.PERMISSIONS if control.switch_state(s, k) == "on")
+            model = self.model or control.current_model(s)[1] or "not chosen"
+            privacy = str(s.get("privacy_mode") or "standard")
+            search = str(s.get("web_search_provider") or "auto")
+            mode = str(s.get("assistant_mode") or "unified")
+            sections = [
+                ("permissions", "Permissions", f"approval: {self.approval_mode} · {allowed} of {len(control.PERMISSIONS)} "
+                                               "action switches on"),
+                ("agents", "Agents and their tools", "what " + (", ".join(one_line(x.get("name"), 20) for x in self.agents
+                                                                   if x.get("name")) or "each agent") + " may use"),
+                ("model", "Model", model),
+                ("privacy", "Privacy", f"{privacy}: {control.PRIVACY_MODES.get(privacy, '')}"),
+                ("search", "Web search", f"{search}: {control.SEARCH_PROVIDERS.get(search, '')}"),
+                ("mode", "Assistant mode", mode),
+            ]
+            opts = [Option(label, sid, hint=hint) for sid, label, hint in sections]
+            action = await self.ask("Settings", opts, selected=selected,
+                                    body=[("class:dim", "Global: the desktop app and every agent use these.")],
+                                    footer=f"{self.caps.glyphs.arrow_up_down} choose · enter open · esc close")
+            if action.kind != "choose":
+                return
+            selected = next(i for i, (sid, _l, _h) in enumerate(sections) if sid == action.value)
+            if action.value == "permissions":
+                await self.cmd_permissions([])
+            elif action.value == "agents":
+                await self.cmd_tools([])
+            elif action.value == "model":
+                await self.cmd_model([])
+            elif action.value == "privacy":
+                await self._pick_setting("privacy_mode", "Privacy", control.PRIVACY_MODES, privacy)
+            elif action.value == "search":
+                await self._pick_setting("web_search_provider", "Web search", control.SEARCH_PROVIDERS, search)
+            elif action.value == "mode":
+                await self.cmd_mode([])
+
+    async def _pick_setting(self, key: str, title: str, choices: dict, current: str) -> None:
+        names = list(choices)
+        opts = [Option(name, name, hint=desc + (" · current" if name == current else "")) for name, desc in choices.items()]
+        action = await self.ask(title, opts, selected=names.index(current) if current in names else 0,
+                                footer=f"{self.caps.glyphs.arrow_up_down} choose · enter use it · esc back")
+        if action.kind != "choose" or action.value == current:
+            return
+        await self.call(control.put_setting, self.client, key, action.value)
+        await self._load_settings()
+        self.note(f"{title.lower()}: {action.value}", "bold", self.caps.glyphs.ok)
+
+    def _switch_row(self, key: str, label: str, desc: str) -> Option:
+        state = control.switch_state(self.settings, key)
+        mark = {"on": "[on] ", "off": "[off]", "blocked": "[on] "}[state]
+        hint = desc if state != "blocked" else f"blocked: {control.switch_label(control.MASTER)} is off"
+        return Option(f"{mark} {label}", ("switch", key), hint=hint,
+                      style="attention" if state == "blocked" else "" if state == "on" else "dim")
+
+    async def cmd_permissions(self, args) -> None:
+        """The approval mode and the action switches. The list stays open, so several can change in a row.
+
+        ``/permissions <mode>`` sets the approval mode; ``/permissions <switch> on|off`` a switch ("files", "terminal").
+        """
+        if args and args[0].lower() in control.APPROVAL_MODES and len(args) == 1:
+            await self._set_approval_mode(args[0].lower(), confirm=True)
+            return
+        if args:
+            key = control.switch_key(" ".join(a for a in args if a.lower() not in {"on", "off"}))
+            want = {"on": True, "off": False}.get(args[-1].lower())
+            if key is None or want is None:
+                raise LookupError("usage: /permissions [smart|autonomous|always|never] · "
+                                  "/permissions <files|terminal|actions|apps|browser|desktop|self> on|off")
+            await self._load_settings()
+            await self._change_switch(key, want)
+            return
+        selected = 0
+        while True:
+            await self._load_settings()
+            opts = [Option(f"Approval mode: {self.approval_mode}", ("mode", None),
+                           hint=control.APPROVAL_MODES.get(self.approval_mode, ""))]
+            opts += [self._switch_row(key, label, desc) for key, label, desc in control.PERMISSIONS]
+            action = await self.ask("Permissions", opts, selected=selected,
+                                    body=[("class:dim", "Global: the desktop app and every agent use these. "
+                                                        "Agents still ask before risky actions.")],
+                                    footer=f"{self.caps.glyphs.arrow_up_down} choose · enter to change (asks first) · "
+                                           "esc back")
+            if action.kind != "choose":
+                return
+            kind, key = action.value
+            selected = next(i for i, o in enumerate(opts) if o.value == action.value)
+            if kind == "mode":
+                modes = list(control.APPROVAL_MODES)
+                mopts = [Option(m, m, hint=control.APPROVAL_MODES[m]) for m in modes]
+                act = await self.ask("Approval mode", mopts,
+                                     selected=modes.index(self.approval_mode) if self.approval_mode in modes else 0)
+                if act.kind == "choose":
+                    await self._set_approval_mode(act.value, confirm=True)
+                continue
+            await self._change_switch(key, control.switch_state(self.settings, key) == "off" or
+                                      (control.switch_state(self.settings, key) == "blocked"))
+
+    async def _change_switch(self, key: str, on: bool) -> None:
+        """Turn a switch on (with the master switch it needs, after asking) or off (at once: turning off is safe)."""
+        label = control.switch_label(key)
+        desc = next((d for k, _l, d in control.PERMISSIONS if k == key), "")
+        if not on:
+            if not self.settings.get(key):
+                self.note(f"{label} is already off")
+                return
+            await self.call(control.put_setting_many, self.client, {key: False})
+            await self._load_settings()
+            extra = " · every action on this computer is off now" if key == control.MASTER else ""
+            self.note(f"{label}: off{extra}", "bold")
+            return
+        plan = control.enable_plan(self.settings, key)
+        if not plan:
+            self.note(f"{label} is already on")
+            return
+        body = [("", f"{label}: {desc}.")]
+        if len(plan) > 1:
+            body.append(("", f"It needs {control.switch_label(control.MASTER)}, which is off, so both will be turned on."))
+        body.append(("class:dim", "Global: the desktop app and every agent use it. Agents still ask before risky actions."))
+        act = await self.ask(f"Turn on {label}?", [Option("No, keep it off", False, "n"), Option("Yes, turn it on", True, "y")],
+                             body=body, attention=True, selected=-1, kind="confirm",
+                             footer="y/n or ↑↓ then enter · esc cancel")
+        if not (act.kind == "choose" and act.value is True):
             self.note("unchanged")
+            return
+        await self.call(control.put_setting_many, self.client, {k: True for k in plan})
+        await self._load_settings()
+        self.note(" · ".join(f"{control.switch_label(k)}: on" for k in plan), "bold", self.caps.glyphs.ok)
+
+    async def cmd_tools(self, args) -> None:
+        """What an agent may use: its tool groups, toggled one at a time (PATCH /lean/agents/{id})."""
+        await self._load_agents()
+        agents = [a for a in self.agents if a.get("id")]
+        if not agents:
+            raise LookupError("no agents to configure")
+        if args:
+            ref = " ".join(args).lower().lstrip("@")
+            agent = next((a for a in agents if str(a.get("id")).lower() == ref or str(a.get("name")).lower() == ref), None)
+            if agent is None:
+                raise LookupError(f"no agent named {' '.join(args)!r} (agents: "
+                                  f"{', '.join(one_line(a.get('name'), 20) for a in agents)})")
+            await self._agent_tools(str(agent["id"]))
+            return
+        selected = 0
+        while True:
+            await self._load_agents()
+            agents = [a for a in self.agents if a.get("id")]
+            opts = [Option(one_line(a.get("name"), 30), str(a.get("id")),
+                           hint=f"{one_line(a.get('title'), 30)} · "
+                                + ", ".join(control.TOOLSET_INFO.get(t, t).split(" and ")[0].split(",")[0]
+                                            for t in a.get("toolsets") or []))
+                    for a in agents]
+            action = await self.ask("Agents and their tools", opts, selected=selected,
+                                    footer=f"{self.caps.glyphs.arrow_up_down} choose · enter to change its tools · esc back")
+            if action.kind != "choose":
+                return
+            selected = next(i for i, o in enumerate(opts) if o.value == action.value)
+            await self._agent_tools(action.value)
+
+    async def _agent_tools(self, agent_id: str) -> None:
+        selected = 0
+        while True:
+            await self._load_agents()
+            await self._load_settings()
+            agent = next((a for a in self.agents if str(a.get("id")) == agent_id), None)
+            if agent is None:
+                return
+            try:
+                available = [str(t.get("id")) for t in (await self.call(self.client.get, "/lean/toolsets") or {})
+                             .get("toolsets") or [] if t.get("id")]
+            except ApiError:
+                available = list(control.TOOLSET_ORDER)
+            have = [str(t) for t in agent.get("toolsets") or []]
+            rows = control.toolset_rows(have, available, self.settings)
+            opts = [Option(f"{'[on] ' if r['on'] else '[off]'} {r['label']}", r["id"],
+                           hint=(f"also needs: {r['needs']}" if r["needs"] and r["on"] else ""),
+                           style="" if r["on"] else "dim") for r in rows]
+            name = one_line(agent.get("name"), 30)
+            action = await self.ask(f"{name}'s tools", opts, selected=selected,
+                                    body=[("class:dim", f"What {name} may use. The global switches in /permissions still "
+                                                        "apply to every agent.")],
+                                    footer=f"{self.caps.glyphs.arrow_up_down} choose · enter to turn on or off · esc back")
+            if action.kind != "choose":
+                return
+            tid = action.value
+            selected = next(i for i, o in enumerate(opts) if o.value == tid)
+            turning_on = tid not in have
+            label = control.TOOLSET_INFO.get(tid, tid)
+            if turning_on and tid in control.TOOLSET_POWERFUL:
+                needs = next((r["needs"] for r in rows if r["id"] == tid), "")
+                body = [("", f"{name} could use: {label}.")]
+                if needs:
+                    body.append(("", f"It also needs {needs} in /permissions before anything runs."))
+                body.append(("class:dim", f"{name} still asks before risky actions."))
+                act = await self.ask(f"Let {name} use {label.lower()}?",
+                                     [Option("No", False, "n"), Option("Yes", True, "y")],
+                                     body=body, attention=True, selected=-1, kind="confirm",
+                                     footer="y/n or ↑↓ then enter · esc cancel")
+                if not (act.kind == "choose" and act.value is True):
+                    continue
+            new = have + [tid] if turning_on else [t for t in have if t != tid]
+            await self.call(self.client.request, "PATCH", f"/lean/agents/{agent_id}", {"toolsets": new})
+            self.note(f"{name}: {label} {'on' if turning_on else 'off'}", "bold", self.caps.glyphs.ok)
+
+    async def _settings_hint(self, run) -> None:
+        """After a run: one line when the answer or a step says a permission blocked it and that switch is off."""
+        texts = [run.final_text] + [t.summary for t in run.transcript if isinstance(t, B.ToolLine) and t.status != "ok"]
+        texts += [b.text for b in run.transcript if isinstance(b, B.Note)]
+        if not any(texts):
+            return
+        try:
+            settings = await self.call(control.settings_of, self.client)
+        except (ApiError, ConnectError):
+            return
+        hint = control.blocked_hint(texts, settings)
+        if hint:
+            self.emit(B.Note("!", hint, "attention", 0))   # "!" as other notes that need you; ⚙ draws as a wide emoji
 
     async def _set_approval_mode(self, mode: str, confirm: bool) -> None:
         if mode == self.approval_mode:

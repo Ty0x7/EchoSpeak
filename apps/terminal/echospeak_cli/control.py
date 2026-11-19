@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import urllib.request
@@ -42,6 +43,137 @@ PERMISSIONS = (
     ("allow_desktop_automation", "Desktop control", "Click and type on your desktop"),
     ("allow_self_modification", "Self-modification", "Let EchoSpeak change its own code"),
 )
+
+MASTER = "enable_system_actions"
+
+# How people name a switch: "/permissions files on".
+SWITCH_NAMES = {
+    "actions": MASTER, "system": MASTER, "master": MASTER, "computer": MASTER,
+    "files": "allow_file_write", "file": "allow_file_write", "write": "allow_file_write",
+    "terminal": "allow_terminal_commands", "commands": "allow_terminal_commands", "shell": "allow_terminal_commands",
+    "apps": "allow_open_application", "applications": "allow_open_application",
+    "browser": "allow_open_chrome", "chrome": "allow_open_chrome",
+    "playwright": "allow_playwright", "automation": "allow_playwright",
+    "desktop": "allow_desktop_automation",
+    "self": "allow_self_modification", "self-modification": "allow_self_modification",
+}
+
+# The app's names for an agent's tool groups (apps/web/src/lean/Dialogs.tsx TOOLSET_INFO).
+TOOLSET_INFO = {
+    "core": "Files and basics",
+    "web": "Web search and reading pages",
+    "live": "Weather, sports, stocks, shopping, video and image cards",
+    "terminal": "Run commands",
+    "vision": "Read screenshots and images",
+    "desktop": "Mouse, keyboard and app control",
+    "comms": "Email and Discord",
+    "memory": "Remember things",
+    "skills": "Installed skills and MCP",
+    "self": "Edit EchoSpeak itself",
+}
+TOOLSET_ORDER = ("core", "web", "live", "terminal", "vision", "desktop", "comms", "memory", "skills", "self")
+# Groups that can act on this computer or reach people: turning them on asks first.
+TOOLSET_POWERFUL = {"terminal", "desktop", "comms", "self"}
+# The global switches a group still needs, whatever the agent may use (agent/lean/toolbox.py NATIVE_POLICY_FLAGS).
+TOOLSET_NEEDS = {
+    "core": ("allow_file_write",),
+    "terminal": ("allow_terminal_commands",),
+    "desktop": ("allow_desktop_automation", "allow_open_application"),
+    "self": ("allow_self_modification",),
+}
+
+APPROVAL_MODE_ORDER = ("smart", "autonomous", "always", "never")
+PRIVACY_MODES = {
+    "standard": "Cloud models and web services are allowed",
+    "private": "Only services on your own machines: local models, your SearXNG",
+    "offline": "Nothing leaves this computer",
+}
+SEARCH_PROVIDERS = {
+    "auto": "Your configured services, then DuckDuckGo",
+    "duckduckgo": "DuckDuckGo only (no key needed)",
+    "searxng": "Your SearXNG (needs its address)",
+    "brave": "Brave Search (needs an API key)",
+    "tavily": "Tavily (needs an API key)",
+}
+
+
+def switch_label(key: str) -> str:
+    return next((label for k, label, _d in PERMISSIONS if k == key), key)
+
+
+def switch_key(name: str) -> Optional[str]:
+    """A switch from what someone typed: "files", "terminal", "Write files", or the setting's own key."""
+    raw = " ".join(str(name or "").lower().split())
+    if raw in {k for k, _l, _d in PERMISSIONS}:
+        return raw
+    if raw in SWITCH_NAMES:
+        return SWITCH_NAMES[raw]
+    return next((k for k, label, _d in PERMISSIONS if label.lower() == raw), None)
+
+
+def switch_state(settings: dict, key: str) -> str:
+    """on, off, or blocked: on, but "Actions on this computer" (the master switch) is off, so it does nothing."""
+    if not settings.get(key):
+        return "off"
+    if key != MASTER and not settings.get(MASTER):
+        return "blocked"
+    return "on"
+
+
+def enable_plan(settings: dict, key: str) -> list[str]:
+    """The switches to turn on so ``key`` takes effect: the master switch first when it is off."""
+    plan = [] if key == MASTER or settings.get(MASTER) else [MASTER]
+    return plan + ([key] if not settings.get(key) or key == MASTER or plan else [])
+
+
+_BLOCKED_WORDS = re.compile(r"\b(permission|permissions|turned off|switched off|is off|are off|disabled|not allowed|"
+                            r"not enabled|settings ?[›>] ?permissions)\b", re.I)
+# ...and it is about the agent being stopped (or EchoSpeak's settings), not, say, an explanation of chmod.
+_ABOUT_ITSELF = re.compile(r"(\bI can'?t\b|\bI cannot\b|\bI'?m not able\b|\bI am not able\b|\bunable to\b|\bmy \w+(?: \w+)? "
+                           r"permissions?\b|\b(?:EchoSpeak|in) settings\b|Settings ?[›>]|^Error:|\bFailed:)", re.I | re.M)
+_TOPICS = (
+    ("allow_file_write", re.compile(r"\b(file|files|write|writing|create|creation|edit|editing|save|saving)\b", re.I)),
+    ("allow_terminal_commands", re.compile(r"\b(terminal|command|commands|shell|run|running)\b", re.I)),
+    ("allow_open_application", re.compile(r"\b(open apps?|application|applications|launch)\b", re.I)),
+    ("allow_open_chrome", re.compile(r"\b(browser|chrome)\b", re.I)),
+    ("allow_desktop_automation", re.compile(r"\b(desktop|click|mouse|keyboard)\b", re.I)),
+    ("allow_self_modification", re.compile(r"\bself[- ]modification\b", re.I)),
+)
+
+
+def blocked_hint(texts: list[str], settings: dict) -> Optional[str]:
+    """One line when an answer or a step says a permission blocked it and that switch really is off now.
+
+    Names only switches that are off in ``settings`` (read fresh by the caller), so the hint is never a guess
+    about the state, only about which switch the words were about.
+    """
+    said = " ".join(str(t or "") for t in texts)
+    if not _BLOCKED_WORDS.search(said) or not _ABOUT_ITSELF.search(said):
+        return None
+    wanted = [key for key, pattern in _TOPICS if pattern.search(said)]
+    off = [k for k in wanted if switch_state(settings, k) != "on"]
+    if not off:
+        return None
+    names = [switch_label(k) for k in off]
+    if not settings.get(MASTER):
+        names.append(switch_label(MASTER))
+    what = " and ".join(dict.fromkeys(names))
+    verb = "is" if len(dict.fromkeys(names)) == 1 else "are"
+    return f"{what} {verb} off · /permissions to turn {'it' if verb == 'is' else 'them'} on"
+
+
+def toolset_rows(agent_toolsets: list[str], available: list[str], settings: dict) -> list[dict]:
+    """An agent's tool groups for the terminal: id, the app's label, on/off, and the global switches still off."""
+    ids = [t for t in TOOLSET_ORDER if t in available] + [t for t in available if t not in TOOLSET_ORDER]
+    rows = []
+    for tid in ids:
+        needs = [switch_label(k) for k in TOOLSET_NEEDS.get(tid, ()) if switch_state(settings, k) != "on"]
+        if needs and not settings.get(MASTER):
+            needs.append(switch_label(MASTER))
+        rows.append({"id": tid, "label": TOOLSET_INFO.get(tid, tid), "on": tid in agent_toolsets,
+                     "needs": ", ".join(dict.fromkeys(needs))})
+    return rows
+
 
 ASSISTANT_MODES = {
     "unified": "One Echo for chat and code: a trusted project in the session gives Echo engineering tools",
@@ -252,6 +384,11 @@ def switch_session_model(client: Client, session_id: str, provider: str, model: 
 
 def put_setting(client: Client, key: str, value: Any) -> dict:
     return client.request("PUT", "/settings", body={key: value})
+
+
+def put_setting_many(client: Client, values: dict) -> dict:
+    """Several settings in one write, so a switch and the master switch it needs change together."""
+    return client.request("PUT", "/settings", body=dict(values))
 
 
 def available(client: Client, path: str, **params: Any) -> bool:

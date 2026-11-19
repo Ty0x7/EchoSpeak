@@ -105,6 +105,8 @@ class ScriptedModel(FakeModel):
     user message picks the script. Each assistant reply after that message is one step:
     ``{"tools": [{"name": "file_read", "args": {...}}], "text": "optional preface"}`` or
     ``{"text": "final answer"}``. After the last step it keeps answering with the last step's text.
+    ``"if_missing": "…"`` on a tool step is what the model says when the backend did not offer that tool
+    (what a real model says when a permission switch is off).
     A tool the backend didn't offer is never called; the reply says so and ``missing`` records it.
     """
 
@@ -198,7 +200,7 @@ class ScriptedModel(FakeModel):
         if lost:
             self.missing += lost
             if not wanted:
-                return {"text": f"(lab: the backend did not offer {', '.join(lost)})"}
+                return {"text": step.get("if_missing") or f"(lab: the backend did not offer {', '.join(lost)})"}
         step["tools"] = wanted
         return step
 

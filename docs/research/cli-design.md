@@ -662,3 +662,66 @@ Branch `tui-polish`. The method, the screenshots, the scorecard and the limits a
   work, and searches list their real sources.
 
 The visual lab (`tests/uilab.py`, `tests/ansishot.py`) is the screenshot loop for the next round.
+
+
+## 10. Settings and agent permissions in the terminal (18 November 2026)
+
+**Cause.** The owner's session `f75dae98` (18 November, 22:27–22:31) asked Echo to build a Pong game in the project:
+
+- Echo answered that file creation was turned off in settings.
+- That was true: every action switch was off.
+- "Write files" also needs the master switch "Actions on this computer".
+- The terminal never said which switch, or how to turn it on.
+- `/permissions` changed one switch at a time and allowed "Write files: on" while the master switch was off. The
+  backend flags that state as an error and blocks the switch anyway.
+
+**What the terminal does now:**
+
+- **`/settings` (alias `/config`) is a hub** that stays open. Esc returns to it from each section:
+  - Permissions;
+  - Agents and their tools;
+  - Model;
+  - Privacy (standard, private, offline);
+  - Web search (auto, duckduckgo, searxng, brave, tavily);
+  - Assistant mode.
+- **`/permissions`:**
+  - The list stays open after a change.
+  - Each switch shows `[on]`, `[off]` or `[on]` *blocked: Actions on this computer is off*.
+  - Turning a switch on asks once and turns on the master switch with it, in a single `PUT /settings`.
+  - Turning off never asks.
+  - `/permissions files on|off` (and `terminal`, `actions`, `apps`, `browser`, `playwright`, `desktop`, `self`) skip
+    the list.
+- **`/tools [agent]`:**
+  - It lists an agent's tool groups with the app's names (`TOOLSET_INFO`) and toggles them through
+    `PATCH /lean/agents/{id}`. Other groups are left unchanged.
+  - Run commands, Desktop, Email and Discord, and Edit EchoSpeak ask before turning on.
+  - A group that's on but still gated by a global switch says so ("also needs: Terminal commands").
+- **The hint.** After a run, if the answer or a failed step says a permission stopped it *and* names this agent or
+  EchoSpeak's settings, the terminal reads the settings fresh. It then prints one line naming only the switches that
+  are really off: `! Write files and Actions on this computer are off · /permissions to turn them on`. An explanation
+  of, say, chmod doesn't trigger it.
+
+**Code:**
+
+- `echospeak_cli/control.py`: `switch_state`, `enable_plan`, `switch_key`, `blocked_hint`, `toolset_rows`,
+  `put_setting_many`;
+- `tui/app.py`: `cmd_settings`, `cmd_permissions`, `_change_switch`, `cmd_tools`, `_agent_tools`, `_settings_hint`.
+
+**Checks:**
+
+- `tests/test_settings_tui.py`: 11 tests, failing-first, with the screens driven through the real key bindings
+  against a recording client;
+- `tests/settingslab.py`: 13/13. It replays the owner's session on an isolated backend with every switch off:
+  - the hint;
+  - `/settings` → Permissions → Write files, which turns on both switches and nothing else (checked through the API);
+  - the same request now writes `pong.html`;
+  - `/tools glados` → Desktop, which persists and keeps her other groups;
+  - `/permissions files off`.
+- Terminal suite: 4,282 passed. Command lab: 34/34.
+
+**Not done:**
+
+- Per-agent models (the app's agent editor has them; `/model` still sets the session's model).
+- Terminal command allow and deny lists, and voice and memory settings.
+- The model hallucinating `read_output` ids in the same session (16-character ids where 24 are real) is a model and
+  harness issue, recorded, not fixed here.
