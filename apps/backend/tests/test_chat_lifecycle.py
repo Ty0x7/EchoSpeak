@@ -123,6 +123,44 @@ def test_an_untrue_memory_claim_in_chat_is_made_true_without_rewriting_the_answe
     assert sum(1 for e in events if e["type"] == "memory_repair") == 1
 
 
+def test_an_unbacked_update_claim_is_repaired_when_the_user_asked_to_remember():
+    """Evaluation LS3 r2 (ctx-after2, 19 November): "I've updated that the Saffron build server is now vega-97" names
+    no memory word, so the repair didn't run; the user had said "Please remember that instead"."""
+    saved = []
+    model = Model([ModelTurn(content="Got it, I've updated that the Saffron build server is now vega-97."),
+                   ModelTurn(tool_calls=[ToolCall("m1", "memory_save", json.dumps({"fact": "Saffron build server is vega-97",
+                                                                                      "key": "saffron_build_server"}))]),
+                   ModelTurn(content="")])
+    ask = "Update: the Saffron build server is now vega-97. Please remember that instead."
+    turn, _run, events = _chat_turn(model, ask, memory_save=lambda a: saved.append(a) or "Saved")
+    turn.memory_repair = True
+    turn.run(ask)
+    assert saved and any(e["type"] == "memory_repair" for e in events)
+    # Without a request to remember, an "updated" claim is only noted, as before.
+    model = Model([ModelTurn(content="Got it, I've updated the config.")])
+    turn, _run, events = _chat_turn(model, "the config looks off", memory_save=lambda a: "Saved")
+    turn.memory_repair = True
+    assert turn.run("the config looks off").stop_reason == "unverified_claim" and len(model.calls) == 1
+
+
+def test_an_unbacked_update_of_a_recalled_fact_is_repaired():
+    """Evaluation LSH2 r1 (ctx-after2, held-out): "FYI my Riverside dentist appointment got moved to Monday" with the
+    saved appointment recalled on the request; "I've updated your Riverside dentist appointment" saved nothing."""
+    saved = []
+    model = Model([ModelTurn(content="Got it. I've updated your Riverside dentist appointment to Monday at 9:30."),
+                   ModelTurn(tool_calls=[ToolCall("m1", "memory_save", json.dumps({"fact": "Riverside dental appointment "
+                                                                                      "is Monday at 9:30",
+                                                                                      "key": "dental_appointment"}))]),
+                   ModelTurn(content="")])
+    ask = "FYI my Riverside dentist appointment got moved to Monday at 9:30."
+    turn, _run, events = _chat_turn(model, ask, memory_save=lambda a: saved.append(a) or "Saved")
+    turn.memory_repair = True
+    turn.request_note = memory_quality.render([{"content": "Riverside dental clinic appointment is on Wednesday at 14:15.",
+                                                "scope": "account", "semantic_key": "dental_appointment"}])
+    turn.run(ask)
+    assert saved and saved[0]["key"] == "dental_appointment"
+
+
 def test_the_memory_repair_happens_once_and_never_for_other_claims():
     model = Model([ModelTurn(content="I've saved that."), ModelTurn(content="I've saved it, really.")])
     turn, _run, events = _chat_turn(model, "remember I like tea", memory_save=lambda a: "Saved")

@@ -138,6 +138,31 @@ def app_note(text: str) -> str:
 AUTO_CONTINUE_LIMIT = 5
 # A claim about remembering: "I've saved that", "noted, I'll remember it", "I've updated my records".
 _MEMORY_CLAIM = re.compile(r"(?i)\b(sav(?:e|ed|ing)|remember(?:ed)?|noted|records?|memor(?:y|ized|ised))\b")
+def _asks_to_remember(text: str) -> bool:
+    """The user asked for something to be remembered ("Please remember that instead"), so any unbacked "I've
+    updated it" is about memory (evaluation LS3 r2, 19 November)."""
+    try:
+        from agent.memory_curator import MemoryCurator
+        return MemoryCurator.is_explicit_memory_request(str(text or ""))
+    except Exception:  # noqa: BLE001 - a detector problem must never break the turn
+        return False
+
+
+def _about_recalled(claim: str, request_note: str) -> bool:
+    """The claim is about a saved fact recalled for this request: it shares two content words with one of its lines
+    ("I've updated your Riverside dentist appointment" and "Riverside dental clinic appointment is on …")."""
+    note = str(request_note or "")
+    start = note.find("## What you know about the user")
+    if start < 0:
+        return False
+    from agent.stopwords import keywords
+    said = set(keywords(claim))
+    for line in note[start:].split("\n## ")[0].splitlines():
+        if line.startswith("- ") and len(said & set(keywords(line))) >= 2:
+            return True
+    return False
+
+
 MEMORY_REPAIR_NOTE = (
     "You said you saved this, but nothing was saved: memory_save was not called. Call memory_save now with the fact "
     "the user asked you to keep, in their words, with a short key naming its subject (for example build_server); use "
@@ -691,7 +716,8 @@ class LeanTurn:
                             continue
                         if (self.memory_repair and not memory_repairs and step < max_steps
                                 and "memory_save" in self.toolbox.names and "memory_save" not in self.succeeded
-                                and _MEMORY_CLAIM.search(claim)):
+                                and (_MEMORY_CLAIM.search(claim) or _asks_to_remember(user_message)
+                                     or _about_recalled(claim, self.request_note))):
                             # Chat keeps its answer (claims there are noted, not rewritten), but a claimed save that
                             # didn't happen loses the fact for good: one step to make the claim true.
                             memory_repairs += 1
