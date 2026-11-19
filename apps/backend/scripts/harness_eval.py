@@ -118,6 +118,48 @@ _TEXTKIT = {
 }
 
 
+# The agent's sandbox Python has no pytest and pip installs into another interpreter (lt1-retest r2: nine runs
+# of "No module named pytest"), so a plain-Python runner, as many small projects have; the judge still runs pytest.
+RUN_TESTS = ("import importlib, pathlib, sys, traceback\n"
+             "sys.path.insert(0, str(pathlib.Path(__file__).parent))\n"
+             "failed = 0\n"
+             "for path in sorted(pathlib.Path(__file__).parent.glob('tests/test_*.py')):\n"
+             "    module = importlib.import_module('tests.' + path.stem)\n"
+             "    for name in [n for n in dir(module) if n.startswith('test_')]:\n"
+             "        try:\n"
+             "            getattr(module, name)()\n"
+             "            print('PASS', path.stem, name)\n"
+             "        except Exception:\n"
+             "            failed += 1\n"
+             "            print('FAIL', path.stem, name)\n"
+             "            traceback.print_exc(limit=1)\n"
+             "print(f'{failed} failed')\n"
+             "sys.exit(1 if failed else 0)\n")
+
+
+def setup_project_copy(name: str) -> Callable[[Path], dict[str, Any]]:
+    """A multi-module project from eval_fixtures/projects/<name>, failing its protected tests as shipped
+    (conversation audit, 19 November 2026: work across files that don't all fit a 16K window at once)."""
+    def setup(p: Path) -> dict[str, Any]:
+        source = Path(__file__).resolve().parent / "eval_fixtures" / "projects" / name
+        shutil.copytree(source, p, dirs_exist_ok=True, ignore=shutil.ignore_patterns("__pycache__"))
+        _w(p, "run_tests.py", RUN_TESTS)
+        _w(p, "tests/__init__.py", "")
+        tests = sorted(str(t.relative_to(p)) for t in (p / "tests").glob("test_*.py"))
+        return {"tests": "tests", "protected": tests, "verify": True}
+    return setup
+
+
+def setup_build(cli_checks: list[dict[str, Any]]) -> Callable[[Path], dict[str, Any]]:
+    """An empty project for a small app built over several turns. The judge runs the app's command line itself
+    (cli_checks) and checks the project stayed in one language (allowed_extensions)."""
+    def setup(p: Path) -> dict[str, Any]:
+        _w(p, "run_tests.py", RUN_TESTS)
+        return {"tests": "tests", "verify": True, "cli_checks": cli_checks,
+                "allowed_extensions": [".py", ".md", ".json", ".txt", ".toml", ".cfg", ".ini", ".csv"]}
+    return setup
+
+
 def setup_long_textkit(p: Path) -> dict[str, Any]:
     """A genuinely long engineering task (owner review, 19 November): ten functions, each in its own module with its
     own test file, all failing at the start. Many steps of real progress, for LeanTurn.auto_continue."""
@@ -129,23 +171,7 @@ def setup_long_textkit(p: Path) -> dict[str, Any]:
         spec.append(f"- `{name}`: {doc}")
     _w(p, "SPEC.md", "\n".join(spec) + "\n")
     _w(p, "conftest.py", "")
-    # The agent's sandbox Python has no pytest and pip installs into another interpreter (lt1-retest r2: nine runs
-    # of "No module named pytest"), so a plain-Python runner, as many small projects have; the judge still runs pytest.
-    _w(p, "run_tests.py", "import importlib, pathlib, sys, traceback\n"
-       "sys.path.insert(0, str(pathlib.Path(__file__).parent))\n"
-       "failed = 0\n"
-       "for path in sorted(pathlib.Path(__file__).parent.glob('tests/test_*.py')):\n"
-       "    module = importlib.import_module('tests.' + path.stem)\n"
-       "    for name in [n for n in dir(module) if n.startswith('test_')]:\n"
-       "        try:\n"
-       "            getattr(module, name)()\n"
-       "            print('PASS', path.stem, name)\n"
-       "        except Exception:\n"
-       "            failed += 1\n"
-       "            print('FAIL', path.stem, name)\n"
-       "            traceback.print_exc(limit=1)\n"
-       "print(f'{failed} failed')\n"
-       "sys.exit(1 if failed else 0)\n")
+    _w(p, "run_tests.py", RUN_TESTS)
     _w(p, "tests/__init__.py", "")
     return {"tests": "tests", "protected": [f"tests/test_{name}.py" for name in _TEXTKIT], "verify": True}
 
@@ -841,7 +867,56 @@ LONG_HELDOUT = [
          setup_supersede("appointment"), ideal_calls=4, attach=False),
 ]
 
+# Conversation audit (19 November 2026): the owner's Pong and GTA-clone sessions, generalised.
+# PJ: one request whose work spans more files than a 16K window holds at once.
+# PC: a build that stops before it is done, then "continue". Run the PC cases with
+#     --env LEAN_MAX_ITERATIONS=8 --env LEAN_AUTO_CONTINUE_STRETCHES=1, so the first turn stops mid-build.
+_NOTES_CLI = [
+    {"argv": ["-m", "notesapp", "add", "buy milk tomorrow"]},
+    {"argv": ["-m", "notesapp", "add", "call the dentist"]},
+    {"argv": ["-m", "notesapp", "list"], "expect": ["buy milk tomorrow", "call the dentist"]},
+    {"argv": ["-m", "notesapp", "search", "dentist"], "expect": ["call the dentist"], "not_expect": ["buy milk"]},
+]
+_SPEND_CLI = [
+    {"argv": ["-m", "spend", "add", "12.50", "food"]},
+    {"argv": ["-m", "spend", "add", "7.50", "food"]},
+    {"argv": ["-m", "spend", "add", "20", "travel"]},
+    {"argv": ["-m", "spend", "total"], "expect": ["40"]},
+    {"argv": ["-m", "spend", "report"], "expect": ["food", "travel", "20"]},
+]
+AUDIT_DEV = [
+    Case("PJ1", "Fix a game whose bugs span five modules", "multi-file",
+         [Turn("The arcade game in this project is broken: the tests in tests/ fail. Find out what's wrong across its "
+               "modules and fix it, without changing the tests. Check with `python3 run_tests.py`.")],
+         setup_project_copy("arcade"), ideal_calls=12),
+    Case("PC1", "A build that stopped, then 'why did you stop? keep going'", "continuation",
+         [Turn("Build a small command-line notes app in Python in this project, as a package called notesapp: a Note "
+               "model, storage in a JSON file, keyword search, and a CLI so that `python3 -m notesapp add \"some "
+               "text\"`, `python3 -m notesapp list` and `python3 -m notesapp search <word>` work. Put tests in tests/ "
+               "and make sure they pass with `python3 run_tests.py`."),
+          Turn("why did you stop? keep going"),
+          Turn("continue")],
+         setup_build(_NOTES_CLI), ideal_calls=16),
+]
+# Written before any run (19 November 2026) and never used to shape a fix.
+AUDIT_HELDOUT = [
+    Case("PJH1", "Fix a checkout whose bugs span five modules (held-out)", "multi-file",
+         [Turn("Checkout in this shop project doesn't work and its tests in tests/ fail. Track down the problems "
+               "across the modules and fix them; leave the tests as they are. `python3 run_tests.py` runs them.")],
+         setup_project_copy("shop"), ideal_calls=12),
+    Case("PCH1", "A build that stopped, then 'ok carry on' (held-out)", "continuation",
+         [Turn("Make me a little expense tracker in Python here, a package named spend: it records an amount and a "
+               "category, keeps them in a JSON file, and has a command line: `python3 -m spend add 12.50 food`, "
+               "`python3 -m spend total` and `python3 -m spend report` (totals per category). Add tests in tests/ "
+               "and check them with `python3 run_tests.py`."),
+          Turn("ok carry on"),
+          Turn("finish it")],
+         setup_build(_SPEND_CLI), ideal_calls=16),
+]
+
 SETS = {"dev": DEV, "heldout": HELDOUT, "all": DEV + HELDOUT, "env": ENV_DEV + ENV_HELDOUT,
+        "audit": AUDIT_DEV + AUDIT_HELDOUT, "audit-dev": AUDIT_DEV, "audit-heldout": AUDIT_HELDOUT,
+        "audit-pj": [AUDIT_DEV[0], AUDIT_HELDOUT[0]], "audit-pc": [AUDIT_DEV[1], AUDIT_HELDOUT[1]],
         "long": LONG_DEV + LONG_HELDOUT, "long-dev": LONG_DEV, "long-heldout": LONG_HELDOUT, "long-task": LONG_TASK,
         "env-dev": ENV_DEV, "env-heldout": ENV_HELDOUT, "cap": CAP_DEV + CAP_HELDOUT, "cap-dev": CAP_DEV,
         "cap-heldout": CAP_HELDOUT,

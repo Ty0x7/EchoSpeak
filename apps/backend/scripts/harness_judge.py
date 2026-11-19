@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import statistics
@@ -96,6 +97,36 @@ def independent_tests(case: dict[str, Any]) -> dict[str, Any]:
             return {"passed": False, "summary": "timed out"}
     tail = (proc.stdout.strip().splitlines() or [""])[-1]
     return {"passed": proc.returncode == 0, "exit": proc.returncode, "summary": tail[:200]}
+
+
+def independent_cli(case: dict[str, Any]) -> tuple[bool, str]:
+    """Run the app's command line as a user would (truth["cli_checks"]), in a copy of the project with its own HOME.
+
+    Each check is {"argv": [...], "expect": [...], "not_expect": [...]}; the commands run in order, so earlier ones
+    can add the data later ones read. Conversation audit cases PC1/PCH1, 19 November 2026.
+    """
+    checks = case["truth"].get("cli_checks") or []
+    with tempfile.TemporaryDirectory(prefix="judge-cli-") as tmp:
+        copy = Path(tmp) / "p"
+        shutil.copytree(case["project"], copy, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(copy), "PYTHONPATH": str(copy),
+               "LANG": "C.UTF-8"}
+        for check in checks:
+            argv = [sys.executable, *check["argv"]]
+            try:
+                proc = subprocess.run(argv, cwd=copy, env=env, capture_output=True, text=True, timeout=30)
+            except subprocess.TimeoutExpired:
+                return False, f"`{' '.join(check['argv'])}` timed out"
+            shown = " ".join(check["argv"][1:])
+            if proc.returncode != 0:
+                last = (proc.stderr.strip().splitlines() or [""])[-1][:120]
+                return False, f"`{shown}` exited {proc.returncode} ({last})"
+            out = proc.stdout.lower()
+            missing = [e for e in check.get("expect", []) if e.lower() not in out]
+            unwanted = [e for e in check.get("not_expect", []) if e.lower() in out]
+            if missing or unwanted:
+                return False, f"`{shown}` printed {proc.stdout.strip()[:120]!r}"
+    return True, f"the app's command line works ({len(checks)} commands)"
 
 
 class Judged:
@@ -229,6 +260,16 @@ def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
         comp.append((2, j.check("completion", f"reply doesn't give the outdated {old!r} as current", not wrong, "lexical")))
     for name in truth.get("deleted", []):
         comp.append((2, j.check("completion", f"{name} deleted", name not in after and name in before)))
+    if truth.get("cli_checks"):
+        ok, label = independent_cli(case)
+        comp.append((3, j.check("completion", label, ok)))
+    if truth.get("allowed_extensions"):
+        # One project, one language: a JavaScript game started beside an unseen Python one was the GTA session's end.
+        allowed = {e.lower() for e in truth["allowed_extensions"]}
+        stray = sorted(n for n in after if n not in before and Path(n).suffix
+                       and Path(n).suffix.lower() not in allowed and not Path(n).name.startswith("."))
+        comp.append((2, j.check("completion", f"stays one project in one language ({', '.join(stray[:4]) or 'no stray files'})",
+                                not stray)))
     if truth.get("asked_question"):
         # On a question card, or in plain text answered by the simulated owner (harness_eval run_case).
         asked = any(e.get("type") == "approval_request" and (e.get("question") or e.get("kind") == "question") for e in events) \
