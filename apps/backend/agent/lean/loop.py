@@ -35,7 +35,7 @@ from agent.lean import approvals, steering
 from agent.lean import file_access
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, evidence, outbound
-from agent.lean.job import (CHECK_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
+from agent.lean.job import (CHECK_TOOLS, READ_ONLY_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
                             is_promise_without_action, promise_nudge, unbacked_claim, unbacked_file_claim,
                             unbacked_screen_claim, written_names)
 from agent.lean.recall import REMIND_EVERY, reminder
@@ -269,6 +269,10 @@ class LeanTurn:
         # What this turn is for, restated every few steps of a long turn (recall.reminder).
         self.goal = goal
         self._outcomes: list[bool] = []
+        # The repeat guard's counts, and which of them are reads: a read may rightly repeat once what it read has
+        # changed or been summarised away (_forget_reads).
+        self._call_counts: dict[str, int] = {}
+        self._read_sigs: set[str] = set()
         # Tools that brought outside content into this request (shared by every
         # agent working on it). Drives the Rule-of-Two policy in agent/lean/policy.py.
         self.taint: list[str] = taint if taint is not None else []
@@ -556,6 +560,7 @@ class LeanTurn:
         max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
         self._extended, self._segment = 0, (0, len(self._outcomes))
         call_counts: dict[str, int] = {}
+        self._call_counts, self._read_sigs = call_counts, set()
         stop_reason = ""
         nudges = 0
         approval_nudged = False
@@ -1135,6 +1140,8 @@ class LeanTurn:
             except (ValueError, TypeError) as exc:
                 name, arg_error = call.name, f"Invalid tool arguments: {exc}"
             signature = self._sig(name, args)
+            if name in READ_ONLY_TOOLS:
+                self._read_sigs.add(signature)
             call_counts[signature] = call_counts.get(signature, 0) + 1
             problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} | computer_names else "repeat")
             if not problem and signature in self._refused:
@@ -1520,6 +1527,14 @@ class LeanTurn:
         except (ValueError, OSError):
             return hit[0]
 
+    def _forget_reads(self) -> None:
+        """Let reads repeat again: after a change, or after compaction summarised their results away, "the result is
+        above" was no longer true (live LT1, 19 November: 21 refused reads and a 9-call failure streak). The
+        signatures stay, so a stretch's count of new actions (_continue_past) is unchanged."""
+        for signature in self._read_sigs:
+            if signature in self._call_counts:
+                self._call_counts[signature] = 0
+
     @staticmethod
     def _sig(name: str, args: dict[str, Any]) -> str:
         if name == "safe_web_fetch" and str(args.get("url") or "").strip():
@@ -1582,6 +1597,13 @@ class LeanTurn:
         if new_actions < max(2, max_steps // 6) or not recent or sum(recent) * 3 < len(recent):
             return False
         self._extended += max_steps
+        if self.work_context is not None and hasattr(self.work_context.coordinator, "extend_budget"):
+            # The work budget goes with the steps, or it ends the task instead (live LT1: stopped at step 59 with
+            # 9 of 10 tests passing, "Work budget exhausted").
+            try:
+                self.work_context.coordinator.extend_budget(self.work_context)
+            except Exception:  # noqa: BLE001 - the budget stays as it was; the turn goes on until it is reached
+                logger.debug("Work budget extension failed", exc_info=True)
         text = f"Continued automatically after {limit} steps: the work was still making progress."
         self.timeline.append({"kind": "note", "step": step, "text": text, "at": time.time()})
         self.emit({"type": "auto_continue", "step": step, "limit": limit + max_steps, "note": text})
@@ -2017,6 +2039,8 @@ class LeanTurn:
             # The structured diff for clients (agent/lean/file_changes.py) travels on the event only;
             # the saved timeline keeps the numeric facts.
             facts["file_change"] = {**facts["file_change"], "tool_call_id": call.id}
+        if (ok or name in CHECK_TOOLS) and name not in READ_ONLY_TOOLS:
+            self._forget_reads()  # what was read may have changed: reading it again isn't a repeat
         if name in CHECK_TOOLS:
             self._unchecked.clear()  # something ran after the changes, pass or fail
         elif ok:
@@ -2197,6 +2221,7 @@ class LeanTurn:
         }
         del messages[user_index + 1:cut]
         self.compactions += 1
+        self._forget_reads()  # their results are now a summary: reading again is not a repeat
         self.timeline.append({"kind": "note", "step": 0, "text": "Earlier steps summarized to fit the context window", "at": time.time()})
         self.emit({"type": "context_compacted", "steps": len(steps) - keep_steps})
         return True

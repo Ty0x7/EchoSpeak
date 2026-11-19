@@ -64,6 +64,20 @@ def test_a_turn_that_keeps_making_progress_continues_on_its_own():
     assert "ran out of steps" not in result.text
 
 
+def test_continuing_also_extends_the_work_budget(tmp_path):
+    """Live LT1: the steps went on but the work budget didn't, so the task stopped at "budget" mid-way."""
+    from agent.state import StateStore
+
+    ledger = StateStore(tmp_path).coordination
+    row = ledger.create(objective="Do the ten pieces of work", agent_id="echo", tools=["work"])
+    model = Model([_work(i) for i in range(6)] + [ModelTurn(content="Done.")])
+    turn, _events = _turn(model, max_steps=4, auto=True)
+    turn.work_context = ledger.claim(row["id"])
+    result = turn.run("Do the ten pieces of work")
+    assert result.text == "Done."
+    assert ledger.get(row["id"])["budget"]["tokens"] == 128000, "the work budget was not extended with the step limit"
+
+
 def test_a_turn_going_in_circles_still_stops_and_says_its_real_limit():
     model = Model([_work(i) for i in range(12)])
     turn, events = _turn(model, max_steps=4, auto=True, ok=lambda args: False)   # every call fails

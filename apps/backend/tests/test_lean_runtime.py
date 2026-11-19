@@ -227,6 +227,26 @@ def test_repeated_identical_call_is_short_circuited():
     assert result.text == "done"
 
 
+def test_reading_a_file_again_after_changing_it_is_not_a_repeat():
+    """Live LT1 (19 November): the agent edited a module, read it again to check, and was told "you already called
+    file_read with exactly these arguments and the result is above" (21 refusals, a 9-call failure streak). The file
+    had changed, and after compaction the old result wasn't above either."""
+    reads, text = [], {"v": "raise NotImplementedError"}
+    read = '{"path": "textkit/slug.py"}'
+    client = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("a", "file_read", read)]),
+        ModelTurn(tool_calls=[ToolCall("b", "file_read", read)]),
+        ModelTurn(tool_calls=[ToolCall("c", "save_module", '{"path": "textkit/slug.py"}')]),  # any change tool
+        ModelTurn(tool_calls=[ToolCall("d", "file_read", read)]),
+        ModelTurn(content="done"),
+    ])
+    box = _toolbox({"file_read": lambda a: reads.append(1) or text["v"],
+                    "save_module": lambda a: text.update(v="def slugify(s): ...") or "Saved textkit/slug.py"})
+    result = _turn(client, box, []).run("go")
+    assert len(reads) == 3 and result.text == "done"           # the read after the edit ran
+    assert "already called" not in str(client.calls[4][-1]["content"])
+
+
 def test_text_encoded_tool_call_runs_and_is_hidden():
     client = ScriptedClient([
         ModelTurn(content='<tool_call>{"name": "lookup", "arguments": {}}</tool_call>'),

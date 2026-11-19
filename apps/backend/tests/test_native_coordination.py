@@ -90,6 +90,22 @@ def test_read_interruption_and_budget_revocation(tmp_path):
         restarted.check(ctx)
 
 
+def test_a_continued_work_gets_its_budget_again_up_to_the_caps(tmp_path):
+    """Live LT1 (19 November): automatic continuation raised the step limit, and the 64k work budget then ended the
+    task at step 59 with 9 of 10 tests passing. Each continuation adds the original allowance, never past the caps."""
+    ledger, row = setup_work(tmp_path)
+    ctx = ledger.claim(row["id"])
+    ledger.account(ctx, 64000)
+    with pytest.raises(PermissionError, match="budget"):
+        ledger.check(ctx)
+    assert ledger.extend_budget(ctx) == {"tokens": 128000, "seconds": 1800, "children": 6}
+    ledger.check(ctx)                                   # room again
+    ledger.extend_budget(ctx); ledger.extend_budget(ctx); ledger.extend_budget(ctx)
+    assert ledger.get(row["id"])["budget"]["tokens"] == 256000 and ledger.get(row["id"])["budget"]["seconds"] == 3600
+    small, small_row = setup_work(tmp_path / "small", budget={"tokens": 1000, "seconds": 60})
+    assert small.extend_budget(small.claim(small_row["id"]))["tokens"] == 2000   # its own allowance, not the default
+
+
 def test_exact_approval_revalidates_files_policy_and_consumes_once(tmp_path, monkeypatch):
     monkeypatch.setattr("agent.coordination.policy_snapshot", lambda: {"privacy": "standard"})
     ledger, row = setup_work(tmp_path)

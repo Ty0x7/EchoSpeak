@@ -264,6 +264,23 @@ class Coordinator:
                 row = data["works"].get(row.get("parent_id"))
         self._tx(change)
 
+    def extend_budget(self, context: WorkContext) -> dict:
+        """Give a work its original token and time allowance again, never past the caps (256k tokens, one hour).
+
+        For a turn that carries on past its step limit because it is still making progress (LeanTurn.auto_continue):
+        raising the steps alone left the 64k budget to end the task mid-way (live LT1, 19 November 2026).
+        """
+        caps = {"tokens": 256000, "seconds": 3600}
+
+        def change(data):
+            row = self._work(data, context.work_id, context.principal)
+            base = row.setdefault("budget_base", {key: row["budget"][key] for key in caps})
+            for key, cap in caps.items():
+                row["budget"][key] = min(cap, int(row["budget"][key]) + int(base[key]))
+            row["updated_at"] = time.time()
+            return dict(row["budget"])
+        return self._tx(change)
+
     def check(self, context: WorkContext, tool: str = "") -> dict:
         row = self.get(context.work_id, principal=context.principal)
         responsibility_id = row.get("provenance", {}).get("responsibility_id")
