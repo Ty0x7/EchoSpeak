@@ -503,6 +503,9 @@ def main() -> int:
                                                                        "SEARXNG_BASE_URL": search.url,
                                                                        "ENABLE_SYSTEM_ACTIONS": "true",
                                                                        "ALLOW_TERMINAL_COMMANDS": "true",
+                                                                       # Search only on this machine: without it the
+                                                                       # backend also merges DuckDuckGo results.
+                                                                       "PRIVACY_MODE": "private",
                                                                        "HOME": str(Path(tmp) / "home")})
         try:
             theme = Path.home() / ".local/state/omarchy/current/theme/colors.toml"

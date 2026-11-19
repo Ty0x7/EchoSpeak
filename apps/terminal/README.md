@@ -57,7 +57,8 @@ switched without you; Esc decides later. `/model` changes it at any time.
 
 | Command | What it does |
 |---|---|
-| `echospeak` | Resume the latest chat for this directory's project, else start a new session on your first message |
+| `echospeak` | Start clean: nothing is reopened or replayed. The banner offers the latest chat in this folder's project (← to pick it up); a new session starts with your first message. (`--plain` still resumes that chat.) |
+| `echospeak -c` / `--continue` | Reopen the latest chat for this directory's project, with its last exchanges |
 | `echospeak new [--agent NAME] [--project PATH_OR_ID]` | New session; with `--agent`, a direct session with that agent |
 | `echospeak resume <id-or-prefix>` | Resume a session; follows its running task and shows waiting approvals |
 | `echospeak sessions [--all]` · `agents` · `status` · `approvals` | Lists and status (plain output) |
@@ -131,6 +132,7 @@ Options: `--plain` (line REPL, no colours) · `--no-anim` · `--ascii` · `--no-
 | Ctrl+O · Ctrl+R · Ctrl+G | transcript pager · history search · edit in `$EDITOR` (in a dialog: full arguments) | same |
 | `\`+Enter, Ctrl+J, Alt+Enter | newline | newline |
 | `?` on empty input | shortcuts | shortcuts |
+| ← on empty input | your sessions (picker); ← again: the sessions page, grouped by what needs you, running, then by day. Esc or → go back one level | same |
 
 **Any size.** The live region fits every terminal from a 20-column split to an ultrawide window: sections get
 rows by priority (input and dialogs first, the stream tail last), the footer shortens one item at a time and

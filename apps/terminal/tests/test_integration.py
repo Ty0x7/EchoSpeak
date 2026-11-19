@@ -203,7 +203,7 @@ def test_tui_in_a_real_pty_round_trip(backend, tmp_path):
 
     try:
         wait_for("EchoSpeak")
-        wait_for("? for shortcuts")
+        wait_for("new session")                 # the idle composer (its rule carries the session title)
         wait_for("Work in this folder?")       # the first-start folder offer (tmp_path is a fresh folder)
         time.sleep(0.4)                         # past the dialog's 300 ms input guard
         os.write(master, b"n")

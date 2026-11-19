@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Echo TUI visual polish</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--soft:#f0f0f0;--accent:#2f6fde;--ok:#1f7a3f;--warn:#a86a00;--bad:#b42318}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--soft:#222;--accent:#8fb4ff;--ok:#5cc983;--warn:#d6a955;--bad:#ff8a7a}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 40px}header{padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 4px}header p{margin:0;font-size:13px;color:var(--muted)}nav{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:13px;margin:0 0 8px}nav a{color:var(--muted);text-decoration:none}nav a:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 6px}section{margin:34px 0;scroll-margin-top:12px}.lead{font-size:13.5px;color:var(--muted);margin:0 0 14px;max-width:820px}svg{width:100%;height:auto;display:block}svg text{fill:var(--ink);font:13px system-ui,sans-serif}svg .m{fill:var(--muted);font-size:11.5px}svg .b{fill:var(--panel);stroke:var(--line)}svg .s{fill:var(--soft);stroke:var(--line)}svg .hl{fill:var(--panel);stroke:var(--accent);stroke-width:1.6}svg .l{stroke:var(--muted);fill:none;stroke-width:1.4}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}figure{margin:0;border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px;min-width:0}figure img{width:100%;height:auto;display:block;border-radius:6px}figcaption{font-size:12.5px;color:var(--muted);margin-top:8px}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:14px 16px;min-width:0}.node h3{font-size:14px;margin:0 0 4px}.node p,.node li{font-size:13px;color:var(--muted);margin:0}.node ul{margin:6px 0 0;padding-left:18px}code{font:12px ui-monospace,monospace}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:0 8px;margin-right:6px}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}.tag.bad{color:var(--bad)}.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}th{font-weight:600;color:var(--muted)}pre{font:12px/1.45 ui-monospace,monospace;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;margin:0}footer{font-size:12px;color:var(--muted);margin-top:30px;border-top:1px solid var(--line);padding-top:12px}@media(max-width:860px){.grid3{grid-template-columns:1fr}.diagram svg{min-width:720px}}
+.strip{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-start}.strip figure{flex:0 1 auto;max-width:100%}pre.term{font:11px/1.35 ui-monospace,'JetBrains Mono',monospace;white-space:pre;background:var(--soft)}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}.pair figure.before figcaption::before{content:"Before · ";font-weight:600;color:var(--muted)}.pair figure.after figcaption::before{content:"After · ";font-weight:600;color:var(--accent)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}td.n{text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap}@media(max-width:860px){.pair,.grid2{grid-template-columns:1fr}}
+</style></head><body><main>
+<header><h1>Echo TUI · visual polish</h1><p>18 November 2026 · branch <code>tui-polish</code> (from <code>env-intelligence</code> <code>d6f6c9e</code>) · not merged or installed · technical record: <code>docs/research/tui-visual-polish.md</code></p></header>
+<nav aria-label="Sections"><a href="#entrance">Echo's entrance</a><a href="#startup">Startup</a><a href="#sessions">← twice</a><a href="#steps">Steps and decisions</a><a href="#more">More screens</a><a href="#score">Scorecard</a><a href="#limits">Limits</a></nav>
+
+<p class="lead">Every picture here is the real TUI running against the real backend in a private tmux. A scripted model made real tool calls, and the backend ran them. The screens were captured with <code>tests/uilab.py</code> and painted in the owner's font and Ion Blue palette by <code>tests/ansishot.py</code>. Before is <code>d6f6c9e</code>; after is this branch. The scores are honest: the 10/10 target was not met in every category, and the reasons are below.</p>
+
+<section id="entrance"><h2>Echo's entrance</h2>
+<p class="lead">A square face with tall pill eyes, after the app's <code>EchoFace</code>. It rises, lands with a squash, perks, glances and blinks, then the banner is committed to scrollback exactly where it played. The frames below are the distinct ones captured from the running TUI.</p>
+<figure><img src="../media/echo-tui/polish/final-entrance-filmstrip.png" alt="Eight captured frames of Echo's face: a bar at the bottom edge, the face rising with eyes, a wide squashed landing frame, eyes perked upward, the resting face, eyes glancing left, eyes glancing right, and a blink."><figcaption>Captured at about 90 ms intervals; the face's canvas is a fixed 8 × 3 cells, so the text beside it never moves. Under <code>ECHO_REDUCED_MOTION=1</code> only the resting face is drawn.</figcaption></figure>
+</section>
+
+<section id="startup"><h2>A clean start</h2>
+<div class="pair">
+<figure class="before"><img src="../media/echo-tui/polish/baseline-01-startup.png" alt="Old startup: flat rectangular face, a Resumed line, a tagline and hint line, then six dim recap lines of the previous conversation above the composer."><figcaption>plain <code>echospeak</code> silently reopened the last conversation and replayed six lines of it.</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/final-01-startup.png" alt="New startup: square face beside three identity lines, one dim line offering the last conversation with ← to pick it up, then an empty canvas and the composer."><figcaption>nothing is reopened; one line offers the last conversation (<code>-c</code> reopens it directly).</figcaption></figure>
+</div>
+<div class="pair" style="margin-top:14px">
+<figure class="before"><img src="../media/echo-tui/polish/baseline-02-composer-short.png" alt="Old composer: the typed text starts one cell after the prompt glyph, touching the cursor."><figcaption>the input sat against <code>›</code>.</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/final-02-composer-multiline.png" alt="New composer: two cells after the prompt; a long wrapped line and a second line with accents, Japanese and an emoji all hang at the same column; the cursor is at the end."><figcaption>two cells after <code>›</code>; wrapped lines, CJK and emoji keep the column.</figcaption></figure>
+</div>
+</section>
+
+<section id="sessions"><h2>← once, ← twice</h2>
+<div class="pair">
+<figure class="before"><img src="../media/echo-tui/polish/baseline-06-left-twice.png" alt="Old session list after pressing left twice: identical to the first press, with a wide empty gap between titles and agent names."><figcaption>a second ← did nothing; short titles left a dead gap.</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/final-05-left-once.png" alt="New picker: rows packed with title, agent in its colour, project, and age at the right edge; the selected conversation's last exchange beneath; a hint naming ← all sessions."><figcaption>first ←: the picker, opened on the last conversation.</figcaption></figure>
+</div>
+<div class="grid2" style="margin-top:14px">
+<figure><img src="../media/echo-tui/polish/final-06-left-twice.png" alt="Sessions page: header All sessions with position, filters, a Today group with the selected conversation opened to show its last request, reply, model and message count, then three more rows and a footer counting four conversations."><figcaption>second ←: the sessions page, grouped (Needs you, Running, Today, Yesterday, This week, Earlier) and fitted to what it lists. Esc or → go back one level at a time.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/final-20b-sessions-page-60x20.png" alt="The sessions page at 60 by 20 columns: all controls visible, columns narrowed, the selected row's detail truncated with an ellipsis."><figcaption>the same page at 60 × 20.</figcaption></figure>
+</div>
+</section>
+
+<section id="steps"><h2>Steps, decisions and failures</h2>
+<div class="pair">
+<figure class="before"><img src="../media/echo-tui/polish/baseline-11-tools.png" alt="Old tool lines: two failed reads in bold link-blue with their errors repeated beneath, the answer glued to the tool lines, and a summary claiming Read 2 files."><figcaption>failures looked like links; errors twice; "Read 2 files" when both reads failed.</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/final-11-tools.png" alt="New tool lines: two quiet ticks for a listing and a read, one failed read with a coloured cross and a dim reason, a separate bulleted answer, and a summary saying Read 1 file, 1 failed."><figcaption>quiet successes; the ✗ carries the failure; the summary counts only what worked.</figcaption></figure>
+</div>
+<div class="pair" style="margin-top:14px">
+<figure class="before"><img src="../media/echo-tui/polish/baseline-15b-denied.png" alt="Old denial: Denied line, a second line saying you denied it, and a bold note quoting the model-facing instruction Do not retry it."><figcaption>one denial, three lines, one of them written for the model.</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/final-15b-denied.png" alt="New denial: a single line with a circle-slash glyph saying the command, you denied it; the agent's reply; and a summary Worked for 1s, 1 denied."><figcaption>one line; the turn says "1 denied".</figcaption></figure>
+</div>
+<div class="pair" style="margin-top:14px">
+<figure class="before"><img src="../media/echo-tui/polish/baseline-15-approval.png" alt="Old approval: a running step, a status line and the dialog title all announce the request; the body repeats the command and says Why: action tool."><figcaption>asked three times; the command shown twice.</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/final-15-approval.png" alt="New approval: the dialog alone, titled with who needs your OK, Run this command, the command once, four numbered choices with key hints."><figcaption>the dialog alone says it.</figcaption></figure>
+</div>
+<div class="pair" style="margin-top:14px">
+<figure class="before"><img src="../media/echo-tui/polish/baseline-12-research.png" alt="Old research: two search lines with result counts only."><figcaption>counts, no sources.</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/final-12-research.png" alt="New research: each search line followed by the hosts and titles of the results it actually returned, then the answer with numbered citations."><figcaption>each search names the sources it actually got (from the tool's own output).</figcaption></figure>
+</div>
+<div class="pair" style="margin-top:14px">
+<figure class="before"><img src="../media/echo-tui/polish/baseline-17-failure.png" alt="Old model failure: the error text, the same error again as a red note, The run failed, and a separator saying Answered in 7s."><figcaption>stated three times, then "Answered".</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/final-17-failure.png" alt="New model failure: the error text once and The run failed, no Answered separator."><figcaption>stated once.</figcaption></figure>
+</div>
+</section>
+
+<section id="more"><h2>More screens</h2>
+<div class="grid2">
+<figure><img src="../media/echo-tui/polish/final-10-answer.png" alt="A markdown answer: bold heading line with the agent bullet, a paragraph, a numbered list with periods, a Python code block and a table."><figcaption>Markdown: numbered lists keep their period; code and tables at full width.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/final-14-question.png" alt="A question from Echo as one dialog: the question, four numbered options and a key hint."><figcaption>a question: one dialog, then one line recording the answer.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/final-08-resumed.png" alt="Resuming from the picker: a rule naming the conversation, a line saying 4 earlier messages, then the last three exchanges in the same prompt column as typed messages."><figcaption>resuming: "⋮ 4 earlier messages", then the last exchanges.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/final-19-size-80x24.png" alt="The conversation at 80 by 24: a failed run, a stopped long answer and the composer, with the footer shortened."><figcaption>80 × 24. Text printed before a resize keeps its old wrapping, as in every inline terminal app.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/reduced-01-startup.png" alt="Startup with reduced motion in a neutral dark palette: the resting face and banner, no animation frames."><figcaption>reduced motion, neutral palette: the banner at once.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/reduced-15b-denied.png" alt="The denial screen in a neutral palette: the glyphs and weights carry meaning, GLaDOS's dot is magenta."><figcaption>neutral palette: meaning rides on glyph and weight; hue is a second signal.</figcaption></figure>
+</div>
+</section>
+
+<section id="score"><h2>Scorecard</h2>
+<p class="lead">10 means nothing a careful reviewer would flag. Scores are from the screenshots and the keyboard labs, not from a model.</p>
+<div class="wrap"><table>
+<thead><tr><th>Category</th><th>Before</th><th>After</th><th>What still keeps it from 10</th></tr></thead>
+<tbody>
+<tr><td>Visual design</td><td class="n">6</td><td class="n">9</td><td>Not yet seen in the owner's own ghostty window; agent hues converge in Ion Blue.</td></tr>
+<tr><td>Typography</td><td class="n">7</td><td class="n">9</td><td>A model failure still shows the backend's raw <code>Details: {…}</code> JSON.</td></tr>
+<tr><td>Layout</td><td class="n">7</td><td class="n">9</td><td>At ≤ 80 columns the footer hint drops to <code>? help</code> before "← sessions" (tested ladder kept).</td></tr>
+<tr><td>Conversations</td><td class="n">6</td><td class="n">9</td><td>Agent names are the backend's ("Glados").</td></tr>
+<tr><td>Tool presentation</td><td class="n">5</td><td class="n">9</td><td>Failed or denied steps keep the backend's present-tense label ("✗ Reading …").</td></tr>
+<tr><td>Research presentation</td><td class="n">5</td><td class="n">8</td><td>Deep research with spawned workers and <code>message_agent</code> delegation were not exercised live.</td></tr>
+<tr><td>Sessions</td><td class="n">6</td><td class="n">9</td><td>Needs-you and running groups verified by tests, not live shots; no rename or archive.</td></tr>
+<tr><td>Interaction</td><td class="n">7</td><td class="n">9</td><td>Labs 14/14 and 34/34 plus key-binding tests; awaiting the owner's hands.</td></tr>
+<tr><td>Animation</td><td class="n">5</td><td class="n">9</td><td>Judged from tmux captures; ghostty's own frame pacing unverified.</td></tr>
+<tr><td>Consistency</td><td class="n">6</td><td class="n">9</td><td>The footer hint gap above.</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="limits"><h2>Limits</h2>
+<div class="grid2">
+<div class="node"><h3>Verified</h3><ul><li>Terminal suite 4,271 passed (62 new); integration 4/4.</li><li>Session lab 14/14, command lab 34/34, size lab: no ghosts.</li><li>Visual lab at 110 × 32, 80 × 24, 60 × 20, 40 × 16, 160 × 44; reduced motion; neutral palette.</li></ul></div>
+<div class="node"><h3>Not verified</h3><ul><li>The owner's real ghostty / alacritty window (tmux was the terminal).</li><li>Live delegation and spawned research workers.</li><li>The earlier lab rounds made generic DuckDuckGo queries; the final round is hermetic (<code>PRIVACY_MODE=private</code>).</li></ul></div>
+</div>
+</section>
+<footer>Run it: <code>apps/terminal/echospeak</code> from this branch, in a project folder. The installed <code>echospeak</code> still runs <code>agent-first-sessions</code>. Acceptance steps: technical record §8.</footer>
+</main></body></html>

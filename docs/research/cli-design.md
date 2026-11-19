@@ -643,3 +643,22 @@ filter instead of the approval mode while the list is open.
   including that a message after resuming lands in the chosen conversation).
 
 Design and results: [agent-first.md](agent-first.md) §4–§5.
+
+
+## 9. Visual polish (18 November 2026)
+
+Branch `tui-polish`. The method, the screenshots, the scorecard and the limits are in
+[tui-visual-polish.md](tui-visual-polish.md). These parts of this spec are superseded:
+
+- **§3.3 Banner.** Echo's face is now a square 14 × 6 quadrant face (`tui/avatar.py`). Its entrance plays in the live
+  region and is then committed to scrollback; it is static under reduced motion, ASCII and small terminals. The
+  tagline and hint lines are gone: the placeholder and footer already say them.
+- **Startup.** Plain `echospeak` reopens nothing. The banner offers `Last here: … ← to pick it up`, and `-c` /
+  `--continue` reopens. The plain REPL still resumes.
+- **§3.4 Composer.** The prompt is `›` plus two spaces (`PROMPT_W = 3`), and sent messages keep that column.
+- **§8 Session manager.** ← again opens the sessions page: grouped, fitted to its content, with the selected
+  conversation's last exchange. Esc and → go back one level at a time.
+- **§3.6 Message rendering.** Steps, decisions and failures are said once, failed or denied steps are not counted as
+  work, and searches list their real sources.
+
+The visual lab (`tests/uilab.py`, `tests/ansishot.py`) is the screenshot loop for the next round.

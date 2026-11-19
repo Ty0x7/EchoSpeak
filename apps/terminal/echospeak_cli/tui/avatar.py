@@ -80,8 +80,7 @@ def _timeline() -> list[tuple[int, list[str]]]:
     return [
         (70, _fit(_face(), 5)),            # the top edge appears
         (140, _fit(_face(), 4)),           # rising: the forehead (no half-cut eyes)
-        (200, _fit(_face(), 2)),           # the eyes come into view whole
-        (260, _fit(_face(), 1)),
+        (240, _fit(_face(), 1)),           # most of the face, eyes whole (a half-cut eye reads as legs)
         (340, _squashed()),                # lands: squash
         (430, _fit(_face(eye_dy=-1), 0)),  # stretches back up, eyes perk
         (620, rest),

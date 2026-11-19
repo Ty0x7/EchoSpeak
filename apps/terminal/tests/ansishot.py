@@ -290,12 +290,14 @@ def shoot(html_text: str, size: tuple[int, int], png: Path, scale: float = 2.0) 
 
 
 def render_png(ansi: str, png: Path, cols: int, rows: int, cursor: tuple[int, int] | None = None,
-               palette: str = "owner", title: str = "") -> Path:
+               palette: str = "owner", title: str = "", scale: float = 0, keep_html: bool = True) -> Path:
     theme = owner_palette() if palette == "owner" else STANDARD
     page, size = to_html(ansi, cols, rows, theme, cursor, title)
     png.parent.mkdir(parents=True, exist_ok=True)
-    (png.with_suffix(".html")).write_text(page, encoding="utf-8")
-    shoot(page, size, png, scale=1.0 if rows > 60 else 2.0)   # tall scrollback captures at 1x: Chromium memory
+    if keep_html:
+        (png.with_suffix(".html")).write_text(page, encoding="utf-8")
+    # 2x for reading closely; tall scrollback captures at 1x (Chromium's memory), and 1x for repo media.
+    shoot(page, size, png, scale=scale or (1.0 if rows > 60 else 2.0))
     return png
 
 
