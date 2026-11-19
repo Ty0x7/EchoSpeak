@@ -70,5 +70,20 @@
 <section><h2>"I ran out of steps (60)"</h2>
 <p class="lead">The owner's turns stopped after <b>6</b> look-up steps, not 60: the final answer call wrote the whole answer as reasoning and returned no reply. That call now runs with thinking off (6.6–7.7 s, against up to 86.5 s with thinking on), an answer written as reasoning is recovered, the note states the real limit, and the agent carries on past its limit while it is still making progress (up to 5 stretches; "Kept going" in the terminal).</p>
 </section>
+
+<section><h2>Verification round: ×4 memory, a live long task, one branch</h2>
+<p class="lead">Memory and long-session cases, four trials each with qwen3.5:9b: <b>51/56 → 60/60</b>, including a fresh held-out case (new manager, 4/4) never used for a fix. The model keys keyless facts itself; the misses were updates it never saved. One end-of-turn step now saves when the user asked to remember or said a recalled fact changed. It fired in 25 of 60 trials, so this reliability is the harness's as much as the model's.</p>
+<div class="bars" role="img" aria-label="Success with four trials before and after: LS6 67 to 100 percent, LSH2 67 to 100, LSH3 67 to 100.">
+<span>LS6 before</span><div class="bar bad" style="width:67%"></div><span class="num">67%</span>
+<span>LS6 after</span><div class="bar" style="width:100%"></div><span class="num">100%</span>
+<span>LSH3 before</span><div class="bar bad" style="width:67%"></div><span class="num">67%</span>
+<span>LSH3 after</span><div class="bar" style="width:100%"></div><span class="num">100%</span>
+</div>
+<div class="grid3" style="margin-top:12px">
+<div class="node"><h3>Long task, live</h3><p>Ten functions, 12-step stretches: continuation fired in all five runs, with no "Continue". The work budget now grows with it (it had stopped one run at step 59), and re-reading a just-edited file is no longer a "repeat". Best run: 10/10 in 30 steps.</p></div>
+<div class="node"><h3>Environment found</h3><p>The sandbox Python has no pytest, and pip installs into another interpreter. That hid progress in two runs; the case now ships a plain runner. Next priority: tell the agent how to test Python projects.</p></div>
+<div class="node"><h3>One branch</h3><p><code>context-recall-integration</code> merges the search-and-memory candidate: its fuller <code>chat_search</code>, and one "remember" rule from both. Both branches' tests pass together; the same 21 known failures.</p></div>
+</div>
+</section>
 <footer>Single runs on this machine; reproduce with <code>context_probe.py</code> (≈ 90 s, unloads the model). Not measured: multi-fact reasoning at depth, a text-only build without the vision projector, <code>num_gpu</code> overrides.</footer>
 </main></body></html>

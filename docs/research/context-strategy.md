@@ -330,3 +330,136 @@ the two most recent such turns were research questions that stopped after **6** 
    engineering task.
 4. Merge carefully with the other worktree's campaign (`campaign-2026-11-18.md` §10), which fixed `chat_search`
    and "remember" listing independently.
+
+## 10. Verification round: live long task, memory ×4, branch integration (19 November, evening)
+
+The owner asked for three checks before moving on, through the engineering cycle. Branch
+`context-recall-integration` (from `context-memory` cff1f0f): commits `a6c3e9c` → `7bed1a3` plus this report, local, not pushed.
+Every evaluation used its own isolated backend; the owner's backend (the `five-model-harness` checkout, up 20 h) was
+never restarted or touched.
+
+### 10.1 Branch integration
+
+`search-recall-candidate` (f452559, five commits; campaign-2026-11-18 §10.5) was merged (`a6c3e9c`). Overlaps:
+
+| Area | context-memory | candidate | Kept |
+|---|---|---|---|
+| `chat_search` | any-word fallback when nothing matched | partial top-up below three hits, marked "(partial match)"; this turn's own messages excluded; full matches first, newest first, with the time | **the candidate's** (a superset) |
+| "remember" lists `memory_save` | the memory curator's explicit-request test | `REMEMBER_REQUEST` regex, not for guests | **both**, in one block |
+| Eval topic rotation | `53a3882` | `f452559` | the same change, already present |
+
+Both branches' tests pass together (120 in the overlapping files); backend suite: the same 21 pre-existing
+failures, nothing new.
+
+### 10.2 Live long task (LT1)
+
+A new case: ten text functions, each in its own module with a protected failing test, "keep going until they all
+pass". The fixture fails 10/10 as shipped and passes 10/10 with a reference implementation. Run with
+`LEAN_MAX_ITERATIONS=12` so the limit is crossed several times in minutes (same code path as the default 60).
+
+**First live run (`lt1-live`, commit b9f912a):** automatic continuation worked: 12 → 24 → 36 → 48 → 60 steps, no
+"Continue", 0/10 → **9/10** tests passing. Two harness limits then ended it:
+
+| Defect | Evidence | Fix (`21ea7f4`) |
+|---|---|---|
+| The work budget (64k tokens / 900 s) wasn't raised with the steps | "Work budget exhausted" at step 59; twelve compactions were ~35% of the charge | `Coordinator.extend_budget`: each continuation adds the work's original allowance, capped at 256k tokens and one hour |
+| The repeat guard refused re-reads of files the agent had just edited, or whose earlier result compaction had summarised away ("the result is above") | 21 refused reads, a 9-call failure streak | read counts reset after a successful change and after compaction; identical reads with nothing changed are still stopped |
+
+**Retest (`lt1-retest`, ×2, commit 4630be0):** lt1-retest showed the budget stop gone (0 of 2) and the repeat refusals down from 21 to 0, but
+both runs were confounded by the **environment**. The sandbox's `python3` (system 3.14) has no pytest, and
+`pip install pytest` reports success into a different interpreter. So r2 ran `python3 -m pytest` nine times, then
+said honestly that it couldn't verify (the judge read "I've completed implementations" as a false success; the reply
+and the harness's "Not verified" note say otherwise). r1 reached 10/10 but could never confirm it, and kept inspecting
+until the step ceiling.
+
+The fixture now ships a plain-Python `run_tests.py`, which the judge doesn't use (it still runs pytest):
+
+| Run (commit) | Continuations | Ended | Tests | Steps | Repeat refusals | Compactions |
+|---|---|---|---|---|---|---|
+| lt1-live r1 (b9f912a) | 12→24→36→48→60 | **work budget**, step 59 | 9/10 | 59 | 21 | 12 |
+| lt1-retest r1 (21ea7f4) | 24, 36, 48, 60 | step ceiling | 10/10, unconfirmed (no pytest) | 60 | 0 | 22 |
+| lt1-retest r2 | 24, 36 | answered, "not verified" | 7/10 | 32 | 0 | 6 |
+| lt1-runner r1 (7bed1a3) | 24, 36, 48, 60 | step ceiling ("Press Continue") | 9/10 | 60 | 7 | 18 |
+| **lt1-runner r2** | 24, 36 | **answered: all 10 pass** | **10/10** | 30 | 1 | 2 |
+
+**Verdict:**
+
+- Automatic continuation works live. It fired in every run, and no turn stopped for "Continue" before its ceiling.
+- The two harness limits it exposed are fixed.
+- With 12-step stretches the ceiling is 60 steps; at the default limit of 60 it is 300.
+- The remaining failure (runner r1) is a small model at 16K, losing the thread over 18 compactions on the hardest
+  function (`camel_to_snake` with acronyms). That is a model and context limit, not continuation.
+
+### 10.3 Memory reliability ×4, including keyless updates
+
+New cases: LS5 (a code reset "in passing"), LS6 (a commute that changed), held-out LSH3 (a friend who moved), and
+after LSH3 informed a fix, a fresh held-out LSH4 (a new manager). None of them says "key".
+
+**What ×4 showed (`mem-x4`, 51 of 56 trials; the eval backend was then killed by memory pressure from my own
+concurrent test suite, an environment fault, and the cut-off trial is excluded):**
+
+- The model *does* key keyless facts, and reuses the key on update (`tundra_build_server` twice,
+  `riverbend_gym_locker_code` twice): supersession by key works when a save happens.
+- The failures were updates that **were never saved**: LS6 r2 ("I switched to the 7:40 train" → "sounds like a good
+  move"), LSH3 r2 ("Ines moved to Gdansk" → "I've updated that in my notes", nothing saved), LSH2 r1 ("Remember: …"
+  → only a reminder).
+- LS2 r1 read "Remind me: when and where is the design review?" as a request for a reminder (model, and a wording
+  ambiguity in the case).
+- Evaluation: repetitions still collided (LS6 r3 answered with r1's train; LS3 drew one project three times).
+
+**Fixes (`4630be0`):** at the end of a turn with no `memory_save`, one repair step asks for it when the user asked to
+remember, or stated a change ("moved", "switched", "reset", "it's … now", "instead") to a recalled fact; the note
+names the recalled key. Questions and unrelated changes never trigger it (tests). It now applies to any agent the
+owner talks to. Eval: each trial is redrawn until its identifying values are new in the run.
+
+| Case | ×4 before the fix (`mem-x4`) | ×4 after (`mem-x4b`) |
+|---|---|---|
+| LS1 | 9.82 (100%) | 9.73 (100%) |
+| LS2 | 9.44 (75%) | **9.62 (100%)** |
+| LS3 | 9.38 (100%) | 9.47 (100%) |
+| LS4 | 8.75 (75%) | **9.69 (100%)** |
+| LS5 | 9.46 (100%) | 9.41 (100%) |
+| LS6 | 8.55 (67%) | **9.4 (100%)** |
+| LSH1 (held-out) | 9.74 (100%) | 9.51 (100%) |
+| LSH2 (held-out) | 9.07 (67%) | **9.39 (100%)** |
+| LSH3 (held-out) | 8.23 (67%) | **9.38 (100%)** |
+| LSH4 (held-out) | not in that run | 9.34 (100%) |
+| MC1 | 10.0 (100%) | 10.0 (100%) |
+| MCH1 | 10.0 (100%) | 9.88 (100%) |
+| MH1 | 9.7 (100%) | 9.54 (100%) |
+| MI1 | 9.27 (100%) | 9.36 (100%) |
+| MR1 | 9.7 (100%) | 9.7 (100%) |
+| **Mean of case means** | 9.37 | **9.56** |
+
+### 10.4 Reading and limits
+
+- **Memory, ×4:**
+  - 51 of 56 trials passed before the follow-through fix, and **60 of 60** after it.
+  - That includes four held-out cases. LSH4 is fresh: written before any run and never used for a fix.
+  - The mean of case means went from 9.37 to 9.56.
+- **How much is the harness:**
+  - The repair step fired in **25 of 60** trials, 17 of the 24 supersession ones.
+  - qwen3.5:9b often does not save an update on its own. The harness now makes it happen, at a cost of one or two
+    model calls: supersession efficiency is 6.7–7.4.
+  - With a stronger model the step would fire less, and it costs nothing when it doesn't fire.
+- **Keyless updates:** the model keys keyless facts itself and reuses the key, so supersession works whenever a save
+  happens. The failures were saves that didn't happen, not missing keys.
+- **Held-out caveat:** LSH2 and LSH3 informed fixes, so LSH4 is the clean held-out measure (4/4).
+- **Cache:** reused share 0.95, mean prefill 251 ms, mean first chunk 0.29 s, as in §9.
+- **Environment faults, both self-inflicted or local:**
+  - A concurrent full test suite pushed the 15 GB machine into an out-of-memory kill of one eval backend. The
+    owner's backend was unaffected, and evals now run with nothing else heavy.
+  - The sandbox Python has no pytest.
+- **Regressions:** the backend suite has the same 21 pre-existing failures and nothing new (1,920 passed). No case
+  lost a trial between the ×4 runs.
+
+### 10.5 Next
+
+1. **Python environment awareness:** the agent's sandbox has no pytest and `pip` installs elsewhere. The owner's
+   projects without a venv hit the same thing. Tell the agent how to run Python tests there, for example by creating
+   a project `.venv`, or detect pytest and say so in the environment note.
+2. **Long tasks at 16K:** 18–22 compactions in one turn lose the thread. Keep test results and the file list in the
+   compaction summary, and consider 32K for long engineering turns only (§3: about 37% slower).
+3. Run LT1 at the default limit (60, ceiling 300) in the owner's real setup, and watch `auto_continue` in real sessions.
+4. **Branch decision for the owner:** `context-recall-integration` contains `context-memory` and the search-recall
+   candidate, so `search-recall-candidate` can be retired.
