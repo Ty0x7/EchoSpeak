@@ -129,6 +129,24 @@ def setup_long_textkit(p: Path) -> dict[str, Any]:
         spec.append(f"- `{name}`: {doc}")
     _w(p, "SPEC.md", "\n".join(spec) + "\n")
     _w(p, "conftest.py", "")
+    # The agent's sandbox Python has no pytest and pip installs into another interpreter (lt1-retest r2: nine runs
+    # of "No module named pytest"), so a plain-Python runner, as many small projects have; the judge still runs pytest.
+    _w(p, "run_tests.py", "import importlib, pathlib, sys, traceback\n"
+       "sys.path.insert(0, str(pathlib.Path(__file__).parent))\n"
+       "failed = 0\n"
+       "for path in sorted(pathlib.Path(__file__).parent.glob('tests/test_*.py')):\n"
+       "    module = importlib.import_module('tests.' + path.stem)\n"
+       "    for name in [n for n in dir(module) if n.startswith('test_')]:\n"
+       "        try:\n"
+       "            getattr(module, name)()\n"
+       "            print('PASS', path.stem, name)\n"
+       "        except Exception:\n"
+       "            failed += 1\n"
+       "            print('FAIL', path.stem, name)\n"
+       "            traceback.print_exc(limit=1)\n"
+       "print(f'{failed} failed')\n"
+       "sys.exit(1 if failed else 0)\n")
+    _w(p, "tests/__init__.py", "")
     return {"tests": "tests", "protected": [f"tests/test_{name}.py" for name in _TEXTKIT], "verify": True}
 
 
@@ -793,7 +811,8 @@ LONG_DEV += [
 LONG_TASK = [
     Case("LT1", "Implement ten functions until every test passes", "long-task",
          [Turn("Implement every function listed in SPEC.md, each in its module under textkit/, so that all the tests "
-               "in tests/ pass. Don't change the tests. Run the tests and keep going until they all pass.")],
+               "in tests/ pass. Don't change the tests. Run them with `python3 run_tests.py` and keep going until "
+               "they all pass.")],
          setup_long_textkit, ideal_calls=24),
 ]
 
