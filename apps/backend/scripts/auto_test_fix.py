@@ -924,6 +924,10 @@ def run(args: argparse.Namespace) -> int:
     session.save()
     write_session_report(session)
     obsidian(session)
+    # Release the model and Ollama's host-RAM prompt cache (about 8 GB after a long session).
+    sys.path.insert(0, str(BACKEND / "scripts"))
+    from harness_campaign import unload
+    unload(st["model"], "http://127.0.0.1:11434")
     return 0
 
 

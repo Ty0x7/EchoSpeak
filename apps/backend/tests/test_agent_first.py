@@ -104,21 +104,90 @@ def test_every_profile_is_told_the_same_facts_about_the_app(env, monkeypatch):
     assert "How it is organised: one assistant." in talking.system_prompt
 
 
-def test_an_agent_in_its_own_conversation_can_hand_work_to_the_roster(env, monkeypatch):
-    """Live check A4: Glados, asked in her direct conversation to hand a lookup to Jarvis, had no
-    delegate_to_agent (the room's only member is Glados) and called propose_agent_change three times."""
-    glados = next(p for p in env.people.list() if p.name == "Glados")
-    jarvis = next(p for p in env.people.list() if p.name == "Jarvis")
+# ── Three separate systems (owner requirement, 18 November 2026; agent/lean/agent_reach.py) ───────────
+# Supersedes live check A4 (17 November), which gave every direct conversation the whole roster to delegate to.
+
+def _people(env):
+    by = {p.name: p for p in env.people.list()}
+    return by["Echo"], by["Jarvis"], by["Glados"]
+
+
+def test_a_primary_agent_alone_does_not_recruit_the_others(env, monkeypatch):
+    """System A, negative: Glados's own conversation, no shared project, so no delegation and no team section."""
+    _echo, _jarvis, glados = _people(env)
     direct = env.rooms.direct(glados.id, "Glados")
     session = _session(monkeypatch, direct.thread_id)
     turn = session._build_turn(glados, "ask Jarvis to look something up", history=[], depth=0, allow_handoff=True)
+    assert "delegate_to_agent" not in turn.toolbox.names
+    assert session._handoff_pool(glados.id) == []
+    assert "## Your team" not in turn.system_prompt
+
+
+def test_project_members_delegate_to_each_other_and_only_to_each_other(env, monkeypatch):
+    """System A, positive: in a project whose members are Glados and Jarvis, Glados may hand work to Jarvis only.
+    Echo is not a member here, so Echo can't delegate in it and isn't a target."""
+    import agent.projects
+    echo, jarvis, glados = _people(env)
+    agent.projects.get_project_manager().update_project(_IDS["work"], agent_ids=[glados.id, jarvis.id])
+    chat = env.chats.create_thread(title="Build", source="web")
+    env.store.update_thread_state(chat.thread_id, active_project_id=_IDS["work"])
+    session = _session(monkeypatch, chat.thread_id)
+    turn = session._build_turn(glados, "ask Jarvis to research the API", history=[], depth=0, allow_handoff=True)
     assert "delegate_to_agent" in turn.toolbox.names
-    assert "Jarvis" in turn.system_prompt.split("## Your team", 1)[1][:400]
-    assert {p.id for p in session._handoff_pool()} >= {glados.id, jarvis.id, "echo"}
-    # A group still hands work only to its members.
+    assert [p.id for p in session._handoff_pool(glados.id)] == [jarvis.id]
+    assert session._handoff_pool(echo.id) == []                  # not a member: no delegation here
+    echo_turn = session._build_turn(echo, "ask Jarvis to research the API", history=[], depth=0, allow_handoff=True)
+    assert "delegate_to_agent" not in echo_turn.toolbox.names
+    # A group room the owner composed still delegates among its members only.
     group = env.rooms.create(name="Pair", agent_ids=[glados.id, jarvis.id])
-    paired = _session(monkeypatch, group.thread_id)
-    assert {p.id for p in paired._handoff_pool()} == {glados.id, jarvis.id}
+    assert {p.id for p in _session(monkeypatch, group.thread_id)._handoff_pool(glados.id)} == {jarvis.id}
+
+
+def test_spawned_workers_exist_without_a_project_and_never_reach_other_agents(env, monkeypatch):
+    """System B: Echo's own research workers, in a conversation with no project, under the Research workers setting.
+    Workers are not primary agents: no delegation, no messaging, no memory, no further spawning."""
+    from agent.lean import swarm
+    monkeypatch.setattr(lean_runtime.settings, "research_swarm", lambda: True)
+    session, turn = _echo_turn(env, monkeypatch, "Do in-depth research across many sources on home heat pumps",
+                               project=False)
+    assert "spawn_workers" in turn.toolbox.names
+    assert "delegate_to_agent" not in turn.toolbox.names          # B is not A
+    assert not swarm.WORKER_TOOLS & {"delegate_to_agent", "message_agent", "spawn_workers", "memory_search",
+                                     "memory_save", "chat_search", "terminal", "file_write"}
+
+
+def test_telling_another_agent_something_sends_one_note_and_grants_nothing(env, monkeypatch):
+    """System C: "tell Jarvis …" offers message_agent for Jarvis only, posts one note to Jarvis's own conversation,
+    and adds no delegation, no project membership and no further messages."""
+    import agent.projects
+    echo, jarvis, _glados = _people(env)
+    chat = env.chats.create_thread(title="Talk", source="web")
+    session = _session(monkeypatch, chat.thread_id)
+    session.job = SimpleNamespace(goal="Tell Jarvis the release moved to Friday.")
+    from agent.lean import policy
+    monkeypatch.setattr(policy, "_secret_values", lambda: ["sk-ant-" + "a" * 30])  # one of the owner's stored keys
+    tools = {t.name: t for t in session._message_tool(echo)}
+    assert set(tools) == {"message_agent"}
+    assert "Error" in tools["message_agent"].func({"agent": "Glados", "message": "hi"})
+    out = tools["message_agent"].func({"agent": "Jarvis", "message": "The release moved to Friday. key sk-ant-" + "a" * 30})
+    assert out.startswith("Sent to Jarvis") and "Already sent" in tools["message_agent"].func(
+        {"agent": "Jarvis", "message": "again"})
+    notes = [i for i in env.store.list_items(session.execution_id) if i.payload.get("role") == "agent_message"]
+    assert len(notes) == 1 and notes[0].session_id == env.rooms.direct(jarvis.id, "Jarvis").thread_id
+    assert "sent at the owner's request" in notes[0].payload["text"] and "sk-ant-aaaa" not in notes[0].payload["text"]
+    assert agent.projects.get_project_manager().get_project(_IDS["work"]).agent_ids == []
+    assert session._handoff_pool(echo.id) == []
+
+
+@pytest.mark.parametrize("request_text, target", [
+    ("Tell Jarvis the release moved", "Jarvis"), ("let Glados know I'm late", "Glados"),
+    ("Please pass this to Jarvis: build is green", "Jarvis"), ("message Glados that tests pass", "Glados"),
+    ("What does Jarvis do?", None), ("Jarvis said the build is green", None), ("tell me about Glados", None),
+])
+def test_only_an_explicit_request_opens_a_message(env, request_text, target):
+    from agent.lean.agent_reach import message_target
+    found = message_target(request_text, env.people.list(), "echo")
+    assert (found.name if found else None) == target
 
 
 @pytest.mark.parametrize("message, merge", [

@@ -42,6 +42,10 @@ ALLOWED = frozenset({
     "memory_save", "memory_search", "chat_search",
     # Skills and connected apps (their actions still ask first)
     "read_skill", "find_integrations", "check_integration", "read_output",
+    # Spawned research workers (System B, agent/lean/agent_reach.py): this agent's own task workers, not other agents.
+    "spawn_workers",
+    # An explicit "tell Jarvis …" from the owner (System C); offered only for such a request.
+    "message_agent",
 })
 # Connected apps register at runtime under their own names; these origins are allowed.
 ALLOWED_ORIGINS = frozenset({"mcp", "skill", "connection"})
@@ -53,7 +57,7 @@ ELSEWHERE = {
     "computer_action": "Desktop control", "desktop_click": "Desktop control", "desktop_type_text": "Desktop control",
     "desktop_send_hotkey": "Desktop control", "take_screenshot": "Looking at the screen", "analyze_screen": "Looking at the screen",
     "browse_task": "Driving a browser", "email_send": "Sending email", "email_reply": "Sending email",
-    "delegate_to_agent": "Handing work to agents", "spawn_workers": "Research workers",
+    "delegate_to_agent": "Handing work to agents (they share a project with this agent)",
 }
 # Apps that run commands: opening one is a terminal by another name.
 _COMMAND_APPS = re.compile(r"(?i)^\s*(cmd|command prompt|powershell|pwsh|wt|windows terminal|terminal|bash|wsl|python[\d.]*|py|node|"

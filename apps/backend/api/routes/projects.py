@@ -20,6 +20,7 @@ router = APIRouter()
 class ProjectResponse(BaseModel):
     id: str
     name: str
+    agent_ids: List[str] = []
     logo_data_url: str = ""
     description: Optional[str] = ""
     created_at: str
@@ -69,6 +70,8 @@ class ProjectUpdateRequest(BaseModel):
     context_prompt: Optional[str] = None
     tags: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
+    # Primary agents taking part in the project (System A delegation, agent/lean/agent_reach.py).
+    agent_ids: Optional[List[str]] = None
 
 
 @router.get("/projects", response_model=ProjectListResponse)
@@ -155,9 +158,16 @@ async def update_project(project_id: str, request: ProjectUpdateRequest):
     """Update an existing project."""
     from agent.projects import get_project_manager
     manager = get_project_manager()
+    if request.agent_ids is not None:
+        from agent.lean.personas import get_persona_store
+        known = {p.id for p in get_persona_store().list()}
+        unknown = [a for a in request.agent_ids if a not in known]
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown agents: {', '.join(unknown)}")
     try:
         project = manager.update_project(
             project_id=project_id,
+            agent_ids=request.agent_ids,
             name=request.name,
             logo_data_url=request.logo_data_url,
             description=request.description,

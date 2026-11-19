@@ -4,6 +4,7 @@ tool that needs them."""
 
 from __future__ import annotations
 
+from agent.lean import runtime as lean_runtime
 import json
 import threading
 from typing import Any
@@ -384,6 +385,8 @@ def test_session_persists_a_b_a_as_three_ordered_messages(monkeypatch):
     Session timeline must reload as Echo, Scout, Echo with distinct ids."""
     from agent.lean import runtime as lean_runtime
     from agent.state import get_state_store
+    # These agents share a project (System A, agent/lean/agent_reach.py): delegation needs a shared environment.
+    monkeypatch.setattr(lean_runtime.LeanSession, "_project_members", lambda self: [p.id for p in self.personas.list()])
 
     scripts = {
         "echo": ScriptedClient([

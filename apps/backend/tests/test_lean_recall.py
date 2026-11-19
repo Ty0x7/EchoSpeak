@@ -35,6 +35,8 @@ def _session(monkeypatch, scripts: dict[str, ScriptedClient], queries: list[str]
 
 
 def test_a_teammate_recalls_by_its_task_and_the_request_and_gets_the_chat_summary(monkeypatch):
+    # These agents share a project (System A, agent/lean/agent_reach.py): delegation needs a shared environment.
+    monkeypatch.setattr(lean_runtime.LeanSession, "_project_members", lambda self: [p.id for p in self.personas.list()])
     monkeypatch.setattr(summaries, "summary_text", lambda session_id: "Earlier: the user is building a bakery site.")
     scripts = {
         "echo": ScriptedClient([

@@ -76,6 +76,9 @@ class Project(BaseModel):
     verified_facts: List[Dict[str, Any]] = Field(default_factory=list)
     archived: bool = False
     preferred_model_profile: Optional[Dict[str, Any]] = None
+    # Primary agents taking part in this project (System A, agent/lean/agent_reach.py): only members may delegate to
+    # one another here. Set by the owner; empty means no delegation between primary agents in this project.
+    agent_ids: List[str] = Field(default_factory=list)
 
 
 class ProjectManager:
@@ -252,12 +255,15 @@ class ProjectManager:
         tags: Optional[List[str]] = None,
         metadata: Optional[Dict[str, Any]] = None,
         logo_data_url: Optional[str] = None,
+        agent_ids: Optional[List[str]] = None,
     ) -> Optional[Project]:
         """Update an existing project."""
         project = self._cache.get(project_id)
         if not project:
             return None
         project = project.model_copy(deep=True)
+        if agent_ids is not None:
+            project.agent_ids = [a for a in dict.fromkeys(str(x).strip() for x in agent_ids) if a]
         
         if name is not None:
             from agent.project_identity import display_name

@@ -63,6 +63,18 @@ def keep_loaded(model: str, upstream: str) -> float:
     return round(time.time() - started, 1)
 
 
+def unload(model: str, upstream: str) -> None:
+    """Release the model and Ollama's host-RAM prompt cache. keep_alive 2h held about 8 GB after the 18 November
+    campaign (MemAvailable 1.9 GB, 10 GB swapped); unloading freed it. Best effort."""
+    try:
+        body = json.dumps({"model": model, "keep_alive": 0}).encode()
+        request = urllib.request.Request(upstream.rstrip("/") + "/api/generate", data=body,
+                                         headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(request, timeout=60).read()
+    except Exception:
+        pass
+
+
 def run_eval(backend: Path, model: str, label: str, repeat: int, only: str, cases: str) -> Path:
     before = set(OUT.glob(f"*-{label}")) | set((backend / "data/evals/harness").glob(f"*-{label}"))
     args = [sys.executable, "scripts/harness_eval.py", "--model", model, "--repeat", str(repeat), "--label", label]
@@ -149,6 +161,8 @@ def main() -> int:
             judging.append(thread)
     for thread in judging:
         thread.join()
+    for model in models:
+        unload(model, args.upstream)
     (folder / "campaign.json").write_text(json.dumps(campaign, indent=1), encoding="utf-8")
     (folder / "campaign.md").write_text(markdown(campaign), encoding="utf-8")
     print(markdown(campaign))

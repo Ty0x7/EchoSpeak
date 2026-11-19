@@ -72,6 +72,8 @@ def _tool_results(client: ScriptedClient, call: int) -> list[str]:
 # ── U1: handoff hygiene ─────────────────────────────────────────────────
 
 def test_teammate_cannot_hand_the_task_straight_back(monkeypatch):
+    # These agents share a project (System A, agent/lean/agent_reach.py): delegation needs a shared environment.
+    monkeypatch.setattr(lean_runtime.LeanSession, "_project_members", lambda self: [p.id for p in self.personas.list()])
     scripts = {
         "echo": ScriptedClient([
             ModelTurn(tool_calls=[_delegate("d1", "Scout")]),
@@ -91,6 +93,8 @@ def test_teammate_cannot_hand_the_task_straight_back(monkeypatch):
 
 
 def test_handoff_brief_carries_the_users_message_and_marks_who_handed_off(monkeypatch):
+    # These agents share a project (System A, agent/lean/agent_reach.py): delegation needs a shared environment.
+    monkeypatch.setattr(lean_runtime.LeanSession, "_project_members", lambda self: [p.id for p in self.personas.list()])
     scripts = {
         "echo": ScriptedClient([ModelTurn(tool_calls=[_delegate("d1", "Scout", "check the score")]), ModelTurn(content="Done.")]),
         "scout": ScriptedClient([ModelTurn(content="3-1.")]),
@@ -108,6 +112,8 @@ def test_handoff_brief_carries_the_users_message_and_marks_who_handed_off(monkey
 
 
 def test_handoffs_per_message_are_capped(monkeypatch):
+    # These agents share a project (System A, agent/lean/agent_reach.py): delegation needs a shared environment.
+    monkeypatch.setattr(lean_runtime.LeanSession, "_project_members", lambda self: [p.id for p in self.personas.list()])
     monkeypatch.setattr(lean_runtime, "MAX_HANDOFFS_PER_MESSAGE", 1)
     scripts = {
         "echo": ScriptedClient([

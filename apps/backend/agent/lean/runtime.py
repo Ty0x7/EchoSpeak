@@ -254,15 +254,32 @@ class LeanSession:
         members = [self.personas.get(agent_id) for agent_id in self.room.agent_ids]
         return [m for m in members if m is not None]
 
-    def _handoff_pool(self) -> list[AgentPersona]:
-        """Who an agent may hand work to: a group's members; anywhere else, the whole roster.
+    def _project_members(self) -> list[str]:
+        """The primary agents the owner put in this conversation's project (Project.agent_ids)."""
+        project_id = self._active_project()
+        if not project_id:
+            return []
+        try:
+            from agent.projects import get_project_manager
+            project = get_project_manager().get_project(project_id)
+            return [str(a) for a in (getattr(project, "agent_ids", None) or [])]
+        except Exception:
+            return []
 
-        A direct conversation's only member is the agent itself, so "room members" left Glados with nobody to
-        delegate to (live check A4, 17 November 2026) and Jarvis unable to see Echo (conversation audit).
+    def _handoff_pool(self, persona_id: str = "") -> list[AgentPersona]:
+        """System A (agent/lean/agent_reach.py): the primary agents this agent may delegate to here.
+
+        Members of the conversation's project when this agent is one of them, or of an owner-composed group room.
+        Nobody otherwise. A direct conversation used to offer the whole roster, so any agent could recruit any other
+        into its work outside a shared project (owner requirement, 18 November 2026).
         """
-        if self.room is not None and self.room.kind == "group":
-            return self._members()
-        return self.personas.list()
+        from agent.lean.agent_reach import delegation_pool
+
+        persona_id = persona_id or (self.default_persona_id if hasattr(self, "default_persona_id") else "")
+        room_kind = self.room.kind if self.room is not None else ""
+        room_ids = [m.id for m in self._members()] if room_kind == "group" else []
+        return delegation_pool(persona_id, self.personas.list(), room_kind=room_kind, room_member_ids=room_ids,
+                               project_member_ids=self._project_members())
 
     def _is_group(self) -> bool:
         return bool(self.room and self.room.kind == "group" and len(self._members()) >= 2)
@@ -1088,8 +1105,10 @@ class LeanSession:
             meta["delegated_by"] = {"id": delegated_by.id, "name": delegated_by.name}
         guest = self.caller_role != "owner"
         # Chat and Code have no team: delegation, rosters and hand-offs are Agents' (agent/environments.py).
-        can_hand_off = allow_handoff and depth < MAX_DELEGATION_DEPTH and not guest and self.environment == "agents"
-        teammates = [] if self.environment != "agents" else [p for p in self._handoff_pool() if p.id != persona.id]
+        # System A: delegation exists only where this agent shares a project or a group room with others.
+        pool = [] if guest else self._handoff_pool(persona.id)
+        can_hand_off = allow_handoff and depth < MAX_DELEGATION_DEPTH and not guest and bool(pool)
+        teammates = pool
         if guest:
             toolbox = Toolbox(toolsets=GUEST_TOOLS[self.caller_role], extra_tools=rich_tools(), session_id=self.session_id)
         else:
@@ -1450,9 +1469,14 @@ class LeanSession:
         tools.extend(generation_tools(self.session_id, self.execution_id))
         # Research swarm (agent/lean/swarm.py): only the agent answering the user leads workers;
         # workers and teammates never spawn more. Off unless Settings › Agent › Research workers is on.
-        if depth == 0 and settings.research_swarm() and self.caller_role == "owner" and self.environment == "agents":
+        # System B: wherever the parent works, project or not (agent/lean/agent_reach.py). Workers are not primary
+        # agents and get a read-only subset of the parent's tools (swarm.WORKER_TOOLS).
+        if depth == 0 and settings.research_swarm() and self.caller_role == "owner":
             from agent.lean import swarm
             tools.append(swarm.tool(self, persona))
+        # System C: an explicit "tell Jarvis …" from the owner, in this request only.
+        if depth == 0 and self.caller_role == "owner" and self.job is not None:
+            tools.extend(self._message_tool(persona))
         # Reminders (agent/reminders.py), on Routines: the owner's, in this chat. A routine's own run can't
         # schedule more of them.
         if self.caller_role == "owner" and self.source not in {"routine", "heartbeat", "proactive"}:
@@ -1696,7 +1720,7 @@ class LeanSession:
             ))
 
         if allow_handoff and depth < MAX_DELEGATION_DEPTH:
-            candidates = self._handoff_pool()
+            candidates = self._handoff_pool(persona.id)
             # Never offer a hand-back to whoever handed this work over.
             excluded = {persona.id, delegated_by.id if delegated_by else ""}
             candidates = [c for c in candidates if c.id not in excluded]
@@ -1793,6 +1817,52 @@ class LeanSession:
                     always=True,
                 ))
         return tools
+
+    def _message_tool(self, persona: AgentPersona) -> list[NativeTool]:
+        """System C: post one note to another primary agent's own conversation, only when the owner asked for it."""
+        from agent.lean import agent_reach
+
+        target = agent_reach.message_target(self.job.goal if self.job else "", self.personas.list(), persona.id)
+        if target is None:
+            return []
+        sent: list[str] = []
+
+        def send(args: dict[str, Any]) -> str:
+            name = str(args.get("agent") or "").strip()
+            if name.lower() != target.name.lower():
+                return f"Error: the owner asked you to message {target.name} only."
+            if sent:
+                return f"Already sent to {target.name} in this request."
+            text = str(args.get("message") or "").strip()
+            if not text:
+                return "Error: write the message in 'message'."
+            from agent.lean.rooms import get_room_store
+            from agent.state import get_state_store
+
+            room = get_room_store().direct(target.id, target.name)
+            note = agent_reach.message_text(persona.name, text)
+            get_state_store().add_item(turn_id=self.execution_id, item_type="assistant_message", status="complete",
+                                       session_id=room.thread_id,
+                                       payload={"text": note, "agent_id": persona.id, "agent_name": persona.name,
+                                                "role": "agent_message", "to_agent": target.id,
+                                                "from_session": self.session_id})
+            policy.audit(policy.Decision("allow", "the owner asked to message this agent", "agent_message"),
+                         name="message_agent", args={"agent": target.name, "chars": len(note)},
+                         session_id=self.session_id, agent=persona.id, outcome=f"sent to {room.thread_id}")
+            sent.append(room.thread_id)
+            return (f"Sent to {target.name}'s conversation. Nothing else was shared: they get this note only, not this "
+                    "conversation, your memory or the project.")
+
+        return [NativeTool(
+            name="message_agent",
+            description=f"Send {target.name} the message the user asked you to pass on. It goes to their own "
+                        "conversation; it doesn't add them to this work or share anything else.",
+            parameters={"type": "object", "properties": {
+                "agent": {"type": "string", "enum": [target.name]},
+                "message": {"type": "string", "description": "What the user wants them to know."},
+            }, "required": ["agent", "message"]},
+            func=send,
+        )]
 
     def _update_soul(self, persona: AgentPersona, args: dict[str, Any]) -> str:
         """Edit the soul this agent's prompt is actually built from, then prove it took.

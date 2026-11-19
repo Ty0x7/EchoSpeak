@@ -84,6 +84,8 @@ def test_work_budget_counts_new_tokens_not_the_re_sent_conversation(env, monkeyp
 
 
 def test_echo_requests_specialist_help_with_child_grant(env, monkeypatch):
+    # These agents share a project (System A, agent/lean/agent_reach.py): delegation needs a shared environment.
+    monkeypatch.setattr(runtime.LeanSession, "_project_members", lambda self: [p.id for p in self.personas.list()])
     store, _, _ = env
     install_clients(monkeypatch, {"echo": [ModelTurn(tool_calls=[ToolCall("d1", "delegate_to_agent", json.dumps({"agent": "Jarvis", "task": "Compare the supplied numbers"}))]), ModelTurn(content="Jarvis returned the comparison.")],
         "scout": [ModelTurn(content="The supplied numbers are equal.")]})

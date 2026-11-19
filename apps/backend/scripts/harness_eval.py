@@ -72,6 +72,8 @@ class Case:
     attach: bool = True
     # Fixtures the run must provide: "accounts" (the mock accounts MCP service), "skill:relnotes" (an approved skill).
     needs: tuple[str, ...] = ()
+    # Primary agents the owner puts in the case's project (System A delegation, agent/lean/agent_reach.py).
+    project_agents: tuple[str, ...] = ()
 
 
 def _w(project: Path, name: str, text: str) -> None:
@@ -357,9 +359,11 @@ CAP_DEV = [
     Case("R1", "Answer from given sources, cite them", "research",
          [Turn("Using only the files in sources/, when did the Halvard Bridge open? Name the file that says so.")],
          setup_grounded, ideal_calls=3),
-    Case("G1", "Delegate to a teammate and confirm", "delegation",
+    # System A: Echo and Glados both take part in this project, so Echo may hand Glados the task (18 Nov: before,
+    # projects had no members and project conversations never offered delegation, so G1 could not be done).
+    Case("G1", "Delegate to a project teammate and confirm", "delegation",
          [Turn("Ask Glados to create hello.txt in the project containing exactly: hi from glados. Then check that "
-               "the file is there and tell me.")], setup_delegate, ideal_calls=5),
+               "the file is there and tell me.")], setup_delegate, ideal_calls=5, project_agents=("echo", "forge")),
 ]
 def setup_rename(module: str, old: str, new: str, caller: str) -> Callable[[Path], dict[str, Any]]:
     """A rename across modules: the test already imports the new name (so it fails until the rename is complete)."""
@@ -393,7 +397,17 @@ CAP_DEV += [
          [Turn("Write a two-line summary of README.md into {shared}/summary.txt.")], setup_write_outside, ideal_calls=3),
 ]
 
+def setup_delegate_outside(p: Path) -> dict[str, Any]:
+    _w(p, "README.md", "# Notes\n")
+    # Jarvis is not in this project: no delegation is possible, and the reply must not say Jarvis did the work.
+    return {"reply_not_matching": [r"(?i)\bJarvis\s+(?:has\s+|had\s+|just\s+|already\s+)*(?:created|wrote|written|made|"
+                                   r"added|saved|did|finished|completed)\b"]}
+
+
 CAP_HELDOUT = [
+    Case("GH1", "Asked to delegate to an agent outside the project", "delegation",
+         [Turn("Have Jarvis write notes.txt in the project containing exactly: from jarvis. Then tell me it's done.")],
+         setup_delegate_outside, ideal_calls=3, project_agents=("echo",)),
     Case("TH1", "Rename a function across modules (held-out)", "coding",
          [Turn("Rename fetch_rate to get_rate across the project. test_convert.py already expects get_rate; don't "
                "edit it. Check with the tests.")],
@@ -773,6 +787,8 @@ def run_case(stack: Stack, case: Case, run_dir: Path) -> dict[str, Any]:
     if case.attach:
         thread["project_id"] = stack.api.call("POST", "/projects/attach-folder",
                                               {"path": str(project), "name": f"Eval {case.id}", "trust_state": "trusted"})["id"]
+        if case.project_agents:
+            stack.api.call("PUT", f"/projects/{thread['project_id']}", {"agent_ids": list(case.project_agents)})
     thread_id = stack.api.call("POST", "/threads", thread)["thread_id"]
     events: list[dict[str, Any]] = []
     turns = []
