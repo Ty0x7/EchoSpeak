@@ -94,6 +94,15 @@ def caller_note(source: str, role: str, owner_name: str = "") -> str:
     )
 
 
+def _explicit_remember(text: str) -> bool:
+    """The memory curator's own test for an explicit request to remember ("Please remember: …")."""
+    try:
+        from agent.memory_curator import MemoryCurator
+        return MemoryCurator.is_explicit_memory_request(text)
+    except Exception:  # noqa: BLE001 - a detector problem must never break building the turn
+        return False
+
+
 def request_text(message: str) -> str:
     """Channel bots send context, then 'User request: ...'. Memory lookups use just the request."""
     marker = "User request:"
@@ -130,6 +139,16 @@ def is_busy(quiet_seconds: float = 30.0) -> bool:
     with _LOCKS_GUARD:
         return _ACTIVITY["running"] > 0 or time.time() - float(_ACTIVITY["last_end"]) < quiet_seconds
 
+
+# Words a past-chat search ignores when it falls back to partial matches (LeanSession chat_search).
+_SEARCH_STOP = frozenset({
+    "the", "and", "for", "that", "this", "what", "whats", "which", "who", "when", "where", "how", "did", "does", "was",
+    "were", "you", "your", "our", "his", "her", "their", "with", "from", "about", "earlier", "before", "mentioned",
+    "said", "told", "name", "called", "chat", "conversation", "message", "past", "previous", "last", "any",
+})
+
+# The owner asking an agent to remember something (keeps memory_save listed on a focused local model).
+REMEMBER_REQUEST = re.compile(r"(?i)\b(remember|don'?t forget|keep in mind|make a note|note (?:that|this|down))\b")
 
 class LeanSession:
     """Runs one user message through one or more agents in a Session."""
@@ -1175,13 +1194,14 @@ class LeanSession:
             # What the request itself names strongly (agent_sessions for "codex and claude sessions") is listed
             # up front instead of waiting for a find_tools call a small model doesn't think to make.
             toolbox.list_suggested(self._goal(message, task))
-        if "memory_save" in toolbox.deferred and not read_only:
-            from agent.memory_curator import MemoryCurator
-            if MemoryCurator.is_explicit_memory_request(request_text(message)):
-                # "Remember that …" to an agent whose focus defers memory_save (the builder): listed, or it saved
-                # the fact over its private project notes with agent_notes (evaluation MI1, 19 November).
-                toolbox.deferred.discard("memory_save")
-                toolbox.schema_version += 1
+        if not guest and not read_only and "memory_save" in toolbox.deferred and (
+                REMEMBER_REQUEST.search(request_text(message) or "") or _explicit_remember(request_text(message))):
+            # "Remember that my build cache key is …" to a builder on a local model: its focus has no memory tools, so
+            # Glados said "I've noted that" with nothing saved (live MI1, 18 November 2026), or saved it over her
+            # private project notes with agent_notes (evaluation MI1, 19 November). An explicit request to remember
+            # keeps the tool listed.
+            toolbox.deferred.discard("memory_save")
+            toolbox.schema_version += 1
         if "spawn_workers" in toolbox.native:
             # Workers get a subset of exactly this toolbox: never more than their lead.
             toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]
@@ -1699,13 +1719,21 @@ class LeanSession:
 
             scoped = not self._owner_side(persona) or bool(current_work() and current_work().coordinator.get(current_work().work_id, principal=current_work().principal).get("parent_id"))
             query = str(args.get("query") or "")
-            store = get_state_store()
-            hits = store.search_messages(query, limit=8, session_id=self.session_id if scoped else "")
-            if not hits and keywords(query):
-                # Models describe what they look for ("venue offsite meeting location"); a message rarely holds every
-                # one of those words (evaluation MC1). Rank messages by the content words they share instead.
-                hits = store.search_messages(" ".join(keywords(query, limit=8)), limit=8, any_term=True,
-                                             session_id=self.session_id if scoped else "")
+            store_ = get_state_store()
+            # This turn's own messages never count: the question being asked matched itself, three hits skipped the
+            # partial top-up, and only two stale ones were left after it was dropped (live MC1 r2).
+            hits = [hit for hit in store_.search_messages(query, limit=9, session_id=self.session_id if scoped else "")
+                    if hit["turn_id"] != self.execution_id][:8]
+            if len(hits) < 3:
+                # Every word had to match: "offsite venue" missed "the team offsite is at Larkspur Hall", and "vendor
+                # account manager name" missed the message naming the manager (live MC1/MCH1, 18 November 2026). Top
+                # up with the best partial matches on the query's meaningful words, marked as partial.
+                words = " ".join(w for w in re.findall(r"\w+", query.lower()) if len(w) > 2 and w not in _SEARCH_STOP)
+                seen_ids = {hit["item_id"] for hit in hits}
+                for hit in (store_.search_messages(words, limit=8, session_id=self.session_id if scoped else "",
+                                                    any_term=True) if words else []):
+                    if hit["item_id"] not in seen_ids and hit["turn_id"] != self.execution_id and len(hits) < 8:
+                        hits.append({**hit, "partial": True})
             context = current_work()
             if context and context.coordinator.get(context.work_id, principal=context.principal).get("parent_id"):
                 hits = [hit for hit in hits if hit["session_id"] == self.session_id]
@@ -1715,12 +1743,16 @@ class LeanSession:
             if not hits:
                 return ("No matching messages in this conversation. Ask the user to share the relevant excerpt here."
                         if scoped else "No past messages match.")
+            # Full matches first, then partial ones, newest first in each: the owner's latest mention is the one they
+            # mean. With rank order, "offsite" found an earlier venue first and the model answered with it (live MC1).
+            hits.sort(key=lambda hit: (bool(hit.get("partial")), -float(hit["created_at"] or 0)))
             lines = []
             for hit in hits:
-                when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
+                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(hit["created_at"] or 0)))
                 who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
                 here = " (this chat)" if hit["session_id"] == self.session_id else ""
-                lines.append(f"- {when}{here} {who}: {hit['snippet']}")
+                partial = " (partial match)" if hit.get("partial") else ""
+                lines.append(f"- {when}{here}{partial} {who}: {hit['snippet']}")
             return "\n".join(lines)
 
         store = getattr(self.agent, "document_store", None)

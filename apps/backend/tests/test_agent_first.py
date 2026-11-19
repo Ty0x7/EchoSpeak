@@ -755,3 +755,67 @@ def test_the_session_overview_says_who_answers_which_project_and_what_is_waiting
     if group.thread_id in rows:
         assert rows[group.thread_id]["kind"] == "group" and rows[group.thread_id]["room_name"] == "Release crew"
         assert [a["name"] for a in rows[group.thread_id]["agents"]] == ["Jarvis", "Glados"]
+
+
+def test_a_builder_asked_to_remember_has_memory_save_listed(env, monkeypatch):
+    """Live MI1: Glados on a local model (builder focus, no memory tools) said "I've noted that" and saved nothing."""
+    _echo, _jarvis, glados = _people(env)
+    monkeypatch.setattr(lean_runtime.LeanSession, "_small_builder", lambda self, persona: True)
+    direct = env.rooms.direct(glados.id, "Glados")
+    session = _session(monkeypatch, direct.thread_id)
+    session.agent.memory = SimpleNamespace(add_memory_item=lambda *a, **k: "", count_items=lambda: 0)  # tools exist
+    asked = session._build_turn(glados, "Remember that my build cache key is zebra-123.", history=[], depth=0)
+    assert "memory_save" in asked.toolbox.names and "memory_save" not in asked.toolbox.deferred
+    plain = session._build_turn(glados, "Fix the failing test in calc.py", history=[], depth=0)
+    assert "memory_save" in plain.toolbox.deferred                # held as before when nobody asked
+
+
+# ── Past-chat search recall (live MC1/MCH1, 18 November 2026) ────────────────────────────────────
+
+def _said(env, text: str) -> str:
+    earlier = env.chats.create_thread(title="Earlier", source="web")
+    env.store.add_item(turn_id=f"t-{abs(hash(text)) % 10**8}", item_type="user_message", status="complete",
+                       session_id=earlier.thread_id, payload={"text": text})
+    return earlier.thread_id
+
+
+def _chat_search(env, monkeypatch, query: str) -> str:
+    _session_, turn = _echo_turn(env, monkeypatch, "which venue did I mention?", project=False)
+    return turn.toolbox.native["chat_search"].func({"query": query})
+
+
+def test_past_chat_search_finds_a_fact_without_every_query_word(env, monkeypatch):
+    """"offsite venue" missed "the team offsite is at Larkspur Hall": every word had to match."""
+    _said(env, "For context: the team offsite is at Larkspur Hall this year.")
+    out = _chat_search(env, monkeypatch, "offsite venue")
+    assert "Larkspur" in out and "partial match" in out
+
+
+def test_the_question_being_asked_does_not_crowd_out_the_partial_matches(env, monkeypatch):
+    """Live MC1 r2: two old full matches plus the current question made three, so no partial top-up; dropping the
+    question then left only the two stale ones, and the fact in a partial match never appeared."""
+    _said(env, "Which venue did I mention earlier for the offsite?")
+    _said(env, "The venue you mentioned for the offsite is Marlowe Hall.")
+    _said(env, "For context: the team offsite is at Kestrel Hall this year.")
+    session, turn = _echo_turn(env, monkeypatch, "which venue did I mention?", project=False)
+    env.store.add_item(turn_id=session.execution_id, item_type="user_message", status="complete",
+                       session_id=session.session_id, payload={"text": "Which venue did I mention for the offsite?"})
+    out = turn.toolbox.native["chat_search"].func({"query": "offsite venue"})
+    assert "Kestrel" in out
+
+
+def test_the_latest_mention_comes_first(env, monkeypatch):
+    """Live MC1 with a fix that only added partial matches: an earlier venue came first and the model named it."""
+    import time as _time
+    _said(env, "For context: the team offsite is at Rookwood Hall this year.")
+    _time.sleep(0.01)
+    _said(env, "For context: the team offsite is at Fenwick Hall this year.")
+    out = _chat_search(env, monkeypatch, "offsite venue")
+    assert out.index("Fenwick") < out.index("Rookwood")
+
+
+def test_an_exact_match_is_not_marked_partial_and_stop_words_alone_find_nothing(env, monkeypatch):
+    _said(env, "Our vendor's account manager is Dara Okafor.")
+    exact = _chat_search(env, monkeypatch, "account manager")
+    assert "Dara" in exact and "partial match" not in exact
+    assert "No past messages match" in _chat_search(env, monkeypatch, "what was the name")
