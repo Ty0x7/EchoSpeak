@@ -76,3 +76,24 @@ def test_cleared_old_results_get_a_handle_instead_of_vanishing():
     note = turn._clear_note({"role": "tool", "name": "file_read", "content": "x" * 3000}, 500, "older tool output cleared")
     ref = note.split("saved as ")[1].split(",")[0]
     assert len(note) < 650 and tool_outputs.load(ref, "chat")[1] == "x" * 3000
+
+
+# ── a guessed ID gets the real ones (owner session f75dae98, 18 November 2026: invented out-84652f9e09137b6a) ──
+def test_a_guessed_id_is_answered_with_this_chats_real_outputs():
+    real = tool_outputs.save("chat", "web_search", LOG, untrusted=True)
+    tool_outputs.save("other-chat", "terminal", LOG, untrusted=False)
+    for guess in ("out-84652f9e09137b6a", "out-" + "0" * 24, "out-50ca3488f69bf533185ac22eca038ac3899c7fc7b1fe1e55cc88af9cfd54480c"):
+        with pytest.raises(ValueError) as err:
+            tool_outputs.read("chat", {"id": guess})
+        said = str(err.value)
+        assert real in said and "web_search" in said      # the real ID, and what it holds
+        assert said.count("out-") == 1 + (guess in said)  # never another chat's outputs
+    # A path-like ID is still refused before anything is looked up.
+    with pytest.raises(ValueError):
+        tool_outputs.read("chat", {"id": "../../secrets"})
+
+
+def test_a_guessed_id_in_a_chat_with_no_saved_outputs_says_so():
+    with pytest.raises(ValueError) as err:
+        tool_outputs.read("empty-chat", {"id": "out-84652f9e09137b6a"})
+    assert "no saved outputs" in str(err.value) and "out-" not in str(err.value).replace("out-…", "").replace("out-84652f9e09137b6a", "")

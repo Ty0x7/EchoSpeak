@@ -235,13 +235,15 @@ def test_prompt_is_ordered_for_caching_and_carries_memory_and_earlier_sources(en
                        recalled=[{"memory_id": "m1", "scope": "account", "content": "Prefers metric units.", "semantic_key": "units"}])
     notebook.retain(session.session_id, url=DOCS, title="Release notes", text="Version 5 ships…", inspected=True)
     notebook.retain(session.session_id, url=BLOG, title="Search snippet only", text="…", inspected=False)
-    prompt = session._build_turn(session._chat_persona(), "and how heavy is it?", history=[], depth=0).system_prompt
-    parts = prompt.split("\n\n## ")
-    assert parts[-1].startswith("Current time")  # the per-minute clock is last: the prefix stays cacheable
+    turn = session._build_turn(session._chat_persona(), "and how heavy is it?", history=[], depth=0)
+    prompt = turn.system_prompt
+    # The per-minute clock is not in the system prompt at all: it comes before the tools and the history, so a
+    # clock there changed every turn's prompt near its start. It rides on the current request instead.
+    assert "Current time" not in prompt and turn.request_note.startswith("[Current time: ")
     assert "Prefers metric units." in prompt
     assert "## Pages read earlier in this chat" in prompt and DOCS in prompt and BLOG not in prompt
     context = session._chat_run.context
-    assert context["sections"]["clock"] > 0 and context["prompt_chars"] == len(prompt)
+    assert "clock" not in context["sections"] and context["prompt_chars"] == len(prompt)
     assert prompt.index("## How to answer") < prompt.index("## What you can use in Chat") < prompt.index("## Pages read earlier")
 
 

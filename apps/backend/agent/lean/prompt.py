@@ -230,6 +230,7 @@ def build_system_prompt(
     model: str = "",
     provider: str = "",
     short_facts: bool = False,
+    clock: bool = True,
 ) -> str:
     """An agent's (or native Code's) system prompt. ``environment`` "code": the engineering workflow
     (agent/lean/code_mode.py) instead of rich-answer and team sections."""
@@ -273,7 +274,7 @@ def build_system_prompt(
         # Last, because these change between turns. Model servers reuse the longest unchanged start of a prompt
         # (llama.cpp's prompt cache, providers' prompt caching): with the minute clock and git status near the top,
         # everything after them was processed again on every turn.
-        _right_now(git_note),
+        _right_now(git_note) if clock else "",
     ]
     return "\n\n".join(section for section in sections if section).strip()
 
@@ -281,6 +282,19 @@ def build_system_prompt(
 def now_line() -> str:
     """The current local time as a prompt line. Both prompt builders put it last (it changes every minute)."""
     return f"- Now: {datetime.now().astimezone().strftime('%A, %B %d, %Y %I:%M %p %Z').strip()}"
+
+
+def request_note(git_note: str = "") -> str:
+    """What changes between turns, for the end of the current request instead of the system prompt.
+
+    The system prompt is sent before the tools and the whole history. A clock in it (it changes every minute)
+    or the git status made every turn's prompt differ near its start, so the model server reprocessed the tools
+    and all of the history on every turn. On the newest message, everything before it stays the same.
+    """
+    parts = ["Current time: " + now_line().removeprefix("- Now: ").strip()]
+    if git_note:
+        parts.append(git_note)
+    return "[" + " · ".join(parts) + "]"
 
 
 def _right_now(git_note: str = "") -> str:

@@ -283,6 +283,8 @@ class LeanTurn:
         self.client = client
         # Set by the session for environments with their own boundary (Chat); returns why a call is refused.
         self.call_guard: Optional[Callable[[str, dict[str, Any], Any], str]] = None
+        # Appended to the current request only (the time, the git status): agent/lean/prompt.py request_note.
+        self.request_note = ""
         # Environment hooks (Chat: agent/lean/chat_run.py). tool_observer sees every finished call
         # (name, args, ok, output, step, duration_ms, meta); final_check may ask for one correction
         # before an answer is accepted (an output guardrail); grace_prompt asks for the best answer
@@ -502,7 +504,7 @@ class LeanTurn:
         messages: list[dict[str, Any]] = [{"role": "system", "content": self.system_prompt}]
         messages.extend(self.history)
         self._history_in_messages = len(self.history)
-        messages.append({"role": "user", "content": user_message})
+        messages.append({"role": "user", "content": user_message + (f"\n\n{self.request_note}" if self.request_note else "")})
         self._goal = user_message  # what the quarantined reader extracts facts for
 
         # A research worker gets its own, smaller step budget (agent/lean/swarm.py).

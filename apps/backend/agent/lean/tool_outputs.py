@@ -94,8 +94,49 @@ def preview(text: str, id_: str, limit: int) -> str:
             f"or a query to find lines]…\n{tail}")
 
 
+def saved_in(session: str, limit: int = 6) -> list[dict[str, Any]]:
+    """This chat's saved outputs, newest first (metadata only)."""
+    rows: list[dict[str, Any]] = []
+    with _lock:
+        if not root().exists():
+            return []
+        for meta in root().glob("out-*.json"):
+            try:
+                item = json.loads(meta.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if item.get("session_id") == session and time.time() - float(item.get("at") or 0) <= RETENTION:
+                rows.append(item)
+    rows.sort(key=lambda item: -float(item.get("at") or 0))
+    return rows[:limit]
+
+
+def _unknown(session: str, reason: str) -> ValueError:
+    """A wrong ID answered with the facts: this chat's real outputs, or that there are none.
+
+    Models guess IDs (the owner's session f75dae98 called read_output with invented 16- and 64-character
+    IDs at the start of a turn, then spent 70 more calls looking around). The real list ends the guessing.
+    """
+    rows = saved_in(session)
+    if not rows:
+        return ValueError(f"{reason}. This chat has no saved outputs: read_output only reopens an ID that a tool "
+                          "result gave you (\"saved as out-…\"). Run the tool that produces what you need instead.")
+    listed = "; ".join(f"{row['id']} ({row.get('tool')}, {int(row.get('chars') or 0):,} characters, "
+                       f"{max(0, int((time.time() - float(row.get('at') or 0)) // 60))} min ago)" for row in rows)
+    return ValueError(f"{reason}. This chat's saved outputs, newest first: {listed}. Use one of these IDs exactly, "
+                      "or run the tool again.")
+
+
 def read(session: str, args: dict[str, Any]) -> str:
-    item, text = load(str(args.get("id") or ""), session)
+    raw = str(args.get("id") or "").strip()
+    if re.fullmatch(r"out-[A-Za-z0-9]{1,128}", raw) and not _ID.fullmatch(raw):
+        raise _unknown(session, f"{raw} is not an output ID from this chat")
+    try:
+        item, text = load(raw, session)
+    except FileNotFoundError as exc:
+        if "expired" in str(exc):
+            raise
+        raise _unknown(session, f"{raw} is not an output ID from this chat") from None
     query = str(args.get("query") or "").strip()
     if query:
         needle = query.casefold()

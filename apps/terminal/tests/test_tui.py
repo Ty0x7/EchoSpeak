@@ -381,8 +381,8 @@ def test_banner_width_fallback():
                       "Build a feature, fix a bug, or explore your code.")
     wide = plain(B.render(banner, 100, CAPS)).strip("\n").splitlines()
     # Echo's square face (tui/avatar.py) beside three lines; the text starts in the same column on each.
-    assert wide[0] == "▗██████▖  EchoSpeak v11.13"
-    assert wide[1].startswith("▐█ ██ █▌  Echo · Personal agent") and "project proj" in wide[2]
+    assert wide[0] == "███████  EchoSpeak v11.13"
+    assert wide[1].startswith("█▌▐█▌▐█  Echo · Personal agent") and "project proj" in wide[2]
     assert len({line.index("  ") for line in wide[:3]}) == 1
     # The tagline is not repeated under the banner: the input's placeholder already types it.
     assert not any("Build a feature" in line for line in wide)

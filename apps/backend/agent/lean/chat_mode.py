@@ -284,8 +284,13 @@ def build_prompt(
     sizes: Optional[dict[str, int]] = None,
     playbook: str = "",
     provider: str = "",
+    clock: bool = True,
 ) -> str:
     """Chat's system prompt, ordered for prefix caching.
+
+    ``clock=False`` leaves the time out: the runtime puts it on the current request instead (request_note),
+    because the system prompt comes before the tools and the whole history, so a clock anywhere in it changed
+    the start of every turn's prompt and the model server reprocessed all of it each turn.
 
     Providers cache the longest unchanged prefix (OpenAI automatically, Anthropic at marked
     breakpoints), so everything that is the same on every turn comes first and what changes
@@ -295,7 +300,7 @@ def build_prompt(
     from agent.lean.prompt import _environment, _memory, identity_section, now_line
 
     environment = _environment(project_root=project_root, notes=list(notes or []), can_write=False)
-    clock = now_line()  # _environment no longer carries it: both builders put the clock last
+    clock = now_line() if clock else ""   # when it is here at all it is last (clock=False: on the request instead)
     compact = profile == "compact"
     sections = [
         # Stable for the life of the chat.

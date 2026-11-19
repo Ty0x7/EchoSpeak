@@ -275,6 +275,7 @@ class EchoTUI:
         self.welcome_t0 = 0.0
         self._after_flush: list[Callable[[], None]] = []
         self._committing_welcome = False
+        self._welcome_sent = False      # committed once (printed or queued); the live copy waits for the flush
         self._welcome_cache: Optional[tuple] = None
         self._last_block: type = type(None)
         self.version = endpoint.version or VERSION_FALLBACK
@@ -366,7 +367,7 @@ class EchoTUI:
     _PROSE = (B.MarkdownBlock, B.Note, B.ThinkingLine, B.UserLine, B.Outcome, B.AgentHeader, B.TaskBoard)
 
     def emit(self, *blocks: B.Block, transcript: bool = True) -> None:
-        if self.welcome is not None and not self._committing_welcome:
+        if self.welcome is not None and not self._welcome_sent and not self._committing_welcome:
             self._commit_welcome()   # nothing may be printed above the banner
         width = self.width()
         prose = L.measure(width, self.env)
@@ -1483,9 +1484,9 @@ class EchoTUI:
         elif key == Keys.Backspace:
             browser.backspace()
         elif key == Keys.Left:
-            # ← goes one level deeper: the picker opens the sessions page; on the page there is nowhere further.
-            if not on_page:
-                browser.mode = "page"
+            # ← again: the full-screen session browser (tui/sessionpage.py), on the alternate screen.
+            self._spawn(self._open_page())
+            return
         elif key == Keys.Escape:
             # Esc clears a search first, then goes back one level: page → picker → your conversation.
             if not browser.clear_query():
@@ -1515,6 +1516,42 @@ class EchoTUI:
                 self._spawn(self._resume_row(row))
             return
         self._forget_plan()    # the page and the picker want different heights
+        self.app.invalidate()
+
+    async def _open_page(self) -> None:
+        """The full-screen browser in place of the picker; back returns to the picker as it was."""
+        browser = self.browser
+        if browser is None or self.dialog is not None:
+            return
+        from . import sessionpage
+
+        self.browser = None            # the picker steps aside while the page has the screen
+        self._forget_plan()
+        try:
+            async with in_terminal():
+                action, row = await sessionpage.run(browser, self.caps, self.app.style)
+        except Exception:  # noqa: BLE001 - never lose the conversation over the browser
+            action, row = "back", None
+        browser.mode = "picker"
+        if action == "back" and self.dialog is None:
+            self.browser = browser
+            try:
+                self.app.layout.focus(self.browser_window)
+            except ValueError:
+                pass
+        else:
+            try:
+                self.app.layout.focus(self.composer_window)
+            except ValueError:
+                pass
+            if action == "resume" and row is not None:
+                if row.get("thread_id") == self.sid:
+                    self.say_notice("you are already in this conversation")
+                else:
+                    await self._resume_row(row)
+            elif action == "new":
+                await self.cmd_new([])
+        self._forget_plan()
         self.app.invalidate()
 
     async def _resume_row(self, row: dict) -> None:
@@ -3009,8 +3046,11 @@ class EchoTUI:
         The live copy stays until the flusher has written the banner, inside the same terminal hand-off, so
         there is never a frame without it (no flicker) and never two of it (no duplicate)."""
         banner = self.welcome
-        if banner is None or self._committing_welcome:
+        if banner is None or self._committing_welcome or self._welcome_sent:
             return
+        # Once only: several outputs before the flush (a resume prints a rule and its recap at once) each used to
+        # commit it again, and the banner was printed between every one of them.
+        self._welcome_sent = True
         self._committing_welcome = True
         try:
             self.emit(banner)
@@ -3028,15 +3068,22 @@ class EchoTUI:
         self._after_flush.append(drop)
 
     async def _welcome_runner(self) -> None:
-        """Redraw the entrance at ~30 fps, then commit it. Under a short terminal it is committed at once."""
+        """Redraw the entrance at ~30 fps while it plays, then leave Echo at rest in the live region.
+
+        The banner is not committed when the entrance ends: committing hands the terminal back to print it,
+        which erases and redraws the whole live region (the flash at the end of the first entrance). It is
+        committed by the next output (``emit``), or at exit, both of which redraw anyway; or at once if the
+        terminal gets too short to show it.
+        """
         while self.welcome is not None:
             elapsed = (self.now() - self.welcome_t0) * 1000 if self.welcome_t0 else 0.0
-            if (self.welcome_t0 and A.done(elapsed - A.HOLD_MS, self.caps.reduced_motion)) or \
-                    (self.welcome_t0 and self._rows("welcome") <= 0):
+            if self.welcome_t0 and self._rows("welcome") <= 0:
                 self._commit_welcome()
                 return
-            self.app.invalidate()
-            await asyncio.sleep(0.033)
+            playing = not (self.welcome_t0 and A.done(elapsed, self.caps.reduced_motion))
+            if playing:
+                self.app.invalidate()
+            await asyncio.sleep(0.033 if playing else 0.25)
 
     # ── startup ──────────────────────────────────────────────────────
     def _banner(self) -> B.Banner:
@@ -3272,6 +3319,10 @@ class EchoTUI:
         finally:
             if self.follow_abandon:
                 self.follow_abandon.set()
+        if self.welcome is not None and not self._welcome_sent:
+            # Never printed (nothing else was): the live region is gone now, so the banner goes where it stood.
+            self._out.insert(0, B.render(self.welcome, self.width(), self.caps))
+            self.welcome = None
         tail = "".join(self._out)
         if tail:
             sys.stdout.write(tail)

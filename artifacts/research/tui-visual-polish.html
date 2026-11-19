@@ -7,9 +7,31 @@
 .pair{display:grid;grid-template-columns:1fr 1fr;gap:14px}.pair figure.before figcaption::before{content:"Before · ";font-weight:600;color:var(--muted)}.pair figure.after figcaption::before{content:"After · ";font-weight:600;color:var(--accent)}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}td.n{text-align:center;font-variant-numeric:tabular-nums;white-space:nowrap}@media(max-width:860px){.pair,.grid2{grid-template-columns:1fr}}
 </style></head><body><main>
 <header><h1>Echo TUI · visual polish</h1><p>18 November 2026 · branch <code>tui-polish</code> (from <code>env-intelligence</code> <code>d6f6c9e</code>) · not merged or installed · technical record: <code>docs/research/tui-visual-polish.md</code></p></header>
-<nav aria-label="Sections"><a href="#entrance">Echo's entrance</a><a href="#startup">Startup</a><a href="#sessions">← twice</a><a href="#steps">Steps and decisions</a><a href="#more">More screens</a><a href="#score">Scorecard</a><a href="#limits">Limits</a></nav>
+<nav aria-label="Sections"><a href="#round2">Round 2</a><a href="#entrance">Echo's entrance</a><a href="#startup">Startup</a><a href="#sessions">← twice</a><a href="#steps">Steps and decisions</a><a href="#more">More screens</a><a href="#score">Scorecard</a><a href="#limits">Limits</a></nav>
 
 <p class="lead">Every picture here is the real TUI running against the real backend in a private tmux. A scripted model made real tool calls, and the backend ran them. The screens were captured with <code>tests/uilab.py</code> and painted in the owner's font and Ion Blue palette by <code>tests/ansishot.py</code>. Before is <code>d6f6c9e</code>; after is this branch. The scores are honest: the 10/10 target was not met in every category, and the reasons are below.</p>
+
+
+<section id="round2"><h2>Round 2 · 19 November · square Echo, no flash, a full-screen session browser</h2>
+<p class="lead">Branch <code>tui-refine</code>. Echo is a solid square (no protruding sides) that slides in from the left; the banner is no longer reprinted when the entrance ends, which was the flash (measured: 2 full redraws before, 0 now). The second ← opens a real full-screen page with a details pane, after Codex's resume picker. Context research: <code>docs/research/context-strategy.md</code>.</p>
+<figure><img src="../media/echo-tui/polish/r2-entrance-filmstrip.png" alt="Six captured frames of the new square face sliding in from the left edge: first a sliver, then one eye, then both eyes, the full square, and a blink."><figcaption>The entrance, from the running TUI: it slides in from the left edge in half-cell steps, settles by ~270 ms and blinks once.</figcaption></figure>
+<div class="pair" style="margin-top:14px">
+<figure class="before"><img src="../media/echo-tui/polish/final-01-startup.png" alt="Round 1 startup: a square-ish face with notched corners and a middle row that sticks out at the sides."><figcaption>round 1: notched corners, the middle row sticking out.</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/r2-01-startup.png" alt="Round 2 startup: a solid square face with two tall eyes beside the three identity lines and the Last here line."><figcaption>round 2: a solid square with straight sides.</figcaption></figure>
+</div>
+<div class="pair" style="margin-top:14px">
+<figure class="before"><img src="../media/echo-tui/polish/final-06-left-twice.png" alt="Round 1 second left arrow: a grouped list in the live region above the footer, similar to the first picker."><figcaption>round 1: the second ← was a taller panel, too like the first.</figcaption></figure>
+<figure class="after"><img src="../media/echo-tui/polish/r2-06-left-twice.png" alt="Round 2 second left arrow: a full-screen page with a title, filters, search, a grouped list on the left and a details pane on the right showing agent, project, status, updated, created, messages, model, session id and the last exchange."><figcaption>round 2: a full-screen page, list beside details; leaving restores the conversation.</figcaption></figure>
+</div>
+<div class="grid2" style="margin-top:14px">
+<figure><img src="../media/echo-tui/polish/r2-07-sessions-search.png" alt="The page while typing jar: the list narrows to Jarvis's conversation and the details follow."><figcaption>type to search: the details follow the selection.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/r2-20b-sessions-page-60x20.png" alt="The page at 60 by 20: the list above, the details below, the position rule and hints at the bottom."><figcaption>below 96 columns the details go under the list.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/r2-07f-resumed-from-page.png" alt="After pressing Enter on the page: the conversation resumes with a single banner, the Resumed rule and the last exchanges."><figcaption>Enter on the page resumes; one banner (a race that printed it three times was caught here and fixed).</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/r2-2-settings-hub.png" alt="The settings hub with permissions, agents and their tools, model, privacy, web search and assistant mode."><figcaption>/settings (18 November, night): permissions, agents' tools, model, privacy, web search.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/r2-4-confirm-both.png" alt="Confirmation to turn on Write files, saying it needs Actions on this computer so both will be turned on."><figcaption>a switch that needs the master switch says so and turns both on.</figcaption></figure>
+<figure><img src="../media/echo-tui/polish/r2-8-glados-tools.png" alt="Glados's tool groups with on and off marks and which global switches each still needs."><figcaption>/tools: an agent's tool groups, with the switches each still needs.</figcaption></figure>
+</div>
+</section>
 
 <section id="entrance"><h2>Echo's entrance</h2>
 <p class="lead">A square face with tall pill eyes, after the app's <code>EchoFace</code>. It rises, lands with a squash, perks, glances and blinks, then the banner is committed to scrollback exactly where it played. The frames below are the distinct ones captured from the running TUI.</p>

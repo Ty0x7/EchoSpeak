@@ -725,3 +725,14 @@ The visual lab (`tests/uilab.py`, `tests/ansishot.py`) is the screenshot loop fo
 - Terminal command allow and deny lists, and voice and memory settings.
 - The model hallucinating `read_output` ids in the same session (16-character ids where 24 are real) is a model and
   harness issue, recorded, not fixed here.
+
+## 11. Round 2: square Echo, no flash, a full-screen session browser (19 November 2026)
+
+Branch `tui-refine`. The face is a 7 × 3-cell square that slides in from the left. The banner is no longer
+printed when the entrance ends: that print erased and redrew the live region, which was the flash. It goes out
+with the next output instead (measured by `tests/flashprobe.py`).
+
+The second ← opens `tui/sessionpage.py`, a full-screen page on the alternate screen after Codex's resume
+picker, with a details pane on the right. Details: [tui-visual-polish.md](tui-visual-polish.md) §9.
+
+The context-window research and the prompt-prefix fix are in [context-strategy.md](context-strategy.md).

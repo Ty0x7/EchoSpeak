@@ -327,6 +327,17 @@ def scene_sessions(L: Lab) -> None:
         lab.keys("Escape")
         time.sleep(0.5)
     L.shot("07d-back-to-composer", "back at the composer, conversation untouched")
+    # The full page, then Enter on another conversation: it resumes from the page itself.
+    lab.keys("Left")
+    time.sleep(1.0)
+    lab.keys("Left")
+    time.sleep(1.2)
+    lab.tmux("send-keys", "-t", "lab", "-l", "release")
+    time.sleep(0.6)
+    L.shot("07e-page-search-release", "the full page, searching")
+    lab.keys("Enter")
+    time.sleep(2.5)
+    L.shot("07f-resumed-from-page", "Enter on the page resumed that conversation")
 
 
 def scene_resume(L: Lab) -> None:

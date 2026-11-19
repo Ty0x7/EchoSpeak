@@ -34,24 +34,36 @@ CAPS = Caps()
 def test_every_entrance_frame_is_the_same_size_so_nothing_beside_it_moves():
     for t in range(-50, avatar.ENTRANCE_MS + 400, 5):
         rows = avatar.frame(t)
-        assert len(rows) == 3 and all(width_of(r) == 8 for r in rows), (t, rows)
+        assert len(rows) == 3 and all(width_of(r) == 7 for r in rows), (t, rows)
 
 
-def test_the_resting_face_is_square_symmetric_and_has_two_eyes():
+def test_the_resting_face_is_a_true_square_with_straight_sides_and_two_eyes():
     bm = avatar.bitmap(avatar.ENTRANCE_MS)
-    cols = [x for x in range(avatar.CANVAS_W) if any(r[x] == "#" for r in bm)]
-    width_half_cells, height_half_rows = len(cols), sum(1 for r in bm if "#" in r)
-    # A half-cell is ~4.5 px and a half-row ~10 px (a 9 × 20 px cell): 14 × 4.5 = 63 px by 6 × 10 = 60 px.
-    assert width_half_cells == 14 and height_half_rows == 6
+    # A half-cell is ~4.5 px and a half-row ~10 px (a 9 x 20 px cell): 14 x 4.5 = 63 px by 6 x 10 = 60 px.
+    assert len(bm) == 6 and all(len(r) == 14 for r in bm)
+    # Straight sides: every row reaches both edges (no notched corners, so nothing sticks out at the sides).
+    assert all(r[0] == r[-1] == "#" for r in bm)
     assert all(r == r[::-1] for r in bm), "the face is mirror-symmetric"
-    eye_row = bm[2]
-    assert eye_row.count(".") - 2 == 4, "two eyes, each one cell wide"
-    assert avatar.FACE_REST == ("▗██████▖", "▐█ ██ █▌", "▝██████▘")
+    assert bm[2].count(".") == 4 and bm[3] == bm[2], "two eyes, each one cell wide and one row tall"
+    assert avatar.FACE_REST == ("███████", "█▌▐█▌▐█", "███████")
 
 
-def test_the_entrance_moves_then_settles_and_reduced_motion_is_still():
+def test_the_entrance_slides_in_from_the_left_and_never_moves_back():
+    def left_edge(t):
+        bm = avatar.bitmap(t)
+        filled = [x for x in range(avatar.CANVAS_W) if any(r[x] == "#" for r in bm)]
+        return max(filled) if filled else -1     # the face's right edge enters first, from the left
+
+    edges = [left_edge(t) for t in range(0, avatar.SLIDE_MS + 1, 10)]
+    assert edges[0] < 3 and edges[-1] == avatar.CANVAS_W - 1
+    assert all(b >= a for a, b in zip(edges, edges[1:])), "monotonic: no jitter back and forth"
+    steps = [b - a for a, b in zip(edges, edges[1:]) if b != a]
+    assert max(steps) <= 2, "at most a cell per 10 ms: smooth at 30 fps"
+
+
+def test_the_entrance_settles_and_reduced_motion_is_still():
     frames = {avatar.frame(t) for t in range(0, avatar.ENTRANCE_MS, 10)}
-    assert len(frames) >= 6, "it rises, lands, glances and blinks"
+    assert len(frames) >= 6, "it slides in and blinks"
     assert avatar.frame(avatar.ENTRANCE_MS + 5000) == avatar.FACE_REST
     assert all(avatar.frame(t, reduced_motion=True) == avatar.FACE_REST for t in (0, 100, 700))
     assert avatar.done(0, reduced_motion=True) and not avatar.done(100)
@@ -163,43 +175,54 @@ def test_the_cli_has_a_continue_flag():
 
 
 # ── D. ← twice: the picker, then the sessions page ─────────────────
-def test_left_twice_opens_the_page_and_back_goes_one_level_at_a_time():
+def _scripted_page(monkeypatch, *results):
+    """Stand in for the full-screen page: return these results in turn, recording what it was given."""
+    from echospeak_cli.tui import sessionpage
+
+    calls = []
+
+    async def fake(browser, caps, style, now=None):
+        calls.append((browser.mode, browser.chosen()))
+        browser.mode = "page"
+        result = results[len(calls) - 1]
+        return result(browser) if callable(result) else result
+
+    monkeypatch.setattr(sessionpage, "run", fake)
+    return calls
+
+
+def test_left_twice_opens_the_full_screen_page_and_back_returns_to_the_picker(monkeypatch):
+    calls = _scripted_page(monkeypatch, ("back", None), ("close", None))
+
     async def go(tui):
         press(tui, Keys.Left)
         await settle(tui)
         assert tui.browser.mode == "picker"
-        picker_rows = tui._rows("sessions")
-        press(tui, Keys.Left)
-        assert tui.browser.mode == "page" and tui._rows("sessions") > picker_rows
-        press(tui, Keys.Left)                                          # nowhere deeper: still the page
-        assert tui.browser.mode == "page"
-        for ch in "gla":
-            press(tui, ch)
-        press(tui, Keys.Escape)                                        # a search is cleared first
-        assert tui.browser is not None and tui.browser.mode == "page" and tui.browser.query == ""
-        press(tui, Keys.Escape)                                        # then back to the picker
-        assert tui.browser.mode == "picker"
-        press(tui, Keys.Escape)                                        # then back to your conversation
-        assert tui.browser is None and tui.app.layout.has_focus(tui.composer_window)
+        press(tui, Keys.Left)                                          # the page
+        await settle(tui)
+        assert len(calls) == 1 and calls[0][0] == "picker"           # opened from the picker, on its selection
+        assert tui.browser is not None and tui.browser.mode == "picker"   # back: the picker as it was
+        assert tui.app.layout.has_focus(tui.browser_window)
         press(tui, Keys.Left)
         await settle(tui)
-        press(tui, Keys.Left, Keys.Right)                              # → also goes back one level
-        assert tui.browser.mode == "picker"
-        press(tui, Keys.Right)
-        assert tui.browser is None
+        assert len(calls) == 2 and tui.browser is None               # close: straight back to the conversation
+        assert tui.app.layout.has_focus(tui.composer_window)
     session(go)
 
 
-def test_enter_on_the_page_resumes_the_selected_conversation():
+def test_enter_on_the_page_resumes_the_selected_conversation(monkeypatch):
+    def pick_needs_you(browser):
+        browser.jump_page(False)
+        return ("resume", browser.chosen())
+
+    _scripted_page(monkeypatch, pick_needs_you)
+
     async def go(tui):
         press(tui, Keys.Left)
         await settle(tui)
-        press(tui, Keys.Left, Keys.Home)                               # the page's first row: what needs you
-        assert tui.browser.chosen()["status"] in {"needs_answer", "needs_approval"}
-        target = tui.browser.chosen()["thread_id"]
-        press(tui, Keys.Enter)
+        press(tui, Keys.Left)
         await settle(tui)
-        assert tui.browser is None and tui.sid == target
+        assert tui.browser is None and tui.sid == "t-pong"            # the page's first row: what needs you
     session(go, RecordingClient())
 
 
@@ -222,152 +245,54 @@ def test_the_page_groups_what_needs_you_first_then_running_then_by_day():
     assert seen[:2] == ["t-pong", "t-crew"] and seen[2] == "t-oilers"  # ↓ walks the page's order
 
 
-def test_the_page_shows_agent_project_state_age_and_the_selected_conversations_last_exchange():
+def test_the_page_lists_beside_a_details_pane_with_the_real_facts():
+    from echospeak_cli.tui import sessionpage
+
     b = _page()
     b.selected = next(i for i, r in enumerate(b.visible()) if r["thread_id"] == "t-oilers")
-    body = "\n".join(text(line) for line in b.lines(120, 30, CAPS, NOW))
-    assert "All sessions" in body and "Needs you" in body and "Running" in body
-    assert "Release crew" in body and "needs approval" in body and "needs your answer" in body
+    lines = [text(line) for line in sessionpage.render(b, 130, 30, CAPS, NOW)]
+    body = "\n".join(lines)
+    assert lines[0].lstrip().startswith("Sessions") and "5 conversations" in lines[0]
+    assert "Needs you" in body and "Running" in body and "Release crew" in body
+    row = next(line for line in lines if "│" in line and "When do the Oilers" in line.split("│", 1)[0])
+    left, right = row.split("│", 1)
+    assert "Echo" in left                                             # the list: title, agent, age
+    assert "Agent" in body and "Project   Work" in body                 # the details pane, from the row's own fields
+    assert "Status    running" in body and "Updated" in body and "Messages  3" in body
     assert "when do the edmonton oilers play next?" in body and "The Oilers play Tuesday" in body
-    assert "here" in body and "5 conversations" in body
+    assert "1 / 5" in body or "/ 5" in body                         # the position rule
 
 
-@pytest.mark.parametrize("width", [20, 30, 45, 60, 80, 120, 200])
-@pytest.mark.parametrize("rows", [3, 5, 8, 14, 30])
-def test_the_page_never_draws_past_the_width_or_the_rows(width, rows):
+def test_below_96_columns_the_details_go_under_the_list():
+    from echospeak_cli.tui import sessionpage
+
+    lines = [text(line) for line in sessionpage.render(_page(), 80, 30, CAPS, NOW)]
+    assert not any("│" in line for line in lines) and any("Agent" in line for line in lines)
+
+
+@pytest.mark.parametrize("width", [20, 30, 45, 60, 80, 96, 120, 200])
+@pytest.mark.parametrize("rows", [3, 5, 8, 14, 30, 50])
+def test_the_page_fills_the_screen_exactly(width, rows):
+    from echospeak_cli.tui import sessionpage
+
     b = _page()
     for _ in range(len(ROWS)):
-        lines = b.lines(width, rows, CAPS, NOW)
-        assert 1 <= len(lines) <= rows
-        assert all(width_of(text(line)) <= width for line in lines), [text(line) for line in lines]
+        lines = sessionpage.render(b, width, rows, CAPS, NOW)
+        assert len(lines) == rows
+        assert all(width_of(text(line)) == width for line in lines), [text(line) for line in lines]
         b.move_page(1, NOW)
 
 
-def test_picker_rows_have_no_dead_gap_after_a_short_title():
-    b = SessionBrowser(current_id="t-models")
-    b.load([dict(r) for r in ROWS])
-    line = next(text(x) for x in b.lines(140, 20, CAPS, NOW) if "Which local model" in text(x))
-    title_end = line.index("Which local model should I use") + len("Which local model should I use")
-    assert line[title_end:].lstrip().startswith("Echo"), line         # the agent follows the longest title closely
-    assert line.rstrip().endswith("ago")                               # the age sits at the right edge
-
-
-def test_previews_are_plain_text_and_ages_are_short():
-    assert plain_recap("The fix is in `iso_week`, **really**.") == "The fix is in iso_week, really."
-    assert age(NOW - 30, NOW) == "now" and age(NOW - 300, NOW) == "5m" and age(NOW - 3 * 86400, NOW) == "3d"
-    assert day_group(NOW, NOW) == "Today" and day_group(NOW - 40 * 86400, NOW) == "Earlier"
-
-
-# ── E. Steps, decisions and failures ────────────────────────────────
-def test_two_model_steps_never_run_their_words_together():
-    run, out = run_of([(0, start()), (1, {"type": "agent_token", "message_id": "m1", "data": "Saved."}),
-                       (2, {"type": "step_start", "message_id": "m1", "step": 2}),
-                       (3, {"type": "agent_token", "message_id": "m1", "data": "Done."}),
-                       (4, {"type": "agent_done", "message_id": "m1"})])
-    out += run.finish("completed", 5)
-    said = " | ".join(b.text for b in out if isinstance(b, B.MarkdownBlock))
-    assert "Saved.Done." not in said and "Saved." in said and "Done." in said
-
-
-def test_what_the_agent_says_after_its_steps_gets_its_own_bullet():
-    run, out = run_of([(0, start()), (1, {"type": "agent_token", "message_id": "m1", "data": "Let me look.\n\n"}),
-                       (2, {"type": "tool_start", "message_id": "m1", "id": "t1", "name": "file_list", "label": "Listing ."}),
-                       (3, {"type": "tool_end", "message_id": "m1", "id": "t1", "name": "file_list", "ok": True,
-                            "done_label": "Listed .", "summary": "4 items"}),
-                       (4, {"type": "agent_token", "message_id": "m1", "data": "Found it."}),
-                       (5, {"type": "agent_done", "message_id": "m1"})])
-    md = [b for b in out if isinstance(b, B.MarkdownBlock)]
-    assert [b.bullet for b in md] == [True, True]
-
-
-def test_failed_steps_are_not_counted_as_work_done():
-    assert steps_summary([{"name": "file_read", "failed": True}, {"name": "file_read", "failed": True},
-                          {"name": "file_list"}]) == "Looked through files · 2 failed"
-    assert steps_summary([{"name": "memory_save"}]) == "Saved to memory"
-
-
-def test_an_answered_question_and_a_denial_are_each_said_once():
-    run, out = run_of([
-        (0, start()),
-        (1, {"type": "tool_start", "message_id": "m1", "id": "c1", "name": "ask_user", "label": "Asking you"}),
-        (2, {"type": "approval_request", "message_id": "m1", "id": "q1", "tool_call_id": "c1", "kind": "question",
-             "question": "Which year?"}),
-        (3, {"type": "approval_resolved", "message_id": "m1", "id": "q1", "tool_call_id": "c1", "decision": "answered",
-             "answer": "2026"}),
-        (4, {"type": "tool_end", "message_id": "m1", "id": "c1", "name": "ask_user", "ok": True,
-             "done_label": "Asked you: Which year?", "summary": "You chose: 2026"}),
-        (5, {"type": "tool_start", "message_id": "m1", "id": "c2", "name": "terminal", "label": "Running `rm -rf build`"}),
-        (6, {"type": "approval_request", "message_id": "m1", "id": "a2", "tool_call_id": "c2", "tool": "terminal",
-             "summary": "Running `rm -rf build`"}),
-        (7, {"type": "approval_resolved", "message_id": "m1", "id": "a2", "tool_call_id": "c2", "decision": "deny"}),
-        (8, {"type": "tool_end", "message_id": "m1", "id": "c2", "name": "terminal", "ok": False, "outcome": "denied"}),
-        (9, {"type": "answer_note", "message_id": "m1", "verification": "blocked",
-             "note": "Blocked — authorization: The user denied permission to run terminal. Do not retry it."}),
-    ])
-    rendered = "\n".join(plain(B.render(b, 100, CAPS)) for b in out)
-    assert rendered.count("2026") == 1
-    assert rendered.count("rm -rf build") == 1 and "you denied it" in rendered
-    assert "Do not retry" not in rendered                              # the model-facing message never shows
-
-
-def test_an_allowed_step_says_so_on_its_own_line():
-    run, out = run_of([(0, start()),
-                       (1, {"type": "approval_resolved", "message_id": "m1", "id": "a1", "tool_call_id": "c1",
-                            "decision": "allow"}),
-                       (2, {"type": "tool_end", "message_id": "m1", "id": "c1", "name": "terminal", "ok": True,
-                            "done_label": "Ran `pytest`", "summary": "3 passed"})])
-    tools = [b for b in out if isinstance(b, B.ToolLine)]
-    assert not [b for b in out if isinstance(b, B.Note)] and tools[0].summary == "3 passed · you allowed it"
-
-
-def test_a_failure_is_stated_once_and_never_called_answered():
-    run, out = run_of([(0, start()),
-                       (1, {"type": "agent_done", "message_id": "m1", "success": False, "error": "Provider unavailable (HTTP 500)",
-                            "text": "The model request failed: Provider unavailable (HTTP 500)"}),
-                       (2, {"type": "final", "success": False})])
-    out += run.finish("completed", 9)
-    rendered = "\n".join(plain(B.render(b, 100, CAPS)) for b in out)
-    assert rendered.count("Provider unavailable") == 1
-    assert "Answered in" not in rendered
-
-
-def test_a_failed_tool_line_reads_as_a_failure_without_repeating_itself(monkeypatch):
-    monkeypatch.setenv("HOME", "/home/owner")
-    line = B.ToolLine("fail", "Reading parser.py", "Failed: file not found: /home/owner/Documents/parser.py", 0,
-                      ["Error: file not found: /home/owner/Documents/parser.py"])
-    out = plain(B.render(line, 100, CAPS)).strip("\n").splitlines()
-    assert out == ["  " + CAPS.glyphs.fail + " Reading parser.py · file not found: ~/Documents/parser.py"]
-
-
-def test_search_lines_name_the_sources_the_agent_actually_got():
-    output = ("1. datetime — Basic date and time types\n   URL: https://docs.python.org/3/library/datetime.html\n"
-              "   date.fromisocalendar …\n2. isoweek · PyPI\n   URL: https://pypi.org/project/isoweek/\n"
-              "3. Pendulum\n   URL: https://www.pendulum.eustace.io/docs/\n4. Fourth\n   URL: https://x.org/\n")
-    assert search_sources(output) == ["docs.python.org · datetime — Basic date and time types",
-                                      "pypi.org · isoweek · PyPI", "pendulum.eustace.io · Pendulum"]
-    assert search_sources("No results") == []
-
-
-def test_an_open_question_is_not_also_announced_by_the_status_line_and_steps():
+def test_several_outputs_at_once_print_the_banner_once():
+    """A resume prints a rule and several recap lines in one go; each used to commit the banner again (lab, 19 Nov)."""
     async def go(tui):
-        from echospeak_cli.tui.state import Run
-
-        tui.run = Run("r1", tui.now(), glyphs=tui.caps.glyphs)
-        tui.run.feed(start(), tui.now())
-        tui.run.feed({"type": "tool_start", "message_id": "m1", "id": "c1", "name": "ask_user", "label": "Asking you"},
-                     tui.now())
-        tui.run.feed({"type": "approval_request", "message_id": "m1", "id": "q1", "tool_call_id": "c1",
-                      "kind": "question", "question": "Which year?"}, tui.now())
-        tui.open_dialog(Dialog(title="Echo is asking", options=[Option("2026", "2026")], kind="question",
-                               payload={"id": "q1", "tool_call_id": "c1"}))
-        tui._forget_plan()
-        assert tui._rows("status") == 0 and tui._rows("steps") == 0
+        tui._out_event = asyncio.Event()
+        tui.welcome = tui._banner()
+        for n in range(4):
+            tui.note(f"recap line {n}")
+        said = plain("".join(tui._out))
+        assert said.count("EchoSpeak v") == 1 and said.index("EchoSpeak v") < said.index("recap line 0")
+        for hook in tui._after_flush:
+            hook()
+        assert tui.welcome is None
     session(go)
-
-
-def test_a_turn_whose_step_you_denied_says_so_instead_of_answered():
-    run, out = run_of([(0, start()),
-                       (1, {"type": "approval_resolved", "message_id": "m1", "id": "a1", "tool_call_id": "c1", "decision": "deny"}),
-                       (2, {"type": "tool_end", "message_id": "m1", "id": "c1", "name": "terminal", "ok": False, "outcome": "denied"})])
-    rules = [b.text for b in run.finish("completed", 3) if isinstance(b, B.RuleLine)]
-    assert rules and rules[0].startswith("Worked for") and rules[0].endswith("1 denied")

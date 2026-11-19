@@ -243,3 +243,105 @@ Run `apps/terminal/echospeak` from this branch (or `echospeak` after installing 
    the lines.
 7. **`echospeak -c`.** It reopens the last conversation directly.
 8. **Fallbacks.** `ECHO_REDUCED_MOTION=1 echospeak` and `ECHO_TUI_ASCII=1 echospeak` show a static banner.
+
+
+## 9. Round 2 (19 November 2026, branch `tui-refine`)
+
+The owner's brief for this round:
+
+- a truly square avatar that slides in from the left, with no flash when it lands;
+- a real full-screen session browser on the second ←, after Codex;
+- context research;
+- agent awareness.
+
+The context and agent findings are in [context-strategy.md](context-strategy.md).
+
+**Avatar.**
+
+- **Shape.** The face is now a solid 14 × 6 quadrant square: 7 cells × 3 rows, about 63 × 60 px. It has straight
+  sides; the earlier face's notched top and bottom rows made its middle row stick out. The eyes are one cell wide
+  and one row tall, three half-cells from each side.
+- **Entrance.** Echo slides in from the left edge in whole half-cell steps, about 4.5 px each, easing out over
+  520 ms, then blinks once at about 820 ms. The canvas is fixed, so the text beside it never moves.
+- **Tests.**
+  - Every frame is 7 × 3 cells.
+  - The right edge moves monotonically, at most two half-cells per 10 ms.
+  - The face is symmetric with straight sides.
+  - Reduced motion and ASCII are still static.
+
+**The flash.**
+
+- **Cause.** Printing the banner when the entrance ended handed the terminal back to prompt_toolkit, which erased
+  the whole live region (`ESC [ J`) and drew it again.
+- **Fix.** The banner now stays in the live region at rest and is printed by the next output, or at exit. Both
+  redraw anyway.
+- **Measured** with `tests/flashprobe.py`: the real TUI in a PTY, every byte it writes in the 4 s after the first
+  frame, with no input.
+  - Previous commit `cdbb5ed`: **2 full erases**, at 1.67 s, followed by a 960-byte redraw.
+  - Now: **0**.
+- **On a quiet quit**, the banner is in scrollback exactly once (checked in tmux).
+
+**A bug the lab caught, and its fix.**
+
+- Lazy printing exposed an old race: several outputs before the flush (a resume prints a rule and its recap at
+  once) each printed the banner again. The live lab showed three banners between the recap lines.
+- The banner is now committed exactly once (`_welcome_sent`); test
+  `test_several_outputs_at_once_print_the_banner_once`. The lab, re-run, shows one.
+
+**The full-screen session browser** (`tui/sessionpage.py`).
+
+- **Reference.** Codex 0.170's real resume picker, captured locally with 42 sessions and not published:
+  - a title, the filter, status and sort row, a search line, a dense list of age and title;
+  - a position rule ("3 / 6 · 100%") and two hint lines;
+  - details (session and ID, created, updated, directory, branch, conversation) only on ^e.
+- **What the page does differently.** The second ← now opens a page on the **alternate screen**: a separate
+  full-screen prompt_toolkit app, run inside the main app's `in_terminal`. Leaving it restores the conversation and
+  its scrollback untouched (prototyped first).
+- **Layout.**
+  - A title with a count of conversations and agents, the filters, the search line, then the list grouped as *Needs
+    you*, *Running* and by day. Each row has a status or agent glyph, title, agent and age.
+  - The details pane sits on the right from 96 columns: the agent (and group members), the project and its
+    folder, status, updated and created (relative and absolute), message count, model, session ID, and the last
+    exchange, wrapped.
+  - Below 96 columns the details go under the list, compact when short. Then come a position rule and hints.
+  - The first ← (the picker) is unchanged.
+- **Keys.**
+  - ↑↓ PgUp PgDn Home End, Tab and Shift+Tab to filter, type to search, Backspace.
+  - Enter resumes, Ctrl+N starts a new conversation.
+  - Esc clears a search first, then goes back to the picker; → also goes back.
+  - Ctrl+C closes the sessions and returns to the conversation. ← on the page does nothing.
+- **Tests.**
+  - It fills exactly width × height at 48 sizes.
+  - The details pane shows the real fields.
+  - The narrow layout is right.
+  - The app routes each result (back, resume, new, close).
+- **Live lab.** Search, clear, back to the picker, back to the composer, and Enter on the page resuming another
+  conversation.
+
+**Checks this round:**
+
+- Terminal suite: 4,286 passed. Integration: 4/4.
+- Session lab: 14/14. Command lab: 34/34. Flash probe: 0 erases.
+- Backend: 1,890 passed and the same 21 pre-existing failures (unchanged).
+- Visual lab: four rounds (41, 36, 36 and 36 shots).
+
+**Scorecard after round 2.** The scores are honest, and still not 10.
+
+| Category | R1 | R2 | Change, and what still keeps it from 10 |
+|---|---|---|---|
+| Visual design | 9 | 9 | A truly square face; still not seen in the owner's ghostty |
+| Typography | 9 | 9 | Unchanged; raw backend JSON in model-failure text |
+| Layout | 9 | 9 | The page fits 20 × 3 up to 200 × 50; the footer hint gap at 80 columns or less remains |
+| Conversations | 9 | 9 | Unchanged |
+| Tool presentation | 9 | 9 | Unchanged |
+| Research presentation | 8 | 8 | Unchanged: no live deep-research or delegation evidence |
+| Sessions | 9 | 9 | Now a real full-screen browser with details. No rename, archive or sort, which Codex has |
+| Interaction | 9 | 9 | Every page key routed and tested. Awaiting the owner's hands |
+| Animation | 9 | 9 | The slide-in and the flash fixed, with the latter measured. Ghostty's own frame pacing unverified |
+| Consistency | 9 | 9 | One model for picker and page |
+
+**Open:**
+
+- Rename, archive and sort on the page.
+- Hand checks in ghostty and alacritty.
+- The footer's ← hint at 80 columns.

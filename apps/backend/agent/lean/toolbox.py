@@ -479,6 +479,57 @@ class Toolbox:
         self.notes.append(f"Only your main tools are listed, to keep this model focused. {len(held)} more "
                           f"(for example {', '.join(sorted(held)[:6])}) load when you call find_tools with what you need.")
 
+    # Words that say nothing about which tool is meant.
+    _PLAIN = frozenset("""a an and are as at be by can do does did for from get give go have help how i if in into is it
+        its let lets look make me my of on or out please show so some than that the their them then there these they this
+        to up us use want was we what when where which who why will with would you your about all any just like need""".split())
+
+    def suggest(self, request: str, limit: int = 2) -> list[str]:
+        """Deferred tools the request itself names strongly enough to list up front.
+
+        The find_tools keyword score, run on the request before the first step, so a focused local model sees a
+        tool it would otherwise have to know to ask for (owner session f75dae98: "look at codex and claude
+        sessions" never reached agent_sessions). Strong matches only: a word of the tool's name and at least two
+        distinct meaningful words of the request in its name or description. At most ``limit`` tools.
+        """
+        words = {w for w in re.findall(r"[a-z0-9]+", str(request or "").lower()) if len(w) > 2 and w not in self._PLAIN}
+        if not words or not self.deferred:
+            return []
+
+        def vocab(name: str) -> set[str]:
+            found = set(re.findall(r"[a-z0-9]+", (name + " " + self._description(name)).lower()))
+            return found | {w.rstrip("s") for w in found}
+
+        texts = {name: vocab(name) for name in self.names}
+        # A word that appears in at most two tools says which tool is meant ("codex", "claude"); "project",
+        # "check" or "create" appear in many and say nothing (they listed save_project_image for "create
+        # hello.txt in the project" in the evaluation prompts).
+        def distinctive(word: str) -> bool:
+            forms = {word, word.rstrip("s")}
+            return sum(1 for text in texts.values() if forms & text) <= 2
+
+        scored: list[tuple[int, str]] = []
+        for name in sorted(self.deferred):
+            if name.startswith("mcp__"):
+                continue      # connected apps have their own listing rules
+            name_words = set(re.findall(r"[a-z0-9]+", name.lower()))
+            name_words |= {w.rstrip("s") for w in name_words}
+            hits = {w for w in words if {w, w.rstrip("s")} & texts.get(name, set())}
+            in_name = {w for w in hits if {w, w.rstrip("s")} & name_words}
+            rare = {w for w in hits if distinctive(w)}
+            if in_name and len(rare) >= 2:
+                scored.append((3 * len(in_name) + 2 * len(rare) + len(hits), name))
+        scored.sort(key=lambda row: (-row[0], row[1]))
+        return [name for _score, name in scored[:limit]]
+
+    def list_suggested(self, request: str) -> list[str]:
+        """List what ``suggest`` finds (they stay callable either way)."""
+        found = self.suggest(request)
+        if found:
+            self.deferred.difference_update(found)
+            self.schema_version += 1
+        return found
+
     def _description(self, name: str) -> str:
         tool = self.native.get(name)
         return str(tool.description if tool else getattr(self.entries.get(name), "description", "") or "")

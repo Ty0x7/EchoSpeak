@@ -24,7 +24,7 @@ from agent.lean.personas import CHAT_AGENT_ID, CODE_AGENT_ID, AgentPersona, chat
 from agent.lean import chat_mode
 from agent.lean import chat_run as chat_run_mod
 from agent.lean import session_logs
-from agent.lean.prompt import build_system_prompt
+from agent.lean.prompt import build_system_prompt, request_note
 from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoint
 from agent.lean.rooms import Room, get_room_store, mentioned_agents
 from agent.lean.coding import coding_tools, project_overview
@@ -1171,6 +1171,10 @@ class LeanSession:
         elif not guest and self._local_model(persona):
             # Any other agent on a local model: everyday tools up front, the rest through find_tools (R12).
             toolbox.focus(chat_mode.COMPACT_FOCUS if chat_run is not None and chat_run.profile == "compact" else CHAT_FOCUS)
+        if toolbox.deferred and not read_only:
+            # What the request itself names strongly (agent_sessions for "codex and claude sessions") is listed
+            # up front instead of waiting for a find_tools call a small model doesn't think to make.
+            toolbox.list_suggested(self._goal(message, task))
         if "spawn_workers" in toolbox.native:
             # Workers get a subset of exactly this toolbox: never more than their lead.
             toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]
@@ -1264,6 +1268,7 @@ class LeanSession:
                 sizes=sections,
                 # The lessons prepare_turn counted as used are the ones Chat actually reads.
                 playbook=learned.section,
+                clock=False,      # on the request (request_note), so the cached prefix survives the minute
             )
             if chat_run is not None:
                 chat_run.user_message = goal
@@ -1309,6 +1314,7 @@ class LeanSession:
                 provider=facts_provider,
                 # Small local models: the short app facts (their window is the tightest).
                 short_facts=not guest and self._local_model(persona) and chat_run_mod.profile_for(facts_model, local=True) == "compact",
+                clock=False,      # the clock and git status go on the request (request_note): see below
             )
             if research_run is not None:
                 research_run.user_message = goal
@@ -1333,6 +1339,9 @@ class LeanSession:
             taint=self._taint,
             goal=goal,
         )
+        # What changes between turns (the time, the git status) rides on this request, not in the system prompt,
+        # so the system prompt, the tools and the history stay byte-identical and the model server reuses them.
+        turn.request_note = request_note("" if self.model_first else repo_note)
         # Only the agent the user is talking to reads steering; a teammate doing delegated work doesn't.
         turn.steerable = depth == 0
         if self.model_first:

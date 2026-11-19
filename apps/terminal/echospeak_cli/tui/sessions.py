@@ -5,9 +5,9 @@ one level at a time:
 
 1. **The picker** (``mode="picker"``) takes the composer's place in the live region, like a dialog: a
    compact list by activity with filters, search and the selected conversation's last exchange.
-2. **The sessions page** (``mode="page"``, ← again) takes the whole live region: conversations grouped
-   by what they need (needs you, running) and then by day, each with its agent, project and age, and
-   the selected one opened up to show where it stands.
+2. **The session browser** (← again) is a full-screen page on the alternate screen (``sessionpage.py``):
+   the list grouped by what needs you, running, then by day, with a details pane, after Codex's resume
+   picker. It uses this same model (filters, search, grouping), so the two never disagree.
 
 The interaction follows Codex CLI's resume picker (0.169: a list ordered by activity, filters
 chosen with the keyboard, type to search, Enter resumes, a position counter), adapted to
@@ -148,7 +148,7 @@ class SessionBrowser:
     top: int = 0                    # first list row shown
     loading: bool = True
     error: str = ""
-    mode: str = "picker"            # picker (in the composer's place) | page (the whole live region)
+    mode: str = "picker"            # picker (in the composer's place) | page (the full-screen browser has it)
     prefer_id: str = ""             # highlighted first when you are in no conversation yet ("last here")
 
     # ── what is listed ────────────────────────────────────────────────
@@ -238,13 +238,7 @@ class SessionBrowser:
 
     # ── drawing ───────────────────────────────────────────────────────
     def natural_rows(self, height: int) -> int:
-        """Rows the manager would like at this terminal height: the picker the whole list, up to the screen;
-        the page the whole screen (all but the footer)."""
-        if self.mode == "page":
-            # Fitted to what it lists (no dead space under a short list), never taller than the screen.
-            groups = self.groups()
-            body = sum(1 + len(idx) for _n, idx in groups) + max(0, len(groups) - 1) + 3 if groups else 1
-            return max(CHROME + 1, min(L.budget(height) - 1, 3 + body + 3))
+        """Rows the picker would like at this terminal height: the whole list, up to the screen."""
         return max(CHROME + 1, min(L.budget(height) - 1, CHROME + PREVIEW_ROWS + max(MIN_LIST, len(self.visible()))))
 
     @staticmethod
@@ -264,8 +258,6 @@ class SessionBrowser:
     def lines(self, width: int, rows: int, caps: Caps, now: Optional[float] = None) -> list[Fragments]:
         """The manager drawn into at most ``rows`` lines of at most ``width`` cells."""
         width, rows = max(1, width), max(1, rows)
-        if self.mode == "page":
-            return self._page(width, rows, caps, now)
         visible = self.visible()
         count = len(visible)
         position = f"{self.selected + 1 if count else 0} / {count}"
@@ -432,125 +424,6 @@ class SessionBrowser:
         order = self.page_order(now)
         if order:
             self.selected = order[-1] if end else order[0]
-
-    def _page(self, width: int, rows: int, caps: Caps, now: Optional[float]) -> list[Fragments]:
-        g = caps.glyphs
-        visible = self.visible()
-        count = len(visible)
-        agents = sorted({who(r) for r in self.rows if r.get("kind") != "echo"} | ({"Echo"} if any(r.get("kind") == "echo"
-                                                                                               for r in self.rows) else set()))
-        head: list[Fragments] = []
-        pos = f"{self.selected + 1 if count else 0} / {count}"
-        if rows >= 3:
-            title = f"All sessions {g.sep} {pos}" if width >= L.MICRO else pos
-            head.append(M.rule(width, title, caps, title_style="class:title"))
-        if rows >= 5:
-            head.append(self._filter_line(width, caps))
-            head.append([])
-        hint = self._page_hint(width, caps) if rows >= 2 else None
-        foot: list[Fragments] = []
-        if hint is not None:
-            if rows >= 6:
-                summary = f" {len(self.rows)} conversations {g.sep} " + ", ".join(agents) if self.rows else ""
-                if rows >= 9:
-                    foot.append([])          # a breath between the list and its footer
-                foot.append([("class:dim", M.truncate(summary, width))])
-            foot.append(hint)
-        room = max(1, rows - len(head) - len(foot))
-        body: list[tuple[Fragments, Optional[int]]] = []    # (line, row index or None)
-        empty = self._empty_line(width, count)
-        if empty is not None:
-            body.append((empty, None))
-        else:
-            cols = self._page_columns(visible, width)
-            for gi, (name, idx) in enumerate(self.groups(now)):
-                if gi:
-                    body.append(([], None))
-                style = "class:attention" if name == "Needs you" else "class:title"
-                body.append(([("", " "), (style, name)], None))
-                for i in idx:
-                    selected = i == self.selected
-                    body.append((self._page_row(visible[i], selected, width, caps, now, cols), i))
-                    if selected:
-                        for line in self._page_detail(visible[i], width, caps):
-                            body.append((line, i))
-        # Scroll so the selected row and its detail are on screen.
-        sel = [n for n, (_l, i) in enumerate(body) if i == self.selected]
-        top = 0
-        if sel and len(body) > room:
-            first, last = sel[0], sel[-1]
-            top = max(0, min(first - 1, len(body) - room))
-            if last >= top + room:
-                top = last - room + 1
-        shown = [line for line, _i in body[top:top + room]]
-        out = head + shown + [[] for _ in range(max(0, room - len(shown)))] + foot
-        return out[:rows]
-
-    def _page_columns(self, rows: list[dict], width: int) -> dict[str, int]:
-        cols = self._columns(rows, width)
-        cols["when"] = max([M.width_of(ago(r.get("last_active_at"))) for r in rows] + [3])
-        fixed = 5 + cols["agent"] + 2 + (cols["project"] + 2 if cols["project"] else 0) + \
-            (cols["state"] + 2 if cols["state"] else 0) + cols["when"] + 1
-        longest = max([M.width_of(one_line(r.get("title") or "(untitled)", 120)) for r in rows] + [0])
-        cols["title"] = max(0, min(longest, width - fixed - 2))
-        cols["fill"] = max(0, width - fixed - 2 - cols["title"])
-        return cols
-
-    def _page_row(self, row: dict, selected: bool, width: int, caps: Caps, now: Optional[float], cols: dict) -> Fragments:
-        g = caps.glyphs
-        status = str(row.get("status") or "idle")
-        current = row.get("thread_id") == self.current_id and bool(self.current_id)
-        glyph, glyph_style = {
-            "needs_answer": (g.attention, "class:attention"), "needs_approval": (g.attention, "class:attention"),
-            "running": (g.task_doing, "class:accent"), "failed": (g.fail, "class:error"),
-        }.get(status, (g.bullet, agent_class(row)))
-        mark = f" {g.select} " if selected else "   "
-        base = "class:sel" if selected else ""
-        dim = "class:sel" if selected else "class:dim"
-        title = one_line(row.get("title") or "(untitled)", 120)
-        if cols["title"] < 8 or L.tier(width) == "micro":
-            return [(base, mark), (glyph_style, glyph + " "), (base, M.truncate(title, max(1, width - 5)))]
-        tier = L.tier(width)
-        state = "here" if current else (STATUS_LABEL if tier == "wide" else STATUS_SHORT).get(status, "")
-        alert = "class:attention" if status in NEEDS_YOU else "class:error" if status == "failed" else dim
-        out: Fragments = [(base, mark), (glyph_style, glyph + " "), (base, _cell(title, cols["title"])), ("", "  "),
-                          (base if selected else agent_class(row), _cell(who(row), cols["agent"]))]
-        if cols["project"]:
-            out += [("", "  "), (dim, _cell(project_name(row), cols["project"]))]
-        out.append(("", " " * cols["fill"]))
-        if cols["state"]:
-            out += [("class:accent" if current else alert, state.rjust(cols["state"])), ("", "  ")]
-        out.append((dim, ago(row.get("last_active_at"), now).rjust(cols["when"])))
-        return out
-
-    def _page_detail(self, row: dict, width: int, caps: Caps) -> list[Fragments]:
-        """Under the selected row: its last exchange and its model, indented under the title."""
-        g = caps.glyphs
-        asked, said = one_line(row.get("last_request"), 400), plain_recap(one_line(row.get("preview"), 400))
-        lines: list[Fragments] = []
-        ind = "       "
-        if asked:
-            lines.append([("class:dim", M.truncate(f"{ind}{g.prompt} {asked}", width))])
-        if said:
-            lines.append([("class:dim", M.truncate(f"{ind}{g.bullet} {said}", width))])
-        meta = [x for x in (one_line(row.get("model"), 40), f"{int(row['message_count'])} messages"
-                            if str(row.get("message_count") or "").isdigit() else "") if x]
-        if meta and width >= L.NARROW:
-            lines.append([("class:dim", M.truncate(f"{ind}{f' {g.sep} '.join(meta)}", width))])
-        return lines
-
-    def _page_hint(self, width: int, caps: Caps) -> Fragments:
-        g = caps.glyphs
-        sep = f" {g.sep} "
-        back = "esc clear search" if self.query else "→ or esc back"
-        forms = [
-            sep.join([f"{g.arrow_up_down} select", "enter open", "tab filter", "type to search", "ctrl+n new", back]),
-            sep.join([f"{g.arrow_up_down} select", "enter open", "tab filter", back]),
-            sep.join(["enter open", "esc back"]),
-            "enter" + sep + "esc",
-        ]
-        text = next((form for form in forms if M.width_of(form) + 1 <= width), "")
-        return [("class:dim", " " + text if text else "")]
 
 
 def _cell(text: str, width: int) -> str:
