@@ -1686,7 +1686,10 @@ class LeanSession:
             scoped = not self._owner_side(persona) or bool(current_work() and current_work().coordinator.get(current_work().work_id, principal=current_work().principal).get("parent_id"))
             query = str(args.get("query") or "")
             store_ = get_state_store()
-            hits = store_.search_messages(query, limit=8, session_id=self.session_id if scoped else "")
+            # This turn's own messages never count: the question being asked matched itself, three hits skipped the
+            # partial top-up, and only two stale ones were left after it was dropped (live MC1 r2).
+            hits = [hit for hit in store_.search_messages(query, limit=9, session_id=self.session_id if scoped else "")
+                    if hit["turn_id"] != self.execution_id][:8]
             if len(hits) < 3:
                 # Every word had to match: "offsite venue" missed "the team offsite is at Larkspur Hall", and "vendor
                 # account manager name" missed the message naming the manager (live MC1/MCH1, 18 November 2026). Top
@@ -1695,7 +1698,7 @@ class LeanSession:
                 seen_ids = {hit["item_id"] for hit in hits}
                 for hit in (store_.search_messages(words, limit=8, session_id=self.session_id if scoped else "",
                                                     any_term=True) if words else []):
-                    if hit["item_id"] not in seen_ids and len(hits) < 8:
+                    if hit["item_id"] not in seen_ids and hit["turn_id"] != self.execution_id and len(hits) < 8:
                         hits.append({**hit, "partial": True})
             context = current_work()
             if context and context.coordinator.get(context.work_id, principal=context.principal).get("parent_id"):

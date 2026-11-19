@@ -791,6 +791,19 @@ def test_past_chat_search_finds_a_fact_without_every_query_word(env, monkeypatch
     assert "Larkspur" in out and "partial match" in out
 
 
+def test_the_question_being_asked_does_not_crowd_out_the_partial_matches(env, monkeypatch):
+    """Live MC1 r2: two old full matches plus the current question made three, so no partial top-up; dropping the
+    question then left only the two stale ones, and the fact in a partial match never appeared."""
+    _said(env, "Which venue did I mention earlier for the offsite?")
+    _said(env, "The venue you mentioned for the offsite is Marlowe Hall.")
+    _said(env, "For context: the team offsite is at Kestrel Hall this year.")
+    session, turn = _echo_turn(env, monkeypatch, "which venue did I mention?", project=False)
+    env.store.add_item(turn_id=session.execution_id, item_type="user_message", status="complete",
+                       session_id=session.session_id, payload={"text": "Which venue did I mention for the offsite?"})
+    out = turn.toolbox.native["chat_search"].func({"query": "offsite venue"})
+    assert "Kestrel" in out
+
+
 def test_the_latest_mention_comes_first(env, monkeypatch):
     """Live MC1 with a fix that only added partial matches: an earlier venue came first and the model named it."""
     import time as _time
