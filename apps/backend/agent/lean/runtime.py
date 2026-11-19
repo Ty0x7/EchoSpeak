@@ -131,6 +131,13 @@ def is_busy(quiet_seconds: float = 30.0) -> bool:
         return _ACTIVITY["running"] > 0 or time.time() - float(_ACTIVITY["last_end"]) < quiet_seconds
 
 
+# Words a past-chat search ignores when it falls back to partial matches (LeanSession chat_search).
+_SEARCH_STOP = frozenset({
+    "the", "and", "for", "that", "this", "what", "whats", "which", "who", "when", "where", "how", "did", "does", "was",
+    "were", "you", "your", "our", "his", "her", "their", "with", "from", "about", "earlier", "before", "mentioned",
+    "said", "told", "name", "called", "chat", "conversation", "message", "past", "previous", "last", "any",
+})
+
 class LeanSession:
     """Runs one user message through one or more agents in a Session."""
 
@@ -1668,7 +1675,19 @@ class LeanSession:
             from agent.state import get_state_store
 
             scoped = not self._owner_side(persona) or bool(current_work() and current_work().coordinator.get(current_work().work_id, principal=current_work().principal).get("parent_id"))
-            hits = get_state_store().search_messages(str(args.get("query") or ""), limit=8, session_id=self.session_id if scoped else "")
+            query = str(args.get("query") or "")
+            store_ = get_state_store()
+            hits = store_.search_messages(query, limit=8, session_id=self.session_id if scoped else "")
+            if len(hits) < 3:
+                # Every word had to match: "offsite venue" missed "the team offsite is at Larkspur Hall", and "vendor
+                # account manager name" missed the message naming the manager (live MC1/MCH1, 18 November 2026). Top
+                # up with the best partial matches on the query's meaningful words, marked as partial.
+                words = " ".join(w for w in re.findall(r"\w+", query.lower()) if len(w) > 2 and w not in _SEARCH_STOP)
+                seen_ids = {hit["item_id"] for hit in hits}
+                for hit in (store_.search_messages(words, limit=8, session_id=self.session_id if scoped else "",
+                                                    any_term=True) if words else []):
+                    if hit["item_id"] not in seen_ids and len(hits) < 8:
+                        hits.append({**hit, "partial": True})
             context = current_work()
             if context and context.coordinator.get(context.work_id, principal=context.principal).get("parent_id"):
                 hits = [hit for hit in hits if hit["session_id"] == self.session_id]
@@ -1683,7 +1702,8 @@ class LeanSession:
                 when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
                 who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
                 here = " (this chat)" if hit["session_id"] == self.session_id else ""
-                lines.append(f"- {when}{here} {who}: {hit['snippet']}")
+                partial = " (partial match)" if hit.get("partial") else ""
+                lines.append(f"- {when}{here}{partial} {who}: {hit['snippet']}")
             return "\n".join(lines)
 
         store = getattr(self.agent, "document_store", None)
