@@ -161,6 +161,65 @@ def test_an_unbacked_update_of_a_recalled_fact_is_repaired():
     assert saved and saved[0]["key"] == "dental_appointment"
 
 
+def _save_then_quiet(fact: str, key: str) -> list[ModelTurn]:
+    return [ModelTurn(tool_calls=[ToolCall("m1", "memory_save", json.dumps({"fact": fact, "key": key}))]), ModelTurn(content="")]
+
+
+def _recalled(content: str, key: str) -> str:
+    return memory_quality.render([{"content": content, "scope": "account", "semantic_key": key}])
+
+
+def test_a_change_to_a_recalled_fact_is_saved_even_when_nothing_is_claimed():
+    """Memory ×4 run, LS6 r2 (19 November): "I switched to the 7:40 Crosstown train" got "That sounds like a good
+    move" and no save, with the 6:55 train recalled on the request; the next chat gave 6:55."""
+    saved = []
+    ask = "I switched to the 7:40 Crosstown train this week, the earlier one was always late."
+    model = Model([ModelTurn(content="That sounds like a good move.")] + _save_then_quiet("Takes the 7:40 Crosstown train", "work_train"))
+    turn, _run, events = _chat_turn(model, ask, memory_save=lambda a: saved.append(a) or "Saved")
+    turn.memory_repair = True
+    turn.request_note = _recalled("Takes the 6:55 AM Crosstown train to work.", "work_train")
+    result = turn.run(ask)
+    assert saved and saved[0]["key"] == "work_train" and result.text.startswith("That sounds like a good move.")
+    assert "work_train" in str(model.calls[1]["messages"][-1]["content"])      # the note names the key to use
+
+
+def test_a_vague_notes_claim_about_a_moved_friend_is_made_true():
+    """LSH3 r2: "Oh, Ines moved to Gdansk last month." → "I've updated that in my notes.", nothing saved."""
+    saved = []
+    ask = "Oh, Ines moved to Gdansk last month."
+    model = Model([ModelTurn(content="Got it. I've updated that in my notes.")] + _save_then_quiet("Friend Ines lives in Gdansk", "friend_ines_location"))
+    turn, _run, _events = _chat_turn(model, ask, memory_save=lambda a: saved.append(a) or "Saved")
+    turn.memory_repair = True
+    turn.request_note = _recalled("Friend Ines lives in Valencia.", "friend_ines_location")
+    turn.run(ask)
+    assert saved
+
+
+def test_remember_answered_with_only_a_reminder_is_also_saved():
+    """LSH2 r1: "Remember: my appointment … is on Monday at 16:45." set a reminder and saved nothing."""
+    saved = []
+    ask = "Remember: my appointment at the Riverside dental clinic is on Monday at 16:45."
+    model = Model([ModelTurn(tool_calls=[ToolCall("r1", "set_reminder", json.dumps({"when": "2026-11-23T16:45"}))]),
+                   ModelTurn(content="Done! I've set a reminder for Monday at 4:45 PM.")] + _save_then_quiet("Dental appointment Monday 16:45", "dental_appointment"))
+    turn, _run, _events = _chat_turn(model, ask, memory_save=lambda a: saved.append(a) or "Saved",
+                                     set_reminder=lambda a: "Reminder set")
+    turn.memory_repair = True
+    turn.run(ask)
+    assert saved
+
+
+def test_questions_and_unrelated_changes_never_ask_for_a_save():
+    for ask, note in (("What's the weather in Edmonton now?", _recalled("Lives in Edmonton.", "home_city")),
+                      ("I switched the app to dark mode.", _recalled("Takes the 6:55 AM Crosstown train to work.", "work_train")),
+                      ("Did Ines move to Gdansk?", _recalled("Friend Ines lives in Valencia.", "friend_ines_location"))):
+        model = Model([ModelTurn(content="Sure.")])
+        turn, _run, events = _chat_turn(model, ask, memory_save=lambda a: "Saved")
+        turn.memory_repair = True
+        turn.request_note = note
+        turn.run(ask)
+        assert len(model.calls) == 1 and not any(e["type"] == "memory_repair" for e in events), ask
+
+
 def test_the_memory_repair_happens_once_and_never_for_other_claims():
     model = Model([ModelTurn(content="I've saved that."), ModelTurn(content="I've saved it, really.")])
     turn, _run, events = _chat_turn(model, "remember I like tea", memory_save=lambda a: "Saved")

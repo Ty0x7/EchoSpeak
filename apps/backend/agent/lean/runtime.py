@@ -1383,6 +1383,9 @@ class LeanSession:
         # The agent the user talks to carries on past its step limit while it is still making progress (Chat has
         # its own small budget that ends in an answer; helpers report back to the agent that asked).
         turn.auto_continue = depth == 0 and not self.model_first
+        # Asked to remember, or told a saved fact changed, and nothing saved: one step to save it, for any agent the
+        # owner talks to (memory ×4 run: LS6, LSH2, LSH3). Chat also repairs an untrue "I saved it" this way.
+        turn.memory_repair = depth == 0 and not guest
         turn.auto_continue_limit = settings.auto_continue_stretches()
         if self.model_first:
             turn.call_guard = chat_mode.call_problem

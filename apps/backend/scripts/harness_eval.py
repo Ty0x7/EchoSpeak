@@ -669,6 +669,30 @@ def setup_update_in_chat(p: Path) -> dict[str, Any]:
             "answer": [day2, room2], "stale": [day1, room1]}
 
 
+_USED_VALUES: set[str] = set()
+
+
+def _distinct(make: Callable[[Path], dict[str, Any]]) -> Callable[[Path], dict[str, Any]]:
+    """Redraw a trial until the values that identify it (its "unique" list) are new in this run. The run's backend
+    keeps every trial's memories, so in the memory x4 run LS6 r3's answer was r1's train and LS3 drew one project
+    three times (19 November): a failure could pass on another trial's value."""
+    def setup(p: Path) -> dict[str, Any]:
+        truth = make(p)
+        for _ in range(200):
+            values = {str(v).lower() for v in truth.get("unique", [])}
+            if not values & _USED_VALUES:
+                break
+            truth = make(p)
+        _USED_VALUES.update(values)
+        return {k: v for k, v in truth.items() if k != "unique"}
+    return setup
+
+
+def _times(n: int) -> list[str]:
+    return sorted(random.sample([f"{h}:{m:02d}" for h in range(6, 10) for m in range(0, 60, 5)], n),
+                  key=lambda t: (int(t.split(":")[0]), int(t.split(":")[1])))
+
+
 def setup_supersede(kind: str) -> Callable[[Path], dict[str, Any]]:
     def setup(p: Path) -> dict[str, Any]:
         if kind == "server":
@@ -681,10 +705,11 @@ def setup_supersede(kind: str) -> Callable[[Path], dict[str, Any]]:
             old, new = (f"{d} at {h}" for d, h in zip(random.sample(days, 2), random.sample(["9:30", "11:00", "14:15", "16:45"], 2)))
         # Each trial names its own subject: the run's backend keeps memories across cases and repetitions, and in
         # the baseline LS3 met MR1's "build server is pluto-21" and LSH2 r2 met r1's appointment (evaluation, not model).
-        subject = random.choice(_CODENAMES) if kind == "server" else random.choice(["Northgate", "Riverside", "Elm Street", "Harbour"])
+        subject = random.choice(_CODENAMES) if kind == "server" else random.choice(["Northgate", "Riverside", "Elm Street", "Harbour", "Westbrook", "Oakridge", "Kingsway", "Larch Hill"])
         return {"vars": {"old": old, "new": new, "subject": subject}, "answer": [new.split(" at ")[0] if kind != "server" else new],
-                "stale": [old.split(" at ")[0] if kind != "server" else old]}
-    return setup
+                "stale": [old.split(" at ")[0] if kind != "server" else old],
+                "unique": [subject, old, new] if kind == "server" else [subject]}
+    return _distinct(setup)
 
 
 def setup_trip(p: Path) -> dict[str, Any]:
@@ -708,15 +733,22 @@ def setup_keyless(kind: str) -> Callable[[Path], dict[str, Any]]:
         if kind == "locker":
             gym = random.choice(["Northside", "Harbour", "Elmwood", "Summit", "Riverbend"])
             old, new = (str(n) for n in random.sample(range(1000, 9999), 2))
-            return {"vars": {"place": gym, "old": old, "new": new}, "answer": [new], "stale": [old]}
+            return {"vars": {"place": gym, "old": old, "new": new}, "answer": [new], "stale": [old], "unique": [gym, old, new]}
         if kind == "train":
             line = random.choice(["Lakeshore", "Valley", "Harbourfront", "Midtown", "Crosstown"])
-            old, new = sorted(random.sample(["6:55", "7:40", "8:15", "8:50", "9:25"], 2))  # "the earlier one was late"
-            return {"vars": {"line": line, "old": old, "new": new}, "answer": [new], "stale": [old]}
+            old, new = _times(2)  # in order: "the earlier one was always late"
+            return {"vars": {"line": line, "old": old, "new": new}, "answer": [new], "stale": [old], "unique": [line, old, new]}
         person = random.choice(["Ana", "Tomas", "Ines", "Priya", "Jonas", "Maren"])
-        old, new = random.sample(["Porto", "Lyon", "Gdansk", "Valencia", "Leeds", "Graz", "Turku"], 2)
-        return {"vars": {"person": person, "old": old, "new": new}, "answer": [new], "stale": [old]}
-    return setup
+        if kind == "manager":
+            old, new = random.sample(["Dana Whitfield", "Marco Ruiz", "Helen Osei", "Victor Lindqvist", "Asha Rao",
+                                      "Colin Byrne", "Yuki Mori", "Rosa Klein", "Ben Adler", "Farah Qureshi"], 2)
+            return {"vars": {"old": old, "new": new}, "answer": [new.split()[0]], "stale": [old.split()[0]],
+                    "unique": [old, new]}
+        old, new = random.sample(["Porto", "Lyon", "Gdansk", "Valencia", "Leeds", "Graz", "Turku", "Bergen", "Bruges",
+                                  "Krakow", "Bilbao", "Tampere", "Utrecht", "Ghent"], 2)
+        return {"vars": {"person": person, "old": old, "new": new}, "answer": [new], "stale": [old],
+                "unique": [person, old, new]}
+    return _distinct(setup)
 
 
 LONG_DEV = [
@@ -777,6 +809,12 @@ LONG_HELDOUT = [
           Turn("Oh, {person} moved to {new} last month.", new_thread=True),
           Turn("Which city does {person} live in?", new_thread=True)],
          setup_keyless("person"), ideal_calls=4, attach=False),
+    # Fresh held-out (19 November, after LSH3 informed a fix): written before any run; not to be used for fixes.
+    Case("LSH4", "A new manager, mentioned in a later chat", "memory-supersession",
+         [Turn("Remember that my manager is {old}."),
+          Turn("{old} left the company last week; my new manager is {new}.", new_thread=True),
+          Turn("Who is my manager?", new_thread=True)],
+         setup_keyless("manager"), ideal_calls=4, attach=False),
     Case("LSH2", "An appointment moved, mentioned in a later chat without 'remember'", "memory-supersession",
          [Turn("Remember: my appointment at the {subject} dental clinic is on {old}."),
           Turn("FYI my {subject} dentist appointment got moved to {new}.", new_thread=True),

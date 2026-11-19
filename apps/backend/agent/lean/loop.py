@@ -137,7 +137,10 @@ def app_note(text: str) -> str:
 # Stretches of the step limit a turn may use in all when it keeps making progress (LeanTurn.auto_continue).
 AUTO_CONTINUE_LIMIT = 5
 # A claim about remembering: "I've saved that", "noted, I'll remember it", "I've updated my records".
-_MEMORY_CLAIM = re.compile(r"(?i)\b(sav(?:e|ed|ing)|remember(?:ed)?|noted|records?|memor(?:y|ized|ised))\b")
+_MEMORY_CLAIM = re.compile(r"(?i)\b(sav(?:e|ed|ing)|remember(?:ed)?|noted|notes|records?|memor(?:y|ized|ised))\b")
+# The user telling us something changed: "moved to", "switched to", "they reset it, it's 9699 now", "instead".
+_CHANGE_CUE = re.compile(r"(?i)\b(moved|switched|changed|reset|rescheduled|replaced|no\s+longer|anymore|instead|left)\b"
+                         r"|\b(?:is|are|it'?s|it\s+is|they'?re)\b[^.?!]{0,40}\bnow\b")
 def _asks_to_remember(text: str) -> bool:
     """The user asked for something to be remembered ("Please remember that instead"), so any unbacked "I've
     updated it" is about memory (evaluation LS3 r2, 19 November)."""
@@ -146,6 +149,40 @@ def _asks_to_remember(text: str) -> bool:
         return MemoryCurator.is_explicit_memory_request(str(text or ""))
     except Exception:  # noqa: BLE001 - a detector problem must never break the turn
         return False
+
+
+def _recalled_lines(request_note: str) -> list[str]:
+    note = str(request_note or "")
+    start = note.find("## What you know about the user")
+    if start < 0:
+        return []
+    return [line for line in note[start:].split("\n## ")[0].splitlines() if line.startswith("- ")]
+
+
+def _changes_recalled(user_message: str, request_note: str) -> str | bool:
+    """The user states a change to a fact recalled for this request: a change cue, not a question, and two shared
+    content words with one of its lines, or one shared name ("Ines moved to Gdansk" and "Friend Ines lives in
+    Valencia"). Returns the line's key when it shows one, True without one, or False."""
+    text = str(user_message or "").strip()
+    if not text or text.endswith("?") or not _CHANGE_CUE.search(text):
+        return False
+    from agent.stopwords import keywords
+    said = set(keywords(text))
+    names = {w.lower() for w in re.findall(r"\b[A-Z][a-z]{2,}\b", text[1:])}  # capitalised after the first letter
+    for line in _recalled_lines(request_note):
+        shared = said & set(keywords(line))
+        if len(shared) >= 2 or shared & names:
+            key = re.search(r"\bkey ([\w.-]+)\)", line)
+            return key.group(1) if key else True
+    return False
+
+
+def memory_follow_note(key: str) -> str:
+    return ("The user asked you to remember this, or told you that something you have saved has changed, but nothing "
+            "was saved: memory_save was not called, and a reminder or a reply is not memory. Call memory_save now with "
+            "the fact in their words" + (f" and the key {key}, so the new value replaces the old one" if key else
+                                          " and a short key naming its subject (the saved fact's key if it updates one)")
+            + ". Your answer above stays as it is: after saving, reply with one short line or nothing.")
 
 
 def _about_recalled(claim: str, request_note: str) -> bool:
@@ -722,7 +759,8 @@ class LeanTurn:
                         if (self.memory_repair and not memory_repairs and step < max_steps
                                 and "memory_save" in self.toolbox.names and "memory_save" not in self.succeeded
                                 and (_MEMORY_CLAIM.search(claim) or _asks_to_remember(user_message)
-                                     or _about_recalled(claim, self.request_note))):
+                                     or _about_recalled(claim, self.request_note)
+                                     or _changes_recalled(user_message, self.request_note))):
                             # Chat keeps its answer (claims there are noted, not rewritten), but a claimed save that
                             # didn't happen loses the fact for good: one step to make the claim true.
                             memory_repairs += 1
@@ -733,6 +771,17 @@ class LeanTurn:
                         note = f"Not verified: no tool call in this reply did this (“{claim[:160]}”)."
                         self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
                         self.emit({"type": "claim_unverified", "step": step, "claim": claim[:200], "note": note})
+                    if (not claim and not stop_reason and self.memory_repair and not memory_repairs and step < max_steps
+                            and "memory_save" in self.toolbox.names and "memory_save" not in self.succeeded):
+                        # Nothing claimed and nothing saved, though the user asked to remember, or told us a saved fact
+                        # changed (memory ×4 run: "I switched to the 7:40 train" got "sounds like a good move"; "Remember:
+                        # my appointment…" got only a reminder). One step to save it; the answer stays as streamed.
+                        changed_key = _changes_recalled(user_message, self.request_note)
+                        if changed_key or _asks_to_remember(user_message):
+                            memory_repairs += 1
+                            add_note(messages, memory_follow_note(changed_key if isinstance(changed_key, str) else ""))
+                            self.emit({"type": "memory_repair", "step": step, "claim": "", "key": changed_key or ""})
+                            continue
                     if (self.promise_guard and not stop_reason and self._unchecked and check_nudges < 1
                             and any(name in self.toolbox.names for name in CHECK_TOOLS)):
                         # Code changed and nothing ran since: check it before calling it done (once).
