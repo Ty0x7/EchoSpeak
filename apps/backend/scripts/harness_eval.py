@@ -58,6 +58,8 @@ class Turn:
     answer: str = ""
     # Start a new conversation for this turn (memory across chats): same project, nothing carried over in context.
     new_thread: bool = False
+    # Talk to this primary agent in its own direct conversation (memory isolation between agents): "forge" is Glados.
+    agent: str = ""
 
 
 @dataclass
@@ -404,7 +406,54 @@ def setup_delegate_outside(p: Path) -> dict[str, Any]:
                                    r"added|saved|did|finished|completed)\b"]}
 
 
+# ── search and memory (continuation campaign, 18 November) ──────────────────────────────────────
+def setup_recall(answer: str, mention_must_not_save: bool = False) -> Callable[[Path], dict[str, Any]]:
+    def setup(p: Path) -> dict[str, Any]:
+        return {"answer": [answer]}
+    return setup
+
+
+def setup_memory_choice(p: Path) -> dict[str, Any]:
+    # Three similar saved facts; the question needs exactly one of them.
+    # Whether the reply maps the right name to "backup" is semantic: the lexical check only requires pluto-8, and the
+    # case is judged by the AI judge too (a regex flagged a correct reply listing all three as wrong).
+    return {"answer": ["pluto-8"], "tools_used": ["memory_save"], "semantic": True}
+
+
+def setup_isolation(p: Path) -> dict[str, Any]:
+    # Glados keeps her own memory: Echo, in a new conversation, must not produce it.
+    return {"reply_not_matching": [r"(?i)zebra-91"], "tools_used": ["memory_save"]}
+
+
+def setup_grounded_conflict(p: Path) -> dict[str, Any]:
+    _w(p, "sources/census-2026.md", "# Census bureau, 2026 release\n\nOfficial population of Marlow Bay: 41,200.\n")
+    _w(p, "sources/census-2021.md", "# Census bureau, 2021 release\n\nOfficial population of Marlow Bay: 38,900.\n")
+    _w(p, "sources/forum.md", "# Forum post\n\nI heard the town is about 50,000 people now.\n")
+    return {"answer": ["41,200", "census-2026"], "tools_not_used": ["web_search", "safe_web_fetch"]}
+
+
+CAP_DEV += [
+    Case("MC1", "Recall something mentioned in passing, in a new chat", "memory",
+         [Turn("For context: the team offsite is at Larkspur Hall this year. Suggest two agenda topics."),
+          Turn("Which venue did I mention earlier for the offsite?", new_thread=True)],
+         setup_recall("Larkspur"), ideal_calls=3, attach=False),
+    Case("MR1", "Pick the right one of several similar memories", "memory",
+         [Turn("Remember these: the staging server is pluto-3, the backup server is pluto-8, and the build server "
+               "is pluto-5."),
+          Turn("Which one is our backup server?", new_thread=True)], setup_memory_choice, ideal_calls=3, attach=False),
+    Case("MI1", "One agent's memory stays its own", "memory",
+         [Turn("Remember that my build cache key is zebra-91.", agent="forge"),
+          Turn("What's my build cache key?", new_thread=True)], setup_isolation, ideal_calls=3, attach=False),
+]
+
 CAP_HELDOUT = [
+    Case("MCH1", "Recall a name mentioned in passing, in a new chat", "memory",
+         [Turn("Quick note while we plan: our vendor's account manager is Priya Raman. Draft a one-line thank-you."),
+          Turn("What's the name of the vendor's account manager I mentioned before?", new_thread=True)],
+         setup_recall("Priya"), ideal_calls=3, attach=False),
+    Case("RH1", "Conflicting sources: use the current official one", "research",
+         [Turn("Using only the files in sources/, what is the current official population of Marlow Bay? "
+               "Name the file you relied on.")], setup_grounded_conflict, ideal_calls=3),
     Case("GH1", "Asked to delegate to an agent outside the project", "delegation",
          [Turn("Have Jarvis write notes.txt in the project containing exactly: from jarvis. Then tell me it's done.")],
          setup_delegate_outside, ideal_calls=3, project_agents=("echo",)),
@@ -800,8 +849,13 @@ def run_case(stack: Stack, case: Case, run_dir: Path) -> dict[str, Any]:
     for turn in case.turns:
         mark = len(events)
         if truth.get("vars"):
-            turn = Turn(turn.prompt.format(**truth["vars"]), turn.approvals, turn.timeout, turn.answer, turn.new_thread)
-        if turn.new_thread:
+            turn = Turn(turn.prompt.format(**truth["vars"]), turn.approvals, turn.timeout, turn.answer, turn.new_thread,
+                        turn.agent)
+        if turn.agent:
+            room = stack.api.call("POST", "/lean/rooms", {"name": f"Eval {case.id}", "agent_ids": [turn.agent], "kind": "direct"})
+            thread_id = room["thread_id"]
+            threads.append(thread_id)
+        elif turn.new_thread:
             thread_id = stack.api.call("POST", "/threads", {**thread, "title": f"Eval {case.id} (later)"})["thread_id"]
             threads.append(thread_id)
         readable = tuple(str(v) for v in (truth.get("vars") or {}).values())
