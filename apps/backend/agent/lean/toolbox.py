@@ -473,11 +473,18 @@ class Toolbox:
                  if name not in keep and name != "find_tools" and not tool.always and not tool.hidden}
         if not held:
             return
+        # Connected apps newly held here are named, or a model asked to use "the accounts service" sees six
+        # alphabetical built-ins as examples and concludes the app isn't there (eval X1). Apps already deferred by
+        # the inline limit are named in that note.
+        apps = sorted({self._app(name).strip() for name in held - self.deferred
+                       if str(getattr(self.entries.get(name), "origin", "")) in {"skill", "mcp", "connection"}} - {""})
         self.deferred |= held
         self._offer_find_tools()
         self.schema_version += 1
+        named = f" Connected apps: {', '.join(apps)}; find_tools with an app's name loads its tools." if apps else ""
         self.notes.append(f"Only your main tools are listed, to keep this model focused. {len(held)} more "
-                          f"(for example {', '.join(sorted(held)[:6])}) load when you call find_tools with what you need.")
+                          f"(for example {', '.join(sorted(held)[:6])}) load when you call find_tools with what you need."
+                          + named)
 
     def _description(self, name: str) -> str:
         tool = self.native.get(name)
