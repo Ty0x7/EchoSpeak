@@ -1706,9 +1706,12 @@ class LeanSession:
             if not hits:
                 return ("No matching messages in this conversation. Ask the user to share the relevant excerpt here."
                         if scoped else "No past messages match.")
+            # Full matches first, then partial ones, newest first in each: the owner's latest mention is the one they
+            # mean. With rank order, "offsite" found an earlier venue first and the model answered with it (live MC1).
+            hits.sort(key=lambda hit: (bool(hit.get("partial")), -float(hit["created_at"] or 0)))
             lines = []
             for hit in hits:
-                when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
+                when = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(hit["created_at"] or 0)))
                 who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
                 here = " (this chat)" if hit["session_id"] == self.session_id else ""
                 partial = " (partial match)" if hit.get("partial") else ""

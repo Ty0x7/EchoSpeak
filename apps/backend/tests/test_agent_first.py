@@ -791,6 +791,16 @@ def test_past_chat_search_finds_a_fact_without_every_query_word(env, monkeypatch
     assert "Larkspur" in out and "partial match" in out
 
 
+def test_the_latest_mention_comes_first(env, monkeypatch):
+    """Live MC1 with a fix that only added partial matches: an earlier venue came first and the model named it."""
+    import time as _time
+    _said(env, "For context: the team offsite is at Rookwood Hall this year.")
+    _time.sleep(0.01)
+    _said(env, "For context: the team offsite is at Fenwick Hall this year.")
+    out = _chat_search(env, monkeypatch, "offsite venue")
+    assert out.index("Fenwick") < out.index("Rookwood")
+
+
 def test_an_exact_match_is_not_marked_partial_and_stop_words_alone_find_nothing(env, monkeypatch):
     _said(env, "Our vendor's account manager is Dara Okafor.")
     exact = _chat_search(env, monkeypatch, "account manager")
