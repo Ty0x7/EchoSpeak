@@ -39,7 +39,7 @@
 <div class="grid3">
 <div class="node"><h3>History</h3><p>Last 30 messages verbatim; older turns as a per-chat summary. Tool outputs aren't carried across turns, only replies.</p></div>
 <div class="node"><h3>Within a turn</h3><p>Older steps summarised (≤ 200 words) and trimmed when the window fills; big outputs saved behind <code>out-…</code> IDs and reread with <code>read_output</code>.</p></div>
-<div class="node"><h3>Memory</h3><p>Retrieved per request (top 8), with <code>memory_search</code> and <code>chat_search</code> on demand. Next: move per-request recall out of the system prompt too.</p></div>
+<div class="node"><h3>Memory</h3><p>Retrieved per request (top 8), now on the request rather than the system prompt, with <code>memory_search</code> and <code>chat_search</code> on demand.</p></div>
 </div>
 </section>
 
@@ -48,6 +48,27 @@
 <div class="node"><h3>Guessed IDs, corrected with facts</h3><p>The model called <code>read_output</code> with invented IDs, then made 76 more calls. A wrong ID now gets this chat's real saved outputs (or "none").</p></div>
 <div class="node"><h3>The right tool, from the request</h3><p>"look at codex and claude sessions" never reached <code>agent_sessions</code>. Strong, distinctive matches between a request and a hidden tool now list it up front: across 52 evaluation prompts, only the two session questions gain a tool.</p></div>
 </div>
+</section>
+
+<section><h2>Memory and long sessions (afternoon campaign)</h2>
+<p class="lead">Eleven memory and long-session cases, twice each, with qwen3.5:9b, judged from evidence. Before = the harness at e11a1f5; final = fccd02f. Trials that succeeded: <b>17 of 22 → 22 of 22</b>; mean score 8.96 → 9.60.</p>
+<div class="bars" role="img" aria-label="Case scores before and after: MC1 6.61 to 10, MI1 7.38 to 9.28, LSH2 7.83 to 9.29, MCH1 9.61 to 10.">
+<span>MC1 before</span><div class="bar bad" style="width:66.1%"></div><span class="num">6.61</span>
+<span>MC1 final</span><div class="bar" style="width:100%"></div><span class="num">10.0</span>
+<span>MI1 before</span><div class="bar bad" style="width:73.8%"></div><span class="num">7.38</span>
+<span>MI1 final</span><div class="bar" style="width:92.8%"></div><span class="num">9.28</span>
+<span>LSH2 before</span><div class="bar bad" style="width:78.3%"></div><span class="num">7.83</span>
+<span>LSH2 final</span><div class="bar" style="width:92.9%"></div><span class="num">9.29</span>
+</div>
+<div class="grid3" style="margin-top:12px">
+<div class="node"><h3>Past chats found</h3><p><code>chat_search</code> needed every word of a descriptive query; it now ranks by shared words. "Did I mention…" now points back.</p></div>
+<div class="node"><h3>Saves that happen</h3><p>An unbacked "I've saved / updated that" gets one step to call <code>memory_save</code>; the builder is offered it; recalled facts show their key so a change replaces them.</p></div>
+<div class="node"><h3>Cache, honestly</h3><p>Recall moved to the request: reused prefix 0.85 → 0.94 and no memory breaks, but prefill stayed ~0.2–0.3 s. This Ollama build already restored earlier prompts.</p></div>
+</div>
+</section>
+
+<section><h2>"I ran out of steps (60)"</h2>
+<p class="lead">The owner's turns stopped after <b>6</b> look-up steps, not 60: the final answer call wrote the whole answer as reasoning and returned no reply. That call now runs with thinking off (6.6–7.7 s, against up to 86.5 s with thinking on), an answer written as reasoning is recovered, the note states the real limit, and the agent carries on past its limit while it is still making progress (up to 5 stretches; "Kept going" in the terminal).</p>
 </section>
 <footer>Single runs on this machine; reproduce with <code>context_probe.py</code> (≈ 90 s, unloads the model). Not measured: multi-fact reasoning at depth, a text-only build without the vision projector, <code>num_gpu</code> overrides.</footer>
 </main></body></html>
