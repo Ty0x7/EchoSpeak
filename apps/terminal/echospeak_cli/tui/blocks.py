@@ -7,13 +7,15 @@ server text can never become rich markup or a terminal escape.
 from __future__ import annotations
 
 import io
+import os
 import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Optional, Union
 
 from rich.console import Console, Group, RenderableType
-from rich.markdown import Heading, Markdown
+from rich.markdown import Heading, ListItem, Markdown
+from rich.segment import Segment
 from rich.padding import Padding
 from rich.table import Table as RTable
 from rich.text import Text
@@ -34,8 +36,10 @@ class Banner:
     cwd: str
     project: str
     mode_label: str
-    tagline: str
+    tagline: str = ""     # kept for callers; the placeholder already types it, so the banner doesn't repeat it
     resumed: str = ""     # 'Resumed "Fix parser" · 14 messages · last active 2h ago'
+    last: str = ""        # 'Last here: "Fix parser" · 14 messages · 2h ago' (a fresh start that could resume)
+    face: Optional[tuple[str, str, str]] = None   # an entrance frame (tui/avatar.py); None = Echo at rest
 
 
 @dataclass
@@ -134,8 +138,23 @@ class _LeftHeading(Heading):
     LEVEL_ALIGN = {f"h{i}": "left" for i in range(1, 7)}
 
 
+class _DotItem(ListItem):
+    """Numbered items as "1." (rich prints a bare "1"), wrapped lines hanging under the text."""
+
+    def render_number(self, console, options, number: int, last_number: int):
+        number_width = len(str(last_number)) + 3
+        lines = console.render_lines(self.elements, options.update(width=options.max_width - number_width), style=self.style)
+        number_style = console.get_style("markdown.item.number", default="none")
+        numeral = Segment(f"{number}.".rjust(number_width - 1) + " ", number_style)
+        padding = Segment(" " * number_width, number_style)
+        for i, line in enumerate(lines):
+            yield numeral if i == 0 else padding
+            yield from line
+            yield Segment("\n")
+
+
 class EchoMarkdown(Markdown):
-    elements = {**Markdown.elements, "heading_open": _LeftHeading}
+    elements = {**Markdown.elements, "heading_open": _LeftHeading, "list_item_open": _DotItem}
 
 
 def _theme(caps: Caps) -> Theme:
@@ -194,7 +213,8 @@ def render(block: Block, width: int, caps: Caps, verbose: bool = False) -> str:
         body = Text(sanitize(block.text).rstrip("\n"))
         if block.queued:
             body.append("  (queued)", style="dim")
-        grid = RTable.grid(padding=(0, 1, 0, 0))
+        # `›` and two spaces, the composer's prompt column: what you sent stays where you typed it.
+        grid = RTable.grid(padding=(0, 2 if width >= 30 else 1, 0, 0))
         grid.add_column(no_wrap=True)
         grid.add_column(overflow="fold")
         grid.add_row(Text(g.prompt, style=st["user"]), body)
@@ -247,7 +267,7 @@ def render(block: Block, width: int, caps: Caps, verbose: bool = False) -> str:
         text.append(sanitize(block.headline), style=style)
         out = "\n" + _render(text, width, caps)
         if block.check:
-            out += _render(Text(f"  {g.check} " + sanitize(block.check), style="bold" if block.style != "accent" else "dim"),
+            out += _render(Text(f"  {g.check} " + sanitize(block.check), style="dim" if block.style in {"accent", ""} else "bold"),
                            width, caps)
         return out
     if isinstance(block, TaskBoard):
@@ -281,34 +301,47 @@ def _banner(b: Banner, width: int, caps: Caps) -> str:
         text.append(f" v{b.version}" if b.version else "", style="dim")
         text.append(f" · {one_line(b.agent, 30)} · {one_line(b.model, 40)}", style="")
         out = _render(text, width, caps)
-        if b.resumed:
-            out += _render(Text(sanitize(b.resumed), style="dim"), width, caps)
+        for note in (b.resumed, b.last):
+            if note:
+                out += _render(Text(sanitize(note), style="dim"), width, caps)
         return out + "\n"
-    face = g.face
-    lines = []
+    lines = banner_rows(b, width, caps)
+    out = _render(Group(*lines), width, caps)
+    notes = [x for x in (b.resumed, b.last) if x]
+    if notes:
+        # Aligned with the banner's text column, so it reads as part of the header.
+        indent = " " * (width_of(lines[0].plain.split("  ", 1)[0]) + 2)
+        out += "\n" + "".join(_render(Text(indent + sanitize(x), style="dim"), width, caps) for x in notes)
+    return out + "\n"
+
+
+def banner_rows(b: Banner, width: int, caps: Caps) -> list[Text]:
+    """The three banner rows: Echo's face, then name and version, agent and model, folder and mode.
+
+    The face is a fixed 8-cell canvas (tui/avatar.py) in every frame, so the text beside it never moves
+    while it animates. ASCII terminals get the ASCII face.
+    """
+    from . import avatar
+
+    g = caps.glyphs
+    face = (b.face or avatar.FACE_REST) if not caps.ascii else g.face
+    pad = "  "
     l1 = Text()
     l1.append(face[0], style="bold")
-    l1.append(" EchoSpeak", style="bold")
-    l1.append(f"  v{one_line(b.version, 20)} {g.sep} terminal" if b.version else "  terminal", style="dim")
+    l1.append(pad + "EchoSpeak", style="bold")
+    l1.append(f" v{one_line(b.version, 20)}" if b.version else "", style="dim")
     l2 = Text()
     l2.append(face[1], style="bold")
-    l2.append(" " + one_line(b.agent, 30), style="bold")
+    l2.append(pad + one_line(b.agent, 30), style="bold")
     rest = f" {g.sep} ".join(x for x in (one_line(b.agent_title, 30), one_line(b.model, 50)) if x)
     l2.append(f" {g.sep} {rest}" if rest else "", style="")
     l3 = Text()
     l3.append(face[2], style="bold")
-    l3.append(" " + f" {g.sep} ".join(x for x in (one_line(b.cwd, 60), one_line(b.project, 40) and f"project {one_line(b.project, 40)}",
+    l3.append(pad + f" {g.sep} ".join(x for x in (one_line(b.cwd, 60), one_line(b.project, 40) and f"project {one_line(b.project, 40)}",
                                             b.mode_label) if x), style="dim")
     for row in (l1, l2, l3):
         row.truncate(width, overflow="ellipsis")
-        lines.append(row)
-    out = _render(Group(*lines), width, caps)
-    if b.resumed:
-        out += _render(Text(" " + sanitize(b.resumed), style="dim"), width, caps)
-    out += "\n"
-    out += _render(Text(" " + sanitize(b.tagline)), width, caps)
-    out += _render(Text(f" /help for commands {g.sep} ? for shortcuts {g.sep} ctrl+o for details", style="dim"), width, caps)
-    return out + "\n"
+    return [l1, l2, l3]
 
 
 _FENCE_LINE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
@@ -385,35 +418,62 @@ def _tool(b: ToolLine, width: int, caps: Caps, verbose: bool) -> str:
     g = caps.glyphs
     st = rich_styles(caps)
     glyph = {"ok": g.ok, "fail": g.fail, "denied": g.denied, "held": g.held}.get(b.status, g.ok)
-    style = {"ok": "dim", "fail": st["error"], "denied": "bold", "held": st["attention"]}.get(b.status, "")
+    # A finished step is quiet (all dim). A step that failed, was denied or is held is not: its glyph carries
+    # the meaning (✗ ⊘ ⏸, readable in any theme), its label is normal weight, its detail stays dim.
+    glyph_style = {"ok": "dim", "fail": st["error"], "denied": "bold", "held": st["attention"]}.get(b.status, "")
+    label_style = "dim" if b.status == "ok" else ""
+    detail_style = st["attention"] if b.status == "held" else "dim"
     dur = fmt_duration_ms(b.duration_ms)
-    label = one_line(b.label, 300)
-    summary = one_line(b.summary, 200)
-    body = label + (f" · {summary}" if summary else "")
+    label = home_short(one_line(b.label, 300))
+    summary = home_short(one_line(b.summary, 200))
+    if b.status == "fail":
+        summary = re.sub(r"^(?:failed|error)\s*:\s*", "", summary, flags=re.I)   # ✗ already says it failed
+    sep = f" {g.sep} "
     pad = "  " if width >= 30 else ""
     head = f"{pad}{glyph} "
     room = width - width_of(head) - (width_of(dur) + 2 if dur else 0)
     if dur and room < 12:
         dur, room = "", width - width_of(head)   # the duration goes before the label is cut short
-    if width_of(body) > room:
-        # Detail is dropped first, then the label is cut.
-        body = truncate(body, max(1, room))
-    line = Text(head, style=style)
-    line.append(body, style=style)
+    # Detail is dropped first, then the label is cut.
+    label = truncate(label, max(1, room))
+    detail = truncate(sep + summary, max(0, room - width_of(label))) if summary else ""
+    if detail and width_of(detail) <= width_of(sep) + 1:
+        detail = ""
+    line = Text()                       # no base style: each span keeps its own (a base style would tint them all)
+    line.append(head, style=glyph_style)
+    line.append(label, style=label_style)
+    if detail:
+        line.append(detail, style=detail_style)
     if dur:
-        line.append(" " * max(2, room - width_of(body) + 2) + dur, style="dim")
+        line.append(" " * max(2, room - width_of(label) - width_of(detail) + 2) + dur, style="dim")
     lines = [line]
-    if b.preview:
+    seen = _plain_key(summary)
+    preview = [row for row in b.preview if not (seen and _plain_key(row) and _plain_key(row) in seen)]
+    if preview:
         first, rest = (f"    {g.elbow}  ", "       ") if width >= 30 else (f"{g.elbow} ", "  ")
-        for i, row in enumerate(b.preview):
+        for i, row in enumerate(preview):
             lead = first if i == 0 else rest
-            lines.append(Text(lead + truncate(sanitize(row), max(1, width - width_of(lead) - 1)), style="dim"))
+            lines.append(Text(lead + truncate(home_short(sanitize(row)), max(1, width - width_of(lead) - 1)), style="dim"))
         if b.more:
             more = f"{g.ellipsis} +{b.more} lines (ctrl+o for details)"
             lines.append(Text(rest + truncate(more, max(1, width - width_of(rest))), style="dim"))
     for t in lines:
         t.no_wrap, t.overflow = True, "crop"
     return _render(Group(*lines), width, caps)
+
+
+def home_short(text: str) -> str:
+    """Your home folder as ~ in what the terminal shows (paths in tool lines and errors)."""
+    home = os.path.expanduser("~").rstrip("/")
+    if not home or home == "~" or len(home) < 2:
+        return text
+    return re.sub(re.escape(home) + r"(?=/|\b)", "~", text)
+
+
+def _plain_key(text: str) -> str:
+    """A line reduced for "does this repeat that?": no Error/Failed prefix, case or spacing."""
+    text = re.sub(r"^\s*(?:error|failed)\s*:\s*", "", home_short(str(text or "")), flags=re.I)
+    return " ".join(text.lower().split())
 
 
 def _file_diff(b: FileDiff, width: int, caps: Caps, verbose: bool) -> str:

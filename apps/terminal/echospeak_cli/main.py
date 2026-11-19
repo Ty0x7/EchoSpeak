@@ -224,7 +224,8 @@ def cmd_tui(args) -> int:
     caps = detect(no_anim=args.no_anim, ascii_only=True if args.ascii else None)
     return run_tui(client, endpoint, caps, verbose=args.show_thinking, agent=getattr(args, "agent", "") or "",
                    resume=getattr(args, "session", "") if args.command == "resume" else "",
-                   new=args.command == "new", project=getattr(args, "project", "") or "")
+                   new=args.command == "new", project=getattr(args, "project", "") or "",
+                   continue_last=bool(getattr(args, "continue_last", False)))
 
 
 def cmd_preview(args) -> int:
@@ -504,6 +505,8 @@ def _add_common(parser: argparse.ArgumentParser, top: bool) -> None:
     parser.add_argument("--plain", action="store_true", default=d(False),
                         help="the plain line REPL instead of the terminal UI, without colors (NO_COLOR: colors only)")
     parser.add_argument("--no-anim", action="store_true", default=d(False), help="no animation (also ECHO_REDUCED_MOTION=1)")
+    parser.add_argument("-c", "--continue", dest="continue_last", action="store_true", default=d(False),
+                        help="reopen the latest conversation in this folder's project (a plain start is a fresh one)")
     parser.add_argument("--ascii", action="store_true", default=d(False), help="ASCII glyphs only (also ECHO_TUI_ASCII=1)")
     parser.add_argument("--no-start", action="store_true", default=d(False),
                         help="never start a backend; only attach to a running one")

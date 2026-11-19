@@ -22,6 +22,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import Optional
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
@@ -85,7 +86,7 @@ def ghosts(full: str, footer_mark: str) -> dict:
     }
 
 
-def start_backend(tmp: Path, model_url: str) -> tuple[subprocess.Popen, dict, Client]:
+def start_backend(tmp: Path, model_url: str, extra_env: Optional[dict] = None) -> tuple[subprocess.Popen, dict, Client]:
     dirs = {name: tmp / name for name in ("data", "logs", "home", "rt", "state", "cwd")}
     for d in dirs.values():
         d.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -104,6 +105,7 @@ def start_backend(tmp: Path, model_url: str) -> tuple[subprocess.Popen, dict, Cl
         "LOCAL_MODEL_NAME": MODEL, "ECHOSPEAK_DISABLE_WARMUP": "1", "LEARNING_ENABLED": "0",
         "CHECKIN_MODE": "off", "LEAN_QUARANTINE_READER": "off", "PYTHONUNBUFFERED": "1",
     })
+    env.update(extra_env or {})
     py = ROOT / "apps" / "backend" / ".venv" / "bin" / "python"
     log = open(tmp / "backend.log", "wb")  # noqa: SIM115 - stays open for the backend's lifetime (the child writes it)
     proc = subprocess.Popen([str(py), "app.py", "--mode", "api", "--host", "127.0.0.1", "--port", str(port)],

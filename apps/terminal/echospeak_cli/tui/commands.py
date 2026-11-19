@@ -67,7 +67,7 @@ def filter_commands(token: str, commands: tuple[Command, ...]) -> list[Command]:
 
 SHORTCUTS = (
     ("/ for commands", "shift+tab to cycle approval mode", "ctrl+o for the transcript"),
-    ("← for your sessions", "enter to resume one", "→ or esc to come back"),
+    ("← for your sessions", "← again: all sessions", "→ or esc to come back"),
     ("? for shortcuts", "esc to stop a running task", "ctrl+g to edit in $EDITOR"),
     ("\\ + enter for a newline", "enter while running to steer", "ctrl+r to search history"),
     ("ctrl+j for a newline", "tab while running to queue", "ctrl+c twice to exit"),
@@ -81,7 +81,7 @@ KEYS_HELP = (
     ("Ctrl+D", "exit on an empty line · while running: detach"),
     ("Shift+Tab", "cycle approval mode: smart → autonomous → always ask"),
     ("↑ / ↓", "history · while running, ↑ on empty input takes back the last queued message"),
-    ("←", "on an empty input: your sessions (browse, search, enter to resume, → or esc to come back)"),
+    ("←", "on an empty input: your sessions; ← again: the sessions page (enter resumes, → or esc goes back a level)"),
     ("Ctrl+O", "transcript in the pager"),
     ("Ctrl+R", "search history"),
     ("Ctrl+G", "edit the draft in $EDITOR · in a dialog: full arguments or the full diff"),

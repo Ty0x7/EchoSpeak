@@ -152,6 +152,7 @@ def pt_style_dict(caps: Caps) -> dict[str, str]:
             "status.glyph": "bold", "status.glyph.dim": "dim", "shimmer.0": "dim", "shimmer.1": "", "shimmer.2": "bold",
             "tail": "", "tail.code": "bold", "chip": "reverse", "mode": "bold", "sel": "bold reverse", "key": "dim",
             "title": "bold", "search": "reverse", "bottom-toolbar": "noreverse",
+            "agent.echo": "bold", "agent.scout": "bold", "agent.forge": "bold", "agent.other": "bold",
         }
     return {
         "rule": "ansibrightblack", "rule.title": "ansibrightblack", "prompt": f"bold {accent}", "prompt.dim": "dim",
@@ -162,6 +163,8 @@ def pt_style_dict(caps: Caps) -> dict[str, str]:
         "tail.code": "bold ansicyan",   # matches markdown.code in scrollback, so committing doesn't change the look
         "chip": f"reverse {accent}", "mode": accent, "sel": f"bold {accent}", "key": "dim", "title": "bold",
         "search": "reverse", "bottom-toolbar": "noreverse",
+        # Who answers, as in scrollback (rich_styles): Echo plain, Jarvis blue, Glados magenta.
+        "agent.echo": "bold", "agent.scout": "bold ansiblue", "agent.forge": "bold ansimagenta", "agent.other": "bold",
     }
 
 

@@ -80,9 +80,10 @@ def test_tool_lines_statuses_and_previews():
     assert tools[1].preview == ["Error: timeout"]
     assert tools[2].summary == "you denied it" and tools[2].preview == []
     notes = [b.text for b in out if isinstance(b, B.Note)]
-    assert "Denied: Running `rm x`" in notes
-    # Denied and held steps never ran: only the search and the pytest run count.
-    assert steps_summary(run.finished_tools) == "Searched the web · Ran 1 command · 1 failed"
+    # One line per decision: the denied step's own line says "you denied it"; no separate "Denied:" note.
+    assert not any(n.startswith("Denied") for n in notes)
+    # Denied and held steps never ran, and a failed step did nothing: only the pytest run counts as work.
+    assert steps_summary(run.finished_tools) == "Ran 1 command · 1 failed"
 
 
 def test_a_passing_check_note_is_not_shown_as_a_warning():
@@ -378,8 +379,13 @@ def test_markup_lookalikes_stay_literal_in_markdown():
 def test_banner_width_fallback():
     banner = B.Banner("11.13", "Echo", "Personal agent", "qwen3.5:9b (ollama)", "~/w", "proj", "ask for risky actions",
                       "Build a feature, fix a bug, or explore your code.")
-    wide = plain(B.render(banner, 100, CAPS))
-    assert "▗▄▄▄▄▄▖" in wide and "EchoSpeak  v11.13 · terminal" in wide and "project proj" in wide
+    wide = plain(B.render(banner, 100, CAPS)).strip("\n").splitlines()
+    # Echo's square face (tui/avatar.py) beside three lines; the text starts in the same column on each.
+    assert wide[0] == "▗██████▖  EchoSpeak v11.13"
+    assert wide[1].startswith("▐█ ██ █▌  Echo · Personal agent") and "project proj" in wide[2]
+    assert len({line.index("  ") for line in wide[:3]}) == 1
+    # The tagline is not repeated under the banner: the input's placeholder already types it.
+    assert not any("Build a feature" in line for line in wide)
     narrow = plain(B.render(banner, 50, CAPS))
     assert narrow.strip().splitlines()[0] == "● EchoSpeak v11.13 · Echo · qwen3.5:9b (ollama)"
 

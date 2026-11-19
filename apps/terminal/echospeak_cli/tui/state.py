@@ -7,6 +7,7 @@ the work was verified. Every server string is sanitized when it is rendered (``b
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -26,9 +27,9 @@ _BUCKETS: dict[str, tuple[str, int]] = {
     "file_write": ("change", 6), "file_edit": ("change", 6), "file_move": ("change", 6), "file_copy": ("change", 6),
     "file_mkdir": ("change", 6), "file_delete": ("change", 6),
     "terminal": ("run", 7), "terminal_run": ("run", 7), "process_start": ("run", 7), "process_output": ("run", 7),
-    "process_stop": ("run", 7), "memory_search": ("memory", 8), "memory_save": ("memory", 8),
+    "process_stop": ("run", 7), "memory_search": ("memory", 8), "memory_save": ("remember", 8),
     "calculate": ("math", 8), "create_artifact": ("artifact", 9), "update_artifact": ("artifact", 9),
-    "delegate_to_agent": ("team", 10),
+    "delegate_to_agent": ("team", 10), "ask_user": ("ask", 10),
 }
 
 
@@ -51,9 +52,11 @@ _LABELS = {
     "change": lambda n: f"Changed {_plural(n, 'file')}",
     "run": lambda n: f"Ran {_plural(n, 'command')}",
     "memory": lambda n: "Checked memory",
+    "remember": lambda n: "Saved to memory",
     "math": lambda n: f"Did {n} calculations" if n > 1 else "Did a calculation",
     "artifact": lambda n: f"Built {n} artifacts" if n > 1 else "Built an artifact",
     "team": lambda n: "Asked a teammate",
+    "ask": lambda n: "Asked you" + _times(n),
 }
 
 
@@ -69,7 +72,9 @@ def steps_summary(tools: list[dict]) -> str:
     changed_paths: set[str] = set()
     for tool in tools:
         if tool.get("failed"):
+            # A failed read read nothing: it is counted once, as a failure, never as work done.
             failed += 1
+            continue
         name = str(tool.get("name") or "")
         if name in _BUCKETS:
             key, rank = _BUCKETS[name]
@@ -146,7 +151,7 @@ def outcome_blocks(*, outcome: Optional[dict], work: Optional[dict], journal: st
         summary = one_line(outcome.get("summary") or "Finished.", 400)
         if verified:
             return [B.Outcome(g.done, f"Done: {summary}", "accent", label)]
-        return [B.Outcome(g.unverified, f"Done (not verified): {summary}", "bold", label or "Not verified")]
+        return [B.Outcome(g.unverified, f"Done (not verified): {summary}", "", label or "Not verified")]
     if verification == "not delivered":
         return [B.Outcome(g.fail, "Not delivered: nothing was created", "error", label)]
     if verification == "not where asked" and work and str(work.get("status") or "") == "completed":
@@ -156,7 +161,7 @@ def outcome_blocks(*, outcome: Optional[dict], work: Optional[dict], journal: st
     if work and str(work.get("status") or "") == "completed":
         if verified:
             return [B.Outcome(g.done, f"Done · {label}", "accent")]
-        return [B.Outcome(g.unverified, "Finished (not verified)", "bold", label or "Not verified")]
+        return [B.Outcome(g.unverified, "Finished (not verified)", "", label or "Not verified")]
     if work and str(work.get("status") or "") in {"failed", "interrupted"}:
         return [B.Outcome(g.fail, f"The work {work.get('status')}", "error", label)]
     return []
@@ -215,6 +220,7 @@ class Run:
         self.msgs: dict[str, Msg] = {}
         self.tools: dict[str, Tool] = {}
         self.finished_tools: list[dict] = []
+        self.denied_steps = 0                 # steps you refused (they never ran, so they are not work done)
         self.decisions: dict[str, str] = {}   # tool_call_id -> decision
         self.approval_info: dict[str, str] = {}  # approval id -> summary
         self.last_event = started
@@ -311,6 +317,12 @@ class Run:
                 out.append(B.Note("·", one_line(evt["model_route"], 300), "dim", 2))
             return out
         m = self._msg(evt)
+        if kind == "step_start":
+            target = m or (self.msgs.get(self.order[-1]) if self.order else None)
+            # Only text still open in the stream can run into the next step's ("…from now on.Noted.").
+            if target is not None and target.md.buf.strip() and not target.md.buf[-1:].isspace():
+                return [self._md(target, block) for block in target.md.feed("\n\n")]
+            return []
         if kind == "reasoning_delta":
             if not m:
                 return []
@@ -346,6 +358,7 @@ class Run:
             if m:
                 out += self._end_thinking(m, now) + self._flush_text(m)
                 m.last = "tool"
+                m.bullet_next = True   # what it says after its steps starts a new paragraph, with its own bullet
             tid = str(evt.get("id") or "")
             self.tools[tid] = Tool(tid, str(evt.get("name") or "tool"),
                                    one_line(evt.get("label") or evt.get("name") or "tool", 200), now,
@@ -385,15 +398,18 @@ class Run:
             self.last_specific = now
             what = self.approval_info.get(aid, "")
             suffix = f": {what}" if what else ""
+            # The tool's own line follows and says what was decided ("you allowed it", "you denied it",
+            # "You chose: 2026"), so a separate note here would say it twice.
+            follows = bool(evt.get("tool_call_id"))
             if decision == "answered" or evt.get("answer"):
-                return [B.Note(g.steer, f"You answered: {one_line(evt.get('answer'), 300)}", "dim", 2)]
+                return [] if follows else [B.Note(g.steer, f"You answered: {one_line(evt.get('answer'), 300)}", "dim", 2)]
             if decision == "allow":
-                return [B.Note(g.ok, f"Allowed{suffix}", "dim", 2)]
+                return [] if follows else [B.Note(g.ok, f"Allowed{suffix}", "dim", 2)]
             if decision == "deny":
                 change = self.approval_changes.get(aid)
                 if change is not None:
                     return [B.Note(g.denied, f"Denied {DV.noun(change)} {g.sep} {DV.where(change, _caps_of(g))}", "bold", 2)]
-                return [B.Note(g.denied, f"Denied{suffix}", "bold", 2)]
+                return [] if follows else [B.Note(g.denied, f"Denied{suffix}", "bold", 2)]
             if decision in {"timeout", "cancelled"}:
                 return [B.Note(g.denied, f"Approval {decision}{suffix}", "dim", 2)]
             return []
@@ -412,6 +428,9 @@ class Run:
                                       f"{one_line(evt.get('task'), 300)}", "dim", 0)]
         if kind == "context_compacted":
             return [B.RuleLine("Earlier steps summarized to fit the context window")]
+        if kind == "answer_note" and str(evt.get("verification") or "").lower() == "blocked" \
+                and any(d in {"deny", "timeout", "cancelled"} for d in self.decisions.values()):
+            return []   # the ⊘ line already says you denied it; the outcome line says Blocked
         if kind in {"answer_note", "claim_unverified", "security_note", "verification_nudge"}:
             default = "Outside content contained instructions; they were left out." if kind == "security_note" else "Not verified."
             if kind == "answer_note" and str(evt.get("verification") or "").lower() in {"verified", "checks pass", "checks_pass", "passed"}:
@@ -466,8 +485,9 @@ class Run:
             if stop not in NORMAL_STOPS:
                 words = {"max_steps": "stopped at the step limit before finishing"}.get(stop, f"stopped: {one_line(stop, 60)}")
                 out.append(B.Note("!", f"{m.name} {words}", "bold", 2))
-            if evt.get("success") is False and evt.get("error") and not cancelled:
-                out.append(B.Note(g.fail, one_line(evt.get("error"), 400), "error", 2))
+            err = one_line(evt.get("error"), 400)
+            if evt.get("success") is False and err and not cancelled and err[:60] not in one_line(m.md.total, 4000):
+                out.append(B.Note(g.fail, err, "error", 2))
             for tool in list(self.tools.values()):
                 if tool.msg == m.id:
                     self.tools.pop(tool.id, None)
@@ -513,10 +533,14 @@ class Run:
             summary = "verified on disk" if (evt.get("meta") or {}).get("memory_verified") else ""
         if status == "denied":
             summary = "you denied it" if decision == "deny" else (summary or outcome)
+        elif decision == "allow" and status == "ok":
+            summary = (summary + " · " if summary else "") + "you allowed it"
         elif status == "held":
             summary = "held for your OK · /approvals"
         output = sanitize(evt.get("output") or "")
         preview, more = self._preview(name, ok, output) if status not in {"denied", "held"} else ([], 0)
+        if status == "denied":
+            self.denied_steps += 1
         if status not in {"denied", "held"}:
             meta = evt.get("meta") if isinstance(evt.get("meta"), dict) else {}
             change = meta.get("file_change") if isinstance(meta.get("file_change"), dict) else {}
@@ -557,7 +581,10 @@ class Run:
         if kind == "run" and lines:
             shown = lines[-n:]
             return shown, max(0, len(lines) - len(shown))
+        if kind == "search" and ok:
+            return search_sources(output, n), 0
         return [], 0
+
 
     # ── queries for the live region ─────────────────────────────────
     def working(self) -> list[Msg]:
@@ -636,10 +663,11 @@ class Run:
                               error=self.error, caps_glyphs=self.g,
                               denied=any(d == "deny" for d in self.decisions.values()))
         elapsed = fmt_elapsed(now - self.started)
-        summary = steps_summary(self.finished_tools)
-        if self.finished_tools:
+        summary = " · ".join(x for x in (steps_summary(self.finished_tools),
+                                         f"{self.denied_steps} denied" if self.denied_steps else "") if x)
+        if self.finished_tools or self.denied_steps:
             out.append(B.RuleLine(f"Worked for {elapsed}" + (f" · {summary}" if summary else ""), gap=True))
-        elif journal == "completed" and now - self.started >= 1:
+        elif journal == "completed" and now - self.started >= 1 and self.success is not False and not self.error:
             thought = f" · thought for {fmt_elapsed(round(self.thought_total))}" if self.thought_total >= 1 else ""
             out.append(B.RuleLine(f"Answered in {elapsed}{thought}", gap=True))
         self.transcript.extend(out)
@@ -664,3 +692,29 @@ def tool_input_detail(raw: Any) -> str:
         if data.get(key):
             return one_line(data[key], 120)
     return ""
+
+
+_RESULT_HEAD = re.compile(r"^\s*(\d+)\.\s+(.+?)\s*$")
+_RESULT_URL = re.compile(r"^\s*URL:\s*(\S+)")
+
+
+def search_sources(output: str, limit: int = 3) -> list[str]:
+    """The top results of a web search as they came back: "docs.python.org · datetime — Basic date…".
+
+    Read from the tool's own output (the numbered results with their URL lines, agent/lean/steps.py), so
+    the sources shown are the ones the agent actually got."""
+    found: list[str] = []
+    title = ""
+    for line in str(output or "").splitlines():
+        head = _RESULT_HEAD.match(line)
+        if head:
+            title = head.group(2)
+            continue
+        url = _RESULT_URL.match(line)
+        if url and title:
+            host = re.sub(r"^www\.", "", re.sub(r"^[a-z]+://", "", url.group(1)).split("/", 1)[0])
+            found.append(f"{host} · {title}" if host else title)
+            title = ""
+            if len(found) >= limit:
+                break
+    return found

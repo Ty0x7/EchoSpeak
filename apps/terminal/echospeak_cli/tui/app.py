@@ -46,18 +46,20 @@ from .. import control, discovery
 from ..client import ApiError, Client, ConnectError, follow, new_request_id, submit
 from ..render import Renderer, one_line, sanitize
 from ..repl import App as Core, Out
+from . import avatar as A
 from . import blocks as B
 from . import diffview as DV
 from . import layout as L
 from . import motion as M
 from .commands import COMMANDS, KEYS_HELP, SHORTCUTS, filter_commands, lookup, visible
 from .dialog import Action, Dialog, Option, approval_options, question_options
-from .sessions import SessionBrowser, from_thread
+from .sessions import SessionBrowser, from_thread, plain_recap  # noqa: F401 (plain_recap: re-exported)
 from .state import Run
 from .theme import Caps
 
 VERSION_FALLBACK = ""
 PASTE_CHARS = 1000
+PROMPT_W = 3            # "›  ": the composer's prompt column (the scrollback user line uses the same)
 PASTE_LINES = 12
 CHIP_RE = re.compile(r"\[Pasted [\d,]+ chars · \d+ lines #(\d+)\]")
 # Approval with a diff (edit-preview.md §3.3): two columns from this width (and height), else stacked.
@@ -70,24 +72,6 @@ DIFF_MARK = "__diff__"
 RECAP_MESSAGES = 6
 
 
-
-_MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-_MD_MARKS = re.compile(r"(^|\s)(#{1,6}|[-*+]|\d+[.)]|>)\s+", re.M)
-
-
-def plain_recap(text: str) -> str:
-    """A one-line recap of a markdown answer: no heading hashes, bullets, emphasis, code ticks or link targets."""
-    text = _MD_LINK.sub(r"\1", str(text or ""))
-    text = re.sub(r"```[^\n]*\n?", " ", text)
-    text = _MD_MARKS.sub(r"\1", text)
-    out = []
-    # Odd segments are inline code: kept exactly (test_*.py stays test_*.py).
-    for i, part in enumerate(text.split("`")):
-        if i % 2 == 0:
-            part = re.sub(r"(\*\*|__)(\S.*?\S|\S)\1", r"\2", part)
-            part = re.sub(r"(?<![\w*])[*_](\S[^*_]*?)[*_](?![\w*])", r"\1", part)
-        out.append(part)
-    return " ".join("".join(out).split())
 
 class _Abandon(Exception):
     pass
@@ -269,7 +253,8 @@ def _crop(frags: StyleAndTextTuples, width: int) -> StyleAndTextTuples:
 
 class EchoTUI:
     def __init__(self, client: Client, endpoint: discovery.Endpoint, caps: Caps, *, env=os.environ,
-                 verbose: bool = False, agent: str = "", resume: str = "", new: bool = False, project: str = "") -> None:
+                 verbose: bool = False, agent: str = "", resume: str = "", new: bool = False, project: str = "",
+                 continue_last: bool = False) -> None:
         self.client = client
         self.endpoint = endpoint
         self.caps = caps
@@ -281,6 +266,17 @@ class EchoTUI:
         self.start_resume = resume
         self.start_new = new
         self.start_project = project
+        # A plain start is a clean one (like `claude`): no conversation is reopened or replayed until you
+        # choose one. --continue (or `echospeak resume`) picks up where you left off.
+        self.start_continue = continue_last
+        self.last_here: Optional[dict] = None   # the latest conversation in this folder's project, offered on ←
+        # The welcome banner while Echo's entrance plays in the live region; then it is printed to scrollback.
+        self.welcome: Optional[B.Banner] = None
+        self.welcome_t0 = 0.0
+        self._after_flush: list[Callable[[], None]] = []
+        self._committing_welcome = False
+        self._welcome_cache: Optional[tuple] = None
+        self._last_block: type = type(None)
         self.version = endpoint.version or VERSION_FALLBACK
         self.data_dir = ""
         # backend-derived state
@@ -370,6 +366,8 @@ class EchoTUI:
     _PROSE = (B.MarkdownBlock, B.Note, B.ThinkingLine, B.UserLine, B.Outcome, B.AgentHeader, B.TaskBoard)
 
     def emit(self, *blocks: B.Block, transcript: bool = True) -> None:
+        if self.welcome is not None and not self._committing_welcome:
+            self._commit_welcome()   # nothing may be printed above the banner
         width = self.width()
         prose = L.measure(width, self.env)
         for b in blocks:
@@ -379,6 +377,10 @@ class EchoTUI:
             if isinstance(b, (B.UserLine, B.Outcome)) or (isinstance(b, B.AgentHeader)):
                 # One blank line before a new turn or a header, never two.
                 text = ("" if self._tail.endswith("\n\n") else "\n") + text.lstrip("\n")
+            elif isinstance(b, B.MarkdownBlock) and self._last_block in (B.ToolLine, B.FileDiff, B.Note, B.ThinkingLine):
+                # What the agent says after its steps is a new paragraph, apart from the step lines.
+                text = ("" if self._tail.endswith("\n\n") else "\n") + text.lstrip("\n")
+            self._last_block = type(b)
             if transcript and not isinstance(b, B.ToolLine):
                 self.transcript.append(b)
             if text:
@@ -447,6 +449,9 @@ class EchoTUI:
             Window(FormattedTextControl(self._dialog_footer), dont_extend_height=True),
         ])
         root = HSplit([
+            # Echo's entrance: the banner at the top of the live region, the row it is printed to afterwards.
+            ConditionalContainer(Window(FormattedTextControl(self._welcome_text), dont_extend_height=True),
+                                 filter=Condition(lambda: self.welcome is not None) & shown("welcome")),
             # Grow above the live conversation, keeping the composer at the terminal's bottom.
             # Preferred height stays zero: inline output and terminal scrollback still work.
             Window(height=D(min=0, preferred=0, weight=1)),
@@ -591,15 +596,20 @@ class EchoTUI:
         if self._plan_cache is not None and self._plan_cache[0] == (w, h):
             return self._plan_cache[1]
         wants: list[L.Want] = []
+        if self.welcome is not None:
+            n = len(self._welcome_lines())
+            wants.append(L.Want("welcome", n, n, 6))   # gives way before the composer, the rules and the footer
         run = self.run
         if run is not None:
             tail = len(self._tail_all())
             wants.append(L.Want("tail", min(8, tail), 1, 6))
-            tools = len(run.running_tools())
+            tools = len(self._running_tools())
             if tools:
                 wants.append(L.Want("steps", min(3, tools) + (1 if tools > 3 else 0), 1, 4))
-            # A single running step already names the activity and shows its elapsed time.
-            if not tools or run.stopping or run.needs_ok() or len(run.working()) > 1:
+            # A single running step already names the activity and shows its elapsed time. An open approval
+            # or question says what it waits for in its own title, so the status line doesn't repeat it.
+            asking = self.dialog is not None and self.dialog.kind in {"approval", "question"}
+            if run.stopping or (not asking and (not tools or run.needs_ok() or len(run.working()) > 1)):
                 wants.append(L.Want("status", 1, 1, 1))
         if self.pending:
             wants.append(L.Want("pending", len(self._pending_lines()), 1, 3))
@@ -630,8 +640,8 @@ class EchoTUI:
         return plan
 
     def _input_rows(self) -> int:
-        """Rows the draft needs at this width (the prompt takes 2 cells), at most 8."""
-        w = max(1, self.width() - 2)
+        """Rows the draft needs at this width (the prompt takes PROMPT_W cells), at most 8."""
+        w = max(1, self.width() - PROMPT_W)
         text = self.buffer.text
         if not text:
             return 1
@@ -649,12 +659,14 @@ class EchoTUI:
         return out
 
     def _line_prefix(self, lineno: int, wrap_count: int) -> StyleAndTextTuples:
+        # `›` and two spaces: the text (and the block cursor on it) sits clear of the prompt glyph.
+        # Wrapped and continuation lines hang at the same column.
         if lineno == 0 and wrap_count == 0:
-            return [("class:prompt", f"{self.caps.glyphs.prompt} ")]
-        return [("", "  ")]
+            return [("class:prompt", self.caps.glyphs.prompt), ("", " " * (PROMPT_W - 1))]
+        return [("", " " * PROMPT_W)]
 
     def _placeholder(self) -> str:
-        room = max(0, self.width() - 3)   # never wraps: a wrapped placeholder would grow the composer
+        room = max(0, self.width() - PROMPT_W - 1)   # never wraps: a wrapped placeholder would grow the composer
         if self.running:
             text = "Steer Echo, or tab to queue a follow-up" if self.agent_name == "Echo" else \
                 f"Steer {self.agent_name}, or tab to queue a follow-up"
@@ -718,10 +730,20 @@ class EchoTUI:
         pad = " " * self._tail_indent()
         return self._join([[("", pad)] + line for line in self._tail_lines()])
 
+    def _running_tools(self) -> list:
+        """Running steps worth a line: not the one an open approval or question is already asking about."""
+        if self.run is None:
+            return []
+        tools = self.run.running_tools()
+        if self.dialog is None or self.dialog.kind not in {"approval", "question"}:
+            return tools
+        asked = {str((d.payload or {}).get("tool_call_id") or "") for d in [self.dialog, *self.dialogs]} - {""}
+        return [t for t in tools if t.id not in asked and t.name != "ask_user"]
+
     def _steps_text(self) -> StyleAndTextTuples:
         if not self.run:
             return []
-        tools = self.run.running_tools()
+        tools = self._running_tools()
         rows = self._rows("steps")
         if not tools or rows <= 0:
             return []
@@ -1387,7 +1409,8 @@ class EchoTUI:
         """Show every conversation in the composer's place (← on an empty input, /sessions)."""
         if self.dialog is not None:
             return
-        self.browser = SessionBrowser(current_id=self.sid or "", project_id=self.core.project_id or "")
+        self.browser = SessionBrowser(current_id=self.sid or "", project_id=self.core.project_id or "",
+                                      prefer_id=str((self.last_here or {}).get("thread_id") or ""))
         self.show_shortcuts = False
         try:
             self.app.layout.focus(self.browser_window)
@@ -1439,31 +1462,44 @@ class EchoTUI:
         if browser is None:
             return
         page = max(1, self._rows("sessions") - 6)
+        on_page = browser.mode == "page"
+        move = browser.move_page if on_page else browser.move
         if key == Keys.Up:
-            browser.move(-1)
+            move(-1)
         elif key == Keys.Down:
-            browser.move(1)
+            move(1)
         elif key == Keys.PageUp:
-            browser.move(-page)
+            move(-page)
         elif key == Keys.PageDown:
-            browser.move(page)
+            move(page)
         elif key == Keys.Home:
-            browser.jump(False)
+            (browser.jump_page if on_page else browser.jump)(False)
         elif key == Keys.End:
-            browser.jump(True)
+            (browser.jump_page if on_page else browser.jump)(True)
         elif key == Keys.Tab:
             browser.cycle_scope(1)
         elif key == Keys.BackTab:
             browser.cycle_scope(-1)
         elif key == Keys.Backspace:
             browser.backspace()
+        elif key == Keys.Left:
+            # ← goes one level deeper: the picker opens the sessions page; on the page there is nowhere further.
+            if not on_page:
+                browser.mode = "page"
         elif key == Keys.Escape:
+            # Esc clears a search first, then goes back one level: page → picker → your conversation.
             if not browser.clear_query():
+                if on_page:
+                    browser.mode = "picker"
+                else:
+                    self.close_sessions()
+                    return
+        elif key == Keys.Right:
+            if on_page:
+                browser.mode = "picker"
+            else:
                 self.close_sessions()
                 return
-        elif key == Keys.Right:
-            self.close_sessions()
-            return
         elif key == Keys.ControlN:
             self.close_sessions()
             self._spawn(self.cmd_new([]))
@@ -1478,6 +1514,7 @@ class EchoTUI:
             else:
                 self._spawn(self._resume_row(row))
             return
+        self._forget_plan()    # the page and the picker want different heights
         self.app.invalidate()
 
     async def _resume_row(self, row: dict) -> None:
@@ -1946,7 +1983,11 @@ class EchoTUI:
                     body.append((DIFF_MARK, ""))
                 full = self._change_text(change, "Proposed change") + ("\n\nArguments\n" + full if full else "")
             else:
-                body.append(("class:title", one_line(evt.get("summary") or evt.get("tool"), 300) + count))
+                summary = one_line(evt.get("summary") or evt.get("tool"), 300)
+                if command and one_line(command, 300)[:40] in summary:
+                    # "Running `rm -rf build`" above "$ rm -rf build" says the command twice.
+                    summary = "Run this command"
+                body.append(("class:title", summary + count))
             if change is not None:
                 pass   # the diff replaces the arguments (ctrl+g still shows them)
             elif command:
@@ -1961,7 +2002,7 @@ class EchoTUI:
                     body.append(("class:dim", line))
                 if len(lines) > 12:
                     body.append(("class:dim", f"… {len(lines) - 12} more lines · ctrl+g"))
-            if evt.get("reason"):
+            if len(str(evt.get("reason") or "").split()) > 2:   # "action tool" says nothing
                 body.append(("class:dim", "Why: " + one_line(evt.get("reason"), 400)))
             if evt.get("recovered"):
                 body.append(("class:dim", "Waiting from earlier work: only this exact action can be allowed, and the "
@@ -2332,7 +2373,7 @@ class EchoTUI:
         if ref_l in {"-", "none", "echo", "chat", "default"}:
             changed = bool(self.core.agent_id)
             self.core.agent_id = ""
-            self.agent_name, self.agent_title = "Echo", "Personal assistant"
+            self.agent_name, self.agent_title = "Echo", "Personal agent"
             if changed and (self.core.session or {}).get("environment") == "agents":
                 self.core.session = None
             self._sync_default_identity()
@@ -2641,10 +2682,14 @@ class EchoTUI:
             hist = (await self.call(self.client.get, "/history", thread_id=self.sid) or {}).get("history") or []
         except (ApiError, ConnectError):
             return
-        tail = [h for h in hist if isinstance(h, str)][-RECAP_MESSAGES:]
+        said = [h for h in hist if isinstance(h, str) and h.startswith(("Human: ", "Assistant: "))]
+        tail = said[-RECAP_MESSAGES:]
+        if len(said) > len(tail):
+            n = len(said) - len(tail)
+            self.emit(B.Note(self.caps.glyphs.vdots, f"{n} earlier message{'s' if n != 1 else ''}", "dim", 0))
         for h in tail:
             if h.startswith("Human: "):
-                self.emit(B.Note(self.caps.glyphs.prompt, one_line(h[7:], 300), "dim", 0))
+                self.emit(B.Note(self.caps.glyphs.prompt + " ", one_line(h[7:], 300), "dim", 0))   # "›  ", as when typed
             elif h.startswith("Assistant: "):
                 self.emit(B.Note(self.caps.glyphs.bullet, one_line(plain_recap(h[11:]), 300), "dim", 0))
         if tail:
@@ -2709,7 +2754,7 @@ class EchoTUI:
             self.agent_name = one_line((self.model or "Assistant").rsplit("/", 1)[-1], 60)
             self.agent_title = "Code" if (self.core.session or {}).get("environment") == "code" else "Chat"
         else:
-            self.agent_name, self.agent_title = "Echo", "Personal assistant"
+            self.agent_name, self.agent_title = "Echo", "Personal agent"
 
     def _model_line(self) -> str:
         provider, default = control.current_model(self.settings)
@@ -2739,6 +2784,79 @@ class EchoTUI:
                 pass
         self.commands = visible(COMMANDS, self.features)
 
+    # ── Echo's entrance (tui/avatar.py) ──────────────────────────────
+    def _animate_welcome(self) -> bool:
+        """The entrance plays only where it can look right; everywhere else the banner is printed at once."""
+        w, h = self.width(), self.height()
+        return (not self.caps.reduced_motion and not self.caps.ascii and w >= L.NARROW and h >= 14
+                and str(self.env.get("TERM", "")) != "dumb")
+
+    def _welcome_lines(self) -> list[StyleAndTextTuples]:
+        """The banner as it will be printed, with the face at this moment of the entrance."""
+        b = self.welcome
+        if b is None:
+            return []
+        t = (self.now() - self.welcome_t0) * 1000 if self.welcome_t0 else 0.0
+        face = A.frame(t, self.caps.reduced_motion)
+        key = (face, self.width(), id(b))
+        if self._welcome_cache is not None and self._welcome_cache[0] == key:
+            return self._welcome_cache[1]
+        b.face = face
+        text = B.render(b, self.width(), self.caps).rstrip("\n")
+        b.face = None
+        frags = to_formatted_text(ANSI(text))
+        lines: list[StyleAndTextTuples] = [[]]
+        for style, chunk, *_ in frags:
+            parts = chunk.split("\n")
+            for i, part in enumerate(parts):
+                if i:
+                    lines.append([])
+                if part:
+                    lines[-1].append((style, part))
+        self._welcome_cache = (key, lines)
+        return lines
+
+    def _welcome_text(self) -> StyleAndTextTuples:
+        if self.welcome is not None and not self.welcome_t0:
+            self.welcome_t0 = self.now()   # the clock starts on the first frame actually drawn
+        rows = self._rows("welcome")
+        return self._join(self._welcome_lines()[:rows]) if rows > 0 else []
+
+    def _commit_welcome(self) -> None:
+        """Print the banner (Echo at rest) into scrollback where the entrance played, then drop the live copy.
+
+        The live copy stays until the flusher has written the banner, inside the same terminal hand-off, so
+        there is never a frame without it (no flicker) and never two of it (no duplicate)."""
+        banner = self.welcome
+        if banner is None or self._committing_welcome:
+            return
+        self._committing_welcome = True
+        try:
+            self.emit(banner)
+        finally:
+            self._committing_welcome = False
+        if self._out_event is None:
+            self.welcome = None
+            return
+
+        def drop() -> None:
+            if self.welcome is banner:
+                self.welcome = None
+                self._forget_plan()
+
+        self._after_flush.append(drop)
+
+    async def _welcome_runner(self) -> None:
+        """Redraw the entrance at ~30 fps, then commit it. Under a short terminal it is committed at once."""
+        while self.welcome is not None:
+            elapsed = (self.now() - self.welcome_t0) * 1000 if self.welcome_t0 else 0.0
+            if (self.welcome_t0 and A.done(elapsed - A.HOLD_MS, self.caps.reduced_motion)) or \
+                    (self.welcome_t0 and self._rows("welcome") <= 0):
+                self._commit_welcome()
+                return
+            self.app.invalidate()
+            await asyncio.sleep(0.033)
+
     # ── startup ──────────────────────────────────────────────────────
     def _banner(self) -> B.Banner:
         cwd = _home(os.getcwd())
@@ -2760,13 +2878,17 @@ class EchoTUI:
         if self.start_agent:
             await self._set_agent(self.start_agent, announce=False)
         session = None
+        last = None
         if self.start_resume:
             session = await self.call(self.core.find_session, self.start_resume)
         elif not self.start_new:
+            # A clean start: the latest conversation in this folder's project is offered, not reopened.
             try:
-                session = await self.call(self.core.default_session, os.getcwd())
+                last = await self.call(self.core.default_session, os.getcwd())
             except (ApiError, ConnectError):
-                session = None
+                last = None
+            if self.start_continue:
+                session, last = last, None
         if self.start_project:
             project = self.start_project
             pid = await self.call(self.core.project_for_path, project, False) if (os.sep in project or Path(project).is_dir()) \
@@ -2782,12 +2904,22 @@ class EchoTUI:
             await self._sync_agent_from_session(session)
         self.project_name = await self._project_name(self.core.project_id)
         await self._refresh_model()
+        self.last_here = last
         banner = self._banner()
+        sep = f" {self.caps.glyphs.sep} "
         if session:
-            banner.resumed = (f'Resumed "{one_line(session.get("title") or "(untitled)", 50)}" · '
-                              f'{_plural_msgs(session.get("message_count"))} · last active {_ago(session.get("last_active_at"))}'
-                              " · /new for a fresh session")
-        self.emit(banner)
+            banner.resumed = sep.join([f'Resumed “{one_line(session.get("title") or "(untitled)", 50)}”',
+                                       _plural_msgs(session.get("message_count")),
+                                       f'last active {_ago(session.get("last_active_at"))}', "/new for a fresh one"])
+        elif last:
+            arrow = "<-" if self.caps.ascii else "←"
+            banner.last = sep.join([f'Last here: “{one_line(last.get("title") or "(untitled)", 50)}”',
+                                    _plural_msgs(last.get("message_count")), _ago(last.get("last_active_at")),
+                                    f"{arrow} to pick it up"])
+        if self._animate_welcome():
+            self.welcome = banner   # drawn in the live region while Echo arrives, then printed (_commit_welcome)
+        else:
+            self.emit(banner)
         return session
 
     async def _after_start(self) -> None:
@@ -2894,6 +3026,9 @@ class EchoTUI:
                 out = self.app.output
                 out.write_raw(data)
                 out.flush()
+                hooks, self._after_flush = self._after_flush, []
+                for hook in hooks:
+                    hook()
 
     async def _ticker(self) -> None:
         while True:
@@ -2947,7 +3082,7 @@ class EchoTUI:
         def pre_run() -> None:
             # Created inside the running app so get_app() (and in_terminal) find it; prompt_toolkit
             # cancels them when the app exits.
-            for coro in (self._flusher(), self._ticker(), self._consume(), self._after_start()):
+            for coro in (self._flusher(), self._ticker(), self._consume(), self._after_start(), self._welcome_runner()):
                 self.app.create_background_task(coro)
 
         try:
