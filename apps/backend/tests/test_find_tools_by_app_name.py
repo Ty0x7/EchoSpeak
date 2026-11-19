@@ -8,6 +8,7 @@ no such tools. The find_tools schema itself invites "the app's name" as a query.
 """
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -59,3 +60,22 @@ def test_naming_the_app_loads_its_tools_needed_for_the_task(box, query):
 def test_an_unrelated_query_does_not_pull_in_the_app(box):
     out = box.run("find_tools", {"query": "web search"}).output
     assert "mcp__accounts__" not in out
+
+
+def test_focus_names_the_connected_apps_it_holds_back(box):
+    """Eval X1 (auto-test-fix cycle 2): with the accounts app's 7 tools held behind find_tools, the focus note gave
+    six alphabetical examples (agent_sessions, cancel_reminder, ...) and never named the app, so the model told the
+    owner it had no accounts tools without ever calling find_tools (r2), or went looking in folders (r1)."""
+    note = " ".join(box.notes)
+    # Named as an app, not merely as part of a tool name an alphabetical example list happened to reach.
+    assert re.search(r"\baccounts\b", note), note
+    assert all(f"mcp__accounts__{short}" in box.deferred for short in ACCOUNTS)  # still held: the note only names it
+
+
+def test_focus_without_connected_apps_adds_no_app_line(monkeypatch):
+    monkeypatch.setattr(ToolRegistry, "get_all", classmethod(lambda cls: {}))
+    monkeypatch.setattr(ToolRegistry, "get", classmethod(lambda cls, name: None))
+    toolbox = Toolbox(toolsets=["none"], extra_tools=[], session_id="t")
+    toolbox.native["web_search"] = SimpleNamespace(name="web_search", always=False, hidden=False)
+    toolbox.focus(set())
+    assert "Connected apps" not in " ".join(toolbox.notes)
