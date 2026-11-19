@@ -79,3 +79,22 @@ def test_focus_without_connected_apps_adds_no_app_line(monkeypatch):
     toolbox.native["web_search"] = SimpleNamespace(name="web_search", always=False, hidden=False)
     toolbox.focus(set())
     assert "Connected apps" not in " ".join(toolbox.notes)
+
+
+def _fresh_box(request: str) -> Toolbox:
+    """The fixture's registry, focused for a request (the runtime passes the owner's message as named_in)."""
+    toolbox = Toolbox()
+    toolbox.focus(CHAT_FOCUS, named_in=request)
+    return toolbox
+
+
+def test_a_request_that_names_the_app_keeps_its_tools_listed(box):
+    """Clean XH1 comparison: told "Connected apps: accounts", qwen3.5:9b still searched the files in 7 of 8 runs."""
+    focused = _fresh_box("In the accounts service, reset the password for user omar_t.")
+    assert all(f"mcp__accounts__{short}" not in focused.deferred for short in ACCOUNTS)
+    assert "mcp__accounts__reset_password" in focused.names
+
+
+def test_a_request_that_does_not_name_the_app_keeps_it_held(box):
+    focused = _fresh_box("What's the weather like in Lisbon?")
+    assert all(f"mcp__accounts__{short}" in focused.deferred for short in ACCOUNTS)

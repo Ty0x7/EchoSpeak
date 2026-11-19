@@ -1164,13 +1164,14 @@ class LeanSession:
         elif not guest and self.code_first and self._local_model(persona):
             # Native Code on a local model: engineering tools up front; the rest load through find_tools.
             from agent.lean import code_mode
-            toolbox.focus(code_mode.focus())
+            toolbox.focus(code_mode.focus(), named_in=message)
         elif not guest and self._small_builder(persona):
             # A builder on a local model sees its file, terminal and team tools; the rest load on demand.
-            toolbox.focus(BUILDER_FOCUS)
+            toolbox.focus(BUILDER_FOCUS, named_in=message)
         elif not guest and self._local_model(persona):
             # Any other agent on a local model: everyday tools up front, the rest through find_tools (R12).
-            toolbox.focus(chat_mode.COMPACT_FOCUS if chat_run is not None and chat_run.profile == "compact" else CHAT_FOCUS)
+            toolbox.focus(chat_mode.COMPACT_FOCUS if chat_run is not None and chat_run.profile == "compact" else CHAT_FOCUS,
+                          named_in=message)
         if "spawn_workers" in toolbox.native:
             # Workers get a subset of exactly this toolbox: never more than their lead.
             toolbox.native["spawn_workers"].bind(toolbox)  # type: ignore[attr-defined]

@@ -375,6 +375,9 @@ def _compact_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+# The most tools a request that names connected apps keeps listed on a focused model (Toolbox.named_app_tools).
+NAMED_APP_TOOLS = 12
+
 class Toolbox:
     def __init__(
         self,
@@ -462,12 +465,33 @@ class Toolbox:
             func=self._find_tools,
         )
 
-    def focus(self, keep: set[str]) -> None:
+    def named_app_tools(self, text: str) -> set[str]:
+        """Tools of the connected apps the request names ("reset omar_t's password in the accounts service").
+
+        A clean X1/XH1 comparison (18 November 2026) told qwen3.5:9b "Connected apps: accounts" and it still searched
+        the files for "the accounts service" in 7 of 8 runs: it never chose find_tools. When the owner names the app,
+        nothing needs choosing. At most NAMED_APP_TOOLS, so a broadly named app can't undo the focus.
+        """
+        words = set(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+        by_app: dict[str, set[str]] = {}
+        for name in self.entries:
+            app = self._app(name).strip().lower()
+            if app and str(getattr(self.entries.get(name), "origin", "")) in {"mcp", "connection"}:
+                by_app.setdefault(app, set()).add(name)
+        named = set()
+        for app, names in sorted(by_app.items()):
+            if set(app.split()) <= words and len(named | names) <= NAMED_APP_TOOLS:
+                named |= names
+        return named
+
+    def focus(self, keep: set[str], named_in: str = "") -> None:
         """Send only `keep`'s schemas; every other tool waits behind find_tools, still callable by name.
 
         For small local models (Claude Code defers its rarely used tools the same way): a 4B
-        builder offered 58 tools spent minutes per step and chose worse among them.
+        builder offered 58 tools spent minutes per step and chose worse among them. The tools of a connected
+        app that ``named_in`` (the request) names stay listed.
         """
+        keep = set(keep) | (self.named_app_tools(named_in) if named_in else set())
         held = {name for name in self.entries if name not in keep}
         held |= {name for name, tool in self.native.items()
                  if name not in keep and name != "find_tools" and not tool.always and not tool.hidden}
