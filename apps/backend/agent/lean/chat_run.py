@@ -34,6 +34,11 @@ from urllib.parse import urlsplit, urlunsplit
 # and web_search can open pages in the same step), so 10 steps covers several searches,
 # reading and a synthesis; a small model gets less rope.
 BUDGETS = {"full": 10, "compact": 6}
+# Steps a turn gains for the work it does in a connected app: one per call, at most this many. The research budget
+# keeps a small model from searching in circles, but a request that is itself app work ("create the account, verify
+# the email, sign in") spent it all: a clean X1 comparison (18 November 2026) ended 6 of 9 failures at the 6-step
+# limit, mid-task, with "Now let me verify the email" delivered as the answer.
+APP_STEPS = 4
 GRACE_PROMPT = ("[EchoSpeak]: This answer's research budget is used up. Answer the user now, without tools, "
                 "using only what you found. Cite the pages you read with inline links, and say plainly what you "
                 "couldn't confirm.")
@@ -188,10 +193,21 @@ class ChatRun:
     project_work: bool = False      # the turn has used one
     page_reads: dict[str, int] = field(default_factory=dict)
     advice: list[str] = field(default_factory=list)
+    app_calls: int = 0              # calls to a connected app's own tools (mcp__…)
 
     @property
     def budget(self) -> int:
         return BUDGETS.get(self.profile, BUDGETS["full"])
+
+    @property
+    def ceiling(self) -> int:
+        """The most steps a conversation turn can reach: the research budget plus the connected-app allowance."""
+        return self.budget + APP_STEPS
+
+    def chat_steps(self) -> int:
+        """Chat's step limit right now (LeanTurn.step_limit): the research budget, plus one step for each connected-app
+        call so far (up to APP_STEPS). Searching and reading never raise it."""
+        return self.budget + min(self.app_calls, APP_STEPS)
 
     def step_limit(self) -> int:
         """The step limit for a turn that can also engineer (LeanTurn.step_limit): the research budget
@@ -310,6 +326,8 @@ class ChatRun:
         elif name in MEMORY_TOOLS:
             row["query"] = str(args.get("query") or "")[:200]
             self.evidence.append(Evidence("memory", row["query"], name, step, ok))
+        if name.startswith("mcp__"):
+            self.app_calls += 1
         if name in PROJECT_TOOLS:
             self.project_work = True
             if ok and name in {"terminal", "process_output"}:

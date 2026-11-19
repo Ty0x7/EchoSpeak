@@ -1347,7 +1347,8 @@ class LeanSession:
             # Reviewed once it's written, never regenerated (no second thinking phase, no erased answer).
             turn.answer_review = chat_run.review
             turn.claim_nudge_limit = 0  # an untrue "I did it" is noted under the answer, not rewritten
-            turn.max_steps_override = chat_run.budget
+            turn.max_steps_override = chat_run.ceiling
+            turn.step_limit = chat_run.chat_steps  # the research budget, extended by connected-app work
             turn.final_grace = True
             turn.grace_prompt = chat_run_mod.GRACE_PROMPT
             self._chat_run = chat_run
