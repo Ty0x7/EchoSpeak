@@ -150,8 +150,11 @@ def test_chat_recall_is_the_owners_facts_and_chat_conversations(env, monkeypatch
     private = {"memory_id": "m2", "scope": "project", "content": "Jarvis: source list for the audit", "semantic_key": "agent:scout:sources"}
     assert chat_mode.visible_memories([owner, private]) == [owner]
     session = _chat_session(monkeypatch, chats, recalled=[owner, private])
-    prompt = session._build_turn(session._chat_persona(), "what units do I like", history=[], depth=0).system_prompt
-    assert "Prefers metric units." in prompt and "source list for the audit" not in prompt
+    turn = session._build_turn(session._chat_persona(), "what units do I like", history=[], depth=0)
+    prompt, note = turn.system_prompt, turn.request_note
+    # Recall rides on the request (not the system prompt), and isolation holds there too.
+    assert "Prefers metric units." in note and "source list for the audit" not in note
+    assert "Prefers metric units." not in prompt and "source list for the audit" not in prompt
 
     chat = chats.create_thread(title="Trip", source="web")
     code = chats.create_thread(title="Code", source="web", surface="code")

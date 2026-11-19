@@ -58,6 +58,15 @@ def kind(request: dict) -> str:
     return "main" if request.get("tools") else "side"
 
 
+def server(row: dict) -> dict:
+    """llama.cpp's own account (Ollama's OpenAI endpoint passes it on): prompt_n is the tokens it actually processed."""
+    response = row.get("response") or {}
+    usage, timings = response.get("usage") or {}, response.get("timings") or {}
+    if isinstance(usage, str) or isinstance(timings, str) or not usage.get("prompt_tokens") or "prompt_n" not in timings:
+        return {}
+    return {"prompt_tokens": usage["prompt_tokens"], "processed": timings["prompt_n"], "prompt_ms": timings.get("prompt_ms", 0)}
+
+
 def analyse(run_dir: Path) -> dict:
     rows = [json.loads(line) for line in (run_dir / "model-calls.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
     rows.sort(key=lambda r: r["started"])
@@ -65,7 +74,7 @@ def analyse(run_dir: Path) -> dict:
     for prev, cur in zip(rows, rows[1:]):
         c = compare(prev["request"], cur["request"])
         c.update({"seq": cur.get("seq"), "kind": kind(cur["request"]), "after": kind(prev["request"]),
-                  "first_chunk_s": cur.get("first_chunk_s"), "latency_s": cur.get("latency_s")})
+                  "first_chunk_s": cur.get("first_chunk_s"), "latency_s": cur.get("latency_s"), **server(cur)})
         report.append(c)
     main = [r for r in report if r["kind"] == "main"]
     breaks: dict[str, int] = {}
@@ -79,6 +88,17 @@ def analyse(run_dir: Path) -> dict:
         "main_after_a_side_call": sum(1 for r in main if r["after"] == "side"),
         "first_break_by_place": dict(sorted(breaks.items(), key=lambda kv: -kv[1])),
     }
+    served = [r for r in main if r.get("prompt_tokens")]
+    if served:
+        # What the model server says it did: prompt tokens it processed versus those it took from its cache.
+        total = sum(r["prompt_tokens"] for r in served)
+        summary["server_prompt_tokens"] = total
+        summary["server_processed_tokens"] = sum(r["processed"] for r in served)
+        summary["server_cached_share"] = round(1 - summary["server_processed_tokens"] / total, 3) if total else None
+        summary["server_prefill_ms_mean"] = round(statistics.mean(r["prompt_ms"] for r in served))
+        summary["server_prefill_ms_median"] = round(statistics.median(r["prompt_ms"] for r in served))
+        summary["server_prefill_ms_total"] = round(sum(r["prompt_ms"] for r in served))
+        summary["calls_mostly_reprocessed"] = sum(1 for r in served if r["processed"] > 0.5 * r["prompt_tokens"])
     timed = [r for r in main if r["first_chunk_s"] is not None]
     if timed:
         summary["main_first_chunk_s_mean"] = round(statistics.mean(r["first_chunk_s"] for r in timed), 2)

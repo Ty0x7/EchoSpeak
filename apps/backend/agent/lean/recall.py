@@ -16,6 +16,9 @@ _POINTS_BACK = re.compile(
         we\s+(?:talked|spoke|discussed|chatted|went\s+over|worked\s+on|were\s+working\s+on)|
         you\s+(?:said|told\s+me|mentioned|suggested|recommended|wrote|made|built)|
         i\s+(?:told|asked|mentioned\s+to|showed)\s+you|
+        (?:did|have)\s+i\s+(?:ever\s+)?(?:mention|say|tell\s+you|give\s+you|share)|
+        i\s+(?:mentioned|said|gave\s+you|shared|told\s+you)\b(?:\s+[\w'’-]+){0,3}?\s+(?:earlier|before|previously)|
+        (?:mentioned|said|gave\s+you|told\s+you)\s+(?:earlier|before|previously)|
         remember\s+(?:when|that|what|the|how|my)|
         as\s+(?:before|usual|discussed|we\s+agreed)|like\s+(?:last\s+time|before|you\s+did)|
         that\s+(?:project|thing|file|idea|plan)\s+(?:we|you|i)

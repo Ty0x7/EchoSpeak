@@ -34,6 +34,15 @@ def max_iterations() -> int:
         return 60
 
 
+def auto_continue_stretches() -> int:
+    """How many step limits in all a turn that keeps making progress may use before it stops for "Continue"
+    (LeanTurn.auto_continue). 1 turns automatic continuation off."""
+    try:
+        return max(1, min(int(_setting("lean_auto_continue_stretches", 5)), 20))
+    except (TypeError, ValueError):
+        return 5
+
+
 def context_tokens(endpoint: Any = None) -> int:
     """Honor exact model metadata/local configuration before a fallback budget.
 

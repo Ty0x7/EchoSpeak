@@ -134,6 +134,18 @@ def app_note(text: str) -> str:
     return f"<echospeak-note>{text}</echospeak-note>"
 
 
+# Stretches of the step limit a turn may use in all when it keeps making progress (LeanTurn.auto_continue).
+AUTO_CONTINUE_LIMIT = 5
+# A claim about remembering: "I've saved that", "noted, I'll remember it", "I've updated my records".
+_MEMORY_CLAIM = re.compile(r"(?i)\b(sav(?:e|ed|ing)|remember(?:ed)?|noted|records?|memor(?:y|ized|ised))\b")
+MEMORY_REPAIR_NOTE = (
+    "You said you saved this, but nothing was saved: memory_save was not called. Call memory_save now with the fact "
+    "the user asked you to keep, in their words, with a short key naming its subject (for example build_server); use "
+    "the same key whenever a fact replaces an earlier one, so the new value supersedes the old. Your answer above "
+    "stays as it is: after saving, reply with one short line or nothing."
+)
+
+
 def add_note(messages: list[dict[str, Any]], text: str) -> None:
     """Add an app note without breaking user/assistant alternation (Gemma-style templates require it)."""
     note = app_note(text)
@@ -295,6 +307,8 @@ class LeanTurn:
         self.answer_review: Optional[Callable[[str], tuple[list[str], str]]] = None
         # How many times an untrue "I did it" claim is sent back for a rewrite before it's just noted.
         self.claim_nudge_limit = 1
+        # Chat (claim_nudge_limit 0): an unbacked "I've saved that" still gets one step to call memory_save.
+        self.memory_repair = False
         self._no_think_next = False
         # Calls to run before the model's first turn, through the normal tool path ([(name, args)]):
         # Chat reads addresses the user gave without waiting for a small model to notice them.
@@ -304,6 +318,12 @@ class LeanTurn:
         # call, adds structured feedback to check results, and states completion under the answer.
         self.verifier: Optional[Any] = None
         self.grace_prompt = ""
+        # The agent the user talks to carries on past its step limit while it is still getting somewhere, instead of
+        # stopping for "Continue" (owner report, 19 November 2026); at most auto_continue_limit × the limit in all.
+        self.auto_continue = False
+        self.auto_continue_limit = AUTO_CONTINUE_LIMIT
+        self._extended = 0
+        self._segment = (0, 0)
         # A smaller step limit that applies while the turn is only looking things up (agent/lean/chat_run.py
         # ChatRun.step_limit): returns 0 for "no limit of its own". Echo with a project attached keeps the
         # engineering budget for engineering and the research budget for a question about tonight's game.
@@ -509,12 +529,14 @@ class LeanTurn:
 
         # A research worker gets its own, smaller step budget (agent/lean/swarm.py).
         max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
+        self._extended, self._segment = 0, (0, len(self._outcomes))
         call_counts: dict[str, int] = {}
         stop_reason = ""
         nudges = 0
         approval_nudged = False
         promise_nudges = 0
         claim_nudges = 0
+        memory_repairs = 0
         check_nudges = 0
         verify_nudges = 0
         menus = 0
@@ -537,7 +559,7 @@ class LeanTurn:
                 {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}} for call in calls]})
             self._run_tools(calls, messages, step, call_counts)
 
-        while step < self._steps_allowed(max_steps):
+        while step < self._steps_allowed(max_steps + self._extended) or self._continue_past(messages, step, max_steps, call_counts):
             if self.cancel.is_set():
                 error = "cancelled"
                 success = False
@@ -667,6 +689,15 @@ class LeanTurn:
                             self.emit({"type": "claim_nudge", "step": step, "claim": claim[:200]})
                             self._retract_text(step)
                             continue
+                        if (self.memory_repair and not memory_repairs and step < max_steps
+                                and "memory_save" in self.toolbox.names and "memory_save" not in self.succeeded
+                                and _MEMORY_CLAIM.search(claim)):
+                            # Chat keeps its answer (claims there are noted, not rewritten), but a claimed save that
+                            # didn't happen loses the fact for good: one step to make the claim true.
+                            memory_repairs += 1
+                            add_note(messages, MEMORY_REPAIR_NOTE)
+                            self.emit({"type": "memory_repair", "step": step, "claim": claim[:200]})
+                            continue
                         stop_reason = "unverified_claim"
                         note = f"Not verified: no tool call in this reply did this (“{claim[:160]}”)."
                         self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
@@ -794,12 +825,13 @@ class LeanTurn:
             # The note lists what was done so a "Continue" turn has context.
             stop_reason = "max_steps"
             # A turn stopped by its research limit (step_limit) still ends in an answer from what it found.
-            limited = self._steps_allowed(max_steps) < max_steps
+            total = max_steps + self._extended
+            limited = self._steps_allowed(total) < total
             grace = self._grace_answer(messages, step + 1) if getattr(self, "final_grace", False) or limited else ""
             if grace:
                 final_text = grace
             else:
-                note = self._out_of_steps_note(max_steps)
+                note = self._out_of_steps_note(self._steps_allowed(total))
                 self._append_text("text", step, note)
                 self.emit({"type": "agent_token", "step": step, "data": note})
 
@@ -1488,11 +1520,49 @@ class LeanTurn:
             "required format, using only what you actually found. Say what you couldn't confirm.")
         add_note(messages, ask.removeprefix("[EchoSpeak]: "))  # keeps strict role alternation
         try:
+            # Thinking off: with it on, qwen3.5:9b wrote the whole answer as reasoning and no reply, and the owner
+            # got "I ran out of steps" under an answer they had watched being thought (19 November 2026).
+            self._no_think_next = True
             turn = self._call_model(messages, [], step)
+            text = str(turn.content or "").strip()
+            reasoning = str(getattr(turn, "reasoning", "") or "").strip()
+            if not text and reasoning and not self.cancel.is_set():
+                # Written as reasoning anyway: once more, from it.
+                messages.append({"role": "assistant", "content": ""})
+                add_note(messages, NUDGE_THOUGHT_ONLY + f" Your reasoning ended with: \"{reasoning[-1200:]}\"")
+                self._no_think_next = True
+                text = str(self._call_model(messages, [], step).content or "").strip()
         except Exception:
             logger.debug("Grace answer failed", exc_info=True)
             return ""
-        return str(turn.content or "").strip()
+        return text
+
+    def _continue_past(self, messages: list[dict[str, Any]], step: int, max_steps: int, call_counts: dict[str, int]) -> bool:
+        """At the step limit: True (with the limit raised by one more stretch) when the turn should carry on.
+
+        Only for the agent the user talks to (auto_continue), never past auto_continue_limit stretches, never under
+        a smaller look-up budget (that ends in an answer, _grace_answer), and only while the last stretch got
+        somewhere: new actions (not the same calls again) and at least a third of its tool calls working.
+        """
+        limit = max_steps + self._extended
+        if not self.auto_continue or self.cancel.is_set() or step < limit or self._steps_allowed(limit) < limit:
+            return False
+        if limit + max_steps > max_steps * max(1, int(self.auto_continue_limit or 1)):
+            return False
+        seen, outcomes = self._segment
+        recent = self._outcomes[outcomes:]
+        new_actions = len(call_counts) - seen
+        self._segment = (len(call_counts), len(self._outcomes))
+        if new_actions < max(2, max_steps // 6) or not recent or sum(recent) * 3 < len(recent):
+            return False
+        self._extended += max_steps
+        text = f"Continued automatically after {limit} steps: the work was still making progress."
+        self.timeline.append({"kind": "note", "step": step, "text": text, "at": time.time()})
+        self.emit({"type": "auto_continue", "step": step, "limit": limit + max_steps, "note": text})
+        add_note(messages, f"You have used {limit} steps on this request and the work is still moving, so you can keep "
+                           f"going (up to {limit + max_steps} steps). Carry on from where you are, without repeating "
+                           "what is done; finish and answer as soon as the work is complete.")
+        return True
 
     def _absorb_steering(self, messages: list[dict[str, Any]], step: int) -> bool:
         """Add instructions the user sent during this run (agent/lean/steering.py). True when any arrived."""

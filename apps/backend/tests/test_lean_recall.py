@@ -14,7 +14,7 @@ from typing import Any
 
 from agent.lean import runtime as lean_runtime, summaries
 from agent.lean.loop import LeanTurn
-from agent.lean.personas import AgentPersona
+from agent.lean.personas import AgentPersona, get_persona_store
 from agent.lean.provider import ModelTurn, ToolCall
 from agent.lean.recall import points_back
 from agent.lean.toolbox import NativeTool, Toolbox
@@ -83,20 +83,47 @@ def test_pointing_back_pulls_in_matching_past_chats(monkeypatch):
     session = _session(monkeypatch, scripts, [])
     session.run("What colour did we pick last time for the Atlas logo?")
 
-    prompt = scripts["echo"].calls[0][0]["content"]
-    assert "## From past conversations" in prompt and "teal" in prompt.lower()
+    messages = scripts["echo"].calls[0]
+    request = messages[-1]["content"]
+    # On the current request, not in the system prompt: recall changes per request and would break the cached prefix.
+    assert "## From past conversations" in request and "teal" in request.lower()
+    assert "## From past conversations" not in messages[0]["content"]
 
     # No back-reference, no lookup.
     plain = {"echo": ScriptedClient([ModelTurn(content="Blue is calm.")])}
     _session(monkeypatch, plain, []).run("What colour suits a logo for Atlas?")
-    assert "## From past conversations" not in plain["echo"].calls[0][0]["content"]
+    assert not any("## From past conversations" in str(m["content"]) for m in plain["echo"].calls[0])
 
 
 def test_points_back():
-    for text in ("like last time", "what we discussed yesterday", "you told me to use teal", "remember when I asked"):
+    for text in ("like last time", "what we discussed yesterday", "you told me to use teal", "remember when I asked",
+                 # Evaluation MC1/MCH1 (19 November): these reached no past chat at all.
+                 "Which venue did I mention earlier for the offsite?",
+                 "What's the name of the vendor's account manager I mentioned before?",
+                 "did I tell you my sister's name?", "the budget I gave you earlier"):
         assert points_back(text), text
-    for text in ("what time is it?", "write a poem", "try again"):
+    for text in ("what time is it?", "write a poem", "try again", "mention the deadline in the email",
+                 "I mentioned it to the team, can you draft the follow-up?"):
         assert not points_back(text), text
+
+
+def test_chat_search_finds_a_past_message_from_a_descriptive_query(monkeypatch):
+    """Evaluation MC1 (19 November): "venue offsite meeting location" found nothing, because every word had to
+    appear in one message. A search with no exact match now ranks messages by the words they do share."""
+    store = get_state_store()
+    other = f"old-{uuid.uuid4().hex[:6]}"
+    marker = uuid.uuid4().hex[:6]
+    turn = store.create_execution(thread_id=other, query=f"For context: the team offsite is at Ashcombe{marker} Hall.",
+                                  record_user_message=True)
+    store.add_item(turn_id=turn.id, item_type="assistant_message", status="complete", session_id=other,
+                   payload={"text": "Two agenda topics for the offsite.", "agent_name": "Echo"})
+    session = _session(monkeypatch, {"echo": ScriptedClient([])}, [])
+    built = session._build_turn(get_persona_store().get("echo"), "where is the offsite?", history=[], depth=0)
+    search = built.toolbox.native["chat_search"].func
+    found = search({"query": "venue offsite meeting location"})
+    assert f"Ashcombe{marker}" in found
+    # An exact match still comes first and nothing is invented when no word matches.
+    assert "No past messages match" in search({"query": f"zzq{marker} qqz{marker}"})
 
 
 def test_long_turns_get_an_on_track_reminder_with_the_failure_count():

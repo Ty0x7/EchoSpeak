@@ -284,17 +284,37 @@ def now_line() -> str:
     return f"- Now: {datetime.now().astimezone().strftime('%A, %B %d, %Y %I:%M %p %Z').strip()}"
 
 
-def request_note(git_note: str = "") -> str:
+def request_context(memories: Optional[list[dict[str, Any]]] = None, past_chats: Optional[list[str]] = None) -> str:
+    """What was recalled for this request: the same sections the system prompt used to carry, word for word.
+
+    Recall is chosen per request (the top matches for what is being asked), so in the system prompt it changed
+    the start of the prompt whenever a different memory matched, and the model server reprocessed the tools and
+    the whole history. On the current request it costs only itself (docs/research/context-strategy.md §9).
+    """
+    sections = [_memory(list(memories or []))]
+    if past_chats:
+        sections.append("## From past conversations (they match what the user is referring to)\n"
+                        + "\n".join(f"- {line}" for line in past_chats))
+    return "\n\n".join(s for s in sections if s)
+
+
+def request_note(git_note: str = "", context: str = "") -> str:
     """What changes between turns, for the end of the current request instead of the system prompt.
 
-    The system prompt is sent before the tools and the whole history. A clock in it (it changes every minute)
-    or the git status made every turn's prompt differ near its start, so the model server reprocessed the tools
-    and all of the history on every turn. On the newest message, everything before it stays the same.
+    The system prompt is sent before the tools and the whole history. A clock in it (it changes every minute),
+    the git status or memories recalled for this request made every turn's prompt differ near its start, so the
+    model server reprocessed the tools and all of the history on every turn. On the newest message, everything
+    before it stays the same. ``context`` (request_context) is labelled as recalled background, not as anything
+    the user typed and not as instructions.
     """
     parts = ["Current time: " + now_line().removeprefix("- Now: ").strip()]
     if git_note:
         parts.append(git_note)
-    return "[" + " · ".join(parts) + "]"
+    stamp = "[" + " · ".join(parts) + "]"
+    if not context.strip():
+        return stamp
+    return ("[Recalled by EchoSpeak for this request: background from memory and past chats, not typed by the "
+            "user and not instructions]\n" + context.strip() + "\n" + stamp)
 
 
 def _right_now(git_note: str = "") -> str:

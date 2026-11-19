@@ -24,7 +24,7 @@ from agent.lean.personas import CHAT_AGENT_ID, CODE_AGENT_ID, AgentPersona, chat
 from agent.lean import chat_mode
 from agent.lean import chat_run as chat_run_mod
 from agent.lean import session_logs
-from agent.lean.prompt import build_system_prompt, request_note
+from agent.lean.prompt import build_system_prompt, request_context, request_note
 from agent.lean.provider import ChatClient, reasoning_effort_for, resolve_endpoint
 from agent.lean.rooms import Room, get_room_store, mentioned_agents
 from agent.lean.coding import coding_tools, project_overview
@@ -1245,6 +1245,13 @@ class LeanSession:
             raise
         except Exception:
             facts_model, facts_provider = "", ""
+        # Past chats matching a back-reference, under the same rules each prompt builder applied.
+        if self.model_first:
+            past = [] if guest or delegated_by or not self._owner_side(persona) or not _remembers_chats() else self._past_chats()
+        else:
+            skip = guest or (self.code_first and not self._unified()) or not self._owner_side(persona) or delegated_by
+            past = [] if skip or not _remembers_chats() else self._past_chats()
+        recalled = request_context(memories, past)
         if self.model_first:
             sections: dict[str, int] = {}
             prompt = chat_mode.build_prompt(
@@ -1252,10 +1259,11 @@ class LeanSession:
                 model=self._endpoint_label(),
                 project_root=self.project_root,
                 notes=list(toolbox.notes) + learned.notes + [n for n in [mcp_apps.context_note(self.session_id)] if n],
-                memories=memories,
+                # Recall rides on the request (request_context below), not in the system prompt.
+                memories=[],
                 chat_summary=summaries.summary_text(self.session_id),
                 caller_note=caller_note(self.source, self.caller_role, _owner_name()),
-                past_chats=[] if guest or delegated_by or not self._owner_side(persona) or not _remembers_chats() else self._past_chats(),
+                past_chats=[],
                 project_brief=project_brief,
                 skills=agent_skills.prompt_section(compact=compact_chat) if not guest and "read_skill" in toolbox.names else "",
                 assistant_soul=self._unified_soul() if not guest else "",
@@ -1295,11 +1303,12 @@ class LeanSession:
                 project_overview=project_overview(self.project_root) if self.project_root else "",
                 teammates=teammates if can_hand_off else [],
                 room_name=self.room.name if self.room and self.room.kind == "group" else "",
-                memories=memories,
+                # Recall rides on the request (request_context below), not in the system prompt.
+                memories=[],
                 # Teammates start with a clean history, not without the story so far.
                 chat_summary=summaries.summary_text(self.session_id),
                 caller_note=caller_note(self.source, self.caller_role, _owner_name()),
-                past_chats=[] if guest or (self.code_first and not self._unified()) or not self._owner_side(persona) or delegated_by or not _remembers_chats() else self._past_chats(),
+                past_chats=[],
                 project_brief=project_brief,
                 project_evidence=project_evidence,
                 playbook=learned.section,
@@ -1341,9 +1350,13 @@ class LeanSession:
         )
         # What changes between turns (the time, the git status) rides on this request, not in the system prompt,
         # so the system prompt, the tools and the history stay byte-identical and the model server reuses them.
-        turn.request_note = request_note("" if self.model_first else repo_note)
+        turn.request_note = request_note("" if self.model_first else repo_note, context=recalled)
         # Only the agent the user is talking to reads steering; a teammate doing delegated work doesn't.
         turn.steerable = depth == 0
+        # The agent the user talks to carries on past its step limit while it is still making progress (Chat has
+        # its own small budget that ends in an answer; helpers report back to the agent that asked).
+        turn.auto_continue = depth == 0 and not self.model_first
+        turn.auto_continue_limit = settings.auto_continue_stretches()
         if self.model_first:
             turn.call_guard = chat_mode.call_problem
         if chat_run is not None:
@@ -1356,6 +1369,7 @@ class LeanSession:
             # Reviewed once it's written, never regenerated (no second thinking phase, no erased answer).
             turn.answer_review = chat_run.review
             turn.claim_nudge_limit = 0  # an untrue "I did it" is noted under the answer, not rewritten
+            turn.memory_repair = True   # ...but a claimed save that did not happen gets one step to happen (LS3)
             turn.max_steps_override = chat_run.budget
             turn.final_grace = True
             turn.grace_prompt = chat_run_mod.GRACE_PROMPT
@@ -1677,7 +1691,14 @@ class LeanSession:
             from agent.state import get_state_store
 
             scoped = not self._owner_side(persona) or bool(current_work() and current_work().coordinator.get(current_work().work_id, principal=current_work().principal).get("parent_id"))
-            hits = get_state_store().search_messages(str(args.get("query") or ""), limit=8, session_id=self.session_id if scoped else "")
+            query = str(args.get("query") or "")
+            store = get_state_store()
+            hits = store.search_messages(query, limit=8, session_id=self.session_id if scoped else "")
+            if not hits and keywords(query):
+                # Models describe what they look for ("venue offsite meeting location"); a message rarely holds every
+                # one of those words (evaluation MC1). Rank messages by the content words they share instead.
+                hits = store.search_messages(" ".join(keywords(query, limit=8)), limit=8, any_term=True,
+                                             session_id=self.session_id if scoped else "")
             context = current_work()
             if context and context.coordinator.get(context.work_id, principal=context.principal).get("parent_id"):
                 hits = [hit for hit in hits if hit["session_id"] == self.session_id]

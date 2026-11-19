@@ -239,8 +239,8 @@ def test_prompt_is_ordered_for_caching_and_carries_memory_and_earlier_sources(en
     prompt = turn.system_prompt
     # The per-minute clock is not in the system prompt at all: it comes before the tools and the history, so a
     # clock there changed every turn's prompt near its start. It rides on the current request instead.
-    assert "Current time" not in prompt and turn.request_note.startswith("[Current time: ")
-    assert "Prefers metric units." in prompt
+    assert "Current time" not in prompt and "[Current time: " in turn.request_note
+    assert "Prefers metric units." in turn.request_note and "Prefers metric units." not in prompt
     assert "## Pages read earlier in this chat" in prompt and DOCS in prompt and BLOG not in prompt
     context = session._chat_run.context
     assert "clock" not in context["sections"] and context["prompt_chars"] == len(prompt)

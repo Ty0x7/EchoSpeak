@@ -637,7 +637,10 @@ def setup_supersede(kind: str) -> Callable[[Path], dict[str, Any]]:
             old, new = (f"{random.choice(['orion', 'vega', 'lyra', 'atlas'])}-{n}" for n in random.sample(range(10, 99), 2))
         else:
             old, new = (f"{d} at {h}" for d, h in zip(random.sample(_DAYS, 2), random.sample(["9:30", "11:00", "14:15", "16:45"], 2)))
-        return {"vars": {"old": old, "new": new}, "answer": [new.split(" at ")[0] if kind != "server" else new],
+        # Each trial names its own subject: the run's backend keeps memories across cases and repetitions, and in
+        # the baseline LS3 met MR1's "build server is pluto-21" and LSH2 r2 met r1's appointment (evaluation, not model).
+        subject = random.choice(_CODENAMES) if kind == "server" else random.choice(["Northgate", "Riverside", "Elm Street", "Harbour"])
+        return {"vars": {"old": old, "new": new, "subject": subject}, "answer": [new.split(" at ")[0] if kind != "server" else new],
                 "stale": [old.split(" at ")[0] if kind != "server" else old]}
     return setup
 
@@ -669,9 +672,9 @@ LONG_DEV = [
           Turn("Remind me: when and where is the design review?")],
          setup_update_in_chat, ideal_calls=5, attach=False),
     Case("LS3", "A remembered fact replaced in a later chat", "memory-supersession",
-         [Turn("Remember that my build server is {old}."),
-          Turn("Update: my build server is now {new}. Please remember that instead.", new_thread=True),
-          Turn("What's my build server?", new_thread=True)],
+         [Turn("Remember that the build server for project {subject} is {old}."),
+          Turn("Update: the {subject} build server is now {new}. Please remember that instead.", new_thread=True),
+          Turn("What's the build server for {subject}?", new_thread=True)],
          setup_supersede("server"), ideal_calls=4, attach=False),
     Case("LS4", "An early fact after a long run of other turns", "long-session",
          [Turn("Note this, I'll ask later: the vault code for the demo is {code}.")]
@@ -687,9 +690,9 @@ LONG_HELDOUT = [
           Turn("What's my hotel confirmation code, and which flight am I on?")],
          setup_trip, ideal_calls=5, attach=False),
     Case("LSH2", "An appointment moved, mentioned in a later chat without 'remember'", "memory-supersession",
-         [Turn("Remember: my dentist appointment is on {old}."),
-          Turn("FYI my dentist appointment got moved to {new}.", new_thread=True),
-          Turn("When is my dentist appointment?", new_thread=True)],
+         [Turn("Remember: my appointment at the {subject} dental clinic is on {old}."),
+          Turn("FYI my {subject} dentist appointment got moved to {new}.", new_thread=True),
+          Turn("When is my appointment at the {subject} dental clinic?", new_thread=True)],
          setup_supersede("appointment"), ideal_calls=4, attach=False),
 ]
 

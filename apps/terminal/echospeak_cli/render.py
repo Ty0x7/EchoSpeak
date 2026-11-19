@@ -209,6 +209,8 @@ class Renderer:
             return self._line(self.s.yellow(f"  ! {one_line(evt.get('tool'), 60)} failed {evt.get('count')} times in a row"))
         if kind == "context_compacted":
             return self._note("earlier steps summarized to fit the context window", "  ")
+        if kind == "auto_continue":
+            return self._note(f"kept going: still making progress (limit now {evt.get('limit')} steps)", "  ")
         if kind == "memory_saved":
             return self._note("memory saved", "  ")
         if kind == "job_continue":

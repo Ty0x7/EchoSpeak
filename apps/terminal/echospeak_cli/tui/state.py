@@ -428,6 +428,9 @@ class Run:
                                       f"{one_line(evt.get('task'), 300)}", "dim", 0)]
         if kind == "context_compacted":
             return [B.RuleLine("Earlier steps summarized to fit the context window")]
+        if kind == "auto_continue":
+            # Past the step limit while still making progress: carried on without asking for "Continue".
+            return [B.RuleLine(f"Kept going: still making progress (limit now {one_line(evt.get('limit'), 6)} steps)")]
         if kind == "answer_note" and str(evt.get("verification") or "").lower() == "blocked" \
                 and any(d in {"deny", "timeout", "cancelled"} for d in self.decisions.values()):
             return []   # the ⊘ line already says you denied it; the outcome line says Blocked

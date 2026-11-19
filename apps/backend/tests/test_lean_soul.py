@@ -215,6 +215,11 @@ def test_soul_changes_ask_first_and_are_rule_of_two_gated(monkeypatch):
     ("The forecast is updated every hour.", set(), False),
     ("Paris is the capital of France.", set(), False),
     ("I have checked three sources and they agree.", {"web_search"}, False),
+    # Evaluation MI1 (19 November): "I've noted your build cache key" with nothing saved; the fact was lost.
+    ("I've noted your build cache key: zebra-598.", set(), True),
+    ("I've noted your build cache key: zebra-598.", {"memory_save"}, False),
+    ("I've noted it in plan.md.", {"file_write"}, False),
+    ("Noted that the build failed twice before the fix.", set(), False),
 ])
 def test_unbacked_claims(text, succeeded, flagged):
     assert bool(unbacked_claim(text, succeeded)) is flagged

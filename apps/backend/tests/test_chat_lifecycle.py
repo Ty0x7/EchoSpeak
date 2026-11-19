@@ -94,11 +94,41 @@ def test_an_unverified_link_is_fixed_in_place_with_no_second_generation():
 
 
 def test_an_untrue_claim_in_chat_is_noted_not_rewritten():
-    model = Model([ModelTurn(content="Done. I've saved that to your memory.")])
-    turn, _run, events = _chat_turn(model, "remember I like tea", memory_save=lambda a: "saved")
-    result = turn.run("remember I like tea")
+    model = Model([ModelTurn(content="Done. I've sent the email to Sam.")])
+    turn, _run, events = _chat_turn(model, "email the report to Sam", email_send=lambda a: "sent")
+    result = turn.run("email the report to Sam")
     assert len(model.calls) == 1 and not _erased(events)
     assert result.stop_reason == "unverified_claim" and any(e["type"] == "claim_unverified" for e in events)
+
+
+def test_an_untrue_memory_claim_in_chat_is_made_true_without_rewriting_the_answer():
+    """Evaluation LS3 (19 November): "I've saved that so I'll remember it" with no memory_save call. Chat noted it
+    under the answer and the fact was lost; the next chat recalled the outdated value. One follow-up step now saves it;
+    the answer stays as it was streamed."""
+    saved = []
+    model = Model([ModelTurn(content="Got it, your build server is now atlas-30. I've saved that."),
+                   ModelTurn(tool_calls=[ToolCall("m1", "memory_save", json.dumps({"fact": "Build server is atlas-30",
+                                                                                      "key": "build_server"}))]),
+                   ModelTurn(content="Saved.")])
+    turn, _run, events = _chat_turn(model, "my build server is now atlas-30, remember that instead",
+                                    memory_save=lambda a: saved.append(a) or "Saved")
+    turn.memory_repair = True
+    result = turn.run("my build server is now atlas-30, remember that instead")
+    assert saved and saved[0]["key"] == "build_server"                        # the save really happened
+    assert not _erased(events)                                                  # the answer was not wiped
+    assert result.text.startswith("Got it, your build server is now atlas-30")
+    assert result.stop_reason != "unverified_claim"
+    note = str(model.calls[1]["messages"][-1]["content"])
+    assert "memory_save" in note and "key" in note
+    assert sum(1 for e in events if e["type"] == "memory_repair") == 1
+
+
+def test_the_memory_repair_happens_once_and_never_for_other_claims():
+    model = Model([ModelTurn(content="I've saved that."), ModelTurn(content="I've saved it, really.")])
+    turn, _run, events = _chat_turn(model, "remember I like tea", memory_save=lambda a: "Saved")
+    turn.memory_repair = True
+    result = turn.run("remember I like tea")
+    assert len(model.calls) == 2 and result.stop_reason == "unverified_claim"   # asked once, then noted as before
 
 
 def test_an_answer_cut_off_by_the_output_limit_continues_without_thinking_again():
