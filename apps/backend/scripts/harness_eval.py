@@ -429,10 +429,23 @@ _PEOPLE = ["Priya Raman", "Tomasz Wolak", "Aiko Mori", "Dara Okafor", "Lucía Fe
            "Rahul Mehta", "Ines Duarte", "Mateo Rossi", "Freya Lund", "Kofi Mensah", "Yara Haddad", "Oskar Berg"]
 
 
+# A topic of its own for each trial too, in rotation: every trial asking the identical question let earlier trials'
+# answers ("You mentioned Marlowe Hall") pass as evidence in later ones (memsearch run, 18 November 2026). Different
+# facts on different topics is also what a real history looks like.
+_TOPICS = {"venue": ["offsite", "board dinner", "hackathon", "summer party", "client workshop", "kickoff", "retreat",
+                     "awards night"],
+           "person": ["account manager", "billing contact", "support engineer", "project lead", "legal contact",
+                      "sales rep", "onboarding coordinator", "security officer"]}
+_TOPIC_TURN = {"venue": 0, "person": 0}
+
+
 def setup_recall(kind: str) -> Callable[[Path], dict[str, Any]]:
     def setup(p: Path) -> dict[str, Any]:
+        topics = _TOPICS[kind]
+        topic = topics[_TOPIC_TURN[kind] % len(topics)]
+        _TOPIC_TURN[kind] += 1
         value = random.choice(_VENUES) + " Hall" if kind == "venue" else random.choice(_PEOPLE)
-        return {"vars": {"value": value}, "answer": [value.split()[0]]}
+        return {"vars": {"value": value, "topic": topic}, "answer": [value.split()[0]]}
     return setup
 
 
@@ -460,8 +473,8 @@ def setup_grounded_conflict(p: Path) -> dict[str, Any]:
 
 CAP_DEV += [
     Case("MC1", "Recall something mentioned in passing, in a new chat", "memory",
-         [Turn("For context: the team offsite is at {value} this year. Suggest two agenda topics."),
-          Turn("Which venue did I mention earlier for the offsite?", new_thread=True)],
+         [Turn("For context: the team {topic} is at {value} this year. Suggest two agenda topics."),
+          Turn("Which venue did I mention earlier for the {topic}?", new_thread=True)],
          setup_recall("venue"), ideal_calls=3, attach=False),
     Case("MR1", "Pick the right one of several similar memories", "memory",
          [Turn("Remember these: the staging server is {staging}, the backup server is {backup}, and the build server "
@@ -478,8 +491,8 @@ CAP_HELDOUT = [
                "email, and log in once to check it works.")],
          setup_accounts_unnamed, ideal_calls=5, attach=False, needs=("accounts",)),
     Case("MCH1", "Recall a name mentioned in passing, in a new chat", "memory",
-         [Turn("Quick note while we plan: our vendor's account manager is {value}. Draft a one-line thank-you."),
-          Turn("What's the name of the vendor's account manager I mentioned before?", new_thread=True)],
+         [Turn("Quick note while we plan: our vendor's {topic} is {value}. Draft a one-line thank-you."),
+          Turn("What's the name of the vendor's {topic} I mentioned before?", new_thread=True)],
          setup_recall("person"), ideal_calls=3, attach=False),
     Case("RH1", "Conflicting sources: use the current official one", "research",
          [Turn("Using only the files in sources/, what is the current official population of Marlow Bay? "
