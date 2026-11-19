@@ -52,6 +52,13 @@ def test_the_system_under_test_gets_no_paid_provider_key_from_the_shell_or_from_
     assert env["API_AUTH_KEY"] == "local" and env["PATH"] == "/usr/bin" and env["LOCAL_MODEL_URL"]
 
 
+def test_the_system_under_test_never_uses_the_owners_keyring():
+    """After a restart the locked desktop keyring failed MCP approval (HTTP 500): the eval backend was using the
+    owner's real keyring. Its credential key belongs in the run's disposable data folder."""
+    source = (SCRIPTS / "harness_eval.py").read_text(encoding="utf-8")
+    assert '"ECHOSPEAK_CREDENTIAL_KEYFILE": "1"' in source
+
+
 def test_the_model_server_must_be_on_this_machine():
     for ok in ("http://127.0.0.1:11434", "http://localhost:11434"):
         heval.assert_local(ok)
