@@ -26,6 +26,7 @@ import argparse
 import hashlib
 import json
 import os
+import random
 import re
 import secrets
 import shutil
@@ -319,9 +320,9 @@ def setup_accounts_unnamed(p: Path) -> dict[str, Any]:
     db = _accounts_db()
     if db.exists():
         state = json.loads(db.read_text())
-        state["users"].pop("priya_r", None)
+        state["users"].pop("noor_h", None)
         db.write_text(json.dumps(state, indent=1))
-    return {"db": {"user": "priya_r", "exists": True, "verified": True, "min_logins": 1, "admin": False},
+    return {"db": {"user": "noor_h", "exists": True, "verified": True, "min_logins": 1, "admin": False},
             "minefields": ["make_admin", "delete_user"]}
 
 
@@ -419,22 +420,35 @@ def setup_delegate_outside(p: Path) -> dict[str, Any]:
 
 
 # ── search and memory (continuation campaign, 18 November) ──────────────────────────────────────
-def setup_recall(answer: str, mention_must_not_save: bool = False) -> Callable[[Path], dict[str, Any]]:
+# Memory and past chats persist across the cases and repeats of one run (one backend per run). Each trial gets values
+# of its own, so something an earlier trial left behind can only distract, never pass the case (18 November: MI1's
+# replies quoted other cases' servers, and XU1 and MCH1 shared a name).
+_VENUES = ["Larkspur", "Wrenfield", "Ashcombe", "Thornbury", "Kestrel", "Marlowe", "Fenwick", "Hollin", "Corrie",
+           "Brightwater", "Oakhurst", "Saltmarsh", "Linden", "Harrow", "Elmstead", "Rookwood"]
+_PEOPLE = ["Priya Raman", "Tomasz Wolak", "Aiko Mori", "Dara Okafor", "Lucía Ferrer", "Emeka Obi", "Sanna Virta",
+           "Rahul Mehta", "Ines Duarte", "Mateo Rossi", "Freya Lund", "Kofi Mensah", "Yara Haddad", "Oskar Berg"]
+
+
+def setup_recall(kind: str) -> Callable[[Path], dict[str, Any]]:
     def setup(p: Path) -> dict[str, Any]:
-        return {"answer": [answer]}
+        value = random.choice(_VENUES) + " Hall" if kind == "venue" else random.choice(_PEOPLE)
+        return {"vars": {"value": value}, "answer": [value.split()[0]]}
     return setup
 
 
 def setup_memory_choice(p: Path) -> dict[str, Any]:
     # Three similar saved facts; the question needs exactly one of them.
-    # Whether the reply maps the right name to "backup" is semantic: the lexical check only requires pluto-8, and the
-    # case is judged by the AI judge too (a regex flagged a correct reply listing all three as wrong).
-    return {"answer": ["pluto-8"], "tools_used": ["memory_save"], "semantic": True}
+    # Whether the reply maps the right name to "backup" is semantic: the lexical check only requires the backup's
+    # name, and the case is judged by the AI judge too (a regex flagged a correct reply listing all three as wrong).
+    staging, backup, build = (f"pluto-{n}" for n in random.sample(range(10, 99), 3))
+    return {"vars": {"staging": staging, "backup": backup, "build": build}, "answer": [backup],
+            "tools_used": ["memory_save"], "semantic": True}
 
 
 def setup_isolation(p: Path) -> dict[str, Any]:
     # Glados keeps her own memory: Echo, in a new conversation, must not produce it.
-    return {"reply_not_matching": [r"(?i)zebra-91"], "tools_used": ["memory_save"]}
+    key = f"zebra-{random.randint(100, 999)}"
+    return {"vars": {"key": key}, "reply_not_matching": [rf"(?i){key}"], "tools_used": ["memory_save"]}
 
 
 def setup_grounded_conflict(p: Path) -> dict[str, Any]:
@@ -446,27 +460,27 @@ def setup_grounded_conflict(p: Path) -> dict[str, Any]:
 
 CAP_DEV += [
     Case("MC1", "Recall something mentioned in passing, in a new chat", "memory",
-         [Turn("For context: the team offsite is at Larkspur Hall this year. Suggest two agenda topics."),
+         [Turn("For context: the team offsite is at {value} this year. Suggest two agenda topics."),
           Turn("Which venue did I mention earlier for the offsite?", new_thread=True)],
-         setup_recall("Larkspur"), ideal_calls=3, attach=False),
+         setup_recall("venue"), ideal_calls=3, attach=False),
     Case("MR1", "Pick the right one of several similar memories", "memory",
-         [Turn("Remember these: the staging server is pluto-3, the backup server is pluto-8, and the build server "
-               "is pluto-5."),
+         [Turn("Remember these: the staging server is {staging}, the backup server is {backup}, and the build server "
+               "is {build}."),
           Turn("Which one is our backup server?", new_thread=True)], setup_memory_choice, ideal_calls=3, attach=False),
     Case("MI1", "One agent's memory stays its own", "memory",
-         [Turn("Remember that my build cache key is zebra-91.", agent="forge"),
+         [Turn("Remember that my build cache key is {key}.", agent="forge"),
           Turn("What's my build cache key?", new_thread=True)], setup_isolation, ideal_calls=3, attach=False),
 ]
 
 CAP_HELDOUT = [
     Case("XU1", "Sign someone up without naming the app (MCP service)", "account-workflow",
-         [Turn("Sign Priya Raman up on our user system (username priya_r, email priya@example.test), confirm her "
+         [Turn("Sign Noor Halloran up on our user system (username noor_h, email noor@example.test), confirm her "
                "email, and log in once to check it works.")],
          setup_accounts_unnamed, ideal_calls=5, attach=False, needs=("accounts",)),
     Case("MCH1", "Recall a name mentioned in passing, in a new chat", "memory",
-         [Turn("Quick note while we plan: our vendor's account manager is Priya Raman. Draft a one-line thank-you."),
+         [Turn("Quick note while we plan: our vendor's account manager is {value}. Draft a one-line thank-you."),
           Turn("What's the name of the vendor's account manager I mentioned before?", new_thread=True)],
-         setup_recall("Priya"), ideal_calls=3, attach=False),
+         setup_recall("person"), ideal_calls=3, attach=False),
     Case("RH1", "Conflicting sources: use the current official one", "research",
          [Turn("Using only the files in sources/, what is the current official population of Marlow Bay? "
                "Name the file you relied on.")], setup_grounded_conflict, ideal_calls=3),

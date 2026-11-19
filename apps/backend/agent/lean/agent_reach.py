@@ -32,10 +32,19 @@ MESSAGE_LIMIT = 2000
 _ASK = r"(tell|inform|notify|let|message|ping|remind|pass|send|forward|relay|give)"
 
 
+def primary_id(persona_id: str) -> str:
+    """The primary agent a profile belongs to: Echo's Chat and Code profiles are Echo."""
+    from agent.lean.personas import CHAT_AGENT_ID, CODE_AGENT_ID
+    return "echo" if persona_id in {CHAT_AGENT_ID, CODE_AGENT_ID} else persona_id
+
+
 def delegation_pool(persona_id: str, roster: Iterable[Any], *, room_kind: str = "", room_member_ids: Iterable[str] = (),
                     project_member_ids: Iterable[str] = ()) -> list[Any]:
     """System A: the primary agents ``persona_id`` may delegate to here (never itself)."""
     roster = list(roster)
+    # Echo speaks as its Chat profile in a plain conversation and as its Code profile beside a project: both are Echo
+    # for membership. Live G1 (18 November): the project listed "echo", the turn asked for "code", nothing was offered.
+    persona_id = primary_id(persona_id)
     project = [str(x) for x in project_member_ids if str(x)]
     members: list[str] = []
     if project and persona_id in project:
@@ -55,7 +64,7 @@ def message_target(request: str, roster: Iterable[Any], persona_id: str) -> Opti
     text = str(request or "")
     for persona in roster:
         name = str(getattr(persona, "name", "") or "")
-        if not name or getattr(persona, "id", None) == persona_id:
+        if not name or getattr(persona, "id", None) == primary_id(persona_id):
             continue
         n = re.escape(name)
         patterns = (

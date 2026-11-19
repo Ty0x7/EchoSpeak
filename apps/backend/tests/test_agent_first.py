@@ -143,6 +143,22 @@ def test_project_members_delegate_to_each_other_and_only_to_each_other(env, monk
     assert {p.id for p in _session(monkeypatch, group.thread_id)._handoff_pool(glados.id)} == {jarvis.id}
 
 
+def test_echo_beside_its_project_delegates_to_a_member(env, monkeypatch):
+    """Live G1, 18 November: the project listed Echo and Glados, but beside a project Echo speaks as its Code profile
+    ("code"), so the shared-project check found no Echo and offered no delegation. Echo's profiles are Echo."""
+    import agent.projects
+    echo, jarvis, glados = _people(env)
+    agent.projects.get_project_manager().update_project(_IDS["work"], agent_ids=[echo.id, glados.id])
+    session, turn = _echo_turn(env, monkeypatch, "Ask Glados to create hello.txt in the project", project=True)
+    assert session._code_persona().id != echo.id                  # the profile the live run used
+    assert "delegate_to_agent" in turn.toolbox.names
+    assert [p.id for p in session._handoff_pool(session._code_persona().id)] == [glados.id]
+    # Not a member: Jarvis isn't offered, and without membership Echo isn't either.
+    agent.projects.get_project_manager().update_project(_IDS["work"], agent_ids=[glados.id, jarvis.id])
+    _s, outside = _echo_turn(env, monkeypatch, "Ask Glados to create hello.txt in the project", project=True)
+    assert "delegate_to_agent" not in outside.toolbox.names
+
+
 def test_spawned_workers_exist_without_a_project_and_never_reach_other_agents(env, monkeypatch):
     """System B: Echo's own research workers, in a conversation with no project, under the Research workers setting.
     Workers are not primary agents: no delegation, no messaging, no memory, no further spawning."""
