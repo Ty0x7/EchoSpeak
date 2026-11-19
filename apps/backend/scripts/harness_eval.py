@@ -599,6 +599,10 @@ class Stack:
             "LEARNING_ENABLED": "false",
             # Without a project the default folder is the owner's Documents; an evaluation must never see it.
             "FILE_TOOL_ROOT": str(dirs["backend-home"]),
+            # The credential broker's key lives in the run's own data folder, never in the owner's desktop keyring
+            # (as tests/conftest.py does). After a restart the locked keyring made MCP approval fail with a 500, and
+            # before that every eval backend had been reaching into the owner's keyring.
+            "ECHOSPEAK_CREDENTIAL_KEYFILE": "1",
         })
         env.update(self.extra_env)
         env = local_only_env(env)  # last, so neither the shell nor --env can hand the backend a paid key
