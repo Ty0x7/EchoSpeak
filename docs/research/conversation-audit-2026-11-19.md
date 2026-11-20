@@ -14,14 +14,24 @@ which weaknesses do those sessions show, and which of them are the harness's to 
   beside it without ever learning the package existed, and never said why it had stopped.
 - **Opening the game looped.** An opener that hands a file to the running browser exits at once; the harness said
   "nothing running", and Echo launched it five times behind six approvals.
-- All three are fixed here, with failing-first regression tests. A live baseline on new cases reproduced the pattern
-  (0 of 3 runs fixed, 15–20 compactions each). **The live after-arm hasn't run yet:** a low-memory stop ended the
-  session's evaluation (§5).
+- All three are fixed in the harness, with regression tests. Measured live (§5), with honest results:
+  - **Continuation works:** after "why did you stop? keep going", Echo looked at the existing project before writing
+    in 4 of 4 runs, against 2 of 4.
+  - **The context changes didn't help enough:** they lower the prompt and the summary pile-up, but the multi-file
+    cases still fail in both arms (0 of 9 runs). About 2K tokens of working room is too little for this model to
+    hold two modules side by side.
+  - **One change hurt and was reverted:** counting re-reads against progress cut an LT1 run short.
+  - **The eval had two faults, both fixed:** D8 couldn't run, and the runner reported "0 failed" for tests it never
+    ran.
 - Several other failures in these sessions were already fixed on the unmerged branch line, **but the backend the
   owner runs is about two days behind it** (§2).
 
-Branch `conversation-audit-1119` (based on `context-recall-integration` 0f31370): eval cases `adbffb9`, harness
-fixes `162f291`. Not pushed, merged or installed.
+Branch `conversation-audit-1119` (based on `context-recall-integration` 0f31370). Not pushed, merged or installed.
+
+- `adbffb9`: the eval cases.
+- `162f291`: the harness fixes.
+- `b79293b`: two eval faults fixed.
+- `a130f12`: the harness revised after the live run.
 
 ## 1. Method
 
@@ -84,9 +94,10 @@ continuation (`21ea7f4`). Installing the integrated branch would bring those to 
 - An older `file_read` result that must shrink keeps its path, size, range read and **outline** (classes, functions
   and methods with line numbers; for HTML, the scripts it loads and element ids), not its first characters. On the real
   GTA files: 6,142 → 343 chars for `game.js`, and the outline still says where `update()` starts.
-- The third read of an unchanged file (size and mtime) in one request gets a note: the window holds about one file,
-  read the lines you need (offset/limit), make the change, check it. Such re-reads don't count as progress for
-  automatic continuation.
+- The third *whole* read of an unchanged file (size and mtime) in one request gets one note: the window holds about
+  one file, read the lines you need (offset/limit), make the change, check it. Ranged reads never count.
+  - **Changed by `a130f12`.** The first version counted ranged reads and fired on every re-read. It also didn't count
+    re-reads as progress for automatic continuation; live runs showed both were wrong (§5).
 
 **Across turns** (new `agent/lean/work_record.py`, `runtime._history`, `_goal`):
 
@@ -103,9 +114,13 @@ continuation (`21ea7f4`). Installing the integrated branch would bring those to 
 that exits 0 with no output counts as opened: "Don't launch it again". One run in the sandbox that reports no
 display or session bus says nothing opened and to run it once with `where="host"`. Approvals are unchanged.
 
-**Tests:** `tests/test_real_conversation_audit.py`, 19 tests, written failing first for the context, history and
-continuation fixes (7 and 4 failures before the code). Full backend suite: 1,938 passed, 22 failed; the same 22 fail
-on the base revision (`0f31370`), none new.
+**Tests:** `tests/test_real_conversation_audit.py`.
+
+- 19 tests at `162f291`, written failing first for the context, history and continuation fixes (7 and 4 failures
+  before the code); 20 at `a130f12`.
+- Full backend suite at `162f291`: 1,938 passed, 22 failed. The same 22 fail on the base revision (`0f31370`), none
+  new.
+- At `a130f12`: the related test files, 147 passed.
 
 ## 5. Verification
 
@@ -134,20 +149,62 @@ The GTA session's pattern reproduced on code the model had never seen: 0 of 3 ru
 came every third call, and the recorded prompts show **20 stacked summaries (18.1K characters, ~4.5K tokens) in one
 request** and **479 tool results cut to their first 250 characters**: the two mechanisms fix 1 removes.
 
-**After the fixes: not run yet.** At 18:05 Claude Code stopped the baseline (PJH1 r2 unfinished) because the machine
-was critically low on memory: the loaded model and llama-server's host-side cache took ~8.5 GB (unloading it took
-available memory from 1.2 to 9.6 GB) beside ~3.5 GB of browser. Its note says not to restart such work unasked, so
-the after-arm (PJ, PC) and the regression runs (D6, D8, LT1) wait for the owner. **So the fixes are verified by
-failing-first unit tests, the full suite and the mechanism evidence above, not yet by a live before/after.** Next
-command, with the browser closed or `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`:
+A sixth baseline run, made later with a third PJ1 sample, agreed: PJ1 3.45 and PJH1 5.46, 20 and 18 compactions.
 
-```bash
-cd apps/backend   # the conversation-audit-1119 worktree (162f291)
-python scripts/harness_eval.py --model qwen3.5:9b --set audit-pj --repeat 2 --label audit-pj-fix
-python scripts/harness_eval.py --model qwen3.5:9b --set audit-pc --repeat 2 --label audit-pc-fix \
-  --env LEAN_MAX_ITERATIONS=8 --env LEAN_AUTO_CONTINUE_STRETCHES=1
-# and the same two from an export of adbffb9 for the PC baseline; then harness_judge.py on each run
-```
+**Live after-arm, round 1** (`162f291`, the owner's go-ahead, 18:39–19:48). All of today's runs are in the evidence
+folder (`fixed-*`, `baseline-*`).
+
+| Case | Baseline | Fixes (`162f291`) | What changed |
+|---|---|---|---|
+| PJ1 (×3 / ×2) | mean 4.76, 0/3 | mean 4.32, 0/2 | Peak prompt 12.3–13.6K → 11.1–11.9K (one summary). Compactions unchanged (15–20 → 17–18). The re-read note fired 26–40 times per run |
+| PJH1 (×2 / ×2) | mean 5.47, 0/2 | mean 4.81, 0/2 | Same |
+| PC1 (×2 / ×2) | mean 4.42, 0/2 | mean 5.00, 0/2 | In turn 2 ("why did you stop? keep going"), Echo **looked at the existing files before writing in 4 of 4 runs**, against 2 of 4. One reply said why it had stopped ("I hit the step limit before running the final test check"); none did before |
+| PCH1 (×2 / ×2) | mean 4.88, 0/2 | mean 4.95, 0/2 | (counted with PC1 above) |
+| LT1 (×2 / ×2, `LEAN_MAX_ITERATIONS=12`; baseline = `lt1-runner`, same harness code) | mean 7.19, 1/2 | mean 7.29, 1/2 | Compactions 18 and 2 → 5 and 8. One fixed run stopped at step 24 with 5/10 tests passing |
+| D6 (×2) | 9.49, 2/2 | 9.45, 2/2 | No change |
+| D8 (×2) | 8.97, 2/2 | 9.61, 2/2 | One baseline run took 50 calls and 15 compactions; the fixed ones took 4–5 calls, none. A single outlier |
+
+**What round 1 showed, and what changed because of it:**
+
+1. **The re-read note contradicted itself.** It asked for ranged reads (offset/limit) and then counted them. On PJ1
+   it fired on nearly every read (`world.py` 15 times).
+   - **Revised (`a130f12`):** only whole reads of an unchanged file count, and the note comes once.
+2. **"Re-reads aren't progress" hurt.** LT1 r2's continuation saw a stretch of reads as no progress and stopped at
+   step 24 with 5/10 tests; the baseline run that kept going reached 9/10.
+   - **Reverted (`a130f12`).**
+3. **The eval itself had two faults.** Both are fixed in `b79293b`, in both arms:
+   - **D8 couldn't run.** Since `e11a1f5` a second `_FILLER` shadowed its report text, so every D8 crashed on setup.
+   - **The runner misled the model.** The plain `run_tests.py` printed "0 failed" for tests it never ran (`unittest`
+     classes, tests outside `tests/`). In two PC1 runs the model reported that as "all tests pass", and the judge
+     correctly failed it. The runner now runs `unittest` classes, reports how many tests ran, and fails with "no tests
+     found".
+4. **Why PJ didn't improve.** Step 4 read all five modules at once (~14K characters). Prompts then sat at the ~11K
+   budget, so compaction came after nearly every step even for 20-line reads. The one bug fixed (`step` → `update`)
+   came from an error message. The `move_up` vs `up` mismatch needs `controls.py` and `entities.py` side by side,
+   which ~2K tokens of working room never allowed.
+
+**Round 2** (`a130f12`) was stopped by Claude Code on low memory again at ~20:05 (available memory 1.1 GB; unloading
+the model restored 8.6 GB). Two runs finished:
+
+- PJ1 5.67 and PJH1 6.21, both 0/1.
+- The note came 5–6 times instead of 26–40, as designed.
+- Compactions still 16–19.
+
+The round-2 LT1 and PC runs, with the corrected runner, didn't run.
+
+**Verdict:**
+
+| Change | Decision | Why |
+|---|---|---|
+| One merged compaction summary | Keep | Mechanism verified: peak prompt down ~1.5K, LT1 compactions fewer. No regression in D6/D8/LT1 |
+| Outlines for trimmed reads; files list in compaction | Keep | Unit-verified. Harmless live, but not enough on its own to move PJ |
+| Re-read note | Keep, revised | Fires as designed after `a130f12` |
+| Re-reads not counted as progress | Reverted | Hurt LT1 |
+| Work record and continuation note | Keep | The one behavioural gain measured live: turn 2 inspects before writing, 4/4 against 2/4 |
+| Launcher note | Keep | Unit-tested against the real failure. Live check needs a desktop session (the eval has none) |
+
+**Nothing here made qwen3.5:9b succeed where it failed before:** 0 of 9 PJ runs and 0 of 8 PC runs succeeded across
+both arms.
 
 ## 6. Model limits and remaining harness weaknesses
 
@@ -177,11 +234,15 @@ python scripts/harness_eval.py --model qwen3.5:9b --set audit-pc --repeat 2 --la
 
 ## 7. Next priorities
 
-1. Run the after-arm and the regressions (§5). Keep `162f291` only if PJ/PC improve and D6/D8/LT1 don't regress.
-2. Decide the integration: `context-recall-integration` plus this branch, then install, so the owner's Echo gets the
-   fixes.
-3. A syntax check for written JS, HTML and Python files on the "Not verified" path.
-4. An A/B on a leaner Code system prompt at 16K.
+1. **Working room at 16K is the bottleneck for multi-file work**, not compaction's form. Run an A/B on a leaner
+   system prompt and tool set for Code on a local 16K model, aiming for ~4K tokens of room instead of ~2K. Measure
+   on PJ1/PJH1 and LT1.
+2. **Finish round 2:** LT1 and PC ×2 on `a130f12`, with the corrected runner on both arms. Run it with the browser
+   closed, or with `CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1`. The model plus llama-server's cache takes ~8.5 GB,
+   and Claude Code stopped the evaluation twice.
+3. **Decide the integration:** `context-recall-integration` plus this branch, then install, so the owner's Echo gets
+   the fixes.
+4. **A syntax check for written JS, HTML and Python files** on the "Not verified" path.
 
 ## 8. Reproduce
 
