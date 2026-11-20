@@ -1157,6 +1157,10 @@ def owner_decision(event: dict[str, Any], turn: Turn, readable: tuple[str, ...] 
             return "deny"
     if "outside the sandbox" in text:
         return "deny"
+    args = event.get("args") or {}
+    if tool in {"terminal", "terminal_run", "process_start"} and isinstance(args, dict):
+        if args.get("network") or str(args.get("where") or "").lower() == "host":
+            return "deny"
     if turn.approvals == "deny" or (turn.approvals == "deny-destructive" and any(w in text for w in DESTRUCTIVE)):
         return "deny"
     return "allow"

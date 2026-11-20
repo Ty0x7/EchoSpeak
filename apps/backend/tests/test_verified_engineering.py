@@ -520,3 +520,12 @@ def _runner(ledger: VerificationLedger):
         ledger.observe("terminal", {"command": command}, True, output, state["step"], call_id=call_id)
         return ledger.feedback(call_id)
     return run
+
+
+def test_empty_collection_blocks_verification_instead_of_marking_code_failing():
+    ledger = VerificationLedger()
+    ledger.observe("file_edit", {"path":"app.py"}, True, "Edited", 1)
+    ledger.observe("terminal", {"command":"python3 -m unittest test_app -v"}, False,
+                   "[exit code 5 · sandbox]\nRan 0 tests in 0.001s\nNO TESTS RAN", 2)
+    assert ledger.completion()["status"] == "blocked"
+    assert "no tests" in ledger.completion()["last"]

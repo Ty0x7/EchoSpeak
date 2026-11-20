@@ -169,3 +169,12 @@ def test_judge_rejects_a_denied_or_stale_check_and_credits_a_real_custom_runner(
     assert not result(attempt(args, "ok", "[ok · sandbox]\n0 ran, 0 failed"))
     edit = [{"type": "tool_start", "id": "later", "name": "file_edit"}, {"type": "tool_end", "id": "later", "ok": True}]
     assert not result(attempt(args, "ok", "[ok · sandbox]\n10 ran, 0 failed") + edit)
+
+
+def test_simulated_owner_keeps_shell_calls_off_host_and_off_network():
+    heval = _load("harness_eval")
+    turn = heval.Turn("Run the fixture's local checks")
+    assert heval.owner_decision({"tool": "terminal", "args": {"where": "bwrap"}}, turn) == "allow"
+    assert heval.owner_decision({"tool": "terminal", "args": {"network": True, "where": "bwrap"}}, turn) == "deny"
+    assert heval.owner_decision({"tool": "terminal", "args": {"where": "host"}}, turn) == "deny"
+    assert heval.owner_decision({"tool": "process_start", "args": {"where": "host"}}, turn) == "deny"

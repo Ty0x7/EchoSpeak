@@ -708,7 +708,7 @@ class VerificationLedger:
                 status = "verified" if self.objective else "checks_pass"
         else:
             refused = any(b["class"] == "authorization" and b.get("step", 0) >= primary.step for b in self.blockers)
-            status = "blocked" if primary.environment or refused else "failing"
+            status = "blocked" if primary.environment or primary.no_tests or refused else "failing"
         first = next((c for c in self.checks if primary is not None and c.scope == primary.scope), None)
         return {
             "status": status,
