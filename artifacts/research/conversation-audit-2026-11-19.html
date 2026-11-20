@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conversation audit</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--panel:#fff;--ink:#171717;--muted:#666;--line:#ddd;--soft:#f0f0f0;--accent:#2f6fde;--ok:#1f7a3f;--warn:#a86a00;--bad:#b42318}@media(prefers-color-scheme:dark){:root{--bg:#101010;--panel:#181818;--ink:#eee;--muted:#aaa;--line:#333;--soft:#222;--accent:#8fb4ff;--ok:#5cc983;--warn:#d6a955;--bad:#ff8a7a}}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 system-ui,sans-serif}main{max-width:1120px;margin:auto;padding:20px clamp(16px,4vw,48px) 40px}header{padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:14px}h1{font-size:22px;line-height:1.3;letter-spacing:-.025em;margin:0 0 4px}header p{margin:0;font-size:13px;color:var(--muted)}h2{font-size:17px;letter-spacing:-.02em;margin:0 0 6px}section{margin:34px 0}.lead{font-size:13.5px;color:var(--muted);margin:0 0 14px;max-width:820px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}.node{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:14px 16px;min-width:0}.node h3{font-size:14px;margin:0 0 4px}.node p,.node li{font-size:13px;color:var(--muted);margin:0}.node ul{margin:6px 0 0;padding-left:18px}code{font:12px ui-monospace,monospace}.tag{display:inline-block;font-size:11px;border:1px solid var(--line);border-radius:20px;padding:0 8px;margin-right:6px}.tag.ok{color:var(--ok)}.tag.warn{color:var(--warn)}.tag.bad{color:var(--bad)}.wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}th{font-weight:600;color:var(--muted)}pre{font:12px/1.45 ui-monospace,monospace;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;margin:0;white-space:pre-wrap}.bars{display:grid;grid-template-columns:150px 1fr 90px;gap:6px 10px;align-items:center;font-size:13px}.bar{height:14px;border-radius:3px;background:var(--accent)}.bar.warn{background:var(--warn)}.bar.bad{background:var(--bad)}.num{font-variant-numeric:tabular-nums;color:var(--muted)}footer{font-size:12px;color:var(--muted);margin-top:30px;border-top:1px solid var(--line);padding-top:12px}@media(max-width:860px){.grid3,.grid2{grid-template-columns:1fr}.bars{grid-template-columns:110px 1fr 70px}}
+</style></head><body><main>
+<header><h1>Conversation audit · the owner's Pong and GTA-clone sessions</h1><p>19 November 2026 · qwen3.5:9b at 16K · branch <code>conversation-audit-1119</code> (eval cases <code>adbffb9</code>, fixes <code>162f291</code>) · technical record: <code>docs/research/conversation-audit-2026-11-19.md</code></p></header>
+<p class="lead"><b>The run that "stopped" wasn't lazy; it was blind.</b> In a 16K window, ~9K tokens are always taken by the system prompt and tools. Each compaction appended another summary, and every older file read was cut to its first 250 characters. Echo could only ever see one file, so it read the same five files for 37 of 49 steps until the work budget ran out. Fixed in the harness, with tests. A live baseline on new code reproduced it; the live after-arm is still to run.</p>
+
+<section><h2>Where the last GTA turn's 49 steps went</h2>
+<p class="lead">From the owner's own trace (thread cf8e79fb, "why stopped? and continue"): prompt tokens per call, against the ~11K the loop may use before it compacts.</p>
+<div class="bars" role="img" aria-label="Steps 1 to 5 wrote five files; steps 6 to 49 re-read them; 20 compactions took 112 of 436 seconds of model time.">
+<span>steps 1–5: wrote 5 JS files</span><div class="bar" style="width:10%"></div><span class="num">5 steps</span>
+<span>steps 6–49: re-reads</span><div class="bar bad" style="width:90%"></div><span class="num">44 steps</span>
+<span>compaction calls</span><div class="bar warn" style="width:26%"></div><span class="num">112 s of 436 s</span>
+</div>
+<div class="grid3" style="margin-top:14px">
+<div class="node"><h3>Fixed overhead</h3><p>Step 1 already sent 8,960 tokens: system prompt (16.7K chars) and 22 tool schemas (14K chars). About 2K tokens of the budget were left for work.</p></div>
+<div class="node"><h3>Summaries piled up</h3><p>Each compaction appended a summary to the request. In the live baseline one request carried <b>20 summaries, 18.1K characters</b>.</p></div>
+<div class="node"><h3>Files cut to their head</h3><p>Older results were trimmed to their first 250 characters (479 times in one baseline run). A file Echo had read was gone, so it read it again.</p></div>
+</div>
+</section>
+
+<section><h2>What was claimed, and what happened</h2>
+<div class="wrap"><table>
+<thead><tr><th>Request</th><th>Echo said</th><th>The records show</th></tr></thead>
+<tbody>
+<tr><td>Pong "… open it up so i can play it"</td><td>"Perfect! … opened it in your browser"</td><td><code>index.html</code> rewritten whole 3×; the sandbox <code>xdg-open</code> printed a bus error and exited 0; <code>chromium</code> 3× and <code>gio open</code> 2× on this PC, <b>6 approvals</b>; "Not verified"</td></tr>
+<tr><td>"first get research and then start coding"</td><td>"Great! Now let me continue building…"</td><td>A <b>Python</b> package (<code>src/core/engine.py</code>, <code>car.py</code>, <code>player.py</code>); the turn ended on a promise, recorded as success</td></tr>
+<tr><td>"why stopped? and continue"</td><td>"Let me read the remaining files properly…" (failed)</td><td>A <b>JavaScript</b> game beside the unseen Python package; 37 re-reads; work budget; "why stopped?" never answered</td></tr>
+<tr><td>"anything new with cyber leek"</td><td>Cyberpunk 2077 patch notes</td><td>A live steer ("not cyberpunk cyberleek") was followed for one search, then dropped <span class="tag warn">model</span></td></tr>
+</tbody></table></div>
+</section>
+
+<section><h2>Fixed in the harness</h2>
+<div class="grid3">
+<div class="node"><h3>Context at 16K <span class="tag ok">tests</span></h3><ul><li>One summary, rewritten from the last one, never appended</li><li>A trimmed read keeps its path, size and outline: <code>game.js</code> goes from 6,142 to 343 characters, and you can still see where <code>update()</code> starts</li><li>Compaction keeps the list of files read</li><li>A third read of an unchanged file explains why, and re-reads aren't counted as progress</li></ul></div>
+<div class="node"><h3>Across turns <span class="tag ok">tests</span></h3><ul><li>Each reply in the history carries a record of what its turn changed and how it ended</li><li>"why stopped? and continue" keeps the original objective, and Echo is told why the last turn stopped</li></ul></div>
+<div class="node"><h3>Opening things <span class="tag ok">tests</span></h3><ul><li>An opener that exits 0 at once is reported as opened: "Don't launch it again"</li><li>An opener in the sandbox with no desktop says nothing opened, and to run it once on this PC</li><li>Approvals unchanged</li></ul></div>
+</div>
+<pre style="margin-top:12px">[EchoSpeak's record of this turn: wrote GTA_CLONE/src/core/engine.py, GTA_CLONE/src/vehicle/car.py,
+GTA_CLONE/src/game/player.py; ran `mkdir -p GTA_CLONE/{src/{core,game,state,map,vehicle,ui},assets/…`;
+it ended without a final answer, in the middle of the work]</pre>
+<p class="lead" style="margin-top:6px">The record rendered from the real GTA research turn. It's attached to that reply in the next turn's history.</p>
+</section>
+
+<section><h2>Live evidence so far</h2>
+<p class="lead">New multi-file cases, written for this audit: an arcade game and a shop checkout (held-out), each with three bugs that span modules. Baseline = the target revision plus the cases, with qwen3.5:9b on an isolated backend.</p>
+<div class="wrap"><table>
+<thead><tr><th>Baseline run</th><th>Independent tests</th><th>Compactions</th><th>File reads (files)</th><th>Calls · time</th></tr></thead>
+<tbody>
+<tr><td>PJ1 r1</td><td><span class="tag bad">3 failed</span></td><td>17</td><td>39 (7)</td><td>56 · 348 s</td></tr>
+<tr><td>PJ1 r2</td><td><span class="tag bad">2 failed</span></td><td>15</td><td>25 (9)</td><td>56 · 288 s</td></tr>
+<tr><td>PJH1 r1 (held-out)</td><td><span class="tag bad">3 failed</span></td><td>20</td><td>65 (13)</td><td>65 · 423 s</td></tr>
+<tr><td>After the fixes</td><td colspan="4"><span class="tag warn">not run</span> The evaluation was stopped on low memory: the model plus llama-server's cache took ~8.5 GB beside the browser. It waits for the owner's go-ahead.</td></tr>
+</tbody></table></div>
+</section>
+
+<section><h2>Already fixed on the branch line, not in the owner's Echo</h2>
+<p class="lead">The backend serving these chats is <code>agent-first-sessions</code> plus uncommitted work, about two days behind <code>context-recall-integration</code>. Fixes there for failures seen in these very sessions: a just-edited file wrongly refused as a "repeat"; "codex and claude sessions" now reaching <code>agent_sessions</code>; wrong <code>read_output</code> IDs answered with the real ones; the work budget growing with automatic continuation.</p>
+</section>
+<footer>Evidence: the owner's runtime data, read from a copy; the live baseline in <code>evaluations/2026-11-19-conversation-audit</code>. Not verified yet: the live after-arm, and the D6/D8/LT1 regressions.</footer>
+</main></body></html>
