@@ -368,6 +368,21 @@ def test_other_commands_get_no_opener_note():
     assert launcher_note("chromium --headless --dump-dom index.html", 0, "<html>…</html>", "", "host") == ""
 
 
+# ── 1d. working room at 16K ─────────────────────────────────────────────
+def test_a_small_window_fills_further_before_trimming(monkeypatch):
+    # ~9K of a 16K window is the system prompt and tools; at 0.8 a turn had ~2K for work and the five-module cases
+    # failed 0/6. At 0.9 (live A/B, 20 November) the work fits two or three modules at once.
+    from agent.lean import settings
+
+    monkeypatch.delenv("LEAN_CONTEXT_FILL", raising=False)
+    assert settings.context_fill(16384) == 0.9
+    assert settings.context_fill(32768) == 0.9
+    assert settings.context_fill(131072) == 0.8
+    assert settings.context_fill() == 0.8
+    monkeypatch.setenv("LEAN_CONTEXT_FILL", "0.75")
+    assert settings.context_fill(16384) == 0.75
+
+
 # ── 5. Python tests in the sandbox (LT1 retest: nine "No module named pytest" in one run) ──────────
 def test_a_missing_pytest_says_which_python_and_how_to_run_the_tests(tmp_path):
     from agent.lean.terminal import failure_hint

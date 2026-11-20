@@ -2281,7 +2281,7 @@ class LeanTurn:
         # window known that idled ~7k tokens: the loop compacted every other step and the model re-read what it had
         # just lost (harness evaluation, D8: 67 calls). Windows of 32k and more keep the reserve they had.
         reserve = min(settings.max_output_tokens(endpoint) // 2, max(2048, window // 8))
-        budget = max(128, int(window * (0.55 if aggressive else settings.context_fill())) - reserve)
+        budget = max(128, int(window * (0.55 if aggressive else settings.context_fill(window))) - reserve)
         # The character estimate, scaled by what the server counted for the last prompt (0.85-1.3 measured).
         scale = getattr(self, "_token_scale", 1.0)
 

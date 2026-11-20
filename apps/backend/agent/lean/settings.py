@@ -74,13 +74,19 @@ def context_tokens(endpoint: Any = None) -> int:
     return max(local, 64000)
 
 
-def context_fill() -> float:
+def context_fill(window: int = 0) -> float:
     """The share of the window a turn may fill before older work is trimmed and compacted (LeanTurn._fit_context),
-    after the reply's reserve. Clamped to 0.6–0.92; window.py catches a prompt the server cut anyway."""
+    after the reply's reserve. Clamped to 0.6–0.92; window.py catches a prompt the server cut anyway.
+
+    0.9 for windows up to 32K: there the system prompt and tools take most of the window (~9K of 16K), and at 0.8
+    a turn had ~2K tokens for its work, compacted every few calls and failed the five-module cases 0/6; at 0.9 the
+    same cases passed (conversation audit A/B, 20 November 2026). Larger windows keep 0.8.
+    """
+    default = 0.9 if 0 < int(window or 0) <= 32768 else 0.8
     try:
-        return min(0.92, max(0.6, float(_setting("lean_context_fill", 0.8))))
+        return min(0.92, max(0.6, float(_setting("lean_context_fill", default))))
     except (TypeError, ValueError):
-        return 0.8
+        return default
 
 
 def max_output_tokens(endpoint: Any = None) -> int:
