@@ -440,3 +440,15 @@ would let the sandbox verify Python fixes. That is a system change for the owner
 
 See §6 of the HTML or the list in the session summary; the same list is in
 `docs/acceptance/2026-11-17-agent-first-acceptance.md`.
+
+## 10. Delegate attribution review
+
+The saved GH1 trace from [issue #129](https://github.com/Ty0x7/EchoSpeak/issues/129) shows Echo writing a file itself and then crediting an unavailable project agent. The tool result proves the write, and the handoff pool establishes which agents can take work. The reply previously used only the write evidence.
+
+For explicit requests to have a named roster agent do work, Echo now receives a request note if that agent cannot be delegated to in this turn. A direct unsupported attribution gets one correction prompt. If it persists, answer review replaces the affected statement with the known handoff status. This check covers direct claim forms in the reply. The existing handoff pool is the authority for membership and tools.
+
+Scripted local-edit regressions fail on `ba5e6f6` and pass on `08c132b`, with both corrected and repeated false claims covered. Honest discussion of an unavailable agent also passes. The adjacent agent, collaboration, policy, verification and chat suites passed 111 checks.
+
+Local Qwen 3.5 9B ran the new ND2 checklist task twice per arm at 16K. Both candidate replies credited the actual actor or explained the unavailable handoff. Neither baseline reply credited the unavailable agent with doing the work, so this sample does not measure a reply-error improvement. The candidate made zero attempts to call the unavailable agent compared with three rejected calls across the baseline turns. ND2 used 20 → 6 model calls across both repetitions. The authorized G1 control completed on both arms, with a successful handoff and the exact file written by the delegate, using 6 → 7 calls. These are small-sample measurements.
+
+The live comparison also exposed an artifact-level gap. One baseline signoff credited the unavailable reviewer even though the chat reported that the reviewer had not participated. The reply rubric passed that trial. File authorship verification is tracked in [issue #131](https://github.com/Ty0x7/EchoSpeak/issues/131).
