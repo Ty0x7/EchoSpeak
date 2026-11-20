@@ -19,6 +19,26 @@ from .motion import fmt_elapsed, thinking_words
 
 ECHO_IDS = {"echo", "chat", "code"}
 
+# A step that failed says what didn't happen ("Couldn't write notes.md"), not "Writing notes.md", which reads as if it
+# were still going. Present participles as the backend's labels start (agent/lean/steps.py _PAST); others are kept.
+_FAILED = (
+    ("Searching your documents", "Couldn't search your documents"), ("Searching code", "Couldn't search code"),
+    ("Searching", "Couldn't search"), ("Reading", "Couldn't read"), ("Writing", "Couldn't write"),
+    ("Editing", "Couldn't edit"), ("Running", "Couldn't run"), ("Calculating", "Couldn't calculate"),
+    ("Finding", "Couldn't find"), ("Creating", "Couldn't create"), ("Updating", "Couldn't update"),
+    ("Deleting", "Couldn't delete"), ("Listing", "Couldn't list"), ("Moving", "Couldn't move"),
+    ("Copying", "Couldn't copy"), ("Saving", "Couldn't save"), ("Recalling", "Couldn't recall"),
+    ("Starting", "Couldn't start"), ("Checking", "Couldn't check"), ("Stopping", "Couldn't stop"),
+    ("Fetching", "Couldn't fetch"), ("Opening", "Couldn't open"), ("Looking up", "Couldn't look up"),
+)
+
+
+def failed_label(label: str) -> str:
+    for present, failed in _FAILED:
+        if label.startswith(present + " ") or label == present:
+            return failed + label[len(present):]
+    return label
+
 # ── steps.ts port ────────────────────────────────────────────────────
 _BUCKETS: dict[str, tuple[str, int]] = {
     "web_search": ("search", 0), "safe_web_fetch": ("pages", 1), "product_search": ("prices", 2),
@@ -531,6 +551,8 @@ class Run:
         else:
             status = "fail"
         label = one_line(evt.get("done_label") or (tool.label if tool else name), 200)
+        if status == "fail":
+            label = failed_label(label)
         summary = one_line(evt.get("summary") or "", 160)
         if name == "memory_save" and ok and summary == "Saved":
             summary = "verified on disk" if (evt.get("meta") or {}).get("memory_verified") else ""

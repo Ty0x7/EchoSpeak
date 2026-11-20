@@ -86,6 +86,25 @@ def test_tool_lines_statuses_and_previews():
     assert steps_summary(run.finished_tools) == "Ran 1 command · 1 failed"
 
 
+def test_a_failed_step_says_what_didnt_happen():
+    # tui-refine open item: a failed step kept its present-tense label ("✗ Writing notes.md"), which reads as if it
+    # were still going.
+    events = [(0, start()),
+              (1, {"type": "tool_start", "message_id": "m1", "id": "t1", "name": "web_search", "label": "Searching “x”"}),
+              (2, {"type": "tool_end", "message_id": "m1", "id": "t1", "name": "web_search", "ok": False, "outcome": "failed",
+                   "summary": "timeout after 15s", "output": "Error: timeout"}),
+              (3, {"type": "tool_start", "message_id": "m1", "id": "t2", "name": "file_write", "label": "Writing notes.md"}),
+              (4, {"type": "tool_end", "message_id": "m1", "id": "t2", "name": "file_write", "ok": False, "outcome": "failed",
+                   "output": "Error: disk full"}),
+              (5, {"type": "tool_start", "message_id": "m1", "id": "t3", "name": "custom", "label": "Frobnicating"}),
+              (6, {"type": "tool_end", "message_id": "m1", "id": "t3", "name": "custom", "ok": False, "outcome": "failed"}),
+              (7, {"type": "tool_start", "message_id": "m1", "id": "t4", "name": "file_read", "label": "Reading a.py"}),
+              (8, {"type": "tool_end", "message_id": "m1", "id": "t4", "name": "file_read", "ok": True, "done_label": "Read a.py"})]
+    _, out = run_of(events)
+    labels = [b.label for b in out if isinstance(b, B.ToolLine)]
+    assert labels == ["Couldn't search “x”", "Couldn't write notes.md", "Frobnicating", "Read a.py"]
+
+
 def test_a_passing_check_note_is_not_shown_as_a_warning():
     events = [(0, start()),
               (1, {"type": "answer_note", "message_id": "m1", "note": "Checks pass — test `pytest`: 2 passed",
