@@ -55,12 +55,11 @@ pipeline.
 | Agent being evaluated | EchoSpeak harness + `--model` (qwen3.5:9b) | Any model EchoSpeak serves | Sees source, cases, judge or held-out results |
 | Evidence collector | `harness_eval.py`, `model_recorder.py`, service state files | — (code) | Model-dependent |
 | Verifier | `harness_judge.py` (deterministic), V0–V4 | — (code) | Overridden by a model |
-| AI judge | `harness_ai_judge.py --judge claude:haiku` | `claude:<model>`, `codex`, `ollama:<model>`, `command:` | The model under test; the score's author |
-| Engineering agent | Claude Code (`--driver claude`), Codex (`--driver codex`) | `--driver command` (EchoSpeak on a cloud model later), `manual` | Edits cases, judge, loop or skills; merges or pushes |
+| AI judge | `harness_ai_judge.py --judge claude:haiku` | `claude:<model>`, `codex`, `ollama:<model>` | The model under test; the score's author |
+| Engineering agent | Claude Code (`--driver claude`), Codex (`--driver codex`) | `manual` | Edits cases, judge, loop or skills; merges or pushes |
 | Orchestration controller | `auto_test_fix.py` | — (code) | Grants permissions; touches owner data or other projects |
 
-If EchoSpeak later engineers itself, it does so through `--driver command`. The verifier, the cases, the held-out
-set and the gates stay outside its reach.
+The verifier, evaluation cases, held-out set and controller gates stay outside the engineering driver’s write scope.
 
 ## 4. The five layers
 
@@ -278,26 +277,28 @@ call here ran with `authMethod: claude.ai` and no API key in the environment. Ev
 
 ## 11. Operating the system
 
-```bash
-cd ~/Work/echospeak-env-intelligence/apps/backend
-# Layers 1–3 (and 4 on demand) for any set: dev / heldout / env / cap / everything
-.venv/bin/python scripts/harness_eval.py --set cap --repeat 2 --label my-run --env LEARNING_ENABLED=false
-.venv/bin/python scripts/harness_judge.py data/evals/harness/<run>
-.venv/bin/python scripts/harness_ai_judge.py judge data/evals/harness/<run> --judge claude:haiku --consensus 2
-.venv/bin/python scripts/harness_ai_judge.py calibrate evals/judge_calibration.jsonl --judge claude:haiku
-# Layer 5: the autonomous loop (loop 13)
-.venv/bin/python scripts/auto_test_fix.py run --driver claude --ai-judge claude:haiku \
-    --cases X1,K1,C1,R1,G1,M1 --heldout XH1,MH1,CH1 --repeat 2 --cycles 2 --max-cost-usd 15
-.venv/bin/python scripts/auto_test_fix.py status | stop | review
+Start with the [engineering workflow](../engineering-prompt.md#start-an-engineering-task). Read the saved artifacts and the issue before spending model calls on a new baseline. From the scoped EchoSpeak checkout, install the backend dependencies in `apps/backend/.venv` and check local Ollama for an evaluation that needs fresh inference.
+
+```sh
+cd apps/backend
+
+# Record a local reference run when a new baseline is needed.
+.venv/bin/python scripts/harness_eval.py --set cap --repeat 2 --label baseline --env LEARNING_ENABLED=false
+
+# Set run_dir to the run path printed by harness_eval.py.
+.venv/bin/python scripts/harness_judge.py "$run_dir"
+
+# Launch one issue-backed campaign. Use the cases and bounds agreed for the issue.
+.venv/bin/python scripts/auto_test_fix.py run --issue 122 --driver manual --cases PJ1 --heldout PJH1 --repeat 2 --cycles 1 --minutes 60
+
+# Set session_dir from the path printed by run.
+.venv/bin/python scripts/auto_test_fix.py status --session "$session_dir"
+.venv/bin/python scripts/auto_test_fix.py run --resume --session "$session_dir"
+.venv/bin/python scripts/auto_test_fix.py review --session "$session_dir"
+.venv/bin/python scripts/auto_test_fix.py review --session "$session_dir" --github
+.venv/bin/python scripts/auto_test_fix.py stop --session "$session_dir"
 ```
 
-- **Stops:**
-  - cycles, minutes, cost and token budgets;
-  - a STOP file;
-  - nothing below target, or two rejected cycles in a row;
-  - a security halt, `needs_authorization`, or an engineering agent that didn't finish;
-  - low memory;
-  - **`review`**: the checks pass, but the AI judge flagged the process.
-- **Review:** `auto_test_fix.py review` lists decisions, evidence and commits, and prints the all-case sweep to run
-  before keeping a session's commits.
-- **Keeping a fix:** cherry-pick it from its `auto/<session>` branch. Nothing is pushed or merged by the system.
+`manual` pauses for the engineer to make the fix in the recorded campaign tree, then `run --resume` performs the gates. Verified subscription drivers can make the edit directly. Optional AI review uses a verified subscription or local inference and serves as a second opinion. The deterministic judge remains the source of scores.
+
+The controller respects time, cycle, token, and memory limits. It preserves working changes when a cycle fails or needs review. Resume only the intended session. Keep the raw trace local, include the confirmed cause and independent verification with the GitHub summary, and submit accepted changes through the issue’s scoped PR. Any installation or release gets its own evidence.

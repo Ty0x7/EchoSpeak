@@ -77,7 +77,7 @@ Codex inspected all five completed local Qwen 3.5 9B judge reports at revision `
 | v-long | 3/3 | 9.52 |
 | v-lt1 | 1/1 | 7.60 |
 
-All five judges recorded zero critical findings. The long task used 34 calls. The independent judge confirmed completion while Echo recorded its own result as unverified because it skipped the final check.
+All five judges recorded zero critical findings. The long task used 34 calls. The independent rerun passed all ten tests. The saved trace also shows two successful test runs after the last edit. Echo and the judge failed to recognize the custom runner, so the historical report recorded the result as unverified. [Trace follow-up](https://github.com/Ty0x7/EchoSpeak/issues/121)
 
 ## 5. Retirement candidates (nothing deleted)
 

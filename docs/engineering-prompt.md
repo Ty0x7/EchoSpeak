@@ -6,6 +6,30 @@ Claude Code and Codex use this cycle for EchoSpeak development, each with its ow
 
 Start substantial work by checking the branch, worktree, Git status and acceptance criteria. Read the latest relevant Claude and Codex session records alongside the code, engineering reports and Obsidian notes. Check which findings still reproduce on the target revision and which fixes have already landed. Choose the loops that answer the open questions. For a small change, the objective and a direct check can fit in one sentence.
 
+## Start an engineering task
+
+Open the EchoSpeak repository in Codex or Claude Code. Give the desired outcome or the GitHub issue, one way to tell whether the work succeeded, and the stopping point. Here are three requests you can use as written.
+
+- **Evidence review:** “Review EchoSpeak issue #121. Start with the saved LT1 trace and the recorded release revision. Tell me what ran, what the verifier counted, and which regression test would catch the difference. Update the issue with evidence.”
+- **Scoped fix:** “Work on EchoSpeak issue #121. Reproduce the false negative and add a failing-first test. Verify the fix also rejects commands that only print test-like output. Use one worktree and open a PR with the results. Stop at review.”
+- **Bounded campaign:** “Run one local EchoSpeak improvement cycle for issue #122. Compare the saved partial run with a successful one first. Keep the model, context and budgets comparable, and report the outcome on the issue. Use local inference and either a verified subscription driver or a manual fix.”
+
+The engineering agent reads this workflow and checks local notes, run artifacts, existing patches and issues before rerunning anything. A deterministic replay or a targeted test is usually the first check. A live model run is useful when the open question concerns model behavior, tool choice or end-to-end reliability.
+
+```mermaid
+flowchart LR
+    A[Issue and saved evidence] --> B[Reproduce on a recorded revision]
+    B --> C[Scoped change and regression check]
+    C --> D[Independent verification]
+    D -->|Meets criteria| E[PR and acceptance]
+    D -->|Fails or unclear| F[Preserve evidence and follow up]
+    E --> G[Main and release status]
+```
+
+GitHub holds the task, patch and shareable evidence. Obsidian holds the local timeline and links to the artifacts. A worktree is a separate local checkout for the task. The controller runs isolated evaluations and records each decision. The engineering session uses that evidence to prepare the PR. Merging updates source on `main`. Building, installing and confirming a release are separate recorded actions.
+
+For a controller-assisted effort, use a scoped checkout with the backend environment ready. Use the session directory returned by the controller for review or stop. New runs use `run --issue NUMBER` and explicit bounds. Resume an approved pending fix with `run --resume --session PATH`. Read [the controller operating guide](research/agentic-evaluation.md#11-operating-the-system) for the commands and [the workspace audit](research/workspace-governance.md#follow-up-evidence-inventory) for existing evidence to reuse.
+
 ## Thirteen engineering loops
 
 | Loop | When and how to use it |
