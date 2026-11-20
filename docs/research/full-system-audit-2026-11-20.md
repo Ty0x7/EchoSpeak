@@ -87,4 +87,10 @@ While following up #122, `--only PJ1` and `--only PJH1` both exited successfully
 3. **Research and platform gaps.** The corrected historical research follow-up needs its own local fixture before changing orchestration. Request platform acceptance for real visual tasks, app management and connected services when those environments are available.
 4. **#120 legacy workspace disposition.** Issue remains open for owner review. This campaign has one scoped worktree. Existing worktrees, branches, historical logs and installed files remain available.
 
+### Focused 16K follow-up on #122
+
+The fresh PJ1 run at `120e539` kept Qwen 3.5 9B, the 16,384-token window and `LEAN_CONTEXT_FILL=0.9`. The canonical runner executed after the first edit. A later check showed two of three tests passing. The frame and scoring checks passed. Arrow movement still failed. The run made 60 model calls and nine compactions in 394 seconds. Compaction used 17,198 tokens. The run reached 64,690 of 64,000 budgeted work tokens and stopped at step 52. PJH1 at `f1bb9c2` stopped at the memory guard with 1,486 MiB available and produced no completed case result.
+
+The original judge read an interim statement that one test passed as a claim of full success. It also counted an earlier identical command as a retry after a budget refusal. The verifier labeled the budget stop as authorization. Failing-first tests cover partial and complete claims, true retry after policy denial, and the separate budget reason. Rejudging the same PJ1 evidence moved the score from 4.24 to 5.54 and removed the false critical finding. The independent outcome remains 2/3. The sample establishes that the retry detour can be removed. Multi-module reliability across completed repetitions remains open. [Issue #122](https://github.com/Ty0x7/EchoSpeak/issues/122)
+
 Raw fixture artifacts and judged reports are under the private model-testing workspace’s `evaluations/2026-11-20-full-system-audit`. GitHub contains redacted evidence and source. The matching Obsidian evaluation links both records.

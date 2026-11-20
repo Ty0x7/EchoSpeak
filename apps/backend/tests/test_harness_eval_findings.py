@@ -533,6 +533,8 @@ def test_custom_runner_verification_requires_an_executed_test_after_the_edit():
                    True, "[ok · sandbox]\n10 ran, 0 failed", 2)
     ledger.observe("terminal", command, False, "Not run: Work budget exhausted", 3)
     assert not ledger.checks
+    assert ledger.completion()["status"] == "blocked"
+    assert ledger.completion()["bottleneck"] == "budget"
     ledger.observe("terminal", command, True, "[ok · sandbox]\n0 ran, 0 failed", 4)
     assert ledger.completion()["status"] == "blocked"
     ledger.observe("terminal", command, True, "[ok · sandbox]\n10 ran, 0 failed", 5)

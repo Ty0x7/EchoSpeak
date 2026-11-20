@@ -77,6 +77,7 @@ ENVIRONMENT_ERROR = re.compile(
     r"could not find a version that satisfies)")
 _AUTHORIZATION = re.compile(r"(?i)^(not run:|blocked by echospeak's safety policy)|needs the user's approval|the user (denied|said no)|"
                             r"turned off in settings")
+WORK_BUDGET_REFUSAL = re.compile(r"(?i)^not run: (?:parent )?work budget exhausted\b")
 _NO_TESTS = re.compile(r"(?i)(no tests ran|collected 0 items|\bran 0 tests|\b0 passing|no test files found|no tests found|"
                        r"test result: ok\. 0 passed|testing: 0 tests|no test suite found|\b0 ran, 0 failed)")
 _MODEL_SLIP = re.compile(r"(?i)(invalid tool arguments|again with a json object matching its parameters|unknown tool|is not one of your tools)")
@@ -396,6 +397,9 @@ class VerificationLedger:
                 self._block("model", "several tool calls in a row had malformed arguments or unknown tool names")
             return
         self.model_slips = 0
+        if WORK_BUDGET_REFUSAL.search(head):
+            self._block("budget", head.split("\n", 1)[0])
+            return
         if _AUTHORIZATION.search(head):
             self._block("authorization", head.split("\n", 1)[0])
             return
@@ -692,7 +696,7 @@ class VerificationLedger:
         latest = {c.scope: c for c in self.checks}
         detail = primary.line() if primary else ""
         if primary is None:
-            status = "blocked" if any(b["class"] in {"environment", "authorization"} for b in self.blockers) else "unverified"
+            status = "blocked" if any(b["class"] in {"environment", "authorization", "budget"} for b in self.blockers) else "unverified"
             detail = "nothing checked the work" if self.changes else ""
         elif self.tamper_after_fail:
             status, detail = "unverified", "tests were changed after they failed"
@@ -710,8 +714,8 @@ class VerificationLedger:
             else:
                 status = "verified" if self.objective else "checks_pass"
         else:
-            refused = any(b["class"] == "authorization" and b.get("step", 0) >= primary.step for b in self.blockers)
-            status = "blocked" if primary.environment or primary.no_tests or refused else "failing"
+            blocked = any(b["class"] in {"authorization", "budget"} and b.get("step", 0) >= primary.step for b in self.blockers)
+            status = "blocked" if primary.environment or primary.no_tests or blocked else "failing"
         first = next((c for c in self.checks if primary is not None and c.scope == primary.scope), None)
         return {
             "status": status,
