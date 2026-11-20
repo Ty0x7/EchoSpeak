@@ -5,6 +5,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load(name: str):
     spec = importlib.util.spec_from_file_location(name, Path(__file__).resolve().parents[1] / "scripts" / f"{name}.py")
@@ -231,3 +233,37 @@ def test_evaluation_environment_keeps_sandbox_and_run_paths_when_overridden(tmp_
     assert env["ECHOSPEAK_DATA_DIR"] == str(tmp_path / "backend-data")
     assert env["LOCAL_MODEL_URL"].startswith("http://127.0.0.1:")
     assert env["LEAN_CONTEXT_FILL"] == "0.9"
+
+
+def test_only_can_select_the_project_audit_cases(tmp_path, monkeypatch):
+    heval = _load("harness_eval")
+    monkeypatch.setattr(heval, "OUT", tmp_path / "records")
+    monkeypatch.setenv("HEVAL_PROJECTS_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setattr(sys, "argv", ["harness_eval.py", "--only", "PJ1,PJH1"])
+    seen = []
+
+    def enter(stack):
+        stack.env_used = {}
+        return stack
+
+    def run_case(stack, case, run_dir):
+        seen.append(case.id)
+        return {"turns": [{"seconds": 0, "error": ""}], "model_calls": []}
+
+    monkeypatch.setattr(heval.Stack, "__enter__", enter)
+    monkeypatch.setattr(heval, "run_case", run_case)
+    assert heval.main() == 0
+    assert seen == ["PJ1", "PJH1"]
+
+
+@pytest.mark.parametrize("args", [["--only", "D1,TYPO"], ["--repeat", "0"]])
+def test_invalid_selection_fails_before_starting_a_run(tmp_path, monkeypatch, args):
+    heval = _load("harness_eval")
+    monkeypatch.setattr(heval, "OUT", tmp_path / "records")
+    monkeypatch.setenv("HEVAL_PROJECTS_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setattr(sys, "argv", ["harness_eval.py", *args])
+    monkeypatch.setattr(heval.Stack, "__enter__", lambda self: pytest.fail("started an invalid evaluation"))
+    with pytest.raises(SystemExit) as error:
+        heval.main()
+    assert error.value.code == 2
+    assert not heval.OUT.exists()

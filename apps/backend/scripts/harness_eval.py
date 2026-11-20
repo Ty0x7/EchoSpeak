@@ -1327,8 +1327,19 @@ def main() -> int:
     parser.add_argument("--skill", action="append", default=[], help="A/B arm: SKILL.md to import and approve (repeatable)")
     args = parser.parse_args()
     assert_local(args.upstream)
-    chosen = {c.strip() for c in args.only.split(",") if c.strip()}
-    cases = [c for c in SETS["everything" if chosen else args.set] if not chosen or c.id in chosen]
+    if args.repeat < 1:
+        parser.error("--repeat must be at least 1")
+    cases = SETS[args.set]
+    if args.only:
+        chosen = {case_id.strip() for case_id in args.only.split(",") if case_id.strip()}
+        if not chosen:
+            parser.error("--only requires at least one case ID")
+        # Explicit IDs can select any registered case, including suites outside the broad sweep.
+        candidates = {case.id: case for group in SETS.values() for case in group}
+        unknown = chosen - candidates.keys()
+        if unknown:
+            parser.error("unknown case IDs: " + ", ".join(sorted(unknown)))
+        cases = [case for case in candidates.values() if case.id in chosen]
     run_dir = OUT / f"{time.strftime('%Y%m%d-%H%M%S')}-{args.label}"
     run_dir.mkdir(parents=True)
     projects_root(run_dir).mkdir(parents=True, exist_ok=True)
