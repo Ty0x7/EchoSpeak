@@ -74,6 +74,15 @@ def context_tokens(endpoint: Any = None) -> int:
     return max(local, 64000)
 
 
+def context_fill() -> float:
+    """The share of the window a turn may fill before older work is trimmed and compacted (LeanTurn._fit_context),
+    after the reply's reserve. Clamped to 0.6–0.92; window.py catches a prompt the server cut anyway."""
+    try:
+        return min(0.92, max(0.6, float(_setting("lean_context_fill", 0.8))))
+    except (TypeError, ValueError):
+        return 0.8
+
+
 def max_output_tokens(endpoint: Any = None) -> int:
     try:
         budget = max(256, int(_setting("lean_max_output_tokens", 8192)))
