@@ -197,18 +197,40 @@ def test_a_read_after_the_file_changed_starts_the_count_again(tmp_path):
     assert turn._note_reread(_read_result(str(target), GAME_JS)) == ""  # changed: a fresh first read
 
 
-def test_rereads_are_not_progress_for_automatic_continuation(tmp_path):
+def test_ranged_reads_never_count_and_the_note_comes_once(tmp_path):
+    # Live PJ1 after the first version: the note asked for offset/limit reads, then counted them, and fired on
+    # nearly every read (world.py 15 times).
+    target = tmp_path / "world.py"
+    text = "\n".join(f"line {n}" for n in range(1, 101))
+    target.write_text(text)
+    box, _ran = _project(tmp_path)
+    turn = _turn(box, Client([]), [], [])
+    lines = text.splitlines()
+
+    def ranged(start: int, count: int) -> str:
+        body = "\n".join(f"{n:>3}| {lines[n - 1]}" for n in range(start, start + count))
+        return f"{target} (100 lines)\n{body}"
+
+    whole = _read_result(str(target), text)
+    assert turn._note_reread(whole) == "" and turn._note_reread(whole) == ""
+    for start in (1, 20, 40, 60, 80):
+        assert turn._note_reread(ranged(start, 20)) == ""  # what the note asks for is never held against it
+    assert "3 times" in turn._note_reread(whole)
+    assert turn._note_reread(whole) == "" and turn._note_reread(whole) == ""  # once, not on every later read
+    assert turn._rereads == 1
+
+
+def test_rereads_dont_stop_automatic_continuation(tmp_path):
+    # Tried and dropped: subtracting re-reads from a stretch's progress ended a live LT1 run at step 24 with 5 of 10
+    # tests passing while the work was still moving.
     box, _ran = _project(tmp_path)
     turn = _turn(box, Client([]), [], [])
     turn.auto_continue = True
     turn._outcomes = [True] * 12
     turn._segment = (0, 0)
     turn._extended = 0
-    calls = {f"sig{i}": 1 for i in range(12)}
-    turn._rereads = 11  # eleven of the twelve "new" calls were re-reads of unchanged files
-    assert not turn._continue_past([], 12, 12, calls)
-    turn._segment, turn._rereads, turn._segment_rereads = (0, 0), 0, 0
-    assert turn._continue_past([], 12, 12, calls)  # twelve real new actions do continue
+    turn._rereads = 11
+    assert turn._continue_past([], 12, 12, {f"sig{i}": 1 for i in range(12)})
 
 
 # ── 2. what a turn did reaches the next turn ─────────────────────────────

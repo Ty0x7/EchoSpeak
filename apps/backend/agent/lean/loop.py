@@ -313,13 +313,12 @@ class LeanTurn:
         # changed or been summarised away (_forget_reads).
         self._call_counts: dict[str, int] = {}
         self._read_sigs: set[str] = set()
-        # Files read in this request, by path: how often while unchanged (file size and time), and their outline
-        # for compaction. Re-reads of an unchanged file aren't progress (_continue_past); the third one says why
-        # re-reading can't fit (owner's GTA session, 19 November 2026: 37 of 49 steps were re-reads).
+        # Files read in this request, by path: how often in full while unchanged (file size and time), and their
+        # outline for compaction. The third whole read says why re-reading can't fit (owner's GTA session,
+        # 19 November 2026: 37 of 49 steps were re-reads).
         self._path_reads: dict[str, tuple[int, tuple[int, int]]] = {}
         self._read_shapes: dict[str, str] = {}
         self._rereads = 0
-        self._segment_rereads = 0
         # Tools that brought outside content into this request (shared by every
         # agent working on it). Drives the Rule-of-Two policy in agent/lean/policy.py.
         self.taint: list[str] = taint if taint is not None else []
@@ -608,7 +607,7 @@ class LeanTurn:
         self._extended, self._segment = 0, (0, len(self._outcomes))
         call_counts: dict[str, int] = {}
         self._call_counts, self._read_sigs = call_counts, set()
-        self._path_reads, self._read_shapes, self._rereads, self._segment_rereads = {}, {}, 0, 0
+        self._path_reads, self._read_shapes, self._rereads = {}, {}, 0
         stop_reason = ""
         nudges = 0
         approval_nudged = False
@@ -1519,10 +1518,13 @@ class LeanTurn:
         self._read_shapes[path] = shape if fresh or len(shape) >= len(old) else old
 
     def _note_reread(self, output: str) -> str:
-        """Count a read of a file while it stays unchanged. From the third, a note on why re-reading can't help."""
-        path = read_outline.read_path(output)
-        if not path:
+        """Count whole reads of a file while it stays unchanged; the third gets a note, once, on why re-reading
+        can't help. Ranged reads (offset/limit, what the note asks for) never count: counting them made the note
+        fire on nearly every read of a live run (PJ1: world.py 15 times) and contradict its own advice."""
+        parsed = read_outline.parse(output)
+        if parsed is None:
             return ""
+        path, total, numbered = parsed
         try:
             stat = Path(path).stat()
             stamp = (int(stat.st_size), int(stat.st_mtime_ns))
@@ -1530,10 +1532,11 @@ class LeanTurn:
             stamp = (0, 0)
         count, seen = self._path_reads.get(path, (0, stamp))
         changed = seen != stamp
-        count = 1 if changed else count + 1
+        whole = numbered[0][0] == 1 and numbered[-1][0] >= total
+        count = (0 if changed else count) + (1 if whole else 0)
         self._path_reads[path] = (count, stamp)
         self._remember_shape(path, output, fresh=changed)
-        if count < 3:
+        if count != 3 or not whole:
             return ""
         self._rereads += 1
         window = settings.context_tokens(getattr(self.client, "endpoint", None))
@@ -1701,10 +1704,10 @@ class LeanTurn:
             return False
         seen, outcomes = self._segment
         recent = self._outcomes[outcomes:]
-        # A re-read of an unchanged file has new arguments (another offset) but gets nothing done.
-        new_actions = len(call_counts) - seen - (self._rereads - self._segment_rereads)
+        # Re-reads aren't subtracted here: tried in the conversation audit (19 November), it ended a live LT1 run at
+        # step 24 with 5 of 10 tests passing while the work was still moving (ranged reads count as new actions).
+        new_actions = len(call_counts) - seen
         self._segment = (len(call_counts), len(self._outcomes))
-        self._segment_rereads = self._rereads
         if new_actions < max(2, max_steps // 6) or not recent or sum(recent) * 3 < len(recent):
             return False
         self._extended += max_steps
