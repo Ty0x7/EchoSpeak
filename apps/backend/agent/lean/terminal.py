@@ -294,10 +294,38 @@ def launcher_note(command: str, code: int, out: str, err: str, where: str) -> st
     return ""
 
 
-def failure_hint(code: int, text: str, where: str, command: str = "", shell: str = "") -> str:
+_NO_PYTEST = re.compile(r"no module named (?:'?pytest'?|pytest\b)", re.I)
+_NO_PIP = re.compile(r"no module named (?:'?pip'?|pip\b)|externally-managed-environment", re.I)
+
+
+def python_hint(text: str, cwd: str = "") -> str:
+    """Why `python3 -m pytest` or `pip install` didn't work, and the way that does.
+
+    The agent's sandbox (and many Linux systems) has a system `python3` without pytest or pip, while the `pip` and
+    `pytest` on the PATH belong to another Python: `pip install pytest` reports success and `python3 -m pytest` still
+    fails. Live LT1 retest, 19 November 2026: nine runs of "No module named pytest", then "couldn't verify".
+    """
+    low = text or ""
+    if not (_NO_PYTEST.search(low) or _NO_PIP.search(low)):
+        return ""
+    venv = Path(cwd) / ".venv" / "bin" / "python" if cwd else None
+    if venv is not None and venv.exists():
+        return ("Hint: this project has its own environment: run its tests with `.venv/bin/python -m pytest` and install "
+                "with `.venv/bin/python -m pip install …` (network=true), not the system python3 or pip.")
+    other = shutil.which("pytest")
+    route = "`pytest` itself works (it brings its own Python), or " if other and _NO_PYTEST.search(low) else ""
+    return ("Hint: `python3` here has no pytest or pip, and `pip` installs into a different Python, so installing "
+            f"won't fix it. {route}give the project its own environment: `python3 -m venv .venv && .venv/bin/python "
+            "-m pip install pytest` (network=true), then `.venv/bin/python -m pytest`. Or run unittest-style tests with "
+            "`python3 -m unittest`.")
+
+
+def failure_hint(code: int, text: str, where: str, command: str = "", shell: str = "", cwd: str = "") -> str:
     """One line on the usual cause of a failure small models get stuck on."""
     low = (text or "").lower()
     first = _first_word(command)
+    if (hint := python_hint(text, cwd)):
+        return hint
     if code == 1 and not (text or "").strip() and (first in {"grep", "rg", "findstr", "egrep", "fgrep"}
                                                    or re.match(r"\s*git\s+(?:diff|grep)\b", command or "")):
         # Claude Code's PowerShell tool treats these the same way.
@@ -1311,7 +1339,8 @@ class Terminal:
         body = _clip(launch.out.strip(), 400_000) or ("(no output)" if not launch.err.strip() else "")
         if launch.err.strip():
             body = (body + "\n" if body else "") + "[stderr]\n" + _clip(launch.err.strip(), 6000)
-        hint = (failure_hint(launch.code, launch.out + "\n" + launch.err, where, command, self.shell_for(args, where))
+        hint = (failure_hint(launch.code, launch.out + "\n" + launch.err, where, command, self.shell_for(args, where),
+                             cwd=str(cwd))
                 if launch.code != 0 else launcher_note(command, launch.code, launch.out, launch.err, where))
         return f"[{status} · {elapsed:.1f}s · {label} · {cwd}]\n{body}" + (f"\n{hint}" if hint else "")
 

@@ -368,6 +368,26 @@ def test_other_commands_get_no_opener_note():
     assert launcher_note("chromium --headless --dump-dom index.html", 0, "<html>…</html>", "", "host") == ""
 
 
+# ── 5. Python tests in the sandbox (LT1 retest: nine "No module named pytest" in one run) ──────────
+def test_a_missing_pytest_says_which_python_and_how_to_run_the_tests(tmp_path):
+    from agent.lean.terminal import failure_hint
+
+    hint = failure_hint(1, "/usr/bin/python3: No module named pytest", "bwrap", "python3 -m pytest -q", cwd=str(tmp_path))
+    assert "python3" in hint and "venv" in hint and ".venv/bin/python -m pytest" in hint
+    (tmp_path / ".venv" / "bin").mkdir(parents=True)
+    (tmp_path / ".venv" / "bin" / "python").write_text("")
+    hint = failure_hint(1, "/usr/bin/python3: No module named pytest", "bwrap", "python3 -m pytest -q", cwd=str(tmp_path))
+    assert hint.startswith("Hint: this project has its own environment") and ".venv/bin/python -m pytest" in hint
+
+
+def test_pip_into_the_wrong_python_is_explained():
+    from agent.lean.terminal import failure_hint
+
+    assert "venv" in failure_hint(1, "/usr/bin/python3: No module named pip", "bwrap", "python3 -m pip install pytest")
+    assert "venv" in failure_hint(1, "error: externally-managed-environment", "host", "pip install requests")
+    assert failure_hint(1, "ModuleNotFoundError: No module named 'textkit'", "bwrap", "python3 run_tests.py") == ""
+
+
 def test_the_terminal_tool_puts_the_opener_note_on_a_successful_run(tmp_path, monkeypatch):
     from agent.lean import terminal as terminal_module
 
