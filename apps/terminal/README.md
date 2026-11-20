@@ -73,7 +73,7 @@ Options: `--plain` (line REPL, no colours) · `--no-anim` · `--ascii` · `--no-
 ### In the TUI
 
 ```text
- ▗▄▄▄▄▄▖  EchoSpeak  v11.14.1 · terminal
+ ▗▄▄▄▄▄▖  EchoSpeak  v11.15.0 · terminal
  ▐█ █ █▌  Echo · Personal agent · qwen3.5:9b (ollama)
  ▝▀▀▀▀▀▘  ~/Work/proj · project proj · ask for risky actions
 
