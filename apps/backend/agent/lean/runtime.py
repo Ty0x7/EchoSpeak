@@ -1185,13 +1185,14 @@ class LeanSession:
         elif not guest and self.code_first and self._local_model(persona):
             # Native Code on a local model: engineering tools up front; the rest load through find_tools.
             from agent.lean import code_mode
-            toolbox.focus(code_mode.focus())
+            toolbox.focus(code_mode.focus(), named_in=message)
         elif not guest and self._small_builder(persona):
             # A builder on a local model sees its file, terminal and team tools; the rest load on demand.
-            toolbox.focus(BUILDER_FOCUS)
+            toolbox.focus(BUILDER_FOCUS, named_in=message)
         elif not guest and self._local_model(persona):
             # Any other agent on a local model: everyday tools up front, the rest through find_tools (R12).
-            toolbox.focus(chat_mode.COMPACT_FOCUS if chat_run is not None and chat_run.profile == "compact" else CHAT_FOCUS)
+            toolbox.focus(chat_mode.COMPACT_FOCUS if chat_run is not None and chat_run.profile == "compact" else CHAT_FOCUS,
+                          named_in=message)
         if toolbox.deferred and not read_only:
             # What the request itself names strongly (agent_sessions for "codex and claude sessions") is listed
             # up front instead of waiting for a find_tools call a small model doesn't think to make.
@@ -1404,7 +1405,8 @@ class LeanSession:
             turn.answer_review = chat_run.review
             turn.claim_nudge_limit = 0  # an untrue "I did it" is noted under the answer, not rewritten
             turn.memory_repair = True   # ...but a claimed save that did not happen gets one step to happen (LS3)
-            turn.max_steps_override = chat_run.budget
+            turn.max_steps_override = chat_run.ceiling
+            turn.step_limit = chat_run.chat_steps  # the research budget, extended by connected-app work
             turn.final_grace = True
             turn.grace_prompt = chat_run_mod.GRACE_PROMPT
             self._chat_run = chat_run

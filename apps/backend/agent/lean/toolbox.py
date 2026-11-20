@@ -375,6 +375,9 @@ def _compact_schema(schema: dict[str, Any]) -> dict[str, Any]:
     return compact
 
 
+# The most tools a request that names connected apps keeps listed on a focused model (Toolbox.named_app_tools).
+NAMED_APP_TOOLS = 12
+
 class Toolbox:
     def __init__(
         self,
@@ -462,22 +465,50 @@ class Toolbox:
             func=self._find_tools,
         )
 
-    def focus(self, keep: set[str]) -> None:
+    def named_app_tools(self, text: str) -> set[str]:
+        """Tools of the connected apps the request names ("reset omar_t's password in the accounts service").
+
+        A clean X1/XH1 comparison (18 November 2026) told qwen3.5:9b "Connected apps: accounts" and it still searched
+        the files for "the accounts service" in 7 of 8 runs: it never chose find_tools. When the owner names the app,
+        nothing needs choosing. At most NAMED_APP_TOOLS, so a broadly named app can't undo the focus.
+        """
+        words = set(re.findall(r"[a-z0-9]+", str(text or "").lower()))
+        by_app: dict[str, set[str]] = {}
+        for name in self.entries:
+            app = self._app(name).strip().lower()
+            if app and str(getattr(self.entries.get(name), "origin", "")) in {"mcp", "connection"}:
+                by_app.setdefault(app, set()).add(name)
+        named = set()
+        for app, names in sorted(by_app.items()):
+            if set(app.split()) <= words and len(named | names) <= NAMED_APP_TOOLS:
+                named |= names
+        return named
+
+    def focus(self, keep: set[str], named_in: str = "") -> None:
         """Send only `keep`'s schemas; every other tool waits behind find_tools, still callable by name.
 
         For small local models (Claude Code defers its rarely used tools the same way): a 4B
-        builder offered 58 tools spent minutes per step and chose worse among them.
+        builder offered 58 tools spent minutes per step and chose worse among them. The tools of a connected
+        app that ``named_in`` (the request) names stay listed.
         """
+        keep = set(keep) | (self.named_app_tools(named_in) if named_in else set())
         held = {name for name in self.entries if name not in keep}
         held |= {name for name, tool in self.native.items()
                  if name not in keep and name != "find_tools" and not tool.always and not tool.hidden}
         if not held:
             return
+        # Connected apps newly held here are named, or a model asked to use "the accounts service" sees six
+        # alphabetical built-ins as examples and concludes the app isn't there (eval X1). Apps already deferred by
+        # the inline limit are named in that note.
+        apps = sorted({self._app(name).strip() for name in held - self.deferred
+                       if str(getattr(self.entries.get(name), "origin", "")) in {"skill", "mcp", "connection"}} - {""})
         self.deferred |= held
         self._offer_find_tools()
         self.schema_version += 1
+        named = f" Connected apps: {', '.join(apps)}; find_tools with an app's name loads its tools." if apps else ""
         self.notes.append(f"Only your main tools are listed, to keep this model focused. {len(held)} more "
-                          f"(for example {', '.join(sorted(held)[:6])}) load when you call find_tools with what you need.")
+                          f"(for example {', '.join(sorted(held)[:6])}) load when you call find_tools with what you need."
+                          + named)
 
     # Words that say nothing about which tool is meant.
     _PLAIN = frozenset("""a an and are as at be by can do does did for from get give go have help how i if in into is it
@@ -534,6 +565,14 @@ class Toolbox:
         tool = self.native.get(name)
         return str(tool.description if tool else getattr(self.entries.get(name), "description", "") or "")
 
+    def _app(self, name: str) -> str:
+        """The connected app a tool belongs to, followed by a space, or "" for EchoSpeak's own tools."""
+        entry = self.entries.get(name)
+        app = str(getattr(entry, "mcp_server", "") or "").split(":")[-1] if entry is not None else ""
+        if not app and name.startswith("mcp__") and name.count("__") >= 2:
+            app = name.split("__")[1]
+        return f"{app.replace('_', ' ')} " if app else ""
+
     def _find_tools(self, args: dict[str, Any]) -> str:
         words = [w for w in re.findall(r"[a-z0-9]+", str(args.get("query") or "").lower()) if len(w) > 1]
         if not words:
@@ -541,7 +580,9 @@ class Toolbox:
         from agent import semantic
 
         pool = sorted(self.deferred | {n for n in self.entries if n not in self.deferred and n.startswith("mcp__")})
-        texts = [f"{name.split('__')[-1].replace('_', ' ')}: {self._description(name)}" for name in pool]
+        # A connected app's name is part of what matches: "the accounts service" finds the accounts app's tools.
+        texts = [f"{self._app(name)}{name.split('__')[-1].replace('_', ' ')}: {self._description(name)}"
+                 for name in pool]
         # By meaning too, when the local embedding model is installed: "make the video brighter"
         # finds a tool called adjust_lumetri. Keywords alone otherwise (agent/semantic.py).
         meaning = semantic.similarities(str(args.get("query") or ""), texts) or [0.0] * len(pool)

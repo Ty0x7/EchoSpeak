@@ -65,6 +65,9 @@ def _tools(log: list[str]) -> dict[str, NativeTool]:
         "web_search": NativeTool(name="web_search", description="search", parameters=schema, func=search, parallel_safe=True),
         "safe_web_fetch": NativeTool(name="safe_web_fetch", description="read a page", parameters=schema, func=fetch, parallel_safe=True),
         "file_read": NativeTool(name="file_read", description="read a file", parameters=schema, func=read_file, parallel_safe=True),
+        **{name: NativeTool(name=name, description="a connected app's action", parameters=schema,
+                            func=lambda args, _n=name: (log.append(_n.split("__")[-1]), "ok")[1])
+           for name in ("mcp__accounts__register_user", "mcp__accounts__verify_email", "mcp__accounts__login")},
     }
 
 
@@ -80,7 +83,8 @@ def _chat_turn(script: Script, *, profile: str = "full", earlier=(), user: str =
                     cancel=threading.Event(), persist_tool_runs=False)
     turn.tool_observer = run.observe
     turn.final_check = run.check_answer
-    turn.max_steps_override = run.budget
+    turn.max_steps_override = run.ceiling
+    turn.step_limit = run.chat_steps
     turn.final_grace = True
     turn.grace_prompt = chat_run.GRACE_PROMPT
     return turn, run, log
@@ -221,11 +225,11 @@ def test_a_small_local_model_gets_the_compact_contract_and_fewer_tools(env, monk
     chats, _ = env
     small = _session(monkeypatch, chats, "qwen/qwen3-4b")
     turn = small._build_turn(small._chat_persona(), "hi", history=[], depth=0)
-    assert small._chat_run.profile == "compact" and turn.max_steps_override == 6
+    assert small._chat_run.profile == "compact" and turn.step_limit() == 6 and turn.max_steps_override == 6 + chat_run.APP_STEPS
     assert "## When to use tools" not in turn.system_prompt and "## How to answer" in turn.system_prompt
     large = _session(monkeypatch, chats, "qwen/qwen3-32b")
     big_turn = large._build_turn(large._chat_persona(), "hi", history=[], depth=0)
-    assert large._chat_run.profile == "full" and big_turn.max_steps_override == 10
+    assert large._chat_run.profile == "full" and big_turn.step_limit() == 10
     assert len(turn.system_prompt) < len(big_turn.system_prompt) * 0.7
 
 
@@ -258,3 +262,22 @@ def test_the_run_trace_is_saved_on_the_execution(env, monkeypatch):
     assert trace["path"] == "direct" and trace["profile"] == "full" and trace["stop_reason"] == "answered"
     assert trace["context"]["prompt_chars"] > 0 and "rules" in trace["context"]["sections"]
     assert "Hello" not in str(trace)  # refs and sizes only: no prompt or reply text
+
+
+def test_work_in_a_connected_app_gets_room_to_finish():
+    """Clean X1 comparison, 18 November 2026: "create the account, verify the email, sign in" spent the 6-step research
+    budget on a detour and ended mid-task. Each connected-app call adds a step, up to chat_run.APP_STEPS."""
+    script = Script([_call("web_search", query=f"accounts {i}") for i in range(5)]
+                    + [_call("mcp__accounts__register_user"), _call("mcp__accounts__verify_email"),
+                       _call("mcp__accounts__login"), ModelTurn(content="Created, verified and signed in.")])
+    turn, run, log = _chat_turn(script, profile="compact")
+    result, _trace = _finish(turn, run, "Create Lena's account, verify it and sign in")
+    assert log[-3:] == ["register_user", "verify_email", "login"]
+    assert result.stop_reason != "max_steps" and result.text == "Created, verified and signed in."
+
+
+def test_connected_app_steps_are_bounded():
+    script = Script([_call("mcp__accounts__login", attempt=i) for i in range(20)] + [ModelTurn(content="Stopped.")])
+    turn, run, log = _chat_turn(script, profile="compact")
+    result, _trace = _finish(turn, run, "Sign in")
+    assert len(log) == run.budget + chat_run.APP_STEPS == run.ceiling and result.stop_reason == "max_steps"
