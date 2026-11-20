@@ -476,6 +476,7 @@ def test_a_supplied_or_existing_reviewer_byline_is_preserved(env, monkeypatch, b
 
 @pytest.mark.parametrize("tool, arguments", [
     ("file_write", {"content": "**Approved by:** Mesa (Custodian)"}),
+    ("file_write", {"content": "Reviewed by Mesa (Custodian)"}),
     ("create_artifact", {"content": "- Reviewed by: Mesa"}),
     ("update_artifact", {"edits": [{"find": "Pending", "replace": "Signed off by: Mesa"}]}),
 ])

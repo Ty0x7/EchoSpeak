@@ -107,7 +107,8 @@ def correct_delegation_attribution(reply: str, unavailable: tuple[str, ...]) -> 
 
 
 _REVIEW_LABEL = r"(?:reviewed|approved|signed off)[ \t]+by"
-_REVIEW_BYLINE = re.compile(rf"(?im)^[ \t]*(?:[-*+][ \t]+)?({_REVIEW_LABEL})[ \t]*:[ \t]*(.+)$")
+_BYLINE_SEPARATOR = r"(?:[ \t]*:[ \t]*|[ \t]+)"
+_REVIEW_BYLINE = re.compile(rf"(?im)^[ \t]*(?:[-*+][ \t]+)?({_REVIEW_LABEL}){_BYLINE_SEPARATOR}(.+)$")
 
 
 def artifact_attribution_problem(tool: str, args: dict[str, Any], unavailable: tuple[str, ...], request: str) -> str:
@@ -135,7 +136,7 @@ def artifact_attribution_problem(tool: str, args: dict[str, Any], unavailable: t
                 target = rf"@?{re.escape(name)}(?=$|[\s(.,;])"
                 if not re.match(target, value, re.I):
                     continue
-                supplied = rf"\b{re.escape(label)}[ \t]*:[ \t]*{target}"
+                supplied = rf"\b{re.escape(label)}{_BYLINE_SEPARATOR}{target}"
                 if not re.search(supplied, existing, re.I):
                     return (f"Draft was not saved because it names {name} as the reviewer or approver, and no handoff "
                             "to that agent was available in this turn. Use a reviewer supported by the tool results "
