@@ -17,7 +17,7 @@ The fourth durable user item and its execution preview both ended mid-word at ex
 
 The stream traces show four fetches across turns 3 and 4. SQLite contains only the first two fetch tool runs. The second turn reused their fixed IDs, and the store kept the first terminal records. The execution-level tool lists were empty. The hardware claims had no lookup or other independent evidence in the turn. The profile's text and any hypotheses in the reply are not verified hardware facts.
 
-## Changes and boundaries
+## Changes and boundaries in the first candidate
 
 - Echo recognizes an explicit offer to send a list and gives one acknowledgement. The staged offer belongs to that owner conversation. A short backup-status paste may intervene once. Each transition is bounded to 30 minutes. A new thread, cancellation or other intervening prompt clears the staged path. An explicit `Remember this list:` also works in a direct owner conversation.
 - Recognized short facts enter the existing `memory_save` tool, with its scope checks, secret filters, tool policy and disk readback. The receipt reports new records, existing records, failed verification and unsupported lines. Inputs within a fenced block stay in the conversation. An exact save of the same key and value keeps its original provenance and produces no new save event. Contradictory values for a single key are left for clarification. A batch attempts at most 24 entries.
@@ -49,3 +49,30 @@ The focused backend regression suite passed **255 tests**. It included failed-wr
 - Mixed prose and copied documents need explicit intake and per-fact grounding. The candidate saves supported fields and reports omissions. The original profile contains contextual prose and technical lists outside the supported grammar. A read-only dry replay recognized the offer, the intervening note and the available profile prefix. It made no changes to the actual memory store. The source-bound update check also remains open for corrections whose new record repeats the retired value. [Issue #136](https://github.com/Ty0x7/EchoSpeak/issues/136)
 - The explicit release-history fetch still needs a configured source appropriate for a private upstream. The local running version remains available offline. [Issue #137](https://github.com/Ty0x7/EchoSpeak/issues/137)
 - Reasoning-only responses recovered in the original model traces. The deterministic intake removes those calls from this workflow. General model behavior and the original missing transcript tail remain outside this fix.
+
+## PR #138 acceptance and remediation
+
+Independent review of `5f0bdec` reproduced unwanted saves after a refusal, promotion of chat- or project-only facts to the account, and two active values after a labeled correction. The new failing-first regressions exercise these cases plus unconfirmed staging, an unavailable project and legacy field records. Adjacent checks found that recall could match both projects when they shared a path, and chat search could return the original scoped source. [Pinned review](https://github.com/Ty0x7/EchoSpeak/pull/138#issuecomment-7050115365)
+
+A past offer now provides conversational context. The current message must authorize its own write. Start a structured list with `Remember this list:`. Use `Remember this list for this chat only:` or `Remember this list for this project only:` for a restricted scope. A project write requires the active project, and a conflicting scope leaves the store alone. The same restriction applies to memory tools and to assistant recalls of scoped source turns. Scoped text stays out of portable chat summaries. The conversation records remain available to the owner.
+
+Both labeled values and supported personal fields use a stable key. Corrections link the new active record to the previous values inside the same owner and scope. Exact legacy field identities participate in supersession. The lookup checks canonical owner, context, active state and text before exposing lexical or vector matches. Legacy project records with a known ID require that ID. Older path-only records retain their path match.
+
+### Verification on the revised code
+
+The original review fixture passed **15/15** on the final code. The focused backend suite passed **367 tests** with **5 skips**. Two scripted chat-search regressions reproduced the archive bypass before the fix and now pass. The vector tests use fixture results with shared paths and stale content. The live machine used lexical recall.
+
+The native harness ran both versions against local Qwen 3.5 9B at 16K using disposable chats and two projects. Read-only checks inspected `records.json` and SQLite after the isolated runtime exited.
+
+| Check | Main `fb0849b` | Revised code `59e4b68` |
+| --- | --- | --- |
+| Persistent records after an explicit read-only request | 0 | 0 and the summary was delivered |
+| Records after an unconfirmed follow-up list | 2 account records | 0 |
+| Project-only entry visible in the other project | Returned the working label | No scoped label returned |
+| Retired project label present in active record text | Present | Absent |
+| Active records by scope | 6 account, 0 project, 0 session | 2 account, 2 project, 2 session |
+| Matched 12-turn wall time | 127.9 s | 41.5 s |
+
+The acceptance run added two held-out turns. The chat-only alias was recalled in its own conversation. The other project exercised the real `chat_search` tool and received none of the restricted values. Canonical readback verified original and correction execution IDs, both supersession links, scoped record counts and the archive scope on replies derived from restricted context.
+
+The actual owner store and all eight audited message items matched the earlier capture in a read-only check. The installed application reported 11.15.0. This change is source-only and awaits owner approval on PR #138. No separately billed model API was used. Mixed-prose memory changes and private release history remain tracked on #136 and #137. [PR #138](https://github.com/Ty0x7/EchoSpeak/pull/138)
