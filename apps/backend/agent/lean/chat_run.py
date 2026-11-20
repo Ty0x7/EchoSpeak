@@ -53,6 +53,10 @@ _SELF = re.compile(r"(?i)\becho ?speak\b")
 # Fetching the releases page for it cost two calls and 20 seconds (live audit replay, 17 November 2026).
 _SELF_UPDATES = re.compile(r"(?i)\b(latest|newest|recent|new|updates?|changes?|changelog|releases?|pull requests?|prs?|what'?s new)\b")
 # A page that covers less than this share of the question's terms doesn't support an answer to it.
+_SELF_UPDATE_REQUEST = re.compile(
+    r"(?i)^\s*(?:please\s+)?(?:what(?:['’]s| is| are)|when(?:['’]s| was| is)|any|has|did|"
+    r"check|show(?: me)?|tell me|look up|find|list|summarize|give me)\b"
+)
 RELEVANT = 0.34
 SEARCH_TOOLS = {"web_search", "image_search", "video_search", "product_search"}
 PAGE_TOOLS = {"safe_web_fetch", "youtube_transcript"}
@@ -253,7 +257,8 @@ class ChatRun:
         """
         from agent.search_rank import urls_in
         urls = urls_in(self.user_message)[:3]
-        if not urls and _SELF.search(self.user_message) and _SELF_UPDATES.search(self.user_message):
+        first = re.split(r"(?<=[.!?])\s+|\n", self.user_message.strip(), maxsplit=1)[0]
+        if not urls and _SELF_UPDATE_REQUEST.match(first) and _SELF.search(first) and _SELF_UPDATES.search(first):
             # "What's new in EchoSpeak?": the app knows its own source. Other apps share the name, and a
             # web search for it found them (live test, 11.11.3).
             urls = [f"{SELF_REPO}/pulls", f"{SELF_REPO}/releases"]

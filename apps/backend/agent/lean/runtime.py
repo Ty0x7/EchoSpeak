@@ -432,6 +432,24 @@ class LeanSession:
             default_persona = members[0] if members else self.personas.default()
         self._lead_id = default_persona.id
         endpoint = self._endpoint_for(default_persona)
+        list_phase, list_payload = "", None
+        if (self.caller_role == "owner" and self.source in INTERACTIVE_SOURCES and self._owner_side(default_persona)
+                and not (self.room and self.room.kind == "group") and not self.work_id
+                and getattr(self.agent, "memory", None) is not None):
+            previous = next(iter(store.list_executions(self.session_id, limit=1)), None)
+            pending = (str((previous.metadata or {}).get("memory_list") or "") if previous
+                       and previous.status == "completed" and time.time() - previous.created_at <= memory_quality.LIST_WAIT_SECONDS
+                       else "")
+            waiting = pending in {"waiting", "waiting_after_status"}
+            if memory_quality.list_offer(message):
+                list_phase = "waiting"
+            elif memory_quality.list_declined(message, waiting=waiting):
+                list_phase = "declined"
+            elif pending == "waiting" and memory_quality.list_status_paste(message):
+                list_phase = "waiting_after_status"
+            elif (entries := memory_quality.list_entries(message, waiting=waiting)) is not None:
+                list_phase, list_payload = "intake", entries
+        self._memory_list_phase, self._memory_list_payload = list_phase, list_payload
         execution = store.create_execution(
             request_id=self.request_id,
             kind="query",
@@ -439,6 +457,7 @@ class LeanSession:
             source=self.source,
             status="running",
             query=message[:4000],
+            user_message=message,
             # A check-in's prompt is Echo's own context, not something the owner said.
             record_user_message=self.source != "heartbeat",
             workspace_id=str(state.workspace_id or ""),
@@ -450,7 +469,7 @@ class LeanSession:
             phase="running",
             metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else "",
                       "hidden_prompt": self.source == "heartbeat",
-                      "environment": self.environment},
+                      "environment": self.environment, **({"memory_list": list_phase} if list_phase else {})},
         )
         self.execution_id = execution.id
         self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else "",
@@ -509,7 +528,7 @@ class LeanSession:
         # Was what the owner asked to be created actually created (agent/lean/deliverable.py)? From the
         # tools that ran, never from the reply. Only the owner's own request is a deliverable.
         delivered = None
-        if not cancelled and success and self.caller_role == "owner" and self.source != "heartbeat":
+        if not cancelled and success and self.caller_role == "owner" and self.source != "heartbeat" and not list_phase:
             from agent.lean import deliverable
             delivered = deliverable.assess(message, [r.timeline for r in self.results])
             if delivered and delivered["status"] != "delivered":
@@ -528,6 +547,8 @@ class LeanSession:
             success=bool(success and not cancelled),
             phase="cancelled" if cancelled else "complete",
             response_preview=final_text[:500],
+            tools_used=list(dict.fromkeys(row["name"] for result in self.results for row in result.timeline
+                                          if row.get("kind") == "tool" and row.get("name"))),
             error=error[:1000],
             metadata={**dict(execution.metadata or {}), **({"outcome": outcome} if outcome else {}),
                       **({"chat_run": self._chat_trace(final_text)} if self._chat_run is not None else {}),
@@ -1453,6 +1474,21 @@ class LeanSession:
             if selected:
                 retrieval = turn.prefetch
                 turn.prefetch = lambda: [("read_skill", {"name": selected}), *(retrieval() if retrieval else [])]
+        list_phase = getattr(self, "_memory_list_phase", "")
+        if (list_phase and depth == 0 and not guest and not read_only and not delegated_by and self._owner_side(persona)
+                and message == self._user_message and "memory_save" in toolbox.native):
+            turn.prefetch = None
+            if list_phase == "waiting":
+                turn.prefetch_reply = lambda _rows: "Send the list when you’re ready. I’ll confirm which entries were saved."
+            elif list_phase == "waiting_after_status":
+                turn.prefetch_reply = lambda _rows: "I’ll keep waiting for the list. The backup note stays in this conversation."
+            elif list_phase == "declined":
+                turn.prefetch_reply = lambda _rows: "Okay. This memory list won’t be saved."
+            else:
+                entries, skipped = self._memory_list_payload
+                toolbox.deferred.discard("memory_save")
+                turn.prefetch = lambda: [("memory_save", entry) for entry in entries]
+                turn.prefetch_reply = lambda rows: memory_quality.list_receipt(rows, len(entries), skipped)
         if ledger is not None:
             turn.verifier = ledger
             if ledger.resumed and ledger.active():
@@ -1645,6 +1681,8 @@ class LeanSession:
         if self.caller_role == "owner" and self.source in INTERACTIVE_SOURCES and depth == 0:
             tools.append(agent_skills.propose_skill_tool())
         if memory is not None:
+            written_ids: set[str] = set()
+
             def memory_save(args: dict[str, Any]) -> str | ToolResult:
                 from agent.state import get_state_store
                 fact = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))
@@ -1663,9 +1701,9 @@ class LeanSession:
                     ))
                     if existing is not None:
                         stored = _memory_on_disk(memory, str(existing.get("id") or ""))
-                        if isinstance(stored, str):
-                            return ToolResult(True, f"Already remembered (verified on disk): {stored}", 0,
-                                              meta={"memory_verified": True})
+                        if isinstance(stored, dict):
+                            return ToolResult(True, f"Already remembered (verified on disk): {stored['text']}", 0,
+                                              meta={"memory_verified": True, "memory_written": False})
                         if stored is False:
                             return "Failed: the remembered fact is no longer on disk. It could not be verified."
                         return f"Already remembered: {existing.get('text')}"
@@ -1688,11 +1726,14 @@ class LeanSession:
                 stored = _memory_on_disk(memory, str(memory_id))
                 if stored is False:
                     return "Failed: the memory store reported a save, but it isn't on disk. Tell the user it did not save."
-                self.emit({"type": "memory_saved", "memory_count": int(memory.count_items() or 0)})
-                if isinstance(stored, str):
-                    text = (f"Already remembered (verified on disk): {stored}" if " ".join(stored.split()) != " ".join(fact.split())
-                            else f"Saved and verified: {fact}")
-                    return ToolResult(True, text, 0, meta={"memory_verified": True})
+                if isinstance(stored, dict):
+                    written = stored.get("source_execution_id") == self.execution_id and memory_id not in written_ids
+                    if written:
+                        written_ids.add(memory_id)
+                        self.emit({"type": "memory_saved", "memory_count": int(memory.count_items() or 0)})
+                    status = "Saved and verified" if written else "Already remembered (verified on disk)"
+                    return ToolResult(True, f"{status}: {stored['text']}", 0,
+                                      meta={"memory_verified": True, "memory_written": written})
                 return f"Saved: {fact}"
 
             def memory_search(args: dict[str, Any]) -> str:
@@ -2431,8 +2472,8 @@ class LeanSession:
         threading.Thread(target=work, name="lean-memory", daemon=True).start()
 
 
-def _memory_on_disk(memory: Any, memory_id: str) -> "str | bool | None":
-    """The saved text if the record is active in records.json, False if it isn't,
+def _memory_on_disk(memory: Any, memory_id: str) -> "dict[str, Any] | bool | None":
+    """The saved record if it is active in records.json, False if it isn't,
     None when this memory store has no record file to check."""
     path = getattr(memory, "_records_path", None)
     if not path:
@@ -2442,9 +2483,9 @@ def _memory_on_disk(memory: Any, memory_id: str) -> "str | bool | None":
     except (OSError, ValueError):
         return False
     record = records.get(memory_id) if isinstance(records, dict) else None
-    if not isinstance(record, dict) or not record.get("active", True):
+    if not isinstance(record, dict) or not record.get("active", True) or not record.get("text"):
         return False
-    return str(record.get("text") or "")
+    return record
 
 
 def _plain_error(error: str) -> str:

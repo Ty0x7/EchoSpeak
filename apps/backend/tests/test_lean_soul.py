@@ -239,7 +239,8 @@ class _FakeMemory:
         import json
 
         memory_id = f"m{len(self.records) + 1}"
-        self.records[memory_id] = {"id": memory_id, "text": text, "active": True}
+        self.records[memory_id] = {"id": memory_id, "text": text, "active": True,
+                                   "source_execution_id": _kwargs.get("source_execution_id", "")}
         if not self.lose_writes:
             self._records_path.write_text(json.dumps({"records": self.records}), encoding="utf-8")
         return memory_id
@@ -309,3 +310,114 @@ def test_already_remembered_fact_requires_a_durable_readback(monkeypatch, tmp_pa
     receipt = next(e for e in events if e["type"] == "tool_end" and e["name"] == "memory_save")
     assert bool(receipt["meta"].get("memory_verified")) is not lose
     assert (result["work"]["verification"] == "verified") is not lose
+
+
+def test_staged_profile_uses_only_current_facts_and_persists_full_message(monkeypatch, tmp_path):
+    from agent.state import get_state_store
+
+    memory = _FakeMemory(tmp_path)
+    agent = type("Agent", (_Agent,), {"memory": memory})()
+    model = ScriptedClient([ModelTurn(content="I've saved it all.") for _ in range(20)])
+    scripts = {"echo": model}
+    offer, _ = _session(monkeypatch, scripts, agent=agent)
+    assert offer.run("I'm going to give you a list of things to remember. My next prompt will be it.")["success"]
+    status, _ = _session(monkeypatch, scripts, agent=agent)
+    status.session_id = offer.session_id
+    status.run("The backup restored successfully. EchoSpeak release verified. See backup-log.md.")
+    assert not memory.records
+    profile, events = _session(monkeypatch, scripts, agent=agent)
+    profile.session_id = offer.session_id
+    message = ("1. Personal details\n- My home city is Alder Harbor.\n\n"
+               "2. Work preferences\n- My default editor is Juniper Edit.\n\n"
+               + "Background for later. " * 205 + "\n- My evening drink is barley tea.")
+    result = profile.run(message)
+    assert result["success"]
+    assert not model.calls
+    assert len(memory.records) == 3
+    assert "barley tea" in result["response"]
+    assert "1 other line" in result["response"]
+    assert result["deliverable"] is None
+    assert sum(e["type"] == "memory_saved" for e in events) == 3
+    store = get_state_store()
+    execution = store.get_execution(result["execution_id"])
+    assert execution.query == message[:4000]
+    assert execution.tools_used == ["memory_save"]
+    timeline = store.session_timeline(offer.session_id)
+    assert timeline["turns"][-1]["messages"][0]["text"] == message
+
+
+def test_repeating_a_keyed_memory_reports_readback_instead_of_a_new_save(monkeypatch, tmp_path):
+    import json
+    from agent.memory import AgentMemory
+
+    def lexical_only(self):
+        self.use_faiss = False
+        self.embeddings = None
+        self.simple_memory = []
+
+    monkeypatch.setattr(AgentMemory, "_select_embeddings", lexical_only)
+    memory = AgentMemory(memory_path=str(tmp_path / "memory"))
+    agent = type("Agent", (_Agent,), {"memory": memory})()
+
+    def save_turn(call_id):
+        return ModelTurn(tool_calls=[ToolCall(call_id, "memory_save", json.dumps({
+            "fact": "Home city is Alder Harbor.", "key": "home_city"
+        }))])
+
+    first_model = ScriptedClient([save_turn("save-first"), ModelTurn(content="Noted.")])
+    first, first_events = _session(monkeypatch, {"echo": first_model}, agent=agent)
+    first.run("Remember my home city is Alder Harbor.")
+    first_receipt = next(e for e in first_events if e["type"] == "tool_end" and e["name"] == "memory_save")
+    assert first_receipt["meta"]["memory_written"] is True
+    before = memory._records_path.read_bytes()
+
+    again_model = ScriptedClient([save_turn("save-again")] + [
+        ModelTurn(content="I've updated your home city in memory.") for _ in range(3)
+    ])
+    again, events = _session(monkeypatch, {"echo": again_model}, agent=agent)
+    again.run("Remember my home city is Alder Harbor.")
+    receipt = next(e for e in events if e["type"] == "tool_end" and e["name"] == "memory_save")
+    assert receipt["output"].startswith("Already remembered (verified on disk)")
+    assert receipt["meta"]["memory_verified"] is True
+    assert receipt["meta"]["memory_written"] is False
+    assert not any(e["type"] == "memory_saved" for e in events)
+    assert any(e["type"] == "claim_unverified" for e in events)
+    assert memory._records_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("between", ["another-thread", "cancel", "public", "second-status"])
+def test_staged_memory_authorization_does_not_spill_into_other_turns(monkeypatch, tmp_path, between):
+    memory = _FakeMemory(tmp_path)
+    agent = type("Agent", (_Agent,), {"memory": memory})()
+    model = ScriptedClient([ModelTurn(content="Understood.") for _ in range(20)])
+    scripts = {"echo": model}
+    offer, _ = _session(monkeypatch, scripts, agent=agent)
+    offer.run("I'll send you a list in my next message. Please remember it.")
+    profile, events = _session(monkeypatch, scripts, agent=agent)
+    if between != "another-thread":
+        profile.session_id = offer.session_id
+    if between == "public":
+        profile.caller_role = "public"
+    elif between == "cancel":
+        cancel, _ = _session(monkeypatch, scripts, agent=agent)
+        cancel.session_id = offer.session_id
+        cancel.run("Cancel that. Don't remember anything from the list.")
+    elif between == "second-status":
+        for _ in range(2):
+            status, _ = _session(monkeypatch, scripts, agent=agent)
+            status.session_id = offer.session_id
+            status.run("Backup status: copy finished.")
+    profile.run("1. Personal details\n- My home city is Alder Harbor.\n- I prefer barley tea.")
+    assert not memory.records
+    assert not any(e["type"] == "tool_start" and e["name"] == "memory_save" for e in events)
+
+
+def test_staged_memory_receipt_lists_only_durable_writes(monkeypatch, tmp_path):
+    memory = _FakeMemory(tmp_path, lose_writes=True)
+    agent = type("Agent", (_Agent,), {"memory": memory})()
+    model = ScriptedClient([])
+    session, events = _session(monkeypatch, {"echo": model}, agent=agent)
+    result = session.run("Remember this list:\n- My home city is Alder Harbor.\n- My evening drink is barley tea.")
+    assert "couldn’t verify 2 entries" in result["response"]
+    assert "Saved and verified" not in result["response"]
+    assert not any(e["type"] == "memory_saved" for e in events)

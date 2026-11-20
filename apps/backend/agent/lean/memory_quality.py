@@ -35,6 +35,133 @@ KINDS: dict[str, str] = {
 MAX_FACT_CHARS = 280
 PROMPT_ROWS = 12
 PROMPT_CHARS = 1600
+LIST_LIMIT = 24
+LIST_WAIT_SECONDS = 1800
+
+_LIST_OFFER = re.compile(
+    r"(?i)^\s*(?:i(?:'ll| will| am going to|'m going to|mma)|i am about to)\s+"
+    r"(?:send|give|share|paste)\b[^\n]{0,80}\blist\b"
+)
+_NEXT_MESSAGE = re.compile(r"(?i)\bnext (?:message|prompt|turn)\b")
+_LIST_CONSENT = re.compile(r"(?i)\b(?:list of (?:things|facts|details|preferences) to remember|"
+                           r"remember (?:it|them|these|the list))\b")
+_DIRECT_LIST = re.compile(r"(?i)^\s*(?:please )?remember (?:this|the following) list[ \t]*:\s*\n")
+_STATUS_PASTE = re.compile(r"(?i)^\s*(?:the )?backup (?:status:|restored successfully\.)")
+_STATUS_REQUEST = re.compile(
+    r"(?im)(?:^|[.!]\s+)(?:please|can|could|would|now|stop|cancel|remember|keep|save|write|create|make|"
+    r"find|look|check|update|fix|run|open|send|tell|show|explain|review)\b"
+)
+_LIST_HEADING = re.compile(r"^(?:#{1,6}\s+|[1-9]\d?\.\s+)")
+_LIST_BULLET = re.compile(r"^[-*•]\s+(.+)")
+_LIST_PERSONAL = re.compile(r"(?i)^(?:my|your) ([-a-z][a-z -]{0,46}) (is|are) (.+)$")
+_LIST_PREFERENCE = re.compile(r"(?i)^(?:I|you) (prefer|use|work with|live in|go by|like|want|have) (.+)$")
+_LIST_FIELD = re.compile(r"^([A-Za-z][A-Za-z0-9 /&()._-]{0,45}):\s+([^\s].*)$")
+_LIST_SKIP = re.compile(r"(?i)\b(?:do not|don't|dont|never|instead of)\s+(?:save|remember|store)\b")
+
+
+def list_offer(text: str) -> bool:
+    """An offer to provide a memory list later, with no facts attached yet."""
+    return (len(text) <= 240 and "\n" not in text and ":" not in text and not _LIST_SKIP.search(text)
+            and bool(_LIST_OFFER.search(text) and _NEXT_MESSAGE.search(text) and _LIST_CONSENT.search(text)))
+
+
+def list_status_paste(text: str) -> bool:
+    """Recognize the short backup receipt that may precede the promised list."""
+    return (len(text) <= 1200 and "?" not in text and not _LIST_SKIP.search(text)
+            and not _STATUS_REQUEST.search(text) and bool(_STATUS_PASTE.search(text)))
+
+
+def _list_lines(text: str) -> list[str]:
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def is_structured_list(text: str) -> bool:
+    lines = _list_lines(text)
+    return bool(lines and (_LIST_HEADING.match(lines[0]) or _LIST_BULLET.match(lines[0]))
+                and sum(bool(_LIST_BULLET.match(line) or _LIST_FIELD.match(line)) for line in lines) >= 2)
+
+
+def list_declined(text: str, *, waiting: bool = False) -> bool:
+    """A cancellation while waiting or an explicit no-save instruction inside a memory list."""
+    direct = _DIRECT_LIST.match(text)
+    if waiting and re.fullmatch(r"(?i)\s*(?:cancel(?: that)?|never mind|nevermind)[.!]?(?:\s+.*)?", text):
+        return True
+    return bool((direct or waiting) and _LIST_SKIP.search(text))
+
+
+def list_entries(text: str, *, waiting: bool = False) -> Optional[tuple[list[dict[str, str]], int]]:
+    """Parse an explicitly authorized structured list. Preserve the user's values verbatim."""
+    direct = _DIRECT_LIST.match(text)
+    if not direct and not waiting:
+        return None
+    list_body = text[direct.end():] if direct else text
+    if not is_structured_list(list_body) or list_declined(text, waiting=waiting):
+        return None
+
+    entries: list[dict[str, str]] = []
+    skipped = 0
+    fence = ""
+    for line in _list_lines(list_body):
+        if line.startswith(("```", "~~~")):
+            fence = "" if fence == line[:3] else (fence or line[:3])
+            skipped += 1
+            continue
+        if fence:
+            skipped += 1
+            continue
+        if _LIST_HEADING.match(line):
+            continue
+        bullet = _LIST_BULLET.match(line)
+        body = bullet[1] if bullet else line
+        key = ""
+        if personal := _LIST_PERSONAL.fullmatch(body):
+            label, verb, value = personal.groups()
+            key = normalize_key(label)
+            body = f"The user's {label} {verb} {value}"
+        elif preference := _LIST_PREFERENCE.fullmatch(body):
+            verb, value = preference.groups()
+            action = {"prefer": "prefers", "use": "uses", "work with": "works with",
+                      "live in": "lives in", "go by": "goes by", "like": "likes", "want": "wants",
+                      "have": "has"}[verb.lower()]
+            body = f"The user {action} {value}"
+        elif not _LIST_FIELD.fullmatch(body):
+            skipped += 1
+            continue
+        fact = tidy_fact(body)
+        entry = {"fact": fact, "key": key}
+        if entry in entries:
+            continue
+        if check_fact(fact) or len(entries) >= LIST_LIMIT:
+            skipped += 1
+            continue
+        entries.append(entry)
+    # A contradictory list shouldn't replace an existing value with an arbitrary winner.
+    conflicting = {row["key"] for row in entries if row["key"] and any(
+        other["key"] == row["key"] and other["fact"] != row["fact"] for other in entries
+    )}
+    accepted = [row for row in entries if row["key"] not in conflicting]
+    return accepted, skipped + len(entries) - len(accepted)
+
+
+def list_receipt(timeline: list[dict[str, Any]], requested: int, skipped: int) -> str:
+    rows = [item for item in timeline if item.get("kind") == "tool" and item.get("name") == "memory_save"]
+    written = [item["output"].removeprefix("Saved and verified: ") for item in rows
+               if item.get("meta", {}).get("memory_written") is True]
+    existing = [item["output"].removeprefix("Already remembered (verified on disk): ") for item in rows
+                if item.get("meta", {}).get("memory_written") is False and item["meta"].get("memory_verified")]
+    parts = []
+    if written:
+        parts.append(f"Saved and verified {len(written)} entries.\n" + "\n".join(f"- {value}" for value in written))
+    if existing:
+        parts.append(f"Already in memory ({len(existing)}).\n" + "\n".join(f"- {value}" for value in existing))
+    if failed := requested - len(written) - len(existing):
+        noun = "entry" if failed == 1 else "entries"
+        parts.append(f"I couldn’t verify {failed} {noun}. The tool results show what happened.")
+    if skipped:
+        noun = "line" if skipped == 1 else "lines"
+        parts.append(f"I left {skipped} other {noun} in this conversation. To save a specific detail, use "
+                     "a short bullet in the form `Label: value`.")
+    return "\n\n".join(parts) or "There were no entries to save."
 
 _LEAD_INS = re.compile(
     r"^(please\s+)?(remember|note|keep in mind|save|store)( that|:)?\s+|^(fyi|for the record)[,:]?\s+",
