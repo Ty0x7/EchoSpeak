@@ -32,6 +32,55 @@ def sanitize(text: Any) -> str:
     return _CONTROLS.sub("", s)
 
 
+_MESSAGE_KEYS = ("detail", "message", "error", "msg", "reason", "description")
+
+
+def _message_of(value: Any) -> str:
+    """The human message in a decoded error body: detail/message/error/msg, nested; validation lists as 'field: msg'."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts = []
+        for item in value[:3]:
+            if isinstance(item, dict) and item.get("msg"):
+                loc = [str(x) for x in item.get("loc") or [] if str(x) not in {"body", "query", "path"}]
+                parts.append((".".join(loc) + ": " if loc else "") + str(item["msg"]))
+            else:
+                parts.append(_message_of(item))
+        return "; ".join(p for p in parts if p)
+    if isinstance(value, dict):
+        for key in _MESSAGE_KEYS:
+            if value.get(key):
+                return _message_of(value[key])
+    return ""
+
+
+def plain_error(value: Any) -> str:
+    """Error text for people: a JSON error body (whole, or after a prefix such as 'HTTP 500: ') becomes its message.
+
+    The model server and the API answer with JSON ('{"error": "model requires more system memory …"}', FastAPI's
+    validation lists), and the terminal used to print it raw (tui-refine open item, 19 November 2026).
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        return _message_of(value) or str(value)
+    start = value.find("{") if "{" in value else -1
+    bracket = value.find("[") if "[" in value else -1
+    if bracket != -1 and (start == -1 or bracket < start):
+        start = bracket
+    if start == -1:
+        return value
+    try:
+        decoded, end = json.JSONDecoder().raw_decode(value[start:])
+    except ValueError:
+        return value
+    message = _message_of(decoded)
+    if not message:
+        return value
+    return (value[:start] + message + value[start + end:]).strip()
+
+
 def one_line(text: Any, limit: int = 160) -> str:
     s = " ".join(sanitize(text).split())
     return s if len(s) <= limit else s[: limit - 1] + "…"

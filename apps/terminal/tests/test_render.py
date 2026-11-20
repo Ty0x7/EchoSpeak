@@ -139,3 +139,19 @@ def test_sanitize_cases():
     # Sequences split across stream chunks never reassemble: each chunk loses its ESC/BEL bytes.
     joined = sanitize("\x1b]0;ti") + sanitize("tle\x07")
     assert "\x1b" not in joined and "\x07" not in joined
+
+
+def test_errors_are_shown_as_their_message_not_raw_json():
+    # tui-refine open item: failure text showed the raw backend JSON.
+    from echospeak_cli.render import plain_error
+
+    assert plain_error('{"detail": "Not found"}') == "Not found"
+    assert plain_error('HTTP 500: {"error": "model requires more system memory (8.5 GiB) than is available"}') == \
+        "HTTP 500: model requires more system memory (8.5 GiB) than is available"
+    assert plain_error('The model request failed: {"error": {"message": "rate limited", "type": "x"}}') == \
+        "The model request failed: rate limited"
+    assert plain_error([{"loc": ["body", "message"], "msg": "field required", "type": "value_error.missing"}]) == \
+        "message: field required"
+    assert plain_error({"detail": {"message": "Busy", "code": 7}}) == "Busy"
+    assert plain_error("plain text, {not json}") == "plain text, {not json}"
+    assert plain_error(None) == ""

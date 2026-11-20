@@ -87,12 +87,11 @@ class Client:
             try:
                 parsed = json.loads(raw)
                 detail = parsed.get("detail", detail) if isinstance(parsed, dict) else detail
-                if isinstance(detail, dict):
-                    detail = str(detail.get("message") or detail)
             except ValueError:
                 pass
+            from .render import plain_error  # validation lists and nested bodies as their message, never raw JSON
             err = AuthError if resp.status == 401 else ApiError
-            raise err(resp.status, str(detail))
+            raise err(resp.status, plain_error(detail))
         return conn, resp
 
     def request(self, method: str, path: str, body: Any = None, params: Optional[dict] = None) -> Any:

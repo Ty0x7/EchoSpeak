@@ -11,7 +11,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from ..render import NORMAL_STOPS, one_line, sanitize
+from ..render import NORMAL_STOPS, one_line, plain_error, sanitize
 from . import blocks as B
 from . import diffview as DV
 from .mdstream import MdStream
@@ -166,7 +166,7 @@ def outcome_blocks(*, outcome: Optional[dict], work: Optional[dict], journal: st
     if denied and success is False and not outcome:
         return [B.Outcome(g.denied, "Stopped: you denied a step it needed", "bold")]
     if journal == "failed" or (success is False and not outcome):
-        return [B.Outcome(g.fail, "The run failed" + (f": {one_line(error, 300)}" if error else ""), "error")]
+        return [B.Outcome(g.fail, "The run failed" + (f": {one_line(plain_error(error), 300)}" if error else ""), "error")]
     if outcome and outcome.get("status") == "done":
         summary = one_line(outcome.get("summary") or "Finished.", 400)
         if verified:
@@ -508,7 +508,7 @@ class Run:
             if stop not in NORMAL_STOPS:
                 words = {"max_steps": "stopped at the step limit before finishing"}.get(stop, f"stopped: {one_line(stop, 60)}")
                 out.append(B.Note("!", f"{m.name} {words}", "bold", 2))
-            err = one_line(evt.get("error"), 400)
+            err = one_line(plain_error(evt.get("error")), 400)
             if evt.get("success") is False and err and not cancelled and err[:60] not in one_line(m.md.total, 4000):
                 out.append(B.Note(g.fail, err, "error", 2))
             for tool in list(self.tools.values()):
@@ -529,7 +529,7 @@ class Run:
                 self.final_text = sanitize(evt.get("response"))
             return []
         if kind == "error":
-            self.error = one_line(evt.get("message") or "error", 400)
+            self.error = one_line(plain_error(evt.get("message")) or "error", 400)
             return [B.Note(g.fail, self.error, "error", 0)]
         if kind == "audio_omitted":
             return [B.Note("·", one_line(evt.get("message"), 300), "dim", 2)]
