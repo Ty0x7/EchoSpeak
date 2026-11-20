@@ -94,15 +94,6 @@ def caller_note(source: str, role: str, owner_name: str = "") -> str:
     )
 
 
-def _explicit_remember(text: str) -> bool:
-    """The memory curator's own test for an explicit request to remember ("Please remember: …")."""
-    try:
-        from agent.memory_curator import MemoryCurator
-        return MemoryCurator.is_explicit_memory_request(text)
-    except Exception:  # noqa: BLE001 - a detector problem must never break building the turn
-        return False
-
-
 def request_text(message: str) -> str:
     """Channel bots send context, then 'User request: ...'. Memory lookups use just the request."""
     marker = "User request:"
@@ -146,9 +137,6 @@ _SEARCH_STOP = frozenset({
     "were", "you", "your", "our", "his", "her", "their", "with", "from", "about", "earlier", "before", "mentioned",
     "said", "told", "name", "called", "chat", "conversation", "message", "past", "previous", "last", "any",
 })
-
-# The owner asking an agent to remember something (keeps memory_save listed on a focused local model).
-REMEMBER_REQUEST = re.compile(r"(?i)\b(remember|don'?t forget|keep in mind|make a note|note (?:that|this|down))\b")
 
 class LeanSession:
     """Runs one user message through one or more agents in a Session."""
@@ -432,6 +420,40 @@ class LeanSession:
             default_persona = members[0] if members else self.personas.default()
         self._lead_id = default_persona.id
         endpoint = self._endpoint_for(default_persona)
+        list_phase, list_payload = "", None
+        self._memory_scope = None
+        self._memory_project_id = str(state.active_project_id or "")
+        direct_owner = self.caller_role == "owner" and self.source in INTERACTIVE_SOURCES and not self.work_id
+        if direct_owner and getattr(self.agent, "memory", None) is not None:
+            scope = memory_quality.requested_scope(message)
+            if scope == "project" and not (self._memory_project_id and self.project_root):
+                scope = None
+            if memory_quality.explicit_write(message):
+                self._memory_scope = scope
+            if self._owner_side(default_persona) and not (self.room and self.room.kind == "group"):
+                previous = next(iter(store.list_executions(self.session_id, limit=1)), None)
+                pending = (str((previous.metadata or {}).get("memory_list") or "") if previous
+                           and previous.status == "completed"
+                           and 0 <= time.time() - previous.created_at <= memory_quality.LIST_WAIT_SECONDS else "")
+                waiting = pending in {"waiting", "waiting_after_status"}
+                if memory_quality.list_offer(message):
+                    list_phase = "waiting"
+                elif waiting and memory_quality.list_cancelled(message):
+                    list_phase = "declined"
+                elif memory_quality.requests_list(message):
+                    if scope and (entries := memory_quality.list_entries(message)) is not None:
+                        list_phase, list_payload = "intake", entries
+                        self._memory_scope = scope
+                    else:
+                        list_phase = "declined" if memory_quality.refuses_memory(message) else "needs_consent"
+                elif pending == "waiting" and memory_quality.list_status_paste(message):
+                    list_phase = "waiting_after_status"
+                elif waiting and memory_quality.list_needs_consent(message):
+                    list_phase = "needs_consent"
+        self._memory_list_phase, self._memory_list_payload = list_phase, list_payload
+        self._memory_context = self._context_scope(self._memory_scope)
+        if not self._memory_context and (memory_quality.refuses_memory(message) or list_phase == "needs_consent"):
+            self._memory_context = self._context_scope("session")
         execution = store.create_execution(
             request_id=self.request_id,
             kind="query",
@@ -439,6 +461,7 @@ class LeanSession:
             source=self.source,
             status="running",
             query=message[:4000],
+            user_message=message,
             # A check-in's prompt is Echo's own context, not something the owner said.
             record_user_message=self.source != "heartbeat",
             workspace_id=str(state.workspace_id or ""),
@@ -450,7 +473,8 @@ class LeanSession:
             phase="running",
             metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else "",
                       "hidden_prompt": self.source == "heartbeat",
-                      "environment": self.environment},
+                      "environment": self.environment, **self._memory_context,
+                      **({"memory_list": list_phase} if list_phase else {})},
         )
         self.execution_id = execution.id
         self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else "",
@@ -509,7 +533,7 @@ class LeanSession:
         # Was what the owner asked to be created actually created (agent/lean/deliverable.py)? From the
         # tools that ran, never from the reply. Only the owner's own request is a deliverable.
         delivered = None
-        if not cancelled and success and self.caller_role == "owner" and self.source != "heartbeat":
+        if not cancelled and success and self.caller_role == "owner" and self.source != "heartbeat" and not list_phase:
             from agent.lean import deliverable
             delivered = deliverable.assess(message, [r.timeline for r in self.results])
             if delivered and delivered["status"] != "delivered":
@@ -528,8 +552,10 @@ class LeanSession:
             success=bool(success and not cancelled),
             phase="cancelled" if cancelled else "complete",
             response_preview=final_text[:500],
+            tools_used=list(dict.fromkeys(row["name"] for result in self.results for row in result.timeline
+                                          if row.get("kind") == "tool" and row.get("name"))),
             error=error[:1000],
-            metadata={**dict(execution.metadata or {}), **({"outcome": outcome} if outcome else {}),
+            metadata={**dict(execution.metadata or {}), **self._memory_context, **({"outcome": outcome} if outcome else {}),
                       **({"chat_run": self._chat_trace(final_text)} if self._chat_run is not None else {}),
                       **({"deliverable": delivered} if delivered else {}),
                       **({"verification": measured} if (measured := self._verification_record()) else {})},
@@ -1197,8 +1223,7 @@ class LeanSession:
             # What the request itself names strongly (agent_sessions for "codex and claude sessions") is listed
             # up front instead of waiting for a find_tools call a small model doesn't think to make.
             toolbox.list_suggested(self._goal(message, task))
-        if not guest and not read_only and "memory_save" in toolbox.deferred and (
-                REMEMBER_REQUEST.search(request_text(message) or "") or _explicit_remember(request_text(message))):
+        if "memory_save" in toolbox.deferred:
             # "Remember that my build cache key is …" to a builder on a local model: its focus has no memory tools, so
             # Glados said "I've noted that" with nothing saved (live MI1, 18 November 2026), or saved it over her
             # private project notes with agent_notes (evaluation MI1, 19 November). An explicit request to remember
@@ -1381,6 +1406,11 @@ class LeanSession:
         # What changes between turns (the time, the git status) rides on this request, not in the system prompt,
         # so the system prompt, the tools and the history stay byte-identical and the model server reuses them.
         turn.request_note = request_note("" if self.model_first else repo_note, context=recalled)
+        if depth == 0 and not guest and memory_quality.refuses_memory(self._user_message):
+            turn.request_note += (
+                "\nThe owner declined saving memory for this request. That preference is settled. "
+                "Complete any separate read-only request using the supplied text without asking whether to save it."
+            )
         if depth == 0 and not guest and (continuing := self._continuation_note()):
             turn.request_note = continuing + "\n" + turn.request_note
         # Only the agent the user is talking to reads steering; a teammate doing delegated work doesn't.
@@ -1453,6 +1483,30 @@ class LeanSession:
             if selected:
                 retrieval = turn.prefetch
                 turn.prefetch = lambda: [("read_skill", {"name": selected}), *(retrieval() if retrieval else [])]
+        list_phase = getattr(self, "_memory_list_phase", "")
+        if (list_phase and depth == 0 and not guest and not read_only and not delegated_by and self._owner_side(persona)
+                and message == self._user_message):
+            turn.prefetch = None
+            if list_phase == "waiting":
+                turn.prefetch_reply = lambda _rows: (
+                    "Send the list with ‘Remember this list:’ when you’re ready. I’ll confirm what was saved."
+                )
+            elif list_phase == "waiting_after_status":
+                turn.prefetch_reply = lambda _rows: "The backup note stays in this chat. I’m ready for the memory list."
+            elif list_phase == "declined":
+                turn.prefetch_reply = lambda _rows: "Okay. This memory list won’t be saved."
+            elif list_phase == "needs_consent":
+                turn.prefetch_reply = lambda _rows: (
+                    "I haven’t saved this list. To authorize it, start the message with ‘Remember this list:’. "
+                    "For project memory, attach the project and use ‘Remember this list for this project only:’."
+                )
+            elif "memory_save" in toolbox.native:
+                entries, skipped = self._memory_list_payload
+                toolbox.deferred.discard("memory_save")
+                turn.prefetch = lambda: [("memory_save", entry) for entry in entries]
+                turn.prefetch_reply = lambda rows: memory_quality.list_receipt(
+                    rows, len(entries), skipped, scope=self._memory_scope,
+                )
         if ledger is not None:
             turn.verifier = ledger
             if ledger.resumed and ledger.active():
@@ -1645,14 +1699,27 @@ class LeanSession:
         if self.caller_role == "owner" and self.source in INTERACTIVE_SOURCES and depth == 0:
             tools.append(agent_skills.propose_skill_tool())
         if memory is not None:
+            written_ids: set[str] = set()
+            scope = getattr(self, "_memory_scope", None) if depth == 0 and not delegated_by else None
+            if scope == "account" and not self._owner_side(persona):
+                scope = "project" if self.project_root and persona.context_scope != "session" else "session"
+            project_id = getattr(self, "_memory_project_id", "")
+
             def memory_save(args: dict[str, Any]) -> str | ToolResult:
                 from agent.state import get_state_store
+                if not scope:
+                    return ToolResult(False, "The current message does not authorize a persistent memory write.", 0,
+                                      outcome="refused")
+                if scope == "project" and (not project_id or not self.project_root
+                        or str(get_state_store().get_thread_state(self.session_id).active_project_id or "") != project_id):
+                    return ToolResult(False, "The authorized project is no longer attached to this chat.", 0,
+                                      outcome="refused")
                 fact = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))
                 problem = memory_quality.check_fact(fact)
                 if problem:
                     return problem
                 key = memory_quality.normalize_key(str(args.get("key") or ""))
-                if not key and self._owner_side(persona):
+                if not key and scope == "account":
                     # A reworded copy of something already saved: keep the one we have.
                     owner_of = getattr(memory, "_owner_id", None)
                     owner = owner_of() if callable(owner_of) else ""
@@ -1663,9 +1730,9 @@ class LeanSession:
                     ))
                     if existing is not None:
                         stored = _memory_on_disk(memory, str(existing.get("id") or ""))
-                        if isinstance(stored, str):
-                            return ToolResult(True, f"Already remembered (verified on disk): {stored}", 0,
-                                              meta={"memory_verified": True})
+                        if isinstance(stored, dict):
+                            return ToolResult(True, f"Already remembered (verified on disk): {stored['text']}", 0,
+                                              meta={"memory_verified": True, "memory_written": False})
                         if stored is False:
                             return "Failed: the remembered fact is no longer on disk. It could not be verified."
                         return f"Already remembered: {existing.get('text')}"
@@ -1675,12 +1742,13 @@ class LeanSession:
                     pinned=bool(args.get("pinned", False)),
                     thread_id=self.session_id,
                     source="agent",
-                    scope="account" if self._owner_side(persona) else "project" if self.project_root and persona.context_scope != "session" else "session",
+                    scope=scope,
                     project_path=self.project_root or None,
-                    project_id=str(get_state_store().get_thread_state(self.session_id).active_project_id or ""),
+                    project_id=project_id,
                     source_execution_id=self.execution_id,
                     # Same key, new value: the old memory is superseded, not kept alongside.
                     semantic_key=key if self._owner_side(persona) or not key else f"agent:{persona.id}:{key}",
+                    **({"supersede_legacy_fields": True} if key and self._memory_list_phase == "intake" else {}),
                 )
                 if not memory_id:
                     return "Failed: that could not be saved (empty, duplicate, or looks like a secret)."
@@ -1688,11 +1756,14 @@ class LeanSession:
                 stored = _memory_on_disk(memory, str(memory_id))
                 if stored is False:
                     return "Failed: the memory store reported a save, but it isn't on disk. Tell the user it did not save."
-                self.emit({"type": "memory_saved", "memory_count": int(memory.count_items() or 0)})
-                if isinstance(stored, str):
-                    text = (f"Already remembered (verified on disk): {stored}" if " ".join(stored.split()) != " ".join(fact.split())
-                            else f"Saved and verified: {fact}")
-                    return ToolResult(True, text, 0, meta={"memory_verified": True})
+                if isinstance(stored, dict):
+                    written = stored.get("source_execution_id") == self.execution_id and memory_id not in written_ids
+                    if written:
+                        written_ids.add(memory_id)
+                        self.emit({"type": "memory_saved", "memory_count": int(memory.count_items() or 0)})
+                    status = "Saved and verified" if written else "Already remembered (verified on disk)"
+                    return ToolResult(True, f"{status}: {stored['text']}", 0,
+                                      meta={"memory_verified": True, "memory_written": written})
                 return f"Saved: {fact}"
 
             def memory_search(args: dict[str, Any]) -> str:
@@ -1702,10 +1773,14 @@ class LeanSession:
                     scopes = {"session"} if persona.context_scope == "session" else {"project", "session"}
                     return "\n".join("- " + str(r.get("content", "")) for r in rows if r.get("scope") in scopes) or "No matching scoped memories."
                 try:
-                    docs = memory.retrieve_relevant(query, k=5, thread_id=self.session_id, project_path=self.project_root or None)
+                    docs = memory.retrieve_relevant(query, k=5, thread_id=self.session_id, project_path=self.project_root or None,
+                                                    project_id=self._active_project())
                     # Saved facts only; old chat transcripts are found with chat_search.
-                    rows += [{"content": getattr(doc, "page_content", "")} for doc in docs
-                             if str((getattr(doc, "metadata", None) or {}).get("type") or "") != "conversation"]
+                    for doc in docs:
+                        metadata = getattr(doc, "metadata", None) or {}
+                        if metadata.get("type") != "conversation":
+                            self._limit_memory_context(metadata.get("scope"))
+                            rows.append({"content": getattr(doc, "page_content", "")})
                 except Exception:
                     pass
                 lines = list(dict.fromkeys(str(r.get("content") or "").strip() for r in rows if str(r.get("content") or "").strip()))
@@ -1715,24 +1790,25 @@ class LeanSession:
                         "in your instructions.)" if len(kept) < len(lines) else "")
                 return ("\n".join(f"- {line}" for line in kept[:12]) or "No matching memories.") + note
 
-            tools.append(NativeTool(
-                name="memory_save",
-                description="Save one lasting fact about the user so you remember it in future chats: who they are, what they "
-                "prefer, people and projects in their life, how they like you to work. Save when the user tells you something "
-                "durable or asks you to remember it. Don't save one-off requests, things that only matter in this chat, web "
-                "content, or secrets. One fact per call.",
-                parameters={"type": "object", "properties": {
-                    "fact": {"type": "string", "description": "One short third-person sentence that still makes sense later, "
-                             "e.g. \"Prefers short answers.\" or \"Partner is called Sam.\""},
-                    "type": {"type": "string", "enum": list(memory_quality.KINDS),
-                             "description": "What kind of fact this is."},
-                    "key": {"type": "string", "description": "For facts that can change, a short stable name like home_city, "
-                            "job or diet. A new fact with the same key replaces the old one."},
-                    "pinned": {"type": "boolean", "description": "True only for core facts that matter in almost every chat "
-                               "(name, key preferences). Pinned facts are always in your context."},
-                }, "required": ["fact"]},
-                func=memory_save,
-            ))
+            if scope:
+                tools.append(NativeTool(
+                    name="memory_save",
+                    description="Save one lasting fact about the user so you remember it in future chats: who they are, what they "
+                    "prefer, people and projects in their life, or how they like you to work. The current user request "
+                    "sets the authorized scope. Save only what that request authorizes. Omit web content and secrets. "
+                    "One fact per call.",
+                    parameters={"type": "object", "properties": {
+                        "fact": {"type": "string", "description": "One short third-person sentence that still makes sense later, "
+                                 "e.g. \"Prefers short answers.\" or \"Partner is called Sam.\""},
+                        "type": {"type": "string", "enum": list(memory_quality.KINDS),
+                                 "description": "What kind of fact this is."},
+                        "key": {"type": "string", "description": "For facts that can change, a short stable name like home_city, "
+                                "job or diet. A new fact with the same key replaces the old one."},
+                        "pinned": {"type": "boolean", "description": "True only for core facts that matter in almost every chat "
+                                   "(name, key preferences). Pinned facts are always in your context."},
+                    }, "required": ["fact"]},
+                    func=memory_save,
+                ))
             tools.append(NativeTool(
                 name="memory_search",
                 description="Search the facts you have saved about the user (preferences, people, projects). "
@@ -1759,7 +1835,7 @@ class LeanSession:
             # This turn's own messages never count: the question being asked matched itself, three hits skipped the
             # partial top-up, and only two stale ones were left after it was dropped (live MC1 r2).
             hits = [hit for hit in store_.search_messages(query, limit=9, session_id=self.session_id if scoped else "")
-                    if hit["turn_id"] != self.execution_id][:8]
+                    if hit["turn_id"] != self.execution_id and self._chat_hit_visible(store_, hit)][:8]
             if len(hits) < 3:
                 # Every word had to match: "offsite venue" missed "the team offsite is at Larkspur Hall", and "vendor
                 # account manager name" missed the message naming the manager (live MC1/MCH1, 18 November 2026). Top
@@ -1768,7 +1844,8 @@ class LeanSession:
                 seen_ids = {hit["item_id"] for hit in hits}
                 for hit in (store_.search_messages(words, limit=8, session_id=self.session_id if scoped else "",
                                                     any_term=True) if words else []):
-                    if hit["item_id"] not in seen_ids and hit["turn_id"] != self.execution_id and len(hits) < 8:
+                    if (hit["item_id"] not in seen_ids and hit["turn_id"] != self.execution_id and len(hits) < 8
+                            and self._chat_hit_visible(store_, hit)):
                         hits.append({**hit, "partial": True})
             context = current_work()
             if context and context.coordinator.get(context.work_id, principal=context.principal).get("parent_id"):
@@ -1784,6 +1861,9 @@ class LeanSession:
             hits.sort(key=lambda hit: (bool(hit.get("partial")), -float(hit["created_at"] or 0)))
             lines = []
             for hit in hits:
+                source = store_.get_execution(hit["turn_id"])
+                if source:
+                    self._limit_memory_context(source.metadata.get("memory_context_scope"))
                 when = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(hit["created_at"] or 0)))
                 who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
                 here = " (this chat)" if hit["session_id"] == self.session_id else ""
@@ -2306,7 +2386,8 @@ class LeanSession:
         try:
             from agent.state import get_state_store
 
-            hits = get_state_store().search_messages(" ".join(terms), limit=12, any_term=True)
+            store = get_state_store()
+            hits = store.search_messages(" ".join(terms), limit=12, any_term=True)
             if self.model_first:
                 hits = chat_mode.chat_hits(hits)  # Chat recalls Chat, not Agents rooms or Code sessions
         except Exception:
@@ -2314,12 +2395,15 @@ class LeanSession:
             return self._past_chat_lines
         lines: list[str] = []
         for hit in hits:
-            if hit["session_id"] == self.session_id or hit["turn_id"] == self.execution_id:
+            if hit["session_id"] == self.session_id or hit["turn_id"] == self.execution_id or not self._chat_hit_visible(store, hit):
                 continue
             if memory_quality.stale_version_claim(str(hit["snippet"] or "")):
                 continue  # an old "current version" answer; the live version is in the prompt
             when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
             who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
+            source = store.get_execution(hit["turn_id"])
+            if source:
+                self._limit_memory_context(source.metadata.get("memory_context_scope"))
             lines.append(f"{when} {who}: {hit['snippet']}")
             if len(lines) >= 5:
                 break
@@ -2341,6 +2425,8 @@ class LeanSession:
             if rows and hasattr(memory, "note_recalled"):
                 # Used facts stay; ones nobody recalls for months are retired at idle (agent/lean/memory_tidy.py).
                 memory.note_recalled([str(r.get("memory_id") or "") for r in rows])
+            for row in rows:
+                self._limit_memory_context(row.get("scope"))
             return rows
         except Exception:
             logger.debug("Lean memory recall failed", exc_info=True)
@@ -2368,6 +2454,10 @@ class LeanSession:
                 continue
             if index < recent_start and str(turn.get("execution_id") or "") in covered:
                 continue
+            metadata = (turn.get("execution") or {}).get("metadata") or {}
+            if not self._context_visible(metadata):
+                continue
+            self._limit_memory_context(metadata.get("memory_context_scope"))
             start = len(rows)
             # What the turn changed and how it ended, on its reply: the reply alone often doesn't say, and the next
             # turn can't see tool calls (owner's GTA session: a JavaScript game started beside an unseen Python one).
@@ -2409,11 +2499,47 @@ class LeanSession:
             merged.pop(0)
         return merged
 
+    def _context_scope(self, scope: Optional[str]) -> dict[str, str]:
+        if scope == "session":
+            return {"memory_context_scope": scope, "memory_context_id": self.session_id}
+        if scope == "project":
+            return {"memory_context_scope": scope, "memory_context_id": self._active_project()}
+        return {}
+
+    def _context_visible(self, metadata: dict[str, Any]) -> bool:
+        scope = metadata.get("memory_context_scope")
+        if not scope:
+            return True
+        context_id = self._context_scope(scope).get("memory_context_id")
+        return self.caller_role == "owner" and bool(context_id) and context_id == metadata.get("memory_context_id")
+
+    def _chat_hit_visible(self, store: Any, hit: dict[str, Any]) -> bool:
+        source = store.get_execution(hit["turn_id"])
+        return source is not None and self._context_visible(source.metadata)
+
+    def _limit_memory_context(self, scope: Optional[str]) -> None:
+        """Keep replies derived from scoped context inside that scope in later chat searches."""
+        if scope not in {"session", "project"} or not self.execution_id:
+            return
+        from agent.state import get_state_store
+
+        with self._state_lock:
+            current = getattr(self, "_memory_context", {})
+            if current and (current["memory_context_scope"] == "session" or scope == "project"):
+                return
+            self._memory_context = self._context_scope(scope)
+            store = get_state_store()
+            record = store.get_execution(self.execution_id)
+            if record is not None:
+                store.update_execution(self.execution_id, metadata={**record.metadata, **self._memory_context}, project_thread=False)
+
     def _remember_async(self, message: str, answer: str) -> None:
         memory = getattr(self.agent, "memory", None)
         if memory is None or not answer or self._lead_id not in {"echo", CHAT_AGENT_ID, CODE_AGENT_ID} or self.source in {"routine", "heartbeat", "proactive"}:
             return
-        if self.caller_role != "owner":
+        if (self.caller_role != "owner" or memory_quality.refuses_memory(message)
+                or getattr(self, "_memory_list_phase", "") or getattr(self, "_memory_context", {})
+                or memory_quality.requested_scope(message) != "account"):
             return
         # Raw transcripts are opt-in (Settings › Memory). Chats are already kept and searchable
         # (chat_search); copying every turn into memory only crowded out the real facts.
@@ -2431,8 +2557,8 @@ class LeanSession:
         threading.Thread(target=work, name="lean-memory", daemon=True).start()
 
 
-def _memory_on_disk(memory: Any, memory_id: str) -> "str | bool | None":
-    """The saved text if the record is active in records.json, False if it isn't,
+def _memory_on_disk(memory: Any, memory_id: str) -> "dict[str, Any] | bool | None":
+    """The saved record if it is active in records.json, False if it isn't,
     None when this memory store has no record file to check."""
     path = getattr(memory, "_records_path", None)
     if not path:
@@ -2442,9 +2568,9 @@ def _memory_on_disk(memory: Any, memory_id: str) -> "str | bool | None":
     except (OSError, ValueError):
         return False
     record = records.get(memory_id) if isinstance(records, dict) else None
-    if not isinstance(record, dict) or not record.get("active", True):
+    if not isinstance(record, dict) or not record.get("active", True) or not record.get("text"):
         return False
-    return str(record.get("text") or "")
+    return record
 
 
 def _plain_error(error: str) -> str:

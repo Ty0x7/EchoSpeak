@@ -170,17 +170,22 @@ def _changes_recalled(user_message: str, request_note: str) -> str | bool:
     """The user states a change to a fact recalled for this request: a change cue, not a question, and two shared
     content words with one of its lines, or one shared name ("Ines moved to Gdansk" and "Friend Ines lives in
     Valencia"). Returns the line's key when it shows one, True without one, or False."""
-    text = str(user_message or "").strip()
-    if not text or text.endswith("?") or not _CHANGE_CUE.search(text):
-        return False
+    from agent.lean import memory_quality
     from agent.stopwords import keywords
-    said = set(keywords(text))
-    names = {w.lower() for w in re.findall(r"\b[A-Z][a-z]{2,}\b", text[1:])}  # capitalised after the first letter
-    for line in _recalled_lines(request_note):
-        shared = said & set(keywords(line))
-        if len(shared) >= 2 or shared & names:
-            key = re.search(r"\bkey ([\w.-]+)\)", line)
-            return key.group(1) if key else True
+
+    text = str(user_message or "").strip()
+    if not text or memory_quality.is_structured_list(text):
+        return False
+    for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
+        if sentence.endswith("?") or not _CHANGE_CUE.search(sentence):
+            continue
+        said = set(keywords(sentence))
+        names = {word.lower() for word in re.findall(r"\b[A-Z][a-z]{2,}\b", sentence[1:])}
+        for line in _recalled_lines(request_note):
+            shared = said & set(keywords(line))
+            if len(shared) >= 2 or shared & names:
+                key = re.search(r"\bkey ([\w.-]+)\)", line)
+                return key.group(1) if key else True
     return False
 
 
@@ -395,6 +400,7 @@ class LeanTurn:
         # Calls to run before the model's first turn, through the normal tool path ([(name, args)]):
         # Chat reads addresses the user gave without waiting for a small model to notice them.
         self.prefetch: Optional[Callable[[], list[tuple[str, dict[str, Any]]]]] = None
+        self.prefetch_reply: Optional[Callable[[list[dict[str, Any]]], str]] = None
         self.final_check: Optional[Callable[[str], str]] = None
         # Measures engineering work against its objective (agent/lean/verification.py): sees every finished
         # call, adds structured feedback to check results, and states completion under the answer.
@@ -639,15 +645,26 @@ class LeanTurn:
             # Deterministic retrieval as the turn's first step, recorded like the model's own calls.
             step = 1
             self.emit({"type": "step_start", "step": step})
-            calls = [ToolCall(f"prefetch_{index}", name, json.dumps(args)) for index, (name, args) in enumerate(planned)]
+            calls = [ToolCall(f"prefetch_{self.message_id}_{index}", name, json.dumps(args))
+                     for index, (name, args) in enumerate(planned)]
             messages.append({"role": "assistant", "content": "", "tool_calls": [
                 {"id": call.id, "type": "function", "function": {"name": call.name, "arguments": call.arguments}} for call in calls]})
             self._run_tools(calls, messages, step, call_counts)
 
-        while step < self._steps_allowed(max_steps + self._extended) or self._continue_past(messages, step, max_steps, call_counts):
+        while True:
             if self.cancel.is_set():
                 error = "cancelled"
                 success = False
+                break
+            if self.prefetch_reply is not None:
+                final_text = self.prefetch_reply(self.timeline)
+                self._append_text("text", step, final_text)
+                self.emit({"type": "agent_token", "step": step, "data": final_text})
+                stop_reason = "deterministic_reply"
+                break
+            if not (step < self._steps_allowed(max_steps + self._extended)
+                    or self._continue_past(messages, step, max_steps, call_counts)):
+                stop_reason = "max_steps"
                 break
             step += 1
             # Safe checkpoint: tool results are in, the next model call hasn't started.
@@ -757,13 +774,28 @@ class LeanTurn:
                     if self.promise_guard and self.toolbox.names and is_promise_without_action(content):
                         # "Sure, I'll do that" is not the work. Ask for the action
                         # (twice at most) instead of ending the turn on a promise.
-                        if promise_nudges < 2:
+                        self._retract_text(step)
+                        if promise_nudges < 2 and step < max_steps:
                             promise_nudges += 1
                             add_note(messages, promise_nudge(self.toolbox.names))
                             self.emit({"type": "promise_nudge", "step": step, "count": promise_nudges})
                             continue
                         stop_reason = "promise_unfulfilled"
-                    claim = ((unbacked_claim(content, self.succeeded) or unbacked_file_claim(content, self._written)
+                        success = False
+                        error = "the promised action did not run"
+                        final_text = "I couldn’t complete the promised action in this turn."
+                        self._append_text("text", step, final_text)
+                        self.emit({"type": "agent_token", "step": step, "data": final_text})
+                        break
+                    claim_tools = self.succeeded
+                    if re.search(r"(?i)\b(?:updated|changed|replaced)\b", content):
+                        # A readback of an identical record can confirm what is remembered, never an update.
+                        receipts = [row.get("meta", {}) for row in self.timeline
+                                    if row.get("kind") == "tool" and row.get("name") == "memory_save"]
+                        if any(m.get("memory_written") is False for m in receipts) and not any(
+                                m.get("memory_written") is True for m in receipts):
+                            claim_tools = claim_tools - {"memory_save"}
+                    claim = ((unbacked_claim(content, claim_tools) or unbacked_file_claim(content, self._written)
                               or unbacked_screen_claim(content, self._screen_changed))
                              if self.promise_guard and self.toolbox.names else "")
                     if claim and not stop_reason:
@@ -930,10 +962,9 @@ class LeanTurn:
                 self.completed_summary = completed
                 final_text = content.strip()
                 break
-        else:
+        if stop_reason == "max_steps":
             # Out of steps: stop honestly instead of forcing a rushed answer.
             # The note lists what was done so a "Continue" turn has context.
-            stop_reason = "max_steps"
             # A turn stopped by its research limit (step_limit) still ends in an answer from what it found.
             total = max_steps + self._extended
             limited = self._steps_allowed(total) < total

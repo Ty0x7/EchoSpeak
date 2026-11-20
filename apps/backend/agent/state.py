@@ -1976,6 +1976,7 @@ class StateStore:
 
     def create_execution(self, **payload: Any) -> ExecutionRecord:
         record_user_message = bool(payload.pop("record_user_message", True))
+        user_message = payload.pop("user_message", None)
         payload.setdefault("session_id", payload.get("thread_id") or "default")
         payload.setdefault("project_id", payload.get("active_project_id") or "")
         record = ExecutionRecord(**payload)
@@ -2016,9 +2017,10 @@ class StateStore:
                 continuity_notice="",
                 safest_next_action="",
             )
-            if record_user_message and str(record.query or "").strip():
+            message = record.query if user_message is None else user_message
+            if record_user_message and str(message or "").strip():
                 self.add_item(turn_id=record.id, item_type="user_message", status="complete",
-                              payload={"text": record.query}, session_id=record.session_id,
+                              payload={"text": message}, session_id=record.session_id,
                               project_id=record.project_id, model_id=record.model_id)
         return ExecutionRecord(**record.model_dump())
 

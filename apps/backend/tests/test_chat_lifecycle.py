@@ -313,3 +313,38 @@ def test_sports_times_say_whose_clock_they_are_on():
     from agent.sports_espn import _local_time
     assert _local_time("2026-10-30T01:00:00Z", zone=True).endswith("(your time)")
     assert "your time" not in _local_time("2026-10-30T01:00:00Z")  # cards stay short
+
+
+def test_release_lookup_requires_a_request_and_keeps_evidence_for_separate_turns():
+    from agent.state import get_state_store
+
+    paste = "The backup restored successfully. See EchoSpeak release notes in backup-log.md."
+    assert chat_run.ChatRun(session_id="t", user_message=paste).prefetch() == []
+    ask_text = "What’s new in EchoSpeak?"
+    store = get_state_store()
+    ids = set()
+    for _ in range(2):
+        model = Model([ModelTurn(content="Here is the release history.")])
+        turn, run, _ = _chat_turn(model, ask_text)
+        execution = store.create_execution(thread_id="prefetch-evidence", query=ask_text)
+        turn.execution_id = execution.id
+        turn.persist_tool_runs = True
+        turn.prefetch = run.prefetch
+        turn.run(ask_text)
+        tool_runs = store.list_tool_runs(execution.id)
+        assert len(tool_runs) == 2
+        current = {row.id for row in tool_runs}
+        assert not current & ids
+        ids.update(current)
+
+
+def test_an_unfulfilled_same_turn_promise_ends_with_one_failure():
+    ask_text = "Search for the Widget 9 manual."
+    model = Model([ModelTurn(content="I'll search for it now.") for _ in range(3)])
+    turn, _, events = _chat_turn(model, ask_text)
+    result = turn.run(ask_text)
+    assert result.stop_reason == "promise_unfulfilled"
+    assert not result.success
+    assert "couldn’t complete" in result.text
+    assert "I'll search" not in result.text
+    assert sum(e["type"] == "promise_nudge" for e in events) == 2
