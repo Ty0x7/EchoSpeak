@@ -56,6 +56,31 @@ def test_turn_compaction_needs_enough_steps():
     assert not turn._compact_turn(messages, keep_steps=2)
 
 
+def test_turn_compaction_carries_forward_measured_test_failures():
+    from agent.lean.verification import VerificationLedger
+
+    client = ScriptedClient([ModelTurn(content="Tests were investigated."), ModelTurn(content="Work continues.")])
+    turn = _turn(client, [])
+    turn._history_in_messages = 0
+    turn.verifier = VerificationLedger()
+    command = {"command": "python3 run_tests.py"}
+    turn.verifier.observe("terminal", command, False,
+                         "[exit code 1 · sandbox]\nFAIL test_motion test_released_key\n2 ran, 1 failed", 2)
+    messages = [{"role": "system", "content": "sys"}, {"role": "user", "content": "Fix motion"}]
+    for n in range(1, 6):
+        messages += _step(n)
+    assert turn._compact_turn(messages, keep_steps=2)
+    assert "test_motion::test_released_key" in messages[1]["content"]
+
+    turn.verifier.observe("file_edit", {"path": "motion.py"}, True, "Edited", 6)
+    for n in range(6, 11):
+        messages += _step(n)
+    assert turn._compact_turn(messages, keep_steps=2)
+    prompt = messages[1]["content"]
+    assert prompt.count("test_motion::test_released_key") == 1
+    assert "predates a source change" in prompt
+
+
 def _fake_turns(count: int) -> list[dict[str, Any]]:
     return [
         {"execution_id": f"e{i}", "messages": [
