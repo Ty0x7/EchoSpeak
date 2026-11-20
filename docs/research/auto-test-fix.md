@@ -19,7 +19,7 @@ agent or model, so that EchoSpeak itself can take the engineering role later on 
 | | System under test | Engineering agent | The loop (this script) |
 |---|---|---|---|
 | Who | EchoSpeak's harness with `--model` (qwen3.5:9b) | `--driver claude` · `codex` · `command` (any CLI, later EchoSpeak) · `manual` | Deterministic Python |
-| Works in | Disposable eval projects, through harness_eval's isolated backend (own data folder, auth on, recorder) | One disposable git worktree, `~/Work/echospeak-auto-<session>`, branch `auto/<session>` | The session folder and the worktree's git |
+| Works in | Disposable eval projects, through harness_eval's isolated backend (own data folder, auth on, recorder) | One disposable git worktree, `~/Work/echospeak-worktrees/auto-<session>`, branch `auto/<session>` | The session folder and the worktree's git |
 | Can change | Nothing in EchoSpeak | Allowed source paths in its worktree | Commits accepted cycles on the session branch |
 | Authority | None: its output is evidence | None: its report is a claim the gates check | Accepts only what the gates prove; never pushes or merges |
 
@@ -70,7 +70,7 @@ What each engineering agent can do:
    - otherwise **reject** or **inconclusive**.
 7. **Preserve:**
    - an accepted cycle is committed on the session branch, with the evidence in the message;
-   - a rejected, inconclusive or no-change cycle is reset, and its diff is kept in `cycle-N/fix.diff`;
+   - a rejected, inconclusive or no-change cycle keeps its diff in `cycle-N/fix.diff`; any working changes halt the session in place for review;
    - a halt leaves the change uncommitted in the worktree for the owner;
    - every cycle writes `cycle-N/report.md` and a `ledger.jsonl` row. The session writes `report.md`, an Obsidian
      note and one line in note 27.
@@ -104,7 +104,7 @@ cd apps/backend
 
 Output goes to `~/Work/echospeak-model-testing-2026/auto-test-fix/<stamp>-<label>/`. Code goes to the worktree
 `~/Work/echospeak-auto-<stamp>-<label>`, branch `auto/<stamp>-<label>`. To keep a fix, review it with `review`,
-then cherry-pick. To discard everything, run `git worktree remove` and `git branch -D`.
+then integrate the verified change through an issue-linked PR. Review retirement and backup scope under the [engineering workflow](../engineering-prompt.md).
 
 ## 5. Relation to what existed
 

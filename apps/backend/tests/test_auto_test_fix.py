@@ -200,3 +200,55 @@ def test_model_names_count_in_code_but_not_in_the_evidence_comments(tmp_path):
     module.write_text('def f(model):\n    if model.startswith("qwen3"):\n        return 2\n    return 1\n')
     named = atf.model_names_in_code(repo, base, ["apps/backend/agent/lean/x.py"])
     assert len(named) == 1 and "qwen3" in named[0]
+
+
+def test_rejected_cycle_preserves_the_working_tree(tmp_path):
+    for args in (["init", "-q"], ["-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                                  "commit", "--allow-empty", "-qm", "base"]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+    evidence = tmp_path / "new.bin"
+    evidence.write_bytes(bytes(range(256)))
+    state = {"status": "running"}
+    atf.preserve_cycle(tmp_path, state, "inconclusive")
+    assert state["status"] == "halted"
+    assert evidence.read_bytes() == bytes(range(256))
+    evidence.unlink()
+    state = {"status": "running"}
+    atf.preserve_cycle(tmp_path, state, "no_change")
+    assert state["status"] == "running"
+
+
+def test_failing_first_leaves_existing_probe_untouched(tmp_path):
+    session = atf.Session(tmp_path, {})
+    probe = tmp_path / "cycle-1" / "base-tree"
+    probe.mkdir(parents=True)
+    marker = probe / "notes"
+    marker.write_text("unfinished")
+    with pytest.raises(FileExistsError, match="Existing baseline probe"):
+        atf.failing_first(tmp_path, "missing-revision", [], session, 1)
+    assert marker.read_text() == "unfinished"
+
+def test_review_reports_the_issue_for_new_sessions_and_reads_legacy_sessions(tmp_path, capsys):
+    from argparse import Namespace
+
+    state = {"base": "0123456789ab", "cycles": [], "model": "local", "driver": "manual",
+             "repeat": 1, "cases": [], "heldout": [], "target": 9}
+    session = atf.Session(tmp_path, state)
+    for issue in (None, 119):
+        if issue:
+            state["issue"] = issue
+        session.save()
+        atf.write_session_report(session)
+        assert atf.review(Namespace(session=str(tmp_path))) == 0
+        assert ("#119" in capsys.readouterr().out) == bool(issue)
+        assert atf.review(Namespace(session=str(tmp_path), github=True)) == (0 if issue else 2)
+        summary = capsys.readouterr().out
+        assert ("Refs #119" in summary) == bool(issue)
+        assert str(tmp_path) not in summary
+
+
+def test_resume_checks_saved_driver_before_opening_the_tree(tmp_path):
+    from argparse import Namespace
+
+    atf.Session(tmp_path, {"driver": "command"}).save()
+    assert atf.run(Namespace(resume=True, session=str(tmp_path), driver="manual", ai_judge="")) == 2

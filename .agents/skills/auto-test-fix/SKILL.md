@@ -1,6 +1,6 @@
 ---
 name: auto-test-fix
-description: Run bounded, evidence-gated engineering cycles on EchoSpeak — test the harness with a real model, judge, diagnose the failing layer, let an engineering agent (Claude Code, Codex, or any CLI agent) fix it with a failing-first test, retest dev and held-out cases, and keep only what the gates prove. Use when the owner asks for autonomous improvement cycles; never as a side effect of other work.
+description: Run bounded, evidence-gated engineering cycles on EchoSpeak — test the harness with a real model, judge, diagnose the failing layer, let an engineering agent (Claude Code, Codex,) fix it with a failing-first test, retest dev and held-out cases, and keep only what the gates prove. Use when the owner asks for autonomous improvement cycles; never as a side effect of other work.
 ---
 
 # auto-test-fix
@@ -15,9 +15,8 @@ re-prompting. Design and evidence: `docs/research/auto-test-fix.md`.
 
 - **System under test:** EchoSpeak's harness running `--model` (qwen3.5:9b is the reference). It works only in
   disposable eval projects through `harness_eval.py`'s isolated backend. Its output is evidence, never authority.
-- **Engineering agent:** `--driver claude | codex | command | manual`. It edits one disposable worktree on branch
-  `auto/<session>` with scoped tools and limits. `command` takes any CLI (`--driver-cmd "tool --brief {brief}
-  --cwd {tree}"`), so EchoSpeak itself can take this role later on a strong enough model. `manual` writes the brief
+- **Engineering agent:** `--driver claude | codex | manual`. It edits one disposable worktree on branch
+  `auto/<session>` with scoped tools and limits. `manual` writes the brief
   and pauses; make the fix yourself, then `run --resume`.
 
 ## Run
@@ -50,8 +49,7 @@ A fix is committed on the cycle branch only if every gate passes:
 5. **Measurement:** the dev mean improves by more than 0.5 (noise) with no new critical finding, and the
    held-out cases (never shown to the engineering agent) don't fall more than 1.0 or gain a critical finding.
 
-Results: `accept` (commit), `reject` / `inconclusive` / `no_change` (worktree reset; diff kept in the cycle
-folder), `halt` (left uncommitted in the worktree for the owner).
+Results: accepted changes commit on the campaign branch. Unaccepted edits remain in the tree and halt the session for review. A clean no-change cycle may continue. The outer session links the decision to the issue following [the engineering workflow](../../../docs/engineering-prompt.md). Supply `--issue NUMBER` on issue-backed runs.
 
 **Stops:** cycle and minute budgets, `stop`, nothing below `--target`, two rejected cycles in a row, a security
 halt, `needs_authorization` from the engineering agent, an engineering agent that stops without its report
@@ -101,5 +99,5 @@ flipped four cases:
 - Session: `~/Work/echospeak-model-testing-2026/auto-test-fix/<stamp>-<label>/` — `state.json`, `ledger.jsonl`,
   `report.md`, `runs/` (judged eval runs), `cycle-N/` (`brief.md`, `diagnosis.json`, `driver.log`,
   `agent-report.json`, `gate.json`, `fix.diff`, `report.md`).
-- Code: worktree `~/Work/echospeak-auto-<session>`, branch `auto/<session>`. Review, then cherry-pick what you keep.
+- Code: worktree `~/Work/echospeak-worktrees/auto-<session>`, branch `auto/<session>`. Resume older campaigns at their recorded paths. Review accepted commits in the issue-linked PR.
 - Obsidian: `EchoSpeak/Evaluations/<date> auto-test-fix <session>.md`, plus one line in note 27.
