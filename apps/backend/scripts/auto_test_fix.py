@@ -577,7 +577,7 @@ def judge_failing_first(before: dict[str, Any], after: dict[str, Any], known: se
     fixed = sorted(set(before["failed"]) - set(after["failed"]))
     if collection_error(before) and not collection_error(after):
         fixed = fixed or ["(the test file doesn't import on the base: it uses what the fix adds)"]
-    still = sorted(t for t in after["failed"] if t not in known)
+    still = related_failures(after, known)
     return {"fails_on_base": bool(fixed), "passes_on_fix": not still, "fixed_by_change": fixed,
             "still_failing": still, "known_failures": sorted(t for t in after["failed"] if t in known),
             "base": before, "fix": after}

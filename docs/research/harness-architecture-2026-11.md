@@ -1,5 +1,8 @@
 # EchoSpeak harness architecture, November 2026: review, verdicts and upgrades
 
+The [20 November full-system audit](full-system-audit-2026-11-20.md) revisits these systems against the installed 11.15 baseline with live, scripted and replay evidence.
+
+
 > **Status, 16 November 2026.** Branch `five-model-harness`; not merged or released.
 >
 > **Commits:**

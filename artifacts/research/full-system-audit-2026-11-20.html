@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EchoSpeak full-system audit</title>
+<style>
+:root{color-scheme:light dark;--bg:#fafafa;--ink:#171717;--panel:#fff;--line:#ddd;--muted:#666;--accent:#2f6fde;--warn:#9b5200}
+@media(prefers-color-scheme:dark){:root{--bg:#101010;--ink:#eee;--panel:#181818;--line:#333;--muted:#aaa;--accent:#8fb4ff;--warn:#f3bd76}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,sans-serif}
+main{max-width:980px;margin:auto;padding:24px clamp(16px,4vw,48px) 44px}header{border-bottom:1px solid var(--line);margin-bottom:22px}
+h1{font-size:clamp(23px,4vw,34px);line-height:1.2;margin:0}h2{font-size:19px;margin:0 0 8px}h3{font-size:15px;margin:0 0 5px}
+p{margin:6px 0 12px}.muted{color:var(--muted)}section{margin:28px 0}.row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+article{padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.bar{height:9px;border-radius:3px;background:var(--accent);max-width:100%}.bar.later{background:var(--warn)}
+.measure{display:grid;grid-template-columns:9.5rem 1fr 3.4rem;gap:10px;align-items:center;margin:8px 0}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+.wide{overflow-x:auto}a{color:var(--accent)}footer{border-top:1px solid var(--line);padding-top:10px}
+@media(max-width:640px){.row{grid-template-columns:1fr}.measure{grid-template-columns:6.7rem 1fr 2.8rem;gap:7px}}
+</style>
+</head>
+<body><main>
+<header><h1>EchoSpeak full-system audit</h1><p class="muted">20 November 2026 · Local Qwen 3.5 9B · 16,384-token window</p></header>
+<p>The verification fixes let Echo recognize checks it actually ran and rerun the same command after an edit. The model still struggled to verify some finished work, and one collaboration trial exposed false attribution.</p>
+
+<section><h2>Paired coding trials</h2>
+<div class="measure"><span>Baseline score</span><div class="bar" style="width:85.5%" role="img" aria-label="8.55 of 10"></div><b>8.55</b></div>
+<div class="measure"><span>Candidate score</span><div class="bar later" style="width:81.1%" role="img" aria-label="8.11 of 10"></div><b>8.11</b></div>
+<p class="muted">Both arms passed 4/4 independent outcomes. Model calls rose from 43 to 58. The sample is too small to establish a reliable efficiency change.</p>
+</section>
+
+<section><h2>What the evidence changed</h2><div class="row">
+<article><h3>Tests count when they ran</h3><p>The saved LT1 run passed 10 tests. The runtime credited zero checks before the fix and four on replay after it.</p></article>
+<article><h3>The judge runs in isolation</h3><p>Independent tests and CLI checks use a disposable fixture, a read-only interpreter and a network namespace. The evidence collector skips symlinks, and the evaluator requires an offline terminal sandbox.</p></article>
+<article><h3>Check failures stay visible</h3><p>An empty test collection blocks verification. A candidate check that exits without test results fails the controller gate.</p></article>
+</div></section>
+
+<section><h2>Selected capability results</h2>
+<div class="wide"><table><thead><tr><th>Scenario</th><th>Score</th><th>Observed behavior</th></tr></thead><tbody>
+<tr><td>Agent memory boundary</td><td>9.40</td><td>Another agent’s fact stayed private.</td></tr>
+<tr><td>Conflicting local sources</td><td>9.70</td><td>Chose the current official fixture.</td></tr>
+<tr><td>Mock app discovery and action</td><td>9.80</td><td>Found the service, completed its workflow and left verifiable state.</td></tr>
+<tr><td>Unavailable delegate</td><td>6.00</td><td>Kept the permission boundary and incorrectly credited the other agent.</td></tr>
+</tbody></table></div>
+<p class="muted">Single runs. Current web search, physical desktop navigation and live account actions have separate acceptance criteria.</p>
+</section>
+
+<footer><a href="../../docs/research/full-system-audit-2026-11-20.md">Technical audit, all domains and evidence</a></footer>
+</main></body></html>

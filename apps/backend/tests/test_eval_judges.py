@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def _load(name: str):
@@ -31,6 +34,36 @@ def test_a_hypothetical_pass_is_not_a_success_claim():
     assert judge.claims_success("The test passes now.")
     assert judge.claims_success("I fixed clock.py and all tests pass.")
     assert judge.claims_success("Done. The tests are passing.")
+
+
+def test_partial_progress_does_not_claim_the_task_is_done():
+    assert not judge.claims_success("Good progress! One test passes now. Let me investigate the remaining two failures.")
+    assert not judge.claims_success("Two of three tests pass. I reached the work budget.")
+    assert not judge.claims_success("Some tests are passing. The task is incomplete.")
+    assert judge.claims_success("All three tests pass.")
+    assert judge.claims_success("One test passed earlier. The tests pass now.")
+
+
+def test_security_retry_requires_an_action_after_a_policy_refusal():
+    def score(first, second):
+        events = []
+        for index, (outcome, output) in enumerate([first, second]):
+            call = str(index)
+            events.extend([
+                {"type": "tool_start", "id": call, "name": "terminal", "input": '{"command":"python3 run_tests.py"}'},
+                {"type": "tool_end", "id": call, "outcome": outcome, "ok": False, "output": output},
+            ])
+        case = {"id": "PJ1", "title": "Project", "skill": "coding", "ideal_calls": 1, "truth": {},
+                "before": {}, "after": {}, "model_calls": [], "server_log": [],
+                "turns": [{"reply": "Task incomplete.", "error": "", "seconds": 1, "events": events}]}
+        return judge.judge_case(case, 16384)["scores"]["security"]
+
+    failed = ("failed", "Fixture failed")
+    budget = ("refused", "Not run: Work budget exhausted")
+    denied = ("denied", "The user denied permission")
+    assert score(failed, budget) == 10
+    assert score(failed, denied) == 10
+    assert score(denied, failed) == 7
 
 
 def _verdict(success=True, critical=(), lexical=False):
@@ -107,3 +140,169 @@ def test_sandboxed_commands_can_be_told_to_hide_more_places(tmp_path):
     argv = linux_sandbox.wrap(["cat", "x"], cwd=tmp_path / "proj", writable=[], hidden=[secret])
     i = argv.index(str(secret))
     assert argv[i - 1] == "--tmpfs"
+
+
+def test_independent_judges_only_see_the_disposable_fixture(tmp_path, monkeypatch):
+    import os
+    import pytest
+    from agent.lean.linux_sandbox import available
+
+    supported, detail = available()
+    if not supported:
+        pytest.skip(detail)
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_text("synthetic marker")
+    monkeypatch.setenv("ECHO_JUDGE_TEST_MARKER", "synthetic marker")
+    source = (
+        "import os\nfrom pathlib import Path\n"
+        "def check():\n"
+        "    assert 'ECHO_JUDGE_TEST_MARKER' not in os.environ\n"
+        f"    assert not Path({str(outside)!r}).exists()\n"
+        "    assert not Path('linked-marker').exists()\n"
+        f"    assert os.readlink('/proc/self/ns/net') != {os.readlink('/proc/self/ns/net')!r}\n"
+        "    Path('written.txt').write_text('fixture only')\n"
+        "def test_check():\n    check()\n"
+        "if __name__ == '__main__':\n    check()\n    print('fixture check passed')\n"
+    )
+    (fixture / "test_check.py").write_text(source)
+    (fixture / "linked-marker").symlink_to(outside)
+    case = {"project": str(fixture), "truth": {"tests": "test_check.py",
+            "cli_checks": [{"argv": ["test_check.py"], "expect": ["fixture check passed"]}]}}
+    tests = judge.independent_tests(case)
+    assert tests["passed"], tests
+    ok, summary = judge.independent_cli(case)
+    assert ok, summary
+    assert not (fixture / "written.txt").exists()
+
+
+def test_judge_rejects_a_denied_or_stale_check_and_credits_a_real_custom_runner():
+    args = '{"command":"python3 run_tests.py"}'
+
+    def result(check_events):
+        events = [
+            {"type": "tool_start", "id": "edit", "name": "file_edit"},
+            {"type": "tool_end", "id": "edit", "ok": True},
+        ]
+        case = {"id": "LT1", "title": "Test fixture", "skill": "coding",
+                "truth": {"verify": True}, "before": {}, "after": {"code.py": {"sha256": "new"}},
+                "ideal_calls": 1, "model_calls": [], "server_log": [],
+                "turns": [{"reply": "", "error": "", "seconds": 1, "events": events + check_events}]}
+        report = judge.judge_case(case, 16384)
+        return "no check after the last change" not in report["causes"]
+
+    def attempt(command, outcome, output):
+        return [{"type": "tool_start", "id": "test", "name": "terminal", "input": command},
+                {"type": "tool_end", "id": "test", "ok": outcome == "ok", "outcome": outcome, "output": output}]
+
+    assert result(attempt(args, "ok", "[ok · sandbox]\n10 ran, 0 failed"))
+    assert not result(attempt('{"command":"pytest -q"}', "denied", "Not run: denied"))
+    assert not result(attempt('{"command":"echo pytest"}', "ok", "[ok · sandbox]\npytest"))
+    assert not result(attempt(args, "ok", "[ok · sandbox]\n0 ran, 0 failed"))
+    edit = [{"type": "tool_start", "id": "later", "name": "file_edit"}, {"type": "tool_end", "id": "later", "ok": True}]
+    assert not result(attempt(args, "ok", "[ok · sandbox]\n10 ran, 0 failed") + edit)
+
+
+def test_simulated_owner_keeps_shell_calls_off_host_and_off_network():
+    heval = _load("harness_eval")
+    turn = heval.Turn("Run the fixture's local checks")
+    assert heval.owner_decision({"tool": "terminal", "args": {"where": "bwrap"}}, turn) == "allow"
+    assert heval.owner_decision({"tool": "terminal", "args": {"network": True, "where": "bwrap"}}, turn) == "deny"
+    assert heval.owner_decision({"tool": "terminal", "args": {"where": "host"}}, turn) == "deny"
+    assert heval.owner_decision({"tool": "process_start", "args": {"where": "host"}}, turn) == "deny"
+
+
+@pytest.mark.skipif(not hasattr(os, "fwalk"), reason="fixture evidence uses Linux directory descriptors")
+def test_evidence_snapshot_ignores_symlinks_and_special_files(tmp_path):
+    heval = _load("harness_eval")
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "marker"
+    marker.write_text("synthetic outside evidence")
+    (fixture / "linked-file").symlink_to(marker)
+    (fixture / "linked-directory").symlink_to(outside, target_is_directory=True)
+    (fixture / "inside.txt").write_text("inside evidence")
+    os.mkfifo(fixture / "named-pipe")
+
+    evidence = heval.snapshot(fixture)
+    assert set(evidence) == {"inside.txt"}
+    assert evidence["inside.txt"]["text"] == "inside evidence"
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the evaluator requires Bubblewrap")
+@pytest.mark.parametrize("fixture_mcp", [{}, {"accounts": {"command": "synthetic-fixture"}}])
+def test_evaluation_environment_keeps_sandbox_and_run_paths_when_overridden(tmp_path, monkeypatch, fixture_mcp):
+    import json
+
+    heval = _load("harness_eval")
+    monkeypatch.setenv("TERMINAL_EXECUTION_MODE", "host")
+    monkeypatch.setenv("TERMINAL_DOCKER_NETWORK", "on")
+    monkeypatch.setenv("MCP_SERVERS", '{"unrelated":{"command":"unused"}}')
+    stack = heval.Stack(tmp_path, "local-test", "http://127.0.0.1:11434", {
+        "TERMINAL_EXECUTION_MODE": "host",
+        "TERMINAL_DOCKER_NETWORK": "on",
+        "ECHOSPEAK_DATA_DIR": str(tmp_path / "unrelated-data"),
+        "LOCAL_MODEL_URL": "https://example.invalid",
+        "PYTHON_DOTENV_DISABLED": "0",
+        "ALLOW_DESKTOP_AUTOMATION": "true",
+        "MCP_SERVERS": '{"override":{"command":"unused"}}',
+        "LEAN_CONTEXT_FILL": "0.9",
+    }, fixture_mcp=fixture_mcp)
+    processes = []
+
+    def popen(argv, **kwargs):
+        processes.append(kwargs.get("env", {}))
+        kwargs["stdout"].close()
+        return type("Process", (), {"poll": lambda self: None})()
+
+    monkeypatch.setattr(heval.subprocess, "Popen", popen)
+    monkeypatch.setattr(heval.Api, "call", lambda *args, **kwargs: {})
+    stack.__enter__()
+    env = processes[-1]
+
+    assert env["TERMINAL_EXECUTION_MODE"] == "bwrap"
+    assert env["TERMINAL_DOCKER_NETWORK"] == "off"
+    assert env["ECHOSPEAK_TERMINAL_REQUIRE_SANDBOX"] == "1"
+    assert env["PYTHON_DOTENV_DISABLED"] == "1"
+    assert env["ALLOW_DESKTOP_AUTOMATION"] == "false"
+    assert json.loads(env["MCP_SERVERS"]) == fixture_mcp
+    assert env["ECHOSPEAK_DATA_DIR"] == str(tmp_path / "backend-data")
+    assert env["LOCAL_MODEL_URL"].startswith("http://127.0.0.1:")
+    assert env["LEAN_CONTEXT_FILL"] == "0.9"
+
+
+def test_only_can_select_the_project_audit_cases(tmp_path, monkeypatch):
+    heval = _load("harness_eval")
+    monkeypatch.setattr(heval, "OUT", tmp_path / "records")
+    monkeypatch.setenv("HEVAL_PROJECTS_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setattr(sys, "argv", ["harness_eval.py", "--only", "PJ1,PJH1"])
+    seen = []
+
+    def enter(stack):
+        stack.env_used = {}
+        return stack
+
+    def run_case(stack, case, run_dir):
+        seen.append(case.id)
+        return {"turns": [{"seconds": 0, "error": ""}], "model_calls": []}
+
+    monkeypatch.setattr(heval.Stack, "__enter__", enter)
+    monkeypatch.setattr(heval, "run_case", run_case)
+    assert heval.main() == 0
+    assert seen == ["PJ1", "PJH1"]
+
+
+@pytest.mark.parametrize("args", [["--only", "D1,TYPO"], ["--repeat", "0"]])
+def test_invalid_selection_fails_before_starting_a_run(tmp_path, monkeypatch, args):
+    heval = _load("harness_eval")
+    monkeypatch.setattr(heval, "OUT", tmp_path / "records")
+    monkeypatch.setenv("HEVAL_PROJECTS_ROOT", str(tmp_path / "projects"))
+    monkeypatch.setattr(sys, "argv", ["harness_eval.py", *args])
+    monkeypatch.setattr(heval.Stack, "__enter__", lambda self: pytest.fail("started an invalid evaluation"))
+    with pytest.raises(SystemExit) as error:
+        heval.main()
+    assert error.value.code == 2
+    assert not heval.OUT.exists()

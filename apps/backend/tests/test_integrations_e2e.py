@@ -1,6 +1,6 @@
 """Echo Connections end to end: a suggestion, the owner's approval, a real MCP server starting,
 and the check that confirms it. The server is tests/fixtures/mock_mcp_server.py, so no
-third-party code runs. Settings go through the real path (DPAPI-backed secrets)."""
+third-party code runs. Settings use the real credential store with the suite’s isolated key."""
 from __future__ import annotations
 
 import json
@@ -43,7 +43,6 @@ def _suggest() -> dict:
     return proposal
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="MCP secrets are stored with Windows DPAPI")
 def test_suggest_approve_connect_and_check(clean):
     from fastapi import HTTPException
 

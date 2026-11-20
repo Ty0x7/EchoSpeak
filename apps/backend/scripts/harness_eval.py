@@ -23,6 +23,7 @@ the case's policy: allow, deny, or deny-destructive. No paid model is called.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -32,6 +33,7 @@ import secrets
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -996,17 +998,22 @@ class Stack:
     """The recorder plus an isolated backend, torn down together."""
 
     def __init__(self, run_dir: Path, model: str, upstream: str, extra_env: dict[str, str],
-                 agents_md: str = "", skills: tuple[str, ...] = ()) -> None:
+                 agents_md: str = "", skills: tuple[str, ...] = (), *,
+                 fixture_mcp: Optional[dict[str, Any]] = None) -> None:
         self.run_dir, self.model, self.upstream, self.extra_env = run_dir, model, upstream, extra_env
         # A/B variables (one experiment arm): the owner's AGENTS.md text, and skills imported + approved through
         # the real API. Both go in through EchoSpeak's own mechanisms, not a test-only prompt path.
         self.agents_md, self.skills = agents_md, skills
+        self.fixture_mcp = fixture_mcp or {}
         self.variant: dict[str, Any] = {}
         self.procs: list[subprocess.Popen] = []
         self.key = "eval-" + secrets.token_hex(16)
         self.data = run_dir / "backend-data"
 
     def __enter__(self) -> "Stack":
+        if sys.platform != "linux":
+            raise RuntimeError("The evaluation requires a Linux Bubblewrap sandbox")
+        assert_local(self.upstream)
         rec_port, api_port = _free_port(), _free_port()
         self.calls = self.run_dir / "model-calls.jsonl"
         self.procs.append(subprocess.Popen(
@@ -1021,12 +1028,7 @@ class Stack:
             self.variant["agents_md_sha256"] = hashlib.sha256(self.agents_md.encode()).hexdigest()[:16]
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ECHOSPEAK_", "API_", "XDG_RUNTIME", "LOCAL_MODEL", "LEAN_"))}
         env.update({
-            "ECHOSPEAK_DATA_DIR": str(dirs["backend-data"]), "ECHOSPEAK_LOGS_DIR": str(dirs["backend-logs"]),
-            "ECHOSPEAK_HOME": str(dirs["backend-home"]), "SOUL_PATH": str(dirs["backend-data"] / "SOUL.md"),
-            "ECHOSPEAK_RUNTIME_DIR": str(dirs["backend-rt"]), "ECHOSPEAK_RUNTIME_KIND": "desktop",
-            "API_AUTH_ENABLED": "true", "API_AUTH_LOCALHOST_BYPASS": "false", "API_AUTH_KEY": self.key,
-            "USE_LOCAL_MODELS": "true", "LOCAL_MODEL_PROVIDER": "ollama", "LOCAL_MODEL_URL": f"http://127.0.0.1:{rec_port}",
-            "LOCAL_MODEL_NAME": self.model, "ECHOSPEAK_DISABLE_WARMUP": "1", "CHECKIN_MODE": "off",
+            "ECHOSPEAK_DISABLE_WARMUP": "1", "CHECKIN_MODE": "off",
             "ASSISTANT_MODE": "unified", "PYTHONUNBUFFERED": "1",
             # An owner who engineers in a project has these on (Settings > Permissions); a fresh data
             # folder has them off. Approval mode stays at its default (smart).
@@ -1035,6 +1037,20 @@ class Stack:
             # 10 calls") carried from one case into the next. Each case should stand alone. Turn it on with
             # --env LEARNING_ENABLED=true to measure learning itself.
             "LEARNING_ENABLED": "false",
+        })
+        env.update(self.extra_env)
+        # Pin isolation after applying experiment options. A model request or an operator's
+        # inherited settings must never send commands to the host or model traffic off-machine.
+        env.update({
+            "ECHOSPEAK_DATA_DIR": str(dirs["backend-data"]), "ECHOSPEAK_LOGS_DIR": str(dirs["backend-logs"]),
+            "ECHOSPEAK_HOME": str(dirs["backend-home"]), "SOUL_PATH": str(dirs["backend-data"] / "SOUL.md"),
+            "ECHOSPEAK_RUNTIME_DIR": str(dirs["backend-rt"]), "ECHOSPEAK_RUNTIME_KIND": "desktop",
+            "API_AUTH_ENABLED": "true", "API_AUTH_LOCALHOST_BYPASS": "false", "API_AUTH_KEY": self.key,
+            "USE_LOCAL_MODELS": "true", "LOCAL_MODEL_PROVIDER": "ollama", "LOCAL_MODEL_URL": f"http://127.0.0.1:{rec_port}",
+            "LOCAL_MODEL_NAME": self.model, "PYTHON_DOTENV_DISABLED": "1",
+            "TERMINAL_EXECUTION_MODE": "bwrap", "TERMINAL_DOCKER_NETWORK": "off",
+            "ECHOSPEAK_TERMINAL_REQUIRE_SANDBOX": "1",
+            "ALLOW_DESKTOP_AUTOMATION": "false", "MCP_SERVERS": json.dumps(self.fixture_mcp),
             # Without a project the default folder is the owner's Documents; an evaluation must never see it.
             "FILE_TOOL_ROOT": str(dirs["backend-home"]),
             # The credential broker's key lives in the run's own data folder, never in the owner's desktop keyring
@@ -1042,13 +1058,12 @@ class Stack:
             # before that every eval backend had been reaching into the owner's keyring.
             "ECHOSPEAK_CREDENTIAL_KEYFILE": "1",
         })
-        env.update(self.extra_env)
         env = local_only_env(env)  # last, so neither the shell nor --env can hand the backend a paid key
         # Sandboxed commands of the system under test must not read the repository (eval scripts hold the answers)
         # or the eval records (other cases' and earlier repetitions' ground truth and trajectories).
         env["ECHOSPEAK_SANDBOX_HIDE"] = os.pathsep.join([str(ROOT.parents[1]), str(OUT), str(self.run_dir)])
         self.env_used = {k: v for k, v in env.items() if k.startswith(("LOCAL_MODEL", "LEAN_", "ASSISTANT", "USE_LOCAL", "LEARNING",
-                                                                       "ENABLE_SYSTEM", "ALLOW_"))}
+                                                                       "ENABLE_SYSTEM", "ALLOW_", "TERMINAL_"))}
         self.procs.append(subprocess.Popen(
             [sys.executable, "app.py", "--mode", "api", "--host", "127.0.0.1", "--port", str(api_port)],
             cwd=str(ROOT), env=env, stdout=open(self.run_dir / "backend.log", "wb"), stderr=subprocess.STDOUT))
@@ -1084,15 +1099,30 @@ class Stack:
 
 # ── evidence ────────────────────────────────────────────────────────────
 def snapshot(project: Path) -> dict[str, Any]:
+    """Read regular fixture files through directory descriptors without following links."""
     files: dict[str, Any] = {}
-    for path in sorted(project.rglob("*")):
-        if not path.is_file() or any(part in {"__pycache__", ".pytest_cache", ".git"} for part in path.parts):
-            continue
-        raw = path.read_bytes()
-        rel = str(path.relative_to(project))
-        files[rel] = {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
-                      "text": raw.decode("utf-8", errors="replace") if len(raw) <= 4000 else None}
-    return files
+    ignored = {"__pycache__", ".pytest_cache", ".git"}
+    for directory, subdirs, names, dir_fd in os.fwalk(project, follow_symlinks=False):
+        subdirs[:] = [name for name in subdirs if name not in ignored]
+        for name in names:
+            if name in ignored:
+                continue
+            try:
+                if not stat.S_ISREG(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
+                    continue
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+            except OSError as exc:
+                if exc.errno in {errno.ENOENT, errno.ELOOP}:
+                    continue  # A background process removed or replaced the entry.
+                raise
+            with os.fdopen(fd, "rb") as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    continue
+                raw = stream.read()
+            rel = str((Path(directory) / name).relative_to(project))
+            files[rel] = {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+                          "text": raw.decode("utf-8", errors="replace") if len(raw) <= 4000 else None}
+    return dict(sorted(files.items()))
 
 
 def server_log(since: float, until: float) -> list[str]:
@@ -1157,6 +1187,10 @@ def owner_decision(event: dict[str, Any], turn: Turn, readable: tuple[str, ...] 
             return "deny"
     if "outside the sandbox" in text:
         return "deny"
+    args = event.get("args") or {}
+    if tool in {"terminal", "terminal_run", "process_start"} and isinstance(args, dict):
+        if args.get("network") or str(args.get("where") or "").lower() == "host":
+            return "deny"
     if turn.approvals == "deny" or (turn.approvals == "deny-destructive" and any(w in text for w in DESTRUCTIVE)):
         return "deny"
     return "allow"
@@ -1299,8 +1333,19 @@ def main() -> int:
     parser.add_argument("--skill", action="append", default=[], help="A/B arm: SKILL.md to import and approve (repeatable)")
     args = parser.parse_args()
     assert_local(args.upstream)
-    chosen = {c.strip() for c in args.only.split(",") if c.strip()}
-    cases = [c for c in SETS["everything" if chosen else args.set] if not chosen or c.id in chosen]
+    if args.repeat < 1:
+        parser.error("--repeat must be at least 1")
+    cases = SETS[args.set]
+    if args.only:
+        chosen = {case_id.strip() for case_id in args.only.split(",") if case_id.strip()}
+        if not chosen:
+            parser.error("--only requires at least one case ID")
+        # Explicit IDs can select any registered case, including suites outside the broad sweep.
+        candidates = {case.id: case for group in SETS.values() for case in group}
+        unknown = chosen - candidates.keys()
+        if unknown:
+            parser.error("unknown case IDs: " + ", ".join(sorted(unknown)))
+        cases = [case for case in candidates.values() if case.id in chosen]
     run_dir = OUT / f"{time.strftime('%Y%m%d-%H%M%S')}-{args.label}"
     run_dir.mkdir(parents=True)
     projects_root(run_dir).mkdir(parents=True, exist_ok=True)
@@ -1319,15 +1364,15 @@ def main() -> int:
     needs = {need for case in cases for need in case.needs}
     if "skill:relnotes" in needs:
         skills += (RELNOTES_SKILL,)
+    fixture_mcp = {}
     if "accounts" in needs:
         # One disposable accounts service per run; its state file is the evidence (setup can seed it).
         db = run_dir / "accounts-db.json"
         os.environ["HEVAL_ACCOUNTS_DB"] = str(db)
-        extra["MCP_SERVERS"] = json.dumps({"accounts": {"command": sys.executable,
-                                                        "args": [str(FIXTURES / "accounts_mcp.py")],
-                                                        "env": {"ACCOUNTS_DB": str(db)}}})
+        fixture_mcp["accounts"] = {"command": sys.executable, "args": [str(FIXTURES / "accounts_mcp.py")],
+                                   "env": {"ACCOUNTS_DB": str(db)}}
     print(f"Harness eval {args.label} · {args.model} · {len(cases)} cases × {args.repeat} · {run_dir}", flush=True)
-    with Stack(run_dir, args.model, args.upstream, extra, agents_md, skills) as stack:
+    with Stack(run_dir, args.model, args.upstream, extra, agents_md, skills, fixture_mcp=fixture_mcp) as stack:
         if "accounts" in needs:
             stack.api.call("POST", "/lean/mcp/accounts/approve", {})  # trusted as an owner would, for this run only
         meta["env"] = stack.env_used

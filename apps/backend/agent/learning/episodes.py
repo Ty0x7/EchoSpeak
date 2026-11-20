@@ -119,8 +119,6 @@ def classify(goal: str, tools: list[dict[str, Any]]) -> str:
 
 # ── checks and tampering ────────────────────────────────────────────────
 
-_TEST_CMD = re.compile(r"(?i)\b(pytest|py\.test|unittest|nose2|npm\s+(run\s+)?test|yarn\s+test|pnpm\s+(run\s+)?test|"
-                       r"vitest|jest|mocha|cargo\s+test|go\s+test|dotnet\s+test|mvn\s+test|gradlew?\s+test|phpunit|rspec|ctest)\b")
 _MUTATING_CMD = re.compile(r"(?i)(\s>{1,2}\s?\S|\b(rm|del|erase|rmdir|rd|mv|move|cp|copy|xcopy|robocopy|mkdir|md|touch|"
                            r"sed\s+-i|pip3?\s+(install|uninstall)|npm\s+(i|install|uninstall|ci)|yarn\s+add|"
                            r"git\s+(commit|checkout|reset|restore|push|merge|rebase|apply|stash|rm|mv)|"
@@ -155,7 +153,7 @@ def command_kind(command: str) -> str:
 
     text = str(command or "")
     # The runner must be what runs: `pip install pytest` or `pip list | grep pytest` checks nothing.
-    if _TEST_CMD.search(text) and check_kind(text) == "test":
+    if check_kind(text) == "test":
         return "test"
     if _MUTATING_CMD.search(text):
         return "change"
@@ -171,10 +169,15 @@ def _check_kind(tool: dict[str, Any]) -> str:
     """The kind of check a successful call is, or ''."""
     name, output = tool["name"], str(tool.get("output") or "")
     if name in {"terminal_run", "terminal"}:
-        kind = command_kind(str(tool.get("target") or ""))
-        if kind in {"test", "run"}:
-            # Finished with exit code 0; "still running in the background" checks nothing yet.
-            return kind if output.lower().startswith("[ok") else ""
+        command = str(tool.get("target") or "")
+        kind = command_kind(command)
+        if kind == "test":
+            from agent.lean.verification import counts, test_result_observed
+
+            finished = output.lower().startswith("[ok") and test_result_observed(command, output)
+            return "test" if finished and max(counts(output)[1:]) <= 0 else ""
+        if kind == "run":
+            return "run" if output.lower().startswith("[ok") else ""
         return "read_back" if kind == "read" else ""
     if name == "process_output":
         return "run" if "finished (ok)" in output.lower() else ""

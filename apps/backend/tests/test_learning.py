@@ -863,3 +863,13 @@ def test_learning_api(store):
     assert client.get("/lean/learning/episodes").json()["episodes"][0]["id"] == episode.id
     assert client.delete(f"/lean/learning/lessons/{lesson.id}").json() == {"ok": True}
     assert client.get("/lean/learning/reliability").status_code == 200
+
+
+def test_custom_runner_earns_verification_only_when_its_tests_pass():
+    assert command_kind("python3 run_tests.py") == "test"
+    edit = _t("file_write", "a.py")
+    for output in ("0 ran, 0 failed", "fixture printed a banner", "10 ran, 1 failed"):
+        attempted = _t("terminal", "python3 run_tests.py", output=f"[ok · sandbox]\n{output}")
+        assert grade("fix a.py", [edit, attempted], outcome="success", claim_failed=False)[0] == 1
+    checked = _t("terminal", "python3 run_tests.py", output="[ok · sandbox]\n10 ran, 0 failed")
+    assert grade("fix a.py", [edit, checked], outcome="success", claim_failed=False)[0] == 2

@@ -252,3 +252,12 @@ def test_resume_checks_saved_driver_before_opening_the_tree(tmp_path):
 
     atf.Session(tmp_path, {"driver": "command"}).save()
     assert atf.run(Namespace(resume=True, session=str(tmp_path), driver="manual", ai_judge="")) == 2
+
+
+def test_failing_first_does_not_credit_a_candidate_check_without_a_result():
+    before = {"ok": False, "failed": ["tests/test_sample.py::test_regression"], "summary": "1 failed"}
+    after = {"ok": False, "failed": [], "summary": "no tests ran"}
+    result = atf.judge_failing_first(before, after, set())
+    assert result["fails_on_base"]
+    assert not result["passes_on_fix"]
+    assert result["still_failing"]

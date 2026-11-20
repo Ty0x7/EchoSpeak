@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Iterable, Mapping, Optional
@@ -136,3 +137,38 @@ def wrap(argv: list[str], *, cwd: Path, writable: Iterable[Path], network: bool 
 def sandbox_env(env: Mapping[str, str]) -> dict[str, str]:
     """The child environment without pointers to sockets the sandbox hides."""
     return {key: value for key, value in env.items() if key not in _SOCKET_VARS}
+
+def python_fixture(root: Path, python_args: list[str], *, timeout: float) -> subprocess.CompletedProcess[str]:
+    """Run an evaluation fixture with a disposable filesystem and no network."""
+    supported, detail = available()
+    if not supported:
+        raise RuntimeError(f"Independent fixture execution unavailable: {detail}")
+
+    # The backend venv and its base interpreter can live outside the system library directories.
+    # Bind those exact trusted directories without mounting their parent directories.
+    prefix = Path(sys.prefix).resolve()
+    executable = prefix / "bin" / Path(sys.executable).name
+    base_prefix = Path(sys.base_prefix).resolve()
+    interpreters = {prefix, base_prefix}
+    base_alias = Path(sys._base_executable).parent.parent
+    if Path("/") in interpreters:
+        raise RuntimeError("Independent fixture execution requires an isolated Python installation")
+    command = [bwrap_path() or "bwrap", "--unshare-all", "--new-session", "--die-with-parent",
+               "--cap-drop", "ALL", "--clearenv", "--dev", "/dev", "--proc", "/proc",
+               "--tmpfs", "/tmp", "--ro-bind", "/usr", "/usr"]
+    for path in ("/bin", "/lib", "/lib64", "/etc/ld.so.cache"):
+        command.extend(("--ro-bind-try", path, path))
+    for directory in sorted(interpreters):
+        if not directory.is_relative_to("/usr"):
+            command.extend(("--ro-bind", str(directory), str(directory)))
+    if base_alias != base_prefix and base_alias.resolve() == base_prefix:
+        command.extend(("--ro-bind", str(base_prefix), str(base_alias)))
+    command.extend(("--bind", str(root), "/fixture", "--chdir", "/fixture",
+                    "--setenv", "HOME", "/fixture", "--setenv", "PATH", "/usr/bin:/bin",
+                    "--setenv", "PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1",
+                    "--", str(executable), *python_args))
+    proc = subprocess.run(command, env={}, stdin=subprocess.DEVNULL, capture_output=True,
+                          text=True, errors="replace", timeout=timeout)
+    if proc.returncode and proc.stderr.startswith("bwrap:"):
+        raise RuntimeError(f"Independent fixture sandbox failed: {proc.stderr.splitlines()[0]}")
+    return proc

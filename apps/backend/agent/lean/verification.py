@@ -57,10 +57,13 @@ _KINDS: list[tuple[str, re.Pattern[str]]] = [
     ("build", re.compile(r"(?i)((npm|pnpm|yarn|bun)\s+run\s+build|vite\s+build|\bwebpack\b|cargo\s+build|go\s+build|dotnet\s+build|"
                          r"mvn\s+(package|compile)|gradlew?\s+build|\bmake\b|cmake\s+--build|next\s+build|tauri\s+build)")),
 ]
+_PYTHON_TEST_RUNNER = re.compile(r"""^(?:["']?[^"'\s]*/)?["']?python(?:3(?:\.\d+)?)?["']?\s+"""
+                                 r"""(?:["']?[^"'\s]*/)?["']?run_tests\.py["']?(?:\s|$)""")
+_RUNNER_SUMMARY = re.compile(r"(?m)^\s*(\d+) ran, (\d+) failed\s*$")
 _CHANGE_TOOLS = {"file_write", "file_edit", "file_delete", "file_move", "file_copy", "self_edit", "checkpoint_undo"}
 _LOOKUP_TOOLS = {"file_read", "file_find", "file_search", "file_list", "self_read", "self_grep", "web_search", "safe_web_fetch"}
 _TEST_FILE = re.compile(r"(?i)(^|[\\/])(tests?|__tests__|spec)[\\/]|(^|[\\/])(test_[^\\/]+|[^\\/]+_test|[^\\/]+\.(test|spec))\.[a-z]+$|"
-                        r"(^|[\\/])(conftest\.py|pytest\.ini|jest\.config\.[a-z]+|vitest\.config\.[a-z]+)$|\.github[\\/]workflows")
+                        r"(^|[\\/])(conftest\.py|run_tests\.py|pytest\.ini|jest\.config\.[a-z]+|vitest\.config\.[a-z]+)$|\.github[\\/]workflows")
 _ABOUT_TESTS = re.compile(r"(?i)\b(tests?|spec|testing|coverage|fixtures?|ci|workflow)\b")
 # The setup, not the code: a missing package or program, permissions, disk, network, a service that isn't up.
 # A missing module with a dotted or relative name ('app.utils', './utils') is usually the code's own, so it's left out.
@@ -74,8 +77,9 @@ ENVIRONMENT_ERROR = re.compile(
     r"could not find a version that satisfies)")
 _AUTHORIZATION = re.compile(r"(?i)^(not run:|blocked by echospeak's safety policy)|needs the user's approval|the user (denied|said no)|"
                             r"turned off in settings")
+WORK_BUDGET_REFUSAL = re.compile(r"(?i)^not run: (?:parent )?work budget exhausted\b")
 _NO_TESTS = re.compile(r"(?i)(no tests ran|collected 0 items|\bran 0 tests|\b0 passing|no test files found|no tests found|"
-                       r"test result: ok\. 0 passed|testing: 0 tests|no test suite found)")
+                       r"test result: ok\. 0 passed|testing: 0 tests|no test suite found|\b0 ran, 0 failed)")
 _MODEL_SLIP = re.compile(r"(?i)(invalid tool arguments|again with a json object matching its parameters|unknown tool|is not one of your tools)")
 _MISS = re.compile(r"(?i)^(error: )?(no (matches|results|files?)\b|nothing (found|matches)|file not found|not found\b|no such file|"
                    r"(it|that|the file|the folder|the path) does(n't| not) exist)")
@@ -126,7 +130,7 @@ def _check_segment(command: str) -> tuple[str, str, bool]:
     runnable = [(text[s:e].strip(), e) for s, e in zip(bounds, ends) if _runs(text[s:e].strip())]
     for kind, pattern in _KINDS:  # the same priority as before: a test anywhere in the command makes it a test
         for segment, end in runnable:
-            if pattern.search(segment):
+            if pattern.search(segment) or (kind == "test" and _PYTHON_TEST_RUNNER.match(segment)):
                 after = text[end:]
                 piped = after.startswith("|") and not after.startswith("||") and "pipefail" not in text
                 return kind, segment, bool(piped or _MASKED.search(after))
@@ -210,6 +214,11 @@ def counts(output: str) -> tuple[int, int, int]:
     dotnet = re.search(r"Failed:\s*(\d+),\s*Passed:\s*(\d+)", text)
     if dotnet:
         return int(dotnet.group(2)), int(dotnet.group(1)), 0
+    runner = _RUNNER_SUMMARY.findall(text)
+    if runner:
+        total, failed = map(int, runner[-1])
+        if total >= failed:
+            return total - failed, failed, 0
     ran = re.search(r"Ran (\d+) tests?", text)  # unittest
     if ran:
         bad = re.search(r"FAILED \((.*?)\)", text)
@@ -226,6 +235,18 @@ def counts(output: str) -> tuple[int, int, int]:
     if eslint:
         return 0, int(eslint.group(1)), 0
     return -1, -1, -1
+
+
+def test_result_observed(command: str, output: str) -> bool:
+    """A fresh test result requires a runner and evidence the command finished."""
+    kind, segment, masked = _check_segment(command)
+    code = exit_code(output)
+    if kind != "test" or code is None or _NO_TESTS.search(output):
+        return False
+    passed, failed, errors = counts(output)
+    if _PYTHON_TEST_RUNNER.match(segment) or masked:
+        return max(passed, failed, errors) > 0
+    return not (code != 0 and max(passed, failed, errors) <= 0 and ENVIRONMENT_ERROR.search(output))
 
 
 def failing_names(output: str) -> list[str]:
@@ -376,6 +397,9 @@ class VerificationLedger:
                 self._block("model", "several tool calls in a row had malformed arguments or unknown tool names")
             return
         self.model_slips = 0
+        if WORK_BUDGET_REFUSAL.search(head):
+            self._block("budget", head.split("\n", 1)[0])
+            return
         if _AUTHORIZATION.search(head):
             self._block("authorization", head.split("\n", 1)[0])
             return
@@ -406,7 +430,9 @@ class VerificationLedger:
                 return  # still running: it hasn't checked anything yet
             command = match.group(3)
             code = 0 if "(ok)" in match.group(1).lower() else int(match.group(2)) if match.group(2) else None
-        kind = check_kind(command) or (check_kind(self.check_command) if self.check_command and scope_of(command) == scope_of(self.check_command) else "")
+        kind, segment, masked = _check_segment(command)
+        if not kind and self.check_command and scope_of(command) == scope_of(self.check_command):
+            kind = check_kind(self.check_command)
         if not kind:
             from agent.learning.episodes import command_kind
             if code is not None and code != 0 and ENVIRONMENT_ERROR.search(text):
@@ -416,7 +442,11 @@ class VerificationLedger:
             return
         if code is None:
             return  # moved to the background: process_output reports it when it finishes
-        if exit_masked(command):
+        if (_PYTHON_TEST_RUNNER.match(segment) and code == 0 and not _NO_TESTS.search(text)
+                and max(counts(text)) <= 0):
+            self._block("verification", f"'{command[:80]}' reported no executed tests")
+            return
+        if masked:
             # `pytest || true` exits 0 whatever happened (found live: "No module named pytest" counted as a pass).
             # The runner's own summary is still evidence; the exit code isn't.
             passed, failed, errors = counts(text)
@@ -666,7 +696,7 @@ class VerificationLedger:
         latest = {c.scope: c for c in self.checks}
         detail = primary.line() if primary else ""
         if primary is None:
-            status = "blocked" if any(b["class"] in {"environment", "authorization"} for b in self.blockers) else "unverified"
+            status = "blocked" if any(b["class"] in {"environment", "authorization", "budget"} for b in self.blockers) else "unverified"
             detail = "nothing checked the work" if self.changes else ""
         elif self.tamper_after_fail:
             status, detail = "unverified", "tests were changed after they failed"
@@ -684,8 +714,8 @@ class VerificationLedger:
             else:
                 status = "verified" if self.objective else "checks_pass"
         else:
-            refused = any(b["class"] == "authorization" and b.get("step", 0) >= primary.step for b in self.blockers)
-            status = "blocked" if primary.environment or refused else "failing"
+            blocked = any(b["class"] in {"authorization", "budget"} and b.get("step", 0) >= primary.step for b in self.blockers)
+            status = "blocked" if primary.environment or primary.no_tests or blocked else "failing"
         first = next((c for c in self.checks if primary is not None and c.scope == primary.scope), None)
         return {
             "status": status,
