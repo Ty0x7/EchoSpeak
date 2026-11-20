@@ -107,3 +107,65 @@ def test_sandboxed_commands_can_be_told_to_hide_more_places(tmp_path):
     argv = linux_sandbox.wrap(["cat", "x"], cwd=tmp_path / "proj", writable=[], hidden=[secret])
     i = argv.index(str(secret))
     assert argv[i - 1] == "--tmpfs"
+
+
+def test_independent_judges_only_see_the_disposable_fixture(tmp_path, monkeypatch):
+    import os
+    import pytest
+    from agent.lean.linux_sandbox import available
+
+    supported, detail = available()
+    if not supported:
+        pytest.skip(detail)
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    outside = tmp_path / "outside"
+    outside.write_text("synthetic marker")
+    monkeypatch.setenv("ECHO_JUDGE_TEST_MARKER", "synthetic marker")
+    source = (
+        "import os\nfrom pathlib import Path\n"
+        "def check():\n"
+        "    assert 'ECHO_JUDGE_TEST_MARKER' not in os.environ\n"
+        f"    assert not Path({str(outside)!r}).exists()\n"
+        "    assert not Path('linked-marker').exists()\n"
+        f"    assert os.readlink('/proc/self/ns/net') != {os.readlink('/proc/self/ns/net')!r}\n"
+        "    Path('written.txt').write_text('fixture only')\n"
+        "def test_check():\n    check()\n"
+        "if __name__ == '__main__':\n    check()\n    print('fixture check passed')\n"
+    )
+    (fixture / "test_check.py").write_text(source)
+    (fixture / "linked-marker").symlink_to(outside)
+    case = {"project": str(fixture), "truth": {"tests": "test_check.py",
+            "cli_checks": [{"argv": ["test_check.py"], "expect": ["fixture check passed"]}]}}
+    tests = judge.independent_tests(case)
+    assert tests["passed"], tests
+    ok, summary = judge.independent_cli(case)
+    assert ok, summary
+    assert not (fixture / "written.txt").exists()
+
+
+def test_judge_rejects_a_denied_or_stale_check_and_credits_a_real_custom_runner():
+    args = '{"command":"python3 run_tests.py"}'
+
+    def result(check_events):
+        events = [
+            {"type": "tool_start", "id": "edit", "name": "file_edit"},
+            {"type": "tool_end", "id": "edit", "ok": True},
+        ]
+        case = {"id": "LT1", "title": "Test fixture", "skill": "coding",
+                "truth": {"verify": True}, "before": {}, "after": {"code.py": {"sha256": "new"}},
+                "ideal_calls": 1, "model_calls": [], "server_log": [],
+                "turns": [{"reply": "", "error": "", "seconds": 1, "events": events + check_events}]}
+        report = judge.judge_case(case, 16384)
+        return "no check after the last change" not in report["causes"]
+
+    def attempt(command, outcome, output):
+        return [{"type": "tool_start", "id": "test", "name": "terminal", "input": command},
+                {"type": "tool_end", "id": "test", "ok": outcome == "ok", "outcome": outcome, "output": output}]
+
+    assert result(attempt(args, "ok", "[ok · sandbox]\n10 ran, 0 failed"))
+    assert not result(attempt('{"command":"pytest -q"}', "denied", "Not run: denied"))
+    assert not result(attempt('{"command":"echo pytest"}', "ok", "[ok · sandbox]\npytest"))
+    assert not result(attempt(args, "ok", "[ok · sandbox]\n0 ran, 0 failed"))
+    edit = [{"type": "tool_start", "id": "later", "name": "file_edit"}, {"type": "tool_end", "id": "later", "ok": True}]
+    assert not result(attempt(args, "ok", "[ok · sandbox]\n10 ran, 0 failed") + edit)

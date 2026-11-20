@@ -57,10 +57,13 @@ _KINDS: list[tuple[str, re.Pattern[str]]] = [
     ("build", re.compile(r"(?i)((npm|pnpm|yarn|bun)\s+run\s+build|vite\s+build|\bwebpack\b|cargo\s+build|go\s+build|dotnet\s+build|"
                          r"mvn\s+(package|compile)|gradlew?\s+build|\bmake\b|cmake\s+--build|next\s+build|tauri\s+build)")),
 ]
+_PYTHON_TEST_RUNNER = re.compile(r"""^(?:["']?[^"'\s]*/)?["']?python(?:3(?:\.\d+)?)?["']?\s+"""
+                                 r"""(?:["']?[^"'\s]*/)?["']?run_tests\.py["']?(?:\s|$)""")
+_RUNNER_SUMMARY = re.compile(r"(?m)^\s*(\d+) ran, (\d+) failed\s*$")
 _CHANGE_TOOLS = {"file_write", "file_edit", "file_delete", "file_move", "file_copy", "self_edit", "checkpoint_undo"}
 _LOOKUP_TOOLS = {"file_read", "file_find", "file_search", "file_list", "self_read", "self_grep", "web_search", "safe_web_fetch"}
 _TEST_FILE = re.compile(r"(?i)(^|[\\/])(tests?|__tests__|spec)[\\/]|(^|[\\/])(test_[^\\/]+|[^\\/]+_test|[^\\/]+\.(test|spec))\.[a-z]+$|"
-                        r"(^|[\\/])(conftest\.py|pytest\.ini|jest\.config\.[a-z]+|vitest\.config\.[a-z]+)$|\.github[\\/]workflows")
+                        r"(^|[\\/])(conftest\.py|run_tests\.py|pytest\.ini|jest\.config\.[a-z]+|vitest\.config\.[a-z]+)$|\.github[\\/]workflows")
 _ABOUT_TESTS = re.compile(r"(?i)\b(tests?|spec|testing|coverage|fixtures?|ci|workflow)\b")
 # The setup, not the code: a missing package or program, permissions, disk, network, a service that isn't up.
 # A missing module with a dotted or relative name ('app.utils', './utils') is usually the code's own, so it's left out.
@@ -126,7 +129,7 @@ def _check_segment(command: str) -> tuple[str, str, bool]:
     runnable = [(text[s:e].strip(), e) for s, e in zip(bounds, ends) if _runs(text[s:e].strip())]
     for kind, pattern in _KINDS:  # the same priority as before: a test anywhere in the command makes it a test
         for segment, end in runnable:
-            if pattern.search(segment):
+            if pattern.search(segment) or (kind == "test" and _PYTHON_TEST_RUNNER.match(segment)):
                 after = text[end:]
                 piped = after.startswith("|") and not after.startswith("||") and "pipefail" not in text
                 return kind, segment, bool(piped or _MASKED.search(after))
@@ -210,6 +213,11 @@ def counts(output: str) -> tuple[int, int, int]:
     dotnet = re.search(r"Failed:\s*(\d+),\s*Passed:\s*(\d+)", text)
     if dotnet:
         return int(dotnet.group(2)), int(dotnet.group(1)), 0
+    runner = _RUNNER_SUMMARY.findall(text)
+    if runner:
+        total, failed = map(int, runner[-1])
+        if total >= failed:
+            return total - failed, failed, 0
     ran = re.search(r"Ran (\d+) tests?", text)  # unittest
     if ran:
         bad = re.search(r"FAILED \((.*?)\)", text)
@@ -226,6 +234,18 @@ def counts(output: str) -> tuple[int, int, int]:
     if eslint:
         return 0, int(eslint.group(1)), 0
     return -1, -1, -1
+
+
+def test_result_observed(command: str, output: str) -> bool:
+    """A fresh test result requires a runner and evidence the command finished."""
+    kind, segment, masked = _check_segment(command)
+    code = exit_code(output)
+    if kind != "test" or code is None or _NO_TESTS.search(output):
+        return False
+    passed, failed, errors = counts(output)
+    if _PYTHON_TEST_RUNNER.match(segment) or masked:
+        return max(passed, failed, errors) > 0
+    return not (code != 0 and max(passed, failed, errors) <= 0 and ENVIRONMENT_ERROR.search(output))
 
 
 def failing_names(output: str) -> list[str]:
@@ -416,6 +436,9 @@ class VerificationLedger:
             return
         if code is None:
             return  # moved to the background: process_output reports it when it finishes
+        if _PYTHON_TEST_RUNNER.match(_check_segment(command)[1]) and code == 0 and not any(n > 0 for n in counts(text)):
+            self._block("verification", f"'{command[:80]}' reported no executed tests")
+            return
         if exit_masked(command):
             # `pytest || true` exits 0 whatever happened (found live: "No module named pytest" counted as a pass).
             # The runner's own summary is still evidence; the exit code isn't.

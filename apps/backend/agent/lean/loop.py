@@ -317,6 +317,7 @@ class LeanTurn:
         # changed or been summarised away (_forget_reads).
         self._call_counts: dict[str, int] = {}
         self._read_sigs: set[str] = set()
+        self._test_sigs: set[str] = set()
         # Files read in this request, by path: how often in full while unchanged (file size and time), and their
         # outline for compaction. The third whole read says why re-reading can't fit (owner's GTA session,
         # 19 November 2026: 37 of 49 steps were re-reads).
@@ -612,7 +613,7 @@ class LeanTurn:
         max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
         self._extended, self._segment = 0, (0, len(self._outcomes))
         call_counts: dict[str, int] = {}
-        self._call_counts, self._read_sigs = call_counts, set()
+        self._call_counts, self._read_sigs, self._test_sigs = call_counts, set(), set()
         self._path_reads, self._read_shapes, self._rereads = {}, {}, 0
         stop_reason = ""
         nudges = 0
@@ -1208,6 +1209,8 @@ class LeanTurn:
 
     # ── tools ───────────────────────────────────────────────────────────
     def _run_tools(self, calls: list[Any], messages: list[dict[str, Any]], step: int, call_counts: dict[str, int]) -> None:
+        from agent.lean.verification import check_kind
+
         prepared: list[tuple[Any, str, dict[str, Any], str]] = []
         # Screens change, so the same screenshot or key press can rightly repeat.
         computer_names = policy.NATIVE_COMPUTER_ACT | policy.NATIVE_COMPUTER_LOOK
@@ -1220,6 +1223,8 @@ class LeanTurn:
             signature = self._sig(name, args)
             if name in READ_ONLY_TOOLS:
                 self._read_sigs.add(signature)
+            if name in CHECK_TOOLS and check_kind(str(args.get("command") or args.get("cmd") or "")) == "test":
+                self._test_sigs.add(signature)
             call_counts[signature] = call_counts.get(signature, 0) + 1
             problem = arg_error or ("" if call_counts[signature] < 3 or name in {"creation_status", "take_screenshot", "vision_qa", "computer_action"} | computer_names else "repeat")
             if not problem and signature in self._refused:
@@ -2217,6 +2222,9 @@ class LeanTurn:
             changed = changed_code_file(name, args)
             if changed:
                 self._unchecked[changed] = True
+                # A check of the old source is stale. Keep any explicit refusal binding.
+                for signature in self._test_sigs:
+                    self._call_counts[signature] = 0
         label = describe_call(name, args)
         # A command that ran and exited non-zero did run ("Ran `pytest`" · "Tests: 1 failed"); a refused or
         # failed file write didn't happen, so it keeps its present-tense label.

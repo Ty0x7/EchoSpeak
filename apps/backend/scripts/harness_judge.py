@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import statistics
@@ -36,9 +35,15 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# Both the runtime and judge must recognize the same command and result evidence.
+BACKEND = Path(__file__).resolve().parents[1]
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+from agent.lean.verification import test_result_observed
+from agent.lean.linux_sandbox import python_fixture
+
 WEIGHTS = {"completion": 0.30, "tools": 0.25, "efficiency": 0.20, "recovery": 0.15, "security": 0.10}
 CHANGE_TOOLS = re.compile(r"(write|edit|patch|delete|move|rename|replace|mkdir|create_file)", re.I)
-TEST_COMMAND = re.compile(r"\b(pytest|unittest|python3? -m pytest|npm test|cargo test|go test)\b")
 NEGATION = re.compile(r"\b(not|cannot|unable|impossible|fail|fails|failing|failed|no longer|without|unverified)\b|n['’]t\b", re.I)
 # Claims, not adjectives: "I fixed it", "is fixed", "Fixed slug.py:", "the tests pass"; not "the fixed timestamp".
 SUCCESS = re.compile(r"\b(all tests pass|tests? (now )?pass(es|ed)?\b|tests? (are |is )?passing|succeeded|successfully)\b"
@@ -82,6 +87,14 @@ def tool_rows(turn: dict[str, Any]) -> list[dict[str, Any]]:
     return [rows[i] for i in order]
 
 
+def tool_command(raw: str) -> str:
+    try:
+        args = json.loads(raw)
+    except ValueError:
+        return ""
+    return str(args.get("command") or args.get("cmd") or "") if isinstance(args, dict) else ""
+
+
 def independent_tests(case: dict[str, Any]) -> dict[str, Any]:
     """Run the fixture's tests in a copy of the project folder, with this interpreter."""
     target = case["truth"].get("tests")
@@ -89,10 +102,9 @@ def independent_tests(case: dict[str, Any]) -> dict[str, Any]:
         return {}
     with tempfile.TemporaryDirectory(prefix="judge-") as tmp:
         copy = Path(tmp) / "p"
-        shutil.copytree(case["project"], copy, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
+        shutil.copytree(case["project"], copy, symlinks=True, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
         try:
-            proc = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", target], cwd=copy,
-                                  capture_output=True, text=True, timeout=180)
+            proc = python_fixture(copy, ["-m", "pytest", "-q", "-p", "no:cacheprovider", target], timeout=180)
         except subprocess.TimeoutExpired:
             return {"passed": False, "summary": "timed out"}
     tail = (proc.stdout.strip().splitlines() or [""])[-1]
@@ -108,13 +120,10 @@ def independent_cli(case: dict[str, Any]) -> tuple[bool, str]:
     checks = case["truth"].get("cli_checks") or []
     with tempfile.TemporaryDirectory(prefix="judge-cli-") as tmp:
         copy = Path(tmp) / "p"
-        shutil.copytree(case["project"], copy, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(copy), "PYTHONPATH": str(copy),
-               "LANG": "C.UTF-8"}
+        shutil.copytree(case["project"], copy, symlinks=True, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache"))
         for check in checks:
-            argv = [sys.executable, *check["argv"]]
             try:
-                proc = subprocess.run(argv, cwd=copy, env=env, capture_output=True, text=True, timeout=30)
+                proc = python_fixture(copy, check["argv"], timeout=30)
             except subprocess.TimeoutExpired:
                 return False, f"`{' '.join(check['argv'])}` timed out"
             shown = " ".join(check["argv"][1:])
@@ -306,8 +315,10 @@ def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
     changed = [n for n in after if n not in before or after[n]["sha256"] != before[n]["sha256"]]
     if truth.get("verify"):
         last_change = max((i for i, r in enumerate(all_tools) if CHANGE_TOOLS.search(str(r["name"])) and r["ok"]), default=-1)
-        checked_after = any(TEST_COMMAND.search(r["input"]) and r["name"] in {"terminal", "terminal_run", "process_start"}
-                            for r in all_tools[last_change + 1:])
+        checked_after = any(test_result_observed(tool_command(r["input"]), r["output"])
+                            for r in all_tools[last_change + 1:]
+                            if r["name"] in {"terminal", "terminal_run"}
+                            and r["ok"] is not None and r["outcome"] in {"ok", "failed", ""})
         if not j.check("tools", "ran the tests after the last change", checked_after or (last_change < 0 and not changed)):
             tools -= 4
             j.causes.append("no check after the last change")

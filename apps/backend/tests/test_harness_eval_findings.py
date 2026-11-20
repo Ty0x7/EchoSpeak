@@ -523,3 +523,50 @@ def test_a_refused_path_the_model_made_up_gets_no_extra_note(tmp_path):
     assert "the user asked for" not in client.calls[1][-1]["content"]
     assert result.text == "Saved notes.txt."
     assert not any(e["type"] == "requested_location_nudge" for e in events)
+
+
+def test_custom_runner_verification_requires_an_executed_test_after_the_edit():
+    ledger = VerificationLedger()
+    command = {"command": "python3 run_tests.py"}
+    ledger.observe("file_edit", {"path": "textkit/trim.py"}, True, "Edited", 1)
+    ledger.observe("terminal", {"command": "echo 'python3 run_tests.py'"},
+                   True, "[ok · sandbox]\n10 ran, 0 failed", 2)
+    ledger.observe("terminal", command, False, "Not run: Work budget exhausted", 3)
+    assert not ledger.checks
+    ledger.observe("terminal", command, True, "[ok · sandbox]\n0 ran, 0 failed", 4)
+    assert ledger.completion()["status"] != "checks_pass"
+    ledger.observe("terminal", command, True, "[ok · sandbox]\n10 ran, 0 failed", 5)
+    assert ledger.completion()["status"] == "checks_pass"
+    assert ledger.checks[-1].passed == 10
+    ledger.observe("file_edit", {"path": "textkit/trim.py"}, True, "Edited again", 6)
+    assert ledger.completion()["status"] == "unverified"
+    ledger.observe("terminal", command, False, "[exit code 1 · sandbox]\n10 ran, 1 failed", 7)
+    assert ledger.completion()["status"] == "failing"
+
+
+@pytest.mark.parametrize("decision", ["allow", "deny"])
+def test_identical_test_can_run_after_an_edit_but_denial_still_holds(tmp_path, monkeypatch, decision):
+    from agent.lean import loop
+
+    needs_approval = loop.tool_needs_approval
+    monkeypatch.setattr(loop, "tool_needs_approval", lambda entry, name, args:
+                        (True, "fixture requires approval") if name == "terminal" else needs_approval(entry, name, args))
+    box, ran = _project(tmp_path)
+    args = '{"command": "python -m pytest -q"}'
+    events = []
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall(f"test{i}", "terminal", args)]) for i in range(3)
+    ] + [
+        ModelTurn(tool_calls=[ToolCall("write", "file_write", '{"path":"solution.py","content":"answer = 1\\n"}')]),
+        ModelTurn(tool_calls=[ToolCall("after", "terminal", args)]),
+        ModelTurn(content="The changes are available for review.", finish_reason="stop"),
+    ])
+    _turn(box, client, [decision] * 3, events).run("Check the tests, update solution.py, then check the tests.")
+    ends = {e["id"]: e for e in events if e["type"] == "tool_end"}
+    if decision == "allow":
+        assert ends["test2"]["outcome"] == "skipped"
+        assert ends["after"]["outcome"] == "ok"
+        assert len(ran) == 3
+    else:
+        assert ends["after"]["outcome"] == "refused"
+        assert not ran
