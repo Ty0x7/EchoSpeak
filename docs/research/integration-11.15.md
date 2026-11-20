@@ -116,3 +116,17 @@ not ancestors of `main`, so removing them needs `-D`. That is safe only because 
 ## Remote preservation
 
 Ten branch tips were pushed atomically under `backup/20261120/`: the three superseded candidate branches, `campaign-base-20261118`, and all six `auto/*` branches. The uncommitted five-model checkout remains in place.
+
+The remote now has one branch, `main`, and zero open PRs. One annotated tag, `archive/pre-11.15-branches-20261120`, preserves all 96 branch names at consolidation and all 94 distinct target commits. Codex fetched the tag into an empty repository and verified every tip before retiring 95 remote names in one atomic push. Local worktrees, evaluation data and the pre-release bundle remain available.
+
+For a historical branch lookup, run `git show archive/pre-11.15-branches-20261120:branches.tsv` after fetching the tag. The first column is the full commit, suitable for `git show` or restoring a branch. The production build comes from `main`.
+
+## Installed Linux baseline
+
+The installed TUI and Linux AppImage use application commit `e3f8c4c`. The shared backend runs from the main checkout. Its authenticated endpoint and the desktop attachment log both reported 11.15.0. The installed TUI displayed 11.15.0, opened its status panel and exited cleanly in a real pseudo-terminal. The desktop opened a mapped EchoSpeak window. The packaged backend passed its self-check.
+
+Before the restart there were zero active turns, active streams and tracked processes. After startup, the 16 conversations, two projects, three agents, memory index and settings were present. Fingerprints matched for eight saved files and the database contents of 88 executions, 173 items and 366 tool runs. The 17 thread-state records matched apart from one refreshed timestamp.
+
+Core readiness passed with local Ollama `qwen3.5:9b`. Typed memory is available. The optional embedding model is absent, document retrieval reported unavailable, and the legacy Calendar and Spotify connections reported unavailable.
+
+Installed AppImage SHA-256: `91369061938091b33ce865da9f1c2ffc197608a8fac21a196aed3ada4ae8582e`. The previous desktop image and terminal launcher are retained with the suffix `.before-11.15.0`.

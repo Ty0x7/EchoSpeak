@@ -463,3 +463,7 @@ owner talks to. Eval: each trial is redrawn until its identifying values are new
 3. Run LT1 at the default limit (60, ceiling 300) in the owner's real setup, and watch `auto_continue` in real sessions.
 4. **Branch decision for the owner:** `context-recall-integration` contains `context-memory` and the search-recall
    candidate, so `search-recall-candidate` can be retired.
+
+### Release follow-up, 20 November
+
+The Linux release includes the sandbox pytest diagnostic and the measured context-fill change. At 16K, two of three completed five-module trials fully passed. The last held-out trial hit the memory guard. In the default-budget LT1 run the local model finished in 34 model calls, below the first 60-step boundary. An independent pytest run passed all ten tests. Echo marked its own result unverified after missing the final check. The earlier 12-step trials remain the evidence for crossing continuation boundaries. [Full release results](integration-11.15.md)

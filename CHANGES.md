@@ -1,5 +1,9 @@
 # Changes
 
+## v11.15.0 — Linux integration release
+
+The terminal, desktop and shared backend now use one tested revision on `main`. This release includes the context, continuation, Python test discovery, memory, connected-app and TUI improvements. [Changes and known limits](docs/releases/v11.15.0.md)
+
 ## v11.14.1 — One assistant, one list of conversations (branch `agent-first-sessions`; not merged, not published)
 
 * **One assistant:**

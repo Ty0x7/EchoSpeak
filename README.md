@@ -6,6 +6,8 @@ EchoSpeak connects a language model to the context, tools and execution controls
 
 Use **LM Studio, Ollama or a compatible local model server**, or connect **OpenAI, Google Gemini, Anthropic Claude or xAI Grok**. EchoSpeak manages the workspace and agent workflow; the selected model supplies reasoning and responses.
 
+**Current source and Linux testing baseline:** EchoSpeak 11.15.0 on `main`. [Release notes](docs/releases/v11.15.0.md) · [Integration and installation checks](docs/research/integration-11.15.md)
+
 ## Who Echo is for
 
 - **Anyone who wants a capable helper on their own PC.** An installer, guided setup, and plain-language approval cards for anything risky. You don't need to be a developer.
