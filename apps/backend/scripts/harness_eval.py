@@ -23,6 +23,7 @@ the case's policy: allow, deny, or deny-destructive. No paid model is called.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -32,6 +33,7 @@ import secrets
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1021,12 +1023,7 @@ class Stack:
             self.variant["agents_md_sha256"] = hashlib.sha256(self.agents_md.encode()).hexdigest()[:16]
         env = {k: v for k, v in os.environ.items() if not k.startswith(("ECHOSPEAK_", "API_", "XDG_RUNTIME", "LOCAL_MODEL", "LEAN_"))}
         env.update({
-            "ECHOSPEAK_DATA_DIR": str(dirs["backend-data"]), "ECHOSPEAK_LOGS_DIR": str(dirs["backend-logs"]),
-            "ECHOSPEAK_HOME": str(dirs["backend-home"]), "SOUL_PATH": str(dirs["backend-data"] / "SOUL.md"),
-            "ECHOSPEAK_RUNTIME_DIR": str(dirs["backend-rt"]), "ECHOSPEAK_RUNTIME_KIND": "desktop",
-            "API_AUTH_ENABLED": "true", "API_AUTH_LOCALHOST_BYPASS": "false", "API_AUTH_KEY": self.key,
-            "USE_LOCAL_MODELS": "true", "LOCAL_MODEL_PROVIDER": "ollama", "LOCAL_MODEL_URL": f"http://127.0.0.1:{rec_port}",
-            "LOCAL_MODEL_NAME": self.model, "ECHOSPEAK_DISABLE_WARMUP": "1", "CHECKIN_MODE": "off",
+            "ECHOSPEAK_DISABLE_WARMUP": "1", "CHECKIN_MODE": "off",
             "ASSISTANT_MODE": "unified", "PYTHONUNBUFFERED": "1",
             # An owner who engineers in a project has these on (Settings > Permissions); a fresh data
             # folder has them off. Approval mode stays at its default (smart).
@@ -1035,6 +1032,19 @@ class Stack:
             # 10 calls") carried from one case into the next. Each case should stand alone. Turn it on with
             # --env LEARNING_ENABLED=true to measure learning itself.
             "LEARNING_ENABLED": "false",
+        })
+        env.update(self.extra_env)
+        # Pin isolation after applying experiment options. A model request or an operator's
+        # inherited settings must never send commands to the host or model traffic off-machine.
+        env.update({
+            "ECHOSPEAK_DATA_DIR": str(dirs["backend-data"]), "ECHOSPEAK_LOGS_DIR": str(dirs["backend-logs"]),
+            "ECHOSPEAK_HOME": str(dirs["backend-home"]), "SOUL_PATH": str(dirs["backend-data"] / "SOUL.md"),
+            "ECHOSPEAK_RUNTIME_DIR": str(dirs["backend-rt"]), "ECHOSPEAK_RUNTIME_KIND": "desktop",
+            "API_AUTH_ENABLED": "true", "API_AUTH_LOCALHOST_BYPASS": "false", "API_AUTH_KEY": self.key,
+            "USE_LOCAL_MODELS": "true", "LOCAL_MODEL_PROVIDER": "ollama", "LOCAL_MODEL_URL": f"http://127.0.0.1:{rec_port}",
+            "LOCAL_MODEL_NAME": self.model, "PYTHON_DOTENV_DISABLED": "1",
+            "TERMINAL_EXECUTION_MODE": "bwrap", "TERMINAL_DOCKER_NETWORK": "off",
+            "ECHOSPEAK_TERMINAL_REQUIRE_SANDBOX": "1",
             # Without a project the default folder is the owner's Documents; an evaluation must never see it.
             "FILE_TOOL_ROOT": str(dirs["backend-home"]),
             # The credential broker's key lives in the run's own data folder, never in the owner's desktop keyring
@@ -1042,13 +1052,12 @@ class Stack:
             # before that every eval backend had been reaching into the owner's keyring.
             "ECHOSPEAK_CREDENTIAL_KEYFILE": "1",
         })
-        env.update(self.extra_env)
         env = local_only_env(env)  # last, so neither the shell nor --env can hand the backend a paid key
         # Sandboxed commands of the system under test must not read the repository (eval scripts hold the answers)
         # or the eval records (other cases' and earlier repetitions' ground truth and trajectories).
         env["ECHOSPEAK_SANDBOX_HIDE"] = os.pathsep.join([str(ROOT.parents[1]), str(OUT), str(self.run_dir)])
         self.env_used = {k: v for k, v in env.items() if k.startswith(("LOCAL_MODEL", "LEAN_", "ASSISTANT", "USE_LOCAL", "LEARNING",
-                                                                       "ENABLE_SYSTEM", "ALLOW_"))}
+                                                                       "ENABLE_SYSTEM", "ALLOW_", "TERMINAL_"))}
         self.procs.append(subprocess.Popen(
             [sys.executable, "app.py", "--mode", "api", "--host", "127.0.0.1", "--port", str(api_port)],
             cwd=str(ROOT), env=env, stdout=open(self.run_dir / "backend.log", "wb"), stderr=subprocess.STDOUT))
@@ -1084,15 +1093,30 @@ class Stack:
 
 # ── evidence ────────────────────────────────────────────────────────────
 def snapshot(project: Path) -> dict[str, Any]:
+    """Read regular fixture files through directory descriptors without following links."""
     files: dict[str, Any] = {}
-    for path in sorted(project.rglob("*")):
-        if not path.is_file() or any(part in {"__pycache__", ".pytest_cache", ".git"} for part in path.parts):
-            continue
-        raw = path.read_bytes()
-        rel = str(path.relative_to(project))
-        files[rel] = {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
-                      "text": raw.decode("utf-8", errors="replace") if len(raw) <= 4000 else None}
-    return files
+    ignored = {"__pycache__", ".pytest_cache", ".git"}
+    for directory, subdirs, names, dir_fd in os.fwalk(project, follow_symlinks=False):
+        subdirs[:] = [name for name in subdirs if name not in ignored]
+        for name in names:
+            if name in ignored:
+                continue
+            try:
+                if not stat.S_ISREG(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
+                    continue
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+            except OSError as exc:
+                if exc.errno in {errno.ENOENT, errno.ELOOP}:
+                    continue  # A background process removed or replaced the entry.
+                raise
+            with os.fdopen(fd, "rb") as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    continue
+                raw = stream.read()
+            rel = str((Path(directory) / name).relative_to(project))
+            files[rel] = {"sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw),
+                          "text": raw.decode("utf-8", errors="replace") if len(raw) <= 4000 else None}
+    return dict(sorted(files.items()))
 
 
 def server_log(since: float, until: float) -> list[str]:

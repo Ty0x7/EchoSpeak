@@ -31,7 +31,7 @@ table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px;bord
 
 <section><h2>What the evidence changed</h2><div class="row">
 <article><h3>Tests count when they ran</h3><p>The saved LT1 run passed 10 tests. The runtime credited zero checks before the fix and four on replay after it.</p></article>
-<article><h3>The judge runs in isolation</h3><p>Independent tests and CLI checks use a disposable fixture, a read-only interpreter and a network namespace.</p></article>
+<article><h3>The judge runs in isolation</h3><p>Independent tests and CLI checks use a disposable fixture, a read-only interpreter and a network namespace. The evidence collector skips symlinks, and the evaluator requires an offline terminal sandbox.</p></article>
 <article><h3>Check failures stay visible</h3><p>An empty test collection blocks verification. A candidate check that exits without test results fails the controller gate.</p></article>
 </div></section>
 

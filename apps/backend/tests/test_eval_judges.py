@@ -178,3 +178,56 @@ def test_simulated_owner_keeps_shell_calls_off_host_and_off_network():
     assert heval.owner_decision({"tool": "terminal", "args": {"network": True, "where": "bwrap"}}, turn) == "deny"
     assert heval.owner_decision({"tool": "terminal", "args": {"where": "host"}}, turn) == "deny"
     assert heval.owner_decision({"tool": "process_start", "args": {"where": "host"}}, turn) == "deny"
+
+
+def test_evidence_snapshot_ignores_symlinks_and_special_files(tmp_path):
+    import os
+
+    heval = _load("harness_eval")
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "marker"
+    marker.write_text("synthetic outside evidence")
+    (fixture / "linked-file").symlink_to(marker)
+    (fixture / "linked-directory").symlink_to(outside, target_is_directory=True)
+    (fixture / "inside.txt").write_text("inside evidence")
+    os.mkfifo(fixture / "named-pipe")
+
+    evidence = heval.snapshot(fixture)
+    assert set(evidence) == {"inside.txt"}
+    assert evidence["inside.txt"]["text"] == "inside evidence"
+
+
+def test_evaluation_environment_keeps_sandbox_and_run_paths_when_overridden(tmp_path, monkeypatch):
+    heval = _load("harness_eval")
+    monkeypatch.setenv("TERMINAL_EXECUTION_MODE", "host")
+    monkeypatch.setenv("TERMINAL_DOCKER_NETWORK", "on")
+    stack = heval.Stack(tmp_path, "local-test", "http://127.0.0.1:11434", {
+        "TERMINAL_EXECUTION_MODE": "host",
+        "TERMINAL_DOCKER_NETWORK": "on",
+        "ECHOSPEAK_DATA_DIR": str(tmp_path / "unrelated-data"),
+        "LOCAL_MODEL_URL": "https://example.invalid",
+        "PYTHON_DOTENV_DISABLED": "0",
+        "LEAN_CONTEXT_FILL": "0.9",
+    })
+    processes = []
+
+    def popen(argv, **kwargs):
+        processes.append(kwargs.get("env", {}))
+        kwargs["stdout"].close()
+        return type("Process", (), {"poll": lambda self: None})()
+
+    monkeypatch.setattr(heval.subprocess, "Popen", popen)
+    monkeypatch.setattr(heval.Api, "call", lambda *args, **kwargs: {})
+    stack.__enter__()
+    env = processes[-1]
+
+    assert env["TERMINAL_EXECUTION_MODE"] == "bwrap"
+    assert env["TERMINAL_DOCKER_NETWORK"] == "off"
+    assert env["ECHOSPEAK_TERMINAL_REQUIRE_SANDBOX"] == "1"
+    assert env["PYTHON_DOTENV_DISABLED"] == "1"
+    assert env["ECHOSPEAK_DATA_DIR"] == str(tmp_path / "backend-data")
+    assert env["LOCAL_MODEL_URL"].startswith("http://127.0.0.1:")
+    assert env["LEAN_CONTEXT_FILL"] == "0.9"

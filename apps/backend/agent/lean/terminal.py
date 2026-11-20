@@ -1270,6 +1270,8 @@ class Terminal:
         if error:
             return None, error, Path("."), ""
         where = self.effective_where(args)
+        if where != "bwrap" and os.getenv("ECHOSPEAK_TERMINAL_REQUIRE_SANDBOX") == "1":
+            return None, "Error: not run. This evaluation requires the Linux sandbox.", cwd, where
         if where == "host" and str(args.get("shell") or "").lower() == "bash" and os.name == "nt" and not git_bash():
             return None, ("Error: not run. Git Bash isn't installed on this PC, so bash commands can't run here. Write "
                           "it for PowerShell instead. " + POWERSHELL_EQUIVALENTS), cwd, where

@@ -142,6 +142,19 @@ def test_explicit_bwrap_mode_refuses_instead_of_running_unconfined(monkeypatch, 
     assert "Linux sandbox can't start" in out and not launched
 
 
+def test_evaluation_terminal_refuses_a_host_request_even_after_approval(monkeypatch, tmp_path):
+    _mode(monkeypatch, "bwrap", bwrap=True)
+    monkeypatch.setenv("ECHOSPEAK_TERMINAL_REQUIRE_SANDBOX", "1")
+    launched = []
+    terminal = term.Terminal(str(tmp_path))
+    monkeypatch.setattr(terminal, "_cwd", lambda raw: (tmp_path, ""))
+    monkeypatch.setattr(terminal, "_launch", lambda *a, **k: launched.append(a))
+
+    out = terminal.run({"command": "printf harmless", "where": "host"})
+    assert "requires the Linux sandbox" in out
+    assert not launched
+
+
 @live
 def test_live_terminal_run_is_confined(monkeypatch, tmp_path):
     project = tmp_path / "project"
