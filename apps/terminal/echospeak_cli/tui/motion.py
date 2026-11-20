@@ -334,8 +334,9 @@ def _footer_forms(fi: FooterInput, caps: Caps) -> dict[str, list[tuple[str, str]
         forms["hints"] = [("class:footer", f"esc to stop {g.sep} enter to steer {g.sep} tab to queue"),
                           ("class:footer", f"esc stop {g.sep} tab queue"), ("class:footer", "")]
     else:
-        # The session list is one key away on an empty input; say so where the eye rests.
-        forms["hints"] = [("class:footer", f"← sessions {g.sep} ? for shortcuts"), ("class:footer", "? help"),
+        # The session list is one key away on an empty input; say so where the eye rests. On a narrow terminal it's the
+        # sessions key that stays: "?" is announced at the start, the session list isn't found by chance.
+        forms["hints"] = [("class:footer", f"← sessions {g.sep} ? for shortcuts"), ("class:footer", "← sessions"),
                           ("class:footer", "")]
     return forms
 

@@ -292,6 +292,17 @@ def test_footer_composition():
             assert first.strip().startswith("qwen"), (width, first)
 
 
+def test_the_sessions_key_stays_in_the_footer_on_an_80_column_terminal():
+    # tui-refine open item: the hint shortened to "? help", so "← sessions" was gone below 110 columns with this
+    # footer, though the session list is what a narrow-terminal user most needs to find. Now it stays down to 64.
+    fi = M.FooterInput(model="qwen3.5:9b (ollama)", agent="Echo", project="echospeak", approval_mode="smart",
+                       context_pct=12)
+    for width in (80, 70, 64):
+        line = text_of(M.footer_lines(fi, width, CAPS)[0])
+        assert "← sessions" in line, (width, line)
+    assert "? for shortcuts" in text_of(M.footer_lines(fi, 140, CAPS)[0])
+
+
 def test_footer_degrades_one_step_at_a_time():
     fi = M.FooterInput(model="qwen3.5:9b", agent="Jarvis", project="echospeak", approval_mode="smart", context_pct=64,
                        held=2)
