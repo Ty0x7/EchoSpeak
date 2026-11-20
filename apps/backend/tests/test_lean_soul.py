@@ -453,6 +453,8 @@ def test_staged_list_needs_consent_in_current_message(monkeypatch, lexical_memor
     followup.session_id = offer.session_id
     followup.run(prompt)
     assert lexical_memory._records == {}
+    if "Summarize this without retaining it" in prompt:
+        assert any("That preference is settled" in m["content"] for m in model.calls[0] if m["role"] == "user")
 
 
 @pytest.mark.parametrize("scope,restriction", [

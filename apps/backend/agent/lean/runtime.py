@@ -1406,6 +1406,11 @@ class LeanSession:
         # What changes between turns (the time, the git status) rides on this request, not in the system prompt,
         # so the system prompt, the tools and the history stay byte-identical and the model server reuses them.
         turn.request_note = request_note("" if self.model_first else repo_note, context=recalled)
+        if depth == 0 and not guest and memory_quality.refuses_memory(self._user_message):
+            turn.request_note += (
+                "\nThe owner declined saving memory for this request. That preference is settled. "
+                "Complete any separate read-only request using the supplied text without asking whether to save it."
+            )
         if depth == 0 and not guest and (continuing := self._continuation_note()):
             turn.request_note = continuing + "\n" + turn.request_note
         # Only the agent the user is talking to reads steering; a teammate doing delegated work doesn't.
