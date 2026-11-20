@@ -522,6 +522,15 @@ def _runner(ledger: VerificationLedger):
     return run
 
 
+def test_python_project_runner_reports_the_failing_test_in_feedback():
+    ledger = VerificationLedger()
+    note = _runner(ledger)("python3 run_tests.py", FAIL + "PASS test_motion test_idle\n"
+                           "FAIL test_motion test_moves_left\nAssertionError\n2 ran, 1 failed")
+    assert ledger.checks[-1].failing == ["test_motion::test_moves_left"]
+    assert "Failing: test_motion::test_moves_left" in note
+    assert ledger.completion()["status"] == "failing"
+
+
 def test_empty_collection_blocks_verification_instead_of_marking_code_failing():
     ledger = VerificationLedger()
     ledger.observe("file_edit", {"path":"app.py"}, True, "Edited", 1)

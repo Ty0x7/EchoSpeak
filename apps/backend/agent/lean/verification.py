@@ -257,7 +257,7 @@ def failing_names(output: str) -> list[str]:
     names += re.findall(r"(?m)^test (\S+) \.\.\. FAILED", text)              # cargo
     names += re.findall(r"(?m)^(?:FAIL|ERROR): (\S+)", text)                 # unittest
     names += [f"{module}::{test}" for module, test in re.findall(
-        r"(?m)^FAIL ([\w.]+) (test_\w+)\s*$", text)]                        # Python project runner
+        r"(?m)^FAIL ([\w.]+) (test_\w+)[ \t]*$", text)]                    # Python project runner
     return list(dict.fromkeys(n.strip() for n in names if n.strip()))[:12]
 
 
@@ -646,18 +646,6 @@ class VerificationLedger:
 
     def active(self) -> bool:
         return bool(self.checks or self.blockers or self.objective or self.special_cased)
-
-    def compact_test_evidence(self) -> str:
-        """Carry a measured failing check across turn compaction."""
-        scope = scope_of(self.check_command) if self.check_command else ""
-        check = next((c for c in reversed(self.checks) if c.kind == "test" and (not scope or c.scope == scope)), None)
-        if check is None or not check.failing or check.ok:
-            return ""
-        names = ", ".join(name[:100] for name in check.failing[:3])
-        evidence = f"Test step {check.step} reported these failures: {names}."
-        if self.changes_since_check or self.changes > check.changes_at:
-            evidence += " This result predates a source change."
-        return evidence
 
     def unfinished(self, answer: str) -> str:
         """For an answer that claims success the evidence contradicts: what to fix first (asked once)."""

@@ -107,7 +107,6 @@ COMPACT_FAILURES = 2
 # Where compaction's summary (one, replaced each time) and its list of files read sit in the user's message.
 SUMMARY_MARK = "\n\n[Progress so far on this task, summarized to fit the context window]:\n"
 FILES_MARK = "\n\n[Files read in this request (outlines; read the lines you need again with offset and limit)]:\n"
-TEST_EVIDENCE_MARK = "\n\n[Measured test evidence from this turn]:\n"
 
 
 def _redacted_card(card: dict[str, Any]) -> dict[str, Any]:
@@ -2367,7 +2366,7 @@ class LeanTurn:
         # it, written from it: appended, they piled up (17 summaries, 15.5K characters by call 72 of live LT1) and
         # took the room the work needed, so compaction came round more and more often.
         request, _, earlier = str(messages[user_index].get("content") or "").partition(SUMMARY_MARK)
-        earlier = earlier.partition(FILES_MARK)[0].partition(TEST_EVIDENCE_MARK)[0].strip()
+        earlier = earlier.partition(FILES_MARK)[0].strip()
         lines: list[str] = []
         for message in span:
             if message.get("role") == "assistant":
@@ -2418,9 +2417,6 @@ class LeanTurn:
             # Which files were read and their shape, from the results themselves: a summary of a few words can't
             # say where update() starts in game.js, and without it the model reads the whole file again.
             files = FILES_MARK + "\n".join(f"- {shape[:360]}" for shape in list(self._read_shapes.values())[-6:])
-        evidence = self.verifier.compact_test_evidence() if self.verifier is not None else ""
-        if evidence:
-            summary += TEST_EVIDENCE_MARK + evidence
         messages[user_index] = {**messages[user_index], "content": request + SUMMARY_MARK + summary + files}
         del messages[user_index + 1:cut]
         self.compactions += 1
