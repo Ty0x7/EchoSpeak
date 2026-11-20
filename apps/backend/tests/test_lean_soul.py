@@ -579,7 +579,7 @@ def test_prose_memory_uses_current_authorized_text_through_a_correction(monkeypa
         "tuesday_ferry", "correction",
     ), agent=agent)
     update.session_id = first.session_id
-    changed = update.run("Small correction. My Tuesday Marlow ferry leaves at 8:10 now. Please remember that instead.")
+    changed = update.run("Small correction. Actually, my Tuesday Marlow ferry leaves at 8:10 now. Please remember that instead.")
 
     disk = list(json.loads(lexical_memory._records_path.read_text())["records"].values())
     old, new = (next(r for r in disk if r["source_execution_id"] == result["execution_id"])

@@ -80,6 +80,7 @@ _PROSE_TERMS = re.compile(r"\d+(?::\d+)?|[^\W\d_]+", re.UNICODE)
 _PROSE_NON_SUBJECT = STOPWORDS | {"user", "now", "take", "leave", "depart", "start", "say", "said",
                                     "am", "pm", "time", "schedule", "account", "project"}
 _PROSE_REFERENCE = re.compile(r"(?i)(?:(?:this|that|it|for me)(?: please)?|instead|(?:this|that|it) instead)")
+_PROSE_PREAMBLE = re.compile(r"(?i)^(?:actually|correction|update|a quick update)[:,]\s*")
 
 _STATUS_PASTE = re.compile(r"(?i)^\s*(?:the )?backup (?:status:|restored successfully\.)")
 _STATUS_REQUEST = re.compile(
@@ -145,7 +146,8 @@ def prose_source(text: str) -> str:
         return ""
     # Periods in titles and clock abbreviations belong to the statement.
     edges = [match for match in _SENTENCE_BREAK.finditer(payload)
-             if "\n" in match.group() or not _ABBREVIATION.search(payload[:match.start()])
+             if "\n" in match.group()
+             or not _ABBREVIATION.search(payload, max(0, match.start() - 8), match.start())
              or _SENTENCE_SUBJECT.match(payload, match.end())]
     if prefix and edges:
         payload = payload[:edges[0].start()]
@@ -153,6 +155,7 @@ def prose_source(text: str) -> str:
         payload = payload[edges[-1].end():]
     if payload.rstrip().endswith("?"):
         return ""
+    payload = _PROSE_PREAMBLE.sub("", payload)
     payload = _PROSE_SCOPE_TAIL.sub("", payload).strip().rstrip(",;")
     if aside := _PROSE_ASIDE.search(payload):
         # A trailing temporary qualifier can apply to the whole clause.
@@ -428,6 +431,7 @@ def render(memories: Iterable[dict[str, Any]]) -> str:
     if not lines:
         return ""
     return ("## What you know about the user\n"
-            "Saved facts, possibly out of date. Use them when they help; don't recite them. When the user says one "
+            "Saved facts, possibly out of date. When answering from memory, keep values as written and leave unstated "
+            "details unspecified, including a reason, date, time zone or AM/PM. Use the facts when they help. When the user says one "
             "of them has changed, save the new value with memory_save and the same key, so it replaces the old one.\n"
             + "\n".join(lines))
