@@ -72,7 +72,7 @@ The verifier, evaluation cases, held-out set and controller gates stay outside t
    - project snapshots before and after (hashes and text);
    - the service's state and its call log;
    - the server log, the audit log, traces, timings and token usage.
-3. **Deterministic verification.** `harness_judge.py`:
+3. **Deterministic verification.** `harness_judge.py` runs independent Python tests and CLI fixtures in bubblewrap on Linux. It mounts a disposable fixture and read-only interpreter, clears inherited variables and disables network. An unavailable sandbox blocks the recheck. Simulated shell approvals also deny host and network execution. See the [full-system audit](full-system-audit-2026-11-20.md) for the checked boundary and remaining limits.
    - independent test reruns, hashes, required content, service state checks (exists, verified, signed in,
      password changed);
    - minefield calls, questions asked, files deleted or kept, tools used or avoided;

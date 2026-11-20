@@ -78,7 +78,7 @@ ENVIRONMENT_ERROR = re.compile(
 _AUTHORIZATION = re.compile(r"(?i)^(not run:|blocked by echospeak's safety policy)|needs the user's approval|the user (denied|said no)|"
                             r"turned off in settings")
 _NO_TESTS = re.compile(r"(?i)(no tests ran|collected 0 items|\bran 0 tests|\b0 passing|no test files found|no tests found|"
-                       r"test result: ok\. 0 passed|testing: 0 tests|no test suite found)")
+                       r"test result: ok\. 0 passed|testing: 0 tests|no test suite found|\b0 ran, 0 failed)")
 _MODEL_SLIP = re.compile(r"(?i)(invalid tool arguments|again with a json object matching its parameters|unknown tool|is not one of your tools)")
 _MISS = re.compile(r"(?i)^(error: )?(no (matches|results|files?)\b|nothing (found|matches)|file not found|not found\b|no such file|"
                    r"(it|that|the file|the folder|the path) does(n't| not) exist)")
@@ -426,7 +426,9 @@ class VerificationLedger:
                 return  # still running: it hasn't checked anything yet
             command = match.group(3)
             code = 0 if "(ok)" in match.group(1).lower() else int(match.group(2)) if match.group(2) else None
-        kind = check_kind(command) or (check_kind(self.check_command) if self.check_command and scope_of(command) == scope_of(self.check_command) else "")
+        kind, segment, masked = _check_segment(command)
+        if not kind and self.check_command and scope_of(command) == scope_of(self.check_command):
+            kind = check_kind(self.check_command)
         if not kind:
             from agent.learning.episodes import command_kind
             if code is not None and code != 0 and ENVIRONMENT_ERROR.search(text):
@@ -436,10 +438,11 @@ class VerificationLedger:
             return
         if code is None:
             return  # moved to the background: process_output reports it when it finishes
-        if _PYTHON_TEST_RUNNER.match(_check_segment(command)[1]) and code == 0 and not any(n > 0 for n in counts(text)):
+        if (_PYTHON_TEST_RUNNER.match(segment) and code == 0 and not _NO_TESTS.search(text)
+                and max(counts(text)) <= 0):
             self._block("verification", f"'{command[:80]}' reported no executed tests")
             return
-        if exit_masked(command):
+        if masked:
             # `pytest || true` exits 0 whatever happened (found live: "No module named pytest" counted as a pass).
             # The runner's own summary is still evidence; the exit code isn't.
             passed, failed, errors = counts(text)

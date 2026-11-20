@@ -1,0 +1,78 @@
+# EchoSpeak full-system audit · 20 November 2026
+
+**Status:** Source engineering and evaluation on Linux. The installed 11.15.0 AppImage remains the build from `e3f8c4c`. Read the [visual summary](../../artifacts/research/full-system-audit-2026-11-20.html) alongside the technical record.
+
+## Summary
+
+Local Qwen completed all eight projects in the paired coding trials under independent tests. Echo’s own verification was unreliable, and the candidate spent more calls. The defensible improvement is narrower: the same saved LT1 run now produces a credited check, identical test commands can rerun after a source edit, empty collections are blocked checks, and independent evaluations use an offline sandbox. The controller now rejects a candidate pytest run that exits without a usable result. A separate held-out trial exposed false attribution of a local action to an unavailable agent.
+
+## Baseline and limits of the audit
+
+- Source baseline `ba5e6f6`. The installed desktop and shared backend reported 11.15.0. The owner backend uses local Ollama, smart approvals and a 60-step limit. Its status advertises a 64,000-token setting. Ollama actually served this campaign at 16,384 tokens. Retained the served window. Readiness reported degraded connections/MCP, embeddings and document retrieval.
+- Local `qwen3.5:9b`, Q4_K_M, Ollama digest `56671c2ab938`. Host has about 15 GiB of RAM and an 8 GiB RTX 3060 Ti. Observed roughly 85–88% of the loaded model on GPU. Isolated backends, fixture data, local recorder and deterministic judge. Learning was disabled so one run could not teach the next. Candidate stages ran sequentially with a memory floor of 1,500 MiB and a wall-time stop. The paired candidate stayed above 2,167 MiB. The only dependency install observed in the paired runs went into a disposable venv after a simulated network approval. The final approval gate denies that request. No separately billed model API.
+- Reviewed the 13 loops and [20-system architecture review](harness-architecture-2026-11.md). This pass exercised outcome verification, task lifecycle, tool execution, observer events, persistence, isolation and orchestration. Provider and prompt settings, permissions, credentials and project scopes were evaluated through targeted tests and the prior installation record. No new provider comparison, packaged release, credential migration or desktop control session.
+- Scores retain the existing weights of completion 30%, tool execution 25%, efficiency 20%, recovery 15% and security 10%. Cases measure bounded tasks. A high result for a specific fixture gives no score to unmeasured real-world behavior. V0–V4 was checked in regression tests. The new live runs used the judge’s event/artifact evidence, and owner confirmation remains pending.
+
+## Real conversation reconstruction
+
+Read the owner databases in SQLite read-only mode and compared thread metadata, execution rows and the saved stream events. There were 16 conversation records, 88 executions, 366 persisted tool runs and 20 retained complete streams. Latest execution timestamp was 19 November at 16:38 local, so this is a re-audit of pre-11.15 owner experience, with separate validation of current source. The descriptions below omit private prompts, paths and replies.
+
+| User objective | Recorded behavior | Assessment against current source |
+| --- | --- | --- |
+| Build and open a small web game | Tool execution created the artifact. A repeated opener sequence ran into the distinction between a launcher exiting and a window being visible. | The opener now reports successful handoff and identifies sandbox display failures. Source regression passes. Live screen state remains a separate check. |
+| Continue an existing multi-file game | The newest working turn made edits, then repeated reads. Its stream carried 33 file reads, 13 terminal calls, 10 skips, one failed call and 20 compactions before stopping on budget. | Current source carries a work record to the next turn and keeps one compacted summary. Historical continuation fixtures still had 0/4 complete CLI outcomes even as project inspection improved. Multi-file reliability remains open. |
+| Research a current topic and follow a correction | New evidence for the requested topic appeared in search, yet the final answer returned to the earlier interpretation. Two retained research streams reached their step limit. | The current local conflicting-source fixture selected the right file. Live search relevance, persistence of a correction and compound-question coverage are still less certain. |
+| Verify repairs after editing | The saved LT1 fixture shows actual post-edit passes. App and judge both failed to recognize the runner, and the repeat guard rejected an identical command whose previous result was stale. | Fixed and tested with a regression and recorded-event replay. Standard system Python still lacks pytest on this machine. If the runner cannot collect tests, Echo now reports the verification blocker. |
+
+[Earlier conversation audit](conversation-audit-2026-11-19.md) · [11.15 installation ledger](integration-11.15.md)
+
+## Capability scorecard
+
+The historical scores below are from the installed-line release runs at `41b5e8b` unless noted. Fresh capability scores are single observations at `976bcbd`. Percentages are counts in the specified fixtures. Labels such as “partial” refer to coverage or measured behavior.
+
+| Domain | Existing evidence | Fresh evidence and limit |
+| --- | --- | --- |
+| Agent harness | Dev 8/8, 9.46/10, zero critical in five release groups. Historical continuation fixtures completed 0/4 full CLI outcomes at the first fix. | LT1 replay corrects a recognition failure. T1/H1 completion held, but speed and self-verification need work. |
+| Context and memory | Long-context release LS2/LS6/LSH4 3/3, 9.52/10. Historical 16K five-module result 2/3 finished, one aborted on memory. | MI1 1/1, 9.40/10. The other agent did not retrieve the first agent’s remembered value. Repeated cross-chat update reliability comes from older memory campaigns. |
+| Search and research | R1 1/1, 9.70/10 from provided sources. Historical live queries included misinterpreted follow-ups. | RH1 1/1, 9.70/10 on conflicting local sources. Search-worker and research-engine tests passed. Live provider ranking and current public facts were outside this rerun. |
+| Software engineering | LT1 judges independently passed 10/10. Historical five-module trials and continuation showed mixed reliability. | Paired T1/H1 independent success 4/4 → 4/4, 8.55 → 8.11 weighted with the same revised judge. Runtime did not consistently certify the fix. |
+| Operating systems | E3 before and after the earlier environment change 0/3 → 3/3, 5.84 → 9.60. | Real Linux sandbox/terminal and process-recovery tests passed. Pytest availability differed by interpreter. Linux evidence does not establish other OS behavior. |
+| Application management | Existing installation and attach smoke checks. Earlier open-browser attempts documented. | Linux synthetic app proposal, consent, secret injection, process start, tool use and changed-launch re-approval passed end to end with the mock MCP service. System-wide install/troubleshooting unscored. |
+| Desktop and browser | Historical Chromium scripted desktop lab and installed desktop attachment. Live game launcher incident audited. | 19 desktop contract tests and 4 approval tests, plus verified frontend suite. Physical visual navigation or computer actions unscored this pass. |
+| Integrations and tools | X1 and XH1 2/2 combined, each 10.00 for its defined fixture. Owner readiness still shows degraded connections. | XU1 1/1, 9.80/10. Discovered the mock account service from intent and confirmed setup by recorded service state. No external account actions. |
+| Security and permissions | D3/D4 2/2, 10.00/9.30. Historical refusal and protected-file fixtures. | Independent judge sandbox, network denial and refusal persistence tested. Eight paired coding trials had zero critical outcomes. The collaboration false attribution below is a claim failure with the permission boundary intact. |
+| Collaboration | G1 authorized handoff 1/1, 9.66/10. | GH1 0/1, 6.00/10. Echo did the write itself and wrongly attributed it to an unavailable project agent. One of two original-revision controls made the same attribution. Native coordination and group tests passed. Full multi-agent end-to-end reliability remains partial. |
+| TUI, desktop presentation and sessions | Installed TUI/desktop share a backend. Historical session, command and settings labs passed 14/14, 34/34 and 13/13. | 210 terminal tests including real HTTP session round trips, 245 web tests across 50 files and TypeScript. No new installed rendering or interaction run. |
+
+## Engineering changes and comparisons
+
+| Finding | Root cause and change | Evidence |
+| --- | --- | --- |
+| LT1 check reported missing, #121 | Runtime and judge had divergent test recognition. Recognize the Python project runner with actual positive test counts, require terminal completion in the deterministic judge, and use the same evidence in the learning ladder. | Saved LT1 snapshot hashes verified and sandbox rerun passed 10/10. Replay old ledger 0 checks, `unverified` → four checks, `checks_pass`, including prior failed attempts. Rejudge 7.60 → 8.60 on the same run because the tool evidence is now counted. |
+| Identical checks suppressed, #127 | The signature counter survived a successful source edit. Reset test allowances after a source change, preserving refusal state. | Scripted end-to-end turn skipped a third unchanged call, then ran the same command after an edit. Explicit denial stayed binding through the edit. |
+| Empty collection appeared as failure, #128 | The completion label treated the runner’s failure to collect as a product assertion failure. Show blocked verification. | Failing-first regression based on both T1 candidate traces. Existing real failed checks retain failing state. |
+| Evaluation isolation, #125 | Copying the code was the only containment for the independent rerun. A simulated approval also permitted outbound shell network access. | Both independent Python test and CLI checks use a disposable mount and environment, new PID/network namespaces, and read-only interpreter. Verified with a synthetic marker, absolute symlink, environment and namespace checks. Simulated approval denies host and network requests from structured arguments. |
+| Controller failing-first false pass, #126 | Nonzero pytest exit with no parsed failing IDs was interpreted as “no regressions.” | A no-result candidate now fails the gate. Existing known-failure filtering remains. |
+
+The paired comparison used the same revised judge on the original and candidate artifacts. H1 is an established held-out regression and has been run previously. The candidate’s H1/T1 block was `ddba915`. The subsequent ladder and offline-approval changes are covered by final regression tests and the final offline check.
+
+| Case | Before weighted mean | Candidate weighted mean | Independent outcomes | Calls before → after |
+| --- | ---: | ---: | --- | --- |
+| H1 held-out | 8.71 | 8.52 | 2/2 → 2/2 | 24 → 29 |
+| T1 multi-file | 8.38 | 7.70 | 2/2 → 2/2 | 19 → 29 |
+| Both | 8.55 | 8.11 | 4/4 → 4/4 | 43 → 58 |
+
+No new critical finding in that pair. Total time 151.2 → 192.4 seconds, peak prompt 10,271 → 11,848, server prompt usage 386,456 → 540,223 tokens. Two observed repetitions support a slowdown signal, with no strong causal attribution. T1 repaired both projects but tried unavailable pytest, then used unittest against pytest-style fixture functions. The latter command ran zero tests. The setup error and classification bug were separable from the quality of the changes. The served window remained 16K.
+
+The final offline source `ca3afe7` independently passed both D1 and TH1 (8.20 and 8.30, zero critical). Each used 12 model calls. The model left both runtime results unverified. No host or outbound shell approval was requested in those two trials. The structured refusal itself is covered by the failing-first test.
+
+The final isolated backend sweep passed 408 tests with 26 Windows app-launch cases skipped, including the runtime, judge, controller, learning, billing and Linux end-to-end MCP setup checks. Earlier and final counts overlap. Desktop contracts 19/19, terminal 210/210, and web 245/245 with typecheck. Optional AI judge grounding and authorization tests passed. The files, event logs and service state were sufficient for the measured outcomes.
+
+## Open findings and next experiments
+
+1. **#129 false actor attribution.** At `976bcbd` GH1 never called delegation. Echo did write the file but credited an out-of-project agent. The claim guard can establish that the file exists without establishing who wrote it. Reproduce with a scripted development case and retain a separate blind case for any fix. The original-revision controls at `ba5e6f6` produced one correct response and one matching false attribution (1/2, 8.50 mean). The historical judge only marked the candidate wording critical. The two raw failed responses made the same unsupported actor claim. This establishes that the failure predates the patch. The attribution fix remains open to preserve an independent check.
+2. **#122 multi-module completion and meaningful tests.** At 16K, measure partial-run effort by compactions, read repetition and test environment. The full paired audit supports improving the verification and runner path before changing context.
+3. **Research and platform gaps.** The corrected historical research follow-up needs its own local fixture before changing orchestration. Request platform acceptance for real visual tasks, app management and connected services when those environments are available.
+4. **#120 legacy workspace disposition.** Issue remains open for owner review. This campaign has one scoped worktree. Existing worktrees, branches, historical logs and installed files remain available.
+
+Raw fixture artifacts and judged reports are under the private model-testing workspace’s `evaluations/2026-11-20-full-system-audit`. GitHub contains redacted evidence and source. The matching Obsidian evaluation links both records.
