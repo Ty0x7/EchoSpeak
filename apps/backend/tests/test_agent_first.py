@@ -808,12 +808,16 @@ def test_a_builder_asked_to_remember_has_memory_save_listed(env, monkeypatch):
     _echo, _jarvis, glados = _people(env)
     monkeypatch.setattr(lean_runtime.LeanSession, "_small_builder", lambda self, persona: True)
     direct = env.rooms.direct(glados.id, "Glados")
-    session = _session(monkeypatch, direct.thread_id)
-    session.agent.memory = SimpleNamespace(add_memory_item=lambda *a, **k: "", count_items=lambda: 0)  # tools exist
-    asked = session._build_turn(glados, "Remember that my build cache key is zebra-123.", history=[], depth=0)
-    assert "memory_save" in asked.toolbox.names and "memory_save" not in asked.toolbox.deferred
-    plain = session._build_turn(glados, "Fix the failing test in calc.py", history=[], depth=0)
-    assert "memory_save" in plain.toolbox.deferred                # held as before when nobody asked
+    offered_tools = []
+    for prompt in ("Remember that my build cache key is zebra-123.", "Fix the failing test in calc.py"):
+        session = _session(monkeypatch, direct.thread_id)
+        session.agent.memory = SimpleNamespace(add_memory_item=lambda *a, **k: "", count_items=lambda: 0)
+        client = ScriptedClient([ModelTurn(content="Understood.")] * 2)
+        monkeypatch.setattr(lean_runtime.LeanSession, "_client_for", lambda *_a, **_k: client)
+        assert session.run(prompt, persona_id=glados.id)["success"]
+        offered_tools.append({tool["function"]["name"] for tool in client.tools[0]})
+    assert "memory_save" in offered_tools[0]
+    assert "memory_save" not in offered_tools[1]
 
 
 # ── Past-chat search recall (live MC1/MCH1, 18 November 2026) ────────────────────────────────────

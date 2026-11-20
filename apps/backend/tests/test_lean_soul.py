@@ -327,7 +327,7 @@ def test_staged_profile_uses_only_current_facts_and_persists_full_message(monkey
     assert not memory.records
     profile, events = _session(monkeypatch, scripts, agent=agent)
     profile.session_id = offer.session_id
-    message = ("1. Personal details\n- My home city is Alder Harbor.\n\n"
+    message = ("Remember this list:\n1. Personal details\n- My home city is Alder Harbor.\n\n"
                "2. Work preferences\n- My default editor is Juniper Edit.\n\n"
                + "Background for later. " * 205 + "\n- My evening drink is barley tea.")
     result = profile.run(message)
@@ -421,3 +421,98 @@ def test_staged_memory_receipt_lists_only_durable_writes(monkeypatch, tmp_path):
     assert "couldn’t verify 2 entries" in result["response"]
     assert "Saved and verified" not in result["response"]
     assert not any(e["type"] == "memory_saved" for e in events)
+
+
+@pytest.fixture
+def lexical_memory(monkeypatch, tmp_path):
+    from agent.memory import AgentMemory
+
+    def disable_embeddings(self):
+        self.use_faiss = False
+        self.simple_memory = []
+
+    monkeypatch.setattr(AgentMemory, "_select_embeddings", disable_embeddings)
+    return AgentMemory(memory_path=str(tmp_path / "memory"))
+
+
+@pytest.mark.parametrize("prompt", [
+    "- Home city: Test Valley\n- Editor: Foundry",
+    "- Home city: Test Valley\n- Editor: Foundry\n\nDon’t save these.",
+    "# Example document\n- Publication: Harbor Gazette\n- Sponsor: River Guild\n\nSummarize this without retaining it.",
+    "Remember this list:\n- Home city: Test Valley\n- Editor: Foundry\n\nDo not retain any of this.",
+])
+def test_staged_list_needs_consent_in_current_message(monkeypatch, lexical_memory, prompt):
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    model = ScriptedClient([ModelTurn(tool_calls=[
+        ToolCall("unrequested", "memory_save", '{"fact":"Home city: Test Valley","key":"home_city"}'),
+    ]), ModelTurn(content="Understood.")])
+    scripts = {"echo": model}
+    offer, _ = _session(monkeypatch, scripts, agent=agent)
+    offer.run("I'll send you a list in my next message. Please remember it.")
+    followup, _ = _session(monkeypatch, scripts, agent=agent)
+    followup.session_id = offer.session_id
+    followup.run(prompt)
+    assert lexical_memory._records == {}
+
+
+@pytest.mark.parametrize("scope,restriction", [
+    ("session", "For this chat only."),
+    ("project", "For this project only."),
+])
+def test_structured_memory_scope_is_preserved_on_disk_and_on_recall(
+    monkeypatch, lexical_memory, tmp_path, scope, restriction,
+):
+    import json
+    from agent.state import get_state_store
+
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    session, _ = _session(monkeypatch, {"echo": ScriptedClient([])}, agent=agent)
+    session.project_root = str(tmp_path)
+    get_state_store().update_thread_state(session.session_id, active_project_id="project-a")
+    outcome = session.run(f"Remember this list:\n- Home city: Test Valley\n- Editor: Foundry\n\n{restriction}")
+    disk = list(json.loads(lexical_memory._records_path.read_text())["records"].values())
+    assert len(disk) == 2
+    assert {row["scope"] for row in disk} == {scope}
+    assert {row["source_execution_id"] for row in disk} == {outcome["execution_id"]}
+    own = lexical_memory.runtime_memory_projection("Home city", session_id=session.session_id, project_id="project-a")
+    assert any("Test Valley" in row["content"] for row in own)
+    outside = lexical_memory.runtime_memory_projection(
+        "Home city", session_id="another-chat", project_id="project-b", project_path=str(tmp_path),
+    )
+    assert not outside
+    another_chat = lexical_memory.runtime_memory_projection(
+        "Home city", session_id="another-chat", project_id="project-a", project_path=str(tmp_path),
+    )
+    assert any("Test Valley" in row["content"] for row in another_chat) == (scope == "project")
+
+
+@pytest.mark.parametrize("seed_legacy", [None, "", "preference:home_city"])
+def test_label_correction_supersedes_in_the_same_scope(monkeypatch, lexical_memory, seed_legacy):
+    import json
+
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    scripts = {"echo": ScriptedClient([])}
+    if seed_legacy is not None:
+        lexical_memory.add_memory_item("Home city: Alder Harbor.", semantic_key=seed_legacy)
+        lexical_memory.add_memory_item("Home city: Slate Town.")
+    else:
+        original, _ = _session(monkeypatch, scripts, agent=agent)
+        original.run("Remember this list:\n- My home city is Alder Harbor.\n- Editor: Foundry")
+    update, _ = _session(monkeypatch, scripts, agent=agent)
+    outcome = update.run("Remember this list:\n- Home city: Moss Quay\n- Editor: Foundry")
+    disk = list(json.loads(lexical_memory._records_path.read_text())["records"].values())
+    city = [row for row in disk if "home city" in row["text"].casefold()]
+    assert [row["text"] for row in city if row["active"]] == ["Home city: Moss Quay."]
+    current = next(row for row in city if row["active"])
+    assert current["source_execution_id"] == outcome["execution_id"]
+    assert all(row["superseded_by"] == current["id"] for row in city if not row["active"])
+
+
+def test_unknown_project_scope_and_ambiguous_model_write_fail_closed(monkeypatch, lexical_memory):
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    model = ScriptedClient([ModelTurn(tool_calls=[
+        ToolCall("invented", "memory_save", '{"fact":"Editor: Foundry","scope":"account"}'),
+    ]), ModelTurn(content="Understood.")])
+    session, _ = _session(monkeypatch, {"echo": model}, agent=agent)
+    session.run("Remember this list for this project only:\n- Home city: Test Valley\n- Editor: Foundry")
+    assert lexical_memory._records == {}

@@ -39,35 +39,88 @@ LIST_LIMIT = 24
 LIST_WAIT_SECONDS = 1800
 
 _LIST_OFFER = re.compile(
-    r"(?i)^\s*(?:i(?:'ll| will| am going to|'m going to|mma)|i am about to)\s+"
+    r"(?i)^\s*(?:i(?:['’]ll| will| am going to|['’]m going to|mma)|i am about to)\s+"
     r"(?:send|give|share|paste)\b[^\n]{0,80}\blist\b"
 )
 _NEXT_MESSAGE = re.compile(r"(?i)\bnext (?:message|prompt|turn)\b")
 _LIST_CONSENT = re.compile(r"(?i)\b(?:list of (?:things|facts|details|preferences) to remember|"
                            r"remember (?:it|them|these|the list))\b")
-_DIRECT_LIST = re.compile(r"(?i)^\s*(?:please )?remember (?:this|the following) list[ \t]*:\s*\n")
+_LIST_REQUEST = r"^\s*(?:please[ \t]+)?remember (?:this|the following) list\b"
+_DIRECT_LIST = re.compile(_LIST_REQUEST + r"(?: for (?:this (?:chat|session|conversation|project)(?: only)?|"
+                          r"my account))?[ \t]*:[ \t]*\r?\n", re.IGNORECASE)
+_SCOPE = re.compile(r"(?i)\b(?:for|in|within) (?:this (chat|session|conversation|project)\b|my (account)\b)")
+_SCOPE_LINE = re.compile(r"(?im)^[ \t]*(?:(?:remember|save|keep) (?:this|these|it) +)?"
+                         r"(?:(?:only |just )?(?:for|in|within) (?:this |the |my |project |chat |session )[^\n]+|"
+                         r"(?:only |just )(?:for|in|within) [^\n]+|(?:for|in|within) [^\n]+? only)[ \t]*$")
+_LOCAL_ONLY = re.compile(r"(?im)^[ \t]*(?:this )?(chat|session|conversation|project) only[.!]?[ \t]*$")
+_WRITE_PREFIX = re.compile(
+    r"(?i)^\s*(?:please[ \t]+)?(?:remember(?:[ \t]*:|[ \t]+(?:that|this|my|i|we|our|your|the user)\b)|"
+    r"save (?:(?:this|that|it) (?:in|to) (?:my )?memory|to memory)\b|"
+    r"keep (?:this|that) in mind\b|do not forget\b|don['’]?t forget\b)"
+)
+_WRITE_SUFFIX = re.compile(
+    r"(?i)(?:[,.!;]\s*|\band +)(?:please +)?(?:remember (?:this|that|it)(?: instead)?|"
+    r"keep (?:this|that) in mind)[.!]?\s*$"
+)
 _STATUS_PASTE = re.compile(r"(?i)^\s*(?:the )?backup (?:status:|restored successfully\.)")
 _STATUS_REQUEST = re.compile(
     r"(?im)(?:^|[.!]\s+)(?:please|can|could|would|now|stop|cancel|remember|keep|save|write|create|make|"
-    r"find|look|check|update|fix|run|open|send|tell|show|explain|review)\b"
+    r"find|look|check|update|fix|run|open|send|tell|show|explain|review|summari[sz]e)\b"
 )
 _LIST_HEADING = re.compile(r"^(?:#{1,6}\s+|[1-9]\d?\.\s+)")
 _LIST_BULLET = re.compile(r"^[-*•]\s+(.+)")
-_LIST_PERSONAL = re.compile(r"(?i)^(?:my|your) ([-a-z][a-z -]{0,46}) (is|are) (.+)$")
+_LIST_PERSONAL = re.compile(r"(?i)^(?:my|your|the user['’]s) ([-a-z][a-z -]{0,46}?) (is|are) (.+)$")
 _LIST_PREFERENCE = re.compile(r"(?i)^(?:I|you) (prefer|use|work with|live in|go by|like|want|have) (.+)$")
 _LIST_FIELD = re.compile(r"^([A-Za-z][A-Za-z0-9 /&()._-]{0,45}):\s+([^\s].*)$")
-_LIST_SKIP = re.compile(r"(?i)\b(?:do not|don't|dont|never|instead of)\s+(?:save|remember|store)\b")
+_NO_WRITE = re.compile(
+    r"(?i)\b(?:(?:do not|don['’]?t|never|instead of|must not)\s+(?:(?:ever|permanently)\s+)?"
+    r"(?:save|remember|store|retain|record|persist)|"
+    r"without\s+(?:saving|remembering|storing|retaining|recording|persisting)|no (?:persistent )?memory)\b"
+)
+
+
+def refuses_memory(text: str) -> bool:
+    return bool(_NO_WRITE.search(text))
+
+
+def requests_list(text: str) -> bool:
+    return bool(re.match(_LIST_REQUEST, text, re.IGNORECASE))
+
+
+def requested_scope(text: str) -> Optional[str]:
+    """Use an explicit scope and reject conflicting or unsupported restrictions."""
+    scopes = set()
+    for match in (*_SCOPE.finditer(text), *_LOCAL_ONLY.finditer(text)):
+        kind = next(group for group in match.groups() if group).lower()
+        scopes.add(kind if kind in {"account", "project"} else "session")
+    if len(scopes) > 1 or any(not _SCOPE.search(line.group()) for line in _SCOPE_LINE.finditer(text)):
+        return None
+    return next(iter(scopes), "account")
+
+
+def explicit_write(text: str) -> bool:
+    """Accept a direct save instruction or a single-line statement with a save request."""
+    text = text.strip()
+    if (not text or text.endswith("?") or refuses_memory(text) or text.startswith((">", "```", "~"))
+            or list_offer(text) or requests_list(text)):
+        return False
+    return bool(_WRITE_PREFIX.match(text) or ("\n" not in text and _WRITE_SUFFIX.search(text)))
+
+
+def structured_field_key(fact: str) -> str:
+    field = _LIST_FIELD.fullmatch(fact) or _LIST_PERSONAL.fullmatch(fact)
+    return normalize_key(field[1]) if field else ""
 
 
 def list_offer(text: str) -> bool:
     """An offer to provide a memory list later, with no facts attached yet."""
-    return (len(text) <= 240 and "\n" not in text and ":" not in text and not _LIST_SKIP.search(text)
+    return (len(text) <= 240 and "\n" not in text and ":" not in text and not refuses_memory(text)
             and bool(_LIST_OFFER.search(text) and _NEXT_MESSAGE.search(text) and _LIST_CONSENT.search(text)))
 
 
 def list_status_paste(text: str) -> bool:
     """Recognize the short backup receipt that may precede the promised list."""
-    return (len(text) <= 1200 and "?" not in text and not _LIST_SKIP.search(text)
+    return (len(text) <= 1200 and "?" not in text and not refuses_memory(text)
             and not _STATUS_REQUEST.search(text) and bool(_STATUS_PASTE.search(text)))
 
 
@@ -81,21 +134,21 @@ def is_structured_list(text: str) -> bool:
                 and sum(bool(_LIST_BULLET.match(line) or _LIST_FIELD.match(line)) for line in lines) >= 2)
 
 
-def list_declined(text: str, *, waiting: bool = False) -> bool:
-    """A cancellation while waiting or an explicit no-save instruction inside a memory list."""
-    direct = _DIRECT_LIST.match(text)
-    if waiting and re.fullmatch(r"(?i)\s*(?:cancel(?: that)?|never mind|nevermind)[.!]?(?:\s+.*)?", text):
-        return True
-    return bool((direct or waiting) and _LIST_SKIP.search(text))
+def list_needs_consent(text: str) -> bool:
+    return is_structured_list(text) and not refuses_memory(text) and not _STATUS_REQUEST.search(text)
 
 
-def list_entries(text: str, *, waiting: bool = False) -> Optional[tuple[list[dict[str, str]], int]]:
-    """Parse an explicitly authorized structured list. Preserve the user's values verbatim."""
+def list_cancelled(text: str) -> bool:
+    return bool(re.fullmatch(r"(?i)\s*(?:cancel(?: that)?|never mind|nevermind)[.!]?\s*", text))
+
+
+def list_entries(text: str) -> Optional[tuple[list[dict[str, str]], int]]:
+    """Read fields only from a list with an explicit header in the current message."""
     direct = _DIRECT_LIST.match(text)
-    if not direct and not waiting:
+    if not direct or refuses_memory(text) or requested_scope(text) is None:
         return None
-    list_body = text[direct.end():] if direct else text
-    if not is_structured_list(list_body) or list_declined(text, waiting=waiting):
+    list_body = text[direct.end():]
+    if not is_structured_list(list_body):
         return None
 
     entries: list[dict[str, str]] = []
@@ -109,14 +162,13 @@ def list_entries(text: str, *, waiting: bool = False) -> Optional[tuple[list[dic
         if fence:
             skipped += 1
             continue
-        if _LIST_HEADING.match(line):
+        if _LIST_HEADING.match(line) or _LOCAL_ONLY.fullmatch(line) or (_SCOPE_LINE.fullmatch(line) and _SCOPE.search(line)):
             continue
         bullet = _LIST_BULLET.match(line)
         body = bullet[1] if bullet else line
-        key = ""
+        key = structured_field_key(body)
         if personal := _LIST_PERSONAL.fullmatch(body):
             label, verb, value = personal.groups()
-            key = normalize_key(label)
             body = f"The user's {label} {verb} {value}"
         elif preference := _LIST_PREFERENCE.fullmatch(body):
             verb, value = preference.groups()
@@ -124,7 +176,7 @@ def list_entries(text: str, *, waiting: bool = False) -> Optional[tuple[list[dic
                       "live in": "lives in", "go by": "goes by", "like": "likes", "want": "wants",
                       "have": "has"}[verb.lower()]
             body = f"The user {action} {value}"
-        elif not _LIST_FIELD.fullmatch(body):
+        elif not key:
             skipped += 1
             continue
         fact = tidy_fact(body)
@@ -143,7 +195,7 @@ def list_entries(text: str, *, waiting: bool = False) -> Optional[tuple[list[dic
     return accepted, skipped + len(entries) - len(accepted)
 
 
-def list_receipt(timeline: list[dict[str, Any]], requested: int, skipped: int) -> str:
+def list_receipt(timeline: list[dict[str, Any]], requested: int, skipped: int, *, scope: str) -> str:
     rows = [item for item in timeline if item.get("kind") == "tool" and item.get("name") == "memory_save"]
     written = [item["output"].removeprefix("Saved and verified: ") for item in rows
                if item.get("meta", {}).get("memory_written") is True]
@@ -151,7 +203,9 @@ def list_receipt(timeline: list[dict[str, Any]], requested: int, skipped: int) -
                 if item.get("meta", {}).get("memory_written") is False and item["meta"].get("memory_verified")]
     parts = []
     if written:
-        parts.append(f"Saved and verified {len(written)} entries.\n" + "\n".join(f"- {value}" for value in written))
+        noun = "entry" if len(written) == 1 else "entries"
+        where = {"session": " for this chat", "project": " for this project", "account": ""}[scope]
+        parts.append(f"Saved and verified {len(written)} {noun}{where}.\n" + "\n".join(f"- {value}" for value in written))
     if existing:
         parts.append(f"Already in memory ({len(existing)}).\n" + "\n".join(f"- {value}" for value in existing))
     if failed := requested - len(written) - len(existing):

@@ -154,3 +154,29 @@ def test_obsidian_malformed_manifest_fails_closed_with_recovery_guide(tmp_path: 
         sync.plan([], project_id="project-a", session_id="session-a")
     assert manifest.read_text(encoding="utf-8") == "{not-json"
     assert list(manifest.parent.glob("corrupt-state/*/RECOVERY.txt"))
+
+
+@pytest.mark.parametrize("semantic", [False, True])
+def test_lookup_uses_canonical_project_identity_and_active_state(tmp_path, monkeypatch, semantic):
+    from types import SimpleNamespace
+    from agent.memory import Document
+
+    memory = _memory(tmp_path)
+    project_path = str(tmp_path / "shared-path")
+    first = memory.add_memory_item("Working label: Copper Finch.", scope="project",
+                                   project_id="A", project_path=project_path, semantic_key="working_label")
+    second = memory.add_memory_item("Working label: Silver Finch.", scope="project",
+                                    project_id="A", project_path=project_path, semantic_key="working_label")
+    memory.add_memory_item("Working label: Maple Kite.", scope="project",
+                           project_id="B", project_path=project_path, semantic_key="working_label")
+    if semantic:
+        memory.use_faiss = True
+        docs = [Document(page_content=memory._records[key]["text"],
+                         metadata=memory._records[key]["metadata"]) for key in (first, second)]
+        docs.append(Document(page_content="Working label: Old indexed text.",
+                             metadata=memory._records[second]["metadata"]))
+        monkeypatch.setattr(memory, "vector_store", SimpleNamespace(similarity_search=lambda *_a, **_k: docs))
+    outside = memory.retrieve_relevant("Working label", thread_id="outside", project_path=project_path, project_id="B")
+    assert [doc.page_content for doc in outside] == ["Working label: Maple Kite."]
+    inside = memory.retrieve_relevant("Working label", thread_id="inside", project_path=project_path, project_id="A")
+    assert [doc.page_content for doc in inside] == ["Working label: Silver Finch."]

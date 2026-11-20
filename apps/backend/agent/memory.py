@@ -890,7 +890,8 @@ class AgentMemory:
         mode_val = str(mode).strip()
         return mode_val or default_mode
 
-    def _normalize_thread_id(self, thread_id: Optional[str]) -> str:
+    @staticmethod
+    def _normalize_thread_id(thread_id: Optional[str]) -> str:
         if thread_id is None:
             return "default"
         thread_val = str(thread_id).strip()
@@ -1164,6 +1165,7 @@ class AgentMemory:
         source_execution_id: str = "",
         source_item_id: str = "",
         semantic_key: str = "",
+        supersede_legacy_fields: bool = False,
     ) -> Optional[str]:
         """Persist canonical memory first, then synchronize the retrieval index."""
         cleaned = str(text or "").strip()
@@ -1211,29 +1213,25 @@ class AgentMemory:
             if bool(record.get("active", True)) and str(record.get("owner_id") or "") == owner
             and same_partition(record)
         ]
+        replacements = []
         if semantic_key:
-            for record in active_records:
-                if str(record.get("semantic_key") or "") != semantic_key:
-                    continue
-                if str(record.get("normalized_content") or "") == normalized:
-                    return str(record.get("id") or "") or None
-                # Corrections preserve provenance by superseding the prior record.
-                record["active"] = False
-                record["status"] = "superseded"
-                record["superseded_by"] = "pending"
-                record["deleted_at"] = timestamp
-                record["updated_at"] = timestamp
-                supersedes = str(record.get("id") or "")
-                break
-            else:
-                supersedes = ""
+            replacements = [record for record in active_records if record.get("semantic_key") == semantic_key]
+            if supersede_legacy_fields:
+                from agent.lean.memory_quality import structured_field_key
+
+                legacy_keys = {"", f"preference:{semantic_key}", f"profile:{semantic_key}"}
+                replacements.extend(record for record in active_records
+                                    if str(record.get("semantic_key") or "") in legacy_keys
+                                    and record.get("memory_type") != "conversation"
+                                    and structured_field_key(str(record.get("text") or "")) == semantic_key)
+            if (len(replacements) == 1 and replacements[0].get("semantic_key") == semantic_key
+                    and replacements[0].get("normalized_content") == normalized):
+                return str(replacements[0].get("id") or "") or None
         else:
-            supersedes = ""
             for record in active_records:
-                if str(record.get("scope") or "") != scope_value or str(record.get("memory_type") or "") != mt:
-                    continue
-                if self._dedupe_should_skip(cleaned, str(record.get("text") or "")):
+                if str(record.get("memory_type") or "") == mt and self._dedupe_should_skip(cleaned, str(record.get("text") or "")):
                     return str(record.get("id") or "") or None
+        supersedes = str(replacements[0]["id"]) if replacements else ""
 
         doc_id = self._build_namespaced_id(mode_value, thread_value)
         metadata: Dict[str, Any] = {
@@ -1267,8 +1265,10 @@ class AgentMemory:
             "checksum": hashlib.sha256(cleaned.encode("utf-8")).hexdigest(),
             "metadata": metadata,
         }
-        if supersedes and supersedes in self._records:
-            self._records[supersedes]["superseded_by"] = doc_id
+        # Keep provenance and retire the old values in the same canonical write.
+        for record in replacements:
+            record.update(active=False, status="superseded", superseded_by=doc_id,
+                          deleted_at=timestamp, updated_at=timestamp)
         self._save_records()
 
         if not self.use_faiss:
@@ -1729,33 +1729,14 @@ class AgentMemory:
         all_tokens = set(re.findall(r"[a-z0-9]{2,}", str(query or "").casefold()))
         # "is", "my", "the" would make every memory look related and crowd out the real matches.
         query_tokens = (all_tokens - STOPWORDS) or all_tokens
-        active_project_id = str(project_id or "").strip()
-        active_project_path = str(project_path or "").strip()
         rows: list[tuple[int, float, str, Dict[str, Any]]] = []
         for record in self._records.values():
-            if not bool(record.get("active", True)) or str(record.get("owner_id") or "") != owner:
+            if not AgentMemory._record_visible(record, owner=owner, thread_id=session_id,
+                                        project_id=project_id, project_path=project_path):
                 continue
             scope = str(record.get("scope") or "account").strip().lower()
-            if scope == "temporary":
-                continue
             metadata = dict(record.get("metadata") or {})
             record_project_id = str(record.get("project_id") or metadata.get("project_id") or "").strip()
-            record_project_path = str(metadata.get("project_path") or "").strip()
-            if scope == "project":
-                if active_project_id:
-                    if record_project_id and record_project_id != active_project_id:
-                        continue
-                    if not record_project_id and (
-                        not active_project_path or record_project_path != active_project_path
-                    ):
-                        continue
-                elif not active_project_path or record_project_path != active_project_path:
-                    continue
-            elif scope == "session":
-                if not self._thread_matches(record.get("source_session_id"), session_id):
-                    continue
-            elif scope != "account":
-                continue
             content = str(record.get("text") or "").strip()
             if not content:
                 continue
@@ -1964,6 +1945,27 @@ class AgentMemory:
         self._save_to_disk()
         return canonical_deleted or deleted
 
+    @staticmethod
+    def _record_visible(
+        record: Dict[str, Any], *, owner: str, thread_id: Optional[str],
+        project_id: str, project_path: Optional[str],
+    ) -> bool:
+        """Require the current owner and the exact contextual scope for recall."""
+        if not record.get("active", True) or str(record.get("owner_id") or "") != owner:
+            return False
+        scope = str(record.get("scope") or "account").strip().lower()
+        if scope == "account":
+            return True
+        if scope == "session":
+            return bool(thread_id) and AgentMemory._normalize_thread_id(record.get("source_session_id")) == thread_id.strip()
+        if scope == "project":
+            metadata = record.get("metadata") or {}
+            record_project_id = str(record.get("project_id") or metadata.get("project_id") or "").strip()
+            if record_project_id:
+                return record_project_id == str(project_id or "").strip()
+            return bool(project_path) and str(metadata.get("project_path") or "").strip() == str(project_path).strip()
+        return False
+
     def _lexical_memory_search(
         self,
         query: str,
@@ -1971,6 +1973,7 @@ class AgentMemory:
         k: int,
         thread_id: Optional[str],
         project_path: Optional[str],
+        project_id: str,
     ) -> List[Document]:
         query_tokens = set(re.findall(r"[a-z0-9]{2,}", str(query or "").casefold()))
         if not query_tokens:
@@ -1978,16 +1981,11 @@ class AgentMemory:
         owner = self._owner_id()
         scored: list[tuple[float, Document]] = []
         for record in self._records.values():
-            if not bool(record.get("active", True)) or str(record.get("owner_id") or "") != owner:
+            if not self._record_visible(record, owner=owner, thread_id=thread_id,
+                                        project_id=project_id, project_path=project_path):
                 continue
             scope = str(record.get("scope") or "account")
             metadata = dict(record.get("metadata") or {})
-            if scope == "session" and not self._thread_matches(record.get("source_session_id"), thread_id):
-                continue
-            record_path = str(metadata.get("project_path") or "").strip()
-            if scope == "project":
-                if not project_path or record_path != str(project_path).strip():
-                    continue
             text = str(record.get("text") or "").strip()
             tokens = set(re.findall(r"[a-z0-9]{2,}", text.casefold()))
             overlap = query_tokens & tokens
@@ -2038,6 +2036,7 @@ class AgentMemory:
             out.append(doc)
         return out
 
+    @_synchronized_records()
     def retrieve_relevant(
         self,
         query: str,
@@ -2045,80 +2044,53 @@ class AgentMemory:
         mode: Optional[str] = None,
         thread_id: Optional[str] = None,
         project_path: Optional[str] = None,
+        project_id: str = "",
     ) -> List[Document]:
         lexical_docs = self._lexical_memory_search(
-            query,
-            k=k,
-            thread_id=thread_id,
-            project_path=project_path,
+            query, k=k, thread_id=thread_id, project_id=project_id, project_path=project_path,
         )
         if not self.use_faiss:
             return lexical_docs[:k]
         if self.partition_enabled:
             scored: List[Tuple[Document, Optional[float]]] = []
             for _path, store in self._iter_vector_stores(mode, thread_id):
-                scored.extend(self._search_store(store, query, k=max(k, 4)))
-            if not scored:
-                return lexical_docs[:k]
+                scored.extend(self._search_store(store, query, k=max(k * 6, 24)))
             if any(score is not None for _doc, score in scored):
                 scored.sort(key=lambda item: float(item[1] if item[1] is not None else 0.0))
             docs = [doc for doc, _score in scored]
-            docs = [
-                doc for doc in docs
-                if (
-                    not str((getattr(doc, "metadata", {}) or {}).get("project_path") or "").strip()
-                    if not project_path
-                    else not str((getattr(doc, "metadata", {}) or {}).get("project_path") or "").strip()
-                    or str((getattr(doc, "metadata", {}) or {}).get("project_path") or "").strip() == str(project_path).strip()
-                )
-            ]
-            return self._fuse_memory_results(docs, lexical_docs, k)
-        if self.vector_store is None:
-            return lexical_docs[:k]
-        results = self.vector_store.similarity_search(query, k=max(k * 6, 24))
-        results = [d for d in results if not (getattr(d, "metadata", {}) or {}).get("bootstrap")]
-        results = [
-            doc for doc in results
-            if (
-                not str((getattr(doc, "metadata", {}) or {}).get("project_path") or "").strip()
-                if not project_path
-                else not str((getattr(doc, "metadata", {}) or {}).get("project_path") or "").strip()
-                or str((getattr(doc, "metadata", {}) or {}).get("project_path") or "").strip() == str(project_path).strip()
-            )
-        ]
-        # Drop vectors whose canonical record is inactive/deleted (stale FAISS).
-        results = [d for d in results if self._vector_doc_is_active(d)]
-        results = self._fuse_memory_results(results, lexical_docs, k)
-        logger.debug(f"Retrieved {len(results)} relevant memories for query: {query[:50]}...")
-        return results
+        elif self.vector_store is not None:
+            docs = self.vector_store.similarity_search(query, k=max(k * 6, 24))
+        else:
+            docs = []
+        owner = self._owner_id()
+        visible_docs = [doc for doc in docs if self._vector_doc_visible(
+            doc, owner=owner, thread_id=thread_id, project_id=project_id, project_path=project_path,
+        )]
+        return self._fuse_memory_results(visible_docs, lexical_docs, k)
 
-    def _vector_doc_is_active(self, doc: Any) -> bool:
-        """True when FAISS hit maps to an active owner record (or has no durable id)."""
+    def _vector_doc_visible(
+        self, doc: Any, *, owner: str, thread_id: Optional[str],
+        project_id: str, project_path: Optional[str],
+    ) -> bool:
         meta = getattr(doc, "metadata", {}) or {}
-        if not isinstance(meta, dict):
-            return True
-        mid = str(meta.get("id") or meta.get("memory_id") or meta.get("doc_id") or "").strip()
-        if not mid:
-            # Match by normalized content against active records
-            content = self._normalize_memory_content(getattr(doc, "page_content", "") or "")
-            if not content:
-                return False
-            # Legacy/unmigrated vector stores may not have canonical records or
-            # ids yet. Preserve those results until a canonical record set
-            # exists; once it does, only an active exact owner record can pass.
-            if not self._records:
-                return True
-            owner = self._owner_id()
-            return any(
-                bool(r.get("active", True))
-                and str(r.get("owner_id") or "") == owner
-                and self._normalize_memory_content(r.get("text") or r.get("normalized_content") or "") == content
-                for r in self._records.values()
-            )
-        rec = self._records.get(mid)
-        if rec is None:
+        if not isinstance(meta, dict) or meta.get("bootstrap"):
             return False
-        return bool(rec.get("active", True)) and str(rec.get("owner_id") or "") == self._owner_id()
+        memory_id = str(meta.get("id") or meta.get("memory_id") or meta.get("doc_id") or "").strip()
+        content = self._normalize_memory_content(getattr(doc, "page_content", "") or "")
+        if not content:
+            return False
+        if memory_id:
+            record = self._records.get(memory_id)
+            records = (record,) if record and self._normalize_memory_content(record.get("text", "")) == content else ()
+        else:
+            # Unmigrated vectors without IDs can only match exact visible canonical text.
+            if not self._records:
+                return (not meta.get("project_path") and str(meta.get("scope") or "account") == "account"
+                        and str(meta.get("owner_id") or owner) == owner)
+            records = (record for record in self._records.values()
+                       if self._normalize_memory_content(record.get("text") or "") == content)
+        return any(self._record_visible(record, owner=owner, thread_id=thread_id,
+                                        project_id=project_id, project_path=project_path) for record in records)
 
     @_synchronized_records()
     def rebuild_faiss_from_canonical(self) -> Dict[str, Any]:
