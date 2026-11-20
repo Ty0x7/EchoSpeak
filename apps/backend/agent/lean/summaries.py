@@ -72,7 +72,10 @@ def update(session_id: str, client: Any) -> bool:
         older = turns[:-RECENT_TURNS] if len(turns) > RECENT_TURNS else []
         data = load(session_id)
         covered = set(data.get("covered") or [])
-        fresh = [t for t in older if str(t.get("execution_id") or "") not in covered]
+        # A chat summary can follow a chat into another project. Keep scoped turns in
+        # the original history, where their context is checked on every read.
+        fresh = [t for t in older if str(t.get("execution_id") or "") not in covered
+                 and not ((t.get("execution") or {}).get("metadata") or {}).get("memory_context_scope")]
         if len(fresh) < BATCH_TURNS:
             return False
         body = "\n".join(line for t in fresh for line in _turn_lines(t))[-_MAX_INPUT_CHARS:]

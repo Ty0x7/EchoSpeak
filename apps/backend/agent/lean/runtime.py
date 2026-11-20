@@ -451,6 +451,9 @@ class LeanSession:
                 elif waiting and memory_quality.list_needs_consent(message):
                     list_phase = "needs_consent"
         self._memory_list_phase, self._memory_list_payload = list_phase, list_payload
+        self._memory_context = self._context_scope(self._memory_scope)
+        if not self._memory_context and (memory_quality.refuses_memory(message) or list_phase == "needs_consent"):
+            self._memory_context = self._context_scope("session")
         execution = store.create_execution(
             request_id=self.request_id,
             kind="query",
@@ -470,7 +473,8 @@ class LeanSession:
             phase="running",
             metadata={"runtime": "lean_v1", "room_id": self.room.id if self.room else "",
                       "hidden_prompt": self.source == "heartbeat",
-                      "environment": self.environment, **({"memory_list": list_phase} if list_phase else {})},
+                      "environment": self.environment, **self._memory_context,
+                      **({"memory_list": list_phase} if list_phase else {})},
         )
         self.execution_id = execution.id
         self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else "",
@@ -551,7 +555,7 @@ class LeanSession:
             tools_used=list(dict.fromkeys(row["name"] for result in self.results for row in result.timeline
                                           if row.get("kind") == "tool" and row.get("name"))),
             error=error[:1000],
-            metadata={**dict(execution.metadata or {}), **({"outcome": outcome} if outcome else {}),
+            metadata={**dict(execution.metadata or {}), **self._memory_context, **({"outcome": outcome} if outcome else {}),
                       **({"chat_run": self._chat_trace(final_text)} if self._chat_run is not None else {}),
                       **({"deliverable": delivered} if delivered else {}),
                       **({"verification": measured} if (measured := self._verification_record()) else {})},
@@ -1767,8 +1771,11 @@ class LeanSession:
                     docs = memory.retrieve_relevant(query, k=5, thread_id=self.session_id, project_path=self.project_root or None,
                                                     project_id=self._active_project())
                     # Saved facts only; old chat transcripts are found with chat_search.
-                    rows += [{"content": getattr(doc, "page_content", "")} for doc in docs
-                             if str((getattr(doc, "metadata", None) or {}).get("type") or "") != "conversation"]
+                    for doc in docs:
+                        metadata = getattr(doc, "metadata", None) or {}
+                        if metadata.get("type") != "conversation":
+                            self._limit_memory_context(metadata.get("scope"))
+                            rows.append({"content": getattr(doc, "page_content", "")})
                 except Exception:
                     pass
                 lines = list(dict.fromkeys(str(r.get("content") or "").strip() for r in rows if str(r.get("content") or "").strip()))
@@ -1823,7 +1830,7 @@ class LeanSession:
             # This turn's own messages never count: the question being asked matched itself, three hits skipped the
             # partial top-up, and only two stale ones were left after it was dropped (live MC1 r2).
             hits = [hit for hit in store_.search_messages(query, limit=9, session_id=self.session_id if scoped else "")
-                    if hit["turn_id"] != self.execution_id][:8]
+                    if hit["turn_id"] != self.execution_id and self._chat_hit_visible(store_, hit)][:8]
             if len(hits) < 3:
                 # Every word had to match: "offsite venue" missed "the team offsite is at Larkspur Hall", and "vendor
                 # account manager name" missed the message naming the manager (live MC1/MCH1, 18 November 2026). Top
@@ -1832,7 +1839,8 @@ class LeanSession:
                 seen_ids = {hit["item_id"] for hit in hits}
                 for hit in (store_.search_messages(words, limit=8, session_id=self.session_id if scoped else "",
                                                     any_term=True) if words else []):
-                    if hit["item_id"] not in seen_ids and hit["turn_id"] != self.execution_id and len(hits) < 8:
+                    if (hit["item_id"] not in seen_ids and hit["turn_id"] != self.execution_id and len(hits) < 8
+                            and self._chat_hit_visible(store_, hit)):
                         hits.append({**hit, "partial": True})
             context = current_work()
             if context and context.coordinator.get(context.work_id, principal=context.principal).get("parent_id"):
@@ -1848,6 +1856,9 @@ class LeanSession:
             hits.sort(key=lambda hit: (bool(hit.get("partial")), -float(hit["created_at"] or 0)))
             lines = []
             for hit in hits:
+                source = store_.get_execution(hit["turn_id"])
+                if source:
+                    self._limit_memory_context(source.metadata.get("memory_context_scope"))
                 when = time.strftime("%Y-%m-%d %H:%M", time.localtime(float(hit["created_at"] or 0)))
                 who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
                 here = " (this chat)" if hit["session_id"] == self.session_id else ""
@@ -2370,7 +2381,8 @@ class LeanSession:
         try:
             from agent.state import get_state_store
 
-            hits = get_state_store().search_messages(" ".join(terms), limit=12, any_term=True)
+            store = get_state_store()
+            hits = store.search_messages(" ".join(terms), limit=12, any_term=True)
             if self.model_first:
                 hits = chat_mode.chat_hits(hits)  # Chat recalls Chat, not Agents rooms or Code sessions
         except Exception:
@@ -2378,12 +2390,15 @@ class LeanSession:
             return self._past_chat_lines
         lines: list[str] = []
         for hit in hits:
-            if hit["session_id"] == self.session_id or hit["turn_id"] == self.execution_id:
+            if hit["session_id"] == self.session_id or hit["turn_id"] == self.execution_id or not self._chat_hit_visible(store, hit):
                 continue
             if memory_quality.stale_version_claim(str(hit["snippet"] or "")):
                 continue  # an old "current version" answer; the live version is in the prompt
             when = time.strftime("%Y-%m-%d", time.localtime(float(hit["created_at"] or 0)))
             who = "user" if hit["role"] == "user" else (hit["agent"] or "assistant")
+            source = store.get_execution(hit["turn_id"])
+            if source:
+                self._limit_memory_context(source.metadata.get("memory_context_scope"))
             lines.append(f"{when} {who}: {hit['snippet']}")
             if len(lines) >= 5:
                 break
@@ -2405,6 +2420,8 @@ class LeanSession:
             if rows and hasattr(memory, "note_recalled"):
                 # Used facts stay; ones nobody recalls for months are retired at idle (agent/lean/memory_tidy.py).
                 memory.note_recalled([str(r.get("memory_id") or "") for r in rows])
+            for row in rows:
+                self._limit_memory_context(row.get("scope"))
             return rows
         except Exception:
             logger.debug("Lean memory recall failed", exc_info=True)
@@ -2432,6 +2449,10 @@ class LeanSession:
                 continue
             if index < recent_start and str(turn.get("execution_id") or "") in covered:
                 continue
+            metadata = (turn.get("execution") or {}).get("metadata") or {}
+            if not self._context_visible(metadata):
+                continue
+            self._limit_memory_context(metadata.get("memory_context_scope"))
             start = len(rows)
             # What the turn changed and how it ended, on its reply: the reply alone often doesn't say, and the next
             # turn can't see tool calls (owner's GTA session: a JavaScript game started beside an unseen Python one).
@@ -2473,12 +2494,47 @@ class LeanSession:
             merged.pop(0)
         return merged
 
+    def _context_scope(self, scope: Optional[str]) -> dict[str, str]:
+        if scope == "session":
+            return {"memory_context_scope": scope, "memory_context_id": self.session_id}
+        if scope == "project":
+            return {"memory_context_scope": scope, "memory_context_id": self._active_project()}
+        return {}
+
+    def _context_visible(self, metadata: dict[str, Any]) -> bool:
+        scope = metadata.get("memory_context_scope")
+        if not scope:
+            return True
+        context_id = self._context_scope(scope).get("memory_context_id")
+        return self.caller_role == "owner" and bool(context_id) and context_id == metadata.get("memory_context_id")
+
+    def _chat_hit_visible(self, store: Any, hit: dict[str, Any]) -> bool:
+        source = store.get_execution(hit["turn_id"])
+        return source is not None and self._context_visible(source.metadata)
+
+    def _limit_memory_context(self, scope: Optional[str]) -> None:
+        """Keep replies derived from scoped context inside that scope in later chat searches."""
+        if scope not in {"session", "project"} or not self.execution_id:
+            return
+        from agent.state import get_state_store
+
+        with self._state_lock:
+            current = getattr(self, "_memory_context", {})
+            if current and (current["memory_context_scope"] == "session" or scope == "project"):
+                return
+            self._memory_context = self._context_scope(scope)
+            store = get_state_store()
+            record = store.get_execution(self.execution_id)
+            if record is not None:
+                store.update_execution(self.execution_id, metadata={**record.metadata, **self._memory_context}, project_thread=False)
+
     def _remember_async(self, message: str, answer: str) -> None:
         memory = getattr(self.agent, "memory", None)
         if memory is None or not answer or self._lead_id not in {"echo", CHAT_AGENT_ID, CODE_AGENT_ID} or self.source in {"routine", "heartbeat", "proactive"}:
             return
         if (self.caller_role != "owner" or memory_quality.refuses_memory(message)
-                or getattr(self, "_memory_list_phase", "") or memory_quality.requested_scope(message) != "account"):
+                or getattr(self, "_memory_list_phase", "") or getattr(self, "_memory_context", {})
+                or memory_quality.requested_scope(message) != "account"):
             return
         # Raw transcripts are opt-in (Settings › Memory). Chats are already kept and searchable
         # (chat_search); copying every turn into memory only crowded out the real facts.

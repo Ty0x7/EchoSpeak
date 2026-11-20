@@ -516,3 +516,39 @@ def test_unknown_project_scope_and_ambiguous_model_write_fail_closed(monkeypatch
     session, _ = _session(monkeypatch, {"echo": model}, agent=agent)
     session.run("Remember this list for this project only:\n- Home city: Test Valley\n- Editor: Foundry")
     assert lexical_memory._records == {}
+
+
+@pytest.mark.parametrize("scope,other_project", [("chat", "project-a"), ("project", "project-b")])
+def test_chat_search_cannot_return_the_scoped_source_transcript(
+    monkeypatch, lexical_memory, tmp_path, scope, other_project,
+):
+    from agent.state import get_state_store
+
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    store = get_state_store()
+    source, _ = _session(monkeypatch, {"echo": ScriptedClient([])}, agent=agent)
+    source.project_root = str(tmp_path)
+    store.update_thread_state(source.session_id, active_project_id="project-a")
+    source.run(f"Remember this list for this {scope} only:\n- Preview alias: Frosty Loom\n- Shape: hexagon")
+
+    if scope == "project":
+        corroborating = ScriptedClient([ModelTurn(tool_calls=[
+            ToolCall("find-own", "chat_search", '{"query":"preview alias"}'),
+        ]), ModelTurn(content="The preview alias is Frosty Loom.")])
+        inside, own_events = _session(monkeypatch, {"echo": corroborating}, agent=agent)
+        inside.project_root = str(tmp_path)
+        store.update_thread_state(inside.session_id, active_project_id="project-a")
+        own_turn = inside.run("Check past conversation messages for the preview alias.")
+        own_result = next(e for e in own_events if e["type"] == "tool_end" and e["name"] == "chat_search")
+        assert "Frosty Loom" in own_result["output"]
+        assert store.get_execution(own_turn["execution_id"]).metadata["memory_context_id"] == "project-a"
+
+    model = ScriptedClient([ModelTurn(tool_calls=[
+        ToolCall("find-source", "chat_search", '{"query":"preview alias"}'),
+    ]), ModelTurn(content="Done checking.")])
+    outside, events = _session(monkeypatch, {"echo": model}, agent=agent)
+    outside.project_root = str(tmp_path)
+    store.update_thread_state(outside.session_id, active_project_id=other_project)
+    outside.run("Check past conversation messages for the preview alias.")
+    result = next(e for e in events if e["type"] == "tool_end" and e["name"] == "chat_search")
+    assert "Frosty Loom" not in result["output"], result["output"]

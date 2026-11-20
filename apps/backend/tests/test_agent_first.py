@@ -824,8 +824,7 @@ def test_a_builder_asked_to_remember_has_memory_save_listed(env, monkeypatch):
 
 def _said(env, text: str) -> str:
     earlier = env.chats.create_thread(title="Earlier", source="web")
-    env.store.add_item(turn_id=f"t-{abs(hash(text)) % 10**8}", item_type="user_message", status="complete",
-                       session_id=earlier.thread_id, payload={"text": text})
+    env.store.create_execution(thread_id=earlier.thread_id, query=text, status="completed")
     return earlier.thread_id
 
 

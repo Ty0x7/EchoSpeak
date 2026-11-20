@@ -42,11 +42,13 @@ def branch_before_prompt(session_id: str, *, execution_id: str = "", request_id:
                 model_id=binding.model_id, provider_configuration_id=binding.provider_configuration_id)
         count = 0
         for old in previous:
+            memory_context = {key: old.metadata[key] for key in ("memory_context_scope", "memory_context_id")
+                              if key in old.metadata}
             new = store.create_execution(thread_id=target.thread_id, source="chat_branch", kind="query",
                 query=old.query, runtime_provider=old.runtime_provider, model_id=old.model_id,
                 workspace_id=state.workspace_id, active_project_id=state.active_project_id,
                 record_user_message=False, created_at=old.created_at,
-                metadata={"branched_from_session": session_id, "branched_from_execution": old.id})
+                metadata={"branched_from_session": session_id, "branched_from_execution": old.id, **memory_context})
             for item in store.list_items(old.id):
                 if item.item_type not in {"user_message", "assistant_message"}:
                     continue
