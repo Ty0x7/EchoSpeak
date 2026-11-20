@@ -1,5 +1,0 @@
-{
-    "name": "System Monitor",
-    "description": "System health checks and status monitoring through the system_info tool.",
-    "prompt_file": "SKILL.md"
-}

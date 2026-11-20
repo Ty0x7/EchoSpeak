@@ -1,7 +1,0 @@
-{
-  "name": "discord_bot",
-  "description": "Discord bot integration for EchoSpeak - responds to mentions and DMs in Discord servers",
-  "enabled": true,
-  "priority": 0,
-  "tools": []
-}

@@ -1,1 +1,0 @@
-{"desktop-main":{"identifier":"desktop-main","description":"Narrow capability for the packaged EchoSpeak main, Settings, setup, and companion windows.","local":true,"windows":["main","settings","setup","companion"],"permissions":["core:default","core:window:allow-start-dragging","desktop-runtime"]}}
