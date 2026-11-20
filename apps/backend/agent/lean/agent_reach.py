@@ -77,6 +77,35 @@ def message_target(request: str, roster: Iterable[Any], persona_id: str) -> Opti
     return None
 
 
+def unavailable_delegation(request: str, roster: Iterable[Any], persona_id: str,
+                           available: Iterable[Any]) -> tuple[str, ...]:
+    """Roster names explicitly requested for work this turn without an available handoff."""
+    allowed = {agent.id for agent in available} | {primary_id(persona_id)}
+    return tuple(agent.name for agent in roster if agent.id not in allowed and agent.name and re.search(
+        rf"\b(?:(?:ask|get)\s+@?{re.escape(agent.name)}\s+to|(?:have|let)\s+@?{re.escape(agent.name)})\s+"
+        r"(?:write|create|edit|update|save|build|fix|run|test|check|review|look|research|send|handle|complete|do)\b",
+        request, re.I,
+    ))
+
+
+def correct_delegation_attribution(reply: str, unavailable: tuple[str, ...]) -> str:
+    """Correct direct claims of execution by an unavailable delegate in this reply."""
+    parts = re.split(r"((?<=[.!?])\s+|\n+)", reply)
+    action = r"wrote|written|created|edited|updated|saved|built|fixed|ran|run|tested|checked|reviewed|completed|handled|sent"
+    for index, part in enumerate(parts):
+        if not part.strip() or re.search(r"\b(?:earlier|yesterday|previously|last\s+time|whether)\b", part, re.I):
+            continue
+        plain = part.replace("**", "").replace("`", "")
+        for name in unavailable:
+            target = re.escape(name)
+            if re.search(rf"(?<!\w)@?{target}\s+(?:has\s+)?(?:successfully\s+)?(?:{action})\b", plain, re.I) or re.search(
+                rf"\b(?:was|were|been)\s+(?:{action})\s+by\s+@?{target}(?!\w)", plain, re.I,
+            ):
+                parts[index] = f"I couldn't delegate to {name} in this conversation."
+                break
+    return "".join(parts)
+
+
 def message_text(sender: str, text: str) -> str:
     """The note as it appears in the recipient's conversation: who sent it, and that the owner asked for it."""
     from agent.lean import policy

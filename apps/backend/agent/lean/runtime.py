@@ -1421,6 +1421,33 @@ class LeanSession:
             turn.step_limit = research_run.step_limit
             turn.grace_prompt = chat_run_mod.GRACE_PROMPT
             self._chat_run = research_run
+        if depth == 0 and not guest and not read_only:
+            from agent.lean.agent_reach import correct_delegation_attribution, unavailable_delegation
+
+            unavailable = unavailable_delegation(message, self.personas.list(), persona.id,
+                                                 pool if "delegate_to_agent" in toolbox.names else [])
+            if unavailable:
+                names = ", ".join(unavailable)
+                correction = (f"No handoff to {names} is available here. State who actually performed any action "
+                              "in this turn, using its tool results.")
+                turn.request_note += "\n" + correction
+                requested_rewrite = False
+
+                def check_attribution(text: str) -> str:
+                    nonlocal requested_rewrite
+                    if not requested_rewrite and correct_delegation_attribution(text, unavailable) != text:
+                        requested_rewrite = True
+                        return correction
+                    return ""
+
+                review = turn.answer_review
+
+                def review_attribution(text: str) -> tuple[list[str], str]:
+                    notes, replacement = review(text) if review is not None else ([], "")
+                    return notes, correct_delegation_attribution(replacement or text, unavailable)
+
+                turn.final_check = check_attribution
+                turn.answer_review = review_attribution
         if not guest and "read_skill" in toolbox.names:
             selected = agent_skills.matching_skill(goal, agent_skills.approved())
             if selected:

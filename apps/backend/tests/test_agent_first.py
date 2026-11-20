@@ -384,6 +384,52 @@ def _call(name: str, args: dict[str, Any], id_: str = "c1") -> ToolCall:
     return ToolCall(id_, name, json.dumps(args))
 
 
+@pytest.mark.parametrize("retry", [
+    "I couldn't delegate to Cedar. I created `receipt.txt` myself.",
+    "`receipt.txt` was created by Cedar. It contains an acknowledgement.",
+])
+def test_unavailable_agent_cannot_get_credit_for_a_local_write(env, monkeypatch, retry):
+    env.people.create({"name": "Cedar"})
+    saved = env.folder / "receipt.txt"
+    saved.write_text("Pending\n")
+    message = "Have Cedar update receipt.txt with an acknowledgement."
+    _, turn = _echo_turn(env, monkeypatch, message, project=True)
+    client = ScriptedClient([
+        ModelTurn(content="", tool_calls=[_call("file_edit", {"path": str(saved), "old_text": "Pending",
+                                                             "new_text": "Acknowledged"})]),
+        ModelTurn(content="**Cedar** created `receipt.txt`. It contains an acknowledgement."),
+        ModelTurn(content=retry),
+    ])
+    turn.client = client
+    events = []
+    turn.emit = events.append
+
+    result = turn.run(message)
+
+    assert saved.read_text() == "Acknowledged\n", [event.get("output") for event in events if event["type"] == "tool_end"]
+    assert "delegate_to_agent" not in turn.toolbox.names
+    assert "Cedar** created" not in result.text
+    assert "created by Cedar" not in result.text
+    assert "couldn't delegate to Cedar" in result.text
+    assert len(client.calls) == 3
+    assert sum(event["type"] == "answer_check" for event in events) == 1
+
+
+@pytest.mark.parametrize("reply", [
+    "Indigo North did not check the receipt. I could not delegate to them from this project.",
+    "I can’t confirm whether Indigo North checked the receipt.",
+])
+def test_unavailable_agent_can_be_discussed_honestly(env, monkeypatch, reply):
+    env.people.create({"name": "Indigo North"})
+    message = "Ask Indigo North to check the receipt."
+    _, turn = _echo_turn(env, monkeypatch, message, project=True)
+    client = ScriptedClient([ModelTurn(content=reply)])
+    turn.client = client
+
+    assert turn.run(message).text == reply
+    assert len(client.calls) == 1
+
+
 def test_a_guess_made_before_checking_is_not_part_of_the_saved_answer():
     """Audit 25 and 32: "…is today against the San Jose Sharks. Let me verify." stayed in the saved
     answer above "…is Tuesday against the Florida Panthers"."""
