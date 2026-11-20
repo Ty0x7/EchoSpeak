@@ -998,17 +998,22 @@ class Stack:
     """The recorder plus an isolated backend, torn down together."""
 
     def __init__(self, run_dir: Path, model: str, upstream: str, extra_env: dict[str, str],
-                 agents_md: str = "", skills: tuple[str, ...] = ()) -> None:
+                 agents_md: str = "", skills: tuple[str, ...] = (), *,
+                 fixture_mcp: Optional[dict[str, Any]] = None) -> None:
         self.run_dir, self.model, self.upstream, self.extra_env = run_dir, model, upstream, extra_env
         # A/B variables (one experiment arm): the owner's AGENTS.md text, and skills imported + approved through
         # the real API. Both go in through EchoSpeak's own mechanisms, not a test-only prompt path.
         self.agents_md, self.skills = agents_md, skills
+        self.fixture_mcp = fixture_mcp or {}
         self.variant: dict[str, Any] = {}
         self.procs: list[subprocess.Popen] = []
         self.key = "eval-" + secrets.token_hex(16)
         self.data = run_dir / "backend-data"
 
     def __enter__(self) -> "Stack":
+        if sys.platform != "linux":
+            raise RuntimeError("The evaluation requires a Linux Bubblewrap sandbox")
+        assert_local(self.upstream)
         rec_port, api_port = _free_port(), _free_port()
         self.calls = self.run_dir / "model-calls.jsonl"
         self.procs.append(subprocess.Popen(
@@ -1045,6 +1050,7 @@ class Stack:
             "LOCAL_MODEL_NAME": self.model, "PYTHON_DOTENV_DISABLED": "1",
             "TERMINAL_EXECUTION_MODE": "bwrap", "TERMINAL_DOCKER_NETWORK": "off",
             "ECHOSPEAK_TERMINAL_REQUIRE_SANDBOX": "1",
+            "ALLOW_DESKTOP_AUTOMATION": "false", "MCP_SERVERS": json.dumps(self.fixture_mcp),
             # Without a project the default folder is the owner's Documents; an evaluation must never see it.
             "FILE_TOOL_ROOT": str(dirs["backend-home"]),
             # The credential broker's key lives in the run's own data folder, never in the owner's desktop keyring
@@ -1358,15 +1364,15 @@ def main() -> int:
     needs = {need for case in cases for need in case.needs}
     if "skill:relnotes" in needs:
         skills += (RELNOTES_SKILL,)
+    fixture_mcp = {}
     if "accounts" in needs:
         # One disposable accounts service per run; its state file is the evidence (setup can seed it).
         db = run_dir / "accounts-db.json"
         os.environ["HEVAL_ACCOUNTS_DB"] = str(db)
-        extra["MCP_SERVERS"] = json.dumps({"accounts": {"command": sys.executable,
-                                                        "args": [str(FIXTURES / "accounts_mcp.py")],
-                                                        "env": {"ACCOUNTS_DB": str(db)}}})
+        fixture_mcp["accounts"] = {"command": sys.executable, "args": [str(FIXTURES / "accounts_mcp.py")],
+                                   "env": {"ACCOUNTS_DB": str(db)}}
     print(f"Harness eval {args.label} · {args.model} · {len(cases)} cases × {args.repeat} · {run_dir}", flush=True)
-    with Stack(run_dir, args.model, args.upstream, extra, agents_md, skills) as stack:
+    with Stack(run_dir, args.model, args.upstream, extra, agents_md, skills, fixture_mcp=fixture_mcp) as stack:
         if "accounts" in needs:
             stack.api.call("POST", "/lean/mcp/accounts/approve", {})  # trusted as an owner would, for this run only
         meta["env"] = stack.env_used

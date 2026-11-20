@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -182,9 +183,8 @@ def test_simulated_owner_keeps_shell_calls_off_host_and_off_network():
     assert heval.owner_decision({"tool": "process_start", "args": {"where": "host"}}, turn) == "deny"
 
 
+@pytest.mark.skipif(not hasattr(os, "fwalk"), reason="fixture evidence uses Linux directory descriptors")
 def test_evidence_snapshot_ignores_symlinks_and_special_files(tmp_path):
-    import os
-
     heval = _load("harness_eval")
     fixture = tmp_path / "fixture"
     fixture.mkdir()
@@ -202,18 +202,25 @@ def test_evidence_snapshot_ignores_symlinks_and_special_files(tmp_path):
     assert evidence["inside.txt"]["text"] == "inside evidence"
 
 
-def test_evaluation_environment_keeps_sandbox_and_run_paths_when_overridden(tmp_path, monkeypatch):
+@pytest.mark.skipif(sys.platform != "linux", reason="the evaluator requires Bubblewrap")
+@pytest.mark.parametrize("fixture_mcp", [{}, {"accounts": {"command": "synthetic-fixture"}}])
+def test_evaluation_environment_keeps_sandbox_and_run_paths_when_overridden(tmp_path, monkeypatch, fixture_mcp):
+    import json
+
     heval = _load("harness_eval")
     monkeypatch.setenv("TERMINAL_EXECUTION_MODE", "host")
     monkeypatch.setenv("TERMINAL_DOCKER_NETWORK", "on")
+    monkeypatch.setenv("MCP_SERVERS", '{"unrelated":{"command":"unused"}}')
     stack = heval.Stack(tmp_path, "local-test", "http://127.0.0.1:11434", {
         "TERMINAL_EXECUTION_MODE": "host",
         "TERMINAL_DOCKER_NETWORK": "on",
         "ECHOSPEAK_DATA_DIR": str(tmp_path / "unrelated-data"),
         "LOCAL_MODEL_URL": "https://example.invalid",
         "PYTHON_DOTENV_DISABLED": "0",
+        "ALLOW_DESKTOP_AUTOMATION": "true",
+        "MCP_SERVERS": '{"override":{"command":"unused"}}',
         "LEAN_CONTEXT_FILL": "0.9",
-    })
+    }, fixture_mcp=fixture_mcp)
     processes = []
 
     def popen(argv, **kwargs):
@@ -230,6 +237,8 @@ def test_evaluation_environment_keeps_sandbox_and_run_paths_when_overridden(tmp_
     assert env["TERMINAL_DOCKER_NETWORK"] == "off"
     assert env["ECHOSPEAK_TERMINAL_REQUIRE_SANDBOX"] == "1"
     assert env["PYTHON_DOTENV_DISABLED"] == "1"
+    assert env["ALLOW_DESKTOP_AUTOMATION"] == "false"
+    assert json.loads(env["MCP_SERVERS"]) == fixture_mcp
     assert env["ECHOSPEAK_DATA_DIR"] == str(tmp_path / "backend-data")
     assert env["LOCAL_MODEL_URL"].startswith("http://127.0.0.1:")
     assert env["LEAN_CONTEXT_FILL"] == "0.9"
