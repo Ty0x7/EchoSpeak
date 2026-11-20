@@ -1704,6 +1704,8 @@ class LeanSession:
             if scope == "account" and not self._owner_side(persona):
                 scope = "project" if self.project_root and persona.context_scope != "session" else "session"
             project_id = getattr(self, "_memory_project_id", "")
+            structured = getattr(self, "_memory_list_phase", "") == "intake"
+            prose_source = memory_quality.prose_source(self._user_message) if scope and not structured else ""
 
             def memory_save(args: dict[str, Any]) -> str | ToolResult:
                 from agent.state import get_state_store
@@ -1714,20 +1716,32 @@ class LeanSession:
                         or str(get_state_store().get_thread_state(self.session_id).active_project_id or "") != project_id):
                     return ToolResult(False, "The authorized project is no longer attached to this chat.", 0,
                                       outcome="refused")
-                fact = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))
+                proposal = str(args.get("fact") or args.get("text") or "")
+                key = memory_quality.normalize_key(str(args.get("key") or ""))
+                if structured:
+                    fact = memory_quality.tidy_fact(proposal)
+                else:
+                    fact = prose_source
+                    if not fact or not memory_quality.prose_proposal_matches(fact, proposal):
+                        return ToolResult(False, "No memory was saved. Use the exact fact in the current save request. "
+                                          "Ask the user to name it if the reference is unclear.", 0, outcome="refused")
+                    if key and not memory_quality.prose_key_matches(fact, key):
+                        return ToolResult(False, "No memory was saved. The key does not name the fact the user authorized.", 0,
+                                          outcome="refused")
                 problem = memory_quality.check_fact(fact)
                 if problem:
                     return problem
-                key = memory_quality.normalize_key(str(args.get("key") or ""))
                 if not key and scope == "account":
                     # A reworded copy of something already saved: keep the one we have.
                     owner_of = getattr(memory, "_owner_id", None)
                     owner = owner_of() if callable(owner_of) else ""
-                    existing = memory_quality.find_duplicate(fact, (
-                        record for record in list((getattr(memory, "_records", None) or {}).values())
-                        if (not owner or str(record.get("owner_id") or "") == owner)
-                        and str(record.get("scope") or "account") == "account"
-                    ))
+                    candidates = (record for record in list((getattr(memory, "_records", None) or {}).values())
+                                  if (not owner or str(record.get("owner_id") or "") == owner)
+                                  and str(record.get("scope") or "account") == "account")
+                    if not structured:
+                        candidates = (record for record in candidates
+                                      if memory_quality.tidy_fact(record.get("text", "")).casefold() == fact.casefold())
+                    existing = memory_quality.find_duplicate(fact, candidates)
                     if existing is not None:
                         stored = _memory_on_disk(memory, str(existing.get("id") or ""))
                         if isinstance(stored, dict):
@@ -1736,6 +1750,9 @@ class LeanSession:
                         if stored is False:
                             return "Failed: the remembered fact is no longer on disk. It could not be verified."
                         return f"Already remembered: {existing.get('text')}"
+                store = get_state_store()
+                user_item = next((item.id for item in store.list_items(self.execution_id)
+                                  if item.item_type == "user_message"), "")
                 memory_id = memory.add_memory_item(
                     fact,
                     memory_type=memory_quality.KINDS.get(str(args.get("type") or "fact").lower(), "note"),
@@ -1746,9 +1763,11 @@ class LeanSession:
                     project_path=self.project_root or None,
                     project_id=project_id,
                     source_execution_id=self.execution_id,
+                    source_item_id=user_item,
                     # Same key, new value: the old memory is superseded, not kept alongside.
                     semantic_key=key if self._owner_side(persona) or not key else f"agent:{persona.id}:{key}",
-                    **({"supersede_legacy_fields": True} if key and self._memory_list_phase == "intake" else {}),
+                    **({"supersede_legacy_fields": True} if key and structured else {}),
+                    **({"exact_duplicate": True} if not structured and not key else {}),
                 )
                 if not memory_id:
                     return "Failed: that could not be saved (empty, duplicate, or looks like a secret)."
@@ -1795,11 +1814,11 @@ class LeanSession:
                     name="memory_save",
                     description="Save one lasting fact about the user so you remember it in future chats: who they are, what they "
                     "prefer, people and projects in their life, or how they like you to work. The current user request "
-                    "sets the authorized scope. Save only what that request authorizes. Omit web content and secrets. "
-                    "One fact per call.",
+                    "sets the authorized scope. Copy the requested fact from that message. Leave out context from earlier "
+                    "turns and extra details. Omit web content and secrets. One fact per call.",
                     parameters={"type": "object", "properties": {
-                        "fact": {"type": "string", "description": "One short third-person sentence that still makes sense later, "
-                                 "e.g. \"Prefers short answers.\" or \"Partner is called Sam.\""},
+                        "fact": {"type": "string", "description": "The exact statement in the current user message that "
+                                 "they asked to remember. Do not infer or rephrase it."},
                         "type": {"type": "string", "enum": list(memory_quality.KINDS),
                                  "description": "What kind of fact this is."},
                         "key": {"type": "string", "description": "For facts that can change, a short stable name like home_city, "

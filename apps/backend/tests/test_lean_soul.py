@@ -249,7 +249,7 @@ class _FakeMemory:
         return len(self.records)
 
 
-@pytest.mark.parametrize("lose, expected", [(False, "Saved and verified: The user takes coffee black."),
+@pytest.mark.parametrize("lose, expected", [(False, "Saved and verified: I take my coffee black."),
                                             (True, "Failed: the memory store reported a save, but it isn't on disk")])
 def test_memory_save_is_verified_on_disk(monkeypatch, tmp_path, soul_file, lose, expected):
     agent = type("Agent", (_Agent,), {"memory": _FakeMemory(tmp_path, lose_writes=lose)})()
@@ -298,7 +298,7 @@ def test_memory_work_is_verified_only_after_readback(monkeypatch, tmp_path, soul
 @pytest.mark.parametrize("lose", [False, True])
 def test_already_remembered_fact_requires_a_durable_readback(monkeypatch, tmp_path, soul_file, lose):
     memory = _FakeMemory(tmp_path, lose_writes=lose)
-    memory.add_memory_item("The user takes coffee black.")
+    memory.add_memory_item("I take my coffee black.")
     memory._records = memory.records
     agent = type("Agent", (_Agent,), {"memory": memory})()
     scripts = {"echo": ScriptedClient([
@@ -554,3 +554,93 @@ def test_chat_search_cannot_return_the_scoped_source_transcript(
     outside.run("Check past conversation messages for the preview alias.")
     result = next(e for e in events if e["type"] == "tool_end" and e["name"] == "chat_search")
     assert "Frosty Loom" not in result["output"], result["output"]
+
+
+def test_prose_memory_uses_current_authorized_text_through_a_correction(monkeypatch, lexical_memory):
+    import json
+    from agent.state import get_state_store
+
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+
+    def propose(fact, key, call_id):
+        return {"echo": ScriptedClient([
+            ModelTurn(tool_calls=[ToolCall(call_id, "memory_save", json.dumps({"fact": fact, "key": key}))]),
+            ModelTurn(content="Noted."),
+        ])}
+
+    first, _ = _session(monkeypatch, propose(
+        "Takes the 7:45 AM Marlow ferry on Tuesdays for reading on the ride.", "tuesday_ferry", "first",
+    ), agent=agent)
+    first_result = first.run(
+        "Please remember that I take the 7:45 Marlow ferry on Tuesdays. I brought a grapefruit seltzer today."
+    )
+    update, _ = _session(monkeypatch, propose(
+        "User takes the 8:10 AM Marlow ferry on Tuesdays for reading, replacing the 7:45 ferry.",
+        "tuesday_ferry", "correction",
+    ), agent=agent)
+    update.session_id = first.session_id
+    changed = update.run("Small correction. My Tuesday Marlow ferry leaves at 8:10 now. Please remember that instead.")
+
+    disk = list(json.loads(lexical_memory._records_path.read_text())["records"].values())
+    old, new = (next(r for r in disk if r["source_execution_id"] == result["execution_id"])
+                for result in (first_result, changed))
+    assert old["text"] == "I take the 7:45 Marlow ferry on Tuesdays."
+    assert new["text"] == "My Tuesday Marlow ferry leaves at 8:10 now."
+    assert not old["active"] and old["superseded_by"] == new["id"]
+    assert new["active"] and new["supersedes"] == old["id"]
+    fresh = lexical_memory.runtime_memory_projection("Tuesday Marlow ferry", session_id="fresh-other-chat")
+    assert [row["content"] for row in fresh] == [new["text"]]
+    user_item = next(item for item in get_state_store().list_items(changed["execution_id"])
+                     if item.item_type == "user_message")
+    assert new["source_item_id"] == user_item.id
+
+
+@pytest.mark.parametrize("request_text,fact,key", [
+    ("Please remember that I take the 7:45 Marlow ferry. My manager is Lucy.",
+     "The user's manager is Lucy.", "manager"),
+    ("Please remember that I take the 7:45 Marlow ferry, but I have grape soda just for today.",
+     "The user always brings grape soda.", "usual_drink"),
+    ("Please remember that the 7:45 Marlow ferry takes 10 minutes.",
+     "The Marlow ferry takes 10 minutes.", "home_city"),
+    ("Remember that I take the ferry at 7:45 a.m. I play the flute.", "The user plays the flute.", "flute"),
+    ("Remember that instead.", "The user wants that instead.", "instead"),
+    ("I recommend this app. Can you run a check? Please remember that instead.",
+     "The user uses Marlow App.", "marlow_app"),
+])
+def test_prose_memory_rejects_unrelated_or_ambiguous_proposals(monkeypatch, lexical_memory, request_text, fact, key):
+    import json
+
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    lexical_memory.add_memory_item("Home city: Alder Harbor.", thread_id="older", semantic_key="home_city")
+    model = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("proposal", "memory_save", json.dumps({"fact": fact, "key": key}))]),
+        ModelTurn(content="Understood."),
+        ModelTurn(content="Understood."),
+    ])
+    session, _ = _session(monkeypatch, {"echo": model}, agent=agent)
+    initial = lexical_memory._records_path.read_bytes()
+    session.run(request_text)
+    assert lexical_memory._records_path.read_bytes() == initial
+
+
+def test_prose_memory_preserves_project_scope_and_literal_time(monkeypatch, lexical_memory, tmp_path):
+    import json
+    from agent.state import get_state_store
+
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    model = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("project-fact", "memory_save", json.dumps({
+            "fact": "Monday builds start at 7:10 a.m. to avoid overruns.", "key": "monday_builds",
+        }))]),
+        ModelTurn(content="Noted."),
+    ])
+    session, _ = _session(monkeypatch, {"echo": model}, agent=agent)
+    session.project_root = str(tmp_path)
+    get_state_store().update_thread_state(session.session_id, active_project_id="project-a")
+    session.run("Remember that the Monday builds start at 7:10 a.m. for this project only. I think it's an easy rhythm.")
+    rows = list(json.loads(lexical_memory._records_path.read_text())["records"].values())
+    assert len(rows) == 1 and rows[0]["text"] == "The Monday builds start at 7:10 a.m."
+    assert rows[0]["scope"] == "project" and rows[0]["project_id"] == "project-a"
+    assert not lexical_memory.runtime_memory_projection(
+        "Monday builds", session_id="other", project_id="project-b", project_path=str(tmp_path),
+    )
