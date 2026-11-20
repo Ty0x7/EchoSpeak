@@ -538,8 +538,8 @@ def full_suite(tree: Path) -> dict[str, Any]:
 def failing_first(tree: Path, base: str, tests: list[str], session: Session, cycle: int) -> dict[str, Any]:
     """The new tests, copied onto the base commit, must fail there; and pass on the fix."""
     probe = session.dir / f"cycle-{cycle}" / "base-tree"
-    if probe.exists():
-        shutil.rmtree(probe)
+    if probe.exists() or probe.is_symlink():
+        raise FileExistsError(f"Existing baseline probe requires inspection: {probe}")
     git(tree, "worktree", "add", "--detach", str(probe), base)
     try:
         for venv in ("apps/backend/.venv", "apps/terminal/.venv"):
@@ -649,11 +649,26 @@ def gate(tree: Path, base: str, session: Session, cycle: int, report: dict[str, 
 
 # ── the loop ────────────────────────────────────────────────────────────
 
+def preserve_cycle(tree: Path, state: dict[str, Any], decision: str) -> None:
+    """Leave unaccepted edits in place for recovery. A clean cycle can continue."""
+    if git(tree, "status", "--porcelain", "--untracked-files=all"):
+        state.update(status="halted", stopped=f"{decision}: working changes preserved for review in {tree}")
+
+
 def make_tree(session: Session, base: str) -> tuple[Path, str]:
     stamp = session.dir.name
-    tree = Path(session.state.get("tree") or (Path.home() / "Work" / f"echospeak-auto-{stamp}"))
-    branch = session.state.get("branch") or f"auto/{stamp}"
-    if not tree.exists():
+    tree = Path(session.state.get("tree") or (Path.home() / "Work" / "echospeak-worktrees" / f"auto-{stamp}"))
+    branch = f"auto/{stamp}"
+    if session.state.get("branch", branch) != branch or (session.state.get("tree") and not tree.is_dir()):
+        raise RuntimeError(f"Recorded worktree or branch is unavailable: {tree}")
+    if tree.exists():
+        if (not session.state.get("tree") or
+                Path(git(tree, "rev-parse", "--show-toplevel")).resolve() != tree.resolve() or
+                git(tree, "symbolic-ref", "--short", "HEAD") != branch or
+                git(tree, "rev-parse", "--path-format=absolute", "--git-common-dir") !=
+                git(REPO, "rev-parse", "--path-format=absolute", "--git-common-dir")):
+            raise RuntimeError(f"Worktree does not match the recorded campaign: {tree}")
+    else:
         git(REPO, "worktree", "add", "-b", branch, str(tree), base)
         exclude = Path(git(tree, "rev-parse", "--git-path", "info/exclude"))
         exclude = exclude if exclude.is_absolute() else tree / exclude
@@ -671,22 +686,26 @@ def make_tree(session: Session, base: str) -> tuple[Path, str]:
 
 def run(args: argparse.Namespace) -> int:
     started = time.time()
-    problems = billing_problems(getattr(args, "driver", ""), getattr(args, "ai_judge", "") or "")
+    session = Session.latest(args.session) if args.resume else None
+    driver = session.state["driver"] if session else args.driver
+    judge = (session.state.get("ai_judge") if session else args.ai_judge) or ""
+    if driver == "command":
+        print("Not starting: --driver command is disabled under the zero API billing policy (use claude, codex or manual).")
+        return 2
+    problems = billing_problems(driver, judge)
     if problems:
         print("Not starting: " + "; ".join(problems) + ". Paid API usage is never used (zero API billing policy).")
         return 2
-    if args.driver == "command":
-        # Until a subscription- or locally-backed agent can be verified, an arbitrary command could bill an API.
-        print("Not starting: --driver command is disabled under the zero API billing policy (use claude, codex or manual).")
-        return 2
-    if args.resume:
-        session = Session.latest(args.session)
+    if session:
+        if session.state.get("status") in {"halted", "review"}:
+            print("This session requires review. Preserve its findings and start approved follow-up from a reviewed base.")
+            return 2
     else:
         stamp = time.strftime("%Y%m%d-%H%M%S") + (f"-{args.label}" if args.label else "")
         session = Session(SESSIONS / stamp)
         session.dir.mkdir(parents=True)
         base = git(REPO, "rev-parse", args.base)
-        session.state = {"started": now(), "base": base, "model": args.model, "driver": args.driver,
+        session.state = {"issue": args.issue, "started": now(), "base": base, "model": args.model, "driver": args.driver,
                          "cases": args.cases.split(","), "heldout": [c for c in args.heldout.split(",") if c],
                          "repeat": args.repeat, "target": args.target, "cycles": [], "status": "running",
                          "limits": {"cycles": args.cycles, "minutes": args.minutes, "driver_minutes": args.driver_minutes,
@@ -697,6 +716,10 @@ def run(args: argparse.Namespace) -> int:
         session.log("session", dir=str(session.dir), base=base, driver=args.driver, model=args.model)
     st = session.state
     tree, branch = make_tree(session, st["base"])
+    pending_fix = st["cycles"] and st["cycles"][-1].get("decision") == "awaiting_fix"
+    if not pending_fix and git(tree, "status", "--porcelain", "--untracked-files=all"):
+        print(f"Working changes require review before starting a cycle in {tree}")
+        return 2
     st.update(tree=str(tree), branch=branch)
     session.save()
 
@@ -823,20 +846,19 @@ def run(args: argparse.Namespace) -> int:
                 outcome, why = driver_outcome(agent, record.get("driver_exit"), cdir / "driver.log")
                 if outcome != "ok":
                     # No report: the engineering agent didn't finish (a usage limit, a crash, a timeout). Its partial
-                    # change is kept in fix.diff and the worktree goes back to the cycle's base; nothing is gated.
+                    # change stays in the worktree, including any binary files absent from the readable diff.
                     (cdir / "fix.diff").write_text(full_diff(tree, base), encoding="utf-8")
-                    git(tree, "reset", "--hard", base)
-                    git(tree, "clean", "-fdq", "-e", ".venv")
                     record["decision"], record["reason"] = outcome, why
                     if outcome == "driver_failed":
                         st["status"], st["stopped"] = "stopped", f"the engineering agent failed: {why}"
                     else:
                         rejected_in_a_row += 1
+                    preserve_cycle(tree, st, outcome)
                     record["ended"] = now()
                     session.save()
                     write_cycle_report(session, record)
                     session.log("decision", cycle=cycle, decision=outcome, reason=why[:160])
-                    if outcome == "driver_failed":
+                    if outcome == "driver_failed" or st["status"] == "halted":
                         session.log("stop", reason=st["stopped"])
                         break
                     continue
@@ -906,9 +928,7 @@ def run(args: argparse.Namespace) -> int:
                 # Uncommitted in the worktree, and saved as cycle-N/fix.diff: the owner decides.
                 st["status"], st["stopped"] = "halted", g["reason"]
             else:
-                # Rejected, inconclusive or no change: the worktree goes back to the cycle's base; the diff is kept.
-                git(tree, "reset", "--hard", base)
-                git(tree, "clean", "-fdq", "-e", ".venv")
+                preserve_cycle(tree, st, decision)
                 rejected_in_a_row += 1 if decision in {"reject", "inconclusive"} else 0
         except Exception as exc:
             record["decision"], record["reason"] = "error", str(exc)[:800]
@@ -968,6 +988,7 @@ def write_session_report(session: Session) -> None:
     text = "\n".join([
         f"# auto-test-fix session {session.dir.name}", "",
         f"- Engineering agent: **{st['driver']}** · system under test: **{st['model']}** (EchoSpeak harness)",
+        *([f"- GitHub issue: #{st['issue']}"] if st.get("issue") else []),
         f"- Base `{st['base'][:8]}` · branch `{st.get('branch')}` · worktree `{st.get('tree')}`",
         f"- Dev cases {','.join(st['cases'])} × {st['repeat']} · held-out {','.join(st['heldout']) or 'none'} · target {st['target']}",
         f"- Held-out baseline: {(st.get('heldout_baseline') or {}).get('mean', 'not run')} · full-suite baseline: "
@@ -1025,6 +1046,21 @@ def stop(args: argparse.Namespace) -> int:
 
 def review(args: argparse.Namespace) -> int:
     s = Session.latest(args.session)
+    if getattr(args, "github", False):
+        issue = s.state.get("issue")
+        if not isinstance(issue, int) or issue < 1:
+            print("This session has no linked issue. Deduplicate the finding and link its evidence manually.")
+            return 2
+        print(f"Refs #{issue}\n")
+        print("| Cycle | Decision | Dev before | Dev after | Held-out after |")
+        print("|---|---|---:|---:|---:|")
+        for cycle in s.state.get("cycles", []):
+            scores = [str((cycle.get(key) or {}).get("mean", "—")) for key in ("before", "after", "heldout")]
+            print(f"| {cycle['cycle']} | {cycle.get('decision') or 'pending'} | " + " | ".join(scores) + " |")
+        print("\nAdd the confirmed cause, regression evidence, reviewed SHA and remaining limits before publication.")
+        return 0
+    if s.state.get("issue"):
+        print(f"GitHub issue #{s.state['issue']}. Attach reviewed evidence and link the scoped PR here.")
     print((s.dir / "report.md").read_text(encoding="utf-8") if (s.dir / "report.md").exists() else "")
     for r in s.state.get("cycles", []):
         report = s.dir / f"cycle-{r['cycle']}" / "report.md"
@@ -1034,7 +1070,7 @@ def review(args: argparse.Namespace) -> int:
     if tree and Path(tree).exists():
         print(f"\nCommits on {s.state.get('branch')} since {s.state['base'][:8]}:")
         print(git(Path(tree), "log", "--oneline", f"{s.state['base']}..HEAD") or "(none)")
-        print(f"\nTo inspect: git -C {tree} show <commit>   ·   to discard: git worktree remove {tree}")
+        print(f"\nTo inspect: git -C {tree} show <commit>   ·   retirement requires the preservation checks in docs/engineering-prompt.md")
         # A session's held-out set is small; check every case before keeping its commits. Demo session
         # 20261117-194230-demo-claude passed its gates, and this sweep then showed four single-run flips to examine.
         print("\nBefore keeping these commits, sweep every case (base against the session branch):\n"
@@ -1079,14 +1115,19 @@ def main() -> int:
     r.add_argument("--ai-judge", default="", help="Layer 4 judge: claude:<model> | codex | ollama:<model> | command:<argv> (off if empty)")
     r.add_argument("--base", default="HEAD")
     r.add_argument("--label", default="")
+    r.add_argument("--issue", type=int, help="Existing GitHub issue for this engineering effort")
     r.add_argument("--resume", action="store_true")
     r.add_argument("--session", default="")
     for name in ("status", "stop", "review"):
         p = sub.add_parser(name)
         p.add_argument("--session", default="")
+        if name == "review":
+            p.add_argument("--github", action="store_true", help="Print a local issue/PR summary without private traces")
     d = sub.add_parser("discover")
     d.add_argument("--target", type=float, default=9.0)
     args = parser.parse_args()
+    if getattr(args, "issue", None) is not None and (args.issue < 1 or args.resume):
+        parser.error("--issue requires a positive number on a new session; resume retains the original issue")
     return {"run": run, "status": status, "stop": stop, "review": review, "discover": discover}[args.command](args)
 
 
