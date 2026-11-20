@@ -104,6 +104,9 @@ def test_usage_view_reads_cached_account_limits_without_launching_a_runtime(monk
     import asyncio
     from types import SimpleNamespace
     from agent.workbench import Workbench
+    from config import config
+    # External accounts are listed only in the legacy "environments" mode (the default is "unified" since aefc279).
+    monkeypatch.setattr(config, 'assistant_mode', 'environments')
     monkeypatch.setattr(accounts, 'remembered', lambda runtime: {'signed_in':True,'plan':'fixture',
         'subscription_usage':code_limits.codex({'rateLimits':{'primary':{'usedPercent':12}}})} if runtime=='codex' else {})
     owner=SimpleNamespace(sessions={},owned_tools={},tool_loans={},directory=tmp_path/'sessions')

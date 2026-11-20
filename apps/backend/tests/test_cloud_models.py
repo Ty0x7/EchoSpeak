@@ -413,20 +413,27 @@ def test_generic_switch_model_is_preserved(monkeypatch, tmp_path):
     assert result["model"] == "gemini-custom"
 
 
-def test_an_echo_code_conversation_cannot_switch_to_an_api_key_model(monkeypatch, tmp_path):
-    """Plans for code, APIs for chat: the switch API refuses before touching the binding."""
-    import pytest
-    from fastapi import HTTPException
+def test_an_echo_code_conversation_may_use_an_api_model(monkeypatch, tmp_path):
+    """Native Code runs local and API models in EchoSpeak's own harness (52071b8, 30 October 2026), so the switch
+    API's code-thread hook refuses no provider. It used to reserve Code for coding-plan runtimes; this test kept
+    that old rule and failed from then on."""
     from agent import echo_code
+    from agent.state import StateStore
     from api.routes import settings as routes
+    store = StateStore(tmp_path)
+    monkeypatch.setattr(routes, "get_state_store", lambda: store)
     monkeypatch.setattr(routes, "_is_lmstudio_only_enabled", lambda: False)
     monkeypatch.setattr(routes, "_assert_provider_available", lambda provider: None)
+    monkeypatch.setattr(routes, "_cancel_active_queries_for_session", lambda session: 0)
+    monkeypatch.setattr(routes, "_cancel_incompatible_session_work", lambda *a, **k: 0)
     monkeypatch.setattr(echo_code, "is_code_thread", lambda session_id: session_id == "code-thread")
-    monkeypatch.setattr(routes, "_ensure_session_model_binding", lambda session: pytest.fail("binding must not be touched"))
     for provider in ("openai", "anthropic", "gemini", "xai"):
-        with pytest.raises(HTTPException) as refused:
-            asyncio.run(routes.switch_provider(routes.SwitchProviderRequest(provider=provider, model="m", session_id="code-thread", expected_revision=1)))
-        assert refused.value.status_code == 403 and "Codex" in refused.value.detail
+        assert echo_code.code_provider_problem("code-thread", provider) == ""
+    monkeypatch.setattr(routes, "_ensure_session_model_binding",
+                        lambda session: store.ensure_session_model_binding(session, provider_id="openai", model_id="old"))
+    result = asyncio.run(routes.switch_provider(routes.SwitchProviderRequest(
+        provider="gemini", model="gemini-code", session_id="code-thread", expected_revision=1)))
+    assert result["model"] == "gemini-code"
 
 
 def test_new_provider_secrets_are_redacted_and_not_inherited(monkeypatch):

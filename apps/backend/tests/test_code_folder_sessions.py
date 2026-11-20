@@ -13,6 +13,14 @@ from tests.test_code_sessions import fake, wait_for
 from tests.test_claude_code_runtime import signed_in
 
 
+@pytest.fixture(autouse=True)
+def _environments_mode(monkeypatch):
+    # These tests cover the external Codex/Claude Code/ACP sessions, which only the legacy "environments" mode
+    # starts. Since the default became "unified" (aefc279, 16 November 2026) every one of them hit
+    # admit_external's PermissionError instead of what it tests.
+    monkeypatch.setattr(config, "assistant_mode", "environments")
+
+
 @pytest.fixture
 def folder(tmp_path, monkeypatch):
     monkeypatch.setenv('GIT_CEILING_DIRECTORIES', str(tmp_path))

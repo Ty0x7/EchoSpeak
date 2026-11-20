@@ -55,8 +55,15 @@ def test_file_edit_explains_missing_and_ambiguous_text(project):
 
 def test_paths_outside_allowed_folders_are_refused(project, tmp_path):
     # Refused with the reason and the way forward (agent/lean/file_access.py), not with the file's text.
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
+    # In the system temp folder: when pytest's own tmp_path lies under a ".claude" folder (a Claude Code worktree),
+    # the file is refused as another program's private data instead, a different (also correct) refusal.
+    import shutil
+    import tempfile
+
+    import atexit
+
+    elsewhere = Path(tempfile.mkdtemp(prefix="echospeak-elsewhere-"))
+    atexit.register(shutil.rmtree, elsewhere, True)
     (elsewhere / "secret.txt").write_text("top secret\n", encoding="utf-8")
     out = file_read({"path": str(elsewhere / "secret.txt")})
     assert out.startswith("Error: Not allowed yet") and "top secret" not in out, out

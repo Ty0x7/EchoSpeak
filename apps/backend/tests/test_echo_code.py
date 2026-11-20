@@ -12,6 +12,13 @@ from api.routes.echo_code import router
 from config import config
 
 
+@pytest.fixture(autouse=True)
+def _environments_mode(monkeypatch):
+    # The external runtimes in this catalog are listed only in the legacy "environments" mode; the default has been
+    # "unified" since aefc279 (16 November 2026), which hides them (echo_code.runtimes).
+    monkeypatch.setattr(config, "assistant_mode", "environments")
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     manager = projects.ProjectManager(tmp_path / "projects")

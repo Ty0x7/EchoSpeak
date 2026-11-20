@@ -301,9 +301,18 @@ def test_appending_to_a_file_adds_a_line():
 
 def test_the_approval_preview_shows_the_line_that_will_be_written(tmp_path):
     from agent.lean.file_changes import proposed
+    from agent.tools import _tool_execution_context
 
     (tmp_path / "notes.md").write_text("alpha")
-    change = proposed("file_write", {"path": str(tmp_path / "notes.md"), "content": "beta", "append": True}, str(tmp_path))
+    # Paths resolve inside the turn's project, as in a real approval (tests/test_file_changes.py does the same);
+    # without it every path is outside the allowed folders and there is nothing to preview.
+    token = _tool_execution_context.set({"strict_scope": True, "project_root": str(tmp_path), "lean_runtime": True,
+                                         "enforce_tools": True, "allowed_tool_names": ["file_write"]})
+    try:
+        change = proposed("file_write", {"path": str(tmp_path / "notes.md"), "content": "beta", "append": True},
+                          str(tmp_path))
+    finally:
+        _tool_execution_context.reset(token)
     added = [text for hunk in change["hunks"] for tag, text in hunk["lines"] if tag == "+"]
     removed = [text for hunk in change["hunks"] for tag, text in hunk["lines"] if tag == "-"]
     assert added == ["beta"] and removed == [] and change["total_lines"] == 2  # before: -alpha +alphabeta

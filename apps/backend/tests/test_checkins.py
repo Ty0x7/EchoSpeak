@@ -34,6 +34,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "checkin_quiet_end", 0)  # no quiet hours unless a test sets them
     monkeypatch.setattr(stop, "paused", lambda: False)
     monkeypatch.setattr(attention, "_connections", lambda: [])  # no MCP manager in these tests
+    # Coding-agent sign-in notices exist only in the legacy "environments" mode; the default has been "unified"
+    # since aefc279 (16 November 2026). test_unified_mode_has_no_coding_agent_notices covers the default.
+    monkeypatch.setattr(config, "assistant_mode", "environments")
     sent = []
     from agent.lean import automations
     monkeypatch.setattr(automations, "deliver", lambda text, channels, label, **k: sent.append((text, channels)) or channels)
@@ -116,6 +119,13 @@ def test_a_broken_source_never_hides_the_others(env, monkeypatch):
     monkeypatch.setattr(attention, "SOURCES", (broken, attention._coding_agents))
     code_accounts._remember("codex", {"installed": True, "signed_in": False, "models": []})
     assert [item.kind for item in attention.collect()] == ["coding_agent"]
+
+
+def test_unified_mode_has_no_coding_agent_notices(env, monkeypatch):
+    # One assistant (the default): EchoSpeak doesn't host Codex or Claude Code, so their sign-in isn't its notice.
+    monkeypatch.setattr(config, "assistant_mode", "unified")
+    code_accounts._remember("codex", {"installed": True, "signed_in": False, "models": []})
+    assert attention._coding_agents() == []
 
 
 def test_the_heartbeat_starts_without_settings_nothing_sets(monkeypatch):
