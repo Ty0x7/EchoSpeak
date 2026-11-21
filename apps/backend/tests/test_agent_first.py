@@ -75,6 +75,23 @@ def _echo_turn(env, monkeypatch, message: str, *, project: bool):
     return session, session._build_turn(persona, message, history=[], depth=0)
 
 
+@pytest.mark.parametrize(("tool", "reports_failure_directly"), [
+    ("mcp__calendar__list_events", True),
+    ("mcp__github__list_releases", False),
+    ("mcp__github__create_release", True),
+])
+def test_release_access_reply_only_defers_to_a_github_connection(env, monkeypatch, tool, reports_failure_directly):
+    from agent.tool_registry import ToolEntry, ToolRegistry
+
+    monkeypatch.setitem(ToolRegistry._entries, tool, ToolEntry(
+        name=tool, func=lambda **_: "fixture", description="Fixture connector tool", origin="mcp",
+        mcp_server=tool.split("__")[1], is_action=tool.endswith("create_release"),
+    ))
+    _, turn = _echo_turn(env, monkeypatch, "What is the latest EchoSpeak release?", project=False)
+    assert tool in turn.toolbox.names
+    assert (turn.prefetch_reply is not None) == reports_failure_directly
+
+
 # ── 1. Application and identity awareness ─────────────────────────────────────────────────────
 
 def test_every_profile_is_told_the_same_facts_about_the_app(env, monkeypatch):

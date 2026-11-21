@@ -1460,6 +1460,10 @@ class LeanSession:
             turn.step_limit = research_run.step_limit
             turn.grace_prompt = chat_run_mod.GRACE_PROMPT
             self._chat_run = research_run
+        release_run = chat_run or research_run
+        if (release_run is not None and release_run.wants_own_releases() and "safe_web_fetch" in toolbox.names
+                and not any(release_run.github_release_reader(entry) for entry in toolbox.entries.values())):
+            turn.prefetch_reply = release_run.release_access_reply
         if depth == 0 and not guest and not read_only:
             from agent.lean.agent_reach import correct_delegation_attribution, unavailable_delegation
 
