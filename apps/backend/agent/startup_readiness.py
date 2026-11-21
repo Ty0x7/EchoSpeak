@@ -132,10 +132,9 @@ def _runtime_state() -> dict[str, Any]:
     store = get_state_store()
     approvals = store.list_approvals(status="pending", limit=200)
     executions = store.list_executions(limit=500)
-    active = [row for row in executions if row.status not in {"complete", "failed", "cancelled"}]
     return {
         "pending_approvals": len(approvals),
-        "active_executions": len(active),
+        "active_executions": sum(not row.is_terminal for row in executions),
         "root": str(store.root.resolve()),
         "detail": "Approvals and active work restored",
     }
