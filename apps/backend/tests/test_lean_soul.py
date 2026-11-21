@@ -707,3 +707,39 @@ def test_prose_memory_preserves_scope_and_literal_time(monkeypatch, lexical_memo
         "Monday builds", session_id="other", project_id="project-a", project_path=str(tmp_path),
     )
     assert bool(in_project) == (scope == "project")
+
+
+@pytest.mark.parametrize(("prompt", "visible"), [
+    ("What time is my Tuesday Marlow ferry? I'm checking what you have saved.", True),
+    ("From saved memory, what time is my Tuesday Marlow ferry?", True),
+    ("What time is my Tuesday Marlow ferry? Use saved memory only.", False),
+])
+def test_saved_schedule_query_returns_literal_visible_memory(
+    monkeypatch, lexical_memory, tmp_path, prompt, visible,
+):
+    from agent.state import get_state_store
+
+    statement = "My Tuesday Marlow ferry leaves at 8:10 now."
+    for text in ("I take the 7:45 Marlow ferry on Tuesdays.", statement):
+        lexical_memory.add_memory_item(text, semantic_key="marlow_ferry", scope="project",
+                                       project_path=str(tmp_path), project_id="project-a")
+    lexical_memory.add_memory_item("My Tuesday Nettle ferry leaves at 12:20.")
+    for index in range(8):
+        lexical_memory.add_memory_item(f"Unrelated pinned preference {index}.", memory_type="profile",
+                                       pinned=True, semantic_key=f"other-{index}")
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    model = ScriptedClient([ModelTurn(content="Your ferry leaves at 8:10 AM. It was updated today.")])
+    real_recall = lean_runtime.LeanSession._recall
+    session, _ = _session(monkeypatch, {"echo": model}, agent=agent)
+    monkeypatch.setattr(session, "_recall", real_recall.__get__(session))
+    session.project_root = str(tmp_path)
+    get_state_store().update_thread_state(session.session_id, active_project_id="project-a" if visible else "project-b")
+
+    result = session.run(prompt)
+    assert result["success"]
+    assert not model.calls
+    assert "7:45" not in result["response"] and "12:20" not in result["response"]
+    if visible:
+        assert result["response"].splitlines()[-1] == f"> {statement}"
+    else:
+        assert result["response"] == "I couldn’t find a matching saved schedule."

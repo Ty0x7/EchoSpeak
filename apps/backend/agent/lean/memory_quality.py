@@ -83,6 +83,12 @@ _PROSE_SCOPE_LEAD = re.compile(rf"(?i)^{_PROSE_SCOPE}[ \t]*:[ \t]*")
 _PROSE_SCOPE_TAIL = re.compile(rf"(?i)\s+{_PROSE_SCOPE}[.!]?$")
 _PROSE_TERMS = re.compile(r"\d+(?::\d+)?|[^\W\d_]+", re.UNICODE)
 _CLOCK_VALUE = re.compile(r"(?i)(?<![\w:])(?:[01]?\d|2[0-3]):[0-5]\d(?:[ \t]*[ap]\.?m\b\.?)?(?![\w:])")
+_SAVED_CLOCK_PREFIX = re.compile(r"(?i)^(?:from|using) (?:my )?saved memory(?: only)?[, :]+")
+_SAVED_CLOCK_SUFFIX = re.compile(
+    r"(?i)(?<=\?)[ \t]+(?:i(?:['’]m| am) (?:checking what you have saved|asking for the saved schedule)|"
+    r"(?:please )?use (?:only )?(?:my )?saved memory(?: only)?)\.?$"
+)
+_CLOCK_QUESTION = re.compile(r"(?i)what time (?:is|do|does) ([^?;!.\r\n]{1,160})\?")
 _PROSE_NON_SUBJECT = STOPWORDS | {"user", "now", "take", "leave", "depart", "start", "say", "said",
                                     "am", "pm", "time", "schedule", "account", "project"}
 _CLOCK_NON_SUBJECT = _PROSE_NON_SUBJECT - {"from", "to", "not", "no", "nor", "only", "and", "or"}
@@ -204,11 +210,33 @@ def prose_key_matches(source: str, key: str) -> bool:
 def prose_clock_subject(fact: str) -> tuple[str, ...]:
     """Match one clock value without changing the order of route or subject terms."""
     subject, clocks = _CLOCK_VALUE.subn("", fact)
-    if clocks != 1:
-        return ()
-    words = [word for word in _prose_words(subject) if word not in _CLOCK_NON_SUBJECT]
+    return _clock_subject(subject) if clocks == 1 else ()
+
+
+def _clock_subject(text: str) -> tuple[str, ...]:
+    words = [word for word in _prose_words(text) if word not in _CLOCK_NON_SUBJECT]
     name = tuple(word for word in words if word not in _WEEKDAYS)
     return (*name, *sorted(set(words) & _WEEKDAYS)) if name else ()
+
+
+def saved_clock_query(message: str) -> str:
+    """Recognize a single schedule question explicitly limited to saved memory."""
+    question, prefix = _SAVED_CLOCK_PREFIX.subn("", message.strip())
+    question, suffix = _SAVED_CLOCK_SUFFIX.subn("", question)
+    match = _CLOCK_QUESTION.fullmatch(question)
+    return match[1] if (prefix or suffix) and match and _clock_subject(match[1]) else ""
+
+
+def saved_clock_reply(memories: Iterable[dict[str, Any]]) -> str:
+    matches = list(dict.fromkeys(str(row["content"]) for row in memories))
+    if not matches:
+        return "I couldn’t find a matching saved schedule."
+    intro = "I found this saved schedule." if len(matches) == 1 else "I found multiple matching saved schedules."
+    return intro + "\n\n" + "\n\n".join(f"> {fact}" for fact in matches)
+
+
+def saved_clock_matches(query: str, fact: str) -> bool:
+    return prose_clock_subject(fact) == _clock_subject(query)
 
 
 def requests_prose_replacement(text: str) -> bool:

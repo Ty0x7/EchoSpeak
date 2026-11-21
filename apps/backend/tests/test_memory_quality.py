@@ -35,6 +35,18 @@ def test_clock_subject_matches_only_the_same_route_day_and_direction():
     assert not identity("My ferry leaves at either 7:45 or 8:10.")
 
 
+def test_clock_recall_requires_a_direct_saved_memory_question():
+    assert mq.saved_clock_query("Using saved memory only: what time does my ferry leave?") == "my ferry leave"
+    assert not mq.saved_clock_query("What time does my ferry leave?")
+    assert not mq.saved_clock_query("From saved memory, what time does my ferry leave? Then look up the weather.")
+    assert not mq.saved_clock_query('Review this prompt: "From saved memory, what time does my ferry leave?"')
+    rows = [{"content": "My ferry leaves at 8:10 AM."}, {"content": "My ferry leaves at 7:45 AM."}]
+    assert mq.saved_clock_reply(rows).splitlines() == [
+        "I found multiple matching saved schedules.", "", "> My ferry leaves at 8:10 AM.",
+        "", "> My ferry leaves at 7:45 AM.",
+    ]
+
+
 def test_only_lasting_single_facts_are_kept():
     assert mq.check_fact("Prefers short answers.") is None
     assert "too long" in mq.check_fact("Likes " + "very " * 80 + "long things.")
