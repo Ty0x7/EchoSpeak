@@ -92,11 +92,11 @@ STATUS_LABELS = {"verified": "Verified", "checks_pass": "Checks pass", "partial"
                  "failing": "Not verified: the last check failed", "unverified": "Not verified", "blocked": "Blocked"}
 
 
-# Commands that mention a runner without running it: `pip install pytest`, `grep -i pytest`, `which jest`.
+# Skip lookups, installation, and directory changes before matching a check's command and arguments.
 _NOT_A_RUN = {"pip", "pip3", "pipx", "uv", "conda", "mamba", "apt", "apt-get", "dnf", "yum", "pacman", "yay", "brew", "winget",
               "choco", "scoop", "grep", "rg", "egrep", "find", "which", "where", "whereis", "type", "command", "echo", "printf",
               "cat", "less", "more", "head", "tail", "ls", "man", "help", "sed", "awk", "wc", "sort", "uniq", "tee", "xargs",
-              "npm-check", "pydoc"}
+              "npm-check", "pydoc", "cd", "pushd", "popd"}
 _SEGMENTS = re.compile(r"&&|\|\||;|\|(?!\|)")
 # An exit code something else decides: `pytest || true`, `pytest; exit 0`, or a runner piped into another command.
 _MASKED = re.compile(r"(?i)\|\|\s*(true|:|exit\s+0|echo\b)|;\s*(true|exit\s+0)\s*$")

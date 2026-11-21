@@ -522,6 +522,43 @@ def _runner(ledger: VerificationLedger):
     return run
 
 
+@pytest.mark.parametrize(("command", "output"), [
+    ("cd /tmp/benchmark-projects && pytest tests/test_slug.py -v",
+     "[ok · 0.1s · sandbox · /work]\n2 passed in 0.01s"),
+    ('cd "/tmp/benchmark projects" && python3 run_tests.py',
+     "[ok · 0.1s · sandbox · /work]\n10 ran, 0 failed"),
+    ("pushd /tmp/benchmark-projects && python3 run_tests.py",
+     "[ok · 0.1s · sandbox · /work]\n10 ran, 0 failed"),
+])
+def test_directory_commands_do_not_shadow_verified_test_runners(command, output):
+    ledger = VerificationLedger()
+    ledger.observe("file_edit", {"path": "slug.py"}, True, "Updated", 1)
+    _runner(ledger)(command, output)
+    assert ledger.checks[-1].kind == "test"
+    assert ledger.completion()["status"] == "checks_pass"
+    assert verification.test_result_observed(command, output)
+
+
+def test_directory_commands_leave_real_benchmarks_and_verification_guards_intact():
+    prefix = "cd /tmp/benchmark-projects && "
+    assert verification.check_kind("cd /tmp/benchmark-projects") == ""
+    assert verification.check_kind(prefix + "hyperfine 'python work.py'") == "bench"
+    assert verification.check_kind(prefix + "pytest --benchmark-only") == "bench"
+    summary = "[ok · 0.1s · sandbox · /work]\n2 passed in 0.01s"
+    assert not verification.test_result_observed(prefix + "echo '2 passed in 0.01s'", summary)
+    for command, output in (
+        ("pytest -q || true", "[ok]\nNo module named pytest"),
+        ("pytest -q", "[exit code 5]\nno tests ran"),
+    ):
+        ledger = VerificationLedger()
+        _runner(ledger)(prefix + command, output)
+        assert ledger.completion()["status"] != "checks_pass"
+        assert not verification.test_result_observed(prefix + command, output)
+    ledger = VerificationLedger()
+    _runner(ledger)(prefix + "pytest -q", "[exit code 1]\n1 failed, 2 passed in 0.01s")
+    assert ledger.completion()["status"] == "failing"
+
+
 def test_python_project_runner_reports_the_failing_test_in_feedback():
     ledger = VerificationLedger()
     note = _runner(ledger)("python3 run_tests.py", FAIL + "PASS test_motion test_idle\n"
