@@ -108,7 +108,9 @@ def correct_delegation_attribution(reply: str, unavailable: tuple[str, ...]) -> 
 
 _REVIEW_LABEL = r"(?:reviewed|approved|signed off)[ \t]+by"
 _BYLINE_SEPARATOR = r"(?:[ \t]*:[ \t]*|[ \t]+)"
-_REVIEW_BYLINE = re.compile(rf"(?im)^[ \t]*(?:[-*+][ \t]+)?({_REVIEW_LABEL}){_BYLINE_SEPARATOR}(.+)$")
+_REVIEW_BYLINE = re.compile(
+    rf"(?im)^[ \t]*(?:(?:[-*+]|\d{{1,9}}[.)])[ \t]+)?({_REVIEW_LABEL}){_BYLINE_SEPARATOR}(.+)$"
+)
 
 
 def artifact_attribution_problem(tool: str, args: dict[str, Any], unavailable: tuple[str, ...], request: str) -> str:

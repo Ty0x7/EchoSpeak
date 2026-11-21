@@ -430,7 +430,11 @@ def test_unavailable_agent_can_be_discussed_honestly(env, monkeypatch, reply):
     assert len(client.calls) == 1
 
 
-def test_an_unavailable_reviewer_cannot_be_added_to_a_generated_signoff(env, monkeypatch):
+@pytest.mark.parametrize("byline", [
+    "**Reviewed by:** Mesa (Reviewer)",
+    "1. **Reviewed by:** Mesa (Reviewer)",
+])
+def test_an_unavailable_reviewer_cannot_be_added_to_a_generated_signoff(env, monkeypatch, byline):
     env.people.create({"name": "Mesa"})
     path = env.folder / "inspection.md"
     path.write_text("Review pending\n")
@@ -440,7 +444,7 @@ def test_an_unavailable_reviewer_cannot_be_added_to_a_generated_signoff(env, mon
     turn.emit = events.append
     turn.client = ScriptedClient([
         ModelTurn(tool_calls=[_call("file_edit", {"path": str(path), "old_text": "Review pending",
-                                                 "new_text": "**Reviewed by:** Mesa (Reviewer)"}, "false-credit")]),
+                                                 "new_text": byline}, "false-credit")]),
         ModelTurn(tool_calls=[_call("file_edit", {"path": str(path), "old_text": "Review pending",
                                                  "new_text": "Mesa was unavailable for review."}, "corrected")]),
         ModelTurn(content="I updated `inspection.md` to record the unavailable review."),
