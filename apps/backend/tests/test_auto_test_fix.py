@@ -277,10 +277,31 @@ def test_full_suite_requires_a_completed_runner(tmp_path, monkeypatch, returncod
     monkeypatch.setattr(atf, "pytest", lambda *_: {"ok": True, "failed": [], "summary": "1 passed"})
     monkeypatch.setattr(atf, "full_suite", lambda *_: {
         "ok": False, "failed": [known] if reports_known else [],
-        "summary": "1 failed" if returncode == 1 else "INTERNALERROR", "returncode": returncode,
+        "summary": "1 failed in 0.14s" if returncode == 1 else "INTERNALERROR", "returncode": returncode,
     })
     result = atf.gate(tmp_path, "head", atf.Session(tmp_path, {"suite_baseline": {"failed": [known]}}), 1, {})
     assert result["decision"] == decision, result
+
+
+@pytest.mark.parametrize(("footer", "complete"), [
+    ("", False),
+    ("1 failed while emitting progress", False),
+    ("1 passed in 0.14s", False),
+    ("2 failed in 0.14s", False),
+    ("1 failed, 8 passed in 0.14s\nrunner ended before reporting", False),
+    ("1 failed in 0.14s", True),
+    ("====== 1 failed, 2097 passed, 50 skipped, 1 warning in 100.72s (0:01:40) ======", True),
+])
+def test_exit_one_with_known_failure_requires_final_pytest_summary(tmp_path, monkeypatch, footer, complete):
+    known = "tests/test_known.py::test_already_failed"
+    backend = tmp_path / "apps" / "backend"
+    (backend / "tests").mkdir(parents=True)
+    output = f"FAILED {known} - AssertionError\n{footer}\n"
+    monkeypatch.setattr(atf, "sh", lambda *args, **kwargs: subprocess.CompletedProcess(
+        args=[], returncode=1, stdout=output, stderr=""))
+    run = atf.full_suite(tmp_path)
+    assert run["failed"] == [known]
+    assert (atf.related_failures(run, {known}) == []) is complete
 
 
 def test_aborted_full_baseline_stops_before_local_model(tmp_path, monkeypatch):

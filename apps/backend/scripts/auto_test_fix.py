@@ -518,19 +518,26 @@ def model_names_in_code(tree: Path, base: str, files: list[str]) -> list[str]:
     return found
 
 
+_PYTEST_RESULT_COUNT = r"\d+ (?:passed|failed|errors?|skipped|deselected|xfailed|xpassed|warnings?|reruns?)"
+_PYTEST_RUN_SUMMARY = re.compile(
+    rf"(?P<counts>{_PYTEST_RESULT_COUNT}(?:, {_PYTEST_RESULT_COUNT})*) in "
+    r"\d+(?:\.\d+)?s(?: \(\d+:\d{2}:\d{2}\))?"
+)
+
+
 def pytest(tree: Path, tests: list[str], timeout: float = 1800) -> dict[str, Any]:
     backend = tree / "apps" / "backend"
     tests = [t for t in tests if (backend / t).exists()]
     if not tests:
         return {"ok": True, "passed": 0, "failed": [], "summary": "no tests"}
-    out = sh([str(backend / ".venv" / "bin" / "python"), "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider", *tests],
-             backend, timeout=timeout)
+    out = sh([str(backend / ".venv" / "bin" / "python"), "-m", "pytest", "-q", "--no-header",
+              "--color=no", "-p", "no:cacheprovider", *tests], backend, timeout=timeout)
     failed = sorted({re.sub(r" - .*", "", l.split(" ", 1)[1]) for l in out.stdout.splitlines()
                      if l.startswith(("FAILED ", "ERROR "))})
-    summary = next((l for l in reversed(out.stdout.splitlines()) if re.search(r"\d+ (passed|failed)", l)), out.stdout[-200:])
+    summary = next((line.strip(" =\t") for line in reversed(out.stdout.splitlines()) if line.strip()), "")
     passed = int(m.group(1)) if (m := re.search(r"(\d+) passed", summary)) else 0
     return {"ok": out.returncode == 0, "returncode": out.returncode, "passed": passed,
-            "failed": failed, "summary": summary.strip("= ")}
+            "failed": failed, "summary": summary}
 
 
 def full_suite(tree: Path) -> dict[str, Any]:
@@ -568,6 +575,12 @@ def related_failures(run: dict[str, Any], known: set[str]) -> list[str]:
         failed.append(f"(pytest exited with code {returncode}: {run['summary'][:120]})")
     elif not run["ok"] and not run["failed"]:
         failed.append(f"(pytest failed without a test id: {run['summary'][:120]})")
+    elif returncode == 1:
+        summary = _PYTEST_RUN_SUMMARY.fullmatch(run["summary"])
+        if not summary:
+            failed.append("(pytest exit 1 has no completed-run summary)")
+        elif sum(map(int, re.findall(r"(\d+) (?:failed|errors?)\b", summary["counts"]))) != len(run["failed"]):
+            failed.append("(pytest failure count does not match its test IDs)")
     return failed
 
 
