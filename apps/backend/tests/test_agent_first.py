@@ -495,6 +495,45 @@ def test_a_supplied_or_existing_reviewer_byline_is_preserved(env, monkeypatch, b
     assert path.read_text() == f"{byline}\nHistorical record preserved.\n"
 
 
+def test_direct_project_reviewer_can_record_completion_on_retry(env, monkeypatch):
+    import agent.projects
+
+    echo, _, reviewer = _people(env)
+    agent.projects.get_project_manager().update_project(_IDS["work"], agent_ids=[echo.id, reviewer.id])
+    (env.folder / "checklist.md").write_text("Packaging pending.\n")
+    signoff = env.folder / "signoff.txt"
+    signoff.write_text("Review pending.\n")
+    chat = env.chats.create_thread(title="Project review", source="web")
+    env.store.update_thread_state(chat.thread_id, active_project_id=_IDS["work"])
+    session = _session(monkeypatch, chat.thread_id)
+    events = []
+    session.emit = events.append
+    request = f"Ask {reviewer.name} to review checklist.md and write the result in signoff.txt."
+    lead = ScriptedClient([
+        ModelTurn(tool_calls=[_call("delegate_to_agent", {"agent": reviewer.name, "task": "Review checklist.md."}, "first")]),
+        ModelTurn(tool_calls=[_call("delegate_to_agent", {"agent": reviewer.name, "task": "Resume the review."}, "retry")]),
+        ModelTurn(tool_calls=[_call("file_edit", {"path": str(signoff), "old_text": "Review pending.",
+                                                 "new_text": f"Reviewed by: {reviewer.name}"}, "credit")]),
+        ModelTurn(content="The review result is in signoff.txt."),
+    ])
+    child = ScriptedClient([
+        *[ModelTurn(content="I will review the checklist and write the result.") for _ in range(3)],
+        ModelTurn(tool_calls=[_call("file_read", {"path": "checklist.md"}, "read-checklist")]),
+        ModelTurn(tool_calls=[_call("complete_task", {"summary": "I reviewed the checklist. Packaging is pending."}, "finish-review")]),
+        ModelTurn(content="I reviewed the checklist. Packaging is pending."),
+    ])
+    monkeypatch.setattr(lean_runtime.LeanSession, "_client_for",
+                        lambda self, persona, routing=False: child if persona.id == reviewer.id else lead)
+    session.run(request)
+
+    assert all("complete_task" not in {tool["function"]["name"] for tool in tools} for tools in lead.tools)
+    assert "complete_task" in {tool["function"]["name"] for tool in child.tools[-1]}
+    tool_results = {event["id"]: event for event in events if event["type"] == "tool_end"}
+    for call_id in ("read-checklist", "finish-review", "credit"):
+        assert tool_results[call_id]["outcome"] == "ok", (call_id, tool_results[call_id]["output"])
+    assert signoff.read_text() == f"Reviewed by: {reviewer.name}\n"
+
+
 @pytest.mark.parametrize("handoff", [
     "failed", "promise-only", "completed", "retried", "retry-incomplete", "unrelated-completion", "different-review",
 ])
