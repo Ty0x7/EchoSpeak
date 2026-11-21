@@ -15,7 +15,7 @@ import shutil
 import threading
 from functools import wraps
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Iterable, Tuple
+from typing import List, Optional, Dict, Any, Iterable, Tuple, Callable
 from datetime import datetime
 from loguru import logger
 
@@ -1743,6 +1743,7 @@ class AgentMemory:
         owner_id: Optional[str] = None,
         limit: int = 8,
         max_chars: int = 3200,
+        content_filter: Optional[Callable[[str], bool]] = None,
     ) -> List[Dict[str, Any]]:
         """Compile one authorized deterministic projection for both model stages."""
         owner = self._owner_id(owner_id)
@@ -1760,7 +1761,7 @@ class AgentMemory:
             metadata = dict(record.get("metadata") or {})
             record_project_id = str(record.get("project_id") or metadata.get("project_id") or "").strip()
             content = str(record.get("text") or "").strip()
-            if not content:
+            if not content or (content_filter is not None and not content_filter(content)):
                 continue
             memory_type = str(record.get("memory_type") or metadata.get("type") or "note").strip().lower()
             if memory_type == "conversation":

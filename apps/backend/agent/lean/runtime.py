@@ -1270,7 +1270,16 @@ class LeanSession:
         route_note = "" if guest or visual else self._route_model(persona, goal)
         if route_note:
             meta["model_route"] = route_note
-        memories = [] if guest else self._recall(goal)
+        clock_query = ""
+        if (depth == 0 and not guest and not read_only and not delegated_by and not self.work_id
+                and self.source in INTERACTIVE_SOURCES and self._owner_side(persona)
+                and not (self.room and self.room.kind == "group") and message == self._user_message
+                and getattr(self.agent, "memory", None) is not None):
+            clock_query = memory_quality.saved_clock_query(message)
+        if clock_query:
+            memories = self._recall(clock_query, content_filter=lambda fact: memory_quality.saved_clock_matches(clock_query, fact))
+        else:
+            memories = [] if guest else self._recall(goal)
         if self.model_first:
             memories = chat_mode.visible_memories(memories)
         if not self._owner_side(persona) or (work_context and work_context.coordinator.get(work_context.work_id, principal=work_context.principal).get("parent_id")):
@@ -1508,6 +1517,9 @@ class LeanSession:
                 turn.prefetch_reply = lambda rows: memory_quality.list_receipt(
                     rows, len(entries), skipped, scope=self._memory_scope,
                 )
+        elif clock_query:
+            turn.prefetch = None
+            turn.prefetch_reply = lambda _rows: memory_quality.saved_clock_reply(memories)
         if ledger is not None:
             turn.verifier = ledger
             if ledger.resumed and ledger.active():
@@ -2437,7 +2449,8 @@ class LeanSession:
         self._past_chat_lines = lines
         return lines
 
-    def _recall(self, query: str, limit: int = 8) -> list[dict[str, Any]]:
+    def _recall(self, query: str, limit: int = 8, *,
+                content_filter: Optional[Callable[[str], bool]] = None) -> list[dict[str, Any]]:
         memory = getattr(self.agent, "memory", None)
         if memory is None or not query:
             return []
@@ -2448,6 +2461,7 @@ class LeanSession:
             rows = list(memory.runtime_memory_projection(
                 query, session_id=self.session_id, project_id=project_id,
                 project_path=self.project_root or None, limit=limit,
+                **({"content_filter": content_filter} if content_filter is not None else {}),
             ) or [])
             if rows and hasattr(memory, "note_recalled"):
                 # Used facts stay; ones nobody recalls for months are retired at idle (agent/lean/memory_tidy.py).
