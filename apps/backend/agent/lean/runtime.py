@@ -1755,8 +1755,8 @@ class LeanSession:
                         return ToolResult(False, "No memory was saved. Use the exact fact in the current save request. "
                                           "Ask the user to name it if the reference is unclear.", 0, outcome="refused")
                     if key and not memory_quality.prose_key_matches(fact, key):
-                        return ToolResult(False, "No memory was saved. The key does not name the fact the user authorized.", 0,
-                                          outcome="refused")
+                        # An optional model key cannot veto the authorized fact or replace another record.
+                        key = ""
                 problem = memory_quality.check_fact(fact)
                 if problem:
                     return problem

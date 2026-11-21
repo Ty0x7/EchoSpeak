@@ -565,6 +565,7 @@ def test_chat_search_cannot_return_the_scoped_source_transcript(
     ("", "tuesday_ferry_time"),
     ("marlow_ferry", "tuesday_ferry_time"),
     ("tuesday_ferry", ""),
+    ("tuesday_ferry_routine", "marlow_ferry_commute"),
 ])
 def test_prose_memory_uses_current_authorized_text_through_a_correction(
     monkeypatch, lexical_memory, side_detail, correction_lead, first_key, correction_key,
@@ -578,6 +579,7 @@ def test_prose_memory_uses_current_authorized_text_through_a_correction(
         return {"echo": ScriptedClient([
             ModelTurn(tool_calls=[ToolCall(call_id, "memory_save", json.dumps({"fact": fact, "key": key}))]),
             ModelTurn(content="Noted."),
+            ModelTurn(content="I checked whether the memory was saved."),
         ])}
 
     first, _ = _session(monkeypatch, propose(
@@ -600,7 +602,8 @@ def test_prose_memory_uses_current_authorized_text_through_a_correction(
     assert new["text"] == "My Tuesday Marlow ferry leaves at 8:10 now."
     assert not old["active"] and old["superseded_by"] == new["id"]
     assert new["active"] and new["supersedes"] == old["id"]
-    assert new["semantic_key"] == (first_key or correction_key)
+    expected_key = "" if first_key == "tuesday_ferry_routine" else first_key or correction_key
+    assert new["semantic_key"] == expected_key
     fresh = lexical_memory.runtime_memory_projection("Tuesday Marlow ferry", session_id="fresh-other-chat")
     assert [row["content"] for row in fresh] == [new["text"]]
     user_item = next(item for item in get_state_store().list_items(changed["execution_id"])
@@ -707,6 +710,33 @@ def test_prose_memory_preserves_scope_and_literal_time(monkeypatch, lexical_memo
         "Monday builds", session_id="other", project_id="project-a", project_path=str(tmp_path),
     )
     assert bool(in_project) == (scope == "project")
+
+
+def test_unrelated_prose_key_does_not_veto_fact_or_replace_other_memory(monkeypatch, lexical_memory):
+    import json
+
+    unrelated = lexical_memory.add_memory_item(
+        "Home city: Alder Harbor.", thread_id="old", semantic_key="home_city")
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    model = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("proposal", "memory_save", json.dumps({
+            "fact": "I take the 7:45 Marlow ferry on Tuesdays; the deck crew served grapefruit seltzer.",
+            "key": "home_city",
+        }))]),
+        ModelTurn(content="Noted."),
+        ModelTurn(content="I checked whether the memory was saved."),
+    ])
+    session, events = _session(monkeypatch, {"echo": model}, agent=agent)
+    session.run("Please remember that I take the 7:45 Marlow ferry on Tuesdays; the deck crew served grapefruit seltzer.")
+
+    receipt = next(e for e in events if e["type"] == "tool_end" and e["id"] == "proposal")
+    assert receipt["outcome"] == "ok"
+    assert receipt["output"] == "Saved and verified: I take the 7:45 Marlow ferry on Tuesdays."
+    records = json.loads(lexical_memory._records_path.read_text())["records"]
+    assert len(records) == 2
+    assert records[unrelated]["active"] and records[unrelated]["semantic_key"] == "home_city"
+    saved = next(row for row in records.values() if row["id"] != unrelated)
+    assert saved["active"] and not saved["semantic_key"]
 
 
 @pytest.mark.parametrize(("prompt", "visible"), [
