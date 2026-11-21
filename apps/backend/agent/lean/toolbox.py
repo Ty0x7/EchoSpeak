@@ -163,7 +163,7 @@ TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
         "Use it for any calculation beyond a trivial sum instead of working it out yourself.",
         "params": {"expression": "The expression, e.g. 0.17 * 2340 or sqrt(2) * 10."},
     },
-    "system_info": {"description": "This PC's operating system, CPU, GPU and memory."},
+    "system_info": {"description": "The running EchoSpeak version and this PC's OS, CPU, GPU and memory."},
     "file_list": {
         "description": "List what is directly inside one folder (files and subfolders). To find files by name "
         "anywhere below a folder use file_find; to search text inside files use file_search.",
