@@ -216,6 +216,7 @@ Whether a given model *uses* `set_objective` well, and how often it reaches veri
 - **Tool rows keep 240 characters of output.** Failure classes read from rows alone are lossy. The ledger's structured record is now kept on the episode for measured work.
 - **The work row's `verification` field said "observed" whenever any tool had succeeded.** It now carries the measured status when checks ran.
 - **Background test runs** (`process_output` "finished with exit code N: npm test") are now parsed as checks. Before, they were only "run" or nothing.
+- **Working-directory names in compound commands.** The runtime ledger and deterministic judge share a check classifier. An initial `cd` or `pushd` into a directory named `benchmark-projects` formerly shadowed a subsequent test command. The classifier now ignores shell directory changes when looking for a runner. Rejudging copies of both 16K benchmark arms restored the two missed receipts in H1 and LT1. The ordinary benchmark and failed, masked, and empty-run controls passed. The original 9.43 → 9.32 campaign record remains the published run. The separate rejudge measured 9.43 → 9.45 with the corrected classifier. [Issue #147](https://github.com/Ty0x7/EchoSpeak/issues/147)
 
 ## 9. Limits and next steps
 
