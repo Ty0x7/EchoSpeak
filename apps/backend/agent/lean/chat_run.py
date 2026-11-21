@@ -48,6 +48,7 @@ _LINK = re.compile(r"\[([^\]]{1,300})\]\((https?://[^)\s]+)\)|(?<![(\[<])\b(http
 _URL = re.compile(r"https?://[^\s)<>\]\"'`]+")
 _TRACKING = re.compile(r"^(utm_[a-z]+|fbclid|gclid|ref|ref_src)$", re.I)
 SELF_REPO = "https://github.com/Ty0x7/EchoSpeak"
+SELF_RELEASES = f"{SELF_REPO}/releases"
 _SELF = re.compile(r"(?i)\becho ?speak\b")
 # Not a bare "version": "what version is this?" is about the running app, which the prompt already states.
 # Fetching the releases page for it cost two calls and 20 seconds (live audit replay, 17 November 2026).
@@ -57,6 +58,9 @@ _SELF_UPDATE_REQUEST = re.compile(
     r"(?i)^\s*(?:please\s+)?(?:what(?:['’]s| is| are)|when(?:['’]s| was| is)|any|has|did|"
     r"check|show(?: me)?|tell me|look up|find|list|summarize|give me)\b"
 )
+_RELEASE_TOPIC = re.compile(r"(?i)\b(?:releases?|changelog)\b")
+_COMBINED_REQUEST = re.compile(r"(?i)[;\r\n]|[.!?]\s+\S|\b(?:and|then)\b")
+_RELEASE_ACCESS_ERROR = re.compile(r"(?m)^safe_fetch_error=http_error:[^\n]*\bHTTP (401|403|404)\b")
 RELEVANT = 0.34
 SEARCH_TOOLS = {"web_search", "image_search", "video_search", "product_search"}
 PAGE_TOOLS = {"safe_web_fetch", "youtube_transcript"}
@@ -249,6 +253,25 @@ class ChatRun:
 
     # ── evidence ─────────────────────────────────────────────────────────
     # ── deterministic retrieval of what the user pointed at ─────────────
+    def wants_own_releases(self) -> bool:
+        urls = [normalize_url(url).casefold() for url in _URL.findall(self.user_message)]
+        if urls and urls != [normalize_url(SELF_RELEASES).casefold()]:
+            return False
+        request = _URL.sub("", self.user_message).strip()
+        return bool(_SELF_UPDATE_REQUEST.match(request) and _RELEASE_TOPIC.search(request)
+                    and (_SELF.search(request) or urls) and not _COMBINED_REQUEST.search(request)
+                    and not re.search(r"(?i)\b(?:pull requests?|prs?)\b", request))
+
+    def release_access_reply(self, _timeline: list[dict[str, Any]]) -> Optional[str]:
+        """Answer from the failed authoritative fetch when the connection cannot read it."""
+        for call in self.calls:
+            if code := call.get("release_access_status"):
+                from version import APP_VERSION
+
+                return (f"GitHub returned HTTP {code} for EchoSpeak’s release history with the current access. "
+                        f"I couldn’t verify the remote releases. The running EchoSpeak version is {APP_VERSION}.")
+        return None
+
     def prefetch(self) -> list[tuple[str, dict[str, Any]]]:
         """Addresses the user gave are read before the model's first call (LeanTurn.prefetch).
 
@@ -258,7 +281,9 @@ class ChatRun:
         from agent.search_rank import urls_in
         urls = urls_in(self.user_message)[:3]
         first = re.split(r"(?<=[.!?])\s+|\n", self.user_message.strip(), maxsplit=1)[0]
-        if not urls and _SELF_UPDATE_REQUEST.match(first) and _SELF.search(first) and _SELF_UPDATES.search(first):
+        if self.wants_own_releases():
+            urls = [SELF_RELEASES]
+        elif not urls and _SELF_UPDATE_REQUEST.match(first) and _SELF.search(first) and _SELF_UPDATES.search(first):
             # "What's new in EchoSpeak?": the app knows its own source. Other apps share the name, and a
             # web search for it found them (live test, 11.11.3).
             urls = [f"{SELF_REPO}/pulls", f"{SELF_REPO}/releases"]
@@ -314,6 +339,10 @@ class ChatRun:
         elif name in PAGE_TOOLS:
             url = str(args.get("url") or args.get("video") or "")
             row["url"] = normalize_url(url) or url[:200]
+            if (name == "safe_web_fetch" and row["url"] == normalize_url(SELF_RELEASES)
+                    and text.startswith("execution_status=error\nresult_state=insufficient_evidence\n")
+                    and (error := _RELEASE_ACCESS_ERROR.search(text))):
+                row["release_access_status"] = int(error[1])
             if ok:
                 self._page(url, text, name, step)
                 row["quality"] = self.pages.get(normalize_url(url), {}).get("status", "?")

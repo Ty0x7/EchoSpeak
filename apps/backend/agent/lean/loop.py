@@ -401,7 +401,7 @@ class LeanTurn:
         # Calls to run before the model's first turn, through the normal tool path ([(name, args)]):
         # Chat reads addresses the user gave without waiting for a small model to notice them.
         self.prefetch: Optional[Callable[[], list[tuple[str, dict[str, Any]]]]] = None
-        self.prefetch_reply: Optional[Callable[[list[dict[str, Any]]], str]] = None
+        self.prefetch_reply: Optional[Callable[[list[dict[str, Any]]], Optional[str]]] = None
         self.final_check: Optional[Callable[[str], str]] = None
         # Measures engineering work against its objective (agent/lean/verification.py): sees every finished
         # call, adds structured feedback to check results, and states completion under the answer.
@@ -657,8 +657,9 @@ class LeanTurn:
                 error = "cancelled"
                 success = False
                 break
-            if self.prefetch_reply is not None:
-                final_text = self.prefetch_reply(self.timeline)
+            prefetch_reply, self.prefetch_reply = self.prefetch_reply, None
+            if prefetch_reply is not None and (prefetched := prefetch_reply(self.timeline)) is not None:
+                final_text = prefetched
                 self._append_text("text", step, final_text)
                 self.emit({"type": "agent_token", "step": step, "data": final_text})
                 stop_reason = "deterministic_reply"

@@ -134,6 +134,8 @@ def _chat(script: Script, user: str, *, profile: str = "compact") -> tuple[LeanT
     turn.grace_prompt = chat_run.GRACE_PROMPT
     if "safe_web_fetch" in box.names:
         turn.prefetch = run.prefetch
+        if run.wants_own_releases():
+            turn.prefetch_reply = run.release_access_reply
     return turn, run
 
 
@@ -173,6 +175,48 @@ def test_same_question_without_a_url_reads_echospeaks_own_repository_not_a_names
     assert net.page_calls == [] and len(script.calls) == 1  # no web search, no namesakes
     trace = run.trace(steps=2, stop_reason=result.stop_reason, answer=result.text)
     assert sorted(trace["citations"]["supported"]) == sorted(["https://github.com/Ty0x7/EchoSpeak/pull/106", release])
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+def test_explicit_echospeak_release_lookup_reports_verified_access_failure(net, status):
+    from version import APP_VERSION
+
+    release_page = "https://github.com/Ty0x7/EchoSpeak/releases"
+    release_api = "https://api.github.com/repos/Ty0x7/EchoSpeak/releases?per_page=10"
+    net.api_failures[release_api] = f"HTTP {status}"
+    net.pages[release_page] = SafeWebRetrievalError(f"Public page returned HTTP {status}", code="http_error")
+    prompt = "What is the latest EchoSpeak release?"
+    script = Script([ModelTurn(content="A public namesake listing says the latest version is 21.0.0.")])
+    turn, _ = _chat(script, prompt)
+    result = turn.run(prompt)
+
+    assert f"HTTP {status}" in result.text and f"running EchoSpeak version is {APP_VERSION}" in result.text
+    assert not script.calls
+    assert net.api_calls == [release_api]
+    assert net.page_calls == [release_page]
+
+
+def test_current_installed_echospeak_version_needs_no_remote_lookup(net):
+    from version import APP_VERSION
+
+    prompt = "What EchoSpeak version am I running?"
+    answer = f"The running EchoSpeak version is {APP_VERSION}."
+    script = Script([ModelTurn(content=answer)])
+    turn, _ = _chat(script, prompt)
+    assert turn.run(prompt).text == answer
+    assert not net.api_calls and not net.page_calls
+
+
+def test_explicit_echospeak_release_lookup_uses_successful_canonical_evidence(net):
+    source = "https://github.com/Ty0x7/EchoSpeak/releases/tag/v11.10.9"
+    prompt = "What is the latest EchoSpeak release?"
+    answer = f"The latest published release is [EchoSpeak 11.10.9]({source})."
+    script = Script([ModelTurn(content=answer)])
+    turn, audit = _chat(script, prompt)
+    assert turn.run(prompt).text == answer
+    assert audit.cite_audit(answer)["supported"] == [source]
+    assert net.api_calls == ["https://api.github.com/repos/Ty0x7/EchoSpeak/releases?per_page=10"]
+    assert not net.page_calls
 
 
 def test_searching_for_the_project_ranks_the_repository_over_the_profile_and_reads_it(net, monkeypatch):
