@@ -401,12 +401,17 @@ def test_followup_history_preserves_image_references_and_policy_taint(monkeypatc
 
 
 def test_mcp_registry_execution_propagates_image_references(monkeypatch):
+    from agent.tool_registry import ToolEntry, ToolRegistry
+
     body = io.BytesIO()
     Image.new("RGB", (20, 10)).save(body, format="PNG")
     encoded = base64.b64encode(body.getvalue()).decode()
-    box = Toolbox(toolsets=["none"], session_id="t")
-    box.entries["mcp__camera"] = SimpleNamespace(origin="mcp", func=lambda: json.dumps({"content": [{"type": "image", "mimeType": "image/png", "data": encoded}]}))
-    result = box.run("mcp__camera", {})
+    name = "mcp__camera__capture"
+    entry = ToolEntry(name=name, description="Mock camera tool", origin="mcp",
+                      func=lambda: json.dumps({"content": [{"type": "image", "mimeType": "image/png", "data": encoded}]}))
+    monkeypatch.setitem(ToolRegistry._entries, name, entry)
+    box = Toolbox(toolsets=[name], session_id="t")
+    result = box.run(name, {})
     assert result.ok and result.widgets[0]["type"] == "observation" and result.observations
     assert encoded not in result.output
 
