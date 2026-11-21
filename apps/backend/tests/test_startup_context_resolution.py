@@ -44,6 +44,39 @@ def test_startup_readiness_reports_real_steps_without_provider_gate(monkeypatch,
     assert not any(item["key"] == "provider" for item in payload["components"])
 
 
+def test_readiness_counts_only_unfinished_durable_executions(monkeypatch, tmp_path: Path):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from agent import state
+    from api.routes.system import router
+
+    location = tmp_path / "phase3"
+    store = state.StateStore(root=location)
+    for status in ("completed", "complete", "failed", "canceled", "cancelled", "superseded"):
+        store.create_execution(thread_id=status, status=status)
+    restored = state.StateStore(root=location)
+    monkeypatch.setattr(state, "get_state_store", lambda: restored)
+
+    app = FastAPI()
+    app.include_router(router)
+    client = TestClient(app)
+
+    def runtime_metadata():
+        response = client.get("/startup/readiness")
+        assert response.status_code == 200
+        return next(item["metadata"] for item in response.json()["components"]
+                    if item["key"] == "runtime_state")
+
+    assert runtime_metadata()["active_executions"] == 0
+    for status in ("running", "queued", "pending_approval"):
+        restored.create_execution(thread_id=status, status=status)
+    restored.create_approval(thread_id="pending_approval", tool="file_read", status="pending")
+    metadata = runtime_metadata()
+    assert metadata["active_executions"] == 3
+    assert metadata["pending_approvals"] == 1
+
+
 def test_browser_mode_also_keeps_projects_in_the_data_folder(monkeypatch, tmp_path: Path):
     import config
     from agent import projects as projects_mod

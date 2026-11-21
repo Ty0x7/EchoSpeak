@@ -38,6 +38,10 @@ TRACE_DIR = PHASE3_DIR / "traces"
 _RECORD_KINDS = ("approvals", "executions", "thread_state", "items", "tool_runs")
 _SEARCHABLE_ITEMS = frozenset({"user_message", "assistant_message"})
 _EVENTS_KEPT = 2000
+_EXECUTION_TERMINAL_STATUS = {
+    "complete": "complete", "completed": "complete", "failed": "failed",
+    "cancelled": "cancelled", "canceled": "cancelled", "superseded": "superseded",
+}
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS records (
@@ -219,6 +223,11 @@ class ExecutionRecord(BaseModel):
     turn_interpretation: dict[str, Any] = Field(default_factory=dict)
     task_run_id: str = ""
     agent_decisions: list[dict[str, Any]] = Field(default_factory=list)
+
+    @property
+    def is_terminal(self) -> bool:
+        return (self.status in _EXECUTION_TERMINAL_STATUS or
+                self.terminal_status in _EXECUTION_TERMINAL_STATUS)
 
 
 class SessionModelBinding(BaseModel):
@@ -1985,7 +1994,7 @@ class StateStore:
                 thread_id=record.thread_id, session_id=record.thread_id
             )
             previous = self._executions.get(state.active_turn_id or state.current_execution_id)
-            if previous and previous.status not in {"completed", "failed", "canceled", "superseded"}:
+            if previous and not previous.is_terminal:
                 previous.status = "superseded"
                 previous.terminal_status = "superseded"
                 previous.completed_at = previous.updated_at = time.time()
@@ -2036,10 +2045,8 @@ class StateStore:
             record.updated_at = time.time()
             if record.status in {"completed", "failed", "canceled"} and record.completed_at is None:
                 record.completed_at = time.time()
-            if record.status in {"completed", "failed", "canceled", "superseded"}:
-                record.terminal_status = {"completed": "complete", "canceled": "cancelled"}.get(
-                    record.status, record.status
-                )
+            if record.status in _EXECUTION_TERMINAL_STATUS:
+                record.terminal_status = _EXECUTION_TERMINAL_STATUS[record.status]
             self._executions[execution_id] = record
             self._persist_executions()
             if project_thread:
