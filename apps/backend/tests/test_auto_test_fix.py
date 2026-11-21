@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import argparse
 import json
 import subprocess
 import sys
@@ -13,6 +14,80 @@ _SPEC = importlib.util.spec_from_file_location("auto_test_fix", Path(__file__).r
 atf = importlib.util.module_from_spec(_SPEC)
 sys.modules["auto_test_fix"] = atf
 _SPEC.loader.exec_module(atf)  # type: ignore[union-attr]
+
+
+def test_reconcile_and_retire_the_workflows_own_clean_merged_checkout(tmp_path, monkeypatch):
+    import json
+
+    repo = tmp_path / "repo"
+    remote = tmp_path / "remote.git"
+    root = tmp_path / "Work" / "echospeak-worktrees"
+    repo.mkdir()
+    root.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(atf, "REPO", repo)
+    monkeypatch.setattr(atf, "github_repo", lambda: "o/source")
+    atf.git(repo, "init", "-b", "main")
+    atf.git(repo, "config", "user.name", "Fixture")
+    atf.git(repo, "config", "user.email", "fixture@example.invalid")
+    (repo / ".gitignore").write_text("ignored.txt\n")
+    atf.git(repo, "add", ".")
+    atf.git(repo, "commit", "-m", "Base")
+    atf.git(repo, "init", "--bare", str(remote))
+    atf.git(repo, "remote", "add", "origin", str(remote))
+    folder = tmp_path / "session"
+    folder.mkdir()
+    session = atf.Session(folder, {"issue": 148, "ended": "now", "status": "stopped"})
+    tree, branch = atf.make_tree(session, "main")
+    session.state.update(tree=str(tree), branch=branch)
+    (tree / "known.txt").write_text("accepted\n")
+    atf.git(tree, "add", "known.txt")
+    atf.git(tree, "commit", "-m", "Scoped work")
+    tip = atf.git(tree, "rev-parse", "HEAD")
+    pr = {"state": "open", "merged": False, "body": "Refs #148",
+          "head": {"sha": tip, "ref": branch, "repo": {"full_name": "o/source"}},
+          "base": {"ref": "main", "repo": {"full_name": "o/source"}}}
+    monkeypatch.setattr(atf, "github_json", lambda *_: pr)
+    session.save()
+    args = argparse.Namespace(session=str(folder), pr=51, reviewed_head=tip, evidence="", retire=False)
+    atf.reconcile(args)
+    assert atf.Session.latest(str(folder)).state["lifecycle"]["stage"] == "awaiting_acceptance"
+    assert tree.exists()
+
+    atf.git(repo, "merge", "--no-ff", branch, "-m", "Accepted merge")
+    atf.git(repo, "push", "origin", "main")
+    merge = atf.git(repo, "rev-parse", "main")
+    pr.update(state="closed", merged=True, merge_commit_sha=merge)
+    evidence = folder / "owner.json"
+    evidence.write_text(json.dumps({"issue": 148, "pr": 51, "head": tip, "merge_commit": merge,
+                                    "issue_update": "recorded", "technical_record": "checked",
+                                    "obsidian_record": "written", "release_status": "not_required"}))
+    args.evidence, args.retire = str(evidence), True
+    (tree / "ignored.txt").write_text("preserve this")
+    with pytest.raises(RuntimeError, match="ignored"):
+        atf.reconcile(args)
+    assert (tree / "ignored.txt").read_text() == "preserve this"
+    (tree / "ignored.txt").rename(folder / "preserved.txt")
+    atf.reconcile(args)
+    assert atf.Session.latest(str(folder)).state["lifecycle"]["stage"] == "retired"
+    assert not tree.exists()
+    assert (repo / "known.txt").read_text() == "accepted\n"
+    assert (folder / "preserved.txt").read_text() == "preserve this"
+
+
+def test_continue_starts_one_independent_open_issue(tmp_path, monkeypatch):
+    folder = tmp_path / "blocked"
+    folder.mkdir()
+    (folder / "state.json").write_text('{"issue": 148, "tree": "/kept"}')
+    monkeypatch.setattr(atf, "SESSIONS", tmp_path)
+    monkeypatch.setattr(atf, "github_repo", lambda: "o/source")
+    monkeypatch.setattr(atf, "github_json", lambda *args: {"state": "OPEN" if args[2] == "147" else "CLOSED"})
+    monkeypatch.setattr(atf, "git", lambda *_: "")
+    calls = []
+    monkeypatch.setattr(atf, "main", lambda args: calls.append(args) or 0)
+    assert atf.continue_queue(argparse.Namespace(issues=[148, 149, 147, 122], start=True, driver="manual", minutes=15)) == 0
+    assert calls == [["run", "--issue", "147", "--base", "origin/main", "--driver", "manual",
+                      "--cycles", "1", "--minutes", "15"]]
 
 
 def test_owner_review_is_triggered_only_by_flags_that_bear_on_the_change():
