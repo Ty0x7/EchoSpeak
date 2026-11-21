@@ -304,6 +304,18 @@ def test_exit_one_with_known_failure_requires_final_pytest_summary(tmp_path, mon
     assert (atf.related_failures(run, {known}) == []) is complete
 
 
+def test_completed_pytest_can_report_failure_and_teardown_error_for_same_test(tmp_path, monkeypatch):
+    known = "tests/test_known.py::test_already_failed"
+    (tmp_path / "apps" / "backend" / "tests").mkdir(parents=True)
+    monkeypatch.setattr(atf, "sh", lambda *args, **kwargs: subprocess.CompletedProcess(
+        args=[], returncode=1,
+        stdout=f"FAILED {known} - AssertionError\nERROR {known} - AssertionError\n1 failed, 1 error in 0.14s\n",
+        stderr=""))
+    run = atf.full_suite(tmp_path)
+    assert run["failed"] == [known]
+    assert atf.related_failures(run, {known}) == []
+
+
 def test_aborted_full_baseline_stops_before_local_model(tmp_path, monkeypatch):
     import json
 
