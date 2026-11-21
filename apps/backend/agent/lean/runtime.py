@@ -1707,6 +1707,9 @@ class LeanSession:
             project_id = getattr(self, "_memory_project_id", "")
             structured = getattr(self, "_memory_list_phase", "") == "intake"
             prose_source = memory_quality.prose_source(self._user_message) if scope and not structured else ""
+            replace_clock = bool(prose_source and self._owner_side(persona)
+                                 and memory_quality.requests_prose_replacement(self._user_message)
+                                 and memory_quality.prose_clock_subject(prose_source))
 
             def memory_save(args: dict[str, Any]) -> str | ToolResult:
                 from agent.state import get_state_store
@@ -1732,7 +1735,7 @@ class LeanSession:
                 problem = memory_quality.check_fact(fact)
                 if problem:
                     return problem
-                if not key and scope == "account":
+                if not key and scope == "account" and not replace_clock:
                     # A reworded copy of something already saved: keep the one we have.
                     owner_of = getattr(memory, "_owner_id", None)
                     owner = owner_of() if callable(owner_of) else ""
@@ -1769,8 +1772,12 @@ class LeanSession:
                     semantic_key=key if self._owner_side(persona) or not key else f"agent:{persona.id}:{key}",
                     **({"supersede_legacy_fields": True} if key and structured else {}),
                     **({"exact_duplicate": True} if not structured and not key else {}),
+                    **({"supersede_prose_clock": True} if replace_clock else {}),
                 )
                 if not memory_id:
+                    if replace_clock:
+                        return ToolResult(False, "No memory was saved. Please identify which saved schedule to replace.",
+                                          0, outcome="refused")
                     return "Failed: that could not be saved (empty, duplicate, or looks like a secret)."
                 # Read back from the durable record file, not this process's copy.
                 stored = _memory_on_disk(memory, str(memory_id))

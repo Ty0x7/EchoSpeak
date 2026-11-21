@@ -1167,6 +1167,7 @@ class AgentMemory:
         semantic_key: str = "",
         supersede_legacy_fields: bool = False,
         exact_duplicate: bool = False,
+        supersede_prose_clock: bool = False,
     ) -> Optional[str]:
         """Persist canonical memory first, then synchronize the retrieval index."""
         cleaned = str(text or "").strip()
@@ -1225,10 +1226,26 @@ class AgentMemory:
                                     if str(record.get("semantic_key") or "") in legacy_keys
                                     and record.get("memory_type") != "conversation"
                                     and structured_field_key(str(record.get("text") or "")) == semantic_key)
-            if (len(replacements) == 1 and replacements[0].get("semantic_key") == semantic_key
-                    and replacements[0].get("normalized_content") == normalized):
-                return str(replacements[0].get("id") or "") or None
-        else:
+        if supersede_prose_clock:
+            from agent.lean.memory_quality import prose_clock_subject
+
+            subject = prose_clock_subject(cleaned)
+            # Only a prior authorized record in this conversation can bridge a missing or changed key.
+            matches = [record for record in active_records
+                       if subject and record.get("source_session_id") == thread_value
+                       and record.get("source_item_id") and record.get("memory_type") != "conversation"
+                       and isinstance(record.get("metadata"), dict) and record["metadata"].get("source") == "agent"
+                       and not str(record.get("semantic_key") or "").startswith("agent:")
+                       and prose_clock_subject(str(record.get("text") or "")) == subject]
+            if len(matches) > 1 or (matches and any(record not in matches for record in replacements)):
+                return None
+            if matches:
+                replacements = matches
+                semantic_key = str(matches[0].get("semantic_key") or semantic_key)
+        if (len(replacements) == 1 and str(replacements[0].get("semantic_key") or "") == semantic_key
+                and replacements[0].get("normalized_content") == normalized):
+            return str(replacements[0].get("id") or "") or None
+        if not semantic_key and not replacements:
             for record in active_records:
                 if str(record.get("memory_type") or "") != mt:
                     continue

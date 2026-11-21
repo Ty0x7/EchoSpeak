@@ -21,6 +21,20 @@ def test_prose_boundaries_preserve_punctuation_inside_quoted_titles():
     )
 
 
+def test_clock_subject_matches_only_the_same_route_day_and_direction():
+    identity = mq.prose_clock_subject
+    assert identity("I take the 7:45am Marlow ferry on Tuesdays.") == (
+        identity("My Tuesday Marlow ferry leaves at 8:10 a.m.")
+    )
+    assert identity("My Tuesday ferry leaves East for West at 7:45.") != (
+        identity("My Tuesday ferry leaves West for East at 8:10.")
+    )
+    assert identity("My Tuesday Marlow ferry leaves at 8:10.") != (
+        identity("My Tuesday Marlow ferry does not leave at 8:10.")
+    )
+    assert not identity("My ferry leaves at either 7:45 or 8:10.")
+
+
 def test_only_lasting_single_facts_are_kept():
     assert mq.check_fact("Prefers short answers.") is None
     assert "too long" in mq.check_fact("Likes " + "very " * 80 + "long things.")

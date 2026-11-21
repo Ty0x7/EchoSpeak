@@ -59,7 +59,7 @@ _WRITE_PREFIX = re.compile(
     r"keep (?:this|that) in mind\b|do not forget\b|don['’]?t forget\b)"
 )
 _WRITE_SUFFIX = re.compile(
-    r"(?i)(?:[,.!;]\s*|\band +)(?:please +)?(?:remember (?:this|that|it)(?: instead)?|"
+    r"(?i)(?:[,.!;]\s*|\band +)(?:please +)?(?:remember (?:this|that|it)(?P<replacement> instead)?|"
     r"keep (?:this|that) in mind)[.!]?\s*$"
 )
 _PROSE_PREFIX = re.compile(
@@ -82,8 +82,11 @@ _PROSE_SCOPE = r"(?:for|in|within) (?:this (?:chat|session|conversation|project)
 _PROSE_SCOPE_LEAD = re.compile(rf"(?i)^{_PROSE_SCOPE}[ \t]*:[ \t]*")
 _PROSE_SCOPE_TAIL = re.compile(rf"(?i)\s+{_PROSE_SCOPE}[.!]?$")
 _PROSE_TERMS = re.compile(r"\d+(?::\d+)?|[^\W\d_]+", re.UNICODE)
+_CLOCK_VALUE = re.compile(r"(?i)(?<![\w:])(?:[01]?\d|2[0-3]):[0-5]\d(?:[ \t]*[ap]\.?m\b\.?)?(?![\w:])")
 _PROSE_NON_SUBJECT = STOPWORDS | {"user", "now", "take", "leave", "depart", "start", "say", "said",
                                     "am", "pm", "time", "schedule", "account", "project"}
+_CLOCK_NON_SUBJECT = _PROSE_NON_SUBJECT - {"from", "to", "not", "no", "nor", "only", "and", "or"}
+_WEEKDAYS = frozenset({"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"})
 _PROSE_REFERENCE = re.compile(r"(?i)(?:(?:this|that|it|for me)(?: please)?|instead|(?:this|that|it) instead)")
 _PROSE_PREAMBLE = re.compile(r"(?i)^(?:actually|correction|update|a quick update)[:,]\s*")
 
@@ -177,10 +180,13 @@ def prose_source(text: str) -> str:
     return tidy_fact(payload)
 
 
+def _prose_words(text: str) -> Iterable[str]:
+    return (word[:-1] if len(word) > 3 and word.endswith("s") else word
+            for word in _PROSE_TERMS.findall(text.casefold()))
+
+
 def _prose_terms(text: str) -> set[str]:
-    terms = {word[:-1] if len(word) > 3 and word.endswith("s") else word
-             for word in _PROSE_TERMS.findall(text.casefold())}
-    return terms - _PROSE_NON_SUBJECT
+    return set(_prose_words(text)) - _PROSE_NON_SUBJECT
 
 
 def prose_proposal_matches(source: str, proposal: str) -> bool:
@@ -193,6 +199,21 @@ def prose_proposal_matches(source: str, proposal: str) -> bool:
 def prose_key_matches(source: str, key: str) -> bool:
     subject = _prose_terms(key)
     return bool(subject) and subject <= _prose_terms(source)
+
+
+def prose_clock_subject(fact: str) -> tuple[str, ...]:
+    """Match one clock value without changing the order of route or subject terms."""
+    subject, clocks = _CLOCK_VALUE.subn("", fact)
+    if clocks != 1:
+        return ()
+    words = [word for word in _prose_words(subject) if word not in _CLOCK_NON_SUBJECT]
+    name = tuple(word for word in words if word not in _WEEKDAYS)
+    return (*name, *sorted(set(words) & _WEEKDAYS)) if name else ()
+
+
+def requests_prose_replacement(text: str) -> bool:
+    suffix = _WRITE_SUFFIX.search(text.strip())
+    return bool(suffix and suffix.group("replacement"))
 
 
 def structured_field_key(fact: str) -> str:

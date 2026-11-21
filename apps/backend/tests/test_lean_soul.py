@@ -560,8 +560,14 @@ def test_chat_search_cannot_return_the_scoped_source_transcript(
     (". I brought a grapefruit seltzer today.", "Small correction. Actually, "),
     ("; the deck crew served grapefruit seltzer at the dock.", "Small correction; "),
 ])
+@pytest.mark.parametrize(("first_key", "correction_key"), [
+    ("tuesday_ferry", "tuesday_ferry"),
+    ("", "tuesday_ferry_time"),
+    ("marlow_ferry", "tuesday_ferry_time"),
+    ("tuesday_ferry", ""),
+])
 def test_prose_memory_uses_current_authorized_text_through_a_correction(
-    monkeypatch, lexical_memory, side_detail, correction_lead,
+    monkeypatch, lexical_memory, side_detail, correction_lead, first_key, correction_key,
 ):
     import json
     from agent.state import get_state_store
@@ -575,12 +581,12 @@ def test_prose_memory_uses_current_authorized_text_through_a_correction(
         ])}
 
     first, _ = _session(monkeypatch, propose(
-        "Takes the 7:45 AM Marlow ferry on Tuesdays for reading on the ride.", "tuesday_ferry", "first",
+        "Takes the 7:45 AM Marlow ferry on Tuesdays for reading on the ride.", first_key, "first",
     ), agent=agent)
     first_result = first.run(f"Please remember that I take the 7:45 Marlow ferry on Tuesdays{side_detail}")
     update, _ = _session(monkeypatch, propose(
         "User takes the 8:10 AM Marlow ferry on Tuesdays for reading, replacing the 7:45 ferry.",
-        "tuesday_ferry", "correction",
+        correction_key, "correction",
     ), agent=agent)
     update.session_id = first.session_id
     changed = update.run(
@@ -594,11 +600,51 @@ def test_prose_memory_uses_current_authorized_text_through_a_correction(
     assert new["text"] == "My Tuesday Marlow ferry leaves at 8:10 now."
     assert not old["active"] and old["superseded_by"] == new["id"]
     assert new["active"] and new["supersedes"] == old["id"]
+    assert new["semantic_key"] == (first_key or correction_key)
     fresh = lexical_memory.runtime_memory_projection("Tuesday Marlow ferry", session_id="fresh-other-chat")
     assert [row["content"] for row in fresh] == [new["text"]]
     user_item = next(item for item in get_state_store().list_items(changed["execution_id"])
                      if item.item_type == "user_message")
     assert new["source_item_id"] == user_item.id
+
+
+@pytest.mark.parametrize("prior", ["same-chat", "another-chat", "another-project", "another-schedule", "ambiguous"])
+def test_clock_correction_only_replaces_one_matching_record_in_its_original_scope(
+    monkeypatch, lexical_memory, tmp_path, prior,
+):
+    import json
+    from agent.state import get_state_store
+
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    proposal = {"fact": "My Tuesday Marlow ferry leaves at 8:10 now.", "key": "tuesday_ferry_time"}
+    model = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("new-clock", "memory_save", json.dumps(proposal))]),
+        ModelTurn(content="Understood."),
+    ])
+    session, events = _session(monkeypatch, {"echo": model}, agent=agent)
+    session.project_root = str(tmp_path)
+    get_state_store().update_thread_state(session.session_id, active_project_id="project-a")
+    previous = "I take the 7:45 Marlow ferry on Tuesdays."
+    if prior == "another-schedule":
+        previous = previous.replace("Marlow", "Barton")
+    values = [previous, previous.replace("7:45", "7:50")] if prior == "ambiguous" else [previous]
+    original_ids = [lexical_memory.add_memory_item(
+        value, source="agent", scope="project", project_path=str(tmp_path),
+        project_id="project-b" if prior == "another-project" else "project-a",
+        thread_id="different-chat" if prior == "another-chat" else session.session_id,
+        source_item_id=f"authorized-item-{index}", exact_duplicate=True,
+    ) for index, value in enumerate(values)]
+
+    session.run("My Tuesday Marlow ferry leaves at 8:10 now for this project only. Please remember that instead.")
+    disk = json.loads(lexical_memory._records_path.read_text())["records"]
+    saved = next(e for e in events if e["type"] == "tool_end" and e["id"] == "new-clock")
+    if prior == "ambiguous":
+        assert saved["outcome"] == "refused"
+        assert set(disk) == set(original_ids)
+    else:
+        assert saved["outcome"] == "ok"
+        assert len(disk) == 2
+    assert all(disk[record_id]["active"] == (prior != "same-chat") for record_id in original_ids)
 
 
 @pytest.mark.parametrize("request_text,fact,key", [
