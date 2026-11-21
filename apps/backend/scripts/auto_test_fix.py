@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import re
@@ -670,6 +671,7 @@ def make_tree(session: Session, base: str) -> tuple[Path, str]:
             raise RuntimeError(f"Worktree does not match the recorded campaign: {tree}")
     else:
         git(REPO, "worktree", "add", "-b", branch, str(tree), base)
+        links = {}
         exclude = Path(git(tree, "rev-parse", "--git-path", "info/exclude"))
         exclude = exclude if exclude.is_absolute() else tree / exclude
         known = exclude.read_text(encoding="utf-8") if exclude.exists() else ""
@@ -681,6 +683,8 @@ def make_tree(session: Session, base: str) -> tuple[Path, str]:
             src = REPO / venv
             if src.exists():
                 (tree / venv).symlink_to(src.resolve())
+                links[venv] = str(src.resolve())
+        session.state["created_workspace"] = {"path": str(tree.resolve()), "branch": branch, "links": links}
     return tree, branch
 
 
@@ -1094,7 +1098,142 @@ def discover(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
+def github_json(*args: str) -> dict:
+    result = sh(["gh", *args], REPO, timeout=30)
+    if result.returncode:
+        raise RuntimeError("GitHub could not verify the requested object")
+    return json.loads(result.stdout)
+
+
+def github_repo() -> str:
+    url = git(REPO, "remote", "get-url", "origin")
+    match = re.fullmatch(r"(?:https://github\.com/|git@github\.com:)([\w.-]+/[\w.-]+?)(?:\.git)?", url)
+    if not match:
+        raise RuntimeError("A GitHub origin is required for this lifecycle operation")
+    return match[1]
+
+
+def retire_workspace(session: Session, head: str) -> None:
+    created = session.state.get("created_workspace") or {}
+    tree = Path(session.state["tree"])
+    branch = session.state["branch"]
+    expected = Path.home() / "Work" / "echospeak-worktrees" / f"auto-{session.dir.name}"
+    if (branch != f"auto/{session.dir.name}" or tree != expected or
+            created.get("path") != str(tree.resolve()) or created.get("branch") != branch):
+        raise RuntimeError("Only a workspace created by this lifecycle can be retired")
+    if (git(tree, "rev-parse", "--show-toplevel") != str(tree) or
+            git(tree, "symbolic-ref", "--short", "HEAD") != branch or
+            git(tree, "rev-parse", "HEAD") != head or
+            git(tree, "rev-parse", "--path-format=absolute", "--git-common-dir") !=
+            git(REPO, "rev-parse", "--path-format=absolute", "--git-common-dir")):
+        raise RuntimeError("Workspace identity or reviewed head changed")
+    git(REPO, "merge-base", "--is-ancestor", head, "refs/remotes/origin/main")
+    git(REPO, "merge-base", "--is-ancestor", head, "refs/heads/main")
+    if sys.platform != "linux":
+        raise RuntimeError("Workspace process checks require Linux")
+    for proc in Path("/proc").iterdir():
+        if proc.name.isdigit():
+            try:
+                cwd = Path(os.readlink(proc / "cwd"))
+            except OSError:
+                continue
+            if cwd.is_relative_to(tree):
+                raise RuntimeError("A process still has this workspace open")
+    status = git(tree, "status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching")
+    allowed_links = {}
+    for name, target in created.get("links", {}).items():
+        if name in {"apps/backend/.venv", "apps/terminal/.venv"}:
+            link = tree / name
+            if link.is_symlink() and os.readlink(link) == target:
+                allowed_links[name] = link
+    if any(row not in {f"!! {name}" for name in allowed_links} for row in status.splitlines()):
+        raise RuntimeError("Workspace has tracked, untracked, or ignored files to preserve")
+    for link in allowed_links.values():
+        link.unlink()
+    git(REPO, "worktree", "remove", str(tree))  # Git also rejects locked or dirty worktrees.
+    git(REPO, "branch", "-d", branch)  # Normal merge checks still apply.
+
+
+def reconcile(args: argparse.Namespace) -> int:
+    """Record GitHub state and optional owner-attested preservation evidence."""
+    session = Session.latest(args.session)
+    state = session.state
+    if not state.get("ended") or state.get("status") in {"running", "awaiting_fix"}:
+        raise RuntimeError("Finish the bounded engineering cycle before reconciliation")
+    if args.pr < 1 or not re.fullmatch(r"[0-9a-f]{40}", args.reviewed_head):
+        raise RuntimeError("Provide a PR and its full reviewed head SHA")
+    if state.get("lifecycle", {}).get("stage") == "retired":
+        raise RuntimeError("This workspace is already retired")
+    if git(REPO, "rev-parse", f"refs/heads/{state['branch']}") != args.reviewed_head:
+        raise RuntimeError("The local branch does not match the reviewed head")
+    repo = github_repo()
+    pr = github_json("api", f"repos/{repo}/pulls/{args.pr}")
+    if (pr["head"]["sha"] != args.reviewed_head or pr["head"]["ref"] != state["branch"] or
+            (pr["head"].get("repo") or {}).get("full_name") != repo or
+            pr["base"]["repo"]["full_name"] != repo or pr["base"]["ref"] != "main" or not isinstance(state.get("issue"), int) or
+            not re.search(rf"(?:#|/issues/){state['issue']}\b", pr.get("body") or "")):
+        raise RuntimeError("The PR does not match the session, reviewed head and issue")
+    stage = "awaiting_acceptance" if pr["state"] == "open" else "closed_without_merge"
+    receipt = {"issue": state["issue"], "pr": args.pr, "head": args.reviewed_head, "stage": stage}
+    if pr["merged"]:
+        git(REPO, "fetch", "--no-tags", "origin", "refs/heads/main:refs/remotes/origin/main")
+        main = git(REPO, "rev-parse", "refs/remotes/origin/main")
+        git(REPO, "merge-base", "--is-ancestor", pr["merge_commit_sha"], main)
+        git(REPO, "merge-base", "--is-ancestor", args.reviewed_head, main)
+        receipt.update(stage="integrated", main=main, merge_commit=pr["merge_commit_sha"])
+        if args.evidence:
+            payload = Path(args.evidence).read_bytes()
+            evidence = json.loads(payload)
+            if (any(evidence.get(key) != receipt[key] for key in ("issue", "pr", "head", "merge_commit")) or
+                    any(not str(evidence.get(key) or "").strip() for key in ("issue_update", "technical_record", "obsidian_record")) or
+                    evidence.get("release_status") not in {"installed_verified", "not_required"}):
+                raise RuntimeError("Preservation evidence is incomplete or identifies different work")
+            if evidence["release_status"] == "installed_verified":
+                installed = str(evidence.get("installed_revision") or "")
+                if not re.fullmatch(r"[0-9a-f]{40}", installed) or not evidence.get("release_record"):
+                    raise RuntimeError("Provide the verified installation revision and release record")
+                git(REPO, "merge-base", "--is-ancestor", receipt["merge_commit"], installed)
+                git(REPO, "merge-base", "--is-ancestor", installed, main)
+            (session.dir / "acceptance-evidence.json").write_bytes(payload)
+            receipt.update(stage="preserved", evidence_sha256=hashlib.sha256(payload).hexdigest(),
+                           release_status=evidence["release_status"])
+    state["lifecycle"] = receipt
+    session.save()
+    session.log("lifecycle", **receipt)
+    if args.retire:
+        if receipt["stage"] != "preserved":
+            raise RuntimeError("Retirement requires integrated work and owner-attested preservation evidence")
+        retire_workspace(session, args.reviewed_head)
+        receipt["stage"] = "retired"
+        session.save()
+        session.log("workspace_retired", head=args.reviewed_head)
+    return 0
+
+
+def continue_queue(args: argparse.Namespace) -> int:
+    repo = github_repo()
+    covered = set()
+    for path in SESSIONS.glob("*/state.json"):
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        if saved.get("issue") and (saved.get("tree") or saved.get("lifecycle")):
+            covered.add(saved["issue"])  # Resume or reconcile the scoped effort instead of duplicating it.
+    for number in dict.fromkeys(args.issues):
+        if number < 1:
+            raise RuntimeError("Queue entries must be positive issue numbers")
+        if number in covered or github_json("issue", "view", str(number),
+                "--repo", repo, "--json", "state")["state"] != "OPEN":
+            continue
+        print(f"Next bounded effort: issue #{number}", flush=True)
+        if args.start:
+            git(REPO, "fetch", "--no-tags", "origin", "refs/heads/main:refs/remotes/origin/main")
+            return main(["run", "--issue", str(number), "--base", "origin/main", "--driver", args.driver,
+                         "--cycles", "1", "--minutes", str(args.minutes)])
+        return 0
+    print("No separate open issue in this queue needs a new workspace.")
+    return 0
+
+
+def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     r = sub.add_parser("run")
@@ -1125,10 +1264,22 @@ def main() -> int:
             p.add_argument("--github", action="store_true", help="Print a local issue/PR summary without private traces")
     d = sub.add_parser("discover")
     d.add_argument("--target", type=float, default=9.0)
-    args = parser.parse_args()
+    c = sub.add_parser("reconcile")
+    c.add_argument("--session", required=True)
+    c.add_argument("--pr", type=int, required=True)
+    c.add_argument("--reviewed-head", required=True)
+    c.add_argument("--evidence", help="Owner-attested JSON closeout evidence")
+    c.add_argument("--retire", action="store_true", help="Retire this workflow's clean, merged, preserved workspace")
+    q = sub.add_parser("continue")
+    q.add_argument("--issues", nargs="+", type=int, required=True)
+    q.add_argument("--start", action="store_true", help="Start one bounded run on the selected issue")
+    q.add_argument("--driver", choices=["codex", "claude", "manual"], default="manual")
+    q.add_argument("--minutes", type=int, choices=range(1, 181), default=45)
+    args = parser.parse_args(argv)
     if getattr(args, "issue", None) is not None and (args.issue < 1 or args.resume):
         parser.error("--issue requires a positive number on a new session; resume retains the original issue")
-    return {"run": run, "status": status, "stop": stop, "review": review, "discover": discover}[args.command](args)
+    return {"run": run, "status": status, "stop": stop, "review": review, "discover": discover,
+            "reconcile": reconcile, "continue": continue_queue}[args.command](args)
 
 
 if __name__ == "__main__":

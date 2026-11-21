@@ -2,6 +2,8 @@
 
 Before engineering work, read and follow the [authoritative engineering workflow](docs/engineering-prompt.md). Apply it again when resuming a campaign. Use its issue, PR, acceptance and preservation rules for GitHub operations.
 
+After verification, reconcile the scoped PR and record preservation before selecting another bounded issue. Follow the closeout checkpoints in the same workflow.
+
 ## Project documentation
 
 After meaningful completed work, use the `project-documentation` skill when
