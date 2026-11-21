@@ -256,6 +256,8 @@ def failing_names(output: str) -> list[str]:
     names += re.findall(r"--- FAIL: (\S+)", text)                           # go
     names += re.findall(r"(?m)^test (\S+) \.\.\. FAILED", text)              # cargo
     names += re.findall(r"(?m)^(?:FAIL|ERROR): (\S+)", text)                 # unittest
+    names += [f"{module}::{test}" for module, test in re.findall(
+        r"(?m)^FAIL ([\w.]+) (test_\w+)[ \t]*$", text)]                    # Python project runner
     return list(dict.fromkeys(n.strip() for n in names if n.strip()))[:12]
 
 
