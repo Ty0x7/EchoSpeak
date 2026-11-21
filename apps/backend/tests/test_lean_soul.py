@@ -556,7 +556,13 @@ def test_chat_search_cannot_return_the_scoped_source_transcript(
     assert "Frosty Loom" not in result["output"], result["output"]
 
 
-def test_prose_memory_uses_current_authorized_text_through_a_correction(monkeypatch, lexical_memory):
+@pytest.mark.parametrize(("side_detail", "correction_lead"), [
+    (". I brought a grapefruit seltzer today.", "Small correction. Actually, "),
+    ("; the deck crew served grapefruit seltzer at the dock.", "Small correction; "),
+])
+def test_prose_memory_uses_current_authorized_text_through_a_correction(
+    monkeypatch, lexical_memory, side_detail, correction_lead,
+):
     import json
     from agent.state import get_state_store
 
@@ -571,15 +577,15 @@ def test_prose_memory_uses_current_authorized_text_through_a_correction(monkeypa
     first, _ = _session(monkeypatch, propose(
         "Takes the 7:45 AM Marlow ferry on Tuesdays for reading on the ride.", "tuesday_ferry", "first",
     ), agent=agent)
-    first_result = first.run(
-        "Please remember that I take the 7:45 Marlow ferry on Tuesdays. I brought a grapefruit seltzer today."
-    )
+    first_result = first.run(f"Please remember that I take the 7:45 Marlow ferry on Tuesdays{side_detail}")
     update, _ = _session(monkeypatch, propose(
         "User takes the 8:10 AM Marlow ferry on Tuesdays for reading, replacing the 7:45 ferry.",
         "tuesday_ferry", "correction",
     ), agent=agent)
     update.session_id = first.session_id
-    changed = update.run("Small correction. Actually, my Tuesday Marlow ferry leaves at 8:10 now. Please remember that instead.")
+    changed = update.run(
+        f"{correction_lead}my Tuesday Marlow ferry leaves at 8:10 now. Please remember that instead."
+    )
 
     disk = list(json.loads(lexical_memory._records_path.read_text())["records"].values())
     old, new = (next(r for r in disk if r["source_execution_id"] == result["execution_id"])

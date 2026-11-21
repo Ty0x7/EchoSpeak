@@ -67,7 +67,11 @@ _PROSE_PREFIX = re.compile(
     r"save (?:(?:this|that|it) (?:in|to) (?:my )?memory|to memory)[ \t]*:?|"
     r"keep (?:this|that) in mind[ \t]*:|(?:do not forget|don['’]?t forget)(?: that)?[ \t]+)"
 )
-_SENTENCE_BREAK = re.compile(r"(?<=[.!?])[ \t]+|\n+")
+_PROSE_BOUNDARY = re.compile(
+    r"""(?P<quoted>"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|"""
+    r"(?<!\w)'(?:[^'\n]|(?<=\w)'(?=\w))+'(?!\w))"
+    r"|(?<=[.!?])[ \t]+|(?P<clause>;[ \t]*|\n+)"
+)
 _ABBREVIATION = re.compile(r"(?i)\b(?:[ap]\.m|e\.g|i\.e|mr|mrs|ms|dr|prof|st|vs)\.$")
 _SENTENCE_SUBJECT = re.compile(r"(?:I|My|We|Our|You|Your|He|She|They|The|This|That|It|Also|Please|Actually|Today)\b")
 _PROSE_ASIDE = re.compile(
@@ -144,11 +148,13 @@ def prose_source(text: str) -> str:
         return ""
     if not payload or payload.startswith((">", "#", "```", '"', "“", "‘")):
         return ""
-    # Periods in titles and clock abbreviations belong to the statement.
-    edges = [match for match in _SENTENCE_BREAK.finditer(payload)
-             if "\n" in match.group()
-             or not _ABBREVIATION.search(payload, max(0, match.start() - 8), match.start())
-             or _SENTENCE_SUBJECT.match(payload, match.end())]
+    # Quoted names and clock abbreviations can contain punctuation without ending the statement.
+    edges = [match for match in _PROSE_BOUNDARY.finditer(payload)
+             if not match.group("quoted") and (
+                 match.group("clause")
+                 or not _ABBREVIATION.search(payload, max(0, match.start() - 8), match.start())
+                 or _SENTENCE_SUBJECT.match(payload, match.end())
+             )]
     if prefix and edges:
         payload = payload[:edges[0].start()]
     elif not prefix and edges:

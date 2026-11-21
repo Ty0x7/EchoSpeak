@@ -12,6 +12,15 @@ def test_facts_are_tidied_to_one_clean_sentence():
     assert mq.tidy_fact("") == ""
 
 
+def test_prose_boundaries_preserve_punctuation_inside_quoted_titles():
+    assert mq.prose_source("Remember that my favorite chapter is “Ferry; At Dawn”; the library closes at 6.") == (
+        "My favorite chapter is “Ferry; At Dawn”."
+    )
+    assert mq.prose_source("Remember that I like 'Ferry; The Captain’s Log' best; the library closes at 6.") == (
+        "I like 'Ferry; The Captain’s Log' best."
+    )
+
+
 def test_only_lasting_single_facts_are_kept():
     assert mq.check_fact("Prefers short answers.") is None
     assert "too long" in mq.check_fact("Likes " + "very " * 80 + "long things.")
