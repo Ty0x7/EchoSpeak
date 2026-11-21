@@ -610,6 +610,8 @@ def test_prose_memory_uses_current_authorized_text_through_a_correction(
      "The Marlow ferry takes 10 minutes.", "home_city"),
     ("Remember that I take the ferry at 7:45 a.m. I play the flute.", "The user plays the flute.", "flute"),
     ("Remember that instead.", "The user wants that instead.", "instead"),
+    ("Remember this for my account: “My manager is Lucy.”", "My manager is Lucy.", "manager"),
+    ("Remember this for my account: 'My manager is Lucy.'", "My manager is Lucy.", "manager"),
     ("I recommend this app. Can you run a check? Please remember that instead.",
      "The user uses Marlow App.", "marlow_app"),
 ])
@@ -629,7 +631,12 @@ def test_prose_memory_rejects_unrelated_or_ambiguous_proposals(monkeypatch, lexi
     assert lexical_memory._records_path.read_bytes() == initial
 
 
-def test_prose_memory_preserves_project_scope_and_literal_time(monkeypatch, lexical_memory, tmp_path):
+@pytest.mark.parametrize(("request_text", "scope"), [
+    ("Remember that the Monday builds start at 7:10 a.m. for this project only. I think it's an easy rhythm.", "project"),
+    ("Remember this for this project only: the Monday builds start at 7:10 a.m.", "project"),
+    ("Remember this for this chat only: the Monday builds start at 7:10 a.m.", "session"),
+])
+def test_prose_memory_preserves_scope_and_literal_time(monkeypatch, lexical_memory, tmp_path, request_text, scope):
     import json
     from agent.state import get_state_store
 
@@ -643,10 +650,14 @@ def test_prose_memory_preserves_project_scope_and_literal_time(monkeypatch, lexi
     session, _ = _session(monkeypatch, {"echo": model}, agent=agent)
     session.project_root = str(tmp_path)
     get_state_store().update_thread_state(session.session_id, active_project_id="project-a")
-    session.run("Remember that the Monday builds start at 7:10 a.m. for this project only. I think it's an easy rhythm.")
+    session.run(request_text)
     rows = list(json.loads(lexical_memory._records_path.read_text())["records"].values())
     assert len(rows) == 1 and rows[0]["text"] == "The Monday builds start at 7:10 a.m."
-    assert rows[0]["scope"] == "project" and rows[0]["project_id"] == "project-a"
+    assert rows[0]["scope"] == scope and rows[0]["project_id"] == "project-a"
     assert not lexical_memory.runtime_memory_projection(
         "Monday builds", session_id="other", project_id="project-b", project_path=str(tmp_path),
     )
+    in_project = lexical_memory.runtime_memory_projection(
+        "Monday builds", session_id="other", project_id="project-a", project_path=str(tmp_path),
+    )
+    assert bool(in_project) == (scope == "project")

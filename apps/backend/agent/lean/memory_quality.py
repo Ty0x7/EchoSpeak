@@ -78,8 +78,9 @@ _PROSE_ASIDE = re.compile(
     r"(?i)(?:[ \t]*[,;][ \t]*|[ \t]+(?:and(?: also)?|but)[ \t]+)"
     r"(?=(?:i|my|we|our|also|that)\b)"
 )
-_PROSE_SCOPE_TAIL = re.compile(r"(?i)\s+(?:for|in|within) (?:this (?:chat|session|conversation|project)|"
-                               r"my account)(?: only)?[.!]?$")
+_PROSE_SCOPE = r"(?:for|in|within) (?:this (?:chat|session|conversation|project)|my account)(?: only)?"
+_PROSE_SCOPE_LEAD = re.compile(rf"(?i)^{_PROSE_SCOPE}[ \t]*:[ \t]*")
+_PROSE_SCOPE_TAIL = re.compile(rf"(?i)\s+{_PROSE_SCOPE}[.!]?$")
 _PROSE_TERMS = re.compile(r"\d+(?::\d+)?|[^\W\d_]+", re.UNICODE)
 _PROSE_NON_SUBJECT = STOPWORDS | {"user", "now", "take", "leave", "depart", "start", "say", "said",
                                     "am", "pm", "time", "schedule", "account", "project"}
@@ -146,7 +147,8 @@ def prose_source(text: str) -> str:
         payload = text[:suffix.start()].strip()
     else:
         return ""
-    if not payload or payload.startswith((">", "#", "```", '"', "“", "‘")):
+    payload = _PROSE_SCOPE_LEAD.sub("", payload)
+    if not payload or payload.startswith((">", "#", "```", '"', "'", "“", "‘")):
         return ""
     # Quoted names and clock abbreviations can contain punctuation without ending the statement.
     edges = [match for match in _PROSE_BOUNDARY.finditer(payload)
