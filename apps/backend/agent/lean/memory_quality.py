@@ -89,6 +89,11 @@ _SAVED_CLOCK_SUFFIX = re.compile(
     r"(?:please )?use (?:only )?(?:my )?saved memory(?: only)?)\.?$"
 )
 _CLOCK_QUESTION = re.compile(r"(?i)what time (?:is|do|does) ([^?;!.\r\n]{1,160})\?")
+_CLOCK_FOLLOWUP = re.compile(
+    r"(?i)(?:,|\b(?:and|or|then)\b)\s*(?:please\s+)?(?:"
+    r"(?:can|could|should|will|would|do)\s+(?:you|i|we)\b|"
+    r"(?:what|when|where|why|how|check|set|tell|look|show|remind|find|open|send|add|book)\b)"
+)
 _PROSE_NON_SUBJECT = STOPWORDS | {"user", "now", "take", "leave", "depart", "start", "say", "said",
                                     "am", "pm", "time", "schedule", "account", "project"}
 _CLOCK_NON_SUBJECT = _PROSE_NON_SUBJECT - {"from", "to", "not", "no", "nor", "only", "and", "or"}
@@ -224,7 +229,9 @@ def saved_clock_query(message: str) -> str:
     question, prefix = _SAVED_CLOCK_PREFIX.subn("", message.strip())
     question, suffix = _SAVED_CLOCK_SUFFIX.subn("", question)
     match = _CLOCK_QUESTION.fullmatch(question)
-    return match[1] if (prefix or suffix) and match and _clock_subject(match[1]) else ""
+    if not (prefix or suffix) or not match or _CLOCK_FOLLOWUP.search(match[1]):
+        return ""
+    return match[1] if _clock_subject(match[1]) else ""
 
 
 def saved_clock_reply(memories: Iterable[dict[str, Any]]) -> str:

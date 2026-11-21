@@ -47,6 +47,14 @@ def test_clock_recall_requires_a_direct_saved_memory_question():
     ]
 
 
+def test_saved_clock_query_does_not_consume_an_action_in_the_same_question():
+    assert not mq.saved_clock_query("From saved memory, what time does my ferry leave and can you set a reminder?")
+    assert not mq.saved_clock_query("What time does my ferry leave, and please check today's weather? Use saved memory only.")
+    assert mq.saved_clock_query("From saved memory, what time is my Monday and Wednesday ferry?") == (
+        "my Monday and Wednesday ferry"
+    )
+
+
 def test_only_lasting_single_facts_are_kept():
     assert mq.check_fact("Prefers short answers.") is None
     assert "too long" in mq.check_fact("Likes " + "very " * 80 + "long things.")
