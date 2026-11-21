@@ -76,3 +76,35 @@ The native harness ran both versions against local Qwen 3.5 9B at 16K using disp
 The acceptance run added two held-out turns. The chat-only alias was recalled in its own conversation. The other project exercised the real `chat_search` tool and received none of the restricted values. Canonical readback verified original and correction execution IDs, both supersession links, scoped record counts and the archive scope on replies derived from restricted context.
 
 The actual owner store and all eight audited message items matched the earlier capture in a read-only check. The installed application reported 11.15.0. This change is source-only and awaits owner approval on PR #138. No separately billed model API was used. Mixed-prose memory changes and private release history remain tracked on #136 and #137. [PR #138](https://github.com/Ty0x7/EchoSpeak/pull/138)
+
+## Issue #136 · Grounding a conversational schedule save
+
+The six-turn installed-app smoke test explicitly asked Echo to remember a Tuesday ferry time and later correct it. An earlier turn mentioned reading on the ferry, and the save request also mentioned a one-day drink. Both model tool calls added “for reading on the ride” and “AM” to the schedule. The corrected record carried those additions even though the SQLite user item contained only the new time and schedule. Consent and correction linking worked. The write path accepted the model's paraphrase after checking consent, scope and basic fact quality. The subsequent disk readback verified the write without checking that the saved wording came from the authorized text.
+
+The conversational write path now selects one statement from the current save request and saves that wording with ordinary whitespace and punctuation normalization. A tool proposal identifies the requested subject. It cannot supply wording for the stored fact, choose an unrelated key, or authorize a separate statement. Unclear references are refused. New writes link the canonical record to the source execution and SQLite user item, and keyed corrections supersede the old value within the same scope. Recall asks Qwen to leave unspecified details such as AM/PM unspecified. Existing records remain in place.
+
+### Matched local verification
+
+Each arm used the native harness with local Ollama Qwen 3.5 9B, a 16,384-token window, and separate disposable state. Each case contained six turns covering unrelated conversation, an uncued correction, an explicit save, an explicit correction and two fresh-chat queries. The shuttle case changed the schedule, day and transient detail. An independent readback checked canonical JSON, source items in SQLite, active status, both directions of supersession and the actual replies.
+
+| Observed result | Main `1b9e992` | Candidate code `d282b70` |
+| --- | --- | --- |
+| Ferry records and source text | Added a commute purpose and AM. | Saved only the requested 7:45 schedule and then “My Tuesday Marlow ferry leaves at 8:10 now.” |
+| Shuttle records and source text | Saved two umbrella records and embedded the retired 6:50 time in the replacement. | Saved only the requested 6:50 schedule and then “My Thursday North Loop shuttle leaves at 7:05 now.” |
+| Canonical records tied to the exact SQLite user item | No source item IDs on these writes. | All four writes point to the authorizing user item. |
+| Active records after correction | Ferry 1, shuttle 3. | One per case with reciprocal supersession links. |
+| Fresh chats | Recalled both current times with AM. The ferry reply supplied a next date. The shuttle reply also volunteered the old time and a separate query retrieved the umbrella. | Recalled 8:10 and 7:05 without AM or the retired time. The transient queries found no saved drink or umbrella. The shuttle reply added an update-date aside outside the saved fact. |
+| Writes on casual and unconfirmed correction turns | 0 in both cases. | 0 in both cases. |
+| Wall time over six turns | Ferry 47.8 s, shuttle 56.3 s. | Ferry 71.8 s, shuttle 79.8 s. One sample per arm measures these runs only. |
+
+Five of the six initial failing-first cases exposed a defect on main, and the ambiguous-reference control already passed. The final backend run passed 375 tests with 5 skips. The independent consent, scope and correction suite from PR #138 passed 15/15. The focused regressions are in `apps/backend/tests/test_lean_soul.py` and can be run from `apps/backend` with `python -m pytest tests/test_lean_soul.py -k prose_memory`. Private run traces and original messages stay in the local evidence directory linked from the vault.
+
+This covers a single explicitly authorized conversational statement and its replacement. Multi-fact profiles, copied notes and richer mixed-prose authorization remain open on Issue #136. The evaluations wrote only to disposable state with no separately billed model APIs. The installed release remains 11.15.0 at `1b9e992`.
+
+### Clause-boundary follow-up on PR #139
+
+A failing-first runtime test exposed a gap at `08c8e7a`. The original single-statement selector skipped a semicolon followed by a subject such as “the deck crew,” so it stored the authorized ferry time together with an unrelated seltzer detail. In the opposite position, “Small correction; my Tuesday Marlow ferry leaves at 8:10 now. Please remember that instead,” the selector treated the requested correction as an aside and kept the preamble. The matched local baseline consequently refused the correction. The final assistant reply still claimed success, while fresh-chat recall returned the old 7:45 schedule with the seltzer detail.
+
+Candidate `e6bd644` uses a semicolon as a clause boundary even before a lowercase subject and after a clock abbreviation. It keeps punctuation inside quoted titles. The prefix save selects the first clause. A trailing save instruction selects the last clause. The existing consent, scope, and proposal checks still apply. The regression exercises persistence, both directions of supersession, and source attribution through the real tool. The targeted backend suite passed **377 tests with 4 skips**, and the independent PR #138 acceptance fixture passed **15/15**.
+
+With the same six prompts on local Qwen 3.5 9B at 16K, the baseline took 103.5 s and the candidate took 87.9 s. The candidate saved “I take the 7:45 Marlow ferry on Tuesdays.” and “My Tuesday Marlow ferry leaves at 8:10 now.” Both canonical records point to the correct SQLite user item, and their reciprocal links leave only the correction active. The fresh schedule chat returned 8:10 without the prior value or seltzer, and the separate drink query found no saved drink. The schedule reply added “AM” and an update-date aside absent from the saved statement. That reply behavior remains tracked with #136. Both runs yielded zero writes on casual or unconfirmed correction turns. The live user's canonical memory and SQLite item hashes matched before and after this follow-up.

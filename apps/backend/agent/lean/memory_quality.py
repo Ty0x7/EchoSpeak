@@ -62,6 +62,31 @@ _WRITE_SUFFIX = re.compile(
     r"(?i)(?:[,.!;]\s*|\band +)(?:please +)?(?:remember (?:this|that|it)(?: instead)?|"
     r"keep (?:this|that) in mind)[.!]?\s*$"
 )
+_PROSE_PREFIX = re.compile(
+    r"(?i)^(?:please[ \t]+)?(?:remember[ \t]*:|remember[ \t]+(?:(?:that|this)(?:[ \t]+|:))?|"
+    r"save (?:(?:this|that|it) (?:in|to) (?:my )?memory|to memory)[ \t]*:?|"
+    r"keep (?:this|that) in mind[ \t]*:|(?:do not forget|don['’]?t forget)(?: that)?[ \t]+)"
+)
+_PROSE_BOUNDARY = re.compile(
+    r"""(?P<quoted>"[^"\n]*"|“[^”\n]*”|‘[^’\n]*’|"""
+    r"(?<!\w)'(?:[^'\n]|(?<=\w)'(?=\w))+'(?!\w))"
+    r"|(?<=[.!?])[ \t]+|(?P<clause>;[ \t]*|\n+)"
+)
+_ABBREVIATION = re.compile(r"(?i)\b(?:[ap]\.m|e\.g|i\.e|mr|mrs|ms|dr|prof|st|vs)\.$")
+_SENTENCE_SUBJECT = re.compile(r"(?:I|My|We|Our|You|Your|He|She|They|The|This|That|It|Also|Please|Actually|Today)\b")
+_PROSE_ASIDE = re.compile(
+    r"(?i)(?:[ \t]*[,;][ \t]*|[ \t]+(?:and(?: also)?|but)[ \t]+)"
+    r"(?=(?:i|my|we|our|also|that)\b)"
+)
+_PROSE_SCOPE = r"(?:for|in|within) (?:this (?:chat|session|conversation|project)|my account)(?: only)?"
+_PROSE_SCOPE_LEAD = re.compile(rf"(?i)^{_PROSE_SCOPE}[ \t]*:[ \t]*")
+_PROSE_SCOPE_TAIL = re.compile(rf"(?i)\s+{_PROSE_SCOPE}[.!]?$")
+_PROSE_TERMS = re.compile(r"\d+(?::\d+)?|[^\W\d_]+", re.UNICODE)
+_PROSE_NON_SUBJECT = STOPWORDS | {"user", "now", "take", "leave", "depart", "start", "say", "said",
+                                    "am", "pm", "time", "schedule", "account", "project"}
+_PROSE_REFERENCE = re.compile(r"(?i)(?:(?:this|that|it|for me)(?: please)?|instead|(?:this|that|it) instead)")
+_PROSE_PREAMBLE = re.compile(r"(?i)^(?:actually|correction|update|a quick update)[:,]\s*")
+
 _STATUS_PASTE = re.compile(r"(?i)^\s*(?:the )?backup (?:status:|restored successfully\.)")
 _STATUS_REQUEST = re.compile(
     r"(?im)(?:^|[.!]\s+)(?:please|can|could|would|now|stop|cancel|remember|keep|save|write|create|make|"
@@ -105,6 +130,69 @@ def explicit_write(text: str) -> bool:
             or list_offer(text) or requests_list(text)):
         return False
     return bool(_WRITE_PREFIX.match(text) or ("\n" not in text and _WRITE_SUFFIX.search(text)))
+
+
+def prose_source(text: str) -> str:
+    """Bind the write to one current statement named by the owner's save instruction."""
+    text = text.strip()
+    if not explicit_write(text):
+        return ""
+    prefix = _PROSE_PREFIX.match(text)
+    suffix = _WRITE_SUFFIX.search(text)
+    if prefix:
+        payload = text[prefix.end():].strip()
+        if suffix and suffix.start() >= prefix.end():
+            payload = text[prefix.end():suffix.start()].strip()
+    elif suffix:
+        payload = text[:suffix.start()].strip()
+    else:
+        return ""
+    payload = _PROSE_SCOPE_LEAD.sub("", payload)
+    if not payload or payload.startswith((">", "#", "```", '"', "'", "“", "‘")):
+        return ""
+    # Quoted names and clock abbreviations can contain punctuation without ending the statement.
+    edges = [match for match in _PROSE_BOUNDARY.finditer(payload)
+             if not match.group("quoted") and (
+                 match.group("clause")
+                 or not _ABBREVIATION.search(payload, max(0, match.start() - 8), match.start())
+                 or _SENTENCE_SUBJECT.match(payload, match.end())
+             )]
+    if prefix and edges:
+        payload = payload[:edges[0].start()]
+    elif not prefix and edges:
+        payload = payload[edges[-1].end():]
+    if payload.rstrip().endswith("?"):
+        return ""
+    payload = _PROSE_PREAMBLE.sub("", payload)
+    payload = _PROSE_SCOPE_TAIL.sub("", payload).strip().rstrip(",;")
+    if aside := _PROSE_ASIDE.search(payload):
+        # A trailing temporary qualifier can apply to the whole clause.
+        if re.search(r"(?i)\b(?:just for today|only today|only for now)\b", payload) and "but" not in aside.group().lower():
+            return ""
+        payload = payload[:aside.start()]
+    from agent.memory_curator import MemoryCurator
+    payload = MemoryCurator.strip_action_tail(payload)
+    if not payload or _PROSE_REFERENCE.fullmatch(payload):
+        return ""
+    return tidy_fact(payload)
+
+
+def _prose_terms(text: str) -> set[str]:
+    terms = {word[:-1] if len(word) > 3 and word.endswith("s") else word
+             for word in _PROSE_TERMS.findall(text.casefold())}
+    return terms - _PROSE_NON_SUBJECT
+
+
+def prose_proposal_matches(source: str, proposal: str) -> bool:
+    """A proposal may identify the requested fact. Its wording is never persisted."""
+    evidence, proposed = _prose_terms(source), _prose_terms(proposal)
+    return (bool(evidence) and {term for term in evidence if term[0].isdigit()} <= proposed
+            and len(evidence & proposed) >= min(2, len(evidence)))
+
+
+def prose_key_matches(source: str, key: str) -> bool:
+    subject = _prose_terms(key)
+    return bool(subject) and subject <= _prose_terms(source)
 
 
 def structured_field_key(fact: str) -> str:
@@ -223,7 +311,7 @@ _LEAD_INS = re.compile(
 )
 # Requests and reminders belong to routines or the chat, not long-term memory.
 _TRANSIENT = re.compile(
-    r"\b(remind me|right now|at the moment|for now|this (chat|conversation|session)|in this chat)\b",
+    r"\b(remind me|right now|at the moment|for now|for today|only today|this (chat|conversation|session)|in this chat)\b",
     re.IGNORECASE,
 )
 
@@ -351,6 +439,7 @@ def render(memories: Iterable[dict[str, Any]]) -> str:
     if not lines:
         return ""
     return ("## What you know about the user\n"
-            "Saved facts, possibly out of date. Use them when they help; don't recite them. When the user says one "
+            "Saved facts, possibly out of date. When answering from memory, keep values as written and leave unstated "
+            "details unspecified, including a reason, date, time zone or AM/PM. Use the facts when they help. When the user says one "
             "of them has changed, save the new value with memory_save and the same key, so it replaces the old one.\n"
             + "\n".join(lines))

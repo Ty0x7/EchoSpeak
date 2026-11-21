@@ -1166,6 +1166,7 @@ class AgentMemory:
         source_item_id: str = "",
         semantic_key: str = "",
         supersede_legacy_fields: bool = False,
+        exact_duplicate: bool = False,
     ) -> Optional[str]:
         """Persist canonical memory first, then synchronize the retrieval index."""
         cleaned = str(text or "").strip()
@@ -1229,7 +1230,11 @@ class AgentMemory:
                 return str(replacements[0].get("id") or "") or None
         else:
             for record in active_records:
-                if str(record.get("memory_type") or "") == mt and self._dedupe_should_skip(cleaned, str(record.get("text") or "")):
+                if str(record.get("memory_type") or "") != mt:
+                    continue
+                if normalized == record.get("normalized_content") or (
+                    not exact_duplicate and self._dedupe_should_skip(cleaned, str(record.get("text") or ""))
+                ):
                     return str(record.get("id") or "") or None
         supersedes = str(replacements[0]["id"]) if replacements else ""
 
