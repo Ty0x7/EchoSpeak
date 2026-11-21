@@ -15,6 +15,7 @@ from agent.lean.provider import ModelTurn, ToolCall, Endpoint
 from agent.lean.toolbox import NativeTool, Toolbox
 from api.routes import lean
 from tests.test_lean_runtime import ScriptedClient
+from tests.test_lean_soul import lexical_memory  # noqa: F401 (fixture)
 
 
 class Client(ScriptedClient):
@@ -361,19 +362,38 @@ def test_loop_returns_previous_effect_as_refusal_without_running_it(env):
     assert any("already completed" in str(m.get("content", "")) for m in client.calls[-1] if m["role"] == "tool")
 
 
-def test_specialist_memory_save_cannot_overwrite_account_memory(env):
-    _, roster, _ = env
-    captured = []
-    class Memory:
-        _records = {}
-        def add_memory_item(self, *args, **kwargs):
-            captured.append(kwargs)
-            return ""
-    session = runtime.LeanSession(agent=SimpleNamespace(memory=Memory()), session_id="scoped", request_id="scoped",
-        emit=lambda _: None, cancel=threading.Event(), source="web")
-    tool = next(t for t in session._native_tools(roster.get("scout"), 0) if t.name == "memory_save")
-    tool.func({"fact": "The project uses Python.", "key": "language"})
-    assert captured[0]["scope"] == "session" and captured[0]["semantic_key"] == "agent:scout:language"
+def test_specialist_memory_save_cannot_overwrite_account_memory(env, lexical_memory, monkeypatch):
+    store, _, _ = env
+    account_id = lexical_memory.add_memory_item("The project language is Rust.", semantic_key="project_language")
+    initial = lexical_memory._records_path.read_bytes()
+    fact = "The project language is Python."
+    args = json.dumps({"fact": fact, "key": "project_language"})
+
+    def ask(prompt):
+        models = install_clients(monkeypatch, {"scout": [
+            ModelTurn(tool_calls=[ToolCall("save", "memory_save", args)]),
+            ModelTurn(content="Understood."),
+        ]})
+        session = runtime.LeanSession(agent=SimpleNamespace(memory=lexical_memory), session_id="scoped",
+            request_id="", emit=lambda _: None, cancel=threading.Event(), source="web")
+        result = session.run(prompt, persona_id="scout")
+        assert result["success"]
+        return result, {tool["function"]["name"] for tool in models["scout"].tools[0]}
+
+    _, offered = ask(f"{fact} Do not save this.")
+    assert "memory_save" not in offered
+    assert lexical_memory._records_path.read_bytes() == initial
+
+    result, offered = ask(f"Remember: {fact}")
+    assert "memory_save" in offered
+    records = json.loads(lexical_memory._records_path.read_text())["records"]
+    assert records[account_id] == json.loads(initial)["records"][account_id]
+    saved, = [row for key, row in records.items() if key != account_id]
+    assert saved["scope"] == "session" and saved["semantic_key"] == "agent:scout:project_language"
+    assert saved["text"] == fact and saved["source_session_id"] == "scoped"
+    assert saved["source_execution_id"] == result["execution_id"]
+    assert any(item.id == saved["source_item_id"] and item.item_type == "user_message"
+               for item in store.list_items(result["execution_id"]))
 
 
 def test_chat_question_creates_no_work_but_a_real_write_does(env, monkeypatch):
