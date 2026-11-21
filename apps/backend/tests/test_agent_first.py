@@ -82,13 +82,18 @@ def _echo_turn(env, monkeypatch, message: str, *, project: bool):
 ])
 def test_release_access_reply_only_defers_to_a_github_connection(env, monkeypatch, tool, reports_failure_directly):
     from agent.tool_registry import ToolEntry, ToolRegistry
+    from agent.tools import TOOL_METADATA, get_available_tools
 
+    # _echo_turn builds the toolbox directly, outside the startup path that loads built-in tools.
+    monkeypatch.setattr(ToolRegistry, "_entries", {})
+    ToolRegistry.register_from_metadata(get_available_tools(), TOOL_METADATA)
     monkeypatch.setitem(ToolRegistry._entries, tool, ToolEntry(
         name=tool, func=lambda **_: "fixture", description="Fixture connector tool", origin="mcp",
         mcp_server=tool.split("__")[1], is_action=tool.endswith("create_release"),
     ))
     _, turn = _echo_turn(env, monkeypatch, "What is the latest EchoSpeak release?", project=False)
     assert tool in turn.toolbox.names
+    assert turn.prefetch()[0][1]["url"] == chat_run.SELF_RELEASES
     assert (turn.prefetch_reply is not None) == reports_failure_directly
 
 

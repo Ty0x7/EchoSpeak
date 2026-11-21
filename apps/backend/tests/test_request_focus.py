@@ -71,15 +71,21 @@ def test_suggest_is_strong_matches_only_and_at_most_two():
 def test_a_builder_asked_to_remember_something_is_offered_memory_save(monkeypatch):
     """Evaluation MI1 (19 November): the builder (forge) had memory_save deferred and agent_notes listed, so
     "Remember that my build cache key is …" replaced its private project notes with the fact (2 of 2 trials)."""
+    from agent.lean.provider import ModelTurn
+    from tests.test_lean_runtime import ScriptedClient
+
     monkeypatch.setattr(runtime.LeanSession, "_recall", lambda *a, **k: [])
+    monkeypatch.setattr(runtime.LeanSession, "_small_builder", lambda *args: True)
     monkeypatch.setattr(runtime.LeanSession, "_endpoint_for", lambda *a, **k: Endpoint(
         provider="ollama", model="qwen3.5:9b", base_url="http://127.0.0.1:1", api_key="", local=True))
 
     def sent(message: str) -> set[str]:
+        client = ScriptedClient([ModelTurn(content="Understood.")] * 2)
+        monkeypatch.setattr(runtime.LeanSession, "_client_for", lambda *args, **kwargs: client)
         session = runtime.LeanSession(agent=SimpleNamespace(memory=SimpleNamespace()), session_id="focus-remember",
                                       request_id="r", emit=lambda _: None, cancel=threading.Event(), source="web")
-        box = session._build_turn(get_persona_store().get("forge"), message, history=[], depth=0).toolbox
-        return {s["function"]["name"] for s in box.schemas()}
+        assert session.run(message, persona_id=get_persona_store().get("forge").id)["success"]
+        return {tool["function"]["name"] for tool in client.tools[0]}
 
     assert "memory_save" in sent("Remember that my build cache key is zebra-164.")
     assert "memory_save" in sent("Please remember: the staging host is vega-12")

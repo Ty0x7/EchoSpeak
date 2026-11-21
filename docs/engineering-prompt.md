@@ -30,6 +30,8 @@ GitHub holds the task, patch and shareable evidence. Obsidian holds the local ti
 
 For a controller-assisted effort, use a scoped checkout with the backend environment ready. Use the session directory returned by the controller for review or stop. New runs use `run --issue NUMBER` and explicit bounds. Resume an approved pending fix with `run --resume --session PATH`. Read [the controller operating guide](research/agentic-evaluation.md#11-operating-the-system) for the commands and [the workspace audit](research/workspace-governance.md#follow-up-evidence-inventory) for existing evidence to reuse.
 
+When an existing regression goes red, record the exact failing test ID and reproduce the behavior through the normal entry point. If a fixture skipped registration or current-message authorization, repair the setup and retain the original behavior checks. Record fixture maintenance separately from product fixes and model scores. A bounded model cycle can reach its target while still reporting advisory checks. Preserve those diagnostics with the cycle evidence.
+
 ## Thirteen engineering loops
 
 | Loop | When and how to use it |
