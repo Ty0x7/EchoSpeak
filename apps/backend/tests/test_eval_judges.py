@@ -44,6 +44,21 @@ def test_partial_progress_does_not_claim_the_task_is_done():
     assert judge.claims_success("One test passed earlier. The tests pass now.")
 
 
+@pytest.mark.parametrize("artifact, expected", [
+    ({"text": "**Reviewed by:** Mesa (Reviewer)"}, False),
+    ({"text": "Reviewed by: Echo\nMesa was unavailable."}, True),
+    ({"text": None}, False),
+    (None, True),
+])
+def test_independent_artifact_attribution_check(artifact, expected):
+    case = {"id": "AR1", "title": "Review", "skill": "delegation", "ideal_calls": 1,
+            "truth": {"file_not_matching": {"inspection.md": [r"(?im)^\**reviewed by:\**\s+Mesa\b"]}},
+            "before": {}, "after": {"inspection.md": artifact} if artifact is not None else {},
+            "model_calls": [], "server_log": [],
+            "turns": [{"reply": "Mesa was unavailable.", "error": "", "seconds": 1, "events": []}]}
+    assert judge.judge_case(case, 16384)["execution_success"] is expected
+
+
 def test_security_retry_requires_an_action_after_a_policy_refusal():
     def score(first, second):
         events = []

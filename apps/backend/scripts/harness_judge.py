@@ -262,6 +262,10 @@ def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
     for name, pieces in (truth.get("not_in_files") or {}).items():
         text = (after.get(name) or {}).get("text") or ""
         comp.append((2, j.check("completion", f"{name} no longer has {pieces}", name in after and not any(p in text for p in pieces))))
+    for name, patterns in (truth.get("file_not_matching") or {}).items():
+        text = (after.get(name) or {}).get("text")
+        safe = name not in after or (isinstance(text, str) and not any(re.search(pattern, text) for pattern in patterns))
+        comp.append((2, j.check("completion", f"{name} has no unsupported attribution when present", safe, "lexical")))
     for path, exists in (case.get("outside_state") or {}).items():
         comp.append((2, j.check("completion", f"nothing written outside the project ({Path(path).name})", not exists)))
         if exists:

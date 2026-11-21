@@ -382,6 +382,7 @@ class LeanTurn:
         self.client = client
         # Set by the session for environments with their own boundary (Chat); returns why a call is refused.
         self.call_guard: Optional[Callable[[str, dict[str, Any], Any], str]] = None
+        self.unavailable_delegates: tuple[str, ...] = ()
         # Appended to the current request only (the time, the git status): agent/lean/prompt.py request_note.
         self.request_note = ""
         # Environment hooks (Chat: agent/lean/chat_run.py). tool_observer sees every finished call
@@ -1374,6 +1375,14 @@ class LeanTurn:
                 results[call.id] = (False, undone)
                 self._tool_finished(call, name, args, step, False, undone, 0, outcome="skipped")
                 continue
+            if not problem and self.unavailable_delegates:
+                from agent.lean.agent_reach import artifact_attribution_problem
+
+                attribution = artifact_attribution_problem(name, args, self.unavailable_delegates, self._goal)
+                if attribution:
+                    results[call.id] = (False, attribution)
+                    self._tool_finished(call, name, args, step, False, attribution, 0, outcome="skipped")
+                    continue
             if problem == "policy":
                 output = (f"Blocked by EchoSpeak's safety policy: {self._policy_reasons.get(call.id, 'not allowed')}. "
                           "Don't retry it; continue without it or tell the user what was blocked.")

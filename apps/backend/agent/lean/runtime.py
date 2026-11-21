@@ -1457,6 +1457,7 @@ class LeanSession:
             unavailable = unavailable_delegation(message, self.personas.list(), persona.id,
                                                  pool if "delegate_to_agent" in toolbox.names else [])
             if unavailable:
+                turn.unavailable_delegates = unavailable
                 names = ", ".join(unavailable)
                 correction = (f"No handoff to {names} is available here. State who actually performed any action "
                               "in this turn, using its tool results.")

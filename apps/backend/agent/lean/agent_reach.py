@@ -106,6 +106,46 @@ def correct_delegation_attribution(reply: str, unavailable: tuple[str, ...]) -> 
     return "".join(parts)
 
 
+_REVIEW_LABEL = r"(?:reviewed|approved|signed off)[ \t]+by"
+_BYLINE_SEPARATOR = r"(?:[ \t]*:[ \t]*|[ \t]+)"
+_REVIEW_BYLINE = re.compile(
+    rf"(?im)^[ \t]*(?:(?:[-*+]|\d{{1,9}}[.)])[ \t]+)?({_REVIEW_LABEL}){_BYLINE_SEPARATOR}(.+)$"
+)
+
+
+def artifact_attribution_problem(tool: str, args: dict[str, Any], unavailable: tuple[str, ...], request: str) -> str:
+    """Require a correction to a newly generated reviewer field for an unavailable delegate."""
+    if tool == "file_edit":
+        edits = [(args.get("old_text", ""), args.get("new_text", ""))]
+    elif tool == "update_artifact" and not args.get("content"):
+        rows = args.get("edits")
+        if not isinstance(rows, list):
+            return ""
+        edits = [(row.get("find", ""), row.get("replace", "")) for row in rows if isinstance(row, dict)]
+    elif tool in {"file_write", "create_artifact", "update_artifact"}:
+        edits = [("", args.get("content", ""))]
+    else:
+        return ""
+
+    def plain(value: Any) -> str:
+        return str(value or "").replace("**", "").replace("`", "")
+
+    owner_text = plain(request)
+    for old, new in edits:
+        existing = owner_text + "\n" + plain(old)
+        for label, value in _REVIEW_BYLINE.findall(plain(new)):
+            for name in unavailable:
+                target = rf"@?{re.escape(name)}(?=$|[\s(.,;])"
+                if not re.match(target, value, re.I):
+                    continue
+                supplied = rf"\b{re.escape(label)}{_BYLINE_SEPARATOR}{target}"
+                if not re.search(supplied, existing, re.I):
+                    return (f"Draft was not saved because it names {name} as the reviewer or approver, and no handoff "
+                            "to that agent was available in this turn. Use a reviewer supported by the tool results "
+                            "or omit that field, then submit the corrected draft.")
+    return ""
+
+
 def message_text(sender: str, text: str) -> str:
     """The note as it appears in the recipient's conversation: who sent it, and that the owner asked for it."""
     from agent.lean import policy

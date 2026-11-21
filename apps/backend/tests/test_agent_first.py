@@ -430,6 +430,67 @@ def test_unavailable_agent_can_be_discussed_honestly(env, monkeypatch, reply):
     assert len(client.calls) == 1
 
 
+@pytest.mark.parametrize("byline", [
+    "**Reviewed by:** Mesa (Reviewer)",
+    "1. **Reviewed by:** Mesa (Reviewer)",
+])
+def test_an_unavailable_reviewer_cannot_be_added_to_a_generated_signoff(env, monkeypatch, byline):
+    env.people.create({"name": "Mesa"})
+    path = env.folder / "inspection.md"
+    path.write_text("Review pending\n")
+    message = "Ask Mesa to review the report and update inspection.md with their decision."
+    _, turn = _echo_turn(env, monkeypatch, message, project=True)
+    events = []
+    turn.emit = events.append
+    turn.client = ScriptedClient([
+        ModelTurn(tool_calls=[_call("file_edit", {"path": str(path), "old_text": "Review pending",
+                                                 "new_text": byline}, "false-credit")]),
+        ModelTurn(tool_calls=[_call("file_edit", {"path": str(path), "old_text": "Review pending",
+                                                 "new_text": "Mesa was unavailable for review."}, "corrected")]),
+        ModelTurn(content="I updated `inspection.md` to record the unavailable review."),
+    ])
+    turn.run(message)
+
+    calls = {e["id"]: e for e in events if e["type"] == "tool_end"}
+    assert calls["false-credit"]["outcome"] == "skipped"
+    assert calls["corrected"]["outcome"] == "ok"
+    assert path.read_text() == "Mesa was unavailable for review.\n"
+
+
+@pytest.mark.parametrize("byline_in_request", [True, False])
+def test_a_supplied_or_existing_reviewer_byline_is_preserved(env, monkeypatch, byline_in_request):
+    env.people.create({"name": "Mesa"})
+    path = env.folder / "inspection.md"
+    byline = "Reviewed by: Mesa"
+    old = "Inspection pending" if byline_in_request else f"{byline}\nInspection pending"
+    path.write_text(old + "\n")
+    message = "Ask Mesa to review the report and update inspection.md."
+    if byline_in_request:
+        message += f" Keep this supplied historical byline: `{byline}`."
+    _, turn = _echo_turn(env, monkeypatch, message, project=True)
+    turn.client = ScriptedClient([
+        ModelTurn(tool_calls=[_call("file_edit", {"path": str(path), "old_text": old,
+                                                 "new_text": f"{byline}\nHistorical record preserved."})]),
+        ModelTurn(content="I updated the report."),
+    ])
+    turn.run(message)
+
+    assert path.read_text() == f"{byline}\nHistorical record preserved.\n"
+
+
+@pytest.mark.parametrize("tool, arguments", [
+    ("file_write", {"content": "**Approved by:** Mesa (Custodian)"}),
+    ("file_write", {"content": "Reviewed by Mesa (Custodian)"}),
+    ("create_artifact", {"content": "- Reviewed by: Mesa"}),
+    ("update_artifact", {"edits": [{"find": "Pending", "replace": "Signed off by: Mesa"}]}),
+])
+def test_reviewer_field_check_covers_the_file_and_artifact_tools(tool, arguments):
+    from agent.lean.agent_reach import artifact_attribution_problem
+
+    assert artifact_attribution_problem(tool, arguments, ("Mesa",), "Ask Mesa to check the report.")
+    assert not artifact_attribution_problem(tool, arguments, (), "Ask Mesa to check the report.")
+
+
 def test_a_guess_made_before_checking_is_not_part_of_the_saved_answer():
     """Audit 25 and 32: "…is today against the San Jose Sharks. Let me verify." stayed in the saved
     answer above "…is Tuesday against the Florida Panthers"."""
