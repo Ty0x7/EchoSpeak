@@ -136,3 +136,9 @@ Also re-run and passing (existing suites for the changed components): `test_web_
   - Use Tavily or Brave `published_date` and `time_range` natively when those providers are configured.
   - More structured adapters: Wikipedia REST, arXiv, Stack Exchange, official changelog feeds.
   - A user-visible "why this source" line from `rank_reason`.
+
+## Disconnected release-history requests
+
+The archived owner audit recorded HTTP 404 from the configured EchoSpeak upstream. A scripted reply could still substitute an unrelated namesake result. Direct release-only requests now fetch the canonical release page. In a disconnected turn, an observed HTTP 401, 403 or 404 produces an evidence-based access result and reports the running version separately. Successful upstream fetches and connected-app turns retain the existing model and permission paths.
+
+Three failing-first access cases and two controls exercised successful source retrieval and offline installed-version questions. The targeted suite passed 200 tests with four skips. An isolated local Qwen run at `d591d62` answered the installed version with the local `system_info` tool. The separate upstream question used only the configured release fetch, received HTTP 404, and reported that the remote releases were unverified. Authenticated operator access confirmed that the upstream is private. An authorized in-app retrieval for private release records still needs a connected configuration for independent verification under #137.
