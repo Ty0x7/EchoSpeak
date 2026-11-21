@@ -114,7 +114,7 @@ _REVIEW_BYLINE = re.compile(
 
 
 def artifact_attribution_problem(tool: str, args: dict[str, Any], unavailable: tuple[str, ...], request: str) -> str:
-    """Require a correction to a newly generated reviewer field for an unavailable delegate."""
+    """Require a correction to a newly generated reviewer field without a supporting handoff."""
     if tool == "file_edit":
         edits = [(args.get("old_text", ""), args.get("new_text", ""))]
     elif tool == "update_artifact" and not args.get("content"):
@@ -140,8 +140,8 @@ def artifact_attribution_problem(tool: str, args: dict[str, Any], unavailable: t
                     continue
                 supplied = rf"\b{re.escape(label)}{_BYLINE_SEPARATOR}{target}"
                 if not re.search(supplied, existing, re.I):
-                    return (f"Draft was not saved because it names {name} as the reviewer or approver, and no handoff "
-                            "to that agent was available in this turn. Use a reviewer supported by the tool results "
+                    return (f"Draft was not saved because it names {name} as the reviewer or approver, and the handoff "
+                            "results do not support that credit. Use a reviewer supported by the tool results "
                             "or omit that field, then submit the corrected draft.")
     return ""
 

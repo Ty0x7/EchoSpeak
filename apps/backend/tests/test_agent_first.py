@@ -478,6 +478,45 @@ def test_a_supplied_or_existing_reviewer_byline_is_preserved(env, monkeypatch, b
     assert path.read_text() == f"{byline}\nHistorical record preserved.\n"
 
 
+@pytest.mark.parametrize("handoff", ["failed", "promise-only", "completed", "retried", "retry-incomplete"])
+def test_reviewer_byline_requires_a_successful_handoff_when_the_reviewer_was_available(env, monkeypatch, handoff):
+    import agent.projects
+    from agent.lean.loop import TurnResult
+
+    echo, _, reviewer = _people(env)
+    agent.projects.get_project_manager().update_project(_IDS["work"], agent_ids=[echo.id, reviewer.id])
+    path = env.folder / "inspection.md"
+    path.write_text("Review pending\n")
+    request = f"Ask {reviewer.name} to review the report and record the result in inspection.md."
+    session, turn = _echo_turn(env, monkeypatch, request, project=True)
+    failed = TurnResult("I could not finish the checklist.", False, "fixture-review", reviewer.id,
+                        error="The review stopped before completion.")
+    finished = TurnResult("Checklist reviewed.", True, "fixture-review", reviewer.id, completed="Checklist reviewed.")
+    promised = TurnResult("I will review it.", True, "fixture-review", reviewer.id, stop_reason="promise_unfulfilled")
+    incomplete = TurnResult("I tried again and still have no review result.", True, "fixture-review", reviewer.id)
+    results = iter({"failed": [failed], "promise-only": [promised],
+                    "completed": [finished], "retried": [failed, finished],
+                    "retry-incomplete": [failed, incomplete]}[handoff])
+    monkeypatch.setattr(session, "_run_agent", lambda *_args, **_kwargs: next(results))
+    events = []
+    turn.emit = events.append
+    turn.client = ScriptedClient([
+        ModelTurn(tool_calls=[_call("delegate_to_agent", {"agent": reviewer.name, "task": "Review the report."}, "handoff")]),
+        *([ModelTurn(tool_calls=[_call("delegate_to_agent", {"agent": reviewer.name, "task": "Resume the review."},
+                                      "retry-handoff")])] if handoff in {"retried", "retry-incomplete"} else []),
+        ModelTurn(tool_calls=[_call("file_edit", {"path": str(path), "old_text": "Review pending",
+                                                 "new_text": f"Reviewed by: {reviewer.name}"}, "false-credit")]),
+        ModelTurn(content="I checked the review result."),
+    ])
+    assert "delegate_to_agent" in turn.toolbox.names
+    turn.run(request)
+
+    draft = next(event for event in events if event["type"] == "tool_end" and event["id"] == "false-credit")
+    completed = handoff in {"completed", "retried"}
+    assert draft["outcome"] == ("ok" if completed else "skipped")
+    assert path.read_text() == (f"Reviewed by: {reviewer.name}\n" if completed else "Review pending\n")
+
+
 @pytest.mark.parametrize("tool, arguments", [
     ("file_write", {"content": "**Approved by:** Mesa (Custodian)"}),
     ("file_write", {"content": "Reviewed by Mesa (Custodian)"}),

@@ -1952,7 +1952,7 @@ class LeanSession:
                                     "Finish the work yourself with what you have.")
                     return f"Handed to {target.name}. Their reply is below."
 
-                def delegate(args: dict[str, Any]) -> str:
+                def delegate(args: dict[str, Any]) -> str | ToolResult:
                     problem = check(args)
                     if problem.startswith("Error"):
                         return problem
@@ -2004,15 +2004,18 @@ class LeanSession:
                             # the completion check still verifies it against the request.
                             self.job.close_subtask(subtask, done=True, summary=_first_sentence(result.text))
                     # A structured result, so the caller can tell "done" from "said they would".
-                    if result.completed:
-                        return f"{target.name} finished the task.\nDelivered: {result.completed}\n\n{target.name}'s reply:\n{result.text}"
                     if not result.success:
-                        return f"{target.name} could not do the task ({result.error[:200]}).\n{result.text}"
+                        return ToolResult(False, f"{target.name} could not do the task ({result.error[:200]}).\n{result.text}",
+                                          0, meta={"delegate_failed": target.name})
+                    if result.completed:
+                        return ToolResult(True, f"{target.name} finished the task.\nDelivered: {result.completed}\n\n"
+                                          f"{target.name}'s reply:\n{result.text}", 0,
+                                          meta={"delegate_completed": target.name})
                     if promised_only:
-                        return (
+                        return ToolResult(False, (
                             f"{target.name} said they would do it but did NOT do anything:\n{result.text}\n\n"
                             "The task is still open. Do it yourself, or tell the user what is blocking it."
-                        )
+                        ), 0, meta={"delegate_failed": target.name})
                     return f"{target.name} replied:\n{result.text}"
 
                 tools.append(NativeTool(

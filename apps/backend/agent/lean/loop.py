@@ -383,6 +383,7 @@ class LeanTurn:
         # Set by the session for environments with their own boundary (Chat); returns why a call is refused.
         self.call_guard: Optional[Callable[[str, dict[str, Any], Any], str]] = None
         self.unavailable_delegates: tuple[str, ...] = ()
+        self.failed_delegates: set[str] = set()
         # Appended to the current request only (the time, the git status): agent/lean/prompt.py request_note.
         self.request_note = ""
         # Environment hooks (Chat: agent/lean/chat_run.py). tool_observer sees every finished call
@@ -1375,10 +1376,11 @@ class LeanTurn:
                 results[call.id] = (False, undone)
                 self._tool_finished(call, name, args, step, False, undone, 0, outcome="skipped")
                 continue
-            if not problem and self.unavailable_delegates:
+            if not problem and (self.unavailable_delegates or self.failed_delegates):
                 from agent.lean.agent_reach import artifact_attribution_problem
 
-                attribution = artifact_attribution_problem(name, args, self.unavailable_delegates, self._goal)
+                unsupported = (*self.unavailable_delegates, *sorted(self.failed_delegates))
+                attribution = artifact_attribution_problem(name, args, unsupported, self._goal)
                 if attribution:
                     results[call.id] = (False, attribution)
                     self._tool_finished(call, name, args, step, False, attribution, 0, outcome="skipped")
@@ -1426,6 +1428,10 @@ class LeanTurn:
                 self._tool_finished(call, name, args, step, True, note, 0)
                 self._seal_for_handoff(step)
                 result = self._run_tool(call, name, args, step)
+                if failed := result.meta.get("delegate_failed"):
+                    self.failed_delegates.add(failed)
+                if completed := result.meta.get("delegate_completed"):
+                    self.failed_delegates.discard(completed)
                 results[call.id] = (result.ok, result.output)
                 # Open the continuation only now, so it sorts after the teammate's reply.
                 self._start_message(continues=True, **self.meta)
