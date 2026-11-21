@@ -10,42 +10,44 @@ import json
 from types import SimpleNamespace
 
 from agent.lean.toolbox import Toolbox
+from agent.tool_registry import ToolEntry, ToolRegistry
 
 
 # ── C1 ──────────────────────────────────────────────────────────────────────────────────────────
-def _mcp_box(result: str) -> Toolbox:
-    box = Toolbox(toolsets=["none"], session_id="t")
-    box.entries["mcp__shop__create_order"] = SimpleNamespace(origin="mcp", func=lambda: result)
-    return box
+def _mcp_box(result: str, monkeypatch) -> Toolbox:
+    name = "mcp__shop__create_order"
+    entry = ToolEntry(name=name, func=lambda: result, description="Mock order tool", origin="mcp")
+    monkeypatch.setitem(ToolRegistry._entries, name, entry)
+    return Toolbox(toolsets=[name], session_id="t")
 
 
-def test_c1_an_mcp_call_lost_in_transit_is_a_failure_with_unknown_effect():
+def test_c1_an_mcp_call_lost_in_transit_is_a_failure_with_unknown_effect(monkeypatch):
     """agent/mcp_client.py returns this string when the call raised (timeout, lost connection): the server may
     have acted. It used to come back ok=True, so the work ledger recorded the action as completed."""
     lost = json.dumps({"isError": True, "error": {"code": "mcp_tool_error", "message": "Timed out after 15s", "retryable": True}})
-    result = _mcp_box(lost).run("mcp__shop__create_order", {})
+    result = _mcp_box(lost, monkeypatch).run("mcp__shop__create_order", {})
     assert not result.ok
     assert result.uncertain  # unsafe to repeat automatically: reconciled, never "completed"
     assert "Timed out" in result.output  # the model still sees why
 
 
-def test_c1_an_unavailable_mcp_server_is_a_plain_failure():
+def test_c1_an_unavailable_mcp_server_is_a_plain_failure(monkeypatch):
     """Nothing was sent, so the effect is known: none."""
     down = json.dumps({"isError": True, "error": {"code": "mcp_server_unavailable", "retryable": True}})
-    result = _mcp_box(down).run("mcp__shop__create_order", {})
+    result = _mcp_box(down, monkeypatch).run("mcp__shop__create_order", {})
     assert not result.ok and not result.uncertain
 
 
-def test_c1_a_tool_error_reported_by_the_server_as_text_is_a_failure():
+def test_c1_a_tool_error_reported_by_the_server_as_text_is_a_failure(monkeypatch):
     """A normal MCP result with isError: true, delivered as JSON text, is the tool saying it failed."""
     reported = json.dumps({"content": [{"type": "text", "text": "Order rejected: out of stock"}], "isError": True})
-    result = _mcp_box(reported).run("mcp__shop__create_order", {})
+    result = _mcp_box(reported, monkeypatch).run("mcp__shop__create_order", {})
     assert not result.ok and not result.uncertain and "out of stock" in result.output
 
 
-def test_c1_a_successful_mcp_result_stays_a_success():
+def test_c1_a_successful_mcp_result_stays_a_success(monkeypatch):
     done = json.dumps({"content": [{"type": "text", "text": "Order 42 created"}]})
-    result = _mcp_box(done).run("mcp__shop__create_order", {})
+    result = _mcp_box(done, monkeypatch).run("mcp__shop__create_order", {})
     assert result.ok and not result.uncertain
 
 

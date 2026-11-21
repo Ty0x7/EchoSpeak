@@ -1,0 +1,5 @@
+name = "EchoSpeakFormal"
+defaultTargets = ["MemoryVisibility"]
+
+[[lean_lib]]
+name = "MemoryVisibility"
