@@ -383,6 +383,7 @@ class LeanTurn:
         # Set by the session for environments with their own boundary (Chat); returns why a call is refused.
         self.call_guard: Optional[Callable[[str, dict[str, Any], Any], str]] = None
         self.unavailable_delegates: tuple[str, ...] = ()
+        self.failed_delegates: dict[str, set[str]] = {}
         # Appended to the current request only (the time, the git status): agent/lean/prompt.py request_note.
         self.request_note = ""
         # Environment hooks (Chat: agent/lean/chat_run.py). tool_observer sees every finished call
@@ -1376,10 +1377,11 @@ class LeanTurn:
                 results[call.id] = (False, undone)
                 self._tool_finished(call, name, args, step, False, undone, 0, outcome="skipped")
                 continue
-            if not problem and self.unavailable_delegates:
+            if not problem and (self.unavailable_delegates or self.failed_delegates):
                 from agent.lean.agent_reach import artifact_attribution_problem
 
-                attribution = artifact_attribution_problem(name, args, self.unavailable_delegates, self._goal)
+                unsupported = (*self.unavailable_delegates, *sorted(self.failed_delegates))
+                attribution = artifact_attribution_problem(name, args, unsupported, self._goal)
                 if attribution:
                     results[call.id] = (False, attribution)
                     self._tool_finished(call, name, args, step, False, attribution, 0, outcome="skipped")
@@ -1427,6 +1429,7 @@ class LeanTurn:
                 self._tool_finished(call, name, args, step, True, note, 0)
                 self._seal_for_handoff(step)
                 result = self._run_tool(call, name, args, step)
+                self._record_delegate_outcome(args, result.meta)
                 results[call.id] = (result.ok, result.output)
                 # Open the continuation only now, so it sorts after the teammate's reply.
                 self._start_message(continues=True, **self.meta)
@@ -2143,6 +2146,24 @@ class LeanTurn:
             return False, "The user stopped this request."
         return False, ("The user didn't answer. Don't ask again right away: go ahead with the safest option, "
                        "or end your reply saying what you need from them.")
+
+    def _record_delegate_outcome(self, args: dict[str, Any], meta: dict[str, Any]) -> None:
+        failed = meta.get("delegate_failed")
+        name = failed or meta.get("delegate_completed")
+        if not name:
+            return
+        task = str(args.get("task") or "").strip()
+        pending = self.failed_delegates.get(name)
+        if pending and len(pending) == 1 and re.fullmatch(r"(?:retry|resume)(?: the)? review[.!]?", task, re.I):
+            original = next(iter(pending))
+            if re.search(r"\breview\b", original, re.I):
+                task = original
+        if failed:
+            self.failed_delegates.setdefault(name, set()).add(task)
+        elif pending:
+            pending.discard(task)
+            if not pending:
+                del self.failed_delegates[name]
 
     def _run_tool(self, call: Any, name: str, args: dict[str, Any], step: int):
         """Run one tool with a live progress line: what it reports shows under its row (agent/lean/progress.py)."""
