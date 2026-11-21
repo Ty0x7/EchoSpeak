@@ -66,6 +66,12 @@ For a controller-assisted effort, use a scoped checkout with the backend environ
 
 ## Model evaluations and handoff
 
+### Formal proof obligations
+
+Architecture and security review choose a concrete invariant, its production boundary, and which state transitions it covers. For changes to canonical memory visibility, run the normal Python regressions and `tools/formal/check.py` using the pinned local Lean 4 toolchain. The controller runs this additional gate after the Python checks for changes to `agent/memory.py`. Missing tooling or an incomplete proof blocks that obligation.
+
+The gate checks the named statements, audits allowed axioms, replays the compiled proof through the kernel, and compares the production predicate with Lean-generated decisions. Record the theorem, assumptions, a negative control, and the separate runtime results. Use the existing V0–V4 ladder for the complete application claim. [Formal verification and the optional proof tool](research/formal-verification.md)
+
 Reuse the native harness, execution loop, permissions, sandbox, delegation, skills, memory and provider integrations. Start with existing regression tests, conversation evidence and architecture reviews. A change to the architecture or prompt needs a demonstrated cause and a measurable improvement.
 
 For a model evaluation, use Qwen 3.5 9B (`qwen3.5:9b`) as the reference unless the owner specifies otherwise. Use the existing campaign runner, model recorder and independent judge. Weight completion **30%**, tool execution **25%**, efficiency **20%**, recovery **15%** and security **10%**. Report failures, security findings and regressions alongside the score. Choose cases that exercise the behavior being changed. See the [model-harness-testing skill](../.agents/skills/model-harness-testing/SKILL.md).

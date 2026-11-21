@@ -244,7 +244,7 @@ def uncertain_after(exc: BaseException) -> bool:
 
 
 # MCP errors agent/mcp_client.py reports before anything reached the server: nothing ran.
-_MCP_NOT_SENT = {"mcp_server_unavailable", "invalid_mcp_tool_name"}
+_MCP_NOT_SENT = {"mcp_server_unavailable", "invalid_mcp_tool_name", "mcp_scope_denied"}
 
 
 def _mcp_outcome(raw: Any, output: str) -> tuple[bool, bool, str]:
@@ -420,6 +420,8 @@ class Toolbox:
             entry = ToolRegistry.get(name)
             if entry is None or not getattr(entry, "available", True):
                 continue
+            if not self._entry_in_scope(name, entry):
+                continue
             if any(not _flag_enabled(flag) for flag in getattr(entry, "policy_flags", ()) or ()):
                 continue
             self.entries[name] = entry
@@ -450,6 +452,19 @@ class Toolbox:
             listing = ", ".join(f"{group} ({count})" for group, count in sorted(groups.items()))
             self.notes.append(f"{len(external)} tools from connected apps load on demand: {listing}. "
                               "Call find_tools with what you need before using one.")
+
+    def _entry_in_scope(self, name: str, entry: Any) -> bool:
+        from agent.tool_registry import ToolRegistry
+
+        if getattr(entry, "origin", None) in {"mcp", "connection"} and ToolRegistry.get(name) is not entry:
+            return False
+        if not (getattr(entry, "project_ids", ()) or getattr(entry, "session_ids", ())):
+            return True
+        from agent.state import get_state_store
+
+        state = get_state_store().get_thread_state(self.session_id)
+        return ToolRegistry.available_in_scope(name, project_id=state.active_project_id or "",
+                                              session_id=self.session_id)
 
     def _offer_find_tools(self) -> None:
         if "find_tools" in self.native:
@@ -1030,7 +1045,7 @@ class Toolbox:
         """Run a registry tool (agent/tools.py) with this toolbox's context."""
         started = time.perf_counter()
         entry = self.entries.get(name)
-        if entry is None:
+        if entry is None or not self._entry_in_scope(name, entry):
             return self._unavailable(name)
 
         from agent.tools import _tool_execution_context, strip_echo_file_wrapper

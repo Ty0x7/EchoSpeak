@@ -775,6 +775,8 @@ class MCPManager:
         raw_name = str(definition.get("name") or "").strip()
         if not raw_name:
             return
+        if not session.state.allow_global and not session.state.project_ids:
+            return  # An explicitly scoped connector needs an actual project grant.
         registered_name = f"mcp__{re_sub_safe(server_name)}__{re_sub_safe(raw_name)}"
         description = str(
             definition.get("description")
@@ -839,6 +841,17 @@ class MCPManager:
         input_schema: dict[str, Any],
     ) -> Any:
         def invoke(**kwargs: Any) -> str:
+            if session.state.project_ids or session.state.session_ids:
+                from agent.state import get_state_store
+                from agent.tool_registry import ToolRegistry
+                from agent.tools import get_tool_execution_context
+
+                context = get_tool_execution_context()
+                thread = str(context.get("session_id") or context.get("thread_id") or "")
+                project = str(get_state_store().get_thread_state(thread).active_project_id or "") if thread else ""
+                if not thread or not ToolRegistry.available_in_scope(registered_name, project_id=project, session_id=thread):
+                    return json.dumps({"isError": True, "error": {"code": "mcp_scope_denied",
+                                       "message": "This MCP capability is outside the current project or session."}})
             if len(kwargs) == 1 and isinstance(kwargs.get("kwargs"), dict):
                 kwargs = kwargs["kwargs"]
             return session.call_tool(

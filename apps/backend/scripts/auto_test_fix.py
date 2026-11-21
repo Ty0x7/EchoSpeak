@@ -637,6 +637,15 @@ def gate(tree: Path, base: str, session: Session, cycle: int, report: dict[str, 
     if not check("full backend suite: no failure the base commit didn't have", not new, ", ".join(new[:8])):
         result["decision"], result["reason"] = "reject", f"new suite failures: {new[:5]}"
         return result
+    if "apps/backend/agent/memory.py" in files:
+        # Proof and conformance are additional checks after the Python test gates.
+        env = _clean_env()
+        env["ECHOSPEAK_LEAN4_ROOT"] = os.environ.get("ECHOSPEAK_LEAN4_ROOT", "")
+        formal = sh([sys.executable, "tools/formal/check.py"], tree, timeout=150, env=env)
+        if not check("canonical memory visibility proof and Python conformance", formal.returncode == 0,
+                     (formal.stderr or formal.stdout)[-600:]):
+            result["decision"], result["reason"] = "halt", "required memory formal check did not pass"
+            return result
     if named:
         result["decision"], result["reason"] = "reject", "model names in code (fix behaviours, not models)"
         return result
