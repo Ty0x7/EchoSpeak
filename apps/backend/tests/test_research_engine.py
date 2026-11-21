@@ -207,6 +207,21 @@ def test_current_installed_echospeak_version_needs_no_remote_lookup(net):
     assert not net.api_calls and not net.page_calls
 
 
+@pytest.mark.parametrize("prompt", [
+    "What is the latest Atlas release compared with EchoSpeak?",
+    "What is the latest release of Atlas mentioned by EchoSpeak?",
+])
+def test_echospeak_release_access_failure_does_not_answer_a_comparison(net, prompt):
+    release = "https://api.github.com/repos/Ty0x7/EchoSpeak/releases?per_page=10"
+    net.api_failures[release] = "HTTP 404"
+    answer = "I need evidence for both products before giving a comparison."
+    script = Script([ModelTurn(content=answer)])
+    turn, run = _chat(script, prompt)
+
+    assert turn.run(prompt).text == answer
+    assert not run.wants_own_releases()
+
+
 def test_explicit_echospeak_release_lookup_uses_successful_canonical_evidence(net):
     source = "https://github.com/Ty0x7/EchoSpeak/releases/tag/v11.10.9"
     prompt = "What is the latest EchoSpeak release?"

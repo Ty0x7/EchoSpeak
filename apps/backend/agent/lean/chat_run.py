@@ -59,8 +59,13 @@ _SELF_UPDATE_REQUEST = re.compile(
     r"check|show(?: me)?|tell me|look up|find|list|summarize|give me)\b"
 )
 _RELEASE_TOPIC = re.compile(r"(?i)\b(?:releases?|changelog)\b")
-_COMBINED_REQUEST = re.compile(r"(?i)[;\r\n]|[.!?]\s+\S|\b(?:and|then)\b")
+_OWN_RELEASE_TOPIC = re.compile(
+    r"(?i)\becho ?speak(?:['’]s)?\s+(?:(?:current|latest|newest|recent|published|last)\s+)*(?:releases?|changelog)\b"
+    r"|\b(?:releases?(?: history| notes)?|changelog)\s+(?:of|for|from|in)\s+echo ?speak\b"
+)
+_COMBINED_REQUEST = re.compile(r"(?i)[;\r\n]|[.!?]\s+\S|\b(?:and|then|compare|compared|comparing|versus|vs)\b")
 _RELEASE_ACCESS_ERROR = re.compile(r"(?m)^safe_fetch_error=http_error:[^\n]*\bHTTP (401|403|404)\b")
+_RELEASE_READER = re.compile(r"(?i)^(?:github_)?(?:get|list|fetch|read|search)[_a-z0-9]*release")
 RELEVANT = 0.34
 SEARCH_TOOLS = {"web_search", "image_search", "video_search", "product_search"}
 PAGE_TOOLS = {"safe_web_fetch", "youtube_transcript"}
@@ -259,8 +264,16 @@ class ChatRun:
             return False
         request = _URL.sub("", self.user_message).strip()
         return bool(_SELF_UPDATE_REQUEST.match(request) and _RELEASE_TOPIC.search(request)
-                    and (_SELF.search(request) or urls) and not _COMBINED_REQUEST.search(request)
+                    and (_OWN_RELEASE_TOPIC.search(request) or urls) and not _COMBINED_REQUEST.search(request)
                     and not re.search(r"(?i)\b(?:pull requests?|prs?)\b", request))
+
+    @staticmethod
+    def github_release_reader(entry: Any) -> bool:
+        name = str(getattr(entry, "name", ""))
+        server = str(getattr(entry, "mcp_server", "")).split(":")[-1] or name.partition("__")[2].partition("__")[0]
+        return bool(getattr(entry, "origin", "") in {"connection", "mcp"} and not getattr(entry, "is_action", False)
+                    and re.search(r"\bgithub\b", server.replace("_", " "), re.I)
+                    and _RELEASE_READER.match(name.rsplit("__", 1)[-1]))
 
     def release_access_reply(self, _timeline: list[dict[str, Any]]) -> Optional[str]:
         """Answer from the failed authoritative fetch when the connection cannot read it."""
