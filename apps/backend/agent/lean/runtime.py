@@ -1205,6 +1205,9 @@ class LeanSession:
         original_names = set(toolbox.names)
         if self._is_discussion():
             original_names.update({"assign_tasks", "complete_task"})
+        if not read_only and "delegate_to_agent" in original_names:
+            # Reserve child bookkeeping in the work grant. A direct lead still has no completion tool.
+            original_names.add("complete_task")
         if read_only:
             # Planning turns: look things up, but nothing that changes state.
             toolbox.restrict_to_read_only()
@@ -1529,7 +1532,13 @@ class LeanSession:
             if ledger.resumed and ledger.active():
                 turn.system_prompt += "\n\n" + verification.resume_brief(ledger)
         turn.work_context = work_context
-        turn.ensure_work = lambda: self._ensure_work(persona, tools=list(toolbox.names))
+        def ensure_work():
+            names = set(toolbox.names)
+            if "delegate_to_agent" in names:
+                names.add("complete_task")
+            return self._ensure_work(persona, tools=list(names))
+
+        turn.ensure_work = ensure_work
         if work_context:
             from agent.coordination_service import notes_scope
             project = str(work_context.coordinator.get(work_context.work_id, principal=work_context.principal).get("project_id") or "")
@@ -1988,9 +1997,12 @@ class LeanSession:
                     previous_active, self._active_subtask = self._active_subtask, subtask
                     parent_work = current_work() or self._ensure_work(persona)
                     owner = parent_work.coordinator.get(parent_work.work_id, principal=parent_work.principal)
+                    child_tools = set(parent_work.tools if parent_work.tools is not None else owner["tools"])
+                    if "complete_task" in owner["tools"]:
+                        child_tools.add("complete_task")
                     child = parent_work.coordinator.create(objective=task, agent_id=target.id, principal=parent_work.principal,
                         parent_id=parent_work.work_id, session_id=self.session_id, project_id=owner.get("project_id", ""),
-                        tools=list(parent_work.tools) if parent_work.tools is not None else owner["tools"],
+                        tools=list(child_tools),
                         key=f"help:{parent_work.work_id}:{target.id}:{task}", taint=self._taint)
                     if child["status"] == "completed":
                         return f"{target.name} already returned this bounded task (untrusted report):\n{child['result']}"
@@ -2009,18 +2021,20 @@ class LeanSession:
                         raise
                     finally:
                         self._active_subtask = previous_active
-                    promised_only = result.stop_reason == "promise_unfulfilled" or not result.text.strip()
+                    promised_only = result.stop_reason == "promise_unfulfilled" or (result.success and not result.text.strip())
+                    failed = not result.success and not promised_only
                     if subtask is not None:
                         if result.completed:
                             self.job.close_subtask(subtask, done=True, summary=result.completed)
-                        elif not result.success:
+                        elif not result.success and not (promised_only and self._is_group()):
+                            # Leave promised-only group work open so the orchestrator can send it back.
                             self.job.close_subtask(subtask, done=False, summary=result.error)
                         elif not promised_only:
                             # A real answer without complete_task: answered. In a group,
                             # the completion check still verifies it against the request.
                             self.job.close_subtask(subtask, done=True, summary=_first_sentence(result.text))
                     # A structured result, so the caller can tell "done" from "said they would".
-                    if not result.success:
+                    if failed:
                         return ToolResult(False, f"{target.name} could not do the task ({result.error[:200]}).\n{result.text}",
                                           0, meta={"delegate_failed": target.name})
                     if result.completed:
