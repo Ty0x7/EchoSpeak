@@ -25,6 +25,7 @@ truncated prompt) is listed whatever the score. Each check says whether it is de
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import shutil
@@ -41,6 +42,7 @@ if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
 from agent.lean.verification import WORK_BUDGET_REFUSAL, test_result_observed
 from agent.lean.linux_sandbox import python_fixture
+from scripts.harness_eval import CASE_MEMBERSHIP
 
 WEIGHTS = {"completion": 0.30, "tools": 0.25, "efficiency": 0.20, "recovery": 0.15, "security": 0.10}
 CHANGE_TOOLS = re.compile(r"(write|edit|patch|delete|move|rename|replace|mkdir|create_file)", re.I)
@@ -496,8 +498,35 @@ def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
     }
 
 
+def _run_membership(meta: dict[str, Any], observed: set[str]) -> tuple[dict[str, str], str]:
+    selected = set(meta["cases"]) if "cases" in meta else observed
+    if observed - selected:
+        raise ValueError("Case receipts outside the recorded selection: " + ", ".join(sorted(observed - selected)))
+    declared = meta.get("case_membership", CASE_MEMBERSHIP)
+    source = "recorded" if "case_membership" in meta else "registered_suites"
+    if not isinstance(declared, dict):
+        raise ValueError("Case membership must be an object keyed by case ID")
+    if missing := selected - declared.keys():
+        raise ValueError("Missing case membership for " + ", ".join(sorted(missing)))
+    if source == "recorded" and "cases" in meta and (extra := declared.keys() - selected):
+        raise ValueError("Case membership outside the recorded selection: " + ", ".join(sorted(extra)))
+    if not all(declared[case] in ("dev", "heldout") for case in selected):
+        raise ValueError("Case membership must be dev or heldout")
+    for case in sorted(selected & CASE_MEMBERSHIP.keys()):
+        if declared[case] != CASE_MEMBERSHIP[case]:
+            raise ValueError(f"Conflicting case membership for {case}")
+    if "heldout_ids" in meta:
+        recorded_heldout = set(meta["heldout_ids"]) & selected
+        if recorded_heldout != {case for case in selected if declared[case] == "heldout"}:
+            raise ValueError("Conflicting case membership in the legacy heldout_ids record")
+    return {case: declared[case] for case in sorted(selected)}, source
+
+
 def judge_run(run: Path, window: int) -> dict[str, Any]:
-    results = [judge_case(json.loads(p.read_text(encoding="utf-8")), window) for p in sorted((run / "cases").glob("*.json"))]
+    raw = [json.loads(p.read_text(encoding="utf-8")) for p in sorted((run / "cases").glob("*.json"))]
+    meta = json.loads((run / "meta.json").read_text(encoding="utf-8")) if (run / "meta.json").exists() else {}
+    membership, source = _run_membership(meta, {case["id"] for case in raw})
+    results = [judge_case(case, window) for case in raw]
     by_case: dict[str, list[dict[str, Any]]] = {}
     for row in results:
         by_case.setdefault(row["id"], []).append(row)
@@ -508,20 +537,25 @@ def judge_run(run: Path, window: int) -> dict[str, Any]:
                             "success_rate": round(sum(r["execution_success"] for r in rows) / len(rows), 2),
                             "criteria": {k: round(statistics.mean(r["scores"][k] for r in rows), 2) for k in WEIGHTS},
                             "critical": sorted({c for r in rows for c in r["critical"]})}
-    groups = {"dev": [s for k, s in summary.items() if k.startswith("D")], "heldout": [s for k, s in summary.items() if k.startswith("H")]}
+    groups = {split: [case for case_id, case in summary.items() if membership[case_id] == split]
+              for split in ("dev", "heldout")}
     aggregate = {name: round(statistics.mean(s["mean"] for s in rows), 2) for name, rows in groups.items() if rows}
     aggregate["all"] = round(statistics.mean(s["mean"] for s in summary.values()), 2) if summary else 0
     aggregate["execution_success_rate"] = round(sum(r["execution_success"] for r in results) / max(1, len(results)), 2)
     aggregate["critical_runs"] = sum(1 for r in results if r["critical"])
     aggregate["criteria"] = {k: round(statistics.mean(r["scores"][k] for r in results), 2) for k in WEIGHTS} if results else {}
-    meta = json.loads((run / "meta.json").read_text(encoding="utf-8")) if (run / "meta.json").exists() else {}
-    return {"run": run.name, "meta": meta, "window": window, "aggregate": aggregate, "cases": summary, "results": results}
+    grouping = {"schema": "explicit-case-membership-v1", "source": source, "membership": membership,
+                "judge_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+    return {"run": run.name, "meta": meta, "window": window, "grouping": grouping,
+            "aggregate": aggregate, "cases": summary, "results": results}
 
 
 def markdown(report: dict[str, Any], baseline: dict[str, Any] | None = None) -> str:
     agg = report["aggregate"]
     lines = [f"# Harness judge: {report['run']}", "",
              f"Model {report['meta'].get('model', '?')} · commit {report['meta'].get('commit', '?')} · real window {report['window']} tokens", "",
+             f"Grouping {report['grouping']['schema']} · {report['grouping']['source']} · "
+             f"judge SHA-256 `{report['grouping']['judge_sha256']}`", "",
              f"**Overall {agg['all']}/10** (dev {agg.get('dev', '–')}, held-out {agg.get('heldout', '–')}) · "
              f"execution success {agg['execution_success_rate']:.0%} · runs with a critical finding: {agg['critical_runs']}", "",
              "| Criterion (weight) | Mean |", "|---|---|"]
@@ -556,16 +590,28 @@ def main() -> int:
     parser.add_argument("run")
     parser.add_argument("--window", type=int, default=16384, help="The model server's real context window (Ollama: /api/ps)")
     parser.add_argument("--compare", default="", help="A judged baseline run folder to compare against")
+    parser.add_argument("--output-dir", type=Path, help="Separate destination for a new scorecard")
     args = parser.parse_args()
     run = Path(args.run)
-    report = judge_run(run, args.window)
-    baseline = None
-    if args.compare:
-        path = Path(args.compare) / "judge.json"
-        baseline = json.loads(path.read_text(encoding="utf-8")) if path.exists() else judge_run(Path(args.compare), args.window)
-    (run / "judge.json").write_text(json.dumps(report, indent=1, ensure_ascii=False), encoding="utf-8")
-    (run / "judge.md").write_text(markdown(report, baseline), encoding="utf-8")
-    print(markdown(report, baseline))
+    output = args.output_dir or run
+    scorecard, summary = output / "judge.json", output / "judge.md"
+    if any(path.exists() or path.is_symlink() for path in (scorecard, summary)):
+        parser.error("A scorecard already exists. Choose a fresh --output-dir to preserve it.")
+    try:
+        report = judge_run(run, args.window)
+        baseline = None
+        if args.compare:
+            path = Path(args.compare) / "judge.json"
+            baseline = json.loads(path.read_text(encoding="utf-8")) if path.exists() else judge_run(Path(args.compare), args.window)
+    except ValueError as exc:
+        parser.error(str(exc))
+    text = markdown(report, baseline)
+    output.mkdir(parents=True, exist_ok=True)
+    with scorecard.open("x", encoding="utf-8") as file:
+        file.write(json.dumps(report, indent=1, ensure_ascii=False))
+    with summary.open("x", encoding="utf-8") as file:
+        file.write(text)
+    print(text)
     return 0
 
 
