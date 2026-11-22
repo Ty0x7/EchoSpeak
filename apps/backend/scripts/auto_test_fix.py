@@ -52,6 +52,10 @@ from pathlib import Path
 from typing import Any, Optional
 
 BACKEND = Path(__file__).resolve().parents[1]
+if str(BACKEND) not in sys.path:
+    sys.path.insert(0, str(BACKEND))
+from scripts import harness_campaign
+
 REPO = BACKEND.parents[1]
 SESSIONS = Path(os.environ.get("ATF_HOME") or Path.home() / "Work" / "echospeak-model-testing-2026" / "auto-test-fix")
 VAULT = Path(os.environ.get("ATF_VAULT") or Path.home() / "Documents" / "Obsidian Vault" / "EchoSpeak")
@@ -169,9 +173,10 @@ def run_eval(tree: Path, cases: list[str], repeat: int, model: str, label: str, 
     judged = sh([python, "scripts/harness_judge.py", str(run)], backend, timeout=1800)
     if judged.returncode:
         raise RuntimeError(f"harness_judge failed: {judged.stderr[-600:]}")
+    report = json.loads((run / "judge.json").read_text(encoding="utf-8"))
+    harness_campaign.require_complete_scorecard(report, model, {case.strip() for case in cases if case.strip()}, repeat)
     keep = session.dir / "runs" / run.name
-    if not keep.exists():
-        shutil.copytree(run, keep)
+    shutil.copytree(run, keep)
     return keep
 
 
@@ -771,10 +776,19 @@ def run(args: argparse.Namespace) -> int:
         session.save()
     if st["heldout"] and "heldout_baseline" not in st:
         session.log("baseline-heldout", cases=",".join(st["heldout"]))
-        st["heldout_baseline"] = judged(run_eval(tree, st["heldout"], st["repeat"], st["model"], "atf-heldout-base", session))
+        try:
+            st["heldout_baseline"] = judged(run_eval(tree, st["heldout"], st["repeat"], st["model"], "atf-heldout-base", session))
+        except Exception as exc:
+            st.update(status="stopped", stopped=f"held-out baseline evaluation failed: {exc}"[:300], ended=now())
+            session.save()
+            session.log("stop", reason=st["stopped"])
+            write_session_report(session)
+            harness_campaign.unload(st["model"], "http://127.0.0.1:11434")
+            return 2
         session.save()
 
     rejected_in_a_row = 0
+    exit_code = 0
     while True:
         # A cycle left awaiting a manual fix continues first (`run --resume`): it is not a new cycle.
         pending = st["cycles"][-1] if st["cycles"] and st["cycles"][-1].get("decision") == "awaiting_fix" else None
@@ -976,6 +990,7 @@ def run(args: argparse.Namespace) -> int:
         except Exception as exc:
             record["decision"], record["reason"] = "error", str(exc)[:800]
             st["status"], st["stopped"] = "stopped", f"a gate or run failed: {exc}"[:300]
+            exit_code = 2
         record["ended"] = now()
         session.save()
         write_cycle_report(session, record)
@@ -988,10 +1003,8 @@ def run(args: argparse.Namespace) -> int:
     write_session_report(session)
     obsidian(session)
     # Release the model and Ollama's host-RAM prompt cache (about 8 GB after a long session).
-    sys.path.insert(0, str(BACKEND / "scripts"))
-    from harness_campaign import unload
-    unload(st["model"], "http://127.0.0.1:11434")
-    return 0
+    harness_campaign.unload(st["model"], "http://127.0.0.1:11434")
+    return exit_code
 
 
 # ── preserve ────────────────────────────────────────────────────────────

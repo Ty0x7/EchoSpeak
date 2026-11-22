@@ -7,6 +7,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -411,3 +412,60 @@ def test_failing_first_does_not_credit_a_candidate_check_without_a_result():
     assert result["fails_on_base"]
     assert not result["passes_on_fix"]
     assert result["still_failing"]
+
+
+@pytest.mark.parametrize("judge_error", [True, False])
+def test_resumed_cycle_exit_matches_judge_outcome(tmp_path, monkeypatch, judge_error):
+    from scripts import harness_campaign
+
+    session = atf.Session(tmp_path, {
+        "base": "0123456789ab", "model": "local", "driver": "codex", "status": "waiting",
+        "suite_baseline": {"summary": "previous baseline"}, "cases": ["D4"], "heldout": [],
+        "repeat": 1, "target": 9, "limits": {"cycles": 1, "minutes": 1},
+        "cycles": [{"cycle": 1, "decision": "awaiting_fix", "base": "0123456789ab", "before": {
+            "mean": 8, "critical": 0, "success": 1, "cases": {}, "run": "earlier",
+        }}],
+    })
+    session.save()
+    monkeypatch.setattr(atf, "make_tree", lambda *_: (tmp_path, "auto/fixture"))
+    monkeypatch.setattr(atf, "billing_problems", lambda *_: [])
+    monkeypatch.setattr(atf, "free_gb", lambda: 10)
+    monkeypatch.setattr(atf, "gate", lambda *_: {"decision": "measure", "checks": []})
+    monkeypatch.setattr(atf, "full_diff", lambda *_: "")
+    monkeypatch.setattr(atf, "git", lambda *_: "")
+    monkeypatch.setattr(atf, "obsidian", lambda *_: None)
+    monkeypatch.setattr(harness_campaign, "unload", lambda *_: None)
+
+    def measure(*_):
+        if judge_error:
+            raise RuntimeError("harness_judge rejected conflicting case membership")
+        return tmp_path / "new-run"
+
+    monkeypatch.setattr(atf, "run_eval", measure)
+    monkeypatch.setattr(atf, "judged", lambda _: {
+        "mean": 8, "critical": 0, "success": 1, "cases": {}, "run": "new-run", "tokens": 0,
+    })
+    code = atf.run(SimpleNamespace(resume=True, session=str(tmp_path)))
+    record = atf.Session.latest(str(tmp_path)).state["cycles"][-1]
+    assert record["decision"] == ("error" if judge_error else "inconclusive")
+    assert "commit" not in record
+    assert code == (2 if judge_error else 0)
+
+
+def test_controller_rejects_a_missing_trial_after_judge_exit_zero(tmp_path, monkeypatch):
+    receipt = tmp_path / "evaluation"
+    receipt.mkdir()
+    (receipt / "judge.json").write_text(json.dumps({
+        "meta": {"cases": ["D4", "EH2"], "model": "local", "repeat": 1, "ended": 1.0},
+        "results": [{"id": "D4", "rep": 1}],
+    }))
+
+    def child(argv, *args, **kwargs):
+        output = f"Done. Judge it with: python scripts/harness_judge.py {receipt}\n" if "scripts/harness_eval.py" in argv else ""
+        return subprocess.CompletedProcess(argv, 0, output, "")
+
+    monkeypatch.setattr(atf, "sh", child)
+    with pytest.raises(RuntimeError, match="Incomplete scorecard"):
+        atf.run_eval(tmp_path, ["D4", "EH2"], 1, "local", "resume", atf.Session(tmp_path))
+    assert not (tmp_path / "runs").exists()
+    assert (receipt / "judge.json").is_file()

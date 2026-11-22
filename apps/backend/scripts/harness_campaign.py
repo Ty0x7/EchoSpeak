@@ -19,12 +19,14 @@ Only the models named are run. Nothing is downloaded or pulled.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import json
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
-import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -81,7 +83,9 @@ def run_eval(backend: Path, model: str, label: str, repeat: int, only: str, case
     args += ["--only", only] if only else ["--set", cases]
     subprocess.run(args, cwd=backend, check=True)
     produced = sorted(set((backend / "data/evals/harness").glob(f"*-{label}")) - before)
-    run = produced[-1]
+    if len(produced) != 1:
+        raise RuntimeError(f"Expected one fresh evaluation run for {label}, found {len(produced)}")
+    run = produced[0]
     if backend != ROOT:  # keep every run in one place
         target = OUT / run.name
         shutil.copytree(run, target)
@@ -90,9 +94,30 @@ def run_eval(backend: Path, model: str, label: str, repeat: int, only: str, case
 
 
 def judge(run: Path) -> dict[str, Any]:
-    subprocess.run([sys.executable, str(ROOT / "scripts" / "harness_judge.py"), str(run)], check=True,
-                   capture_output=True, text=True)
+    child = subprocess.run([sys.executable, str(ROOT / "scripts" / "harness_judge.py"), str(run)],
+                           capture_output=True, text=True, timeout=1800)
+    if child.returncode:
+        diagnostic = (child.stderr or child.stdout).strip()[-600:]
+        raise RuntimeError(f"harness_judge exited {child.returncode}: {diagnostic}")
     return json.loads((run / "judge.json").read_text(encoding="utf-8"))
+
+
+def require_complete_scorecard(report: dict[str, Any], model: str, cases: set[str], repeat: int) -> None:
+    """Require exactly one scored receipt for each requested case and repetition."""
+    expected = Counter((case, rep) for case in cases for rep in range(1, repeat + 1))
+    meta = report.get("meta") or {}
+    if (not expected or not meta.get("ended") or meta.get("model") != model or meta.get("repeat") != repeat
+            or set(meta.get("cases") or []) != cases):
+        raise RuntimeError("Incomplete scorecard: evaluation metadata does not match the requested arm")
+    observed = Counter((row["id"], row["rep"]) for row in report["results"])
+    if observed != expected:
+        raise RuntimeError(f"Incomplete scorecard: missing {dict(expected - observed)}, unexpected {dict(observed - expected)}")
+
+
+def score_arm(run: Path, model: str, cases: set[str], repeat: int) -> dict[str, Any]:
+    report = judge(run)
+    require_complete_scorecard(report, model, cases, repeat)
+    return {"run": run.name, **summary(report), "speed": speed(run)}
 
 
 def speed(run: Path) -> dict[str, float]:
@@ -134,43 +159,84 @@ def main() -> int:
     parser.add_argument("--upstream", default="http://127.0.0.1:11434")
     args = parser.parse_args()
     sys.path.insert(0, str(ROOT / "scripts"))
-    from harness_eval import assert_local  # zero API billing: the model server must be on this machine
+    from harness_eval import CASE_MEMBERSHIP, SETS, assert_local
     assert_local(args.upstream)
-    models = [m.strip() for m in args.models.split(",") if m.strip()]
+    models = list(dict.fromkeys(m.strip() for m in args.models.split(",") if m.strip()))
+    if not models or args.repeat < 1:
+        parser.error("Supply at least one model and a positive repeat count")
+    if args.only:
+        cases = {case.strip() for case in args.only.split(",") if case.strip()}
+        if not cases or cases - CASE_MEMBERSHIP.keys():
+            parser.error("--only must name registered cases")
+    else:
+        if args.set not in SETS:
+            parser.error(f"Unknown case set: {args.set}")
+        cases = {case.id for case in SETS[args.set]}
     folder = OUT / f"{time.strftime('%Y%m%d-%H%M%S')}-{args.label}"
     folder.mkdir(parents=True)
     head = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
-    base = baseline_tree(args.baseline_ref) if args.baseline_ref else None
-    campaign: dict[str, Any] = {"label": args.label, "head": head, "baseline_ref": args.baseline_ref, "models": {}}
-    judging: list[threading.Thread] = []
-
-    def judged(model: str, side: str, run: Path) -> None:
-        report = judge(run)
-        campaign["models"].setdefault(model, {})[side] = {"run": run.name, **summary(report), "speed": speed(run)}
-
-    for model in models:
-        slug = model.replace(":", "-").replace(".", "-").replace("/", "-")
-        load = keep_loaded(model, args.upstream)
-        campaign["models"].setdefault(model, {})["load_seconds"] = load
-        print(f"{model}: loaded in {load}s", flush=True)
-        sides = ([("baseline", base)] if base else []) + [("current", ROOT)]
-        for side, backend in sides:
-            run = run_eval(backend, model, f"{args.label}-{side}-{slug}", args.repeat, args.only, args.set)
-            thread = threading.Thread(target=judged, args=(model, side, run))
-            thread.start()
-            judging.append(thread)
-    for thread in judging:
-        thread.join()
-    for model in models:
-        unload(model, args.upstream)
+    required = ("baseline", "current") if args.baseline_ref else ("current",)
+    campaign: dict[str, Any] = {
+        "label": args.label, "head": head, "baseline_ref": args.baseline_ref, "status": "running",
+        "models": {model: {} for model in models}, "required_arms": required, "failures": [],
+    }
     (folder / "campaign.json").write_text(json.dumps(campaign, indent=1), encoding="utf-8")
-    (folder / "campaign.md").write_text(markdown(campaign), encoding="utf-8")
-    print(markdown(campaign))
-    return 0
+    loaded = []
+    jobs = {}
+    context = {}
+    with ThreadPoolExecutor() as workers:
+        try:
+            base = baseline_tree(args.baseline_ref) if args.baseline_ref else None
+            for model in models:
+                context = {"model": model}
+                slug = model.replace(":", "-").replace(".", "-").replace("/", "-")
+                loaded.append(model)
+                load = keep_loaded(model, args.upstream)
+                campaign["models"][model]["load_seconds"] = load
+                print(f"{model}: loaded in {load}s", flush=True)
+                for arm in required:
+                    context = {"model": model, "arm": arm}
+                    backend = base if arm == "baseline" else ROOT
+                    run = run_eval(backend, model, f"{args.label}-{arm}-{slug}", args.repeat, args.only, args.set)
+                    jobs[model, arm] = (run, workers.submit(score_arm, run, model, cases, args.repeat))
+        except (Exception, KeyboardInterrupt) as exc:
+            campaign["failures"].append({**context, "reason": str(exc) or "Campaign interrupted"})
+        for (model, arm), (run, task) in jobs.items():
+            try:
+                campaign["models"][model][arm] = task.result()
+            except (Exception, KeyboardInterrupt) as exc:
+                campaign["failures"].append({"model": model, "arm": arm, "run": str(run),
+                                             "reason": str(exc) or "Judging interrupted"})
+
+    for model in loaded:
+        try:
+            unload(model, args.upstream)
+        except KeyboardInterrupt as exc:
+            campaign["failures"].append({"model": model, "reason": str(exc) or "Cleanup interrupted"})
+
+    campaign["missing_arms"] = [{"model": model, "arm": arm} for model in models for arm in required
+                                if arm not in campaign["models"][model]]
+    failed = bool(campaign["failures"] or campaign["missing_arms"])
+    campaign["status"] = "failed" if failed else "complete"
+    text = markdown(campaign)
+    (folder / "campaign.md").write_text(text, encoding="utf-8")
+    completed = folder / "campaign.json.tmp"
+    completed.write_text(json.dumps(campaign, indent=1), encoding="utf-8")
+    completed.replace(folder / "campaign.json")
+    print(text)
+    return 2 if failed else 0
 
 
 def markdown(campaign: dict[str, Any]) -> str:
     lines = [f"# Campaign {campaign['label']} (harness {campaign['head']}, baseline {campaign['baseline_ref'] or '–'})", "",
+             f"**Status: {campaign['status']}**", ""]
+    for failure in campaign["failures"]:
+        subject = " ".join(failure[key] for key in ("model", "arm") if key in failure)
+        lines.append(f"- {subject or 'Campaign'} failed: {failure['reason']}")
+    if campaign["missing_arms"]:
+        lines += ["", "Unscored required arms: " +
+                  ", ".join(f"{item['model']} {item['arm']}" for item in campaign["missing_arms"]), ""]
+    lines += [
              "| Model | Baseline | Current | Held-out | Success | Critical runs | Calls | Time | Gen tok/s | Prompt cached |",
              "|---|---:|---:|---|---|---|---|---|---|---|"]
     for model, sides in campaign["models"].items():
@@ -186,5 +252,10 @@ def markdown(campaign: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _terminate(_signum, _frame) -> None:
+    raise KeyboardInterrupt("Campaign terminated")
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, _terminate)
     sys.exit(main())
