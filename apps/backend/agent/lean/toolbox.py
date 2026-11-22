@@ -850,6 +850,11 @@ class Toolbox:
         finally:
             _tool_execution_context.reset(token)
 
+    def contradicted_file_removals(self, answer: str, timeline: list[dict[str, Any]]) -> list[str]:
+        from agent.lean import evidence
+
+        return self._in_tool_context(lambda: evidence.contradicted_removals(answer, timeline))
+
     def _file_snapshot(self, name: str, args: dict[str, Any]):
         from agent.lean import file_changes
 

@@ -135,6 +135,80 @@ def written_files(effects: list[dict[str, Any]]) -> set[str]:
             if e.get("kind") == "file" and e.get("action") in {"wrote", "made"} and e.get("exists")}
 
 
+# Named whole-file claims. Conditional language, quoted examples, removal from a
+# list or index, and reports of a deletion followed by recreation are different claims.
+_FILE_REFERENCE = r"(?P<file>`[^`\n]+`|\"[^\"`\n]+\"|'[^'`\n]+'|[\w./\\:-]+\.\w+)"
+_FILE_LOCATION = r"(?:\s+from\s+(?:the\s+|this\s+)?(?:project(?:\s+folder)?|workspace|disk|directory))?"
+_FILE_REMOVAL = re.compile(
+    rf"^(?:[-*•]\s+)?(?:(?:I(?:\s+have|['’]ve)?\s+)?(?:successfully\s+)?"
+    rf"(?:deleted|removed)\s+(?:the\s+file\s+)?{_FILE_REFERENCE}{_FILE_LOCATION})[.!]?$",
+    re.I,
+)
+_FILE_ABSENCE = re.compile(
+    rf"^(?:[-*•]\s+)?(?:the\s+file\s+)?{_FILE_REFERENCE}\s+"
+    rf"(?:(?:was|has\s+been)\s+(?:successfully\s+)?(?:deleted|removed){_FILE_LOCATION}"
+    r"|is\s+(?:gone|absent|no\s+longer\s+(?:present|(?:in\s+(?:the\s+|this\s+)?(?:project|workspace|directory))))"
+    r"|no\s+longer\s+exists)[.!]?$",
+    re.I,
+)
+_FILE_RECREATION = re.compile(
+    rf"^(?:I\s+(?:then\s+)?)?recreated\s+(?:it|{_FILE_REFERENCE})[.!]?$", re.I,
+)
+
+
+def contradicted_removals(answer: str, timeline: list[dict[str, Any]]) -> list[str]:
+    """Named deletion claims contradicted by a final stat of a scoped, observed path.
+
+    Call under the toolbox's file context. Only successful structured file
+    effects nominate paths. In particular, a command's text or exit status
+    cannot nominate a new path for inspection.
+    """
+    sentences = []
+    for line in _FENCE.sub("", answer).splitlines():
+        if not line.lstrip().startswith(">"):
+            sentences.extend(part.strip().strip("*") for part in re.split(r"(?<=[.!?])\s+", line) if part.strip())
+    references: dict[str, None] = {}
+    for i, sentence in enumerate(sentences):
+        removal = _FILE_REMOVAL.fullmatch(sentence)
+        claim = removal or _FILE_ABSENCE.fullmatch(sentence)
+        if not claim:
+            continue
+        name = claim["file"].strip("`\"'")
+        if removal and i + 1 < len(sentences) and (recreated := _FILE_RECREATION.fullmatch(sentences[i + 1])):
+            if recreated["file"] is None or recreated["file"].strip("`\"'") == name:
+                continue
+        references[name] = None
+    if not references:
+        return []
+
+    observed = {
+        Path(effect["path"])
+        for row in timeline
+        if row.get("kind") == "tool" and row.get("outcome") == "ok" and row.get("name") in FILE_CHANGE_TOOLS
+        for effect in row.get("effects", ())
+        if effect.get("kind") == "file" and effect.get("path")
+    }
+    if not observed:
+        return []
+
+    from agent.tools import _file_tool_root, get_active_project_root
+
+    root = get_active_project_root() or _file_tool_root()
+    present = []
+    for name in references:
+        target = root / name
+        # Match a literal rooted or project-relative path, never a basename across
+        # directories. Refuse re-resolution to a different or protected target.
+        if target not in observed or _resolve(target) != target:
+            continue
+        try:
+            target.lstat()
+        except OSError:
+            continue
+        present.append(name)
+    return present
+
+
 # ── quoted evidence ────────────────────────────────────────────────────
 # Lines that read as copied from a log or data file: a timestamp, a log level, or file_read's "123| " prefix.
 _DATA_LINE = re.compile(r"\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}|\b(ERROR|WARN(ING)?|INFO|DEBUG|FATAL|CRITICAL)\b|^\s*\d+\|")

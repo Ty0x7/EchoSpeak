@@ -223,3 +223,148 @@ def test_always_mode_asks_for_native_file_edit_and_terminal(monkeypatch):
     assert approvals.tool_needs_approval(None, "file_read", {"path": "a"})[0] is False
     monkeypatch.setattr(settings, "approval_mode", lambda: "smart")
     assert approvals.tool_needs_approval(None, "file_edit", {"path": "a"})[0] is False
+
+
+@pytest.mark.parametrize(
+    "actions, answer, decisions, contents, contradicted, summary_tool",
+    [
+        pytest.param(
+            ("write", "terminal", "write"), "Done! I've deleted `notes-draft.md` from the project folder.",
+            ("allow", "allow", "allow"), "", True, False, id="recorded-c1-recreation",
+        ),
+        pytest.param(
+            ("delete", "write"), "`notes-draft.md` is no longer in the project.",
+            ("allow", "allow"), "", True, False, id="stale-native-delete",
+        ),
+        pytest.param(
+            ("delete", "write"), "`notes-draft.md` was deleted.",
+            ("allow", "allow"), "", True, True, id="stale-completion-summary",
+        ),
+        pytest.param(
+            ("delete",), "`notes-draft.md` was deleted.",
+            ("allow",), None, False, True, id="genuine-completion-summary",
+        ),
+        pytest.param(
+            ("write", "terminal"), "I deleted `notes-draft.md`.",
+            ("allow", "allow"), None, False, False, id="genuine-terminal-delete",
+        ),
+        pytest.param(
+            ("delete", "write"), "I deleted `notes-draft.md` and recreated it.",
+            ("allow", "allow"), "", False, False, id="authorized-recreation",
+        ),
+        pytest.param(
+            ("delete", "write"), "I deleted `notes-draft.md`.\nI then recreated it.",
+            ("allow", "allow"), "", False, False, id="authorized-recreation-across-sentences",
+        ),
+        pytest.param(
+            ("write", "delete"), "I kept `notes-draft.md` after you declined deletion.",
+            ("allow", "deny"), "", False, False, id="denied-delete",
+        ),
+        pytest.param(
+            ("write",), "`archive/notes-draft.md` was deleted.",
+            ("allow",), "", False, False, id="distinct-path-with-same-basename",
+        ),
+        pytest.param(
+            ("write",), "I removed `notes-draft.md` from the index.",
+            ("allow",), "", False, False, id="removed-reference",
+        ),
+        pytest.param(
+            ("write",), "> I deleted `notes-draft.md`.",
+            ("allow",), "", False, False, id="quoted-example",
+        ),
+    ],
+)
+def test_streamed_file_removal_matches_final_disk_state(tmp_path, monkeypatch, actions, answer, decisions,
+                                                       contents, contradicted, summary_tool):
+    from agent.lean import settings
+
+    root = tmp_path / "project"
+    root.mkdir()
+    draft = root / "notes-draft.md"
+    draft.write_text("draft")
+    final = root / "notes-final.md"
+    final.write_text("final")
+    (root / "archive").mkdir()
+    monkeypatch.setattr(settings, "approval_mode", lambda: "always")
+    box = Toolbox(toolsets=["none"], session_id="t", project_root=str(root))
+    writes = []
+    deletes = []
+
+    def write(args):
+        draft.write_text(args["content"])
+        writes.append(args["content"])
+        return "Wrote the draft"
+
+    def delete(_args):
+        draft.unlink()
+        deletes.append(draft)
+        return "Deleted the draft"
+
+    def terminal(args):
+        delete(args)
+        return "[ok · 0.1s · sandbox · project]"
+
+    names = {"write": "file_write", "delete": "file_delete", "terminal": "terminal_run"}
+    box.native = {
+        names[action]: NativeTool(name=names[action], description="", parameters={"type": "object"}, func=fn)
+        for action, fn in {"write": write, "delete": delete, "terminal": terminal}.items()
+    }
+    box.native["complete_task"] = NativeTool("complete_task", "", {"type": "object"},
+                                            lambda _args: "Completion summary submitted.", ends_turn=True)
+    monkeypatch.setattr(box, "entry", lambda name: None if name == "complete_task"
+                        else _Entry("destructive", True, "file_ops"))
+    turns = []
+    for i, action in enumerate(actions):
+        arguments = ({"command": "rm notes-draft.md", "where": "sandbox"} if action == "terminal"
+                     else {"path": draft.name, **({"content": ""} if action == "write" else {})})
+        turns.append(ModelTurn(tool_calls=[ToolCall(f"c{i}", names[action], json.dumps(arguments))]))
+    conclusion = (ModelTurn(tool_calls=[ToolCall("done", "complete_task", json.dumps({"summary": answer}))])
+                  if summary_tool else ModelTurn(content=answer))
+    client = ScriptedClient([*turns, conclusion])
+    events = []
+    turn = _turn(client, box, events)
+    approvals = iter(decisions)
+
+    def emit(event):
+        events.append(event)
+        if event["type"] == "approval_request":
+            decision = next(approvals)
+            threading.Timer(0.01, lambda: get_approval_broker().resolve(event["id"], decision)).start()
+
+    turn._emit = emit
+    result = turn.run("Remove only the draft.")
+    assert len(client.calls) == len(actions) + 1
+    assert len(writes) == actions.count("write")
+    assert len(deletes) == sum(action in {"delete", "terminal"} and decision == "allow"
+                               for action, decision in zip(actions, decisions, strict=True))
+    assert [event["decision"] for event in events if event["type"] == "approval_resolved"] == list(decisions)
+    assert (draft.read_text() if draft.exists() else None) == contents
+    assert final.read_text() == "final"
+    done = next(event for event in events if event["type"] == "agent_done")
+    assert done["text"] == result.text
+    assert done["completed"] == result.completed == (answer if summary_tool and not contradicted else "")
+    if contradicted:
+        assert result.stop_reason == "unverified_claim"
+        assert any(event.get("check") == "final_file_state" for event in events)
+        assert "notes-draft.md" in result.text and "still present" in result.text
+        assert any(event["type"] == "text_replace" and event["text"] == result.text for event in events)
+        assert answer not in result.text
+    else:
+        assert result.text == answer
+
+
+def test_final_state_observations_stay_in_scope(tmp_path):
+    first = tmp_path / "first"
+    first.mkdir()
+    second = tmp_path / "second"
+    second.mkdir()
+    private = second / "notes-draft.md"
+    private.write_text("second project")
+    target = first / private.name
+    target.symlink_to(private)
+    box = Toolbox(toolsets=["none"], session_id="t", project_root=str(first))
+    receipt = {"kind": "tool", "outcome": "ok", "name": "file_write",
+               "effects": [{"kind": "file", "path": str(target), "exists": True}]}
+    assert box.contradicted_file_removals("I deleted `notes-draft.md`.", [receipt]) == []
+    assert box.contradicted_file_removals(f"I deleted `{private}`.", [receipt]) == []
+    assert private.read_text() == "second project"
