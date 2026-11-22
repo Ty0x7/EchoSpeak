@@ -490,7 +490,8 @@ class LeanTurn:
     def _check_final_file_state(self, visible: str, step: int) -> tuple[str, bool]:
         """Correct contradicted completion claims without requesting another action."""
         def correction(text: str) -> str:
-            names = self.toolbox.contradicted_file_removals(text, self.timeline)
+            state = self.toolbox.file_removal_state(text, self.timeline)
+            names = dict.fromkeys(name for name, present in state.values() if present)
             return "\n".join(f"`{name}` is still present at the end of this turn. Its deletion is incomplete."
                              for name in names)
 
@@ -834,7 +835,10 @@ class LeanTurn:
                         if any(m.get("memory_written") is False for m in receipts) and not any(
                                 m.get("memory_written") is True for m in receipts):
                             claim_tools = claim_tools - {"memory_save"}
-                    claim = ((unbacked_claim(content, claim_tools) or unbacked_file_claim(content, self._written)
+                    checked_removals = (self.toolbox.file_removal_state(content, self.timeline)
+                                        if self.promise_guard and self.toolbox.names else {})
+                    claim = ((unbacked_claim(content, claim_tools)
+                              or unbacked_file_claim(content, self._written, checked_removals=checked_removals)
                               or unbacked_screen_claim(content, self._screen_changed))
                              if self.promise_guard and self.toolbox.names else "")
                     if claim and not stop_reason:
@@ -974,7 +978,8 @@ class LeanTurn:
 
             self._mark_interim(step)
             self._run_tools(calls, messages, step, call_counts)
-            file_claim = (unbacked_file_claim(content, self._written)
+            file_claim = (unbacked_file_claim(content, self._written,
+                                             checked_removals=self.toolbox.file_removal_state(content, self.timeline))
                           if self.promise_guard and content and messages[-1].get("role") == "tool" else "")
             if file_claim:
                 # Text sent beside tool calls is checked too: "I've written mics.md" while only running `dir`.

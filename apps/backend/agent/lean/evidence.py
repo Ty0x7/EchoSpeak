@@ -106,6 +106,12 @@ def observe(name: str, args: dict[str, Any], output: str, meta: dict[str, Any] |
             effects.append(effect)
             if effect["exists"]:
                 return effects, f"file_delete reported success, but {effect['path']} is still there"
+    elif name == "file_list":
+        # A scoped listing can back a later check of one named child, even if
+        # a mutation ran in a different directory or only left a process receipt.
+        directory = _resolve(args.get("path") or ".")
+        if directory is not None and directory.is_dir():
+            effects.append({"kind": "directory", "action": "listed", "path": str(directory)})
     elif name in TERMINAL_TOOLS:
         head = str(output or "").lstrip()
         match = _HEADER.match(head)
@@ -156,18 +162,17 @@ _FILE_RECREATION = re.compile(
 )
 
 
-def contradicted_removals(answer: str, timeline: list[dict[str, Any]]) -> list[str]:
-    """Named deletion claims contradicted by a final stat of a scoped, observed path.
+def file_removal_state(answer: str, timeline: list[dict[str, Any]]) -> dict[str, tuple[str, bool]]:
+    """Map checked sentences to their claimed path and its current existence.
 
     Call under the toolbox's file context. Only successful structured file
-    effects nominate paths. In particular, a command's text or exit status
-    cannot nominate a new path for inspection.
+    effects and listing footprints nominate paths. Shell text never does.
     """
     sentences = []
     for line in _FENCE.sub("", answer).splitlines():
         if not line.lstrip().startswith(">"):
             sentences.extend(part.strip().strip("*") for part in re.split(r"(?<=[.!?])\s+", line) if part.strip())
-    references: dict[str, None] = {}
+    references: dict[str, str] = {}
     for i, sentence in enumerate(sentences):
         removal = _FILE_REMOVAL.fullmatch(sentence)
         claim = removal or _FILE_ABSENCE.fullmatch(sentence)
@@ -177,36 +182,50 @@ def contradicted_removals(answer: str, timeline: list[dict[str, Any]]) -> list[s
         if removal and i + 1 < len(sentences) and (recreated := _FILE_RECREATION.fullmatch(sentences[i + 1])):
             if recreated["file"] is None or recreated["file"].strip("`\"'") == name:
                 continue
-        references[name] = None
+        references[sentence] = name
     if not references:
-        return []
+        return {}
 
-    observed = {
-        Path(effect["path"])
-        for row in timeline
-        if row.get("kind") == "tool" and row.get("outcome") == "ok" and row.get("name") in FILE_CHANGE_TOOLS
-        for effect in row.get("effects", ())
-        if effect.get("kind") == "file" and effect.get("path")
-    }
-    if not observed:
-        return []
+    files: set[Path] = set()
+    directories: set[Path] = set()
+    for row in timeline:
+        if row.get("kind") != "tool" or row.get("outcome") != "ok":
+            continue
+        name = row.get("name")
+        for effect in row.get("effects", ()):
+            if not effect.get("path"):
+                continue
+            if effect.get("kind") == "file" and name in FILE_CHANGE_TOOLS:
+                files.add(Path(effect["path"]))
+            elif effect.get("kind") == "directory" and effect.get("action") == "listed" and name == "file_list":
+                directories.add(Path(effect["path"]))
+    if not files and not directories:
+        return {}
 
     from agent.tools import _file_tool_root, get_active_project_root
 
-    root = get_active_project_root() or _file_tool_root()
-    present = []
-    for name in references:
+    project = get_active_project_root()
+    root = project or _file_tool_root()
+    project_file_names = {path.name for path in files if project is not None and path.is_relative_to(project)}
+    checked = {}
+    for sentence, name in references.items():
         target = root / name
-        # Match a literal rooted or project-relative path, never a basename across
-        # directories. Refuse re-resolution to a different or protected target.
-        if target not in observed or _resolve(target) != target:
+        observed = target in files or target.parent in directories
+        # A tool may have addressed a nested copy instead of the named root
+        # file. This can justify checking for a contradiction at the root.
+        alternate = target.parent == project and target.name in project_file_names
+        if not (observed or alternate) or _resolve(target) != target:
             continue
         try:
             target.lstat()
+        except FileNotFoundError:
+            if observed:
+                checked[sentence] = (name, False)
         except OSError:
             continue
-        present.append(name)
-    return present
+        else:
+            checked[sentence] = (name, True)
+    return checked
 
 
 # ── quoted evidence ────────────────────────────────────────────────────

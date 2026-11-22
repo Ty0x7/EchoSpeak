@@ -245,6 +245,10 @@ def test_always_mode_asks_for_native_file_edit_and_terminal(monkeypatch):
             ("allow",), None, False, True, id="genuine-completion-summary",
         ),
         pytest.param(
+            ("delete",), "I've removed `notes-draft.md` from the project.",
+            ("allow",), None, False, False, id="genuine-delete-with-claim-guard",
+        ),
+        pytest.param(
             ("write", "terminal"), "I deleted `notes-draft.md`.",
             ("allow", "allow"), None, False, False, id="genuine-terminal-delete",
         ),
@@ -323,6 +327,10 @@ def test_streamed_file_removal_matches_final_disk_state(tmp_path, monkeypatch, a
     client = ScriptedClient([*turns, conclusion])
     events = []
     turn = _turn(client, box, events)
+    # The stronger mode checks action claims and may ask the model to do more work.
+    turn.promise_guard = actions == ("delete",)
+    if turn.promise_guard and not summary_tool:
+        client.turns.append(ModelTurn(content="I found the draft absent after checking again."))
     approvals = iter(decisions)
 
     def emit(event):
@@ -338,6 +346,7 @@ def test_streamed_file_removal_matches_final_disk_state(tmp_path, monkeypatch, a
     assert len(deletes) == sum(action in {"delete", "terminal"} and decision == "allow"
                                for action, decision in zip(actions, decisions, strict=True))
     assert [event["decision"] for event in events if event["type"] == "approval_resolved"] == list(decisions)
+    assert not any(event["type"] == "claim_nudge" for event in events)
     assert (draft.read_text() if draft.exists() else None) == contents
     assert final.read_text() == "final"
     done = next(event for event in events if event["type"] == "agent_done")
@@ -365,6 +374,40 @@ def test_final_state_observations_stay_in_scope(tmp_path):
     box = Toolbox(toolsets=["none"], session_id="t", project_root=str(first))
     receipt = {"kind": "tool", "outcome": "ok", "name": "file_write",
                "effects": [{"kind": "file", "path": str(target), "exists": True}]}
-    assert box.contradicted_file_removals("I deleted `notes-draft.md`.", [receipt]) == []
-    assert box.contradicted_file_removals(f"I deleted `{private}`.", [receipt]) == []
+    assert box.file_removal_state("I deleted `notes-draft.md`.", [receipt]) == {}
+    assert box.file_removal_state(f"I deleted `{private}`.", [receipt]) == {}
     assert private.read_text() == "second project"
+
+
+def test_final_state_can_check_the_named_file_after_a_project_listing(tmp_path):
+    draft = tmp_path / "notes-draft.md"
+    draft.write_text("draft")
+    box = Toolbox(toolsets=["none"], session_id="t", project_root=str(tmp_path))
+    box.native["file_list"] = NativeTool("file_list", "", {"type": "object"}, lambda _args: draft.name)
+    listing = box.run("file_list", {"path": "."})
+    assert listing.ok
+    row = {"kind": "tool", "outcome": listing.outcome, "name": "file_list", "effects": listing.effects}
+    answer = "`notes-draft.md` has been removed from the project."
+    assert box.file_removal_state(answer, [row]) == {answer: (draft.name, True)}
+
+
+def test_nested_mutation_cannot_back_a_root_file_deletion_claim(tmp_path):
+    draft = tmp_path / "notes-draft.md"
+    draft.write_text("original")
+    (tmp_path / "nested").mkdir()
+    other = tmp_path / "nested" / draft.name
+    box = Toolbox(toolsets=["none"], session_id="t", project_root=str(tmp_path))
+
+    def write(_args):
+        other.write_text("")
+        return "Wrote nested draft"
+
+    box.native["file_write"] = NativeTool("file_write", "", {"type": "object"}, write)
+    result = box.run("file_write", {"path": f"nested/{draft.name}", "content": ""})
+    assert result.ok and result.effects[0]["path"] == str(other)
+    other.unlink()
+    row = {"kind": "tool", "outcome": result.outcome, "name": "file_write", "effects": result.effects}
+    answer = "`notes-draft.md` was removed from the project folder."
+    assert box.file_removal_state(answer, [row]) == {answer: (draft.name, True)}
+    assert draft.read_text() == "original"
+    assert not other.exists()

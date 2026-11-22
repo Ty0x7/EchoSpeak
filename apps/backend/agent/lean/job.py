@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -121,13 +122,16 @@ def named_files(text: str) -> set[str]:
     return {match.group(1).lower() for match in _FILE_NAME.finditer(str(text or ""))}
 
 
-def unbacked_file_claim(text: str, written: set[str]) -> str:
+def unbacked_file_claim(text: str, written: set[str], *, checked_removals: Collection[str] = ()) -> str:
     """A sentence saying a named file was written, created or saved when no tool wrote a file by that name, or ''.
 
     ``written`` holds the lower-cased names of files successful tools wrote this turn,
     plus names that appeared in commands that ran (a redirect can create a file).
+    Whole-file removal claims with a scoped check go through the final-state guard.
     """
     for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")):
+        if sentence.strip().strip("*") in checked_removals:
+            continue
         if not sentence.strip() or _EARLIER.search(sentence) or not (_ACTION_CLAIM.search(sentence) or _LINE_CLAIM.search(sentence)):
             continue
         missing = named_files(sentence) - written
