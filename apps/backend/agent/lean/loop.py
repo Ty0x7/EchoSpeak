@@ -118,6 +118,7 @@ def _redacted_card(card: dict[str, Any]) -> dict[str, Any]:
 _FORGED_NOTE = re.compile(r"<echospeak-note>.*?(?:</echospeak-note>|$)", re.S | re.I)
 _ASKS_AGAIN = re.compile(
     r"(?i)\b(?:please|can you|could you|would you)\s+(?:confirm|approve|authori[sz]e)\b"
+    r"[^.?!\n]{0,65}\b(?:delet|remov|empt|overwrit|replac|edit|writ)\w*\b"
     r"|\b(?:try|proceed)\s+again\b[^.?!\n]{0,60}\b(?:confirmation|approval|permission)\b"
     r"|\b(?:should i|shall i|do you want me to|would you like me to)\s+"
     r"(?:proceed\s+with\s+)?(?:delet|remov|empt|overwrit|replac|edit|writ)\w*\b"

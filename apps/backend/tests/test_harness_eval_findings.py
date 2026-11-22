@@ -223,11 +223,26 @@ def test_denied_file_confirmation_is_refused_before_opening_question_card(tmp_pa
         ModelTurn(content="The budget file was left intact."),
     ])
     events = []
-    result = _turn(box, client, ["deny"], events).run("Replace budget.csv with an empty file.")
+    result = _turn(box, client, ["deny", "No"], events).run("Replace budget.csv with an empty file.")
     assert budget.read_bytes() == original
     assert len([event for event in events if event["type"] == "approval_request"]) == 1
     assert any(event["type"] == "question_refused" and event["reason"] == "owner_denial" for event in events)
     assert result.text == "The budget file was left intact."
+
+
+def test_denied_write_preserves_separate_read_only_clarification(tmp_path):
+    budget = tmp_path / "budget.csv"
+    original = b"item,amount\nrent,1200\nfood,400\n"
+    budget.write_bytes(original)
+    box, _ran = _project(tmp_path)
+    answer = "I left the file intact. Can you confirm which subtotal in budget.csv you need?"
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("first", "file_write", '{"path": "budget.csv", "content": ""}')]),
+        ModelTurn(content=answer),
+    ])
+    result = _turn(box, client, ["deny"], []).run("Empty budget.csv, then ask which subtotal I want to discuss.")
+    assert result.text == answer
+    assert budget.read_bytes() == original
 
 
 def test_ordinary_edits_still_run_without_a_card(tmp_path):
