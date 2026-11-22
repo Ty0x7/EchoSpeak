@@ -487,6 +487,43 @@ class LeanTurn:
             self.timeline = [item for item in self.timeline if not (item.get("kind") == "text" and item.get("step") == step)]
             self.emit({"type": "text_replace", "step": step, "text": ""})
 
+    def _check_final_file_state(self, visible: str, step: int) -> tuple[str, bool]:
+        """Correct contradicted completion claims without requesting another action."""
+        def correction(text: str) -> str:
+            state = self.toolbox.file_removal_state(text, self.timeline)
+            names = dict.fromkeys(name for name, present in state.values() if present)
+            return "\n".join(f"`{name}` is still present at the end of this turn. Its deletion is incomplete."
+                             for name in names)
+
+        corrected = False
+        for item in self.timeline:
+            if item.get("kind") != "text" or (item.get("interim") and item.get("step") != step):
+                continue
+            if replacement := correction(item["text"]):
+                item["text"] = replacement
+                self.emit({"type": "text_replace", "step": item["step"], "text": replacement})
+                corrected = True
+        if corrected:
+            visible = self._answer_text()
+        elif not self._answer_text() and (replacement := correction(visible)):
+            visible = replacement
+            self._append_text("text", step, visible)
+            self.emit({"type": "agent_token", "step": step, "data": visible})
+            corrected = True
+        summary_correction = correction(self.completed_summary) if self.completed_summary and not corrected else ""
+        if self.completed_summary and (corrected or summary_correction):
+            self.completed_summary = None
+            if summary_correction:
+                note = summary_correction + " The task remains open."
+                self._append_text("text", step, "\n\n" + note)
+                self.emit({"type": "agent_token", "step": step, "data": "\n\n" + note})
+                visible = self._answer_text()
+            corrected = True
+        if corrected:
+            self.emit({"type": "claim_unverified", "step": step, "check": "final_file_state",
+                       "note": "The deletion claim contradicted the final file state."})
+        return visible, corrected
+
     def _discard_step(self, step: int) -> None:
         """Take back everything a step streamed (its reply was made from a prompt the server cut)."""
         self._retract_text(step)
@@ -798,7 +835,10 @@ class LeanTurn:
                         if any(m.get("memory_written") is False for m in receipts) and not any(
                                 m.get("memory_written") is True for m in receipts):
                             claim_tools = claim_tools - {"memory_save"}
-                    claim = ((unbacked_claim(content, claim_tools) or unbacked_file_claim(content, self._written)
+                    checked_removals = (self.toolbox.file_removal_state(content, self.timeline)
+                                        if self.promise_guard and self.toolbox.names else {})
+                    claim = ((unbacked_claim(content, claim_tools)
+                              or unbacked_file_claim(content, self._written, checked_removals=checked_removals)
                               or unbacked_screen_claim(content, self._screen_changed))
                              if self.promise_guard and self.toolbox.names else "")
                     if claim and not stop_reason:
@@ -938,7 +978,8 @@ class LeanTurn:
 
             self._mark_interim(step)
             self._run_tools(calls, messages, step, call_counts)
-            file_claim = (unbacked_file_claim(content, self._written)
+            file_claim = (unbacked_file_claim(content, self._written,
+                                             checked_removals=self.toolbox.file_removal_state(content, self.timeline))
                           if self.promise_guard and content and messages[-1].get("role") == "tool" else "")
             if file_claim:
                 # Text sent beside tool calls is checked too: "I've written mics.md" while only running `dir`.
@@ -1004,6 +1045,10 @@ class LeanTurn:
             visible = self.completed_summary
             self._append_text("text", step, visible)
             self.emit({"type": "agent_token", "step": step, "data": visible})
+        if success and error == "" and not self.cancel.is_set():
+            visible, file_claim_corrected = self._check_final_file_state(visible, step)
+            if file_claim_corrected and not stop_reason:
+                stop_reason = "unverified_claim"
         empty = bool(self._handed_off and not visible and error in {"", "cancelled"})
         if not visible and not empty:
             if error == "cancelled":
@@ -1064,7 +1109,7 @@ class LeanTurn:
         """The summary from a successful complete_task call in this step, if any."""
         for call in calls:
             name = self.toolbox.resolve_name(call.name)
-            if not self.toolbox.ends_turn(name):
+            if not self.toolbox.ends_turn(name) or self._outcomes_by_call.get(call.id) != "ok":
                 continue
             result = next((m for m in reversed(messages) if m.get("role") == "tool" and m.get("tool_call_id") == call.id), None)
             if result is None or str(result.get("content") or "").lower().startswith("error"):

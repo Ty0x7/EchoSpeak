@@ -850,6 +850,11 @@ class Toolbox:
         finally:
             _tool_execution_context.reset(token)
 
+    def file_removal_state(self, answer: str, timeline: list[dict[str, Any]]) -> dict[str, tuple[str, bool]]:
+        from agent.lean import evidence
+
+        return self._in_tool_context(lambda: evidence.file_removal_state(answer, timeline))
+
     def _file_snapshot(self, name: str, args: dict[str, Any]):
         from agent.lean import file_changes
 

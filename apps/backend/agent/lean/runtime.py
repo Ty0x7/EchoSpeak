@@ -291,12 +291,14 @@ class LeanSession:
     def _is_group(self) -> bool:
         return bool(self.room and self.room.kind == "group" and len(self._members()) >= 2)
 
-    def _add_result(self, result: TurnResult) -> None:
+    def _add_result(self, result: TurnResult, *, depth: int = 0) -> None:
         """Every agent message of this request goes through here, in order."""
         self.results.append(result)
         if self.job is None:
             return
         name = self._name_of(result.agent_id)
+        if result.completed and depth == 0:
+            self.job.claim_complete(name, result.completed)
         usage = result.usage or {}
         # New tokens, not the conversation re-read at every step (agent/lean/loop.py "fresh").
         self.job.record_text(name, result.text, int(usage.get("fresh", usage.get("total")) or 0))
@@ -1578,7 +1580,7 @@ class LeanSession:
 
     def _record(self, persona: AgentPersona, part: TurnResult, depth: int, meta: dict[str, Any]) -> None:
         """A message closed before a handoff: save it now so it sorts before the teammate's."""
-        self._add_result(part)
+        self._add_result(part, depth=depth)
         self._persist(persona, part, depth, meta=meta)
 
     def _persist(self, persona: AgentPersona, result: TurnResult, depth: int, *, meta: Optional[dict[str, Any]] = None) -> None:
@@ -1701,9 +1703,7 @@ class LeanSession:
                 summary = str(args.get("summary") or "").strip()
                 if not summary:
                     return "Error: say what you delivered in 'summary' (one or two sentences)."
-                if depth == 0 and self.job is not None:
-                    self.job.claim_complete(persona.name, summary)
-                return "Marked as done."
+                return "Completion summary submitted."
 
             tools.append(NativeTool(
                 name="complete_task",
@@ -2015,7 +2015,7 @@ class LeanSession:
                         parent_work.coordinator.finish(child_context, status="completed" if result.success and result.text.strip() else "failed",
                             result=result.text, evidence=[{"execution_id": self.execution_id, "agent_id": target.id}])
                         if not result.empty:
-                            self._add_result(result)
+                            self._add_result(result, depth=depth + 1)
                     except BaseException:
                         parent_work.coordinator.finish(child_context, status="interrupted", result="Child execution interrupted")
                         raise
