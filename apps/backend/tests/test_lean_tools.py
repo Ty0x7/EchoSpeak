@@ -44,23 +44,6 @@ def test_default_toolsets_drop_redundant_tools():
     assert TOOLSETS["research"] == TOOLSETS["web"] + TOOLSETS["live"]  # old name still works
 
 
-@pytest.mark.parametrize("host_info", [{"os": "Linux", "ram": "16 GB"}, {}])
-def test_system_info_reports_running_echospeak_version(monkeypatch, host_info):
-    from agent import tools
-    from agent.lean.toolbox import TOOL_OVERRIDES
-    from version import APP_VERSION
-
-    monkeypatch.setattr(tools, "_collect_system_info", lambda: host_info)
-    report = tools.system_info.invoke({})
-    assert report.splitlines()[0] == f"Running EchoSpeak version: {APP_VERSION}"
-    if host_info:
-        assert "OS: Linux" in report
-        assert "RAM: 16 GB" in report
-    else:
-        assert "System info unavailable." in report
-    assert "running EchoSpeak version" in TOOL_OVERRIDES["system_info"]["description"]
-
-
 def test_other_harness_names_and_arguments_reach_the_right_tool():
     box = _box("terminal", "file_read", "file_edit", "file_search", "file_find", "safe_web_fetch")
     assert box.normalize_call("bash", {"cmd": "ls", "workdir": "src"}) == ("terminal", {"command": "ls", "cwd": "src"})

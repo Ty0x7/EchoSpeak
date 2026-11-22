@@ -1699,21 +1699,19 @@ def notepad_write(content: str, filename: Optional[str] = None) -> str:
     return f"Opened Notepad, typed {len(data)} chars, and saved artifact: {artifact_path}"
 
 
-@tool(description="The running EchoSpeak version and this computer's OS, CPU, GPU, memory and home-disk space.")
+@tool(description="This computer's specs: OS and distribution, CPU, GPU, RAM (total and free), home-disk space.")
 def system_info() -> str:
-    from version import APP_VERSION
-
     info = _collect_system_info()
+    if not info:
+        return "System info unavailable."
     labels = {"os": "OS", "distro": "Distribution", "cpu": "CPU", "gpu": "GPU", "ram": "RAM",
               "ram_available": "RAM available", "disk_home": "Home disk"}
-    lines = [f"Running EchoSpeak version: {APP_VERSION}"]
+    lines = []
     for key, label in labels.items():
         val = info.get(key)
         if val:
             lines.append(f"{label}: {val}")
-    if len(lines) == 1:
-        lines.append("System info unavailable.")
-    return "\n".join(lines)
+    return "\n".join(lines) if lines else "System info unavailable."
 
 
 class DesktopFindControlArgs(BaseModel):
