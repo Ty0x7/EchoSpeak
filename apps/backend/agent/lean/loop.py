@@ -1104,7 +1104,7 @@ class LeanTurn:
         """The summary from a successful complete_task call in this step, if any."""
         for call in calls:
             name = self.toolbox.resolve_name(call.name)
-            if not self.toolbox.ends_turn(name):
+            if not self.toolbox.ends_turn(name) or self._outcomes_by_call.get(call.id) != "ok":
                 continue
             result = next((m for m in reversed(messages) if m.get("role") == "tool" and m.get("tool_call_id") == call.id), None)
             if result is None or str(result.get("content") or "").lower().startswith("error"):

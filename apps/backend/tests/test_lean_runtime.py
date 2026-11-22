@@ -294,6 +294,24 @@ def test_non_interactive_sources_never_wait_for_approval(monkeypatch):
     assert "only be given in the EchoSpeak app" in client.calls[1][-1]["content"]
 
 
+def test_denied_completion_tool_cannot_publish_a_summary(monkeypatch):
+    executed = []
+    box = _toolbox({"complete_task": lambda args: executed.append(args) or "Completion summary submitted."})
+    box.native["complete_task"].ends_turn = True
+    client = ScriptedClient([
+        ModelTurn(tool_calls=[ToolCall("c1", "complete_task", '{"summary": "I finished the work."}')]),
+        ModelTurn(content="The owner declined completion."),
+    ])
+    events = []
+    turn = _turn(client, box, events)
+    monkeypatch.setattr(turn, "_approve", lambda *args: (False, "The user denied this action.", "denied"))
+    result = turn.run("Check the work.")
+    assert not executed
+    assert not result.completed
+    assert result.text == "The owner declined completion."
+    assert next(event for event in events if event["type"] == "tool_end")["outcome"] == "denied"
+
+
 def test_cancel_stops_the_loop():
     cancel = threading.Event()
     cancel.set()
