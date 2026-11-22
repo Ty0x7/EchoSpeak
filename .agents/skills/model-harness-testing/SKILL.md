@@ -88,6 +88,19 @@ Report task success, pass^k and critical findings next to the weighted score, no
 - Approvals are answered as an owner would answer them.
 - A case can state what the owner says on a question card (`Turn.answer`).
 
+## Comparing a reference behavior across models
+
+- Pin the runtime revision, the case matrix and its suite membership, the evaluator scripts, the model tag and
+  digest, and the served context window. Keep historical grades and any corrected rejudgment separately addressable.
+- Record the reference session's observable request, actions, receipts, and verified end state. Include failures
+  and uncertain evidence. Keep raw reference transcripts and held-out answers outside model prompts. Judge any
+  safe trajectory by the same acceptance criteria.
+- For mixed suites, report development and held-out results using the recorded suite membership. The current
+  judge's headline groups use D/H case prefixes and omit other held-out families. Regroup the existing per-case
+  grades and report the number of cases with all expected trials before calculating pass@k or pass^k.
+- If resource pressure interrupts a run, retain valid completed trials and resume only the missing trials under the
+  same inputs. Record each reload and label timing differences between batch schedules.
+
 ## Scoring
 
 | Criterion | Weight |
