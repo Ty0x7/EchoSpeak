@@ -139,6 +139,112 @@ def test_emptying_a_file_asks_and_a_no_keeps_it(tmp_path):
     assert (tmp_path / "budget.csv").read_text().startswith("item,amount")
 
 
+def test_false_file_claim_after_denial_ends_without_a_retry_hint(tmp_path):
+    budget = tmp_path / "budget.csv"
+    original = b"item,amount\nrent,1200\nfood,400\n"
+    budget.write_bytes(original)
+    box, _ran = _project(tmp_path)
+    write = '{"path": "budget.csv", "content": ""}'
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("first", "file_write", write)]),
+        ModelTurn(content="I replaced `budget.csv` with an empty file."),
+        ModelTurn(tool_calls=[ToolCall("retry", "file_write", write)]),
+        ModelTurn(content="The write was denied."),
+    ])
+    events = []
+    result = _turn(box, client, ["deny"], events).run("Replace budget.csv with an empty file.")
+    assert budget.read_bytes() == original
+    assert len(client.calls) == 2
+    assert "budget.csv" in result.text and "declined" in result.text
+    assert "I replaced" not in result.text
+    assert any(e["type"] == "text_replace" for e in events)
+    assert [e["outcome"] for e in events if e["type"] == "tool_end"] == ["denied"]
+
+    later = Client([ModelTurn(tool_calls=[ToolCall("new", "file_write", write)]),
+                    ModelTurn(content="Replaced budget.csv with an empty file.")])
+    fresh_events = []
+    _turn(box, later, ["allow"], fresh_events).run("I changed my mind. Replace budget.csv now.")
+    assert budget.read_bytes() == b""
+    assert [e["outcome"] for e in fresh_events if e["type"] == "tool_end"] == ["ok"]
+
+
+def test_denied_file_claim_next_to_a_refused_call_gets_a_rewrite_only(tmp_path):
+    budget = tmp_path / "budget.csv"
+    original = b"item,amount\nrent,1200\nfood,400\n"
+    budget.write_bytes(original)
+    box, _ran = _project(tmp_path)
+    write = '{"path": "budget.csv", "content": ""}'
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("first", "file_write", write)]),
+        ModelTurn(content="I replaced budget.csv with an empty file.", tool_calls=[ToolCall("again", "file_write", write)]),
+        ModelTurn(content="The write was denied. Please confirm you want to empty budget.csv."),
+    ])
+    events = []
+    result = _turn(box, client, ["deny"], events).run("Replace budget.csv with an empty file.")
+    assert budget.read_bytes() == original
+    note = client.calls[-1][-1]["content"]
+    assert "Report that the owner declined it" in note
+    assert "Write it with file_write" not in note
+    assert [e["outcome"] for e in events if e["type"] == "tool_end"] == ["denied", "refused"]
+    assert "declined" in result.text and "Please confirm" not in result.text
+    assert "I replaced" not in result.text
+
+
+def test_denial_does_not_rewrite_a_separate_authorized_file_claim(tmp_path):
+    budget = tmp_path / "budget.csv"
+    budget.write_text("item,amount\nrent,1200\nfood,400\n")
+    other = tmp_path / "next"
+    other.mkdir()
+    box, _ran = _project(tmp_path)
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("first", "file_write", '{"path": "budget.csv", "content": ""}')]),
+        ModelTurn(tool_calls=[ToolCall("next", "file_write", '{"path": "next/budget.csv", "content": "approved"}')]),
+        ModelTurn(content="I saved `next/budget.csv`. The original is still intact."),
+    ])
+    result = _turn(box, client, ["deny"], []).run("Empty budget.csv and independently create next/budget.csv.")
+    assert budget.read_text().startswith("item,amount")
+    assert (other / "budget.csv").read_text() == "approved"
+    assert result.text == "I saved `next/budget.csv`. The original is still intact."
+
+
+def test_denied_file_confirmation_is_refused_before_opening_question_card(tmp_path):
+    from agent.lean.ask import ask_user_tool
+
+    budget = tmp_path / "budget.csv"
+    original = b"item,amount\nrent,1200\nfood,400\n"
+    budget.write_bytes(original)
+    box, _ran = _project(tmp_path)
+    question = ask_user_tool()
+    box.native[question.name] = question
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("first", "file_write", '{"path": "budget.csv", "content": ""}')]),
+        ModelTurn(tool_calls=[ToolCall("question", question.name,
+                                      '{"question": "Should I overwrite budget.csv?", "options": ["Yes", "No"]}')]),
+        ModelTurn(content="The budget file was left intact."),
+    ])
+    events = []
+    result = _turn(box, client, ["deny", "No"], events).run("Replace budget.csv with an empty file.")
+    assert budget.read_bytes() == original
+    assert len([event for event in events if event["type"] == "approval_request"]) == 1
+    assert any(event["type"] == "question_refused" and event["reason"] == "owner_denial" for event in events)
+    assert result.text == "The budget file was left intact."
+
+
+def test_denied_write_preserves_separate_read_only_clarification(tmp_path):
+    budget = tmp_path / "budget.csv"
+    original = b"item,amount\nrent,1200\nfood,400\n"
+    budget.write_bytes(original)
+    box, _ran = _project(tmp_path)
+    answer = "I left the file intact. Can you confirm which subtotal in budget.csv you need?"
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("first", "file_write", '{"path": "budget.csv", "content": ""}')]),
+        ModelTurn(content=answer),
+    ])
+    result = _turn(box, client, ["deny"], []).run("Empty budget.csv, then ask which subtotal I want to discuss.")
+    assert result.text == answer
+    assert budget.read_bytes() == original
+
+
 def test_ordinary_edits_still_run_without_a_card(tmp_path):
     (tmp_path / "calc.py").write_text("def average(v):\n    return sum(v) / (len(v) + 1)\n")
     box, _ran = _project(tmp_path)

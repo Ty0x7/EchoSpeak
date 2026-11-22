@@ -36,7 +36,7 @@ from agent.lean import file_access
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, evidence, outbound
 from agent.lean.job import (CHECK_TOOLS, READ_ONLY_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
-                            is_promise_without_action, promise_nudge, unbacked_claim, unbacked_file_claim,
+                            is_promise_without_action, named_files, promise_nudge, unbacked_claim, unbacked_file_claim,
                             unbacked_screen_claim, written_names)
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
@@ -116,6 +116,17 @@ def _redacted_card(card: dict[str, Any]) -> dict[str, Any]:
 
 # An EchoSpeak note written by the model itself, in its own reply (open tag through close, or to the end).
 _FORGED_NOTE = re.compile(r"<echospeak-note>.*?(?:</echospeak-note>|$)", re.S | re.I)
+_ASKS_AGAIN = re.compile(
+    r"(?i)\b(?:please|can you|could you|would you)\s+(?:confirm|approve|authori[sz]e)\b"
+    r"[^.?!\n]{0,65}\b(?:delet|remov|empt|overwrit|replac|edit|writ)\w*\b"
+    r"|\b(?:try|proceed)\s+again\b[^.?!\n]{0,60}\b(?:confirmation|approval|permission)\b"
+    r"|\b(?:should i|shall i|do you want me to|would you like me to)\s+"
+    r"(?:proceed\s+with\s+)?(?:delet|remov|empt|overwrit|replac|edit|writ)\w*\b"
+)
+_FILE_DENIAL_GUIDANCE = (
+    "The owner's file-action denial is settled for this turn. Report that the owner declined it. "
+    "Correct any unsupported success claim. Continue only separate authorized work."
+)
 # Tools that put content at a location, and a reply that says a location couldn't be used (W1, below).
 _PLACING_TOOLS = frozenset({"file_write", "file_copy", "file_move"})
 _SAYS_NOT_WRITTEN = re.compile(r"(?i)\b(not allowed|outside|couldn['’]t|could not|can['’]t|cannot|unable|refused|"
@@ -776,6 +787,14 @@ class LeanTurn:
             messages.append(assistant)
 
             if not calls:
+                if denied_file := self._declined_file_reply(content):
+                    final_text = f"The requested change to `{denied_file}` was declined and remains blocked for this turn."
+                    self._retract_text(step)
+                    self._append_text("text", step, final_text)
+                    self.emit({"type": "agent_token", "step": step, "data": final_text})
+                    self.emit({"type": "claim_unverified", "step": step, "note": final_text, "check": "owner_denial"})
+                    stop_reason = "deterministic_reply"
+                    break
                 if content.strip() and turn.finish_reason == "length" and continuations < CONTINUATIONS and step < max_steps:
                     # Cut off by the output limit mid-answer: carry on with the same answer, thinking off,
                     # instead of accepting half an answer or starting a new one.
@@ -845,7 +864,7 @@ class LeanTurn:
                         # "I've saved it" with nothing saved: ask once for the tool call or the truth.
                         if claim_nudges < self.claim_nudge_limit:
                             claim_nudges += 1
-                            add_note(messages, claim_nudge(claim))
+                            add_note(messages, _FILE_DENIAL_GUIDANCE if self._owner_denied_targets else claim_nudge(claim))
                             self.emit({"type": "claim_nudge", "step": step, "claim": claim[:200]})
                             self._retract_text(step)
                             continue
@@ -983,7 +1002,8 @@ class LeanTurn:
                           if self.promise_guard and content and messages[-1].get("role") == "tool" else "")
             if file_claim:
                 # Text sent beside tool calls is checked too: "I've written mics.md" while only running `dir`.
-                messages[-1]["content"] = (str(messages[-1].get("content") or "") + "\n\n" + file_claim_note(file_claim))
+                guidance = app_note(_FILE_DENIAL_GUIDANCE) if self._owner_denied_targets else file_claim_note(file_claim)
+                messages[-1]["content"] = str(messages[-1].get("content") or "") + "\n\n" + guidance
                 self._retract_text(step)
                 self.emit({"type": "claim_nudge", "step": step, "claim": file_claim[:200]})
             if self._refusals >= REFUSAL_STOP:
@@ -1789,6 +1809,37 @@ class LeanTurn:
         except (ValueError, OSError):
             return hit[0]
 
+    def _named_declined_file(self, text: str) -> str:
+        """Bind a reply to an existing owner-denied path without opening a path from prose."""
+        try:
+            root = Path(self.toolbox.project_root or ".").expanduser().resolve()
+        except (OSError, RuntimeError):
+            root = None
+        for raw in sorted(self._owner_denied_targets):
+            target = Path(raw)
+            display = str(target.relative_to(root)) if root is not None and target.is_relative_to(root) else raw
+            for name in (display, raw):
+                if "`" not in name and "\n" not in name and re.search(
+                    rf"(?<![\w./\\-]){re.escape(name)}(?![\w/\\-]|\.\w)", text
+                ):
+                    return display
+        return ""
+
+    def _declined_file_reply(self, text: str) -> str:
+        if not self._owner_denied_targets or not text:
+            return ""
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", text):
+            if unbacked_file_claim(sentence, set()) or is_promise_without_action(sentence):
+                if target := self._named_declined_file(sentence):
+                    return target
+        for block in re.split(r"\n\s*\n", text):
+            if _ASKS_AGAIN.search(block):
+                if target := self._named_declined_file(block):
+                    return target
+                if not named_files(block) and len(named_files(text)) == 1:
+                    return self._named_declined_file(text)
+        return ""
+
     def _forget_reads(self) -> None:
         """Let reads repeat again: after a change, or after compaction summarised their results away, "the result is
         above" was no longer true (live LT1, 19 November: 21 refused reads and a 9-call failure streak). The
@@ -2145,7 +2196,12 @@ class LeanTurn:
         question, options, allow_other, problem = ask.parse(args)
         if problem:
             return False, problem
-        if ask.repeats_action_request(question, options, self._goal):
+        repeats_request = ask.repeats_action_request(question, options, self._goal)
+        if self._owner_denied_targets and (self._declined_file_reply("\n".join([question, *options]))
+                                           or (repeats_request and self._named_declined_file(self._goal))):
+            self.emit({"type": "question_refused", "step": step, "reason": "owner_denial"})
+            return False, _FILE_DENIAL_GUIDANCE
+        if repeats_request:
             self.emit({"type": "question_refused", "step": step, "reason": "action_confirmation"})
             return False, ("This was already requested. Use the available tool so the harness can present its "
                            "exact approval card. If the action was denied or unavailable, explain that and stop.")
