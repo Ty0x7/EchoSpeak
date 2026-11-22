@@ -260,6 +260,81 @@ def test_related_suites_except_failures_the_base_already_had():
     assert atf.related_failures({"ok": False, "failed": [], "summary": "INTERNALERROR"}, known)
 
 
+@pytest.mark.parametrize(("returncode", "reports_known", "decision"), [
+    (1, True, "measure"), (1, False, "reject"), (3, False, "reject"), (3, True, "reject"),
+])
+def test_full_suite_requires_a_completed_runner(tmp_path, monkeypatch, returncode, reports_known, decision):
+    test = "apps/backend/tests/test_fixture.py"
+    known = "tests/test_known.py::test_already_failed"
+    monkeypatch.setattr(atf, "changed_files", lambda *_: [test])
+    monkeypatch.setattr(atf, "model_names_in_code", lambda *_: [])
+    monkeypatch.setattr(atf, "added_lines", lambda *_: [])
+    monkeypatch.setattr(atf, "failing_first", lambda *_: {
+        "fails_on_base": True, "passes_on_fix": True, "fixed_by_change": [test],
+        "still_failing": [], "known_failures": [],
+        "base": {"summary": "1 failed"}, "fix": {"summary": "1 passed"},
+    })
+    monkeypatch.setattr(atf, "pytest", lambda *_: {"ok": True, "failed": [], "summary": "1 passed"})
+    monkeypatch.setattr(atf, "full_suite", lambda *_: {
+        "ok": False, "failed": [known] if reports_known else [],
+        "summary": "1 failed in 0.14s" if returncode == 1 else "INTERNALERROR", "returncode": returncode,
+    })
+    result = atf.gate(tmp_path, "head", atf.Session(tmp_path, {"suite_baseline": {"failed": [known]}}), 1, {})
+    assert result["decision"] == decision, result
+
+
+@pytest.mark.parametrize(("footer", "complete"), [
+    ("", False),
+    ("1 failed while emitting progress", False),
+    ("1 passed in 0.14s", False),
+    ("2 failed in 0.14s", False),
+    ("1 failed, 8 passed in 0.14s\nrunner ended before reporting", False),
+    ("1 failed in 0.14s", True),
+    ("====== 1 failed, 2097 passed, 50 skipped, 1 warning in 100.72s (0:01:40) ======", True),
+])
+def test_exit_one_with_known_failure_requires_final_pytest_summary(tmp_path, monkeypatch, footer, complete):
+    known = "tests/test_known.py::test_already_failed"
+    backend = tmp_path / "apps" / "backend"
+    (backend / "tests").mkdir(parents=True)
+    output = f"FAILED {known} - AssertionError\n{footer}\n"
+    monkeypatch.setattr(atf, "sh", lambda *args, **kwargs: subprocess.CompletedProcess(
+        args=[], returncode=1, stdout=output, stderr=""))
+    run = atf.full_suite(tmp_path)
+    assert run["failed"] == [known]
+    assert (atf.related_failures(run, {known}) == []) is complete
+
+
+def test_completed_pytest_can_report_failure_and_teardown_error_for_same_test(tmp_path, monkeypatch):
+    known = "tests/test_known.py::test_already_failed"
+    (tmp_path / "apps" / "backend" / "tests").mkdir(parents=True)
+    monkeypatch.setattr(atf, "sh", lambda *args, **kwargs: subprocess.CompletedProcess(
+        args=[], returncode=1,
+        stdout=f"FAILED {known} - AssertionError\nERROR {known} - AssertionError\n1 failed, 1 error in 0.14s\n",
+        stderr=""))
+    run = atf.full_suite(tmp_path)
+    assert run["failed"] == [known]
+    assert atf.related_failures(run, {known}) == []
+
+
+def test_aborted_full_baseline_stops_before_local_model(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setattr(atf, "SESSIONS", tmp_path / "sessions")
+    monkeypatch.setattr(atf, "billing_problems", lambda *_: [])
+    monkeypatch.setattr(atf, "make_tree", lambda *_: (tmp_path, "auto/baseline-fixture"))
+    monkeypatch.setattr(atf, "git", lambda _, command, *args: "" if command == "status" else "a" * 40)
+    monkeypatch.setattr(atf, "full_suite", lambda *_: {
+        "ok": False, "failed": [], "summary": "INTERNALERROR", "returncode": 3,
+    })
+    monkeypatch.setattr(atf, "run_eval", lambda *_: pytest.fail("Model launched after the baseline aborted"))
+    assert atf.main(["run", "--driver", "manual", "--label", "aborted-suite"]) == 2
+    path, = atf.SESSIONS.glob("*/state.json")
+    result = json.loads(path.read_text())
+    assert result["status"] == "halted" and result["ended"]
+    assert result["suite_baseline"]["returncode"] == 3
+    assert "INTERNALERROR" in result["stopped"]
+
+
 def test_model_names_count_in_code_but_not_in_the_evidence_comments(tmp_path):
     """Same cycle: comments and docstrings citing "D7 (qwen3.5:9b, 2 of 3 runs)" were rejected as model-specific code."""
     repo = tmp_path / "repo"

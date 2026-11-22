@@ -518,18 +518,27 @@ def model_names_in_code(tree: Path, base: str, files: list[str]) -> list[str]:
     return found
 
 
+_PYTEST_RESULT_COUNT = r"\d+ (?:passed|failed|errors?|skipped|deselected|xfailed|xpassed|warnings?|reruns?)"
+_PYTEST_RUN_SUMMARY = re.compile(
+    rf"(?P<counts>{_PYTEST_RESULT_COUNT}(?:, {_PYTEST_RESULT_COUNT})*) in "
+    r"\d+(?:\.\d+)?s(?: \(\d+:\d{2}:\d{2}\))?"
+)
+
+
 def pytest(tree: Path, tests: list[str], timeout: float = 1800) -> dict[str, Any]:
     backend = tree / "apps" / "backend"
     tests = [t for t in tests if (backend / t).exists()]
     if not tests:
         return {"ok": True, "passed": 0, "failed": [], "summary": "no tests"}
-    out = sh([str(backend / ".venv" / "bin" / "python"), "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider", *tests],
-             backend, timeout=timeout)
-    failed = sorted({re.sub(r" - .*", "", l.split(" ", 1)[1]) for l in out.stdout.splitlines()
-                     if l.startswith(("FAILED ", "ERROR "))})
-    summary = next((l for l in reversed(out.stdout.splitlines()) if re.search(r"\d+ (passed|failed)", l)), out.stdout[-200:])
+    out = sh([str(backend / ".venv" / "bin" / "python"), "-m", "pytest", "-q", "--no-header",
+              "--color=no", "-p", "no:cacheprovider", *tests], backend, timeout=timeout)
+    lines = out.stdout.splitlines()
+    failure_ids = [re.sub(r" - .*", "", line.split(" ", 1)[1]) for line in lines
+                   if line.startswith(("FAILED ", "ERROR "))]
+    summary = next((line.strip(" =\t") for line in reversed(lines) if line.strip()), "")
     passed = int(m.group(1)) if (m := re.search(r"(\d+) passed", summary)) else 0
-    return {"ok": out.returncode == 0, "passed": passed, "failed": failed, "summary": summary.strip("= ")}
+    return {"ok": out.returncode == 0, "returncode": out.returncode, "passed": passed,
+            "failed": sorted(set(failure_ids)), "failure_reports": len(failure_ids), "summary": summary}
 
 
 def full_suite(tree: Path) -> dict[str, Any]:
@@ -559,10 +568,23 @@ def failing_first(tree: Path, base: str, tests: list[str], session: Session, cyc
 
 
 def related_failures(run: dict[str, Any], known: set[str]) -> list[str]:
-    """Failures in a test run that the session's base commit didn't already have."""
+    """Runner failures and unexpected test failures."""
     failed = [t for t in run["failed"] if t not in known]
-    if not run["ok"] and not run["failed"]:
+    # Pytest exit 1 can represent known red tests. Other nonzero exits mean the run was incomplete.
+    returncode = run.get("returncode")
+    if returncode not in {None, 0, 1}:
+        failed.append(f"(pytest exited with code {returncode}: {run['summary'][:120]})")
+    elif not run["ok"] and not run["failed"]:
         failed.append(f"(pytest failed without a test id: {run['summary'][:120]})")
+    elif returncode == 1:
+        summary = _PYTEST_RUN_SUMMARY.fullmatch(run["summary"])
+        if not summary:
+            failed.append("(pytest exit 1 has no completed-run summary)")
+        else:
+            # The same test can be listed twice when its call fails and its teardown errors.
+            count = sum(int(value) for value in re.findall(r"(\d+) (?:failed|errors?)\b", summary["counts"]))
+            if count != run.get("failure_reports", len(run["failed"])):
+                failed.append("(pytest failure count does not match its test IDs)")
     return failed
 
 
@@ -633,8 +655,8 @@ def gate(tree: Path, base: str, session: Session, cycle: int, report: dict[str, 
         result["decision"], result["reason"] = "reject", f"related suites fail: {broken[:3]}"
         return result
     suite = full_suite(tree)
-    new = [t for t in suite["failed"] if t not in known]
-    result["suite"] = {"summary": suite["summary"], "new_failures": new}
+    new = related_failures(suite, known)
+    result["suite"] = {"summary": suite["summary"], "returncode": suite.get("returncode"), "new_failures": new}
     if not check("full backend suite: no failure the base commit didn't have", not new, ", ".join(new[:8])):
         result["decision"], result["reason"] = "reject", f"new suite failures: {new[:5]}"
         return result
@@ -739,7 +761,13 @@ def run(args: argparse.Namespace) -> int:
     if "suite_baseline" not in st:
         session.log("baseline-suite", commit=git(tree, "rev-parse", "--short", "HEAD"))
         suite = full_suite(tree)
-        st["suite_baseline"] = {"summary": suite["summary"], "failed": suite["failed"]}
+        st["suite_baseline"] = {"summary": suite["summary"], "failed": suite["failed"],
+                                "returncode": suite.get("returncode")}
+        if incomplete := related_failures(suite, set(suite["failed"])):
+            st.update(status="halted", stopped=f"backend baseline did not complete: {incomplete[0]}", ended=now())
+            session.save()
+            session.log("halt", reason=st["stopped"])
+            return 2
         session.save()
     if st["heldout"] and "heldout_baseline" not in st:
         session.log("baseline-heldout", cases=",".join(st["heldout"]))
@@ -803,7 +831,9 @@ def run(args: argparse.Namespace) -> int:
                 session.save()
                 if not dx["items"]:
                     record["decision"] = "nothing_to_fix"
-                    st["status"], st["stopped"] = "stopped", f"every dev case is at or above {st['target']} with no failed check"
+                    st["status"] = "stopped"
+                    st["stopped"] = (f"every dev case reached {st['target']} with successful execution "
+                                     "and no critical findings")
                     session.save()
                     session.log("stop", reason=st["stopped"], mean=before["mean"])
                     break
