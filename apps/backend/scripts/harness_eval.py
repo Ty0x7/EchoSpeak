@@ -939,6 +939,17 @@ SETS = {"dev": DEV, "heldout": HELDOUT, "all": DEV + HELDOUT, "env": ENV_DEV + E
         "cap-heldout": CAP_HELDOUT,
         "everything": DEV + HELDOUT + ENV_DEV + ENV_HELDOUT + CAP_DEV + CAP_HELDOUT + LONG_DEV + LONG_HELDOUT}
 
+# These memberships describe the cases themselves. The selected command-line
+# suite can combine splits, and --only can select across unrelated suites.
+CASE_MEMBERSHIP: dict[str, str] = {}
+for split, split_cases in (
+    ("dev", DEV + ENV_DEV + CAP_DEV + LONG_DEV + LONG_TASK + AUDIT_DEV),
+    ("heldout", HELDOUT + ENV_HELDOUT + CAP_HELDOUT + LONG_HELDOUT + AUDIT_HELDOUT),
+):
+    for case in split_cases:
+        if CASE_MEMBERSHIP.setdefault(case.id, split) != split:
+            raise ValueError(f"Conflicting registered membership for {case.id}")
+
 
 # ── zero API billing (owner policy, 18 November 2026: "No paid API calls whatsoever") ─────────────
 # The backend under test reads many paid-provider keys from its environment (config.py: OpenAI, Anthropic, Gemini,
@@ -1356,6 +1367,7 @@ def main() -> int:
     status = subprocess.run(["git", "status", "--porcelain", "--", *tracked], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     diff = subprocess.run(["git", "diff", "HEAD", "--", *tracked], cwd=ROOT, capture_output=True, text=True).stdout
     meta = {"label": args.label, "model": args.model, "set": args.set, "cases": [c.id for c in cases], "repeat": args.repeat,
+            "case_membership": {case.id: CASE_MEMBERSHIP[case.id] for case in cases},
             "commit": commit + ("+dirty" if status else ""), "started": time.time(),
             "projects_root": str(projects_root(run_dir)),
             "dirty": {"files": status.splitlines()[:40], "diff_sha256": hashlib.sha256(diff.encode()).hexdigest()[:16]} if status else {}}
