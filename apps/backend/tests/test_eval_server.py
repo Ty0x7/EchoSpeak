@@ -114,8 +114,11 @@ def test_private_server_runs_with_the_window_and_no_prompt_cache_then_stops_its_
             os.kill(runner, 0)
         except ProcessLookupError:
             break
-        # A zombie still answers kill(0); it has no live state left.
-        if Path(f"/proc/{runner}/stat").read_text().split(") ", 1)[1].startswith("Z"):
+        # A zombie still answers kill(0); it has no live state left. It can also be reaped between the two checks.
+        try:
+            if Path(f"/proc/{runner}/stat").read_text().split(") ", 1)[1].startswith("Z"):
+                break
+        except FileNotFoundError:
             break
         time.sleep(0.1)
     else:
