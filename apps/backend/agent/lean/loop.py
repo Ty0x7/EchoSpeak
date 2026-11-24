@@ -34,7 +34,7 @@ from agent.lean import quarantine, read_outline, tool_outputs, tool_prompting, t
 from agent.lean import approvals, steering
 from agent.lean import file_access
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
-from agent.lean import ask, evidence, outbound
+from agent.lean import ask, evidence, outbound, removal_scope
 from agent.lean.job import (CHECK_TOOLS, READ_ONLY_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
                             is_promise_without_action, named_files, promise_nudge, unbacked_claim, unbacked_file_claim,
                             unbacked_screen_claim, written_names)
@@ -664,6 +664,7 @@ class LeanTurn:
         self._history_in_messages = len(self.history)
         messages.append({"role": "user", "content": user_message + (f"\n\n{self.request_note}" if self.request_note else "")})
         self._goal = user_message  # what the quarantined reader extracts facts for
+        self._turn_started, self._unnamed_removed = time.time(), set()
 
         # A research worker gets its own, smaller step budget (agent/lean/swarm.py).
         max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
@@ -1442,6 +1443,21 @@ class LeanTurn:
                 results[call.id] = (False, undone)
                 self._tool_finished(call, name, args, step, False, undone, 0, outcome="skipped")
                 continue
+            if not problem and removal_scope.is_removal(name, args):
+                # A removal stays within what the user asked to remove (agent/lean/removal_scope.py). Checked
+                # before the approval card, which shows the command but not whether it exceeds the request.
+                request, named_in = self._removal_request()
+                new = removal_scope.unnamed_targets(self._touched(name, args), named_in, getattr(self, "_turn_started", 0.0))
+                already = getattr(self, "_unnamed_removed", set())
+                scope = removal_scope.problem(new, already, request,
+                                              Path(str(getattr(self.toolbox, "project_root", "") or ".")).expanduser())
+                if scope:
+                    policy.audit(policy.Decision("deny", scope, "unnamed_removal"), name=name, args=args,
+                                 session_id=self.session_id, agent=self.persona.id, outcome="blocked")
+                    results[call.id] = (False, scope)
+                    self._tool_finished(call, name, args, step, False, scope, 0, outcome="skipped")
+                    continue
+                self._unnamed_removed = already | set(new)
             if not problem and (self.unavailable_delegates or self.failed_delegates):
                 from agent.lean.agent_reach import artifact_attribution_problem
 
@@ -1728,6 +1744,24 @@ class LeanTurn:
                 parts.append(f"optional: {', '.join(optional)}")
             return f" ({'; '.join(parts)})" if parts else ""
         return ""
+
+    def _removal_request(self) -> tuple[str, str]:
+        """The user's request for collective wording, and the text that may name targets.
+
+        A reply such as "yes" answers the assistant's last question, so that question and the previous user
+        message can name what is removed. Only the user's own words can ask for several.
+        """
+        last_user = last_assistant = ""
+        for message in reversed(self.history or []):
+            role, content = message.get("role"), message.get("content")
+            text = content if isinstance(content, str) else ""
+            if role == "assistant" and not last_assistant and not last_user:
+                last_assistant = text
+            elif role == "user" and not last_user:
+                last_user = text
+                break
+        request = getattr(self, "_goal", "") or ""
+        return f"{request}\n{last_user}", f"{request}\n{last_user}\n{last_assistant}"
 
     def _touched(self, name: str, args: dict[str, Any]) -> set[str]:
         """Existing files and folders a call names: a file tool's paths, or a command's arguments.
