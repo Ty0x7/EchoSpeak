@@ -146,7 +146,7 @@ def _turn(client: ScriptedClient, toolbox: Toolbox, events: list[dict[str, Any]]
     )
 
 
-@pytest.mark.parametrize("mode", ["prose", "persistent", "fenced", "quote", "expanding", "tool", "cancel"])
+@pytest.mark.parametrize("mode", ["prose", "single", "persistent", "fenced", "quote", "expanding", "tool", "cancel"])
 def test_repeated_stream_closes_and_retries_only_for_plain_prose(mode):
     cycle = "I will read the configuration again.\n\nI should check the inputs first.\n\n"
     text = cycle * 12
@@ -156,6 +156,9 @@ def test_repeated_stream_closes_and_retries_only_for_plain_prose(mode):
         text = "\n".join("> " + line for line in text.splitlines())
     if mode == "expanding":
         text = "".join(f"Case {index}\n\n" + cycle for index in range(12))
+    if mode == "single":
+        cycle = "I will read the configuration again.\n\n"
+        text = cycle * 24
     cancel = threading.Event()
     received = []
     requests = []
@@ -194,7 +197,7 @@ def test_repeated_stream_closes_and_retries_only_for_plain_prose(mode):
         result = _turn(client, _toolbox({"lookup": lambda _: calls.append(True) or "Ready"}), events, cancel).run("Inspect the inputs.")
 
     assert closed == ([True, True] if mode == "persistent" else [True])
-    if mode == "prose":
+    if mode in {"prose", "single"}:
         assert received[-1] < len(text) - len(cycle)
         assert result.success
         assert result.text == "The inputs are ready."
