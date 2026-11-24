@@ -689,6 +689,7 @@ class LeanTurn:
         overflow_retries = 0
         transient_retries = 0
         continuations = 0
+        repetition_retried = False
         step = 0
         planned = self.prefetch() if self.prefetch is not None else []
         if planned and not self.cancel.is_set():
@@ -764,6 +765,22 @@ class LeanTurn:
             if turn.finish_reason == "cancelled":
                 error = "cancelled"
                 success = False
+                break
+            if turn.finish_reason == "repeated_prose":
+                self._discard_step(step)
+                self.emit({"type": "model_repetition", "step": step, "characters": len(turn.content),
+                           "retry": not repetition_retried and step < max_steps})
+                if not repetition_retried and step < max_steps:
+                    repetition_retried = True
+                    add_note(messages, "Your last draft stalled. Continue from the existing tool results. "
+                             "Take the next necessary action, or give a concise answer grounded in what already ran.")
+                    self._no_think_next = True
+                    continue
+                stop_reason = "model_repetition"
+                success = False
+                final_text = "The model got stuck repeating itself. I stopped this attempt."
+                self._append_text("text", step, final_text)
+                self.emit({"type": "agent_token", "step": step, "data": final_text})
                 break
 
             calls = list(turn.tool_calls)
@@ -1878,6 +1895,9 @@ class LeanTurn:
             # got "I ran out of steps" under an answer they had watched being thought (19 November 2026).
             self._no_think_next = True
             turn = self._call_model(messages, [], step)
+            if turn.finish_reason == "repeated_prose":
+                self._discard_step(step)
+                return ""
             text = str(turn.content or "").strip()
             reasoning = str(getattr(turn, "reasoning", "") or "").strip()
             if not text and reasoning and not self.cancel.is_set():
@@ -1885,7 +1905,11 @@ class LeanTurn:
                 messages.append({"role": "assistant", "content": ""})
                 add_note(messages, NUDGE_THOUGHT_ONLY + f" Your reasoning ended with: \"{reasoning[-1200:]}\"")
                 self._no_think_next = True
-                text = str(self._call_model(messages, [], step).content or "").strip()
+                turn = self._call_model(messages, [], step)
+                if turn.finish_reason == "repeated_prose":
+                    self._discard_step(step)
+                    return ""
+                text = str(turn.content or "").strip()
         except Exception:
             logger.debug("Grace answer failed", exc_info=True)
             return ""
