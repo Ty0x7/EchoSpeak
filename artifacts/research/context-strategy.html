@@ -9,6 +9,24 @@
 <header><h1>Context, memory and long conversations · qwen3.5:9b on this machine</h1><p>19 November 2026 · branch <code>tui-refine</code> · technical record: <code>docs/research/context-strategy.md</code> · script: <code>apps/backend/scripts/context_probe.py</code></p></header>
 <p class="lead"><b>Keep 16K.</b> A larger window doesn't buy recall this model already has; on an 8 GB card it buys slower replies. The bigger win was in EchoSpeak itself: the prompt layout made the server reprocess the tools and the whole history every turn. That is fixed: <b>5.73 s → 0.31 s</b> before the first token of a second turn at 13K tokens.</p>
 
+
+<section id="matched-context"><h2>Matched context comparison · 24 November 2026</h2>
+<p class="lead">Both local models completed the four-report task at 32K and 64K. The 32K runs took less time. Their prompts peaked near 18K tokens, so both settings had enough room.</p>
+<div class="wrap"><table>
+<caption style="text-align:left;color:var(--muted)">One attempt per model and window</caption>
+<thead><tr><th scope="col">Local model</th><th scope="col">16K</th><th scope="col">32K</th><th scope="col">64K</th></tr></thead>
+<tbody>
+<tr><th scope="row">Qwen 3.5 9B</th><td>150 s limit, 37 model calls</td><td>Pass · 21.1 s · 2 calls</td><td>Pass · 29.6 s · 2 calls</td></tr>
+<tr><th scope="row">Gemma 4 12B</th><td>Incorrect room code · 55.2 s</td><td>Pass · 44.6 s · 6 calls</td><td>Pass · 62.0 s · 6 calls</td></tr>
+</tbody></table></div>
+<div class="grid2" style="margin-top:14px">
+<div class="node"><h3>Compaction</h3><p>Qwen attempted 10 summaries at 16K. Gemma completed one. Both models completed the task without compaction at 32K and 64K.</p></div>
+<div class="node"><h3>Offloading</h3><p>At the same 10.4K-token prompt, Qwen generated 29.4 tokens/s at 32K and 16.0 at 64K. Its reported CPU share grew from 16% to 26%.</p></div>
+</div>
+<p class="lead" style="margin-top:10px">The direct dispatch question failed at every size for both models. Keep 16K as the reference and installed default. Use 32K for the next development comparisons.</p>
+<p><a href="../../docs/research/context-strategy.md">Technical notes and resource measurements</a></p>
+</section>
+
 <section><h2>What a larger window costs here (measured)</h2>
 <p class="lead">RTX 3060 Ti 8 GB · Ollama 0.40.16 · flash attention · q8_0 KV cache. qwen3.5:9b is hybrid: only 8 of 32 layers keep a KV cache (16 KiB per token at q8_0: 256 MiB at 16K, 1 GiB at 64K). Ollama holds ~5.6 GB of this card for the model; a bigger window moves more of the <i>model</i> onto the CPU.</p>
 <div class="bars" role="img" aria-label="Generation speed at depth: 16K 39.4, 32K 24.8, 64K 13.5 tokens per second.">
