@@ -60,9 +60,10 @@ class _RepeatedProse:
                     continue
                 self.recent.append(paragraph)
                 recent = list(self.recent)
-                for period in range(2, self.max_period + 1):
+                # Period 1 is the same paragraph verbatim; longer periods are a cycle of paragraphs.
+                for period in range(1, self.max_period + 1):
                     cycle = recent[-period:]
-                    if len(cycle) == period and len(set(cycle)) > 1 and recent[-period * self.repetitions:] == cycle * self.repetitions:
+                    if len(cycle) == period and recent[-period * self.repetitions:] == cycle * self.repetitions:
                         return True
         return False
 
