@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,37 @@ _SPEC = importlib.util.spec_from_file_location("auto_test_fix", Path(__file__).r
 atf = importlib.util.module_from_spec(_SPEC)
 sys.modules["auto_test_fix"] = atf
 _SPEC.loader.exec_module(atf)  # type: ignore[union-attr]
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the isolated evaluator runs on Linux")
+def test_model_evaluation_stops_on_live_memory_pressure_and_preserves_partial_evidence(tmp_path, monkeypatch):
+    backend = tmp_path / "apps" / "backend"
+    python = backend / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.symlink_to(sys.executable)
+    script = backend / "scripts" / "harness_eval.py"
+    script.parent.mkdir()
+    script.write_text(
+        'import os, time\n'
+        'print(f"partial receipt pid={os.getpid()}", flush=True)\n'
+        'try:\n'
+        '    time.sleep(4)\n'
+        'except KeyboardInterrupt:\n'
+        '    print("evaluation interrupted", flush=True)\n',
+        encoding="utf-8",
+    )
+    log = tmp_path / "pressure.eval.log"
+    monkeypatch.setattr(atf, "MIN_FREE_GB", 2.0)
+    monkeypatch.setattr(atf, "free_gb", lambda: 0.5 if log.exists() and log.read_text() else 8.0)
+
+    with pytest.raises(RuntimeError, match="low memory"):
+        atf.run_eval(tmp_path, ["D1"], 1, "fixture", "pressure", atf.Session(tmp_path))
+
+    lines = log.read_text().splitlines()
+    assert lines[1:] == ["evaluation interrupted"]
+    pid = int(lines[0].removeprefix("partial receipt pid="))
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
 
 
 def test_reconcile_and_retire_the_workflows_own_clean_merged_checkout(tmp_path, monkeypatch):
@@ -460,11 +492,8 @@ def test_controller_rejects_a_missing_trial_after_judge_exit_zero(tmp_path, monk
         "results": [{"id": "D4", "rep": 1}],
     }))
 
-    def child(argv, *args, **kwargs):
-        output = f"Done. Judge it with: python scripts/harness_judge.py {receipt}\n" if "scripts/harness_eval.py" in argv else ""
-        return subprocess.CompletedProcess(argv, 0, output, "")
-
-    monkeypatch.setattr(atf, "sh", child)
+    monkeypatch.setattr(atf, "run_live_eval", lambda *_: f"Done. Judge it with: python scripts/harness_judge.py {receipt}\n")
+    monkeypatch.setattr(atf, "sh", lambda argv, *args, **kwargs: subprocess.CompletedProcess(argv, 0))
     with pytest.raises(RuntimeError, match="Incomplete scorecard"):
         atf.run_eval(tmp_path, ["D4", "EH2"], 1, "local", "resume", atf.Session(tmp_path))
     assert not (tmp_path / "runs").exists()
