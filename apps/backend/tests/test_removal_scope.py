@@ -34,7 +34,7 @@ def _permissions_on(monkeypatch):
 
 def _project(tmp_path: Path, files=NOTES, folders: dict[str, tuple[str, ...]] | None = None) -> Path:
     root = tmp_path / "project"
-    root.mkdir()
+    root.mkdir(parents=True)
     past = time.time() - 3600
     for name in files:
         (root / name).write_text(name)
@@ -429,3 +429,114 @@ def test_resolving_git_clean_never_runs_a_repository_configured_program(tmp_path
     call = rs.removal("terminal_run", {"command": "git clean -f"}, root)
     assert call is not None and call.resolved_by == "git clean -n" and {p.name for p in call.targets} == set(NOTES)
     assert not marker.exists()
+
+
+# ── final check: a read-only preview must cover everything the real command removes ──
+
+def _archive_project(tmp_path):
+    root = _project(tmp_path, files=(*NOTES, "todo.md"), folders={"notes-archive": ("budget.xlsx",)})
+    return root
+
+
+def test_a_find_action_placed_before_its_tests_is_previewed_where_it_acts(tmp_path, monkeypatch):
+    root = _archive_project(tmp_path)
+    out = _run(monkeypatch, root, "Delete all the notes files.", [_rm("find . -type f -delete -name 'notes*'")])
+    assert "todo.md" in out["left"] and (root / "notes-archive" / "budget.xlsx").exists() and out["blocked"]
+
+
+@pytest.mark.parametrize("command", [
+    "find . -name 'notes*' -exec rm -rf {} +",
+    "rm -rf notes-archive notes-draft.md notes-final.md",
+    "rm -r notes-*",
+])
+def test_a_recursive_removal_is_checked_file_by_file(tmp_path, monkeypatch, command):
+    root = _archive_project(tmp_path)
+    out = _run(monkeypatch, root, "Delete all the notes files.", [_rm(command)])
+    assert (root / "notes-archive" / "budget.xlsx").exists() and "budget.xlsx" in out["blocked"][0]
+
+
+def test_naming_a_folder_covers_what_is_inside_it(tmp_path, monkeypatch):
+    root = _archive_project(tmp_path)
+    out = _run(monkeypatch, root, "Delete the notes-archive folder.", [_rm("rm -r notes-archive")])
+    assert "notes-archive" not in out["left"] and not out["blocked"]
+
+
+@pytest.mark.parametrize("command", [
+    "find . -name \"${X:-*}\" -delete",
+    "find ~/../.. -maxdepth 0 -name nothing -delete",
+    "find . -name 'notes*' -o -name {todo,x}.md -delete",
+    "find -L . -name 'notes*' -delete",
+    "find . -name 'notes*' -delete -delete",
+    "find . -name 'notes*' -prune -delete",
+])
+def test_expressions_the_preview_cannot_reproduce_are_not_resolved(tmp_path, monkeypatch, command):
+    root = _archive_project(tmp_path)
+    call = rs.removal("terminal_run", {"command": command}, root)
+    assert call is not None and call.indirect and not call.resolved_by
+    out = _run(monkeypatch, root, "Delete all the notes files.", [_rm(command)])
+    assert "todo.md" in out["left"] and "couldn't be listed" in out["blocked"][0]
+
+
+@pytest.mark.parametrize("command", ["git clean -ffd", "git clean -f -f -d", "git clean -fX"])
+def test_git_clean_forms_the_dry_run_does_not_list_are_not_resolved(tmp_path, monkeypatch, command):
+    root = _git_project(tmp_path)
+    call = rs.removal("terminal_run", {"command": command}, root)
+    assert call is not None and call.indirect and not call.resolved_by
+
+
+PREVIEW_CASES = [
+    "find . -name 'notes*' -delete",
+    "find . -type f -name '*.md' -delete",
+    "find . -name 'todo*' -o -name 'notes*' -delete",
+    "find . \\( -name 'notes*' -o -name 'todo*' \\) -type f -delete",
+    "find . -maxdepth 1 -name 'notes*' -exec rm {} \;",
+    "find . -name 'notes*' -exec rm -rf {} +",
+    "find . -empty -delete",
+    "find . -type f -delete -name 'notes*'",
+    "rm -rf notes-archive notes-draft.md",
+    "rm -r notes-*",
+]
+
+
+@pytest.mark.parametrize("command", PREVIEW_CASES)
+def test_the_preview_covers_everything_the_command_removes(tmp_path, command):
+    import shutil
+
+    preview_root = _archive_project(tmp_path / "a")
+    (preview_root / "empty-dir").mkdir()
+    real_root = tmp_path / "b" / "project"
+    shutil.copytree(preview_root, real_root, symlinks=True)
+
+    def tree(root):
+        return {str(p.relative_to(root)) for p in root.rglob("*")}
+
+    before = tree(preview_root)
+    call = rs.removal("terminal_run", {"command": command}, preview_root)
+    assert tree(preview_root) == before  # previewing changed nothing
+    assert call is not None and not call.indirect
+    covered = {str(p.relative_to(preview_root)) for p in rs.covered(call)}
+    subprocess.run(["bash", "-c", command], cwd=real_root, capture_output=True, timeout=20)
+    removed = before - tree(real_root)
+    assert removed <= covered, f"removed but not previewed: {sorted(removed - covered)}"
+
+
+def test_git_clean_preview_covers_what_git_clean_removes(tmp_path):
+    import shutil
+
+    for flags in ("-f", "-fd", "-fx", "-fdx"):
+        base = tmp_path / flags
+        root = _git_project(base)
+        (root / ".gitignore").write_text("*.log\n")
+        (root / "app.log").write_text("x")
+        (root / "build").mkdir()
+        (root / "build" / "out.bin").write_text("y")
+        copy = base / "copy"
+        shutil.copytree(root, copy, symlinks=True)
+        tree = lambda r: {str(p.relative_to(r)) for p in r.rglob("*") if ".git" not in p.relative_to(r).parts}
+        before = tree(root)
+        call = rs.removal("terminal_run", {"command": f"git clean {flags}"}, root)
+        assert tree(root) == before and call is not None and not call.indirect
+        covered = {str(p.relative_to(root)) for p in rs.covered(call)}
+        subprocess.run(["git", "clean", flags], cwd=copy, capture_output=True, check=True)
+        removed = before - tree(copy)
+        assert removed <= covered, (flags, sorted(removed - covered))

@@ -25,16 +25,21 @@ Files the agent created during this request are its own. Ownership comes from a 
 that existed when the request began, not from modification times. A user's file the agent edited, rewrote or moved
 is still the user's. A directory counts as the agent's only if everything inside it is.
 
-Removals that don't list their targets are resolved where a read-only listing exists: a single `find` with
-selecting tests only (`-delete`, or `-exec rm|unlink … {}`) is listed with `find … -print0`, and `git clean` with
-`git clean -n`. The listed targets then go through every check above. Anything else (`xargs rm`, `rsync --delete`,
-inline-script deletions, `sh -c '…rm…'`, `eval`, `cd … && rm`, variables, `find` with other actions) runs only if
+Removals that don't list their targets are resolved where a read-only listing reproduces them exactly: a single
+`find` with selecting tests and exactly one action (`-delete`, or `-exec rm|unlink [flags] {}`) is listed with that
+action replaced *in place* by `-print0`, since precedence makes its position matter; `git clean` with one `-f` and
+without `-X` is listed with `git clean -n`. A recursive removal (`rm -r`, `-exec rm -r`, `git clean -d`) is checked
+file by file inside each folder unless the user named the folder. A listing that reports any error, and anything the
+shell would expand first ($VAR, ~, braces, escapes other than find's own), isn't resolved. The listed targets then go
+through every check above. Anything else (`xargs rm`, `rsync --delete`, inline-script deletions,
+`sh -c '…rm…'`, `eval`, `cd … && rm`, variables, other `find` actions or options, `git clean -ff`/`-X`) runs only if
 the user's own words, or their card answer, contain that exact command. The project folder and its parents are
 never removed this way.
 
 Limits: overwriting or truncating a file, and scripts run from files (`python cleanup.py`), are outside this check.
 A resolved listing reflects the moment of the check; the listing runs read-only `find`, or `git` with the
-repository's program-running settings overridden, on the host with a 5-second limit. Clause parsing is heuristic and English-only; when it misreads,
+repository's program-running settings overridden and global configuration ignored (so it can list more than the
+real command, never less), on the host with a 5-second limit. The command itself still runs in the sandbox. Clause parsing is heuristic and English-only; when it misreads,
 the agent asks. Approvals, the sandbox and the floor of always-asked commands still apply to everything allowed
 here.
 """
@@ -271,6 +276,7 @@ class Removal:
     resolved_by: str = ""  # how an indirect removal's targets were listed ("find", "git clean -n")
     command: str = ""
     attributes: frozenset[str] = frozenset()  # what every resolved target is by construction ("untracked")
+    recursive: bool = False  # removes folders with everything inside them (rm -r, find -exec rm -r)
 
 
 def removal(name: str, args: dict[str, Any], root: Path) -> Removal | None:
@@ -301,6 +307,7 @@ def removal(name: str, args: dict[str, Any], root: Path) -> Removal | None:
             tokens = command.split()
         words: list[str] = []
         take = False
+        remover = ""
         for token in tokens:
             if token in {";", "&&", "||", "|", "&"}:
                 take = False
@@ -309,12 +316,16 @@ def removal(name: str, args: dict[str, Any], root: Path) -> Removal | None:
             base = os.path.basename(word)
             if base in {"rm", "rmdir", "unlink", "shred"}:
                 take = True
+                remover = base
             elif word != "sudo" and take and word and not word.startswith("-"):
                 words.append(word)
+            elif take and remover == "rm" and _RECURSIVE_FLAG.fullmatch(word):
+                found.recursive = True
             if word != token:
                 take = False
         resolved = _resolve(words, root, cwd)
         found.targets, found.project = resolved.targets, resolved.project
+        found.recursive = found.recursive and any(p.is_dir() and not p.is_symlink() for p in found.targets)
         if not any(os.path.basename(tok.rstrip(";&|")) in {"rm", "rmdir", "unlink", "shred"} for tok in tokens):
             if not _INTERPRETER.search(command):
                 return None  # only text mentioning a removal (`grep "rm -rf" notes.md`): nothing is removed
@@ -326,6 +337,9 @@ def removal(name: str, args: dict[str, Any], root: Path) -> Removal | None:
             found.indirect = True
     return found
 
+
+_RM_FLAG = re.compile(r"-[frRvd]+|--(?:force|recursive|verbose|dir)")
+_RECURSIVE_FLAG = re.compile(r"-[a-zA-Z]*[rR][a-zA-Z]*|--recursive")
 
 # Something that runs a quoted string as commands.
 _INTERPRETER = re.compile(r"(?<![\w./-])(?:sh|bash|zsh|dash|ksh|fish|eval|xargs|su|doas|sudo|nohup|watch|timeout|env)"
@@ -347,6 +361,11 @@ def _list_indirect(command: str, root: Path, cwd: Path) -> Removal | None:
     body = re.sub(r"""\s(?:\\;|';'|";"|\+)\s*$""", "", command)
     if re.search(r"[;&|<>`\n]|\$\(", body):
         return None
+    # Anything the shell would expand or rewrite before the command runs ($VAR, ${...}, ~, {a,b}, backslash
+    # escapes other than find's own grouping and terminator) isn't reproduced by a listing that runs without a
+    # shell, so it isn't resolved. `{}` is find's placeholder.
+    if re.search(r"[$~]|\\(?![();])|\{(?!\})|(?<!\{)\}", body):
+        return None
     try:
         tokens = shlex.split(command)
     except ValueError:
@@ -363,31 +382,45 @@ def _list_indirect(command: str, root: Path, cwd: Path) -> Removal | None:
 
 
 def _list_find(tokens: list[str], root: Path, cwd: Path) -> Removal | None:
+    """List with the same expression, the one action replaced in place by `-print0`.
+
+    Precedence makes the action's position matter (`find . -delete -name x` removes everything), so the listing
+    keeps it. Exactly one action is allowed; global options (-L, -H…), other actions and unknown tests aren't.
+    """
     paths, rest = [], tokens[1:]
     while rest and not rest[0].startswith("-") and rest[0] not in {"!", "(", ")"}:
         paths.append(rest.pop(0))
-    tests: list[str] = []
-    action = False
+    if any(glob.has_magic(path) for path in paths):
+        return None
+    listing: list[str] = []
+    actions = 0
+    recursive = False
     i = 0
     while i < len(rest):
         token = rest[i]
         if token == "-delete":
-            action, i = True, i + 1
+            actions += 1
+            listing.append("-print0")
+            i += 1
             continue
         if token in {"-exec", "-execdir"}:
             end = next((j for j in range(i + 1, len(rest)) if rest[j] in {";", "+"}), None)
             body = rest[i + 1:end] if end is not None else []
+            flags = body[1:-1]
             if not body or os.path.basename(body[0]) not in {"rm", "unlink"} or body[-1:] != ["{}"] \
-                    or any(not b.startswith("-") for b in body[1:-1]):
+                    or any(not _RM_FLAG.fullmatch(f) for f in flags):
                 return None
-            action, i = True, end + 1
+            recursive = recursive or any(_RECURSIVE_FLAG.fullmatch(f) for f in flags)
+            actions += 1
+            listing.append("-print0")
+            i = end + 1
             continue
         if token not in _FIND_TESTS:
             return None
         count = _FIND_TESTS[token]
-        tests.extend(rest[i:i + 1 + count])
+        listing.extend(rest[i:i + 1 + count])
         i += 1 + count
-    if not action:
+    if actions != 1:
         return None
     for path in paths or ["."]:
         target = Path(path) if os.path.isabs(path) else cwd / path
@@ -396,20 +429,26 @@ def _list_find(tokens: list[str], root: Path, cwd: Path) -> Removal | None:
         except ValueError:
             return None
     try:
-        listed = subprocess.run(["find", *(paths or ["."]), *tests, "-print0"], cwd=cwd, capture_output=True,
+        listed = subprocess.run(["find", *(paths or ["."]), *listing], cwd=cwd, capture_output=True,
                                 timeout=_LIST_TIMEOUT)
     except (OSError, subprocess.TimeoutExpired):
         return None
-    if listed.returncode:
-        return None
+    if listed.returncode or listed.stderr.strip():
+        return None  # an incomplete listing (unreadable folders, errors) isn't a listing
     names = [n for n in listed.stdout.decode(errors="surrogateescape").split("\0") if n]
     found = _resolve(names, root, cwd)
-    found.resolved_by = "find"
+    found.resolved_by, found.recursive = "find", recursive
     return found
 
 
 def _list_git_clean(tokens: list[str], root: Path, cwd: Path) -> Removal | None:
     flags, paths, after = [], [], False
+    forces = sum(t.count("f") for t in tokens[2:] if t.startswith("-") and not t.startswith("--")) + \
+        sum(t == "--force" for t in tokens[2:])
+    if forces != 1 or any(t.startswith("-") and not t.startswith("--") and "X" in t for t in tokens[2:]):
+        # -ff also removes nested repositories, which `git clean -n` only reports as skipped; -X depends on the
+        # user's global ignore files, which the isolated dry run doesn't read. Neither is listed faithfully.
+        return None
     for token in tokens[2:]:
         if token == "--":
             after = True
@@ -439,11 +478,12 @@ def _list_git_clean(tokens: list[str], root: Path, cwd: Path) -> Removal | None:
                                      "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"})
     except (OSError, subprocess.TimeoutExpired):
         return None
-    if listed.returncode:
+    if listed.returncode or listed.stderr.strip():
         return None
     names = [line[len("Would remove "):] for line in listed.stdout.splitlines() if line.startswith("Would remove ")]
     found = _resolve(names, root, cwd)
     found.resolved_by, found.attributes = "git clean -n", frozenset({"untracked"})
+    found.recursive = "-d" in flags
     return found
 
 
@@ -481,6 +521,19 @@ def _ambiguous(target: Path, words: set[str], provenance: Provenance) -> list[Pa
     return [p for p in siblings if _tokens(p) & words]
 
 
+_EXPAND_LIMIT = 2000
+
+
+def covered(call: Removal) -> list[Path]:
+    """Everything the call would remove: its targets, and for a recursive removal everything inside its folders."""
+    out = list(call.targets)
+    if call.recursive:
+        for folder in call.targets:
+            if folder.is_dir() and not folder.is_symlink():
+                out.extend(folder.rglob("*"))
+    return out
+
+
 def problem(call: Removal, request: Intent, provenance: Provenance, already: set[Path],
             root: Path | None = None) -> tuple[str, set[Path]]:
     """Why this removal isn't run (or ""), and the user's unnamed targets it uses up when it goes ahead."""
@@ -499,6 +552,30 @@ def problem(call: Removal, request: Intent, provenance: Provenance, already: set
         return ("Not run: this would remove the project folder or a folder containing it. That is never done as "
                 "part of a request. Tell the user the exact command if they want to run it themselves."), set()
     users = [t for t in call.targets if not provenance.created(t)]
+    inside: list[Path] = []
+    if call.recursive:
+        # A recursive removal takes everything inside a folder: each of the user's files in it is checked, unless
+        # the user named the folder itself. An incomplete or oversized listing isn't checked; it isn't run.
+        for folder in [t for t in users if t.is_dir() and not t.is_symlink()]:
+            try:
+                contents = []
+                for count, entry in enumerate(folder.rglob("*")):
+                    if count >= _EXPAND_LIMIT:
+                        return (f"Not run: {show([folder])} holds more than {_EXPAND_LIMIT} entries, too many to "
+                                "check against the request." + ask), set()
+                    contents.append(entry)
+            except OSError:
+                return f"Not run: the contents of {show([folder])} couldn't be listed completely." + ask, set()
+            named_folder = mentioned(folder, request.named_text) or exact_named(folder, request.selected_text)
+            for entry in contents:
+                if provenance.created(entry):
+                    continue
+                if named_folder:
+                    if mentioned(entry, request.protected_text):
+                        inside.append(entry)  # still checked against the keep clauses below
+                    continue
+                inside.append(entry)
+    users = users + inside
     kept = [t for t in users if mentioned(t, request.protected_text)]
     if kept:
         return (f"Not run: the user asked to keep {show(kept)}. Don't remove it in any other way."), set()
