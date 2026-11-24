@@ -77,9 +77,10 @@ def unload(model: str, upstream: str) -> None:
         pass
 
 
-def run_eval(backend: Path, model: str, label: str, repeat: int, only: str, cases: str) -> Path:
+def run_eval(backend: Path, model: str, label: str, repeat: int, only: str, cases: str, *, upstream: str) -> Path:
     before = set(OUT.glob(f"*-{label}")) | set((backend / "data/evals/harness").glob(f"*-{label}"))
-    args = [sys.executable, "scripts/harness_eval.py", "--model", model, "--repeat", str(repeat), "--label", label]
+    args = [sys.executable, "scripts/harness_eval.py", "--model", model, "--repeat", str(repeat), "--label", label,
+            "--upstream", upstream]
     args += ["--only", only] if only else ["--set", cases]
     subprocess.run(args, cwd=backend, check=True)
     produced = sorted(set((backend / "data/evals/harness").glob(f"*-{label}")) - before)
@@ -159,7 +160,7 @@ def main() -> int:
     parser.add_argument("--upstream", default="http://127.0.0.1:11434")
     args = parser.parse_args()
     sys.path.insert(0, str(ROOT / "scripts"))
-    from harness_eval import CASE_MEMBERSHIP, SETS, assert_local
+    from harness_eval import CASE_MEMBERSHIP, SETS, assert_local, upstream_origin
     assert_local(args.upstream)
     models = list(dict.fromkeys(m.strip() for m in args.models.split(",") if m.strip()))
     if not models or args.repeat < 1:
@@ -178,6 +179,7 @@ def main() -> int:
     required = ("baseline", "current") if args.baseline_ref else ("current",)
     campaign: dict[str, Any] = {
         "label": args.label, "head": head, "baseline_ref": args.baseline_ref, "status": "running",
+        "upstream": upstream_origin(args.upstream),
         "models": {model: {} for model in models}, "required_arms": required, "failures": [],
     }
     (folder / "campaign.json").write_text(json.dumps(campaign, indent=1), encoding="utf-8")
@@ -197,7 +199,8 @@ def main() -> int:
                 for arm in required:
                     context = {"model": model, "arm": arm}
                     backend = base if arm == "baseline" else ROOT
-                    run = run_eval(backend, model, f"{args.label}-{arm}-{slug}", args.repeat, args.only, args.set)
+                    run = run_eval(backend, model, f"{args.label}-{arm}-{slug}", args.repeat, args.only, args.set,
+                                   upstream=args.upstream)
                     jobs[model, arm] = (run, workers.submit(score_arm, run, model, cases, args.repeat))
         except (Exception, KeyboardInterrupt) as exc:
             campaign["failures"].append({**context, "reason": str(exc) or "Campaign interrupted"})

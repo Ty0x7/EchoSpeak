@@ -973,6 +973,12 @@ def assert_local(url: str) -> None:
         raise SystemExit(f"Refusing {url}: the model server must run on this machine (zero API billing policy).")
 
 
+def upstream_origin(url: str) -> str:
+    """Record the requested server without URL credentials, paths, or query parameters."""
+    endpoint = urllib.parse.urlsplit(url)
+    return f"{endpoint.scheme}://{endpoint.netloc.rsplit('@', 1)[-1]}"
+
+
 # ── backend and recorder ────────────────────────────────────────────────
 def _free_port() -> int:
     with socket.socket() as s:
@@ -1368,6 +1374,7 @@ def main() -> int:
     diff = subprocess.run(["git", "diff", "HEAD", "--", *tracked], cwd=ROOT, capture_output=True, text=True).stdout
     meta = {"label": args.label, "model": args.model, "set": args.set, "cases": [c.id for c in cases], "repeat": args.repeat,
             "case_membership": {case.id: CASE_MEMBERSHIP[case.id] for case in cases},
+            "upstream": upstream_origin(args.upstream),
             "commit": commit + ("+dirty" if status else ""), "started": time.time(),
             "projects_root": str(projects_root(run_dir)),
             "dirty": {"files": status.splitlines()[:40], "diff_sha256": hashlib.sha256(diff.encode()).hexdigest()[:16]} if status else {}}
