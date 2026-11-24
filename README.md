@@ -30,6 +30,6 @@ Open EchoSpeak, choose a model in Settings, and use **Test response** before sta
 
 The [React workspace](apps/web) runs in the [Rust/Tauri desktop host](apps/desktop). The [Python terminal client](apps/terminal) and desktop share a [Python backend](apps/backend) for conversations, tools, and approvals. EchoSpeak's agent harness supplies context to the model, checks tool permissions, records results, and tracks verification. [Architecture](docs/ARCHITECTURE.md)
 
-EchoSpeak development uses reproducible cases, independent checks, and reviewable GitHub changes. The workflow explains how to start a task, reuse prior evaluations, and take a measured fix from an issue to `main`. [Engineering workflow](docs/engineering-prompt.md) · [Evaluation system](docs/research/agentic-evaluation.md) · [Issues](https://github.com/Ty0x7/EchoSpeak/issues)
+[Engineering workflow](docs/engineering-prompt.md) · [Evaluation system](docs/research/agentic-evaluation.md) · [Issues](https://github.com/Ty0x7/EchoSpeak/issues)
 
 [MIT License](LICENSE)
