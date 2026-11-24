@@ -9,12 +9,13 @@ import json
 import threading
 from typing import Any
 
+import httpx
 import pytest
 
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean.loop import LeanTurn
 from agent.lean.personas import AgentPersona
-from agent.lean.provider import ModelTurn, ThinkTagScrubber, ToolCall, extract_text_tool_calls
+from agent.lean.provider import ChatClient, Endpoint, ModelTurn, ThinkTagScrubber, ToolCall, extract_text_tool_calls
 from agent.lean.toolbox import NativeTool, Toolbox, _compact_schema
 
 
@@ -143,6 +144,74 @@ def _turn(client: ScriptedClient, toolbox: Toolbox, events: list[dict[str, Any]]
         cancel=cancel or threading.Event(),
         persist_tool_runs=False,
     )
+
+
+@pytest.mark.parametrize("mode", ["prose", "persistent", "fenced", "quote", "expanding", "tool", "cancel"])
+def test_repeated_stream_closes_and_retries_only_for_plain_prose(mode):
+    cycle = "I will read the configuration again.\n\nI should check the inputs first.\n\n"
+    text = cycle * 12
+    if mode == "fenced":
+        text = "```text\n" + text + "```\n"
+    if mode == "quote":
+        text = "\n".join("> " + line for line in text.splitlines())
+    if mode == "expanding":
+        text = "".join(f"Case {index}\n\n" + cycle for index in range(12))
+    cancel = threading.Event()
+    received = []
+    requests = []
+    calls = []
+    closed = []
+
+    def packet(delta, finish=None):
+        return ("data: " + json.dumps({"choices": [{"delta": delta, "finish_reason": finish}]}) + "\n\n").encode()
+
+    class Stream(httpx.SyncByteStream):
+        def __iter__(self):
+            if mode == "tool":
+                yield packet({"tool_calls": [{"id": "read-1", "index": 0,
+                                              "function": {"name": "lookup", "arguments": "{}"}}]})
+            for offset in range(0, len(text), 13):
+                if mode == "cancel" and offset >= 39:
+                    cancel.set()
+                received.append(offset)
+                yield packet({"content": text[offset:offset + 13]})
+            yield packet({}, "tool_calls" if mode == "tool" else "stop")
+
+        def close(self):
+            closed.append(True)
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        if len(requests) == 1 or mode == "persistent":
+            return httpx.Response(200, stream=Stream())
+        return httpx.Response(200, content=packet({"content": "The inputs are ready."}, "stop"))
+
+    client = ChatClient(Endpoint("http://127.0.0.1:11434/v1", "", "fixture", "ollama", True))
+    client._http.close()
+    events = []
+    with httpx.Client(base_url=client.endpoint.base_url, transport=httpx.MockTransport(respond)) as transport:
+        client._http = transport
+        result = _turn(client, _toolbox({"lookup": lambda _: calls.append(True) or "Ready"}), events, cancel).run("Inspect the inputs.")
+
+    assert closed == ([True, True] if mode == "persistent" else [True])
+    if mode == "prose":
+        assert received[-1] < len(text) - len(cycle)
+        assert result.success
+        assert result.text == "The inputs are ready."
+        assert len(requests) == 2
+        assert "I will read the configuration again." not in str(requests[1]["messages"])
+        assert any(event["type"] == "text_replace" and event["text"] == "" for event in events)
+    elif mode == "persistent":
+        assert len(requests) == 2
+        assert not result.success and result.stop_reason == "model_repetition"
+        assert "stopped this attempt" in result.text
+    elif mode == "cancel":
+        assert result.error == "cancelled"
+        assert len(requests) == 1
+    else:
+        assert received[-1] + 13 >= len(text)
+        assert result.success
+        assert calls == ([True] if mode == "tool" else [])
 
 
 def test_loop_runs_tools_until_the_model_answers():
