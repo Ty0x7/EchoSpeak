@@ -51,6 +51,20 @@ NUDGE_EMPTY = (
 )
 NUDGE_TRUNCATED = "Your last reply was cut off by the output limit. Continue from where you stopped, concisely."
 # Output limit reached mid-answer: the same answer continues (thinking off), it isn't rewritten.
+# The user asks for repeated text, so repeated paragraphs are the answer, not a stall.
+REPETITION_REQUEST = re.compile(
+    r"\b(?:repeat(?:ed|ing|s)?|over and over|again and again|(?:\d+|two|three|four|five|six|seven|eight|nine|ten|"
+    r"twenty|thirty|fifty|hundred|several|many)\s+times|copies of|duplicates? (?:it|this|that|the))\b", re.I)
+
+
+def _accepts(method: Callable[..., Any], name: str) -> bool:
+    import inspect
+    try:
+        return name in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 NUDGE_CONTINUE = ("Your answer was cut off by the output limit. Continue it exactly where it stopped, without repeating "
                   "anything already written and without starting over.")
 # All of the output went to reasoning: answer from it instead of reasoning again from scratch.
@@ -667,6 +681,8 @@ class LeanTurn:
         self._turn_started, self._unnamed_removed = time.time(), set()
         # What existed when the request began: a removal's ownership comes from this record (removal_scope.py).
         self._provenance = removal_scope.Provenance.snapshot(self._project_root())
+        # A request for repeated text ("write it 20 times") turns off the repeated-prose stop for this request.
+        self._repetition_requested = bool(REPETITION_REQUEST.search(user_message or ""))
 
         # A research worker gets its own, smaller step budget (agent/lean/swarm.py).
         max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
@@ -692,6 +708,7 @@ class LeanTurn:
         overflow_retries = 0
         transient_retries = 0
         continuations = 0
+        repetition_retried = False
         step = 0
         planned = self.prefetch() if self.prefetch is not None else []
         if planned and not self.cancel.is_set():
@@ -767,6 +784,22 @@ class LeanTurn:
             if turn.finish_reason == "cancelled":
                 error = "cancelled"
                 success = False
+                break
+            if turn.finish_reason == "repeated_prose":
+                self._discard_step(step)
+                self.emit({"type": "model_repetition", "step": step, "characters": len(turn.content),
+                           "retry": not repetition_retried and step < max_steps})
+                if not repetition_retried and step < max_steps:
+                    repetition_retried = True
+                    add_note(messages, "Your last draft stalled. Continue from the existing tool results. "
+                             "Take the next necessary action, or give a concise answer grounded in what already ran.")
+                    self._no_think_next = True
+                    continue
+                stop_reason = "model_repetition"
+                success = False
+                final_text = "The model got stuck repeating itself. I stopped this attempt."
+                self._append_text("text", step, final_text)
+                self.emit({"type": "agent_token", "step": step, "data": final_text})
                 break
 
             calls = list(turn.tool_calls)
@@ -1183,6 +1216,9 @@ class LeanTurn:
                         provider=str(getattr(endpoint, "provider", "") or ""), tools=len(tools or [])) as span:
             # A template that drops tool definitions gets them as text (agent/lean/tool_prompting.py).
             sent_messages = tool_prompting.with_catalog(messages, tools) if tools and tool_prompting.needed(endpoint) else messages
+            options = {}
+            if getattr(self, "_repetition_requested", False) and _accepts(self.client.stream_turn, "detect_repetition"):
+                options["detect_repetition"] = False
             turn = self.client.stream_turn(
                 sent_messages,
                 tools=tools or None,
@@ -1190,6 +1226,7 @@ class LeanTurn:
                 on_content=on_content,
                 cancel=self.cancel,
                 temperature=self.temperature,
+                **options,
             )
             span.set(tool_calls=len(turn.tool_calls), finish=str(turn.finish_reason or ""),
                      prompt_tokens=int((turn.usage or {}).get("prompt") or 0),
@@ -1914,6 +1951,9 @@ class LeanTurn:
             # got "I ran out of steps" under an answer they had watched being thought (19 November 2026).
             self._no_think_next = True
             turn = self._call_model(messages, [], step)
+            if turn.finish_reason == "repeated_prose":
+                self._discard_step(step)
+                return ""
             text = str(turn.content or "").strip()
             reasoning = str(getattr(turn, "reasoning", "") or "").strip()
             if not text and reasoning and not self.cancel.is_set():
@@ -1921,7 +1961,11 @@ class LeanTurn:
                 messages.append({"role": "assistant", "content": ""})
                 add_note(messages, NUDGE_THOUGHT_ONLY + f" Your reasoning ended with: \"{reasoning[-1200:]}\"")
                 self._no_think_next = True
-                text = str(self._call_model(messages, [], step).content or "").strip()
+                turn = self._call_model(messages, [], step)
+                if turn.finish_reason == "repeated_prose":
+                    self._discard_step(step)
+                    return ""
+                text = str(turn.content or "").strip()
         except Exception:
             logger.debug("Grace answer failed", exc_info=True)
             return ""

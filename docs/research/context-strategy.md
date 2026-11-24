@@ -594,3 +594,59 @@ from 8.37 to 8.80 and held-out H1 from 8.45 to 8.80. C1 fell from 9.60 to 5.60 w
 instead of asking which one, and the controller rejected the cycle. The detector did not fire in any live trial.
 A matched three-trial C1 follow-up passed on both trees (9.59 base, 9.49 candidate). The candidate remains
 unaccepted pending owner review. The full record is on [#160](https://github.com/Ty0x7/EchoSpeak/issues/160).
+
+### Decision: 32K for development comparisons · 24 November
+
+The owner adopted 32K as the primary development comparison window. The installed application and the shared
+workstation service stay at 16K, and every saved 16K result remains the historical reference. 64K is reserved for
+tasks whose active prompts need it. The controller now evaluates on a private server per run
+(`scripts/eval_server.py`, `auto_test_fix.py run --context`, default 32768). That server has llama-server's prompt
+cache off. On the shared service, that cache stored about 3 GiB per Gemma 4 12B prompt and reached 7.5 GiB after
+three prompts during the #160 gate. That growth took available RAM to 1.7 GB.
+
+### Evaluation server: what the lock and GPU checks cover · 24 November
+
+`scripts/eval_server.py` (#174) keeps private evaluations from competing with each other or with the workstation
+service for the GPU. Its protection has the following scope.
+
+**The lock** is an advisory `flock` on `~/.cache/echospeak/eval-gpu.lock` (override: `ECHO_EVAL_GPU_LOCK`). The
+kernel releases it when the holder exits, crashes or is killed.
+
+- *Covers:* every evaluation started through `private_server`, which today means `auto_test_fix.py run --context N`
+  with N above 0.
+- *Doesn't cover:*
+  - `harness_eval.py --upstream` run by hand;
+  - `harness_campaign.py`;
+  - the one-off scripts in the evaluation folders;
+  - the shared service itself;
+  - other users;
+  - a process started with a different `HOME` or lock path.
+
+  The lock prevents only the races it can see. The GPU check below is the second line.
+
+**The GPU check** reads `nvidia-smi`'s compute-process list and memory totals at start, and the compute-process list
+every 10 seconds during a run.
+
+- *Counts as busy:*
+  - another `llama-server` or `ollama` process;
+  - any process holding 1 GiB or more, excluding the evaluation's own runner, identified by process group;
+  - less than 6 GiB free at start;
+  - `nvidia-smi` failing or returning output it can't parse.
+- *Small desktop GPU users,* such as a browser or video player, are ignored.
+- *Limits:*
+  - **NVIDIA only.** On other GPUs the check fails closed and private evaluations don't start.
+  - **Compute processes only.** Whether a graphics workload (a game, a compositor) appears depends on the driver.
+    Some GPU processes do appear (FreeTube's renderer did); one that doesn't is seen only through free VRAM at
+    start, not during a run.
+  - **Polling, not reservation.** A workload starting mid-run can overlap for up to about 10 seconds before the
+    evaluation stops. A stopped evaluation is recorded as an error with no score.
+  - **Thresholds are tuned for this workstation:** 8 GB RTX 3060 Ti, Q4 9–12B models, up to 32K. Larger models or
+    64K windows can need more than 6 GiB, and the threshold is a starting check, not a guarantee.
+  - Processes in another PID namespace (containers) can't be matched to a process group and count as foreign
+    when large.
+  - The shared-service check asks only `127.0.0.1:11434`. A refused connection means it isn't running; any other
+    failure counts as busy.
+
+**Host RAM** is a separate guard. The controller stops an evaluation below 2 GB available (#168). The private
+server's disabled prompt cache keeps that guard from being needed for Gemma 4 12B at 32K: in the #160 targeted
+replay, the minimum stayed above 8.4 GB.

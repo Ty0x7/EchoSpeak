@@ -85,6 +85,9 @@ session, honesty, and context pressure. Two further sets:
 
 Report task success, pass^k and critical findings next to the weighted score, not inside it.
 - **Never look at held-out failures while designing a fix.** Fix from D cases, then confirm on H.
+- **Context window.** Development comparisons run at 32K on a private server (`scripts/eval_server.py`, or
+  `harness_eval.py --upstream`). Results from the shared 16K service are the historical reference; never mix the
+  two in one comparison. Use 64K only when the active prompt needs it, and record the served window.
 - Approvals are answered as an owner would answer them.
 - A case can state what the owner says on a question card (`Turn.answer`).
 
