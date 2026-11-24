@@ -42,6 +42,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -159,16 +160,55 @@ class Session:
 
 # ── the system under test: run, judge, read ─────────────────────────────
 
+def run_live_eval(argv: list[str], backend: Path, log_path: Path, timeout: float = 7200) -> str:
+    """Capture partial receipts and stop the isolated evaluation if available RAM drops."""
+    deadline = time.monotonic() + timeout
+    with log_path.open("w", encoding="utf-8") as log:
+        child = subprocess.Popen(argv, cwd=backend, env=_clean_env(), stdout=log,
+                                 stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            while child.poll() is None:
+                available = free_gb()
+                if available < MIN_FREE_GB:
+                    raise RuntimeError(f"low memory during evaluation ({available:.1f} GB available)")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(f"evaluation exceeded {timeout:g}s")
+                try:
+                    child.wait(timeout=min(1, remaining))
+                except subprocess.TimeoutExpired:
+                    continue
+        except BaseException:
+            # A normal interrupt lets the evaluator stop its recorder and backend.
+            # The separate process group also bounds cleanup if a child lingers.
+            try:
+                child.send_signal(signal.SIGINT)
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            finally:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                child.wait()
+            raise
+    output = log_path.read_text(encoding="utf-8", errors="replace")
+    if child.returncode:
+        raise RuntimeError(f"harness_eval failed ({child.returncode}): {output[-600:]}")
+    return output
+
+
 def run_eval(tree: Path, cases: list[str], repeat: int, model: str, label: str, session: Session) -> Path:
     """harness_eval.py from ``tree``'s own harness, in its isolated backend; returns the judged run folder."""
     backend = tree / "apps" / "backend"
     python = str(backend / ".venv" / "bin" / "python")
-    out = sh([python, "scripts/harness_eval.py", "--model", model, "--only", ",".join(cases), "--repeat", str(repeat),
-              "--label", label, "--env", "LEARNING_ENABLED=false"], backend, timeout=3600 * 2)
-    (session.dir / f"{label}.eval.log").write_text(out.stdout + out.stderr, encoding="utf-8")
-    found = re.search(r"harness_judge\.py (\S+)", out.stdout)
-    if out.returncode or not found:
-        raise RuntimeError(f"harness_eval failed ({out.returncode}): {(out.stderr or out.stdout)[-600:]}")
+    argv = [python, "scripts/harness_eval.py", "--model", model, "--only", ",".join(cases), "--repeat", str(repeat),
+            "--label", label, "--env", "LEARNING_ENABLED=false"]
+    output = run_live_eval(argv, backend, session.dir / f"{label}.eval.log")
+    found = re.search(r"harness_judge\.py (\S+)", output)
+    if not found:
+        raise RuntimeError(f"harness_eval exited without a completed run receipt: {output[-600:]}")
     run = Path(found.group(1))
     judged = sh([python, "scripts/harness_judge.py", str(run)], backend, timeout=1800)
     if judged.returncode:
