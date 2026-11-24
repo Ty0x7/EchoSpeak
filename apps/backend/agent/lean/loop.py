@@ -665,6 +665,8 @@ class LeanTurn:
         messages.append({"role": "user", "content": user_message + (f"\n\n{self.request_note}" if self.request_note else "")})
         self._goal = user_message  # what the quarantined reader extracts facts for
         self._turn_started, self._unnamed_removed = time.time(), set()
+        # What existed when the request began: a removal's ownership comes from this record (removal_scope.py).
+        self._provenance = removal_scope.Provenance.snapshot(self._project_root())
 
         # A research worker gets its own, smaller step budget (agent/lean/swarm.py).
         max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
@@ -1443,21 +1445,21 @@ class LeanTurn:
                 results[call.id] = (False, undone)
                 self._tool_finished(call, name, args, step, False, undone, 0, outcome="skipped")
                 continue
-            if not problem and removal_scope.is_removal(name, args):
+            removing = removal_scope.removal(name, args, self._project_root()) if not problem else None
+            if removing is not None:
                 # A removal stays within what the user asked to remove (agent/lean/removal_scope.py). Checked
-                # before the approval card, which shows the command but not whether it exceeds the request.
-                request, named_in = self._removal_request()
-                new = removal_scope.unnamed_targets(self._touched(name, args), named_in, getattr(self, "_turn_started", 0.0))
-                already = getattr(self, "_unnamed_removed", set())
-                scope = removal_scope.problem(new, already, request,
-                                              Path(str(getattr(self.toolbox, "project_root", "") or ".")).expanduser())
+                # before the approval card, which shows the command but not whether it exceeds the request, and
+                # in every approval mode, autonomous included.
+                scope, used = removal_scope.problem(
+                    removing, self._removal_intent(), getattr(self, "_provenance", None) or removal_scope.Provenance(),
+                    getattr(self, "_unnamed_removed", set()), self._project_root())
                 if scope:
-                    policy.audit(policy.Decision("deny", scope, "unnamed_removal"), name=name, args=args,
+                    policy.audit(policy.Decision("deny", scope, "removal_scope"), name=name, args=args,
                                  session_id=self.session_id, agent=self.persona.id, outcome="blocked")
                     results[call.id] = (False, scope)
                     self._tool_finished(call, name, args, step, False, scope, 0, outcome="skipped")
                     continue
-                self._unnamed_removed = already | set(new)
+                self._unnamed_removed = getattr(self, "_unnamed_removed", set()) | used
             if not problem and (self.unavailable_delegates or self.failed_delegates):
                 from agent.lean.agent_reach import artifact_attribution_problem
 
@@ -1745,23 +1747,23 @@ class LeanTurn:
             return f" ({'; '.join(parts)})" if parts else ""
         return ""
 
-    def _removal_request(self) -> tuple[str, str]:
-        """The user's request for collective wording, and the text that may name targets.
+    def _project_root(self) -> Path:
+        return Path(str(getattr(self.toolbox, "project_root", "") or ".")).expanduser().resolve()
 
-        A reply such as "yes" answers the assistant's last question, so that question and the previous user
-        message can name what is removed. Only the user's own words can ask for several.
+    def _removal_intent(self) -> "removal_scope.Intent":
+        """What the user asked to remove: this request, their card answers in it, and their own previous message.
+
+        The assistant's messages and suggestions never authorize a removal.
         """
-        last_user = last_assistant = ""
-        for message in reversed(self.history or []):
-            role, content = message.get("role"), message.get("content")
-            text = content if isinstance(content, str) else ""
-            if role == "assistant" and not last_assistant and not last_user:
-                last_assistant = text
-            elif role == "user" and not last_user:
-                last_user = text
-                break
-        request = getattr(self, "_goal", "") or ""
-        return f"{request}\n{last_user}", f"{request}\n{last_user}\n{last_assistant}"
+        started = getattr(self, "_turn_started", 0.0)
+        selections = [(str(item.get("question") or ""), [str(o) for o in item.get("options") or []],
+                       str(item.get("answer") or ""))
+                      for item in self.timeline
+                      if item.get("kind") == "approval" and item.get("tool") == ask.ASK_USER
+                      and item.get("decision") == "answered" and float(item.get("at") or 0) >= started]
+        previous = next((str(m.get("content") or "") for m in reversed(self.history or [])
+                         if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
+        return removal_scope.intent(getattr(self, "_goal", "") or "", selections, previous)
 
     def _touched(self, name: str, args: dict[str, Any]) -> set[str]:
         """Existing files and folders a call names: a file tool's paths, or a command's arguments.
