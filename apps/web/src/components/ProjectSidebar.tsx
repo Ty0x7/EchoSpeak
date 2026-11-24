@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import {
   fitLayout,
   loadStackLayout,
@@ -77,13 +77,30 @@ const SECTION_TITLES: Record<SectionKey, string> = { agents: "Agents", chats: "C
 const sectionTitle = (key: SectionKey, environment: Environment) =>
   key === "chats" && environment === "agents" ? "Conversations" : SECTION_TITLES[key];
 
-const NAV_ITEMS: { id: Exclude<SidebarPage, "chat" | "code" | "agents">; label: string; hint: string }[] = [
+type NavPage = Exclude<SidebarPage, "chat" | "code" | "agents">;
+type NavId = NavPage | "new";
+const NAV_ITEMS: { id: NavPage; label: string; hint: string }[] = [
   { id: "groups", label: "Group chats", hint: "Chats with several agents" },
   { id: "projects", label: "Projects", hint: "Your project folders" },
   { id: "artifacts", label: "Artifacts", hint: "Apps, documents and diagrams your agents made" },
   { id: "routines", label: "Routines", hint: "Tasks that run on a schedule" },
   { id: "creations", label: "Creations", hint: "Your generated images and videos" },
 ];
+
+const NAV_ORDER: NavId[] = ["new", ...NAV_ITEMS.map(item => item.id)];
+const NAV_PREFERENCE = "echospeak.sidebar.navigation.v1";
+
+function loadNavigation(): { order: NavId[]; collapsed: boolean } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(NAV_PREFERENCE) || "{}");
+    const order = Array.isArray(saved?.order)
+      ? NAV_ORDER.filter(id => saved.order.includes(id)).sort((a, b) => saved.order.indexOf(a) - saved.order.indexOf(b))
+      : [];
+    return { order: [...order, ...NAV_ORDER.filter(id => !order.includes(id))], collapsed: saved?.collapsed === true };
+  } catch {
+    return { order: NAV_ORDER, collapsed: false };
+  }
+}
 
 function NavIcon({ name }: { name: Exclude<SidebarPage, "chat"> }) {
   const common = { width: 15, height: 15, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const, "aria-hidden": true };
@@ -266,6 +283,22 @@ export function ProjectSidebar(props: SidebarProps) {
   const updateNotice = updateInfo?.configured && updateInfo.available ? <button type="button" className="sidebar-update-notice" onClick={openUpdate} title={`EchoSpeak ${updateInfo.version} is available`} aria-label={`Update to EchoSpeak ${updateInfo.version}`}><span aria-hidden>↑</span>{!props.collapsed ? <span><strong>Update available</strong><small>EchoSpeak {updateInfo.version}</small></span> : null}</button> : null;
   const [layout, setLayout] = useState<StackLayout>(() => loadStackLayout());
   const [dragging, setDragging] = useState(false);
+  const [navigation, setNavigation] = useState(loadNavigation);
+  const [drop, setDrop] = useState<{ id: NavId; after: boolean } | null>(null);
+  const navDrag = useRef<{ id: NavId; x: number; y: number; moved: boolean } | null>(null);
+  const suppressNavClick = useRef(false);
+  const navListId = useId();
+  useEffect(() => {
+    try { localStorage.setItem(NAV_PREFERENCE, JSON.stringify(navigation)); } catch { /* Optional persistence. */ }
+  }, [navigation]);
+  const reorderNav = (id: NavId, target: NavId, after: boolean) => {
+    if (id === target) return;
+    setNavigation(value => {
+      const order = value.order.filter(item => item !== id);
+      order.splice(order.indexOf(target) + Number(after), 0, id);
+      return { ...value, order };
+    });
+  };
   const splitRef = useRef<HTMLDivElement | null>(null);
   const sectionRefs = useRef<Partial<Record<SectionKey, HTMLElement | null>>>({});
   useEffect(() => {
@@ -306,7 +339,13 @@ export function ProjectSidebar(props: SidebarProps) {
   const unified = props.unified;
   const environment: Environment = unified ? "chat" : props.environment || "chat";
   // Each environment lists its own pages; the shell stays the same. One assistant lists them all.
-  const shownNav = unified ? NAV_ITEMS : ENVIRONMENT_PAGES[environment].map(id => NAV_ITEMS.find(item => item.id === id)!);
+  const availableNav = navigation.order.filter(id => id === "new"
+    ? !(environment === "code" && props.codeTree)
+    : unified || ENVIRONMENT_PAGES[environment].includes(id));
+  const canFoldNav = availableNav.length > 3;
+  const foldedNav = availableNav.slice(0, 3);
+  if (availableNav.includes("projects") && !foldedNav.includes("projects")) foldedNav[2] = "projects";
+  const shownNav = canFoldNav && navigation.collapsed ? foldedNav : availableNav;
   const sessions = props.sessions;
   const switcher = props.onEnvironment && !unified ? (
     <div className={`es-env-switch${iconOnly ? " is-rail" : ""}`} role="tablist" aria-label="Environment" aria-orientation={iconOnly ? "vertical" : "horizontal"}>
@@ -436,12 +475,18 @@ export function ProjectSidebar(props: SidebarProps) {
   // space by flex-grow, so the browser sizes them and changes animate; only a
   // drag needs to measure.
   const SECTION_HEAD_PX = 30;
-  const present: SectionKey[] = (environment === "agents" || unified) && props.agents ? ["agents", "chats"] : ["chats"];
+  const present: SectionKey[] = (environment === "agents" || unified) && props.agents ? (unified ? ["chats", "agents"] : ["agents", "chats"]) : ["chats"];
   const listArea = Math.max(0, splitHeight - SECTION_HEAD_PX * present.length - 9 * (present.length - 1));
   const effective = fitLayout(layout, props.agents?.count || 0, listArea);
   const fractions = sectionFractions(effective, present);
-  const sectionFlex = (key: SectionKey): React.CSSProperties =>
-    effective.open[key] ? { flex: `${fractions[key] ?? 1} 1 0px` } : { flex: `0 0 ${SECTION_HEAD_PX}px` };
+  const sectionFlex = (key: SectionKey): React.CSSProperties => {
+    if (!effective.open[key]) return { flex: `0 0 ${SECTION_HEAD_PX}px` };
+    const fitConversations = unified && key === "chats" && present.length > 1 && !layout.custom;
+    return {
+      flex: `${fractions[key] ?? 1} 1 0px`,
+      maxHeight: fitConversations ? SECTION_HEAD_PX + 30 + Math.max(1, sessions.length) * 68 : undefined,
+    };
+  };
   /** Where the upper list starts and how tall both lists are, for pointer/keyboard resizing. */
   const measurePair = (a: SectionKey, b: SectionKey): SplitGeometry => {
     const elA = sectionRefs.current[a];
@@ -700,49 +745,77 @@ export function ProjectSidebar(props: SidebarProps) {
             {switcher}
             {props.onPage ? (
               <nav className="es-nav" aria-label="Pages">
-                {!(environment === "code" && props.codeTree) ? <button
-                  type="button"
-                  className="es-nav-item es-nav-new"
-                  onClick={() => {
-                    if (environment === "chat") {
-                      props.onView("chat");
-                      props.onPage?.("chat");
-                    }
-                    props.onNewSession();
-                  }}
-                  title={unified ? "New conversation" : NEW_LABEL[environment]}
-                >
-                  <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
-                  <span>{unified ? "New conversation" : NEW_LABEL[environment]}</span>
-                </button> : null}
-                {shownNav.map((item) => {
-                  const active = props.page === item.id;
-                  const count = props.pageCounts?.[item.id];
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`es-nav-item${active ? " is-active" : ""}`}
-                      aria-current={active ? "page" : undefined}
-                      onClick={() => props.onPage?.(active ? (environment === "agents" ? "agents" : "chat") : item.id)}
-                      title={item.hint}
-                    >
-                      <NavIcon name={item.id} />
-                      <span>{item.label}</span>
+                <div className="es-nav-entries" id={navListId}>
+                  {shownNav.map((id, index) => {
+                    const item = NAV_ITEMS.find(page => page.id === id);
+                    const active = props.page === id;
+                    const count = item && props.pageCounts?.[item.id];
+                    const label = item?.label || (unified ? "New conversation" : NEW_LABEL[environment]);
+                    const dropAt = (event: React.PointerEvent<HTMLButtonElement>) => {
+                      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-nav-id]");
+                      if (!target || target.parentElement?.id !== navListId) return null;
+                      const rect = target.getBoundingClientRect();
+                      return { id: target.dataset.navId as NavId, after: event.clientY > rect.top + rect.height / 2 };
+                    };
+                    return <button key={id} type="button" data-nav-id={id}
+                      data-drop={drop?.id === id ? (drop.after ? "after" : "before") : undefined}
+                      className={`es-nav-item${item ? "" : " es-nav-new"}${active ? " is-active" : ""}`}
+                      aria-current={active ? "page" : undefined} aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                      title={`${item?.hint || label} · Drag or use Alt+↑/↓ to reorder`}
+                      onPointerDown={event => {
+                        if (event.button !== 0 || event.pointerType !== "mouse") return;
+                        suppressNavClick.current = false;
+                        navDrag.current = { id, x: event.clientX, y: event.clientY, moved: false };
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                      }}
+                      onPointerMove={event => {
+                        const drag = navDrag.current;
+                        if (!drag || drag.id !== id) return;
+                        if (!drag.moved && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 5) return;
+                        drag.moved = true;
+                        const target = dropAt(event);
+                        setDrop(target?.id !== id ? target : null);
+                      }}
+                      onPointerUp={event => {
+                        const drag = navDrag.current;
+                        navDrag.current = null;
+                        setDrop(null);
+                        if (!drag?.moved) return;
+                        suppressNavClick.current = true;
+                        const target = dropAt(event);
+                        if (target) reorderNav(id, target.id, target.after);
+                      }}
+                      onLostPointerCapture={() => { navDrag.current = null; setDrop(null); }}
+                      onKeyDown={event => {
+                        if (!event.altKey || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+                        event.preventDefault();
+                        const down = event.key === "ArrowDown";
+                        const target = shownNav[index + (down ? 1 : -1)];
+                        if (target) {
+                          const button = event.currentTarget;
+                          reorderNav(id, target, down);
+                          requestAnimationFrame(() => button.focus());
+                        }
+                      }}
+                      onClick={event => {
+                        if (event.detail && suppressNavClick.current) { suppressNavClick.current = false; return; }
+                        if (item) {
+                          props.onPage?.(active ? (environment === "agents" ? "agents" : "chat") : item.id);
+                        } else {
+                          if (environment === "chat") { props.onView("chat"); props.onPage?.("chat"); }
+                          props.onNewSession();
+                        }
+                      }}>
+                      {item ? <NavIcon name={item.id} /> : <Icon name="plus" size={15} />}
+                      <span>{label}</span>
                       {count ? <small>{count}</small> : null}
-                    </button>
-                  );
-                })}
-                {unified ? (
-                  // The project workbench (files, changes, terminal tabs) is a tool, not a separate assistant.
-                  <button type="button" className={`es-nav-item${props.page === "code" ? " is-active" : ""}`}
-                    aria-current={props.page === "code" ? "page" : undefined}
-                    onClick={() => props.onPage?.(props.page === "code" ? "chat" : "code")}
-                    title="Project files, changes and terminals">
-                    <NavIcon name="code" />
-                    <span>Workbench</span>
-                  </button>
-                ) : null}
+                    </button>;
+                  })}
+                </div>
+                {canFoldNav ? <button className="es-nav-fold" type="button" aria-expanded={!navigation.collapsed} aria-controls={navListId}
+                  onClick={() => setNavigation(value => ({ ...value, collapsed: !value.collapsed }))}>
+                  <Icon name="chevron" size={14} />{navigation.collapsed ? "Show more" : "Show less"}
+                </button> : null}
               </nav>
             ) : null}
           </div>
@@ -854,7 +927,7 @@ export function ProjectSidebar(props: SidebarProps) {
             onClick={props.onSettings}
             aria-pressed={props.settingsOpen}
             aria-label="Settings" title="Settings"
-            style={{ width: "100%", minHeight: 36, borderRadius: 4, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 9, padding: "0 11px", fontFamily: "'Inter', 'Segoe UI', sans-serif", fontSize: 11.5 }}
+            style={{ width: "100%", minHeight: 36, borderRadius: 4, cursor: "pointer", display: "grid", placeItems: "center", padding: 0, fontFamily: "'Inter', 'Segoe UI', sans-serif", fontSize: 11.5 }}
           >
             <Icon name="studio" size={14} active={props.settingsOpen} />
           </button>

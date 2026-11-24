@@ -14,18 +14,21 @@
 .wb-vscode-mark { color:#3ba3e8; font-size:19px; width:16px; line-height:16px; }
 .wb-script-form { display:grid; gap:9px; padding:8px 12px; }.wb-script-form label,.wb-changes form label { display:grid; gap:5px; }
 .wb-sidebar-actions { display:flex; gap:6px; padding:3px 8px 8px; }.wb-sidebar-actions button { display:grid; place-items:center; color:var(--es-text-3); background:none; border:0; padding:4px; cursor:pointer; }
-.wb-tabs { min-width:0; display:flex; align-items:center; flex:1; gap:2px; overflow-x:auto; scrollbar-width:thin; }
-.right-panel:has(.wb-tabs) .rp-spacer { display:none; }
-.right-panel .wb-tabs .wb-tab>button[role=tab] { text-transform:none; letter-spacing:0; font:11px var(--es-font); padding:6px; height:28px; }
-.right-panel .wb-tabs .wb-tab>button[aria-selected=true] { color:var(--es-text-strong); }
-.wb-tab { display:flex; align-items:center; flex:0 0 auto; max-width:160px; border-radius:5px; }.wb-tab:has([aria-selected=true]) { background:var(--es-surface-2); }
-.right-panel .wb-tab>button,.right-panel .wb-new-surface { display:flex; align-items:center; gap:5px; border:0; background:none; color:var(--es-text-3); padding:7px 6px; font:11px var(--es-font); cursor:pointer; }
-.wb-tab>button[aria-selected=true] { color:var(--es-text-strong); }.wb-tab>button>span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:90px; }
-.right-panel .wb-tab .wb-tab-close { padding:6px 3px; opacity:.5; }.wb-tab:hover .wb-tab-close { opacity:1; }
-.right-panel:has(.wb-tabs)>.rp-tabs { min-height:40px; gap:4px; padding:0 8px; }
-.right-panel:has(.wb-tabs)>.rp-body { display:flex; flex-direction:column; overflow:hidden; background:var(--es-bg); min-height:0; }
-.wb-surface-picker { display:flex; flex-direction:column; width:min(240px,100%); margin:auto; padding:25px 12px; gap:3px; }
-.wb-surface-picker>strong { text-align:center; margin-bottom:14px; font-size:12px; }
+.rp-tabs:has(.wb-tabs) { align-items:flex-start; flex-wrap:nowrap; gap:4px; padding:8px; }
+.rp-tabs:has(.wb-tabs) .rp-spacer { display:none; }
+.wb-tabs { display:flex; align-items:flex-start; flex:1; min-width:0; gap:4px; }
+.wb-tab-list { display:flex; align-items:center; align-content:flex-start; flex:1; min-width:0; flex-wrap:wrap; gap:4px; max-height:116px; overflow:auto; scrollbar-width:thin; }
+.wb-tab { display:flex; align-items:center; min-width:0; max-width:100%; border-radius:6px; }
+.wb-tab:has([aria-selected=true]) { background:var(--es-surface-3); }
+.rp-tabs .wb-tab > button[role=tab] { min-width:0; padding:0 5px 0 8px; font:11px var(--es-font); text-transform:none; letter-spacing:0; }
+.wb-tab > button > span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; max-width:110px; }
+.wb-tab > button > svg { flex-shrink:0; }
+.rp-tabs .wb-tab > button[aria-selected=true] { color:var(--es-text-strong); }
+.rp-tabs .wb-tab-close { flex:0 0 24px; width:24px; height:24px; margin-right:2px; border-radius:5px; }
+.rp-tabs .wb-new-surface { flex:0 0 28px; }
+.rp:has(.wb-tabs) > .rp-body { overflow:hidden; background:var(--es-bg); }
+.wb-surface-picker { display:flex; flex-direction:column; width:min(100%,300px); margin:0 auto; padding:16px 12px; gap:3px; overflow:auto; }
+.wb-surface-picker>strong { padding:4px 8px 8px; color:var(--es-text); font-size:12px; }
 .wb-surface-picker>button { display:flex; align-items:center; gap:10px; background:none; color:var(--es-text); border:0; border-radius:5px; padding:7px 6px; text-align:left; cursor:pointer; font:12px var(--es-font); }
 .wb-surface-picker>button:hover { background:var(--es-surface-2); }.wb-surface-picker>button:disabled { opacity:.35; cursor:default; }
 .wb-surface-picker kbd { margin-left:auto; color:var(--es-text-4); background:var(--es-surface-1); border-radius:3px; padding:1px 5px; font:10px var(--es-font); }
@@ -65,7 +68,7 @@
 .echo-root.echo-root .chat-transcript .chat-line-assistant { width:100%; max-width:100% !important; }
 .echo-root.echo-root .is-empty-conversation .input-bar { margin:auto !important; width:calc(100% - 48px); max-width:var(--es-conversation-width); padding:0 !important; }
 .echo-root .conversation-welcome { text-align:center; margin-bottom:22px; }.echo-root .conversation-welcome h1 { font-size:26px; line-height:1.25; font-weight:500; }.echo-root .conversation-welcome .welcome-typewriter { min-height:2.2em; margin:9px auto 0; max-width:440px; }
-.echo-root .composer-card { max-width:var(--es-conversation-width); margin-inline:auto; width:100%; }.echo-root .composer-card textarea.input-field { min-height:46px !important; padding-top:12px !important; padding-bottom:10px !important; }
+.echo-root .composer-card { max-width:var(--es-conversation-width); margin-inline:auto; width:100%; }
 .echo-root .ec-page .es-page { height:100%; display:flex; flex-direction:column; padding-bottom:20px; }.echo-root .ec-page .es-page-body { flex:1; min-height:0; display:flex; flex-direction:column; width:100%; }.echo-root .ec-workspace { flex:1; min-height:0; display:flex; flex-direction:column; }
 .echo-root .ec-workspace>.ec-start:not(.ec-start-external) { margin:auto; width:calc(100% - 36px); max-width:var(--es-conversation-width); }.echo-root .ec-welcome h2 { font-size:26px; }.echo-root .ec-welcome { text-align:center; margin-bottom:22px; }.echo-root .ec-draft-card textarea { min-height:46px; padding-top:12px; padding-bottom:10px; }
 /* Chat's shorter controls have no checkout/status footer. Reserve that lower
@@ -108,3 +111,10 @@
 .wb-dstate[data-state="OPEN"] { color:var(--es-ok, #41c77a); }
 .wb-dstate[data-state="MERGED"] { color:#a371f7; }
 .wb-dlive { margin-left:auto; color:var(--es-ok, #41c77a); font-size:11px; }
+
+.wb-shell-select { max-width:115px; padding:4px 6px; border:1px solid var(--es-border); border-radius:5px; background:#191919; color:#d4d4d4; font:11px var(--es-font); }
+.rp-tabs:has(.wb-tabs) .rp-close[aria-expanded=true],
+.rp-tabs:has(.wb-tabs) .rp-close[aria-pressed=true] { color:var(--es-text-strong); background:var(--es-surface-3); }
+.rp .rp-filters { padding:10px 12px; gap:5px; }
+.rp .rp-filters button { gap:5px; padding-inline:8px; min-height:26px; }
+.rp .rp-act-list .ap-empty { margin-inline:2px; }
