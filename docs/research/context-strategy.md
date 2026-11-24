@@ -635,8 +635,9 @@ every 10 seconds during a run.
 - *Small desktop GPU users,* such as a browser or video player, are ignored.
 - *Limits:*
   - **NVIDIA only.** On other GPUs the check fails closed and private evaluations don't start.
-  - **Compute processes only.** A pure graphics workload (a game, a compositor) isn't listed. It is seen only
-    through free VRAM at start, not during a run.
+  - **Compute processes only.** Whether a graphics workload (a game, a compositor) appears depends on the driver.
+    Some GPU processes do appear (FreeTube's renderer did); one that doesn't is seen only through free VRAM at
+    start, not during a run.
   - **Polling, not reservation.** A workload starting mid-run can overlap for up to about 10 seconds before the
     evaluation stops. A stopped evaluation is recorded as an error with no score.
   - **Thresholds are tuned for this workstation:** 8 GB RTX 3060 Ti, Q4 9–12B models, up to 32K. Larger models or
