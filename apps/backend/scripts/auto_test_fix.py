@@ -228,14 +228,14 @@ def run_eval(tree: Path, cases: list[str], repeat: int, model: str, label: str, 
         # A private server per evaluation at the comparison window (scripts/eval_server.py). It stops if the
         # shared service loads a model meanwhile: both can't share the GPU, and the run would not be comparable.
         with (session.dir / f"{label}.server.log").open("w", encoding="utf-8") as server_log, \
-                eval_server.private_server(context, log=server_log) as upstream:
-            def shared_loaded() -> str:
-                loaded = eval_server.busy()
-                return f"the shared Ollama service loaded {loaded} during the evaluation" if loaded else ""
+                eval_server.private_server(context, log=server_log) as server:
+            def competing() -> str:
+                reason = server.competing()
+                return f"{reason} during the evaluation" if reason else ""
 
-            output = run_live_eval([*argv, "--upstream", upstream, "--env", f"LOCAL_MODEL_CONTEXT={context}"],
-                                   backend, session.dir / f"{label}.eval.log", guard=throttled(shared_loaded, 10))
-            served = eval_server.served_context(upstream)
+            output = run_live_eval([*argv, "--upstream", server.url, "--env", f"LOCAL_MODEL_CONTEXT={context}"],
+                                   backend, session.dir / f"{label}.eval.log", guard=throttled(competing, 10))
+            served = eval_server.served_context(server.url)
         if served != context:
             raise RuntimeError(f"the private server served {served} tokens instead of {context}")
     found = re.search(r"harness_judge\.py (\S+)", output)
