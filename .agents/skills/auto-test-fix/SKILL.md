@@ -31,6 +31,12 @@ cd apps/backend
 .venv/bin/python scripts/auto_test_fix.py review                   # decisions, evidence, commits
 ```
 
+Each evaluation runs on a private Ollama server at **32K** (`--context 32768`, the default), the development
+comparison window. Use `--context 65536` only for tasks whose prompts exceed 32K, and `--context 0` for the shared
+16K service, the historical reference. The private server has the prompt cache off and starts only while the
+shared service has no model loaded. The evaluation stops if the shared service loads one. See
+`scripts/eval_server.py`.
+
 Before `run`, do the model-harness-testing machine checks (memory, `ollama ps`, no other evaluation). Tell the
 owner the expected duration: a cycle with two repetitions of three dev and two held-out cases takes about
 20–40 minutes plus the engineering agent's time.

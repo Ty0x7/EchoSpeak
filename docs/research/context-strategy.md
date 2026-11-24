@@ -594,3 +594,12 @@ from 8.37 to 8.80 and held-out H1 from 8.45 to 8.80. C1 fell from 9.60 to 5.60 w
 instead of asking which one, and the controller rejected the cycle. The detector did not fire in any live trial.
 A matched three-trial C1 follow-up passed on both trees (9.59 base, 9.49 candidate). The candidate remains
 unaccepted pending owner review. The full record is on [#160](https://github.com/Ty0x7/EchoSpeak/issues/160).
+
+### Decision: 32K for development comparisons · 24 November
+
+The owner adopted 32K as the primary development comparison window. The installed application and the shared
+workstation service stay at 16K, and every saved 16K result remains the historical reference. 64K is reserved for
+tasks whose active prompts need it. The controller now evaluates on a private server per run
+(`scripts/eval_server.py`, `auto_test_fix.py run --context`, default 32768). That server has llama-server's prompt
+cache off. On the shared service, that cache stored about 3 GiB per Gemma 4 12B prompt and reached 7.5 GiB after
+three prompts during the #160 gate. That growth took available RAM to 1.7 GB.
