@@ -2,8 +2,6 @@
   <img src="assets/readme/title.svg" alt="EchoSpeak" width="300" />
 </p>
 
-# EchoSpeak
-
 EchoSpeak is a local-first AI workspace for research, coding, and creative work. Use a model from Ollama, LM Studio, or a supported cloud provider. EchoSpeak gives it project context, approved tools, persistent sessions, and a record of what it did.
 
 ## Downloads
