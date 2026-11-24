@@ -13,6 +13,7 @@ import hashlib
 import re
 import threading
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
@@ -21,6 +22,50 @@ from loguru import logger
 
 from config import ModelProvider, config
 from agent.lean import settings
+
+
+class _RepeatedProse:
+    """Detect a sustained cycle of distinct prose paragraphs across stream chunks."""
+
+    repetitions = 8
+    max_period = 4
+    fence = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+    def __init__(self) -> None:
+        self.line = ""
+        self.paragraph: list[str] = []
+        self.recent: deque[str] = deque(maxlen=self.repetitions * self.max_period)
+        self.open_fence = ""
+
+    def feed(self, text: str) -> bool:
+        *lines, self.line = (self.line + text).split("\n")
+        for line in lines:
+            marker = self.fence.match(line)
+            if self.open_fence:
+                if marker and marker[1].startswith(self.open_fence) and not line[marker.end():].strip():
+                    self.open_fence = ""
+                continue
+            if marker:
+                self.open_fence = marker[1]
+            if marker or line.startswith(("    ", "\t")) or line.lstrip().startswith((">", "|", '"', "“")):
+                self.paragraph.clear()
+                self.recent.clear()
+            elif line.strip():
+                self.paragraph.append(line)
+            elif self.paragraph:
+                paragraph = " ".join(" ".join(self.paragraph).split())
+                self.paragraph.clear()
+                if not paragraph[0].isalpha() or paragraph[-1] not in ".!?":
+                    self.recent.clear()
+                    continue
+                self.recent.append(paragraph)
+                recent = list(self.recent)
+                # Period 1 is the same paragraph verbatim; longer periods are a cycle of paragraphs.
+                for period in range(1, self.max_period + 1):
+                    cycle = recent[-period:]
+                    if len(cycle) == period and recent[-period * self.repetitions:] == cycle * self.repetitions:
+                        return True
+        return False
 
 
 @dataclass
@@ -528,6 +573,7 @@ class ChatClient:
         cancel: Optional[threading.Event] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        detect_repetition: bool = True,
     ) -> ModelTurn:
         from agent.lean.observations import hydrate
         has_visual = any(message.get("observations") for message in messages)
@@ -604,7 +650,7 @@ class ChatClient:
             else:
                 body["reasoning_effort"] = self.reasoning_effort
         try:
-            return self._stream(body, on_reasoning, on_content, cancel)
+            return self._stream(body, on_reasoning, on_content, cancel, detect_repetition)
         except ProviderError as exc:
             if has_visual and not getattr(self, "_text_only", False) and _rejects_images(exc):
                 # Text-only local models (and some APIs) refuse image parts. Keep the turn
@@ -612,12 +658,12 @@ class ChatClient:
                 logger.info("Model rejected image input; retrying with text notes")
                 self._text_only = True
                 body["messages"] = _chat_history(hydrate(raw_messages, images=False), self.endpoint)
-                return self._stream(body, on_reasoning, on_content, cancel)
+                return self._stream(body, on_reasoning, on_content, cancel, detect_repetition)
             if "reasoning_effort" in body and exc.status == 400 and "reason" in exc.detail.lower():
                 logger.info("Provider rejected reasoning_effort; retrying without it")
                 self.reasoning_effort = ""
                 body.pop("reasoning_effort", None)
-                return self._stream(body, on_reasoning, on_content, cancel)
+                return self._stream(body, on_reasoning, on_content, cancel, detect_repetition)
             raise
 
     def _stream(
@@ -626,6 +672,7 @@ class ChatClient:
         on_reasoning: Optional[Callable[[str], None]],
         on_content: Optional[Callable[[str], None]],
         cancel: Optional[threading.Event],
+        detect_repetition: bool = True,
     ) -> ModelTurn:
         turn = ModelTurn()
         scrubber = ThinkTagScrubber()
@@ -635,6 +682,9 @@ class ChatClient:
         content_parts: list[str] = []
         reasoning_parts: list[str] = []
         protocol_reasoning: list[str] = []
+        # The interactive loop handles retraction and recovery. Side calls such
+        # as compaction have no transcript to retract and use their own limits.
+        repetition = _RepeatedProse() if self.endpoint.local and on_content and detect_repetition else None
 
         def emit_reasoning(text: str) -> None:
             if text:
@@ -677,6 +727,7 @@ class ChatClient:
                         "completion": int(usage.get("completion_tokens") or 0),
                         "total": int(usage.get("total_tokens") or 0),
                     }
+                stalled = False
                 for choice in chunk.get("choices") or []:
                     delta = choice.get("delta") or {}
                     if isinstance(delta.get("reasoning_content"), str):
@@ -687,6 +738,8 @@ class ChatClient:
                         visible, hidden = scrubber.feed(text)
                         emit_reasoning(hidden)
                         emit_content(visible)
+                        if repetition and not partial_calls and not delta.get("tool_calls"):
+                            stalled |= repetition.feed(visible)
                     for fragment in delta.get("tool_calls") or []:
                         # OpenAI streams an index; Gemini can omit it entirely.
                         # Keep distinct IDs separate instead of treating every
@@ -724,6 +777,9 @@ class ChatClient:
                             slot["arguments"] += str(function["arguments"])
                     if choice.get("finish_reason"):
                         turn.finish_reason = str(choice["finish_reason"])
+                if stalled and not partial_calls and not turn.finish_reason:
+                    turn.finish_reason = "repeated_prose"
+                    break
 
         visible, hidden = scrubber.flush()
         emit_reasoning(hidden)
