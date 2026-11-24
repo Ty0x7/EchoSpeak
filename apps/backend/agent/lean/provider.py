@@ -573,6 +573,7 @@ class ChatClient:
         cancel: Optional[threading.Event] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        detect_repetition: bool = True,
     ) -> ModelTurn:
         from agent.lean.observations import hydrate
         has_visual = any(message.get("observations") for message in messages)
@@ -649,7 +650,7 @@ class ChatClient:
             else:
                 body["reasoning_effort"] = self.reasoning_effort
         try:
-            return self._stream(body, on_reasoning, on_content, cancel)
+            return self._stream(body, on_reasoning, on_content, cancel, detect_repetition)
         except ProviderError as exc:
             if has_visual and not getattr(self, "_text_only", False) and _rejects_images(exc):
                 # Text-only local models (and some APIs) refuse image parts. Keep the turn
@@ -657,12 +658,12 @@ class ChatClient:
                 logger.info("Model rejected image input; retrying with text notes")
                 self._text_only = True
                 body["messages"] = _chat_history(hydrate(raw_messages, images=False), self.endpoint)
-                return self._stream(body, on_reasoning, on_content, cancel)
+                return self._stream(body, on_reasoning, on_content, cancel, detect_repetition)
             if "reasoning_effort" in body and exc.status == 400 and "reason" in exc.detail.lower():
                 logger.info("Provider rejected reasoning_effort; retrying without it")
                 self.reasoning_effort = ""
                 body.pop("reasoning_effort", None)
-                return self._stream(body, on_reasoning, on_content, cancel)
+                return self._stream(body, on_reasoning, on_content, cancel, detect_repetition)
             raise
 
     def _stream(
@@ -671,6 +672,7 @@ class ChatClient:
         on_reasoning: Optional[Callable[[str], None]],
         on_content: Optional[Callable[[str], None]],
         cancel: Optional[threading.Event],
+        detect_repetition: bool = True,
     ) -> ModelTurn:
         turn = ModelTurn()
         scrubber = ThinkTagScrubber()
@@ -682,7 +684,7 @@ class ChatClient:
         protocol_reasoning: list[str] = []
         # The interactive loop handles retraction and recovery. Side calls such
         # as compaction have no transcript to retract and use their own limits.
-        repetition = _RepeatedProse() if self.endpoint.local and on_content else None
+        repetition = _RepeatedProse() if self.endpoint.local and on_content and detect_repetition else None
 
         def emit_reasoning(text: str) -> None:
             if text:

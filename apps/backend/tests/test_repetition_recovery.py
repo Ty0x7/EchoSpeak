@@ -128,3 +128,66 @@ def test_a_reasoning_stall_is_a_different_failure_and_is_left_alone():
         [{"role": "user", "content": "x"}], on_content=lambda _: None, on_reasoning=thoughts.append,
         cancel=threading.Event())
     assert turn.finish_reason == "length" and stream.served == 0 and "".join(thoughts)
+
+
+# ── legitimate repetition is left alone ────────────────────────────────
+
+LINES = "I will not talk in class.\n\n" * 20
+
+
+def _single_turn(text: str, request: str):
+    requests, events = [], []
+
+    def respond(request_):
+        requests.append(json.loads(request_.content))
+        if len(requests) == 1:
+            return httpx.Response(200, stream=_Stream(text, finish="stop"))
+        return httpx.Response(200, content=_packet({"content": RECOVERY}, "stop"))
+
+    result = _turn(_client(respond), _toolbox({}), events, threading.Event()).run(request)
+    return result, requests, events
+
+
+def test_repetition_the_user_asked_for_is_the_answer():
+    result, requests, events = _single_turn(LINES, "Write 'I will not talk in class.' 20 times, one per paragraph.")
+    assert len(requests) == 1 and result.success and result.text.count("I will not talk in class.") == 20
+    assert not any(e["type"] in {"model_repetition", "text_replace"} for e in events)
+
+
+def test_the_same_output_without_such_a_request_is_treated_as_a_stall():
+    """The trade-off, pinned: identical paragraphs nobody asked for are a stall."""
+    result, requests, events = _single_turn(LINES, "Say something about classroom rules.")
+    assert len(requests) == 2 and result.text == RECOVERY
+    assert any(e["type"] == "model_repetition" for e in events)
+
+
+@pytest.mark.parametrize("text", [
+    "".join(f"Verse {i} walks a different road tonight.\n\nAnd the chorus rings out loud and clear.\n\n"
+            for i in range(10)),
+    "".join(f"Step {i}. Run the build again.\n\n" for i in range(30)),
+    "- Run the build again.\n\n" * 30,
+    "```\nretry()\n```\n\n" * 30,
+    "> Keep going.\n\n" * 30,
+], ids=["song-refrain", "numbered-steps", "list-items", "code-blocks", "quotes"])
+def test_structured_or_varied_repetition_is_not_a_stall(text):
+    stream = _Stream(text, finish="stop")
+    turn = _client(lambda _: httpx.Response(200, stream=stream)).stream_turn(
+        [{"role": "user", "content": "x"}], on_content=lambda _: None, cancel=threading.Event())
+    assert turn.finish_reason == "stop" and stream.served == len(text)
+
+
+# ── the bounded retry ends in an accurate outcome ──────────────────────
+
+def test_a_second_stall_stops_with_an_accurate_outcome_and_no_loop_text():
+    requests, events = [], []
+
+    def respond(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, stream=_Stream(SHAPE_DENSE))
+
+    result = _turn(_client(respond), _toolbox({}), events, threading.Event()).run("Fix the text helpers.")
+    assert len(requests) == 2  # one retry, then stop
+    assert not result.success and result.stop_reason == "model_repetition"
+    assert result.text == "The model got stuck repeating itself. I stopped this attempt."
+    assert "I'll start." not in result.text
+    assert [e.get("retry") for e in events if e["type"] == "model_repetition"] == [True, False]
