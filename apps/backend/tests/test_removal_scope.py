@@ -293,7 +293,7 @@ def test_intent_clauses():
     assert not rs.intent("Fix all tests and delete the notes file").collective
     keep = rs.intent("Delete everything except notes-final.md")
     assert keep.collective and "notes-final.md" in keep.protected_text
-    assert rs.intent("notes-draft.md", previous_request="Delete the notes file").exact_only
+    assert rs.intent("notes-draft.md", previous_request="Delete the notes file").selected_text == "notes-draft.md"
     assert not rs.intent("notes-draft.md", previous_request="Summarise the notes").removal
 
 
@@ -306,3 +306,126 @@ def test_provenance_uses_paths_and_inodes(tmp_path):
     assert record.created(tmp_path / "mine.txt")
     assert not record.created(tmp_path / "moved.txt")
     assert not rs.Provenance(root=tmp_path).created(tmp_path / "mine.txt")  # no complete record: the user's
+
+
+# ── second source review (04dc9f4): selections bound to what was presented; indirect removals resolved ──
+
+def test_both_selects_only_what_the_question_presented(tmp_path, monkeypatch):
+    root = _project(tmp_path, files=(*NOTES, "todo.md"))
+    out = _run(monkeypatch, root, "Delete the notes file in the project.",
+               [QUESTION, _rm("rm notes-draft.md notes-final.md todo.md"), _rm("rm notes-draft.md notes-final.md")],
+               answers=["Both"])
+    assert out["left"] == ["todo.md"] and len(out["blocked"]) == 1 and "todo.md" in out["blocked"][0]
+
+
+def test_all_does_not_stretch_to_a_wildcard_over_more_files(tmp_path, monkeypatch):
+    root = _project(tmp_path, files=(*NOTES, "todo.md"))
+    out = _run(monkeypatch, root, "Delete the notes file in the project.", [QUESTION, _rm("rm *.md")], answers=["All"])
+    assert out["left"] == sorted((*NOTES, "todo.md")) and out["blocked"]
+
+
+def test_both_does_not_authorize_an_indirect_command(tmp_path, monkeypatch):
+    root = _project(tmp_path, files=(*NOTES, "todo.md"))
+    out = _run(monkeypatch, root, "Delete the notes file in the project.",
+               [QUESTION, _rm("ls *.md | xargs rm")], answers=["Both"])
+    assert out["left"] == sorted((*NOTES, "todo.md")) and out["blocked"]
+
+
+def test_an_answer_to_an_unrelated_question_selects_nothing_to_remove(tmp_path, monkeypatch):
+    root = _project(tmp_path)
+    question = ("ask_user", {"question": "Which notes file should I summarise?", "options": list(NOTES)})
+    out = _run(monkeypatch, root, "Summarise one of the notes for me.", [question, _rm("rm notes-final.md")],
+               answers=["notes-final.md"])
+    assert out["left"] == list(NOTES) and out["blocked"]
+
+
+@pytest.mark.parametrize("command", [
+    "find . -type f -delete",
+    "find . -name '*.md' -delete",
+    "find . -type f -exec rm -f {} +",
+])
+def test_a_resolved_find_is_checked_against_the_collective_request(tmp_path, monkeypatch, command):
+    root = _project(tmp_path, files=(*NOTES, "todo.md"))
+    out = _run(monkeypatch, root, "Delete all the notes files.", [_rm(command)])
+    assert "todo.md" in out["left"] and "doesn't match" in out["blocked"][0]
+
+
+@pytest.mark.parametrize("command", [
+    "find . -name 'notes*' -delete",
+    "find . -maxdepth 1 -name 'notes-*.md' -exec rm {} \\;",
+])
+def test_a_resolved_find_within_the_request_is_allowed(tmp_path, monkeypatch, command):
+    root = _project(tmp_path, files=(*NOTES, "todo.md"))
+    out = _run(monkeypatch, root, "Delete all the notes files.", [_rm(command)])
+    assert out["left"] == ["todo.md"] and not out["blocked"]
+
+
+@pytest.mark.parametrize("command", [
+    "ls notes* | xargs rm",
+    "python3 -c \"import os; [os.remove(f) for f in os.listdir('.') if f.startswith('notes')]\"",
+    "find . -name 'notes*' -exec sh -c 'rm \"$0\"' {} \\;",
+    "find . -name 'notes*' -fprint /dev/null -delete",
+    "rsync -a --delete empty/ ./",
+])
+def test_collective_intent_alone_does_not_authorize_an_unresolved_command(tmp_path, monkeypatch, command):
+    root = _project(tmp_path, files=(*NOTES, "todo.md"))
+    (root / "empty").mkdir()
+    out = _run(monkeypatch, root, "Delete all the notes files.", [_rm(command)])
+    assert set(NOTES) <= set(out["left"]) and "couldn't be listed" in out["blocked"][0]
+
+
+def test_an_unresolved_command_the_user_gave_verbatim_may_run(tmp_path, monkeypatch):
+    root = _project(tmp_path, files=(*NOTES, "todo.md"))
+    out = _run(monkeypatch, root, "Please run `ls notes* | xargs rm` in the project.", [_rm("ls notes* | xargs rm")])
+    assert out["left"] == ["todo.md"] and not out["blocked"]
+
+
+def _git_project(tmp_path):
+    root = _project(tmp_path, files=(*NOTES, "todo.md"))
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.test",
+           "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.test"}
+    for argv in (["git", "init", "-q"], ["git", "add", "todo.md"], ["git", "commit", "-qm", "base"]):
+        subprocess.run(argv, cwd=root, check=True, env=env)
+    return root
+
+
+def test_git_clean_is_resolved_by_its_dry_run(tmp_path, monkeypatch):
+    root = _git_project(tmp_path)
+    out = _run(monkeypatch, root, "Delete all the untracked files.", [_rm("git clean -f")])
+    assert out["left"] == [".git", "todo.md"] and not out["blocked"]
+
+
+def test_git_clean_is_still_checked_against_the_description(tmp_path, monkeypatch):
+    root = _git_project(tmp_path)
+    out = _run(monkeypatch, root, "Delete all the log files.", [_rm("git clean -f")])
+    assert set(NOTES) <= set(out["left"]) and "doesn't match" in out["blocked"][0]
+
+
+@pytest.mark.parametrize("command", [
+    "grep -n \"rm -rf\" notes-draft.md",
+    "echo 'never rm notes-final.md' > reminder.txt",
+    "git log --oneline -- notes-draft.md",
+])
+def test_text_that_only_mentions_a_removal_is_not_one(tmp_path, monkeypatch, command):
+    root = _project(tmp_path)
+    out = _run(monkeypatch, root, "Summarise the notes.", [_rm(command)])
+    assert set(NOTES) <= set(out["left"]) and not out["blocked"] and out["ran"] == [command]
+
+
+@pytest.mark.parametrize("command", ["bash -c 'rm notes-draft.md'", "eval 'rm notes-final.md'"])
+def test_a_removal_run_through_a_shell_string_is_not_listable(tmp_path, monkeypatch, command):
+    root = _project(tmp_path)
+    out = _run(monkeypatch, root, "Delete all the notes files.", [_rm(command)])
+    assert set(NOTES) <= set(out["left"]) and "couldn't be listed" in out["blocked"][0]
+
+
+def test_resolving_git_clean_never_runs_a_repository_configured_program(tmp_path, monkeypatch):
+    root = _git_project(tmp_path)
+    marker = tmp_path / "fsmonitor-ran"
+    hook = tmp_path / "monitor.sh"
+    hook.write_text(f"#!/bin/sh\ntouch {marker}\n")
+    hook.chmod(0o755)
+    subprocess.run(["git", "config", "core.fsmonitor", str(hook)], cwd=root, check=True)
+    call = rs.removal("terminal_run", {"command": "git clean -f"}, root)
+    assert call is not None and call.resolved_by == "git clean -n" and {p.name for p in call.targets} == set(NOTES)
+    assert not marker.exists()

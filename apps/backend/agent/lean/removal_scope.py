@@ -11,8 +11,9 @@ What authorizes removing a file that existed when the request began:
   up to the next clause or the next unrelated verb. A target is *named* when its name (or stem) is in a removal
   clause. A file mentioned in a keep, except or negated clause is *protected* and is never removed. Earlier turns
   and the assistant's own suggestions never authorize anything.
-- **The user's selection on a question card in this request** (``ask_user``). The recorded answer names the targets.
-  "Both"/"All" selects every file the card listed.
+- **The user's selection on a question card in this request** (``ask_user``), when the question is about removing
+  something. The recorded answer names the targets by their full names. "Both"/"All" selects exactly the files that
+  question presented, and nothing else. An answer to any other question selects nothing.
 - **Collective intent.** A removal clause whose object has a quantifier, a number, a plural kind of file or a
   wildcard allows several unnamed targets. Each must still match the object's describing words ("all the .pyc
   files" covers a.pyc and b.pyc, not notes.md).
@@ -24,10 +25,18 @@ Files the agent created during this request are its own. Ownership comes from a 
 that existed when the request began, not from modification times. A user's file the agent edited, rewrote or moved
 is still the user's. A directory counts as the agent's only if everything inside it is.
 
-Not checked from the arguments, so allowed only under collective intent: removals that don't list their targets
-(`find -delete`, `git clean`, `xargs rm`, `rsync --delete`, inline-script deletions). The project folder and
-its parents are never removed this way. Overwrites and scripts run from files are outside this check. Approvals,
-the sandbox and the floor of always-asked commands still apply to everything allowed here.
+Removals that don't list their targets are resolved where a read-only listing exists: a single `find` with
+selecting tests only (`-delete`, or `-exec rm|unlink … {}`) is listed with `find … -print0`, and `git clean` with
+`git clean -n`. The listed targets then go through every check above. Anything else (`xargs rm`, `rsync --delete`,
+inline-script deletions, `sh -c '…rm…'`, `eval`, `cd … && rm`, variables, `find` with other actions) runs only if
+the user's own words, or their card answer, contain that exact command. The project folder and its parents are
+never removed this way.
+
+Limits: overwriting or truncating a file, and scripts run from files (`python cleanup.py`), are outside this check.
+A resolved listing reflects the moment of the check; the listing runs read-only `find`, or `git` with the
+repository's program-running settings overridden, on the host with a 5-second limit. Clause parsing is heuristic and English-only; when it misreads,
+the agent asks. Approvals, the sandbox and the floor of always-asked commands still apply to everything allowed
+here.
 """
 from __future__ import annotations
 
@@ -35,6 +44,7 @@ import glob
 import os
 import re
 import shlex
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -42,11 +52,12 @@ from typing import Any, Iterable
 REMOVAL_TOOLS = frozenset({"file_delete"})
 COMMAND_TOOLS = frozenset({"terminal", "terminal_run"})
 
-_DIRECT = re.compile(r"(?:^|[\s;&|(])(?:sudo\s+)?(?:rm|rmdir|unlink|shred)(?=\s)", re.I)
+# A removal command anywhere in the text, including inside a quoted script (`sh -c 'rm "$0"'`).
+_DIRECT = re.compile(r"(?<![\w./-])(?:rm|rmdir|unlink|shred)(?=[\s'\"]|$)", re.I)
 _INDIRECT = re.compile(
     r"(?ix)"
     r"\bfind\b[^;&|]*\s-(?:delete\b|exec(?:dir)?\s+(?:rm|unlink|shred)\b)"
-    r"|\bgit\s+(?:clean|rm)\b"
+    r"|\bgit\s+clean\b"
     r"|\bxargs\s+(?:-\S+\s+)*(?:rm|unlink|shred)\b"
     r"|\brsync\b[^;&|]*--delete"
     r"|\bos\.(?:remove|unlink|rmdir|removedirs)\s*\(|\bshutil\.rmtree\s*\(|\.unlink\s*\(|\.rmdir\s*\("
@@ -91,10 +102,10 @@ class Intent:
     removal: bool = False  # a non-negated removal clause exists
     collective: bool = False  # a removal clause's object covers several things
     objects: list[str] = field(default_factory=list)  # the removal clauses' objects
-    named_text: str = ""  # text that may name targets: removal clauses and the user's card selections
+    named_text: str = ""  # text that may name targets: this request's removal clauses
     protected_text: str = ""  # keep / except / negated clauses
-    selected_all: bool = False  # the user picked "both"/"all" on a card
-    exact_only: bool = False  # a typed selection: only exact file names count
+    selected_text: str = ""  # the user's selections: they authorize exact file names (and exact commands) only
+    request_text: str = ""  # the request as the user wrote it
 
 
 def intent(request: str, selections: Iterable[tuple[str, list[str], str]] = (), previous_request: str = "") -> Intent:
@@ -104,11 +115,10 @@ def intent(request: str, selections: Iterable[tuple[str, list[str], str]] = (), 
     it names targets by their exact names and nothing else ("notes-draft.md" yes; "yes" or "both" no). The
     assistant's messages never count.
     """
-    result = Intent()
+    result = Intent(request_text=request or "")
     if previous_request and not _REMOVE_VERB.search(request or "") and intent(previous_request).removal:
         result.removal = True
-        result.named_text = request or ""
-        result.exact_only = True
+        result.selected_text = request or ""
     current = None  # the kind of the previous clause, inherited by a verbless continuation ("…, and the logs")
     for raw in _SEGMENT_SPLIT.split(request or ""):
         segment = raw.strip()
@@ -131,14 +141,16 @@ def intent(request: str, selections: Iterable[tuple[str, list[str], str]] = (), 
             if _QUANTIFIER.search(obj) or _PLURAL_KIND.search(obj):
                 result.collective = True
     for question, options, answer in selections:
-        if not answer:
+        # Only an answer to a question about removing something selects what to remove. "Both"/"All" selects
+        # exactly the files that question presented, by their full names, and nothing else.
+        if not answer or not _REMOVE_VERB.search(question):
             continue
         result.removal = True
         if _SELECT_ALL.match(answer):
-            result.selected_all = True
-            result.named_text += "\n" + "\n".join([question, *options])
+            presented = [o for o in options if not _SELECT_ALL.match(o)]
+            result.selected_text += "\n" + "\n".join([question, *presented])
         else:
-            result.named_text += "\n" + answer
+            result.selected_text += "\n" + answer
     return result
 
 
@@ -169,6 +181,12 @@ def mentioned(path: Path, text: str) -> bool:
         return True
     stem = path.stem.lower()
     return len(stem) >= 3 and re.search(rf"(?<![\w.-]){re.escape(stem)}(?![\w.-])", lowered) is not None
+
+
+def _contains_command(text: str, command: str) -> bool:
+    """The text contains this exact command (whitespace aside)."""
+    squash = lambda s: " ".join((s or "").split()).strip("`'\" ")  # noqa: E731
+    return bool(command.strip()) and squash(command) in squash(text)
 
 
 def exact_named(path: Path, text: str) -> bool:
@@ -247,9 +265,12 @@ class Provenance:
 
 @dataclass
 class Removal:
-    targets: list[Path] = field(default_factory=list)  # existing paths the call names
-    indirect: bool = False  # removes things its arguments don't list
+    targets: list[Path] = field(default_factory=list)  # existing paths the call would remove
+    indirect: bool = False  # removes things its arguments don't list, and they couldn't be resolved
     project: bool = False  # names the project folder or one of its parents
+    resolved_by: str = ""  # how an indirect removal's targets were listed ("find", "git clean -n")
+    command: str = ""
+    attributes: frozenset[str] = frozenset()  # what every resolved target is by construction ("untracked")
 
 
 def removal(name: str, args: dict[str, Any], root: Path) -> Removal | None:
@@ -265,7 +286,14 @@ def removal(name: str, args: dict[str, Any], root: Path) -> Removal | None:
         return None
     cwd = Path(str(args.get("cwd") or root)).expanduser()
     cwd = cwd if cwd.is_absolute() else root / cwd
-    found = Removal(indirect=indirect)
+    found = Removal(indirect=indirect, command=command)
+    if indirect:
+        # Resolve what it would remove where that can be done by listing alone; otherwise it stays unresolved.
+        listed = _list_indirect(command, root, cwd)
+        if listed is not None:
+            listed.command = command
+            return listed
+        return found
     if direct:
         try:
             tokens = shlex.split(command, comments=True)
@@ -287,10 +315,135 @@ def removal(name: str, args: dict[str, Any], root: Path) -> Removal | None:
                 take = False
         resolved = _resolve(words, root, cwd)
         found.targets, found.project = resolved.targets, resolved.project
+        if not any(os.path.basename(tok.rstrip(";&|")) in {"rm", "rmdir", "unlink", "shred"} for tok in tokens):
+            if not _INTERPRETER.search(command):
+                return None  # only text mentioning a removal (`grep "rm -rf" notes.md`): nothing is removed
+            # The removal is inside a script a shell will run (`sh -c 'rm …'`, `eval`): its operands aren't listable.
+            found.indirect = True
         # Operands it can't name (a variable, a substitution), or a changed folder (`cd x && rm y`), remove
         # things the arguments don't identify here.
         if any(("$" in w or "`" in w) for w in words) or re.search(r"(?:^|[\s;&|(])(?:cd|pushd)\s", command):
             found.indirect = True
+    return found
+
+
+# Something that runs a quoted string as commands.
+_INTERPRETER = re.compile(r"(?<![\w./-])(?:sh|bash|zsh|dash|ksh|fish|eval|xargs|su|doas|sudo|nohup|watch|timeout|env)"
+                          r"(?![\w-])")
+
+# `find` tests that only select (no actions, no command execution), with how many values each takes.
+_FIND_TESTS = {"-name": 1, "-iname": 1, "-path": 1, "-ipath": 1, "-wholename": 1, "-regex": 1, "-iregex": 1,
+               "-type": 1, "-maxdepth": 1, "-mindepth": 1, "-size": 1, "-mtime": 1, "-mmin": 1, "-atime": 1,
+               "-amin": 1, "-ctime": 1, "-cmin": 1, "-newer": 1, "-empty": 0, "-not": 0, "!": 0, "-a": 0,
+               "-and": 0, "-o": 0, "-or": 0, "(": 0, ")": 0, "-depth": 0, "-xdev": 0, "-mount": 0}
+_LIST_TIMEOUT = 5
+
+
+def _list_indirect(command: str, root: Path, cwd: Path) -> Removal | None:
+    """The targets of a single `find … -delete` / `find … -exec rm {} +|;` or `git clean` command, listed by
+    running its read-only equivalent (`find … -print0`, `git clean -n`). None when that can't be done safely."""
+    # One command only: no other commands, pipes, redirections or substitutions, apart from the terminator
+    # of `find -exec … {} \;` or `{} +` at the very end.
+    body = re.sub(r"""\s(?:\\;|';'|";"|\+)\s*$""", "", command)
+    if re.search(r"[;&|<>`\n]|\$\(", body):
+        return None
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    try:
+        cwd.resolve().relative_to(root)
+    except ValueError:
+        return None
+    if tokens[:1] == ["find"]:
+        return _list_find(tokens, root, cwd)
+    if tokens[:2] == ["git", "clean"]:
+        return _list_git_clean(tokens, root, cwd)
+    return None
+
+
+def _list_find(tokens: list[str], root: Path, cwd: Path) -> Removal | None:
+    paths, rest = [], tokens[1:]
+    while rest and not rest[0].startswith("-") and rest[0] not in {"!", "(", ")"}:
+        paths.append(rest.pop(0))
+    tests: list[str] = []
+    action = False
+    i = 0
+    while i < len(rest):
+        token = rest[i]
+        if token == "-delete":
+            action, i = True, i + 1
+            continue
+        if token in {"-exec", "-execdir"}:
+            end = next((j for j in range(i + 1, len(rest)) if rest[j] in {";", "+"}), None)
+            body = rest[i + 1:end] if end is not None else []
+            if not body or os.path.basename(body[0]) not in {"rm", "unlink"} or body[-1:] != ["{}"] \
+                    or any(not b.startswith("-") for b in body[1:-1]):
+                return None
+            action, i = True, end + 1
+            continue
+        if token not in _FIND_TESTS:
+            return None
+        count = _FIND_TESTS[token]
+        tests.extend(rest[i:i + 1 + count])
+        i += 1 + count
+    if not action:
+        return None
+    for path in paths or ["."]:
+        target = Path(path) if os.path.isabs(path) else cwd / path
+        try:
+            target.resolve().relative_to(root)
+        except ValueError:
+            return None
+    try:
+        listed = subprocess.run(["find", *(paths or ["."]), *tests, "-print0"], cwd=cwd, capture_output=True,
+                                timeout=_LIST_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if listed.returncode:
+        return None
+    names = [n for n in listed.stdout.decode(errors="surrogateescape").split("\0") if n]
+    found = _resolve(names, root, cwd)
+    found.resolved_by = "find"
+    return found
+
+
+def _list_git_clean(tokens: list[str], root: Path, cwd: Path) -> Removal | None:
+    flags, paths, after = [], [], False
+    for token in tokens[2:]:
+        if token == "--":
+            after = True
+        elif not after and token.startswith("-"):
+            if token in {"-i", "--interactive", "-e"} or token.startswith("--exclude"):
+                return None
+            letters = token[1:] if not token.startswith("--") else ""
+            if token in {"-f", "--force", "-ff", "-q", "--quiet"} or (letters and set(letters) <= {"f", "q"}):
+                if "d" in letters or "x" in letters or "X" in letters:
+                    return None
+                continue
+            if letters and set(letters) <= {"f", "d", "x", "X", "q"}:
+                flags.extend(f"-{c}" for c in letters if c in "dxX")
+            elif token in {"-d", "-x", "-X"}:
+                flags.append(token)
+            else:
+                return None
+        else:
+            paths.append(token)
+    try:
+        # Runs on the host, so nothing in the repository's own configuration may run a program: command-line
+        # settings override `core.fsmonitor` and hooks, and global/system configuration is ignored.
+        listed = subprocess.run(["git", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null",
+                                 "-c", "core.untrackedCache=false", "clean", "-n", *flags, "--", *paths],
+                                cwd=cwd, capture_output=True, text=True, timeout=_LIST_TIMEOUT,
+                                env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+                                     "GIT_OPTIONAL_LOCKS": "0", "GIT_TERMINAL_PROMPT": "0"})
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if listed.returncode:
+        return None
+    names = [line[len("Would remove "):] for line in listed.stdout.splitlines() if line.startswith("Would remove ")]
+    found = _resolve(names, root, cwd)
+    found.resolved_by, found.attributes = "git clean -n", frozenset({"untracked"})
     return found
 
 
@@ -350,14 +503,15 @@ def problem(call: Removal, request: Intent, provenance: Provenance, already: set
     if kept:
         return (f"Not run: the user asked to keep {show(kept)}. Don't remove it in any other way."), set()
     if call.indirect:
-        if request.collective or request.selected_all:
+        # Targets that couldn't be listed: only the exact command, in the user's words or chosen on a card.
+        if _contains_command(request.request_text, call.command) or _contains_command(request.selected_text,
+                                                                                      call.command):
             return "", set()
-        return ("Not run: this command removes files its arguments don't list, so it can't be checked against "
-                "what the user asked for. Remove the specific files they asked about with `rm <file>`, or ask "
-                "them to confirm the files." + ask), set()
-    unnamed = [t for t in users if not (request.selected_all or (exact_named(t, request.named_text)
-                                                                 if request.exact_only else
-                                                                 mentioned(t, request.named_text)))]
+        return ("Not run: this command removes files its arguments don't list, and they couldn't be listed "
+                "safely, so it can't be checked against what the user asked for. Remove the specific files with "
+                "`rm <file>`, or show the user this exact command and run it only if they approve it in their "
+                "own words." + ask), set()
+    unnamed = [t for t in users if not (mentioned(t, request.named_text) or exact_named(t, request.selected_text))]
     if not unnamed:
         return "", set()
     if not request.removal:
@@ -365,7 +519,8 @@ def problem(call: Removal, request: Intent, provenance: Provenance, already: set
                 "didn't ask to remove anything." + ask), set()
     words = set().union(*(describing_words(o) for o in request.objects)) if request.objects else set()
     if request.collective:
-        off = [t for t in unnamed if words and not (_tokens(t) & words or t.suffix.lstrip(".").lower() in words)]
+        off = [t for t in unnamed if words and not (_tokens(t) & words or t.suffix.lstrip(".").lower() in words
+                                                    or words & call.attributes)]
         if off:
             return (f"Not run: {show(off)} doesn't match what the user asked to remove." + ask), set()
         return "", set(unnamed)
