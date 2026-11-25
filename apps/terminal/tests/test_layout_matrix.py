@@ -281,17 +281,18 @@ if __name__ == "__main__":
 
 @pytest.mark.parametrize("state", ["idle", "slash-menu", "running", "question"])
 @pytest.mark.parametrize("width,height", [(24, 8), (40, 16), (80, 24), (120, 40)])
-def test_composer_stays_at_bottom_with_space_from_cursor_report(state, width, height):
+def test_region_with_free_rows_below_takes_only_what_it_needs(state, width, height):
+    """A new conversation starts at the top and grows downward: free rows stay under the composer."""
     with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
         tui, out = make_tui()
         out.size = Size(rows=height, columns=width)
         tui.app.renderer.report_absolute_cursor_row(2)
-        available = tui.app.renderer._min_available_height
-        assert available == budget(height)
+        assert tui._fit.below == height - 1
+        assert tui.app.renderer._min_available_height == 1   # known, but not pinned to the bottom
         with set_app(tui.app):
             STATES[state](tui)
-        rows, _ = render_live(tui, out, width, height)
-        assert len(rows) == available
+        rows, want = render_live(tui, out, width, height)
+        assert len(rows) == min(want, height)
         if tui.dialog is None or height >= 12:
             assert any(tui.model[:4] in row for row in rows[-3:])
         if tui.dialog is None:

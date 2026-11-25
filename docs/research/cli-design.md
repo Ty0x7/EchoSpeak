@@ -736,3 +736,34 @@ The second ← opens `tui/sessionpage.py`, a full-screen page on the alternate s
 picker, with a details pane on the right. Details: [tui-visual-polish.md](tui-visual-polish.md) §9.
 
 The context-window research and the prompt-prefix fix are in [context-strategy.md](context-strategy.md).
+
+## 12. Answers grow downward; the slash menu closes without a gap (24 November 2026)
+
+The owner asked for new conversations to start at the top of the conversation area and grow downward, and
+reported two defects. Both were reproduced on main `594d50f` with `apps/terminal/tests/layoutlab.py`.
+
+- **Two movements after `/clear`.** §7's bottom-pinned region kept every row the cursor report offered, so after
+  `/clear` the composer sat on the last row and the streaming answer appeared just above it, then jumped to the
+  top when committed.
+- **A gap under the composer after Esc.** With a full screen, the slash menu grew the region and scrolled the
+  terminal. prompt_toolkit's `erase()` resets the rows it knows are below the region, so the region was redrawn
+  8 rows higher with blank rows beneath, after every open and close.
+
+`layout.LiveRegionFit` now tracks the rows from the region's top to the bottom row: the cursor report sets them,
+and a render that scrolls raises them. A region with free rows under it is as tall as its content, so an answer
+streams under the question and stays put. Once the region reaches the bottom row, the composer stays there.
+
+The slash menu and the shortcuts are passing lists. Opened at the bottom, they borrow the rows above the region
+and draw over the last committed lines instead of scrolling them away. `layout.CommittedRows` records what the
+output pump printed, one string per screen row, and writes those rows back when the list closes or before the
+next output. A wrapped line, a cursor sequence or a resize makes the record unusable, and the region then
+grows and scrolls as before. Dialogs and the session browser never borrow, so the conversation above an
+approval stays visible.
+
+Checks: `layoutlab.py` (slash, full-screen slash, stream, `/clear`, five open/Esc cycles each) failed before the
+change and passes after it. The full `uilab.py` run (44 screens) shows the same content as baseline apart from
+timestamps.
+
+Selection in Workenv is tmux's: Echo leaves the mouse to tmux, so a drag copies through OSC 52 like Claude and
+Codex. The Workenv launcher (`~/.local/bin/ai-workspace`, not in this repository) adds a "Copied to clipboard"
+confirmation and turns off tmux's right-click pane menu, for the Echo window only.
