@@ -29,7 +29,8 @@ from agent.vector_store import Document, VectorStore, split_text
 try:
     from rank_bm25 import BM25Okapi
 except Exception:
-    BM25Okapi = None
+    # rank_bm25 is in no requirements file; the built-in one keeps hybrid search working (agent/bm25.py).
+    from agent.bm25 import BM25Okapi
 
 
 def _pin_saved_index(folder) -> None:

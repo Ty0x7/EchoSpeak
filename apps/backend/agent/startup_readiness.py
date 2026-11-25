@@ -225,6 +225,28 @@ def _connections_mcp() -> dict[str, Any]:
     }
 
 
+_SEARCH_OFF = ("Search by meaning is off until a search model is chosen: Settings › Memory & documents › "
+               "Search by meaning (a one-time ~90 MB download). Memory still works with keyword recall.")
+
+
+def _search_model_installed() -> bool:
+    """A search model is available without downloading anything: a local model on disk or a configured provider."""
+    try:
+        from agent.embeddings import local_status
+        from config import config
+
+        # The same rule as Settings › Search by meaning (api/routes/memory.py _search_choice): "openai" is the
+        # default value even without a key, so it counts only with one.
+        provider = str(getattr(getattr(config.embedding, "provider", None), "value", config.embedding.provider) or "")
+        if provider == "openai" and str(getattr(config.openai, "api_key", "") or "").strip():
+            return True
+        if provider == "lmstudio" and str(getattr(config.embedding, "model", "") or "").strip():
+            return True
+        return bool(local_status().get("installed"))
+    except Exception:
+        return False
+
+
 def _embeddings() -> dict[str, Any]:
     import sys
 
@@ -234,10 +256,13 @@ def _embeddings() -> dict[str, Any]:
     with memory_module._MEMORY_INSTANCES_GUARD:
         instances = list(memory_module._MEMORY_INSTANCES.values())
     if not instances:
-        return {"ready": False, "degraded": True, "detail": "Embedding runtime has not initialized"}
+        # Memory starts with the first conversation; until then, say whether a search model is there to load.
+        installed = _search_model_installed()
+        return {"ready": installed, "degraded": not installed,
+                "detail": "Search model installed; it loads with the first conversation" if installed else _SEARCH_OFF}
     status = instances[0].capability_status()
     ready = bool(status.get("semantic_retrieval_ready"))
-    return {**status, "ready": ready, "degraded": not ready, "detail": "Embeddings ready" if ready else "Typed memory active without semantic retrieval"}
+    return {**status, "ready": ready, "degraded": not ready, "detail": "Embeddings ready" if ready else _SEARCH_OFF}
 
 
 def _document_retrieval() -> dict[str, Any]:
@@ -250,7 +275,11 @@ def _document_retrieval() -> dict[str, Any]:
     agent = get_existing_agent("default") or get_existing_agent(None)
     store = getattr(agent, "document_store", None) if agent is not None else None
     if store is None:
-        return {"enabled": True, "ready": False, "degraded": True, "detail": "Document retrieval requested but unavailable"}
+        # The store opens with the first agent that needs it; it needs a search model (embeddings) to exist.
+        if _search_model_installed():
+            return {"enabled": True, "ready": True, "degraded": False,
+                    "detail": "Document search ready; it opens on first use"}
+        return {"enabled": True, "ready": False, "degraded": True, "detail": "Document search needs a search model. " + _SEARCH_OFF}
     status = store.capability_status()
     return {
         **status,

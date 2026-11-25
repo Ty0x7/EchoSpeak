@@ -135,3 +135,24 @@ def test_connection_registry_corruption_fails_closed_and_preserves_authority(tmp
         ConnectionRegistry(path)
     assert '"schema_version": 99' in path.read_text(encoding="utf-8")
     assert list((path.parent / "corrupt-state").rglob("RECOVERY.txt"))
+
+
+def test_a_switched_off_connection_is_not_a_degraded_capability(tmp_path):
+    """Owner's install, 25 Nov 2026: two legacy connections migrated disabled (Google Calendar, Spotify, never set up)
+    made startup readiness report "connections_mcp degraded" although nothing was broken."""
+    from agent.connections import ConnectionHealth, ConnectionRegistry
+
+    registry = ConnectionRegistry(tmp_path / "connections" / "registry.json")
+    registry.register(_connection_record(connection_id="ok"))
+    off = _connection_record(connection_id="off")
+    off.enabled = False
+    off.health = ConnectionHealth.DISABLED
+    from agent.connections import ConnectionLifecycle
+    off.lifecycle = ConnectionLifecycle.DISABLED
+    registry.register(off)
+    broken = _connection_record(connection_id="broken")
+    broken.health = ConnectionHealth.UNHEALTHY
+    registry.register(broken)
+    status = registry.readiness_status()
+    assert status["unavailable_ids"] == ["broken"] and status["unavailable_count"] == 1
+    assert status["disabled_ids"] == ["off"] and status["available_count"] == 1 and status["configured_count"] == 3
