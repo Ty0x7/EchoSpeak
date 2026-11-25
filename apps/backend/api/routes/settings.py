@@ -1130,6 +1130,44 @@ async def switch_provider(request: SwitchProviderRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/settings/context-windows")
+async def context_windows_info():
+    """The windows the current local model can be given, the configured one, and what the server really serves.
+
+    ``served`` is 0 until the model is loaded; it is read from the server (agent/lean/window.py), never
+    copied from the setting, so a window that isn't served is shown as what it is.
+    """
+    from agent import context_windows
+    from agent.lean import window
+    from agent.lean.provider import resolve_endpoint
+
+    provider = str(getattr(config.local, "provider", "") or "")
+    configured = int(getattr(config.local, "context_length", 0) or 0)
+    if provider != "ollama":
+        return {"provider": provider, "model": str(config.local.model_name or ""), "configured": configured,
+                "served": 0, "choices": [], "default": context_windows.DEFAULT_TOKENS,
+                "note": "This provider sets its own window; EchoSpeak reads what it serves."}
+    def _read() -> dict:
+        endpoint = resolve_endpoint("ollama")
+        effective = context_windows.effective(endpoint.base_url, endpoint.model, configured) if configured else 0
+        served = window.served(endpoint)
+        loaded = context_windows.loaded(endpoint.base_url, endpoint.model)
+        if served and effective and served != effective:
+            state = "different"      # the server is serving another window than the one chosen (it says which)
+        elif served:
+            state = "served"
+        elif loaded:
+            state = "switching"      # another window of this model is loaded; the chosen one loads with the next message
+        else:
+            state = "not_loaded"
+        return {"provider": provider, "model": endpoint.model, "served_as": endpoint.served_name,
+                "configured": configured, "requested": effective, "served": served, "state": state,
+                "loaded": loaded, "trained": context_windows.trained_max(endpoint.base_url, endpoint.model),
+                "choices": context_windows.choices(endpoint.base_url, endpoint.model),
+                "default": context_windows.DEFAULT_TOKENS}
+    return await asyncio.to_thread(_read)
+
+
 @router.get("/provider/models")
 async def list_provider_models(provider: Optional[str] = Query(default=None)):
     p = None

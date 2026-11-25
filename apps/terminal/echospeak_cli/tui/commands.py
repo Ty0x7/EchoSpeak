@@ -16,6 +16,7 @@ class Command:
 
 COMMANDS: tuple[Command, ...] = (
     Command("/model", "choose the model (this chat and the default)", "[name]", needs="models"),
+    Command("/context", "choose the context window (16K, 32K, 64K…) and see what is served", "[16k|32k|64k|128k]"),
     Command("/agents", "list agents and talk to one", needs="agents"),
     Command("/agent", "talk to an agent in a new direct session (- for Echo)", "<name|->", needs="agents"),
     Command("/new", "start a new session with your next message", "[--agent NAME]"),

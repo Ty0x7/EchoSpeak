@@ -406,6 +406,36 @@ def _migrate_v10_defaults(payload: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+_CONTEXT_32K_MARKER = DATA_DIR / ".settings-migrated-context-32k"
+
+
+def _migrate_context_32k(payload: dict[str, Any]) -> dict[str, Any]:
+    """Once: move a local Ollama window saved at the old 16K default to the new 32K standard (campaign 25 Nov 2026).
+
+    16,384 was the terminal's saved default before 32K became standard (agent/context_windows.py), so a saved
+    16K is moved once. The marker keeps a 16K chosen afterwards: 16K stays a supported choice.
+    """
+    if _CONTEXT_32K_MARKER.exists():
+        return payload
+    local = payload.get("local") if isinstance(payload.get("local"), dict) else None
+    changed = False
+    if local and str(local.get("provider") or "ollama").strip().lower() == "ollama":
+        try:
+            if int(local.get("context_length") or 0) == 16384:
+                local["context_length"] = 32768
+                changed = True
+        except (TypeError, ValueError):
+            pass
+    try:
+        if changed:
+            _write_json_dict(SETTINGS_PATH, payload)
+        _CONTEXT_32K_MARKER.write_text("local context window 16384 -> 32768 (once)\n" if changed else "nothing to move\n",
+                                       encoding="utf-8")
+    except OSError:
+        pass
+    return payload
+
+
 # Settings retired in 10.0 with the classic settings screen: nothing reads them
 # any more (see docs/research/harness-review-2026-10-02.md, part C). Dropped from saved
 # settings so they don't linger; every setting still in use keeps its value.
@@ -440,7 +470,7 @@ def _drop_retired_settings(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def read_runtime_override_payload(include_secrets: bool = True, migrate_legacy: bool = True) -> dict[str, Any]:
-    public_payload = _drop_retired_settings(_migrate_app_allowlist(_migrate_v10_defaults(_read_json_dict(SETTINGS_PATH))))
+    public_payload = _drop_retired_settings(_migrate_app_allowlist(_migrate_context_32k(_migrate_v10_defaults(_read_json_dict(SETTINGS_PATH)))))
     refs = public_payload.get(_CREDENTIAL_REFS_KEY)
     refs = dict(refs) if isinstance(refs, dict) else {}
     secret_payload: dict[str, Any] = {}

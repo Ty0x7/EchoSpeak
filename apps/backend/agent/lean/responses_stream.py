@@ -51,7 +51,7 @@ def response_input(messages, endpoint):
 
 def responses_turn(client, messages, tools, on_reasoning, on_content, cancel, max_tokens):
     endpoint = client.endpoint
-    body = {"model": endpoint.model, "input": response_input(messages, endpoint),
+    body = {"model": getattr(endpoint, "wire_model", endpoint.model), "input": response_input(messages, endpoint),
             "stream": True, "store": False,
             "max_output_tokens": min(int(max_tokens or settings.max_output_tokens(endpoint)), settings.max_output_tokens(endpoint))}
     if client.reasoning_effort:
