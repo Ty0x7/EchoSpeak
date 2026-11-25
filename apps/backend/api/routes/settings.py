@@ -1149,9 +1149,20 @@ async def context_windows_info():
                 "note": "This provider sets its own window; EchoSpeak reads what it serves."}
     def _read() -> dict:
         endpoint = resolve_endpoint("ollama")
-        return {"provider": provider, "model": endpoint.model, "served_as": endpoint.wire_model,
-                "configured": configured, "served": window.served(endpoint),
-                "trained": context_windows.trained_max(endpoint.base_url, endpoint.model),
+        effective = context_windows.effective(endpoint.base_url, endpoint.model, configured) if configured else 0
+        served = window.served(endpoint)
+        loaded = context_windows.loaded(endpoint.base_url, endpoint.model)
+        if served and effective and served != effective:
+            state = "different"      # the server is serving another window than the one chosen (it says which)
+        elif served:
+            state = "served"
+        elif loaded:
+            state = "switching"      # another window of this model is loaded; the chosen one loads with the next message
+        else:
+            state = "not_loaded"
+        return {"provider": provider, "model": endpoint.model, "served_as": endpoint.served_name,
+                "configured": configured, "requested": effective, "served": served, "state": state,
+                "loaded": loaded, "trained": context_windows.trained_max(endpoint.base_url, endpoint.model),
                 "choices": context_windows.choices(endpoint.base_url, endpoint.model),
                 "default": context_windows.DEFAULT_TOKENS}
     return await asyncio.to_thread(_read)

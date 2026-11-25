@@ -100,6 +100,9 @@ def served_model(base_url: str, model: str, tokens: int) -> str:
     if not model or tokens <= 0 or is_variant(model):
         return ""
     base = _base(base_url)
+    top = trained_max(base_url, model)
+    if top and tokens > top:
+        tokens = top   # never ask the server for more than the model was trained on; the served window says what it got
     key = (base, model, int(tokens))
     with _lock:
         if key in _made:
@@ -117,6 +120,30 @@ def served_model(base_url: str, model: str, tokens: int) -> str:
             return ""
         _made[key] = name
         return name
+
+
+def effective(base_url: str, model: str, tokens: int) -> int:
+    """The window a request for ``tokens`` will really ask for: capped at the model's trained window."""
+    top = trained_max(base_url, model) if base_url and model else 0
+    return min(int(tokens), top) if top and tokens > 0 else int(tokens)
+
+
+def loaded(base_url: str, model: str) -> list[dict[str, Any]]:
+    """What the server has loaded for ``model`` right now: the model itself or any of its variants, with windows."""
+    try:
+        with urllib.request.urlopen(_base(base_url) + "/api/ps", timeout=2.0) as response:
+            rows = json.loads(response.read() or b"{}").get("models") or []
+    except Exception:  # noqa: BLE001
+        return []
+    stem = variant_name(model, 1024).rsplit(":", 1)[0]
+    out = []
+    for row in rows:
+        name = str(row.get("name") or row.get("model") or "")
+        if name in {model, f"{model}:latest"} or name.startswith(stem + ":"):
+            size, vram = int(row.get("size") or 0), int(row.get("size_vram") or 0)
+            out.append({"name": name, "context": int(row.get("context_length") or 0),
+                        "gpu_share": round(vram / size, 2) if size else None})
+    return out
 
 
 def forget() -> None:

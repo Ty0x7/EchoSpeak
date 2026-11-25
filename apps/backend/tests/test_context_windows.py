@@ -141,3 +141,66 @@ def test_a_server_that_cannot_make_variants_is_reported_honestly(monkeypatch):
 def test_other_providers_keep_their_own_window():
     assert Endpoint("http://x/v1", "k", "gpt-x", "openai", False).wire_model == "gpt-x"
     assert cw.served_model("http://127.0.0.1:9/v1", "echospeak/qwen3.5-9b:32k", 65536) == ""   # never a variant of a variant
+
+
+def test_a_restarted_backend_reads_the_variant_already_loaded(monkeypatch):
+    """After a restart nothing is made yet in this process; the served window must still be the variant's."""
+    server = FakeOllama()
+    try:
+        server.loaded = {"echospeak/qwen3.5-9b:32k": 32768}          # loaded by the backend before it restarted
+        monkeypatch.setattr(config.local, "base_url", server.url)
+        monkeypatch.setattr(config.local, "model_name", "qwen3.5:9b")
+        monkeypatch.setattr(config.local, "context_length", 32768)
+        endpoint = resolve_endpoint("ollama")
+        assert endpoint.wire == "" and endpoint.served_name == "echospeak/qwen3.5-9b:32k"
+        assert window.served(endpoint) == 32768 and server.created == []
+    finally:
+        server.close()
+
+
+def test_switching_windows_reports_the_old_one_until_the_new_one_loads(monkeypatch):
+    server = FakeOllama()
+    try:
+        server.loaded = {"echospeak/qwen3.5-9b:64k": 65536}
+        monkeypatch.setattr(config.local, "base_url", server.url)
+        monkeypatch.setattr(config.local, "model_name", "qwen3.5:9b")
+        monkeypatch.setattr(config.local, "context_length", 32768)
+        endpoint = resolve_endpoint("ollama")
+        assert window.served(endpoint) == 0                          # 32K isn't loaded: never reported as served
+        assert [r["context"] for r in cw.loaded(endpoint.base_url, endpoint.model)] == [65536]
+        ChatClient(endpoint).stream_turn([{"role": "user", "content": "hi"}])
+        window._served.clear()
+        assert window.served(endpoint) == 32768
+    finally:
+        server.close()
+
+
+def test_a_window_above_the_trained_one_is_capped(monkeypatch):
+    server = FakeOllama(trained=65536)
+    try:
+        monkeypatch.setattr(config.local, "base_url", server.url)
+        monkeypatch.setattr(config.local, "model_name", "small:7b")
+        monkeypatch.setattr(config.local, "context_length", 131072)
+        endpoint = resolve_endpoint("ollama")
+        assert endpoint.served_name == "echospeak/small-7b:64k"
+        ChatClient(endpoint).stream_turn([{"role": "user", "content": "hi"}])
+        assert server.created[0]["parameters"]["num_ctx"] == 65536 and endpoint.wire == "echospeak/small-7b:64k"
+    finally:
+        server.close()
+
+
+def test_the_old_16k_default_moves_to_32k_once(tmp_path, monkeypatch):
+    import config as cfg
+
+    settings = tmp_path / "settings.json"
+    monkeypatch.setattr(cfg, "SETTINGS_PATH", settings)
+    monkeypatch.setattr(cfg, "_CONTEXT_32K_MARKER", tmp_path / ".marker")
+    moved = cfg._migrate_context_32k({"local": {"provider": "ollama", "context_length": 16384}})
+    assert moved["local"]["context_length"] == 32768 and json.loads(settings.read_text())["local"]["context_length"] == 32768
+    # A 16K chosen afterwards stays: the migration runs once.
+    assert cfg._migrate_context_32k({"local": {"provider": "ollama", "context_length": 16384}})["local"]["context_length"] == 16384
+    # Other providers and other sizes are left alone.
+    (tmp_path / ".marker").unlink()
+    assert cfg._migrate_context_32k({"local": {"provider": "lmstudio", "context_length": 16384}})["local"]["context_length"] == 16384
+    (tmp_path / ".marker").unlink()
+    assert cfg._migrate_context_32k({"local": {"provider": "ollama", "context_length": 65536}})["local"]["context_length"] == 65536

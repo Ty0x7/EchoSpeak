@@ -86,6 +86,18 @@ class Endpoint:
     def wire_model(self) -> str:
         return self.wire or self.model
 
+    @property
+    def served_name(self) -> str:
+        """The name the server knows this model by at the chosen window: the variant once made, or the one it will be
+        (so a restarted backend reads the window of the variant already loaded), else the model itself."""
+        if self.wire:
+            return self.wire
+        if self.want_context and self.provider == "ollama" and self.local:
+            from agent import context_windows
+            return context_windows.variant_name(self.model, context_windows.effective(self.base_url, self.model,
+                                                                                      self.want_context))
+        return self.model
+
 
 def provider_affinity(endpoint: Endpoint, transport: str) -> dict:
     """Internal protocol state must never follow a different account or model."""

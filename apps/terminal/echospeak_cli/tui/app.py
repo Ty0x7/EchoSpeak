@@ -2596,8 +2596,17 @@ class EchoTUI:
             opts = [Option(r["label"], int(r["tokens"]),
                            hint=r["note"] + (" (current)" if r["tokens"] == configured else "")
                            + (" · default" if r.get("default") and r["tokens"] != configured else "")) for r in rows]
-            now = (f"Set to {k(configured)}" if configured else "Not set") + (
-                f"; the model is serving {k(served)} right now." if served else "; the model isn't loaded right now.")
+            state = str(info.get("state") or "")
+            loaded = ", ".join(f"{k(int(r.get('context') or 0))}" for r in info.get("loaded") or [] if r.get("context"))
+            now = (f"Set to {k(configured)}" if configured else "Not set") + {
+                "served": f"; the model is serving {k(served)}.",
+                "different": f"; but the model is serving {k(served)}.",
+                "switching": f"; {loaded or 'another size'} is loaded now, and {k(configured)} loads with your next message.",
+            }.get(state, "; the model isn't loaded right now.")
+            share = next((r.get("gpu_share") for r in info.get("loaded") or [] if r.get("gpu_share") is not None), None)
+            if share is not None and share < 0.95:
+                # Measured: qwen3.5:9b on an 8 GB GPU is 83% on the GPU at 16K, 79% at 32K, 70% at 64K, 57% at 128K.
+                now += f" {round(share * 100)}% of it is on the GPU; the rest runs on the CPU, which is slower."
             sel = next((i for i, r in enumerate(rows) if r["tokens"] == configured), 0)
             action = await self.ask(f"Context window for {info.get('model') or 'the model'}", opts,
                                     body=[("class:dim", now + " Larger windows keep more of a long task in view and use "

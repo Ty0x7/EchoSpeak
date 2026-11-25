@@ -615,14 +615,14 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
   // Once the user picks an app themselves, never switch it for them.
   const userPicked = useRef(false);
   // Ollama: the windows this model can have, and the one the server is really serving (GET /settings/context-windows).
-  const [windows, setWindows] = useState<{ served: number; choices: { tokens: number; label: string; note: string }[] } | null>(null);
+  const [windows, setWindows] = useState<{ served: number; state: string; choices: { tokens: number; label: string; note: string }[] } | null>(null);
 
   useEffect(() => {
     if (!useLocal || provider !== "ollama") { setWindows(null); return; }
     let cancelled = false;
     fetch(`${apiBase}/settings/context-windows`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled && d) setWindows({ served: Number(d.served) || 0, choices: Array.isArray(d.choices) ? d.choices : [] }); })
+      .then((d) => { if (!cancelled && d) setWindows({ served: Number(d.served) || 0, state: String(d.state || ""), choices: Array.isArray(d.choices) ? d.choices : [] }); })
       .catch(() => { if (!cancelled) setWindows(null); });
     return () => { cancelled = true; };
   }, [apiBase, useLocal, provider, local.model_name, local.context_length, reloadKey]);
@@ -785,7 +785,9 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
           <Row
             label="Context length"
             help={provider === "ollama"
-              ? `How much of the conversation and the work Echo keeps in view. 32K is the standard; 64K suits coding and long tasks and uses more memory.${windows?.served ? ` The model is serving ${Math.round(windows.served / 1024)}K right now.` : " The chosen size is used from the next message."}`
+              ? `How much of the conversation and the work Echo keeps in view. 32K is the standard; 64K suits coding and long tasks and uses more memory.${windows?.state === "served" ? ` The model is serving ${Math.round(windows.served / 1024)}K.`
+                : windows?.state === "different" ? ` The model is serving ${Math.round(windows.served / 1024)}K, not the size chosen.`
+                : " The chosen size loads with the next message."}`
               : "Match what you set in LM Studio. Agents trim old messages to stay inside it."}
           >
             <Select

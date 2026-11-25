@@ -60,3 +60,20 @@ def test_providers_with_their_own_window_say_so(monkeypatch):
 
 def test_the_standard_default_is_32k():
     assert control.DEFAULT_CONTEXT == 32768
+
+
+def test_the_picker_says_how_much_runs_on_the_cpu(monkeypatch):
+    with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
+        tui, _ = make_tui()
+        shown = {}
+
+        async def ask(title, opts, body=None, selected=0, **kw):
+            shown["body"] = " ".join(t for _s, t in body or [])
+            class A:
+                kind = "cancel"
+            return A()
+        tui.ask = ask
+        info = dict(INFO, state="served", served=32768, configured=32768,
+                    loaded=[{"name": "echospeak/qwen3.5-9b:32k", "context": 32768, "gpu_share": 0.79}])
+        _run(tui, [], monkeypatch, info=info)
+        assert "serving 32K" in shown["body"] and "79% of it is on the GPU" in shown["body"]
