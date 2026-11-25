@@ -505,20 +505,25 @@ class ConnectionRegistry:
         """Secret-free aggregate health for startup diagnostics."""
         with self._lock:
             records = list(self._envelope.connections.values())
+            # Switched off is the owner's choice, not a fault: it doesn't count as unavailable (a disabled legacy
+            # connection made startup readiness report "degraded" with nothing broken, 25 November 2026).
+            disabled = [record.id for record in records
+                        if not record.enabled or record.health == ConnectionHealth.DISABLED]
             unavailable = [
                 record.id for record in records
-                if not record.enabled or record.health in {
+                if record.id not in disabled and record.health in {
                     ConnectionHealth.UNHEALTHY,
                     ConnectionHealth.BLOCKED,
                     ConnectionHealth.MISSING_CONFIGURATION,
-                    ConnectionHealth.DISABLED,
                 }
             ]
             return {
                 "configured_count": len(records),
-                "available_count": len(records) - len(unavailable),
+                "available_count": len(records) - len(unavailable) - len(disabled),
                 "unavailable_count": len(unavailable),
                 "unavailable_ids": unavailable,
+                "disabled_count": len(disabled),
+                "disabled_ids": disabled,
                 "revision": self._envelope.revision,
                 "path": str(self.path),
             }
