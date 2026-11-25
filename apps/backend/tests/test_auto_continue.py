@@ -83,7 +83,8 @@ def test_a_turn_going_in_circles_still_stops_and_says_its_real_limit():
     turn, events = _turn(model, max_steps=4, auto=True, ok=lambda args: False)   # every call fails
     result = turn.run("Do the ten pieces of work")
     assert result.stop_reason == "max_steps" and not any(e["type"] == "auto_continue" for e in events)
-    assert "ran out of steps (4)" in result.text
+    assert result.text.startswith("I haven't finished this yet.") and "step" not in result.text.lower()
+    assert any(item["kind"] == "note" and "step limit (4)" in item["text"] for item in result.timeline)
 
 
 def test_continuing_has_a_ceiling():
@@ -92,7 +93,8 @@ def test_continuing_has_a_ceiling():
     turn.auto_continue_limit = 3                                                  # at most 3 × 4 steps
     result = turn.run("Do the ten pieces of work")
     assert result.stop_reason == "max_steps" and sum(1 for e in events if e["type"] == "auto_continue") == 2
-    assert "ran out of steps (12)" in result.text and len(model.calls) == 12
+    assert any(item["kind"] == "note" and "step limit (12)" in item["text"] for item in result.timeline)
+    assert len(model.calls) == 13    # 12 working steps, then one tool-free handoff call
 
 
 def test_without_auto_continue_the_limit_is_where_it_was():
@@ -120,3 +122,40 @@ def test_the_grace_answer_asks_with_thinking_off():
     turn.step_limit = lambda: 2
     result = turn.run("look it up")
     assert result.text == "The answer from what I found." and model.calls[2]["thinking"] is False
+
+
+# ── At the limit, the agent says where things stand in its own words (campaign 24 November 2026) ──
+def _stalled(handoff: ModelTurn) -> tuple[Model, LeanTurn, list[dict[str, Any]]]:
+    model = Model([_work(i) for i in range(4)] + [handoff])
+    turn, events = _turn(model, max_steps=4, auto=True, ok=lambda args: False)    # no progress: it stops at 4
+    return model, turn, events
+
+
+def test_the_agent_hands_over_in_plain_words_at_the_limit():
+    handoff = ModelTurn(content="The service kept refusing the work, so none of the ten pieces went through. "
+                                "Next I'd check whether it is up. Tell me to continue when you want me to retry.")
+    model, turn, _events = _stalled(handoff)
+    result = turn.run("Do the ten pieces of work")
+    assert result.stop_reason == "max_steps" and result.text.startswith("The service kept refusing")
+    assert model.calls[-1]["tools"] == [] and model.calls[-1]["thinking"] is False
+    assert "Don't mention steps" in model.calls[-1]["messages"][-1]["content"]
+
+
+def test_a_handoff_that_calls_unfinished_work_done_is_withdrawn():
+    model, turn, events = _stalled(ModelTurn(content="All done: the work is complete."))
+    result = turn.run("Do the ten pieces of work")
+    assert result.text.startswith("I haven't finished this yet.") and "complete" not in result.text
+    assert any(e["type"] == "text_replace" for e in events)
+
+
+def test_a_handoff_claiming_an_unmade_change_is_withdrawn():
+    model, turn, _events = _stalled(ModelTurn(content="I've saved the results to report.md; three pieces remain."))
+    result = turn.run("Do the ten pieces of work")
+    assert result.text.startswith("I haven't finished this yet.") and "report.md" not in result.text
+
+
+def test_helpers_without_auto_continue_get_no_handoff_call():
+    model = Model([_work(i) for i in range(6)])
+    turn, _events = _turn(model, max_steps=4, auto=False)
+    result = turn.run("Do the ten pieces of work")
+    assert len(model.calls) == 4 and result.text.startswith("I haven't finished this yet.")
