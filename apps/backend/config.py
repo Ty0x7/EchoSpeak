@@ -4,6 +4,7 @@ Loads environment variables and provides centralized configuration management.
 """
 
 import os
+import sys
 import json
 from pathlib import Path
 from dotenv import load_dotenv
@@ -1098,7 +1099,9 @@ class Config:
         self.allow_generation_actions = os.getenv("ALLOW_GENERATION_ACTIONS", "false").lower() == "true"
         self.voice_local_provider = os.getenv("VOICE_LOCAL_PROVIDER", "windows-sapi").strip() or "windows-sapi"
         self.voice_local_stt_provider = os.getenv("VOICE_LOCAL_STT_PROVIDER", "windows-sapi").strip() or "windows-sapi"
-        self.voice_local_tts_provider = os.getenv("VOICE_LOCAL_TTS_PROVIDER", self.voice_local_provider).strip() or "windows-sapi"
+        # Windows SAPI exists only on Windows; elsewhere read-aloud defaults to Kokoro on the CPU.
+        _tts_default = self.voice_local_provider if sys.platform == "win32" else "kokoro-local"
+        self.voice_local_tts_provider = os.getenv("VOICE_LOCAL_TTS_PROVIDER", _tts_default).strip() or _tts_default
         self.voice_cloud_provider = os.getenv("VOICE_CLOUD_PROVIDER", "").strip()
         # ElevenLabs read-aloud voice (agent/elevenlabs.py), chosen as the "Read aloud" provider.
         self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
@@ -1110,6 +1113,14 @@ class Config:
         self.voice_wake_word = os.getenv("VOICE_WAKE_WORD", "echo").strip().lower() or "echo"
         self.voice_whisper_cpp_model_path = os.getenv("VOICE_WHISPER_CPP_MODEL_PATH", "").strip()
         self.voice_piper_model_path = os.getenv("VOICE_PIPER_MODEL_PATH", "").strip()
+        # Kokoro (agent/kokoro_voice.py). Blank paths use ~/.local/share/echospeak/models/tts/kokoro.
+        self.voice_kokoro_model_path = os.getenv("VOICE_KOKORO_MODEL_PATH", "").strip()
+        self.voice_kokoro_voices_path = os.getenv("VOICE_KOKORO_VOICES_PATH", "").strip()
+        self.voice_kokoro_voice = os.getenv("VOICE_KOKORO_VOICE", "af_heart").strip() or "af_heart"
+        # Shared speech output (agent/speech_output.py): Echo and Echo Companion use one queue.
+        self.voice_speed = float(os.getenv("VOICE_SPEED", "1.0") or 1.0)
+        self.voice_volume = float(os.getenv("VOICE_VOLUME", "1.0") or 1.0)
+        self.voice_output_device = os.getenv("VOICE_OUTPUT_DEVICE", "").strip()
         self.voice_windows_voice = ""
         self.voice_drama_runtime_path = ""
         self.voice_drama_model_path = ""
@@ -1660,6 +1671,12 @@ class Config:
             "voice_faster_whisper_model_path",
             "voice_whisper_cpp_model_path",
             "voice_piper_model_path",
+            "voice_kokoro_model_path",
+            "voice_kokoro_voices_path",
+            "voice_kokoro_voice",
+            "voice_speed",
+            "voice_volume",
+            "voice_output_device",
             "voice_windows_voice",
             "voice_drama_runtime_path",
             "voice_drama_model_path",

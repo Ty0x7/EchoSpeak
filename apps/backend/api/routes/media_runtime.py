@@ -361,3 +361,109 @@ async def list_generation_jobs(
     jobs = get_generation_job_store().list(session_id=session_id, limit=limit)
     jobs = [job for job in jobs if not project_id or job.project_id == state.active_project_id]
     return {"items": [job.model_dump(mode="json") for job in jobs], "count": len(jobs)}
+
+
+# ---- Shared speech output: one queue for Echo, Echo Companion and previews ----------
+
+class SpeakRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=6000)
+    channel: str = Field(default="echo", pattern=r"^(echo|companion|preview)$")
+    source: str = Field(default="", max_length=80)
+    priority: int | None = Field(default=None, ge=0, le=100)
+    provider_id: str = Field(default="", max_length=100)
+    voice: str = Field(default="", max_length=100)
+    speed: float = Field(default=0.0, ge=0.0, le=1.6)
+    interrupt: bool = False
+
+
+class SpeakCancel(BaseModel):
+    request_id: str = Field(default="", max_length=100)
+    channel: str = Field(default="", pattern=r"^(|echo|companion|preview)$")
+
+
+class SpeakMute(BaseModel):
+    channel: str = Field(pattern=r"^(echo|companion|preview)$")
+    muted: bool
+
+
+@router.post("/voice/speak")
+def speak(request: SpeakRequest):
+    """Queue speech on this machine's speakers. Returns at once; progress arrives as events."""
+    from agent.speech_output import get_speech_output
+    return get_speech_output().speak(
+        request.text, channel=request.channel, priority=request.priority, source=request.source,
+        provider_id=request.provider_id, voice=request.voice, speed=request.speed, interrupt=request.interrupt,
+    )
+
+
+@router.post("/voice/speak/cancel")
+def speak_cancel(request: SpeakCancel):
+    from agent.speech_output import get_speech_output
+    return {"cancelled": get_speech_output().cancel(request_id=request.request_id, channel=request.channel)}
+
+
+@router.post("/voice/speak/mute")
+def speak_mute(request: SpeakMute):
+    from agent.speech_output import get_speech_output
+    get_speech_output().set_muted(request.channel, request.muted)
+    return get_speech_output().state()
+
+
+@router.get("/voice/speak/state")
+def speak_state():
+    from agent.speech_output import get_speech_output
+    return get_speech_output().state()
+
+
+@router.get("/voice/speak/events")
+async def speak_events(after: int = Query(default=0, ge=0)):
+    """Server-sent events for speech state, including per-chunk amplitude envelopes."""
+    import asyncio
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from agent.speech_output import get_speech_output
+
+    output = get_speech_output()
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=500)
+
+    def push(event):
+        loop.call_soon_threadsafe(lambda: queue.full() or queue.put_nowait(event))
+
+    async def stream():
+        unsubscribe = output.subscribe(push)
+        last = after
+        try:
+            for event in output.events_since(after):
+                last = event["seq"]
+                yield f"id: {event['seq']}\nevent: {event['type']}\ndata: {_json.dumps(event)}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if event["seq"] > last:
+                    last = event["seq"]
+                    yield f"id: {event['seq']}\nevent: {event['type']}\ndata: {_json.dumps(event)}\n\n"
+        finally:
+            unsubscribe()
+
+    return StreamingResponse(stream(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+
+
+@router.get("/voice/output-devices")
+def voice_output_devices():
+    from agent.speech_output import output_devices
+    return {"items": output_devices()}
+
+
+@router.get("/voice/kokoro/voices")
+def kokoro_voices():
+    from agent import kokoro_voice
+    try:
+        return {"items": kokoro_voice.voices(), "selected": kokoro_voice.DEFAULT_VOICE}
+    except kokoro_voice.KokoroError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

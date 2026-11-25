@@ -5,6 +5,7 @@ import type { SettingsMap } from "./useSettings";
 import { DramaSettings } from "./DramaSettings";
 
 export const SPEECH_PROVIDERS = [
+  { value: "kokoro-local", label: "Kokoro · local, CPU, natural" },
   { value: "windows-sapi", label: "Windows voices · local, lightweight" },
   { value: "piper-local", label: "Piper · local" },
   { value: "drama3-local", label: "Drama-3 · local, large download" },
@@ -15,7 +16,8 @@ type Save = (patch: Record<string, unknown>) => void | Promise<void>;
 
 /** One provider selection, shared by Settings and optional first-run setup. */
 export function VoiceProviders({ s, save, apiBase }: { s: SettingsMap; save: Save; apiBase: string }) {
-  const selected = String(s.voice_local_tts_provider || "windows-sapi");
+  const isWindows = typeof navigator !== "undefined" && /win/i.test(navigator.platform || "");
+  const selected = String(s.voice_local_tts_provider || (isWindows ? "windows-sapi" : "kokoro-local"));
   const [providers, setProviders] = useState<Provider[]>([]);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
@@ -53,10 +55,86 @@ export function VoiceProviders({ s, save, apiBase }: { s: SettingsMap; save: Sav
     </Group> : null}
     {selected === "piper-local" ? <Group title="Piper voice" description="Use your existing Piper executable on PATH and an installed ONNX voice with its matching .onnx.json file.">
       <Row label="Voice model" help="Full path to the .onnx voice on this PC." stack>
-        <TextField wide mono value={String(s.voice_piper_model_path || "")} onCommit={v => save({ voice_piper_model_path: v.trim() })} placeholder="C:\Voices\voice.onnx" />
+        <TextField wide mono value={String(s.voice_piper_model_path || "")} onCommit={v => save({ voice_piper_model_path: v.trim() })} placeholder={isWindows ? "C:\\Voices\\voice.onnx" : "~/.local/share/echospeak/models/tts/piper/en_US-lessac-medium.onnx"} />
       </Row>
     </Group> : null}
+    {selected === "kokoro-local" ? <KokoroSettings s={s} save={save} apiBase={apiBase} ready={ready} /> : null}
+    <SpeakerSettings s={s} save={save} apiBase={apiBase} ready={ready} />
     {selected === "elevenlabs" ? <ElevenLabsSettings s={s} save={save} apiBase={apiBase} /> : null}
     {selected === "drama3-local" ? <DramaSettings s={s} save={save} apiBase={apiBase} /> : null}
   </>;
+}
+
+function KokoroSettings({ s, save, apiBase, ready }: { s: SettingsMap; save: Save; apiBase: string; ready: boolean }) {
+  const [voices, setVoices] = useState<string[]>([]);
+  useEffect(() => {
+    if (!ready) return;
+    let active = true;
+    fetch(`${apiBase}/media-runtime/voice/kokoro/voices`).then(r => r.ok ? r.json() : { items: [] })
+      .then(d => { if (active) setVoices(d.items || []); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [apiBase, ready]);
+  const current = String(s.voice_kokoro_voice || "af_heart");
+  const options = (voices.length ? voices : [current]).map(v => ({ value: v, label: kokoroLabel(v) }));
+  return <Group title="Kokoro voice" description="Runs on the CPU, so speech never takes GPU memory from your chat model. Works offline once the model is on disk.">
+    <Row label="Voice" help="American (a…) and British (b…) English voices; f is female, m is male.">
+      <Select value={current} onChange={v => save({ voice_kokoro_voice: v })} options={options} disabled={!ready} />
+    </Row>
+    {!ready ? <Row label="Set up" help="Run scripts/setup_local_tts.py kokoro in the backend folder. It installs kokoro-onnx and downloads the 164 MB model once." stack><span /></Row> : null}
+  </Group>;
+}
+
+function kokoroLabel(id: string) {
+  const accent = id.startsWith("b") ? "British" : id.startsWith("a") ? "American" : "Other";
+  const kind = id[1] === "f" ? "female" : id[1] === "m" ? "male" : "";
+  const name = id.split("_").slice(1).join(" ");
+  return `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${accent}${kind ? ` ${kind}` : ""}`;
+}
+
+type Device = { name: string; description: string; default: boolean; muted: boolean };
+
+/** Shared by Echo and Echo Companion: speed, volume, output device and a real speaker test. */
+function SpeakerSettings({ s, save, apiBase, ready }: { s: SettingsMap; save: Save; apiBase: string; ready: boolean }) {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [test, setTest] = useState("");
+  useEffect(() => {
+    let active = true;
+    fetch(`${apiBase}/media-runtime/voice/output-devices`).then(r => r.ok ? r.json() : { items: [] })
+      .then(d => { if (active) setDevices(d.items || []); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [apiBase]);
+  const speed = Number(s.voice_speed || 1);
+  const volume = Number(s.voice_volume ?? 1);
+  const speakTest = async () => {
+    setTest("Speaking…");
+    try {
+      const res = await fetch(`${apiBase}/media-runtime/voice/speak`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "This is Echo, speaking through your speakers.", channel: "preview", interrupt: true }),
+      });
+      setTest(res.ok ? "Sent to your speakers. If you heard nothing, check the output and volume." : "The voice isn't ready.");
+    } catch { setTest("Couldn't reach EchoSpeak."); }
+  };
+  const stop = () => void fetch(`${apiBase}/media-runtime/voice/speak/cancel`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then(() => setTest(""));
+  const deviceOptions = [{ value: "", label: "System default" }, ...devices.map(d => ({ value: d.name, label: `${d.description}${d.muted ? " (muted)" : ""}` }))];
+  return <Group title="Speakers" description="Echo and Echo Companion share one voice queue, so they never talk over each other.">
+    <Row label="Speaking speed" help={`${speed.toFixed(2)}×`}>
+      <input type="range" min={0.7} max={1.4} step={0.05} value={speed} aria-label="Speaking speed"
+        onChange={e => save({ voice_speed: Number(e.target.value) })} />
+    </Row>
+    <Row label="Volume" help={`${Math.round(volume * 100)}%`}>
+      <input type="range" min={0} max={1.5} step={0.05} value={volume} aria-label="Volume"
+        onChange={e => save({ voice_volume: Number(e.target.value) })} />
+    </Row>
+    <Row label="Output" help="Where speech plays on this computer.">
+      <Select value={String(s.voice_output_device || "")} onChange={v => save({ voice_output_device: v })} options={deviceOptions} />
+    </Row>
+    <Row label="Test speakers" help={test || "Plays a short sentence on this computer through the shared queue."}>
+      <span style={{ display: "flex", gap: 6 }}>
+        <button className="es-btn es-btn-sm" disabled={!ready} onClick={() => void speakTest()}>Speak</button>
+        <button className="es-btn es-btn-sm" onClick={stop}>Stop</button>
+      </span>
+    </Row>
+  </Group>;
 }

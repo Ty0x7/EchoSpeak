@@ -206,7 +206,7 @@ def voice_provider_statuses() -> list[VoiceProviderStatus]:
     sapi_stt = sapi_tts and _windows_sapi_recognizer_installed()
     faster_whisper = importlib.util.find_spec("faster_whisper") is not None
     whisper_cpp = bool(shutil.which("whisper-cli") or shutil.which("whisper-cpp"))
-    piper = bool(shutil.which("piper"))
+    piper = bool(_piper_executable())
     faster_whisper_model = _existing_path(getattr(config, "voice_faster_whisper_model_path", ""))
     whisper_cpp_model = _existing_file(getattr(config, "voice_whisper_cpp_model_path", ""))
     piper_model = _existing_file(getattr(config, "voice_piper_model_path", ""))
@@ -284,6 +284,7 @@ def voice_provider_statuses() -> list[VoiceProviderStatus]:
                 else "Piper is not installed."
             ),
         ),
+        _kokoro_status(),
         VoiceProviderStatus(
             id="personaplex",
             locality="local",
@@ -323,6 +324,33 @@ def voice_provider_statuses() -> list[VoiceProviderStatus]:
             detail="Credentials are present, but cloud audio remains disabled until explicit upload/cost approval is implemented." if openai_key else "OPENAI_API_KEY is not configured.",
         ),
     ]
+
+
+def _piper_executable() -> str:
+    """Piper on PATH, or installed beside this backend (pip install piper-tts)."""
+
+    found = shutil.which("piper")
+    if found:
+        return found
+    beside = Path(sys.executable).parent / ("piper.exe" if sys.platform == "win32" else "piper")
+    return str(beside) if beside.is_file() and os.access(beside, os.X_OK) else ""
+
+
+def _kokoro_status() -> VoiceProviderStatus:
+    from agent import kokoro_voice
+
+    detected, ready, detail = kokoro_voice.readiness()
+    return VoiceProviderStatus(
+        id="kokoro-local",
+        locality="local",
+        operations=["text_to_speech"],
+        operation_readiness={"text_to_speech": ready},
+        detected=detected,
+        configured=ready,
+        execution_ready=ready,
+        supports_cancel=True,
+        detail=detail,
+    )
 
 
 def _drama_status() -> VoiceProviderStatus:
@@ -406,13 +434,19 @@ def _existing_path(value: Any) -> Optional[Path]:
     return path if path.is_file() or path.is_dir() else None
 
 
+def platform_default_tts_provider() -> str:
+    """Windows ships SAPI voices; elsewhere the local default is Kokoro on the CPU."""
+
+    return "windows-sapi" if sys.platform == "win32" else "kokoro-local"
+
+
 def default_voice_provider(operation: VoiceOperation) -> str:
     """Resolve one explicitly configured provider; credentials never select it."""
 
     if operation == "speech_to_text":
         return str(getattr(config, "voice_local_stt_provider", "windows-sapi") or "windows-sapi")
     if operation == "text_to_speech":
-        return str(getattr(config, "voice_local_tts_provider", "windows-sapi") or "windows-sapi")
+        return str(getattr(config, "voice_local_tts_provider", "") or platform_default_tts_provider())
     return ""
 
 
@@ -598,12 +632,13 @@ def synthesize_voice_audio(
         options.setdefault("voice_id", getattr(config, "voice_windows_voice", ""))
         _sapi_synthesize(value, output, options)
     elif selected == "piper-local":
-        executable = shutil.which("piper")
+        executable = _piper_executable()
         model_path = _existing_file(getattr(config, "voice_piper_model_path", ""))
         if not executable or model_path is None:
             raise VoiceRuntimeError("Piper and an explicit local voice model are required")
         completed = subprocess.run(
-            [executable, "--model", str(model_path), "--output_file", str(output)],
+            [executable, "--model", str(model_path), "--output_file", str(output),
+             "--length-scale", f"{1.0 / min(1.6, max(0.6, float(options.get('speed') or getattr(config, 'voice_speed', 1.0) or 1.0))):.3f}"],
             input=value,
             capture_output=True,
             text=True,
@@ -616,6 +651,13 @@ def synthesize_voice_audio(
         )
         if completed.returncode != 0:
             raise VoiceRuntimeError("Piper could not synthesize this speech chunk")
+    elif selected == "kokoro-local":
+        from agent import kokoro_voice
+        try:
+            kokoro_voice.synthesize(value, output, voice=str(options.get("voice_id") or ""),
+                                    speed=float(options.get("speed") or getattr(config, "voice_speed", 1.0) or 1.0))
+        except kokoro_voice.KokoroError as exc:
+            raise VoiceRuntimeError(str(exc)) from exc
     elif selected == "drama3-local":
         from agent import drama_voice
         try:
@@ -746,7 +788,7 @@ def submit_voice_job(request: VoiceJob, *, store: Optional[VoiceJobStore] = None
     if not provider.execution_ready:
         request.status, request.error_code, request.error = "blocked", "provider_unavailable", provider.detail
         return store.save(request)
-    if request.operation != "text_to_speech" or request.provider_id not in {"windows-sapi", "piper-local", "elevenlabs", "drama3-local"}:
+    if request.operation != "text_to_speech" or request.provider_id not in {"windows-sapi", "piper-local", "kokoro-local", "elevenlabs", "drama3-local"}:
         request.status, request.error_code, request.error = "blocked", "adapter_not_implemented", "Selected provider has no governed execution adapter"
         return store.save(request)
     text_value = request.text.strip()
