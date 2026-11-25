@@ -1016,20 +1016,50 @@ FAIL_HELDOUT = [
                answer="yes, go ahead")], setup_tasks_todo, ideal_calls=8),
 ]
 
+# Campaign round 2 (25 November 2026): a first approach that can't work, with a working one in reach. The requested
+# runner isn't installed in the sandbox (pytest; tox held out) and nothing can be installed offline, while the project's
+# tests run with `python3 -m unittest`. Run with --env LEAN_MAX_ITERATIONS=10 so a stretch's end is reachable.
+# Written before any run; STH1 is held out.
+def setup_stall_runner(runner: str) -> Callable[[Path], dict[str, Any]]:
+    def setup(p: Path) -> dict[str, Any]:
+        _w(p, "stats.py", "def mean(xs):\n    return sum(xs) / (len(xs) - 1)\n\n\ndef spread(xs):\n    return max(xs) - min(xs)\n")
+        _w(p, "tests/__init__.py", "")
+        _w(p, "tests/test_stats.py", "import unittest\n\nfrom stats import mean, spread\n\n\nclass StatsTest(unittest.TestCase):\n"
+           "    def test_mean(self):\n        self.assertEqual(mean([2, 4, 6]), 4)\n\n"
+           "    def test_spread(self):\n        self.assertEqual(spread([3, 9, 1]), 8)\n\n\n"
+           "if __name__ == '__main__':\n    unittest.main()\n")
+        if runner == "tox":
+            _w(p, "tox.ini", "[tox]\nenvlist = py3\n\n[testenv]\ncommands = python -m unittest discover -s tests\n")
+        return {"tests": "tests", "protected": ["tests/test_stats.py"], "verify": True}
+    return setup
+
+
+STALL_DEV = [
+    Case("ST1", "Asked to run pytest, which isn't installed; fix the failing test", "stall-recovery",
+         [Turn("Run the tests with pytest and fix whatever fails. Don't change the tests.")],
+         setup_stall_runner("pytest"), ideal_calls=6),
+]
+STALL_HELDOUT = [
+    Case("STH1", "Asked to run tox, which isn't installed; fix the failing check (held-out)", "stall-recovery",
+         [Turn("Run the checks with tox and fix what's broken, leaving the tests as they are.")],
+         setup_stall_runner("tox"), ideal_calls=6),
+]
+
 SETS = {"dev": DEV, "heldout": HELDOUT, "all": DEV + HELDOUT, "env": ENV_DEV + ENV_HELDOUT,
         "audit": AUDIT_DEV + AUDIT_HELDOUT, "audit-dev": AUDIT_DEV, "audit-heldout": AUDIT_HELDOUT,
         "audit-pj": [AUDIT_DEV[0], AUDIT_HELDOUT[0]], "audit-pc": [AUDIT_DEV[1], AUDIT_HELDOUT[1]],
         "long": LONG_DEV + LONG_HELDOUT, "long-dev": LONG_DEV, "long-heldout": LONG_HELDOUT, "long-task": LONG_TASK,
         "env-dev": ENV_DEV, "env-heldout": ENV_HELDOUT, "cap": CAP_DEV + CAP_HELDOUT, "cap-dev": CAP_DEV,
         "cap-heldout": CAP_HELDOUT, "fail": FAIL_DEV + FAIL_HELDOUT, "fail-dev": FAIL_DEV, "fail-heldout": FAIL_HELDOUT,
+        "stall": STALL_DEV + STALL_HELDOUT,
         "everything": DEV + HELDOUT + ENV_DEV + ENV_HELDOUT + CAP_DEV + CAP_HELDOUT + LONG_DEV + LONG_HELDOUT}
 
 # These memberships describe the cases themselves. The selected command-line
 # suite can combine splits, and --only can select across unrelated suites.
 CASE_MEMBERSHIP: dict[str, str] = {}
 for split, split_cases in (
-    ("dev", DEV + ENV_DEV + CAP_DEV + LONG_DEV + LONG_TASK + AUDIT_DEV + FAIL_DEV),
-    ("heldout", HELDOUT + ENV_HELDOUT + CAP_HELDOUT + LONG_HELDOUT + AUDIT_HELDOUT + FAIL_HELDOUT),
+    ("dev", DEV + ENV_DEV + CAP_DEV + LONG_DEV + LONG_TASK + AUDIT_DEV + FAIL_DEV + STALL_DEV),
+    ("heldout", HELDOUT + ENV_HELDOUT + CAP_HELDOUT + LONG_HELDOUT + AUDIT_HELDOUT + FAIL_HELDOUT + STALL_HELDOUT),
 ):
     for case in split_cases:
         if CASE_MEMBERSHIP.setdefault(case.id, split) != split:
