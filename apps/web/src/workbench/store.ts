@@ -10,11 +10,11 @@ export const contextKey = (context: WorkbenchContext) => `${context.project_id}:
 
 type State = {
   context: WorkbenchContext; tabs: Surface[]; active: string; rightOpen: boolean; bottomOpen: boolean;
-  detailsOpen: boolean; bottomHeight: number; terminalIds: Record<string, string[]>; revision: number;
+  detailsOpen: boolean; bottomHeight: number; terminalIds: Record<string, string[]>; terminalLabels: Record<string, string>; revision: number;
   setContext(context: WorkbenchContext): void; open(kind: SurfaceKind, props?: Partial<Surface>): void;
   select(id: string): void; close(id: string): void; toggleRight(): void; toggleBottom(): void;
   toggleDetails(): void; setBottomHeight(value: number): void; refresh(): void;
-  addTerminal(id: string, context?: WorkbenchContext): void; removeTerminal(id: string, context?: WorkbenchContext): void;
+  addTerminal(id: string, context?: WorkbenchContext, label?: string): void; removeTerminal(id: string, context?: WorkbenchContext): void;
   meter: ConversationMeter; setMeter(meter: ConversationMeter): void;
 };
 
@@ -25,7 +25,7 @@ function height(): number {
 
 export const useWorkbench = create<State>((set, get) => ({
   context: { project_id: "", external_session_id: "" }, tabs: [], active: "", rightOpen: false,
-  bottomOpen: false, detailsOpen: false, bottomHeight: height(), terminalIds: {}, revision: 0,
+  bottomOpen: false, detailsOpen: false, bottomHeight: height(), terminalIds: {}, terminalLabels: {}, revision: 0,
   meter: { session_id: "", used: 0, window: 0, model: "" },
   setMeter(meter) {
     const current = get().meter;
@@ -61,8 +61,21 @@ export const useWorkbench = create<State>((set, get) => ({
     try { localStorage.setItem("echospeak.workbench.height", String(bottomHeight)); } catch { /* optional persistence */ }
   },
   refresh: () => set(state => ({ revision: state.revision + 1 })),
-  addTerminal(id, context) { const key = contextKey(context || get().context); set(state => ({ terminalIds: { ...state.terminalIds, [key]: [...(state.terminalIds[key] || []), id] } })); },
-  removeTerminal(id, context) { const key = contextKey(context || get().context); set(state => ({ terminalIds: { ...state.terminalIds, [key]: (state.terminalIds[key] || []).filter(item => item !== id) } })); },
+  addTerminal(id, context, label) {
+    const key = contextKey(context || get().context);
+    set(state => ({
+      terminalIds: { ...state.terminalIds, [key]: [...(state.terminalIds[key] || []), id] },
+      terminalLabels: label ? { ...state.terminalLabels, [id]: label } : state.terminalLabels,
+    }));
+  },
+  removeTerminal(id, context) {
+    const key = contextKey(context || get().context);
+    set(state => {
+      const terminalLabels = { ...state.terminalLabels };
+      delete terminalLabels[id];
+      return { terminalIds: { ...state.terminalIds, [key]: (state.terminalIds[key] || []).filter(item => item !== id) }, terminalLabels };
+    });
+  },
 }));
 
 export function workbenchUrl(apiBase: string, context: WorkbenchContext, resource: string, extra: Record<string, string> = {}) {

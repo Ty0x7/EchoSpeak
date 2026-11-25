@@ -31,14 +31,26 @@ def record(project_id: str, record_id: str):
     return result
 
 
+@router.get("/vaults/{vault_id}")
+def vault(project_id: str, vault_id: str):
+    return call(workspace.discover, call(workspace.vault_source, project_id, vault_id))
+
+
+def source(project_id: str, vault_id: str):
+    return call(workspace.vault_source, project_id, vault_id) if vault_id else call(workspace.project, project_id)
+
+
+@router.get("/vaults/{vault_id}/files")
 @router.get("/files")
-def files(project_id: str, path: str = Query(default="", max_length=500)):
-    return {"items": call(workspace.files, call(workspace.project, project_id), path)}
+def files(project_id: str, path: str = Query(default="", max_length=500), vault_id: str = ""):
+    return {"items": call(workspace.files, source(project_id, vault_id), path)}
 
 
+@router.get("/vaults/{vault_id}/file")
 @router.get("/file")
-def file(project_id: str, path: str = Query(max_length=500)):
-    data, _ = call(workspace.read_file, call(workspace.project, project_id), path)
+def file(project_id: str, path: str = Query(max_length=500), vault_id: str = ""):
+    item = source(project_id, vault_id)
+    data, _ = call(workspace.read_file, item, path)
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -47,13 +59,14 @@ def file(project_id: str, path: str = Query(max_length=500)):
     text = redact_secrets(text)
     result = {"path": path, "text": text}
     if path.lower().endswith((".html", ".htm")):
-        result["html_preview"] = call(workspace.document_html, call(workspace.project, project_id), path, text)
+        result["html_preview"] = call(workspace.document_html, item, path, text)
     return result
 
 
+@router.get("/vaults/{vault_id}/media")
 @router.get("/media")
-def media(project_id: str, request: Request, path: str = Query(max_length=500)):
-    data, mime = call(workspace.read_file, call(workspace.project, project_id), path, media=True)
+def media(project_id: str, request: Request, path: str = Query(max_length=500), vault_id: str = ""):
+    data, mime = call(workspace.read_file, source(project_id, vault_id), path, media=True)
     headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Accept-Ranges": "bytes"}
     # Single byte ranges allow native video seeking without a public/tokenized media endpoint.
     interval = request.headers.get("range", "")

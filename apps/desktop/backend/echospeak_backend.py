@@ -222,6 +222,9 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["--workbench-worker"]:
         from agent.workbench_worker import main as workbench_worker
         workbench_worker()
+    elif sys.argv[1:2] == ["--workbench-shell"]:
+        from agent.workbench_worker import exec_posix_shell
+        exec_posix_shell(sys.argv[2:])
     elif sys.argv[1:] == ["--code-claude-hook"]:
         from agent.code_claude_hook import main as claude_hook
         raise SystemExit(claude_hook())

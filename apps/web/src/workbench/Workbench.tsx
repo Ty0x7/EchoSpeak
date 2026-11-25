@@ -150,9 +150,9 @@ export function WorkspaceDetails({ apiBase }: { apiBase: string }) {
     </DetailSection>
     <DetailSection id="servers" title="Servers & scripts" meta={terminals.length ? <span>{terminals.length} running</span> : null}>
       {terminals.map((id, index) => <button key={id} className="wb-drow wb-drow-btn" onClick={() => useWorkbench.setState({ bottomOpen: true })}>
-        <WorkbenchIcon kind="terminal" /><span>Terminal {index + 1}</span><small className="wb-dlive">running</small></button>)}
+        <WorkbenchIcon kind="terminal" /><span>{store.terminalLabels[id] || "Terminal"} {index + 1}</span><small className="wb-dlive">running</small></button>)}
       {data?.scripts.map(script => <button key={script.id} className="wb-drow wb-drow-btn" title={script.command} onClick={() => void action(async () => {
-        const terminal = await request<{ id: string }>(`${apiBase}/workbench/scripts/${script.id}/run`, store.context); store.addTerminal(terminal.id, store.context); useWorkbench.setState({ bottomOpen: true });
+        const terminal = await request<{ id: string; shell: string }>(`${apiBase}/workbench/scripts/${script.id}/run`, store.context); store.addTerminal(terminal.id, store.context, terminal.shell); useWorkbench.setState({ bottomOpen: true });
       })}><WorkbenchIcon kind="terminal" /><span className="wb-dtrunc">{script.name}</span><small className="wb-dmuted">Run</small></button>)}
       {!terminals.length && !data?.scripts.length ? <p className="wb-dnote">Dev servers and scripts you run here show up in this list.</p> : null}
       <button className="wb-dmore" disabled={!data} onClick={() => setEditing(value => !value)}>{editing ? "Cancel" : "Add a project script"}</button>
@@ -180,13 +180,37 @@ export function WorkbenchTabs({ onNativeTab, nativeAllowed = true }: { onNativeT
   const store = useWorkbench();
   const [picker, setPicker] = useState(false);
   const anchor = useRef<HTMLButtonElement>(null);
-  return <div className="wb-tabs" role="tablist" aria-label="Workspace surfaces" onKeyDown={event => {
-    const index = store.tabs.findIndex(tab => tab.id === store.active);
-    const next = event.key === "ArrowRight" ? (index + 1) % store.tabs.length : event.key === "ArrowLeft" ? (index + store.tabs.length - 1) % store.tabs.length : -1;
-    if (next >= 0) { event.preventDefault(); const tab = store.tabs[next]; store.select(tab.id); onNativeTab(tab.kind); }
-  }}>{store.tabs.map(tab => <div className="wb-tab" key={tab.id}><button role="tab" aria-selected={store.active === tab.id} onClick={() => { store.select(tab.id); onNativeTab(tab.kind); }}>
-      <WorkbenchIcon kind={tab.kind} /><span>{tab.title}</span></button><button className="wb-tab-close" aria-label={`Close ${tab.title}`} onClick={() => store.close(tab.id)}>×</button></div>)}
-    <button ref={anchor} className="wb-new-surface" aria-label="Open a surface" title="Open a surface" aria-expanded={picker} onClick={() => setPicker(value => !value)}>＋</button>
+  const tabs = store.tabs.filter(tab => tab.kind !== "surfaces");
+  const listRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    listRef.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [store.active]);
+  return <div className="wb-tabs">
+    <div ref={listRef} className="wb-tab-list" role="tablist" aria-label="Workspace surfaces" onKeyDown={event => {
+      if (!(event.target as HTMLElement).matches('[role="tab"]')) return;
+      const index = Array.from(event.currentTarget.querySelectorAll('[role="tab"]')).indexOf(event.target as HTMLElement);
+      const next = event.key === "ArrowRight" ? (index + 1) % tabs.length
+        : event.key === "ArrowLeft" ? (index + tabs.length - 1) % tabs.length
+        : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+      if (next < 0 || !tabs[next]) return;
+      event.preventDefault();
+      store.select(tabs[next].id);
+      onNativeTab(tabs[next].kind);
+      event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+    }}>
+      {tabs.map((tab, index) => <div className="wb-tab" key={tab.id}>
+        <button role="tab" aria-selected={store.active === tab.id} tabIndex={store.active === tab.id || (store.active === "surfaces" && index === 0) ? 0 : -1}
+          title={tab.title} onClick={() => { store.select(tab.id); onNativeTab(tab.kind); }}>
+          <WorkbenchIcon kind={tab.kind} /><span>{tab.title}</span>
+        </button>
+        <button type="button" className="rp-close wb-tab-close" aria-label={`Close ${tab.title}`} title={`Close ${tab.title}`} onClick={() => store.close(tab.id)}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden><path d="m6 6 12 12M18 6 6 18" /></svg>
+        </button>
+      </div>)}
+    </div>
+    <button ref={anchor} type="button" className="rp-close wb-new-surface" aria-label="Add a surface" title="Add a surface" aria-expanded={picker} onClick={() => setPicker(value => !value)}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden><path d="M12 5v14M5 12h14" /></svg>
+    </button>
     {picker ? <WorkspacePopover anchor={anchor} label="Open a surface" width={260} onClose={() => setPicker(false)}><div onClick={() => setPicker(false)}><SurfacePicker nativeAllowed={nativeAllowed} /></div></WorkspacePopover> : null}
   </div>;
 }
