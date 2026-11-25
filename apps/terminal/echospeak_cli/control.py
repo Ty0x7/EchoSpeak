@@ -19,7 +19,7 @@ from .client import ApiError, Client
 from .render import one_line
 
 DEFAULT_OLLAMA = "http://127.0.0.1:11434"
-DEFAULT_CONTEXT = 16384
+DEFAULT_CONTEXT = 32768   # the standard window (backend agent/context_windows.py); 16K stays a choice
 LOCAL_PROVIDERS = {"ollama", "lmstudio", "localai", "vllm", "llama_cpp"}
 
 # Approval modes (agent/lean/settings.py approval_mode). Shift+Tab cycles the first three; `never`
@@ -368,6 +368,15 @@ def save_default_model(client: Client, model: str, base_url: str, context_length
         "use_local_models": True,
         "local": {"provider": "ollama", "base_url": base_url, "model_name": model, "context_length": int(context_length)},
     })
+
+
+def context_windows(client: Client) -> dict:
+    """GET /settings/context-windows: the choices for the current model, the configured and the served window."""
+    return client.get("/settings/context-windows") or {}
+
+
+def save_context_length(client: Client, tokens: int) -> dict:
+    return client.request("PUT", "/settings", body={"local": {"context_length": int(tokens)}})
 
 
 def switch_session_model(client: Client, session_id: str, provider: str, model: str, base_url: str = "") -> dict:
