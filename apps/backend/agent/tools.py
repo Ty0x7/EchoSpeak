@@ -1699,18 +1699,26 @@ def notepad_write(content: str, filename: Optional[str] = None) -> str:
     return f"Opened Notepad, typed {len(data)} chars, and saved artifact: {artifact_path}"
 
 
-@tool(description="This computer's specs: OS and distribution, CPU, GPU, RAM (total and free), home-disk space.")
+@tool(description="This computer: OS, CPU, GPU, RAM, disk, network (VPN or not, Wi-Fi or wired) and installed "
+                  "desktop apps.")
 def system_info() -> str:
     info = _collect_system_info()
-    if not info:
-        return "System info unavailable."
     labels = {"os": "OS", "distro": "Distribution", "cpu": "CPU", "gpu": "GPU", "ram": "RAM",
               "ram_available": "RAM available", "disk_home": "Home disk"}
     lines = []
     for key, label in labels.items():
-        val = info.get(key)
+        val = (info or {}).get(key)
         if val:
             lines.append(f"{label}: {val}")
+    if sys.platform.startswith("linux"):
+        from agent import env_facts
+        try:
+            lines.append("Network: " + env_facts.network_summary())
+            apps = env_facts.installed_apps()
+            if apps:
+                lines.append(f"Desktop apps ({len(apps)}): " + ", ".join(apps))
+        except Exception:  # noqa: BLE001  extra facts never break the hardware answer
+            pass
     return "\n".join(lines) if lines else "System info unavailable."
 
 
