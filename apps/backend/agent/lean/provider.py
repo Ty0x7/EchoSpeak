@@ -75,6 +75,28 @@ class Endpoint:
     model: str
     provider: str
     local: bool
+    # The name sent to the server when it differs from ``model``: a local model served at the window the
+    # owner chose (agent/context_windows.py). ``model`` stays the identity for lookups and display.
+    wire: str = ""
+    # The window the owner chose for a local Ollama model; the variant that serves it is made on the first model
+    # call (ChatClient._prepare_window), not when the endpoint is resolved, so resolving never touches the server.
+    want_context: int = 0
+
+    @property
+    def wire_model(self) -> str:
+        return self.wire or self.model
+
+    @property
+    def served_name(self) -> str:
+        """The name the server knows this model by at the chosen window: the variant once made, or the one it will be
+        (so a restarted backend reads the window of the variant already loaded), else the model itself."""
+        if self.wire:
+            return self.wire
+        if self.want_context and self.provider == "ollama" and self.local:
+            from agent import context_windows
+            return context_windows.variant_name(self.model, context_windows.effective(self.base_url, self.model,
+                                                                                      self.want_context))
+        return self.model
 
 
 def provider_affinity(endpoint: Endpoint, transport: str) -> dict:
@@ -190,12 +212,17 @@ def resolve_endpoint(provider: str, model_id: str = "") -> Endpoint:
     if not model or model == "default":
         # Nothing chosen yet (fresh install): use whatever the app has loaded.
         model = first_local_model(resolved, configured_url) or model
+    want = 0
+    if resolved == ModelProvider.OLLAMA and model and model != "default":
+        # The owner's chosen window, really served: Ollama's /v1 ignores a per-request size.
+        want = max(0, int(getattr(config.local, "context_length", 0) or 0))
     return Endpoint(
         base_url=base,
         api_key="not-needed",
         model=model,
         provider=resolved.value,
         local=True,
+        want_context=want,
     )
 
 
@@ -563,6 +590,16 @@ class ChatClient:
             pass
 
     @admitted
+    def _prepare_window(self) -> None:
+        """Serve the owner's chosen window: point the request at the model variant that has it (once)."""
+        endpoint = self.endpoint
+        if endpoint.wire or not endpoint.want_context or endpoint.provider != "ollama" or not endpoint.local:
+            return
+        from agent import context_windows
+        endpoint.wire = context_windows.served_model(endpoint.base_url, endpoint.model, endpoint.want_context)
+        if not endpoint.wire:
+            endpoint.want_context = 0   # couldn't be made: use the server's own window, and don't retry every call
+
     def stream_turn(
         self,
         messages: list[dict[str, Any]],
@@ -629,8 +666,9 @@ class ChatClient:
             return responses_turn(self, messages, tools, on_reasoning, on_content, cancel, max_tokens)
         # Provider-specific metadata is only meaningful to its own adapter.
         messages = _chat_history(messages, self.endpoint)
+        self._prepare_window()
         body: dict[str, Any] = {
-            "model": self.endpoint.model,
+            "model": self.endpoint.wire_model,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},

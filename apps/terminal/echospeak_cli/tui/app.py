@@ -2576,6 +2576,49 @@ class EchoTUI:
                   + ("" if self.sid else " · applies from your next message"))
         self.app.invalidate()
 
+    async def cmd_context(self, args) -> None:
+        """Choose the context window; it is saved for the app too and served from the next message."""
+        info = await self.call(control.context_windows, self.client)
+        rows = info.get("choices") or []
+        if not rows:
+            raise LookupError(str(info.get("note") or "this provider sets its own context window"))
+        configured, served = int(info.get("configured") or 0), int(info.get("served") or 0)
+
+        def k(n: int) -> str:
+            return f"{n // 1024}K"
+        if args:
+            want = str(args[0]).lower().removesuffix("k").removesuffix("tokens").strip()
+            match = next((r for r in rows if str(r["tokens"] // 1024) == want or str(r["tokens"]) == want), None)
+            if match is None:
+                raise LookupError("choose one of: " + ", ".join(r["label"] for r in rows))
+            tokens = int(match["tokens"])
+        else:
+            opts = [Option(r["label"], int(r["tokens"]),
+                           hint=r["note"] + (" (current)" if r["tokens"] == configured else "")
+                           + (" · default" if r.get("default") and r["tokens"] != configured else "")) for r in rows]
+            state = str(info.get("state") or "")
+            loaded = ", ".join(f"{k(int(r.get('context') or 0))}" for r in info.get("loaded") or [] if r.get("context"))
+            now = (f"Set to {k(configured)}" if configured else "Not set") + {
+                "served": f"; the model is serving {k(served)}.",
+                "different": f"; but the model is serving {k(served)}.",
+                "switching": f"; {loaded or 'another size'} is loaded now, and {k(configured)} loads with your next message.",
+            }.get(state, "; the model isn't loaded right now.")
+            share = next((r.get("gpu_share") for r in info.get("loaded") or [] if r.get("gpu_share") is not None), None)
+            if share is not None and share < 0.95:
+                # Measured: qwen3.5:9b on an 8 GB GPU is 83% on the GPU at 16K, 79% at 32K, 70% at 64K, 57% at 128K.
+                now += f" {round(share * 100)}% of it is on the GPU; the rest runs on the CPU, which is slower."
+            sel = next((i for i, r in enumerate(rows) if r["tokens"] == configured), 0)
+            action = await self.ask(f"Context window for {info.get('model') or 'the model'}", opts,
+                                    body=[("class:dim", now + " Larger windows keep more of a long task in view and use "
+                                                        "more memory.")], selected=sel)
+            if action.kind != "choose":
+                return
+            tokens = int(action.value)
+        await self.call(control.save_context_length, self.client, tokens)
+        await self._load_settings()
+        self.note(f"context window {k(tokens)} · served from your next message (EchoSpeak checks what the model "
+                  f"really gets and shows it under /context)", "bold", self.caps.glyphs.ok)
+
     async def cmd_mode(self, args) -> None:
         current = str(self.settings.get("assistant_mode") or "unified")
         if args:

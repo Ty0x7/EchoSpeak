@@ -614,6 +614,18 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
   const [customId, setCustomId] = useState(false);
   // Once the user picks an app themselves, never switch it for them.
   const userPicked = useRef(false);
+  // Ollama: the windows this model can have, and the one the server is really serving (GET /settings/context-windows).
+  const [windows, setWindows] = useState<{ served: number; state: string; choices: { tokens: number; label: string; note: string }[] } | null>(null);
+
+  useEffect(() => {
+    if (!useLocal || provider !== "ollama") { setWindows(null); return; }
+    let cancelled = false;
+    fetch(`${apiBase}/settings/context-windows`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d) setWindows({ served: Number(d.served) || 0, state: String(d.state || ""), choices: Array.isArray(d.choices) ? d.choices : [] }); })
+      .catch(() => { if (!cancelled) setWindows(null); });
+    return () => { cancelled = true; };
+  }, [apiBase, useLocal, provider, local.model_name, local.context_length, reloadKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -770,11 +782,20 @@ export function ModelsSection({ s, save, apiBase }: { s: SettingsMap; save: Save
               onChange={(v) => save({ local: { model_name: v } })}
             />
           </Row>
-          <Row label="Context length" help="Match what you set in LM Studio. Agents trim old messages to stay inside it.">
+          <Row
+            label="Context length"
+            help={provider === "ollama"
+              ? `How much of the conversation and the work Echo keeps in view. 32K is the standard; 64K suits coding and long tasks and uses more memory.${windows?.state === "served" ? ` The model is serving ${Math.round(windows.served / 1024)}K.`
+                : windows?.state === "different" ? ` The model is serving ${Math.round(windows.served / 1024)}K, not the size chosen.`
+                : " The chosen size loads with the next message."}`
+              : "Match what you set in LM Studio. Agents trim old messages to stay inside it."}
+          >
             <Select
               value={String(local.context_length || 32768)}
               onChange={(v) => save({ local: { context_length: Number(v) } })}
-              options={[8192, 16384, 32768, 65536, 131072].map((n) => ({ value: String(n), label: `${Math.round(n / 1024)}k tokens` }))}
+              options={(provider === "ollama" && windows?.choices.length
+                ? windows.choices.map((c) => c.tokens)
+                : [8192, 16384, 32768, 65536, 131072]).map((n) => ({ value: String(n), label: `${Math.round(n / 1024)}k tokens` }))}
             />
           </Row>
           <Row label="Creativity" help="Temperature. Lower is more focused, higher is more varied.">

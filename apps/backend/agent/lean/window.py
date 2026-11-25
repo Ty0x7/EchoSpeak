@@ -44,7 +44,7 @@ def _key(endpoint: Any) -> tuple[str, str]:
     base = str(getattr(endpoint, "base_url", "") or "").rstrip("/")
     if base.endswith("/v1"):
         base = base[:-3]
-    return base, str(getattr(endpoint, "model", "") or "")
+    return base, str(getattr(endpoint, "served_name", "") or getattr(endpoint, "model", "") or "")
 
 
 def _loopback(base: str) -> bool:
