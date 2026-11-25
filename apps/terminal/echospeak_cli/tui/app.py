@@ -2691,8 +2691,8 @@ class EchoTUI:
             selected = next(i for i, o in enumerate(opts) if o.value == action.value)
             if kind == "mode":
                 modes = list(control.APPROVAL_MODES)
-                mopts = [Option(m, m, hint=control.APPROVAL_MODES[m]) for m in modes]
-                act = await self.ask("Approval mode", mopts,
+                mopts = [Option(control.mode_name(m), m, hint=control.APPROVAL_MODES[m].split(": ", 1)[-1]) for m in modes]
+                act = await self.ask("Approval mode", mopts, body=[("class:dim", control.APPROVAL_LIMITS)],
                                      selected=modes.index(self.approval_mode) if self.approval_mode in modes else 0)
                 if act.kind == "choose":
                     await self._set_approval_mode(act.value, confirm=True)
@@ -2822,19 +2822,20 @@ class EchoTUI:
 
     async def _set_approval_mode(self, mode: str, confirm: bool) -> None:
         if mode == self.approval_mode:
-            self.note(f"approval mode is already {mode}")
+            self.note(f"approval mode is already {control.mode_name(mode)}")
             return
         if mode == "never":
             body = [("", control.APPROVAL_MODES["never"] + "."),
-                    ("class:dim", "Agents will act without asking you, everywhere (the app too). Type never to confirm.")]
-            act = await self.ask("Turn approvals off?", [Option("Type never to confirm", "never", text_entry=True),
+                    ("class:dim", "Agents will act without asking you, everywhere (the app too). " + control.APPROVAL_LIMITS
+                     + " Type don't ask to confirm.")]
+            act = await self.ask("Turn approvals off?", [Option("Type don't ask to confirm", "never", text_entry=True),
                                                         Option("Cancel", None, "n")],
-                                 body=body, attention=True, selected=0, kind="confirm", text_prompt="Type never:")
-            if not (act.kind == "text" and act.text.strip().lower() == "never"):
+                                 body=body, attention=True, selected=0, kind="confirm", text_prompt="Type don't ask:")
+            if not (act.kind == "text" and act.text.strip().lower().replace("’", "'") in {"don't ask", "dont ask"}):
                 self.note("approval mode unchanged")
                 return
         elif confirm:
-            act = await self.ask(f"Change the approval mode to {mode}?",
+            act = await self.ask(f"Change the approval mode to {control.mode_name(mode)}?",
                                  [Option("No", False, "n"), Option("Yes, change it", True, "y")],
                                  body=[("", control.APPROVAL_MODES[mode] + "."),
                                        ("class:dim", "Global: the app uses it too.")],

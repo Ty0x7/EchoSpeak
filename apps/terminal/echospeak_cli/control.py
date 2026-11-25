@@ -26,11 +26,21 @@ LOCAL_PROVIDERS = {"ollama", "lmstudio", "localai", "vllm", "llama_cpp"}
 # is never in the cycle and needs a typed confirmation.
 APPROVAL_CYCLE = ("smart", "autonomous", "always")
 APPROVAL_MODES = {
-    "smart": "Ask for risky actions (default): destructive or external steps wait for you",
-    "autonomous": "Autonomous: routine approvals don't interrupt; risky ones are held for you",
-    "always": "Always ask: every action waits for your OK",
-    "never": "Never ask: actions run without approval (dangerous)",
+    "always": "Ask first: every action waits for your OK",
+    "smart": "Ask for risky actions (default): deleting, sending, dangerous commands and desktop control wait for you",
+    "autonomous": "Work independently: routine steps don't interrupt; risky ones are held for you and listed at the end",
+    "never": "Don't ask: actions run without approval, except commands that could wipe the system, pull requests "
+             "and tasks for remote agents",
 }
+
+# What no approval mode changes (owner decision, #187): said wherever the modes are offered.
+APPROVAL_LIMITS = ("Approval modes only decide what waits for you. They never override privacy settings, folder access, "
+                   "the sandbox, or capabilities switched off in Permissions.")
+
+def mode_name(mode: str) -> str:
+    """The approval mode's name as the owner sees it ("Ask first"), from its stored value ("always")."""
+    return APPROVAL_MODES.get(mode, mode).split(":", 1)[0].removesuffix(" (default)")
+
 
 # Permission switches (config.py). Only ones with a real effect on agents are listed.
 PERMISSIONS = (
@@ -176,8 +186,9 @@ def toolset_rows(agent_toolsets: list[str], available: list[str], settings: dict
 
 
 ASSISTANT_MODES = {
-    "unified": "One Echo for chat and code: a trusted project in the session gives Echo engineering tools",
-    "environments": "Separate Chat, Code and Agents environments (the app's classic layout)",
+    "unified": "Unified (recommended): one Echo for chat and code; a trusted project in the session gives Echo "
+               "engineering tools",
+    "environments": "Environments (legacy): separate Chat, Code and Agents environments, the app's classic layout",
 }
 
 

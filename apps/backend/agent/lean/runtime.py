@@ -239,6 +239,12 @@ class LeanSession:
                     steering.to_queue(self.session_id)
                 except Exception:
                     logger.warning("Could not move unread steering to the queue", exc_info=True)
+                try:
+                    # A folder the owner just approved becomes this conversation's project; the request continues there.
+                    from agent.lean import project_offer
+                    project_offer.apply_pending(self.session_id)
+                except Exception:
+                    logger.warning("Could not apply the approved project", exc_info=True)
                 with _LOCKS_GUARD:
                     _ACTIVITY["running"] -= 1
                     _ACTIVITY["last_end"] = time.time()
@@ -1187,6 +1193,11 @@ class LeanSession:
         if self.model_first:
             # Chat's capability boundary, in trusted code: what it may not use is never offered.
             chat_mode.restrict(toolbox)
+            from agent import environments
+            if environments.unified() and depth == 0:
+                # No project in this conversation: work in a folder is offered as a project, never done in artifacts.
+                from agent.lean import project_offer
+                toolbox.native[project_offer.NAME] = project_offer.tool(self.session_id, message)
             # Chat's execution layer for the answer the user sees (agent/lean/chat_run.py).
             chat_run = self._new_chat_run(persona) if depth == 0 else None
         elif self.code_first:
