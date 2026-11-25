@@ -78,13 +78,15 @@ def test_continuing_also_extends_the_work_budget(tmp_path):
     assert ledger.get(row["id"])["budget"]["tokens"] == 128000, "the work budget was not extended with the step limit"
 
 
-def test_a_turn_going_in_circles_still_stops_and_says_its_real_limit():
+def test_a_turn_going_in_circles_gets_one_recovery_stretch_then_stops_at_its_real_limit():
     model = Model([_work(i) for i in range(12)])
     turn, events = _turn(model, max_steps=4, auto=True, ok=lambda args: False)   # every call fails
     result = turn.run("Do the ten pieces of work")
-    assert result.stop_reason == "max_steps" and not any(e["type"] == "auto_continue" for e in events)
+    continues = [e for e in events if e["type"] == "auto_continue"]
+    assert result.stop_reason == "max_steps" and len(continues) == 1 and continues[0].get("recovery")
+    assert continues[0]["limit"] == 8                                             # 4 + one stretch of max(4, 4 // 2)
     assert result.text.startswith("I haven't finished this yet.") and "step" not in result.text.lower()
-    assert any(item["kind"] == "note" and "step limit (4)" in item["text"] for item in result.timeline)
+    assert any(item["kind"] == "note" and "step limit (8)" in item["text"] for item in result.timeline)
 
 
 def test_continuing_has_a_ceiling():
@@ -128,6 +130,7 @@ def test_the_grace_answer_asks_with_thinking_off():
 def _stalled(handoff: ModelTurn) -> tuple[Model, LeanTurn, list[dict[str, Any]]]:
     model = Model([_work(i) for i in range(4)] + [handoff])
     turn, events = _turn(model, max_steps=4, auto=True, ok=lambda args: False)    # no progress: it stops at 4
+    turn.auto_continue_limit = 1                                                  # no room for a recovery stretch
     return model, turn, events
 
 
@@ -186,3 +189,35 @@ def test_the_plain_note_names_files_not_paths():
     turn.timeline.append({"kind": "tool", "label": "Reading /home/me/.cache/run/heval-PC1/notesapp/storage.py"})
     note = turn._out_of_steps_note(4)
     assert "Reading storage.py" in note and "/home/me" not in note
+
+
+
+# ── A stretch without progress gets one recovery stretch to change approach (campaign round 2, 25 Nov 2026) ──
+def test_the_recovery_note_names_what_kept_failing():
+    model = Model([_work(i) for i in range(4)] + [ModelTurn(content="Switched approach; done.")])
+    turn, events = _turn(model, max_steps=4, auto=True, ok=lambda args: False)
+    result = turn.run("Do the ten pieces of work")
+    note = model.calls[4]["messages"][-1]["content"]
+    assert "didn't get the work closer to done" in note and "failed" in note and "service unavailable" in note
+    assert "Don't repeat those" in note and "different approach" in note and result.text == "Switched approach; done."
+    assert any(i["kind"] == "note" and "Changing approach" in i["text"] for i in result.timeline)
+
+
+def test_a_turn_that_changes_approach_finishes():
+    calls = {"n": 0}
+
+    def ok(args):
+        calls["n"] += 1
+        return calls["n"] > 4          # the first approach fails; the next one works
+    model = Model([_work(i) for i in range(6)] + [ModelTurn(content="All ten pieces are done.")])
+    turn, events = _turn(model, max_steps=4, auto=True, ok=ok)
+    result = turn.run("Do the ten pieces of work")
+    assert result.text == "All ten pieces are done." and result.stop_reason != "max_steps"
+    assert sum(1 for e in events if e["type"] == "auto_continue" and e.get("recovery")) == 1
+
+
+def test_recovery_happens_once_per_turn():
+    model = Model([_work(i) for i in range(30)])
+    turn, events = _turn(model, max_steps=4, auto=True, ok=lambda args: False)
+    turn.run("Do the ten pieces of work")
+    assert sum(1 for e in events if e["type"] == "auto_continue") == 1 and len(model.calls) <= 9

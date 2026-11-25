@@ -457,6 +457,8 @@ class LeanTurn:
         self.auto_continue_limit = AUTO_CONTINUE_LIMIT
         self._extended = 0
         self._segment = (0, 0)
+        # One recovery stretch per turn when a stretch made no progress (LeanTurn._continue_past).
+        self._recovered = False
         # A smaller step limit that applies while the turn is only looking things up (agent/lean/chat_run.py
         # ChatRun.step_limit): returns 0 for "no limit of its own". Echo with a project attached keeps the
         # engineering budget for engineering and the research budget for a question about tonight's game.
@@ -705,6 +707,7 @@ class LeanTurn:
         # A research worker gets its own, smaller step budget (agent/lean/swarm.py).
         max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
         self._extended, self._segment = 0, (0, len(self._outcomes))
+        self._recovered = False
         call_counts: dict[str, int] = {}
         self._call_counts, self._read_sigs, self._test_sigs = call_counts, set(), set()
         self._path_reads, self._read_shapes, self._rereads = {}, {}, 0
@@ -2039,7 +2042,7 @@ class LeanTurn:
         new_actions = len(call_counts) - seen
         self._segment = (len(call_counts), len(self._outcomes))
         if new_actions < max(2, max_steps // 6) or not recent or sum(recent) * 3 < len(recent):
-            return False
+            return self._recover(messages, step, max_steps, limit, len(recent))
         self._extended += max_steps
         if self.work_context is not None and hasattr(self.work_context.coordinator, "extend_budget"):
             # The work budget goes with the steps, or it ends the task instead (live LT1: stopped at step 59 with
@@ -2054,6 +2057,44 @@ class LeanTurn:
         add_note(messages, f"You have used {limit} steps on this request and the work is still moving, so you can keep "
                            f"going (up to {limit + max_steps} steps). Carry on from where you are, without repeating "
                            "what is done; finish and answer as soon as the work is complete.")
+        return True
+
+    def _recover(self, messages: list[dict[str, Any]], step: int, max_steps: int, limit: int, calls: int) -> bool:
+        """A stretch that got nowhere gets one shorter stretch to change approach, instead of stopping (campaign
+        round 2, 25 November 2026: "the natural handoff is useful, but it does not solve premature termination").
+
+        Once per turn, half a stretch, inside the same ceiling as every stretch. The note names what wasn't working
+        (the repeated and failing calls, each with its first error line) so the next steps try something else
+        rather than more of the same; a blocker outside the agent's reach still ends in the handoff.
+        """
+        if self._recovered or not calls:
+            return False
+        stretch = max(4, max_steps // 2)
+        if limit + stretch > max_steps * max(1, int(self.auto_continue_limit or 1)):
+            return False
+        self._recovered = True
+        self._extended += stretch
+        tools = [item for item in self.timeline if item.get("kind") == "tool"][-calls:]
+        seen: dict[str, list[Any]] = {}
+        for item in tools:
+            label = str(item.get("label") or item.get("name") or "")[:90]
+            failed = item.get("status") == "failed"
+            row = seen.setdefault(label, [0, 0, ""])
+            row[0] += 1
+            if failed:
+                row[1] += 1
+                row[2] = row[2] or next((ln.strip() for ln in str(item.get("output") or "").splitlines() if ln.strip()), "")[:140]
+        lines = [f"- {label}: {count}× ({failed} failed){f': {first}' if first else ''}"
+                 for label, (count, failed, first) in sorted(seen.items(), key=lambda kv: (-kv[1][1], -kv[1][0]))
+                 if failed or count > 1][:5]
+        text = f"Changing approach after {limit} steps without progress."
+        self.timeline.append({"kind": "note", "step": step, "text": text, "at": time.time()})
+        self.emit({"type": "auto_continue", "step": step, "limit": limit + stretch, "note": text, "recovery": True})
+        add_note(messages, "The last steps didn't get the work closer to done" + (":\n" + "\n".join(lines) if lines else ".")
+                 + f"\nDon't repeat those. Step back: read the errors again and check your assumptions (paths, which "
+                   f"tools and commands exist here, what the project already provides). Then try a different approach. "
+                   f"You have up to {limit + stretch} steps in all. If something outside your control blocks the work, "
+                   "stop and say exactly what's needed.")
         return True
 
     def _absorb_steering(self, messages: list[dict[str, Any]], step: int) -> bool:
