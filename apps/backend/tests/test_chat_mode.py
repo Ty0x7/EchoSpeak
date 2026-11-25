@@ -161,3 +161,13 @@ def test_chat_recall_is_the_owners_facts_and_chat_conversations(env, monkeypatch
     contact = room_store.direct("scout", "Jarvis")
     hits = [{"session_id": s, "snippet": s} for s in (chat.thread_id, code.thread_id, contact.thread_id)]
     assert chat_mode.chat_hits(hits) == [hits[0]]
+
+
+def test_chat_can_suggest_a_connection_but_not_install_or_approve_it():
+    """mcplab (qwen3.5:9b): Chat found the right connection but propose_integration was blocked, so every run ended
+    "Would you like me to propose this?". Suggesting only queues a card in Settings; installing and approving stay
+    with the owner (api/routes/lean.py _approve_proposal)."""
+    from agent.lean import chat_mode
+
+    assert {"find_integrations", "propose_integration", "check_integration"} <= chat_mode.ALLOWED
+    assert not {"terminal", "file_write", "computer_action"} & chat_mode.ALLOWED

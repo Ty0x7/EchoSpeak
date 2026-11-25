@@ -496,6 +496,7 @@ def server_config(proposal: dict[str, Any], values: dict[str, str]) -> dict[str,
         raise ValueError(f"Not a setting of this connection: {', '.join(unknown)}")
     env: dict[str, str] = {}
     headers: dict[str, str] = {}
+    arguments: list[str] = []
     for name, spec in settings.items():
         value = str(values.get(name) or "").strip() or str(spec.get("default") or "")
         if not value:
@@ -504,6 +505,15 @@ def server_config(proposal: dict[str, Any], values: dict[str, str]) -> dict[str,
             continue
         if spec.get("template"):
             value = spec["template"].replace("{value}", value)
+        if spec.get("kind") == "arg":
+            # A start-up argument (e.g. the folder a filesystem server may use): one argv element, no shell.
+            if spec.get("folder"):
+                folder = Path(value).expanduser()
+                if not folder.is_absolute() or not folder.is_dir():
+                    raise ValueError(f"{name}: {value} isn't an existing folder (give the full path).")
+                value = str(folder.resolve())
+            arguments.append(value)
+            continue
         (headers if spec.get("kind") == "header" else env)[name] = value
     launch = dict(proposal.get("launch") or {})
     config: dict[str, Any] = {"enabled": True, "connection_id": f"mcp-{proposal['server_name']}",
@@ -520,7 +530,8 @@ def server_config(proposal: dict[str, Any], values: dict[str, str]) -> dict[str,
     else:
         command = str(launch.get("command") or "")
         # npx / uvx are .cmd / .exe shims on Windows: start the resolved file.
-        config.update(transport="stdio", command=shutil.which(command) or command, args=list(launch.get("args") or []))
+        config.update(transport="stdio", command=shutil.which(command) or command,
+                      args=list(launch.get("args") or []) + arguments)
     if env:
         config["env"] = env
     return config
@@ -678,8 +689,9 @@ def _format_results(found: dict[str, Any]) -> str:
         if c["homepage"]:
             lines.append(f"  Page: {c['homepage']}")
         out.append("\n".join(lines))
-    tail = ("\nTell the user the best option, what it needs from them and anything to watch out for. "
-            "If they want it, call propose_integration with its id. Finding it doesn't install it.")
+    tail = ("\nIf the user asked you to set up or connect one, call propose_integration with the best id now: it only "
+            "puts it in Settings for them to review and approve, so don't ask first. Otherwise tell them the best option, "
+            "what it needs from them and anything to watch out for. Finding it doesn't install it.")
     if found.get("error"):
         tail += f"\n(The MCP registry didn't answer, so only setup guides are shown: {found['error']}.)"
     return "\n".join(out) + tail
@@ -738,8 +750,8 @@ def integration_tools(session_id: str = "") -> list[Any]:
             name="propose_integration",
             description=(
                 "Suggest a connection found with find_integrations to the user. It appears in Settings for them to "
-                "review, type any keys and approve; you can't install or approve it yourself. Only after the user "
-                "says they want it."
+                "review, type any keys and approve; you can't install or approve it yourself. Call it when the user "
+                "asked to set up or connect it (that request is their go-ahead), not on your own initiative."
             ),
             parameters={"type": "object", "properties": {
                 "id": {"type": "string", "description": "The id from find_integrations."},
