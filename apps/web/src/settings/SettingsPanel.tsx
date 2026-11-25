@@ -500,29 +500,30 @@ function GeneralSection({ s, save }: { s: SettingsMap; save: Save }) {
   );
 }
 
+/** What each approval mode means (owner decision #187; stored values unchanged). */
+const APPROVAL_HELP: Record<string, string> = {
+  always: "Ask first: every action waits for your OK.",
+  smart: "Ask for risky actions: deleting files, sending messages, controlling the desktop and dangerous commands wait for you.",
+  autonomous: "Work independently: desktop control and ordinary commands outside the sandbox run without asking, so long tasks keep going while you're away. Deleting, dangerous commands, sending messages, cloud costs and tasks for other agents are never approved for you: they're held and listed for you at the end.",
+  never: "Don't ask: actions run without approval. Commands that could wipe the system, pull requests and tasks for remote agents still ask.",
+};
+
 /** Settings › Permissions: when agents stop and ask you. */
 function ApprovalSettings({ s, save }: { s: SettingsMap; save: Save }) {
   return (
-    <Group title="Approvals" description="When agents stop and ask you. These apply to Echo and every agent you create.">
-      <Row label="Ask before risky actions" help="Deleting files, sending messages, controlling the desktop, and dangerous commands.">
+    <Group title="Approvals" description="When agents stop and ask you. These apply to Echo and every agent you create. Approval modes only decide what waits for you: they never override privacy settings, folder access, the sandbox, or capabilities switched off in Permissions.">
+      <Row label="Approval mode" help={APPROVAL_HELP[String(s.lean_approval_mode || "smart")] || APPROVAL_HELP.smart}>
         <Segmented
           value={String(s.lean_approval_mode || "smart")}
           onChange={(v) => save({ lean_approval_mode: v })}
           options={[
-            { value: "smart", label: "Risky only", hint: "Recommended" },
-            { value: "autonomous", label: "Autonomous", hint: "Walk away" },
-            { value: "always", label: "Every action" },
-            { value: "never", label: "Never" },
+            { value: "always", label: "Ask first" },
+            { value: "smart", label: "Ask for risky actions", hint: "Recommended" },
+            { value: "autonomous", label: "Work independently", hint: "Walk away" },
+            { value: "never", label: "Don't ask" },
           ]}
         />
       </Row>
-      {String(s.lean_approval_mode || "smart") === "autonomous" ? (
-        <div className="st-muted" role="status">
-          Autonomous: desktop control and ordinary commands outside the sandbox run without asking, so long tasks keep going while you're away.
-          Deleting, dangerous commands, sending messages, cloud costs and tasks for other agents are never approved for you: the agent skips them
-          and lists them for you at the end. Permissions, Blocked apps, Private mode and Stop still apply.
-        </div>
-      ) : null}
       <Row label="Separate reader for outside content" help="A web page, email or app result goes first to a reader with no tools, and the agent sees only the facts it found. Lowers the chance hidden instructions work, and tells you when content tried. Costs one extra model call per result.">
         <Segmented
           value={String(s.lean_quarantine_reader || "messages")}

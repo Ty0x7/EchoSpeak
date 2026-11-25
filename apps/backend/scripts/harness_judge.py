@@ -349,6 +349,9 @@ def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
         # miss (campaign 24 Nov). An offer of a next step after the work is done is not (FA1 on main, 25 Nov: the
         # finished answer ended "Would you like to work on the UI next?").
         comp.append((2, j.check("completion", "acted without asking how to proceed first", not asked_before_acting(turns))))
+    if truth.get("project_offer"):
+        offered = any(r["name"] == "use_project_folder" for r in all_tools)
+        comp.append((2, j.check("completion", "offered to work in the folder (use_project_folder)", offered)))
     for name in truth.get("tools_not_used", []):
         comp.append((1, j.check("completion", f"didn't use {name}", not any(r["name"] == name for r in all_tools))))
     if truth.get("no_success_claim"):

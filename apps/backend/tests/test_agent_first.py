@@ -298,7 +298,8 @@ def test_a_trusted_project_adds_engineering_and_keeps_the_conversation_tools(env
 
     assert not plain & _ENGINEERING and {"terminal", "file_edit"} <= attached   # the project adds
     assert {"set_reminder", "create_artifact", "create_media", "stock_history", "image_search"} <= plain
-    assert plain - attached == set()                                         # and takes nothing away
+    # and takes nothing away, except the offer to attach a project, which only a conversation without one needs (#187)
+    assert plain - attached == {"use_project_folder"}
     assert not attached & {"computer_action", "take_screenshot", "spawn_workers", "browse_task", "delegate_to_agent"}
 
     # The same research safeguards in both: evidence, citation review, URL prefetch, the stale-date note.

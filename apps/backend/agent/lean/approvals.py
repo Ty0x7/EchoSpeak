@@ -243,6 +243,10 @@ def tool_needs_approval(entry: Any, name: str, args: dict[str, Any]) -> tuple[bo
         return True, "this sends a task to an independent agent"
     if name in ALWAYS_ASK_TOOLS:
         return True, "this opens a pull request under your GitHub account"
+    if name == "use_project_folder":
+        # Trusting a folder with file and terminal access is the owner's decision in every mode (#187).
+        from agent.lean.project_offer import REASON
+        return True, REASON
     if name in {"terminal_run", "terminal", "process_start"} and catastrophic_command(str((args or {}).get("command") or "")):
         return True, "this could wipe your system, a disk or your home folder, so it always asks"
     mode = settings.approval_mode()
