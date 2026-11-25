@@ -90,3 +90,21 @@ def test_a_builder_asked_to_remember_something_is_offered_memory_save(monkeypatc
     assert "memory_save" in sent("Remember that my build cache key is zebra-164.")
     assert "memory_save" in sent("Please remember: the staging host is vega-12")
     assert "memory_save" not in sent("Fix the failing test in parser.py")
+
+
+def test_a_request_naming_mcp_lists_the_connection_tools():
+    """mcplab, qwen3.5:9b: an MCP request reached find_integrations in 1 of 3 runs while it waited behind find_tools."""
+    from agent.lean.toolbox import NativeTool, Toolbox
+
+    tools = [NativeTool(n, "x", {"type": "object", "properties": {}}, lambda a: "ok") for n in (
+        "find_integrations", "propose_integration", "check_integration", "web_search")]
+    box = Toolbox(toolsets=["none"], extra_tools=tools)
+    box.native = {t.name: t for t in tools}
+    box.focus({"web_search"})
+    assert box.suggest("connect an MCP filesystem server for my notes folder and set it up") == []
+    assert box.list_connection_tools("connect an MCP filesystem server for my notes folder and set it up") == [
+        "find_integrations", "propose_integration", "check_integration"]
+    assert not {"find_integrations", "propose_integration"} & box.deferred
+    box.focus({"web_search"})
+    for unrelated in ("summarise this article about integrating sales teams", "what's the weather", "connect the dots"):
+        assert box.list_connection_tools(unrelated) == [], unrelated

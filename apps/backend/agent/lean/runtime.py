@@ -1239,6 +1239,7 @@ class LeanSession:
             # What the request itself names strongly (agent_sessions for "codex and claude sessions") is listed
             # up front instead of waiting for a find_tools call a small model doesn't think to make.
             toolbox.list_suggested(self._goal(message, task))
+            toolbox.list_connection_tools(message)
         if "memory_save" in toolbox.deferred:
             # "Remember that my build cache key is …" to a builder on a local model: its focus has no memory tools, so
             # Glados said "I've noted that" with nothing saved (live MI1, 18 November 2026), or saved it over her

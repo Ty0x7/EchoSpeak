@@ -42,6 +42,8 @@ ALLOWED = frozenset({
     "memory_save", "memory_search", "chat_search",
     # Skills and connected apps (their actions still ask first)
     "read_skill", "find_integrations", "check_integration", "read_output",
+    # Suggesting a connection only adds a card in Settings; the owner reviews, types any keys and approves there.
+    "propose_integration",
     # Spawned research workers (System B, agent/lean/agent_reach.py): this agent's own task workers, not other agents.
     "spawn_workers",
     # An explicit "tell Jarvis …" from the owner (System C); offered only for such a request.

@@ -576,6 +576,25 @@ class Toolbox:
             self.schema_version += 1
         return found
 
+    # Naming MCP, a connector or an integration is asking about connections (campaign round 3, mcplab).
+    _CONNECT_REQUEST = re.compile(r"(?i)\bmcp\b|\bmodel context protocol\b|\bintegrations?\b|\bconnectors?\b")
+    _CONNECT_TOOLS = ("find_integrations", "propose_integration", "check_integration")
+
+    def list_connection_tools(self, request: str) -> list[str]:
+        """List the connection tools when the request names MCP, a connector or an integration.
+
+        Live (mcplab, qwen3.5:9b, Chat): "connect an MCP filesystem server for my notes folder … set it up" reached
+        find_integrations in 1 of 3 runs; the others searched the web for install steps and suggested nothing.
+        ``suggest`` needs a word of the tool's own name, and nobody says "find integrations".
+        """
+        if not self._CONNECT_REQUEST.search(str(request or "")):
+            return []
+        found = [name for name in self._CONNECT_TOOLS if name in self.deferred]
+        if found:
+            self.deferred.difference_update(found)
+            self.schema_version += 1
+        return found
+
     def _description(self, name: str) -> str:
         tool = self.native.get(name)
         return str(tool.description if tool else getattr(self.entries.get(name), "description", "") or "")

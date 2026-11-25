@@ -238,6 +238,30 @@ GUIDES: list[dict[str, Any]] = [
         "homepage": "https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp/use-the-github-mcp-server",
     },
     {
+        "id": "filesystem",
+        "app": "Files in a folder (MCP filesystem server)",
+        "field": "files in one chosen folder",
+        "keywords": ["filesystem", "file system", "files", "folder", "directory", "notes", "documents"],
+        "publisher": "official (MCP reference servers)",
+        "how": {"kind": "npm", "package": "@modelcontextprotocol/server-filesystem"},
+        "needs": ["Node.js"],
+        "settings": [
+            {"name": "Folder", "kind": "arg", "folder": True, "required": True,
+             "about": "The full path of the one folder it may use, e.g. /home/you/notes. It can't see anything outside it."},
+        ],
+        "steps": ["Type the folder's full path when you approve."],
+        "watch_out": [
+            "It can change and move files in that folder; Echo asks before each change.",
+            "For a project you work on with Echo, attaching it as a project (/project) is simpler and needs no package.",
+        ],
+        "verify": "Ask it to list the files in the folder.",
+        # Its reading tools; anything else (write_file, edit_file, move_file, create_directory) asks first.
+        "capability_policies": {name: "read" for name in (
+            "read_file", "read_text_file", "read_media_file", "read_multiple_files", "list_directory",
+            "list_directory_with_sizes", "directory_tree", "search_files", "get_file_info", "list_allowed_directories")},
+        "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+    },
+    {
         "id": "playwright",
         "app": "Web browser automation (Playwright)",
         "field": "testing and web automation",
@@ -567,7 +591,7 @@ GUIDES: list[dict[str, Any]] = [
 
 # Gallery groups in Settings › Connections (each guide belongs to one).
 CATEGORIES: dict[str, str] = {
-    **{g: "Work and productivity" for g in ("todoist", "notion", "linear", "atlassian", "monday", "airtable", "zapier", "hubspot", "stripe")},
+    **{g: "Work and productivity" for g in ("todoist", "notion", "linear", "atlassian", "monday", "airtable", "zapier", "hubspot", "stripe", "filesystem")},
     **{g: "Code and data" for g in ("github", "sentry", "vercel", "supabase", "context7", "huggingface", "jupyter", "playwright", "rea")},
     **{g: "Creative and media" for g in ("canva", "figma", "blender", "photoshop", "premiere", "obs", "ableton")},
     **{g: "Games and engineering" for g in ("godot", "unreal", "kicad", "autocad")},
