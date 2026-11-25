@@ -46,7 +46,7 @@ export function TerminalView({ apiBase, context, id }: { apiBase: string; contex
     fit.fit(); term.focus();
     return () => { live = false; clearInterval(drain); socket.close(); resize.disconnect(); input.dispose(); term.dispose(); };
   }, [apiBase, id, context.project_id, context.external_session_id]);
-  return <div className="wb-terminal-view"><div className="wb-terminal-screen" ref={host} aria-label="Interactive PowerShell terminal" />
+  return <div className="wb-terminal-view"><div className="wb-terminal-screen" ref={host} aria-label="Interactive terminal" />
     <div className="wb-terminal-status">{state}{error ? <span role="alert"> · {error}</span> : null}</div></div>;
 }
 
@@ -58,12 +58,26 @@ export function TerminalDock({ apiBase, side = false }: { apiBase: string; side?
   const [split, setSplit] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [shells, setShells] = useState<{ id: string; label: string }[] | null>(null);
+  const [shell, setShell] = useState("");
+  useEffect(() => {
+    if (!context.project_id) return;
+    let live = true;
+    request<{ items: { id: string; label: string }[] }>(`${apiBase}/workbench/shells`).then(data => {
+      if (!live) return;
+      setShells(data.items);
+      setShell(value => data.items.some(item => item.id === value) ? value : data.items[0]?.id || "");
+    }).catch(err => { if (live) { setShells([]); setError(err.message); } });
+    return () => { live = false; };
+  }, [apiBase, context.project_id]);
+  const shellLabel = shells?.find(item => item.id === shell)?.label;
+  const canCreate = Boolean(context.project_id && shellLabel && !busy);
   const active = ids.includes(selected) ? selected : ids[ids.length - 1] || "";
   const create = async () => {
     setBusy(true); setError("");
     try {
-      const result = await request<Snapshot>(`${apiBase}/workbench/terminals`, { ...context, rows: 24, cols: 100 });
-      store.addTerminal(result.id, context); if (contextKey(useWorkbench.getState().context) === contextKey(context)) setSelected(result.id);
+      const result = await request<Snapshot & { shell: string }>(`${apiBase}/workbench/terminals`, { ...context, rows: 24, cols: 100, shell });
+      store.addTerminal(result.id, context, result.shell); if (contextKey(useWorkbench.getState().context) === contextKey(context)) setSelected(result.id);
     } catch (err) { setError(err instanceof Error ? err.message : "Could not open terminal"); }
     finally { setBusy(false); }
   };
@@ -74,8 +88,11 @@ export function TerminalDock({ apiBase, side = false }: { apiBase: string; side?
         const target = event.currentTarget; const move = (e: PointerEvent) => store.setBottomHeight(height + start - e.clientY);
         const end = () => { target.removeEventListener("pointermove", move); target.removeEventListener("pointerup", end); target.removeEventListener("pointercancel", end); };
         target.addEventListener("pointermove", move); target.addEventListener("pointerup", end); target.addEventListener("pointercancel", end); }} /> : null}
-    <header><WorkbenchIcon kind="terminal" /><div className="wb-terminal-tabs" role="tablist" aria-label="Terminals">{ids.map((id, index) => <button key={id} role="tab" aria-selected={active === id} onClick={() => setSelected(id)}>Terminal {index + 1}</button>)}</div>
-      <button title="New terminal" aria-label="New terminal" disabled={!context.project_id || busy} onClick={() => void create()}>＋</button>
+    <header><WorkbenchIcon kind="terminal" /><div className="wb-terminal-tabs" role="tablist" aria-label="Terminals">{ids.map((id, index) => <button key={id} role="tab" aria-selected={active === id} onClick={() => setSelected(id)}>{store.terminalLabels[id] || "Terminal"} {index + 1}</button>)}</div>
+      {context.project_id && shells?.length ? <select className="wb-shell-select" aria-label="Terminal shell" title="Shell for the next terminal" value={shell} onChange={event => setShell(event.target.value)}>
+        {shells.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
+      </select> : null}
+      <button title="New terminal" aria-label="New terminal" disabled={!canCreate} onClick={() => void create()}>＋</button>
       <button title="Split terminals" aria-label="Split terminals" aria-pressed={split} disabled={ids.length < 2} onClick={() => setSplit(value => !value)}>◫</button>
       <button title={side ? "Move terminal to bottom" : "Move terminal to side"} aria-label={side ? "Move terminal to bottom" : "Move terminal to side"} onClick={() => {
         if (side) { useWorkbench.setState({ bottomOpen: true }); store.close("terminal"); }
@@ -87,7 +104,8 @@ export function TerminalDock({ apiBase, side = false }: { apiBase: string; side?
     </header>
     {error ? <p role="alert" className="wb-error">{error}</p> : null}
     {ids.length ? <div className={`wb-terminal-panes${split ? " is-split" : ""}`}>{ids.map(id => <div key={id} hidden={id !== active && !(split && id === ids.find(item => item !== active))}>
-      <TerminalView apiBase={apiBase} context={context} id={id} /></div>)}</div> : <div className="wb-empty"><strong>Terminal</strong><p>{context.project_id ? "Open PowerShell in this workspace. Project profiles are not run automatically." : "Choose a project folder to open its terminal."}</p>
-      <button className="es-btn" disabled={!context.project_id || busy} onClick={() => void create()}>Open PowerShell</button></div>}
+      <TerminalView apiBase={apiBase} context={context} id={id} /></div>)}</div> : <div className="wb-empty"><strong>Terminal</strong><p>{!context.project_id ? "Choose a project folder to open its terminal."
+      : shells === null ? "Checking installed shells…" : shells.length ? "Open a shell in this workspace." : "No supported shells found."}</p>
+      {shellLabel ? <button className="es-btn" disabled={!canCreate} onClick={() => void create()}>Open {shellLabel}</button> : null}</div>}
   </section>;
 }

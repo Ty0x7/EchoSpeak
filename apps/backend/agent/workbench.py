@@ -21,6 +21,7 @@ import uuid
 from agent import code_worktree as git_ops, project_workspace, privacy
 from agent.child_env import child_env
 from agent.code_process import RpcProcess
+from agent.workbench_worker import installed_shells
 from agent.lean.policy import redact_payload, redact_secrets
 
 
@@ -61,7 +62,7 @@ class OwnedJob:
             while self.size > 500_000 or len(self.output) > 1000:
                 self.size -= len(self.output.pop(0)["text"])
             self.changed.set()
-        else:
+        elif self.state != "stopping":
             self.state = "exited"
             await self.stop()
         return {}
@@ -85,6 +86,12 @@ class OwnedJob:
 
     async def stop(self, reason="Stopped by owner"):
         if self.rpc:
+            if self.is_terminal and os.name != "nt" and not self.rpc.closed and self.state == "running":
+                self.state = "stopping"
+                try:
+                    await asyncio.wait_for(self.rpc.request("terminal/stop", {}), timeout=2)
+                except (OSError, RuntimeError, asyncio.TimeoutError):
+                    pass
             await self.rpc.close()
         self.state = "stopped"
         self.changed.set()
@@ -279,7 +286,7 @@ class Workbench:
         except (ValueError, OSError):
             git = {"is_git": False, "branch": "", "head": "", "branches": [], "changes": [], "repository": ""}
         return {**context, "git": git, "computer": platform.node(), "system": platform.system(),
-                "scripts": self.load_scripts().get(context["project_id"], []), "terminal_supported": os.name == "nt"}
+                "scripts": self.load_scripts().get(context["project_id"], []), "terminal_supported": bool(installed_shells())}
 
     @staticmethod
     def github_repo(remote):
@@ -398,13 +405,15 @@ class Workbench:
                                     fingerprint=review["fingerprint"], pre_commands=pre_commands)
         return {"output": output, "summary": await self.summary(context)}
 
-    async def terminal_start(self, context, rows, cols):
+    async def terminal_start(self, context, rows, cols, shell=""):
         self.supervisor.admit(); self.validate(context)
         stopped = [key for key, job in self.terminals.items() if job.rpc and job.rpc.closed]
         for key in stopped[:-32]:
             self.terminals.pop(key, None)
-        if os.name != "nt":
-            raise ValueError("The interactive terminal currently requires Windows ConPTY")
+        choices = installed_shells()
+        shell = shell or next(iter(choices), "")
+        if shell not in choices:
+            raise ValueError("The selected terminal shell is not installed")
         if len([job for job in self.terminals.values() if job.rpc and not job.rpc.closed]) >= 8:
             raise ValueError("Close an existing terminal before opening another")
         job = OwnedJob(self, dict(context))
@@ -412,7 +421,7 @@ class Workbench:
         try:
             self.acquire(job)
             job.start()
-            details = await job.rpc.request("terminal/start", {"rows": rows, "cols": cols})
+            details = await job.rpc.request("terminal/start", {"rows": rows, "cols": cols, "shell": shell})
             job.state = "running"
             self.terminals[job.id] = job
             return {**job.public(), **details}

@@ -82,14 +82,21 @@ def apply(request: GitApply):
     return run("apply", request.project_id, request.external_session_id, review_id=request.review_id)
 
 
+@router.get("/shells")
+def terminal_shells():
+    from agent.workbench_worker import installed_shells
+    return {"items": [{"id": key, "label": label} for key, (label, _) in installed_shells().items()]}
+
+
 class TerminalStart(Context):
+    shell: Literal["", "bash", "zsh", "fish", "powershell"] = ""
     rows: int = Field(default=24, ge=5, le=120)
     cols: int = Field(default=100, ge=20, le=300)
 
 
 @router.post("/terminals")
 def terminal_start(request: TerminalStart):
-    return run("terminal_start", request.project_id, request.external_session_id, rows=request.rows, cols=request.cols)
+    return run("terminal_start", request.project_id, request.external_session_id, rows=request.rows, cols=request.cols, shell=request.shell)
 
 
 @router.get("/{project_id}/terminals/{terminal_id}")

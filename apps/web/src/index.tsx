@@ -37,7 +37,7 @@ import { WidgetEnvProvider, type WidgetEnv } from "./widgets/env";
 import { AGENTS_CHANGED } from "./settings/DesktopControlOffer";
 import { COMPOSE_EVENT } from "./widgets/McpAppView";
 import type { ObservationRef } from "./widgets/types";
-import { RightPanel, TERMINAL_TOOLS, clampPanelWidth, collectActivity, lastReplyId, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
+import { RightPanel, CHAT_MIN, RIGHT_PANEL_MIN, TERMINAL_TOOLS, clampPanelWidth, collectActivity, lastReplyId, loadPanelWidth, savePanelWidth, type RightTab } from "./widgets/RightPanel";
 import { liveAudioPlayback, type LiveAudioPacket } from "./liveVoiceTransport";
 import { ArtifactsPage, GroupChatsPage, PageCloseContext, ProjectsPage, RoutinesPage, type ArtifactSummary } from "./lean/Pages";
 import { ProjectWorkspace } from "./projects/ProjectWorkspace";
@@ -137,6 +137,16 @@ export const Dashboard: React.FC<{
   const [rpPeek, setRpPeek] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(() => loadPanelWidth());
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const [shellWidth, setShellWidth] = useState(0);
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const measure = () => setShellWidth(shell.clientWidth);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(shell);
+    return () => observer.disconnect();
+  }, []);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => loadRuntimeLayout(typeof window !== "undefined" ? window.localStorage : null).sidebarCollapsed);
   const [narrowLayout, setNarrowLayout] = useState<boolean>(() => typeof window !== "undefined" && window.innerWidth < 900);
   useEffect(() => {
@@ -774,14 +784,27 @@ export const Dashboard: React.FC<{
   const pinBottomRafRef = useRef(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = textareaRef.current;
-    if (el) {
-      el.style.height = "auto";
-      const nextHeight = Math.min(el.scrollHeight, 156);
-      el.style.height = `${nextHeight}px`;
-      el.style.overflowY = el.scrollHeight > 156 ? "auto" : "hidden";
-    }
+    if (!el) return;
+    const resize = () => {
+      el.style.overflowY = "hidden";
+      el.style.height = "0px";
+      const fullHeight = el.scrollHeight;
+      el.style.height = `${Math.min(fullHeight, 156)}px`;
+      el.toggleAttribute("data-scrollable", fullHeight > 156);
+      if (fullHeight > 156) el.style.overflowY = "auto";
+    };
+    resize();
+    let width = el.getBoundingClientRect().width;
+    const observer = new ResizeObserver(() => {
+      const nextWidth = el.getBoundingClientRect().width;
+      if (nextWidth === width) return;
+      width = nextWidth;
+      resize();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [input, activeThreadId, mainPage, codeConversationOpen]);
 
 
@@ -1633,7 +1656,11 @@ export const Dashboard: React.FC<{
     workbench.setMeter({ session_id: activeThreadId || "", used, window: window_, model: String(providerInfo?.model || "") });
   }, [messages, providerInfo?.context_window, providerInfo?.model, activeThreadId]);
   const rightOpen = !voiceConversationMode && workbench.rightOpen;
-  const rightDocked = rightOpen && !narrowLayout;
+  const sidebarWidthPx = showSidebar ? (sidebarCollapsed || narrowLayout ? 56 : SIDEBAR_WIDTH) : 0;
+  const panelRoom = (shellWidth || window.innerWidth) - sidebarWidthPx;
+  const rightOverlay = narrowLayout || panelRoom < CHAT_MIN + RIGHT_PANEL_MIN;
+  const rightDocked = rightOpen && !rightOverlay;
+  const dockedPanelWidth = clampPanelWidth(panelWidth, panelRoom);
   const shellColumns = [
     desktopMode
       ? [showSidebar ? (sidebarCollapsed || narrowLayout ? "56px" : `${SIDEBAR_WIDTH}px`) : null, "minmax(0, 1fr)"].filter(Boolean).join(" ")
@@ -1643,7 +1670,7 @@ export const Dashboard: React.FC<{
         visualizerVisible: false,
         visualizerDensity: "normal",
       }),
-    rightDocked ? `${panelWidth}px` : "",
+    rightDocked ? `${dockedPanelWidth}px` : "",
   ].filter(Boolean).join(" ");
 
   const threadEnvironment = useCallback((id: string) => environmentOf(threads.find(thread => thread.id === id) || (roomThreadIds.has(id) ? { id } : undefined), roomThreadIds), [threads, roomThreadIds]);
@@ -1729,7 +1756,6 @@ export const Dashboard: React.FC<{
     if (!activeThreadId || environment !== "agents") return;
     try { window.localStorage.setItem("echospeak.agents.last_thread", activeThreadId); } catch { /* per-viewer convenience */ }
   }, [activeThreadId, environment]);
-  const sidebarWidthPx = showSidebar ? (sidebarCollapsed || narrowLayout ? 56 : SIDEBAR_WIDTH) : 0;
   /** Room chat + side panel share (the shell minus the left sidebar). */
   const measurePanelRoom = useCallback(() => {
     const el = shellRef.current;
@@ -1740,13 +1766,6 @@ export const Dashboard: React.FC<{
   useEffect(() => {
     savePanelWidth(panelWidth);
   }, [panelWidth]);
-  useEffect(() => {
-    // Keep the chat usable when the window shrinks.
-    const fit = () => setPanelWidth((w) => clampPanelWidth(w, measurePanelRoom().room));
-    fit();
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
-  }, [measurePanelRoom, rightOpen]);
   const activityItems = useMemo(() => {
     const live = lean.live ? lean.live.order.map((id) => lean.live!.messages[id]) : [];
     return collectActivity([...messages.map((m) => m.lean), ...live]);
@@ -2038,7 +2057,7 @@ export const Dashboard: React.FC<{
           workingSessionIds={inFlightSessionIds}
           onDeleteProject={(id) => void deleteProject(id)}
           onSettings={() => openSettingsAt()}
-          footerExtra={<><div className="wb-sidebar-actions"><button aria-label="Pull requests" title="Pull requests" onClick={() => workbench.open("pull_requests")}><WorkbenchIcon kind="pull_requests" /></button><button aria-label="Usage and limits" title="Usage and limits" onClick={() => workbench.open("usage")}><WorkbenchIcon kind="usage" /></button></div><StopEverythingButton apiBase={apiBase} /></>}
+          footerExtra={<><div className="wb-sidebar-actions"><button aria-label="Pull requests" title="Pull requests" aria-pressed={rightOpen && workbench.active === "pull_requests"} onClick={() => workbench.open("pull_requests")}><WorkbenchIcon kind="pull_requests" /></button><button aria-label="Usage and limits" title="Usage and limits" aria-pressed={rightOpen && workbench.active === "usage"} onClick={() => workbench.open("usage")}><WorkbenchIcon kind="usage" /></button></div><StopEverythingButton apiBase={apiBase} /></>}
           settingsOpen={studioOpen}
           onView={() => {
             setLeftTab("chat");
@@ -2084,10 +2103,10 @@ export const Dashboard: React.FC<{
               setInput(`Read artifact ${id} at version ${version}, then revise it and save a new version. Preserve the original version.${passage ? `\nSelected passage:\n${passage}\n` : "\n"}Changes I'd like: `);
               window.setTimeout(() => textareaRef.current?.focus(), 0);
             }}
-            width={panelWidth}
+            width={dockedPanelWidth}
             onWidth={setPanelWidth}
             measureRoom={measurePanelRoom}
-            overlay={narrowLayout}
+            overlay={rightOverlay}
             onClose={() => {
               useWorkbench.setState({ rightOpen: false });
               setOpenArtifact(null);
@@ -2279,19 +2298,16 @@ export const Dashboard: React.FC<{
                   <PausedNotice apiBase={apiBase} />
                   <SystemCheckNotice apiBase={apiBase} onOpen={() => openSettingsAt("system")} />
                   <ChatThread
-                    contextBar={<div className="ec-conversation-bar">{unifiedLayout ? <><strong className="workspace-breadcrumb">{threads.find(thread => thread.id === activeThreadId)?.name || "New conversation"}</strong><span className="es-identity" aria-label="Who is answering, the model, the project and the approval mode">{conversationIdentity.map(part => <span key={part.key} className={`es-identity-${part.key}`} title={part.hint}>{part.text}</span>)}</span></> : <strong className="workspace-breadcrumb"><span>{mainPage === "code" ? "Code · Echo native" : environment === "agents" ? "Agents" : "Chat"}</span><i aria-hidden>/</i>{threads.find(thread => thread.id === activeThreadId)?.name || "New chat"}</strong>}<div className="workspace-header-actions">{mainPage === "code" ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setCodeConversationOpen(false)}>Workspace</button> : null}{environment === "agents" && activeRoom?.kind === "direct" && roomMembers[0] ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setAgentEditor({ open: true, agent: roomMembers[0] })}>{roomMembers[0].name}'s profile</button> : null}{!rightOpen && !voiceConversationMode && activeThreadId ? (
+                    contextBar={<div className={`ec-conversation-bar${unifiedLayout ? " is-unified" : ""}`}>{unifiedLayout ? <><strong className="workspace-breadcrumb">{threads.find(thread => thread.id === activeThreadId)?.name || "New conversation"}</strong><span className="es-identity" aria-label="Who is answering, the model, the project and the approval mode">{conversationIdentity.map(part => <span key={part.key} className={`es-identity-${part.key}`} title={part.hint}>{part.text}</span>)}</span></> : <strong className="workspace-breadcrumb"><span>{mainPage === "code" ? "Code · Echo native" : environment === "agents" ? "Agents" : "Chat"}</span><i aria-hidden>/</i>{threads.find(thread => thread.id === activeThreadId)?.name || "New chat"}</strong>}<div className="workspace-header-actions">{mainPage === "code" ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setCodeConversationOpen(false)}>Workspace</button> : null}{environment === "agents" && activeRoom?.kind === "direct" && roomMembers[0] ? <button className="es-btn es-btn-quiet es-btn-sm" onClick={() => setAgentEditor({ open: true, agent: roomMembers[0] })}>{roomMembers[0].name}'s profile</button> : null}{!rightOpen && !voiceConversationMode && activeThreadId ? (
                     <button
                       type="button"
                       className="rp-toggle workspace-research-button"
                       aria-label="Research & activity"
-                      onClick={() => {
-                        setActivityOpen(true);
-                        setRightTab("research");
-                      }}
-                      title="Open this chat’s research notebook and activity"
+                      onClick={() => workbench.open("surfaces")}
+                      title="Choose a surface for this conversation"
                     >
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4 12h3l2-6 4 12 2-6h5" /></svg>
-                      Research &amp; activity
+                      <span>Research &amp; activity</span>
                       <small>{activityItems.length}</small>
                     </button>
                   ) : null}</div></div>}

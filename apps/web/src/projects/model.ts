@@ -4,8 +4,11 @@ export type WorkRecord = {
   files_changed: string[]; media: { path: string; caption: string }[]; artifact_ids: string[]; related_records: string[];
   verification: { label: string; result: string; evidence: string }[]; remaining: string[]; imported_at: number; history?: WorkRecord[];
 };
-export type WorkspaceData = {
-  documents: ProjectDocument[]; file_revision: string; scan_limited: boolean; scan_error: string;
+export type ProjectVault = { id?: string; name: string; path: string };
+export type WorkspaceDocuments = {
+  documents: ProjectDocument[]; vaults?: ProjectVault[]; file_revision: string; scan_limited: boolean; scan_error: string;
+};
+export type WorkspaceData = WorkspaceDocuments & {
   project: { id: string; name: string; description: string; workspace_root: string; sharing_enabled: boolean; brief: string };
   records: WorkRecord[]; artifacts: { id: string; title: string; kind: string; versions: number; excerpt: string }[];
   sessions: { id: string; title: string; at: number }[];
@@ -13,7 +16,7 @@ export type WorkspaceData = {
   routines: { id: string; name: string; enabled: boolean; last_result_status: string }[];
   media: { id: string; name: string; media_kind: string; session_id: string }[];
 };
-export type ProjectDocument = { path: string; title: string; kind: "html" | "markdown"; markdown: string; thumbnail: string; size: number; modified_at: number; revision?: string };
+export type ProjectDocument = { path: string; title: string; kind: "html" | "markdown" | "workflow"; markdown: string; thumbnail: string; size: number; modified_at: number; revision?: string };
 export const SECTIONS = ["Work", "Files", "Conversations", "Research", "Routines"] as const;
 export type Section = typeof SECTIONS[number];
 

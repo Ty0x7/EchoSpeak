@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 from pathlib import Path, PureWindowsPath
+from types import SimpleNamespace
 import re
 import time
 from urllib.parse import unquote, urlsplit
@@ -52,7 +53,9 @@ def safe_path(root: Path, relative: str, *, exists: bool = True) -> Path:
     if (not raw or raw.startswith("/") or PureWindowsPath(raw).drive or ":" in raw
             or any(p in {"..", ""} for p in parts) or any(ord(c) < 32 for c in raw)):
         raise ValueError("Use a relative path inside this project")
-    for name in parts:
+    for index, name in enumerate(parts):
+        if index == 0 and parts[:2] == [".github", "workflows"]:
+            continue
         if _private_name(name):
             raise ValueError("Private or generated path is not available in the workspace")
     candidate = root.joinpath(*parts)
@@ -96,13 +99,15 @@ def files(item, relative: str = "") -> list[dict]:
         if index >= 1500:
             break
         rel = child.relative_to(root).as_posix()
+        if not relative and rel == ".github":
+            rel = ".github/workflows"
         try:
             resolved = safe_path(root, rel)
         except (OSError, ValueError):
             continue
         if not resolved.is_dir() and resolved.suffix.lower() not in TEXT | MEDIA:
             continue
-        rows.append({"name": child.name, "path": rel, "directory": child.is_dir(), "size": child.stat().st_size if child.is_file() else 0})
+        rows.append({"name": rel if rel == ".github/workflows" else child.name, "path": rel, "directory": resolved.is_dir(), "size": resolved.stat().st_size if resolved.is_file() else 0})
     return sorted(rows, key=lambda row: (not row["directory"], row["name"].lower()))[:300]
 
 
@@ -162,6 +167,42 @@ def _html_details(content: str, document: str) -> tuple[str, str, set[str]]:
     return " ".join(parser.title.split())[:120], parser.thumbnail, parser.media
 
 
+def _vault_marker(folder: Path) -> bool:
+    marker = folder / ".obsidian"
+    return marker.is_dir() and not marker.is_symlink() and not (hasattr(marker, "is_junction") and marker.is_junction())
+
+
+def connected_vaults(project_id: str, sessions: set[str], only: str = "") -> dict[str, Path]:
+    from agent.connections import ConnectionRegistryError, get_connection_registry
+
+    registry = get_connection_registry()
+    vaults = {}
+    for record in registry.list_unscoped():
+        if (only and record.id != only) or record.provider != "obsidian" or project_id not in record.scope.project_ids:
+            continue
+        session = next((sid for sid in record.scope.session_ids if sid in sessions), "")
+        try:
+            registry.resolve_references([{"connection_id": record.id, "capability_ids": ["vault.read"]}],
+                                        project_id=project_id, session_id=session)
+            configured = str(record.metadata.get("vault_path") or "")
+            if not configured or configured not in record.scope.filesystem_roots:
+                continue
+            path = Path(configured).resolve(strict=True)
+            if str(path) == configured and path.is_dir():
+                vaults[record.id] = path
+        except (ConnectionRegistryError, ValueError, OSError):
+            continue
+    return vaults
+
+
+def vault_source(project_id: str, vault_id: str):
+    project(project_id)
+    path = connected_vaults(project_id, session_ids(project_id), only=vault_id).get(vault_id)
+    if path is None:
+        raise KeyError("Obsidian vault unavailable")
+    return SimpleNamespace(workspace_root=str(path))
+
+
 def discover(item) -> dict:
     """Bounded, deterministic read-only scan, prioritizing conventional folders.
 
@@ -169,16 +210,26 @@ def discover(item) -> dict:
     watcher dependency, LLM invocation or copy into the artifact store.
     """
     if not item.workspace_root:
-        return {"documents": [], "file_revision": "", "scan_limited": False, "scan_error": ""}
+        return {"documents": [], "vaults": [], "file_revision": "", "scan_limited": False, "scan_error": ""}
     try:
         root = root_for(item)
     except (OSError, ValueError) as exc:
-        return {"documents": [], "file_revision": "", "scan_limited": False, "scan_error": str(exc)[:200]}
+        return {"documents": [], "vaults": [], "file_revision": "", "scan_limited": False, "scan_error": str(exc)[:200]}
     started = time.monotonic()
     candidates, fingerprints = [], []
     count = 0
     limited = False
+    vaults = []
+    parent_vault = next((folder for folder in (root, *root.parents) if _vault_marker(folder)), None)
+    if parent_vault:
+        vaults.append({"name": parent_vault.name, "path": ""})
     queue = [(root, 0)]
+    try:
+        workflows = safe_path(root, ".github/workflows")
+        if workflows.is_dir():
+            queue.append((workflows, 2))
+    except (OSError, ValueError):
+        pass
     while queue:
         folder, depth = queue.pop(0)
         if folder != root:
@@ -186,6 +237,8 @@ def discover(item) -> dict:
                 folder = safe_path(root, folder.relative_to(root).as_posix())
             except (OSError, ValueError):
                 continue
+        if folder != root and _vault_marker(folder):
+            vaults.append({"name": folder.name, "path": folder.relative_to(root).as_posix()})
         children = []
         try:
             # DirEntry caches metadata from enumeration on Windows. Avoid
@@ -213,7 +266,8 @@ def discover(item) -> dict:
                         suffix = path.suffix.lower()
                         if suffix not in TEXT | MEDIA: continue
                         fingerprints.append(f"{rel}:{stat.st_mtime_ns}:{stat.st_size}")
-                        if suffix in {".html", ".htm", ".md"}:
+                        workflow = suffix in {".yml", ".yaml"} and any(part.casefold() == "workflows" for part in path.relative_to(root).parts[:-1])
+                        if suffix in {".html", ".htm", ".md"} or workflow:
                             if len(candidates) < SCAN_DOCUMENTS:
                                 candidates.append((rel, suffix, stat))
                             else: limited = True
@@ -231,7 +285,7 @@ def discover(item) -> dict:
     documents, paired = [], set()
     from agent.lean.policy import redact_secrets
     for rel, suffix, stat in sorted(candidates):
-        if suffix == ".md": continue
+        if suffix not in {".html", ".htm"}: continue
         path = Path(rel)
         # Pair exact relative names, never a fuzzy basename from another topic.
         sibling = path.with_suffix(".md").as_posix()
@@ -264,12 +318,12 @@ def discover(item) -> dict:
                           "size": stat.st_size, "modified_at": stat.st_mtime})
         if technical: paired.add(technical)
     for rel, suffix, stat in sorted(candidates):
-        if suffix == ".md" and rel not in paired:
+        if suffix not in {".html", ".htm"} and rel not in paired:
             documents.append({"path": rel, "title": Path(rel).stem.replace("-", " ").replace("_", " "),
-                              "kind": "markdown", "markdown": "", "thumbnail": "",
+                              "kind": "markdown" if suffix == ".md" else "workflow", "markdown": "", "thumbnail": "",
                               "revision": f"{stat.st_mtime_ns}:{stat.st_size}",
                               "size": stat.st_size, "modified_at": stat.st_mtime})
-    return {"documents": documents, "file_revision": revision, "scan_limited": limited, "scan_error": ""}
+    return {"documents": documents, "vaults": vaults, "file_revision": revision, "scan_limited": limited, "scan_error": ""}
 
 
 def document_html(item, document: str, content: str) -> str:
@@ -333,9 +387,18 @@ def overview(project_id: str) -> dict:
     ids = session_ids(project_id)
     earlier_ids = {row.get("artifact_id") for row in item.workspace_records}
     threads = [{"id": t.thread_id, "title": t.title, "at": t.last_active_at} for t in get_thread_manager().list_threads(limit=2000) if t.thread_id in ids]
+    discovery = discover(item)
+    links = connected_vaults(project_id, ids)
+    try:
+        root = root_for(item)
+    except (OSError, ValueError):
+        root = None
+    linked = [{"id": key, "name": path.name, "path": str(path)} for key, path in links.items()
+              if not root or not path.is_relative_to(root) or not _vault_marker(path)]
+    discovery["vaults"].extend(linked)
     return {"project": {"id": item.id, "name": item.name, "description": item.description, "workspace_root": item.workspace_root,
                         "sharing_enabled": item.workspace_sharing_enabled, "brief": str(item.metadata.get("brief") or "")},
-            **discover(item),
+            **discovery,
             "records": [{k: v for k, v in row.items() if k != "history"} for row in sorted(item.workspace_records, key=lambda r: r["imported_at"], reverse=True)],
             "artifacts": [a for a in artifacts.list_all() if artifact_belongs(a, project_id, ids) and a["id"] not in earlier_ids],
             "sessions": threads, "research": item.metadata.get("research_findings", []),
