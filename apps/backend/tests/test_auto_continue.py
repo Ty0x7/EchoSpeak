@@ -159,3 +159,30 @@ def test_helpers_without_auto_continue_get_no_handoff_call():
     turn, _events = _turn(model, max_steps=4, auto=False)
     result = turn.run("Do the ten pieces of work")
     assert len(model.calls) == 4 and result.text.startswith("I haven't finished this yet.")
+
+
+def test_a_handoff_reporting_unfinished_work_as_working_is_withdrawn():
+    """Live PC1/PCH1 (25 November 2026): "The tests pass (12/0 failed)" and "tests are ready" with tests failing."""
+    for claim in ("I fixed the CLI. The tests pass (12/0 failed). Next I'll fix search.",
+                  "The core logic and tests are ready. Next I'll run them.",
+                  "I also confirmed the core implementation looks good; search still needs work."):
+        model, turn, _events = _stalled(ModelTurn(content=claim))
+        result = turn.run("Do the ten pieces of work")
+        assert result.text.startswith("I haven't finished this yet."), claim
+
+
+def test_an_honest_handoff_about_failing_tests_is_kept():
+    honest = ModelTurn(content="I added the CLI, but two tests still fail on search. Next I'll fix search. "
+                               "Say “continue” and I'll pick up from here.")
+    model = Model([_work(i) for i in range(4)] + [honest])
+    turn, _events = _turn(model, max_steps=4, auto=True)          # the work calls succeed (a change was made)
+    turn.auto_continue_limit = 1                                  # but there is no second stretch
+    assert turn.run("Do the ten pieces of work").text.startswith("I added the CLI")
+
+
+def test_the_plain_note_names_files_not_paths():
+    model = Model([ModelTurn(tool_calls=[ToolCall(f"c{i}", "work", json.dumps({"n": i}))]) for i in range(4)])
+    turn, _events = _turn(model, max_steps=4, auto=False)
+    turn.timeline.append({"kind": "tool", "label": "Reading /home/me/.cache/run/heval-PC1/notesapp/storage.py"})
+    note = turn._out_of_steps_note(4)
+    assert "Reading storage.py" in note and "/home/me" not in note

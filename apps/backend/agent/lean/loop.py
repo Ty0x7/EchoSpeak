@@ -263,12 +263,19 @@ REFUSAL_STREAK_NOTE = 3
 # At the step limit, the agent the user talks to hands over in its own words (LeanTurn._handoff_answer).
 HANDOFF_PROMPT = (
     "[EchoSpeak]: This request has used its time for now, and the work isn't finished. Reply now, without tools, "
-    "in two to four short sentences to the user: what you finished (only what tool results showed), what is "
-    "still left, and the next thing you'd do. Don't say it's done or working unless a check showed it. Don't "
-    "mention steps, limits or budgets. End by saying they can tell you to continue.")
-# A handoff that calls unfinished work finished is not used.
-_CLAIMS_DONE = re.compile(r"(?i)\b(?:all\s+done|everything\s+(?:is\s+)?(?:done|complete|finished|working)|"
-                          r"(?:task|work|it)\s+is\s+(?:now\s+)?(?:complete|finished|done))\b")
+    "to the user in two to four short sentences: what you changed (only what tool results showed), what is still "
+    "left or failing, and the next thing you'll do. Don't say that anything works, passes or is ready: it isn't "
+    "finished. Don't ask a question. Don't mention steps, limits or budgets. End with exactly: "
+    "Say “continue” and I'll pick up from here.")
+# A handoff that reports unfinished work as working is not used: the turn stopped before it was done (PC1/PCH1 live,
+# 25 November 2026: "The tests pass (12/0 failed)" and "The core logic and tests are ready" with 5 and 13 failing).
+_CLAIMS_DONE = re.compile(
+    r"(?i)\b(?:all\s+done|everything\s+(?:is\s+)?(?:done|complete|finished|working|works)|"
+    r"(?:task|work|it)\s+is\s+(?:now\s+)?(?:complete|finished|done)|"
+    r"tests?\s+(?:all\s+|now\s+)?pass(?:es|ed|ing)?\b|all\s+(?:the\s+)?tests\s+(?:are\s+)?(?:pass|green)|"
+    r"\d+\s*/\s*0\s+failed|0\s+failed|"
+    r"(?:is|are)\s+(?:now\s+|all\s+)?(?:ready|working|fixed|done)\b|"
+    r"works\s+(?:now|correctly|as\s+expected)|looks\s+good)")
 
 REFUSAL_STOP = 10
 # Screen work that isn't moving. A 4B model on Minecraft's menu took a screenshot seven times
@@ -1194,6 +1201,8 @@ class LeanTurn:
         lines = ["I haven't finished this yet."]
         if done:
             shown = done[-8:]
+            # Paths read as file names: the owner knows the project; a full path in every item is noise.
+            shown = [re.sub(r"(?<![\w.])/?(?:[\w.-]+/)+([\w.-]+)", r"\1", label) for label in shown]
             lines.append("What I did so far: " + "; ".join(shown) + ("; and more." if len(done) > len(shown) else "."))
         lines.append("Say “continue” and I'll pick up from here.")
         self.timeline.append({"kind": "note", "step": 0, "text": f"Stopped at the step limit ({max_steps}).",
