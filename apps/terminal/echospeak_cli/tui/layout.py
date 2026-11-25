@@ -16,8 +16,12 @@ Pure functions only; ``app.py`` asks them what fits.
 from __future__ import annotations
 
 import math
+import re
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass
+
+from prompt_toolkit.utils import get_cwidth
 
 # Width tiers (columns).
 MICRO = 30      # below: only the essentials, no titles or hints
@@ -42,6 +46,118 @@ def tier(width: int) -> str:
 def budget(rows: int) -> int:
     """Rows the live region may use: everything but one, so it never starts at row 0."""
     return max(1, rows - 1)
+
+
+class LiveRegionFit:
+    """Where the inline live region's top row sits, so it grows downward and stays at the bottom once there.
+
+    ``below`` is the number of rows from the region's top row to the terminal's bottom. A cursor
+    report sets it (``reported``). A render taller than that scrolled the terminal, and the region now
+    ends on the bottom row, so ``rendered`` raises it to the rendered height. While the region is
+    shorter than ``below`` it has free rows under it and takes only what its content needs
+    (``floor`` = 0). Once it reaches the bottom it keeps every row down to it (``floor`` = ``below``),
+    so whatever shrinks inside it leaves the composer on the bottom row instead of leaving blank rows
+    beneath it. ``stale`` forgets the position when the region is about to move (output printed above
+    it, a resize) until the next report.
+
+    ``borrowed`` counts committed rows directly above the region's natural top that it is drawn over
+    for the moment (``borrow``); ``give_back`` returns them once they have been written back.
+    """
+
+    def __init__(self) -> None:
+        self.below: int | None = None
+        self.borrowed = 0
+
+    @property
+    def known(self) -> bool:
+        return self.below is not None
+
+    def reported(self, rows_below_cursor: int) -> None:
+        self.below = max(1, rows_below_cursor)
+
+    def stale(self) -> None:
+        self.below = None
+
+    def rendered(self, height: int) -> None:
+        if self.below is not None and height > self.below:
+            self.below = height
+
+    def floor(self, height: int, budget_rows: int) -> int:
+        """Rows the region must keep: all of them down to the bottom once it reaches it, else none."""
+        if self.below is None:
+            return 0
+        bottom = min(self.below, budget_rows)
+        return bottom if height >= bottom else 0
+
+    def borrow(self, rows: int) -> None:
+        self.borrowed += rows
+        if self.below is not None:
+            self.below += rows
+
+    def give_back(self, rows: int) -> None:
+        rows = min(rows, self.borrowed)
+        self.borrowed -= rows
+        if self.below is not None:
+            self.below = max(1, self.below - rows)
+
+
+_ANSI = re.compile(r"\x1b\[[0-9;?:<=>]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>78]")
+
+
+class CommittedRows:
+    """The last rows the TUI printed above the live region, exactly as written, one string per screen row.
+
+    Fed with every chunk the output pump writes (``feed``). A chunk splits into screen rows at each
+    newline as long as every line fits the terminal's width and carries no cursor movement; anything
+    else (a line that wraps, a screen clear, a cursor move) makes the rows before it unknowable, so the
+    record starts over from there. ``last(n)`` returns the last ``n`` complete rows, or ``None`` when
+    fewer are known; ``restore`` turns rows into the bytes that draw them back from the cursor's row.
+    """
+
+    def __init__(self, keep: int = 400) -> None:
+        self.rows: deque[str] = deque(maxlen=keep)
+        self.partial = ""
+
+    def reset(self) -> None:
+        self.rows.clear()
+        self.partial = ""
+
+    @staticmethod
+    def _plain_row(line: str, columns: int) -> bool:
+        for match in _ANSI.finditer(line):
+            seq = match.group(0)
+            if seq.startswith("\x1b[") and seq[-1] != "m":
+                return False          # cursor movement, erase, scroll: not a plain row
+        visible = _ANSI.sub("", line)
+        if "\r" in visible or "\t" in visible or "\b" in visible:
+            return False
+        return get_cwidth(visible) <= columns
+
+    def feed(self, data: str, columns: int) -> None:
+        if not data:
+            return
+        parts = (self.partial + data).split("\n")
+        self.partial = parts.pop()
+        for line in parts:
+            if self._plain_row(line, columns):
+                self.rows.append(line)
+            else:
+                self.rows.clear()
+        if self.partial and not self._plain_row(self.partial, columns):
+            self.rows.clear()
+            self.partial = ""
+
+    def last(self, n: int) -> list[str] | None:
+        if n <= 0:
+            return []
+        if self.partial or n > len(self.rows):
+            return None
+        return list(self.rows)[-n:]
+
+    @staticmethod
+    def restore(rows: list[str]) -> str:
+        """Draw ``rows`` from the cursor's row down, clearing each first; the cursor ends below them."""
+        return "".join("\r\x1b[0m\x1b[2K" + row + "\x1b[0m\r\n" for row in rows)
 
 
 def measure(width: int, env: Mapping[str, str]) -> int:

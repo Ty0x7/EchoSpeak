@@ -138,18 +138,58 @@ def prose_action_confirmation(goal: str, reply: str) -> bool:
                           r"(?:or would you prefer to keep it)?\?", reply, re.I))
 
 
+# Consequential actions, by family: a confirmation counts only when the owner's request used the same family.
+_ACTION_FAMILIES = {
+    "delete": r"delet\w*|remov\w*|eras\w*|wip(?:e|es|ed|ing)\b|clear(?:s|ed|ing)?\b",
+    "overwrite": r"overwrit\w*|replac\w*",
+    "send": r"send\w*|sent\b|e-?mail\w*|messag\w*",
+    "install": r"(?:un)?install\w*",
+    "run": r"run(?:s|ning)?\b|execut\w*",
+    "publish": r"publish\w*|push\w*|deploy\w*|post(?:s|ed|ing)?\b|releas\w*",
+    "move": r"mov(?:e|es|ed|ing)\b|renam\w*",
+}
+_CONFIRM_FRAME = re.compile(
+    r"(?i)^\W*(?:please\s+)?(?:confirm\b|are\s+you\s+sure|proceed\b|go\s+ahead\b|do\s+you\s+want(?:\s+me)?\s+to\b|"
+    r"would\s+you\s+like\s+me\s+to\b|should\s+i\b|shall\s+i\b|can\s+i\b|may\s+i\b|"
+    r"is\s+it\s+(?:ok|okay|alright|fine)\s+(?:to|if)\b|ok(?:ay)?\s+to\b)")
+_YES = re.compile(r"(?i)^\W*(?:yes|yeah|yep|y|ok(?:ay)?|sure|proceed|go\s+ahead|confirm|do\s+it|delete|send|install)\b")
+_NO = re.compile(r"(?i)^\W*(?:no|nope|n|cancel|don'?t|do\s+not|stop|keep|abort|not\s+now)\b")
+_BEYOND = re.compile(r"(?i)\b(?:also|too|as\s+well|additionally|in\s+addition)\b")
+_FILLER = {"the", "a", "an", "my", "your", "this", "that", "these", "those", "all", "of", "for", "me", "now", "go",
+           "ahead", "and", "with", "from", "in", "to", "on", "project", "folder", "file", "files"}
+
+
+def _stem(word: str) -> str:
+    word = word.casefold().strip("`\"'.,:;!?()[]")
+    return word[:-1] if len(word) > 3 and word.endswith("s") and not word.endswith("ss") else word
+
+
 def repeats_action_request(question: str, options: list[str], goal: str) -> bool:
-    """A binary confirmation of the owner's explicit action belongs on the tool's approval card."""
-    choices = [o.strip().casefold() for o in options]
-    if not (any(re.match(r"yes\b", o) for o in choices) and any(re.match(r"no\b", o) for o in choices)):
+    """A yes/no confirmation of an action the owner already asked for belongs on the tool's approval card (#179).
+
+    Refused only when the options are a yes/no pair, the question is framed as a confirmation, it names a
+    consequential action whose family the owner's request also uses, and its object is one the request named
+    (file names included). A question about something beyond the request ("also delete the logs?") or a real
+    choice ("Which file…?") is still asked.
+    """
+    choices = [str(o or "").strip() for o in options]
+    if not (len(choices) <= 3 and any(_YES.match(o) for o in choices) and any(_NO.match(o) for o in choices)):
         return False
-    action = re.fullmatch(r"(?:do you want (?:me )?to|should I|shall I)\s+"
-                          r"((?:delete|remove|overwrite|replace|send|publish|install)\s+[^?]+)\?", question.strip(), re.I)
-    if not action:
+    q = str(question or "").strip()
+    if not (_CONFIRM_FRAME.match(q) or re.search(r"(?i)\bconfirm\b", q)) or _BEYOND.search(q):
         return False
-    requested = goal.strip().casefold().removeprefix("please ")
-    target = action.group(1).casefold().strip()
-    return re.fullmatch(re.escape(target) + r"(?: (?:from|in|under) the project)?[.!]?", requested) is not None
+    wanted = str(goal or "").casefold()
+    family = next((name for name, pattern in _ACTION_FAMILIES.items()
+                   if re.search(rf"(?i)\b(?:{pattern})", q) and re.search(rf"(?i)\b(?:{pattern})", wanted)), "")
+    if not family:
+        return False
+    goal_words = {_stem(w) for w in re.findall(r"[\w./-]+", wanted)}
+    if any(name.casefold() not in wanted for name in re.findall(r"[\w-]+\.[\w]{1,6}\b", q)):
+        return False   # a file the owner didn't name
+    verb = re.search(rf"(?i)\b(?:{_ACTION_FAMILIES[family]})", q)
+    following = [w for w in re.findall(r"[\w./-]+", q[verb.end():]) if _stem(w) not in _FILLER]
+    obj = _stem(following[0]) if following else "it"
+    return obj in {"it", "them", "that", "this"} or obj in goal_words
 
 
 def permission_refusal(off: str) -> str:

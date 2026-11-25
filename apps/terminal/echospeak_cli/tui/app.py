@@ -309,6 +309,11 @@ class EchoTUI:
         self.changes: list[DV.Change] = []     # file changes seen in this terminal (fallback for /diff)
         self.preview_pane = ""                  # tmux pane id of the /preview companion
         self.project_root = ""
+        # The project this terminal works in (its start folder, /project, or the folder question): a new
+        # conversation (/new, /clear) belongs to it even after switching to a session that has none, so it
+        # keeps file and terminal tools (unified mode gives a conversation without a project only Chat).
+        # None: not worked out yet; "": none (the folder isn't a trusted project, or /project - detached it).
+        self.home_project_id: Optional[str] = None
         self._diff_cache: dict = {}
         self.notice = ("", 0.0)
         self.ctrl_c_at = 0.0
@@ -326,6 +331,8 @@ class EchoTUI:
         self._out: list[str] = []
         self._tail = "\n\n"
         self._out_event: Optional[asyncio.Event] = None
+        self._fit = L.LiveRegionFit()            # where the live region sits (_fit_live_region)
+        self._committed = L.CommittedRows()      # the last committed screen rows, to draw back over
         self._events: Optional[asyncio.Queue] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._plan_cache: Optional[tuple[tuple[int, int], dict[str, int]]] = None
@@ -488,34 +495,88 @@ class EchoTUI:
         self._reflow_on_resize(app)
         return app
 
-    @staticmethod
-    def _fit_live_region(app: Application) -> None:
-        """Keep available terminal height, with spare rows above the live conversation.
+    def _fit_live_region(self, app: Application) -> None:
+        """Size the live region from the top down, and keep the composer at the bottom once it gets there.
 
-        CPR reports the space below the scrollback cursor. Preserve it so a short conversation
-        already has its input at the bottom; reserve row zero for the inline resize/scrollback rule.
+        A conversation with free rows below it grows downward: the region is as tall as its content,
+        so a new answer streams right under the question and stays where it was drawn when it is
+        committed. Once the region reaches the terminal's bottom row, it keeps every row down to the
+        bottom, so the composer stays there when something shrinks. Row zero stays reserved for the
+        inline resize/scrollback rule (layout.budget).
+
+        A region already at the bottom that grows for something passing (the slash menu, the
+        shortcuts) borrows the rows above it instead of scrolling the terminal: it is drawn
+        over the last committed lines, which are written back from ``_committed`` when it shrinks
+        again or before the next output is printed. Nothing scrolls, so closing the menu leaves no
+        blank rows above or below the composer. When those lines aren't known exactly (a resize,
+        a line wider than the terminal), the region grows and scrolls as before.
+
+        prompt_toolkit only knows the rows below the region from a cursor-position report, forgets
+        them on every erase, and never learns that a taller render scrolled the terminal; ``_fit``
+        tracks them here (layout.LiveRegionFit).
         """
         renderer = app.renderer
         original = renderer.report_absolute_cursor_row
+        fit = self._fit
 
         def report(row: int) -> None:
             original(row)
-            renderer._min_available_height = min(renderer._min_available_height, L.budget(app.output.get_size().rows))
+            fit.reported(renderer._min_available_height)
+            last = renderer._last_screen
+            renderer._min_available_height = max(1, fit.floor(last.height if last else 0,
+                                                              L.budget(app.output.get_size().rows)))
 
         renderer.report_absolute_cursor_row = report
+        request = renderer.request_absolute_cursor_position
+
+        def request_position() -> None:
+            fit.stale()   # the region is about to be drawn somewhere new; wait for its report
+            request()
+
+        renderer.request_absolute_cursor_position = request_position
 
         def before_render(_app) -> None:
             last = renderer._last_screen
-            if last is None:
+            if last is None or not fit.known:
                 return
             size = app.output.get_size()
-            renderer._min_available_height = min(renderer._min_available_height, L.budget(size.rows))
-            want = min(L.budget(size.rows), max(renderer._min_available_height,
-                       app.layout.container.preferred_height(size.columns, size.rows).preferred))
-            if want < last.height:
+            budget = L.budget(size.rows)
+            preferred = min(budget, app.layout.container.preferred_height(size.columns, size.rows).preferred)
+            floor = fit.floor(last.height, budget)
+            out = app.output
+            if floor and preferred > fit.below and self._overlay_open():
+                extra = preferred - fit.below
+                if size.rows - fit.below - extra >= 1 and self._committed.last(fit.borrowed + extra) is not None:
+                    renderer.erase(leave_alternate_screen=False)   # cursor at the region's top, renderer reset
+                    out.cursor_up(extra)
+                    out.flush()
+                    fit.borrow(extra)
+            elif fit.borrowed and preferred < fit.below:
+                give = min(fit.borrowed, fit.below - preferred)
                 renderer.erase(leave_alternate_screen=False)
+                out.write_raw(self._committed.restore(self._committed.last(fit.borrowed)[:give]))
+                out.flush()
+                fit.give_back(give)
+            want = min(budget, max(preferred, fit.floor(last.height, budget)))
+            if renderer._last_screen is not None and want < renderer._last_screen.height:
+                renderer.erase(leave_alternate_screen=False)   # resets the renderer, keeping the region's top
+            renderer._min_available_height = max(1, want)
+
+        def after_render(_app) -> None:
+            last = renderer._last_screen
+            if last is not None and fit.known:
+                fit.rendered(last.height)
 
         app.before_render += before_render
+        app.after_render += after_render
+
+    def _overlay_open(self) -> bool:
+        """The slash menu or the shortcuts are open: passing lists that may draw over committed rows.
+
+        Dialogs (an approval, a question) and the session browser are not: the conversation right
+        above an approval is what it is about, so those still push the conversation up.
+        """
+        return self.dialog is None and self.browser is None and (self._rows("menu") > 0 or self._rows("shortcuts") > 0)
 
     def _reflow_on_resize(self, app: Application) -> None:
         """Erase the old live region correctly when the terminal narrows (layout.reflowed_rows_above).
@@ -540,6 +601,9 @@ class EchoTUI:
             output.erase_down = erase_lines
 
         def on_resize() -> None:
+            # The terminal re-wraps what is on screen: rows drawn over can't be written back exactly.
+            self._fit.borrowed = 0
+            self._committed.reset()
             last = renderer._last_screen
             old = renderer._last_size
             new = app.output.get_size()
@@ -2189,9 +2253,37 @@ class EchoTUI:
     async def cmd_quit(self, args) -> None:
         self.app.exit()
 
+    async def _home_project(self) -> str:
+        """The trusted project this terminal works in, or "" (worked out once from the start folder)."""
+        if self.home_project_id is None:
+            pid = ""
+            try:
+                if self.start_project:
+                    project = self.start_project
+                    pid = await self.call(self.core.project_for_path, project, False) \
+                        if (os.sep in project or Path(project).is_dir()) else project
+                else:
+                    found = await self.call(self.core.project_for_path, os.getcwd(), False)
+                    if found:
+                        body = await self.call(self.client.get, "/projects/" + found)
+                        pid = found if str(body.get("trust_state") or "") == "trusted" else ""
+            except (ApiError, ConnectError, LookupError):
+                return ""   # unknown for now; try again next time
+            self.home_project_id = str(pid or "")
+        return self.home_project_id
+
+    async def _back_to_home_project(self) -> None:
+        """A new conversation starts in the terminal's own project, not the one last switched to."""
+        home = await self._home_project()
+        if home and home != self.core.project_id:
+            self.core.project_id = home
+            self.project_name = await self._project_name(home)
+            self.note(f"project {self.project_name} · this folder's project, for the new session")
+
     async def cmd_clear(self, args) -> None:
         self.core.session = None
         self.context = None
+        await self._back_to_home_project()
         self._out.append("\x1b[2J\x1b[H")
         if self._out_event:
             self._out_event.set()
@@ -2203,6 +2295,7 @@ class EchoTUI:
             await self._set_agent(args[args.index("--agent") + 1], announce=False)
         self.core.session = None
         self.context = None
+        await self._back_to_home_project()
         who = self.agent_name
         self.emit(B.RuleLine(f"New session with {who}" if self.core.agent_id else "New session"))
         self.app.invalidate()
@@ -2439,6 +2532,7 @@ class EchoTUI:
             if self.sid:
                 await self.call(self.client.request, "POST", "/projects/deactivate", None, {"thread_id": self.sid})
             self.core.project_id, self.project_name = "", ""
+            self.home_project_id = ""
             self.note("project detached from this session")
             self.app.invalidate()
             return
@@ -2473,6 +2567,7 @@ class EchoTUI:
         if self.sid and not activated:
             await self.call(self.client.request, "POST", f"/projects/{pid}/activate", None, {"thread_id": self.sid})
         self.core.project_id = pid
+        self.home_project_id = pid
         self.project_name = one_line(project.get("name") or "", 40)
         self.project_root = str(project.get("workspace_root") or "")
         trust = str(project.get("trust_state") or "")
@@ -3286,8 +3381,13 @@ class EchoTUI:
             self._out.clear()
             async with in_terminal():
                 out = self.app.output
+                if self._fit.borrowed:
+                    # The region was drawn over the last committed lines; put them back first.
+                    out.write_raw(self._committed.restore(self._committed.last(self._fit.borrowed) or []))
+                    self._fit.give_back(self._fit.borrowed)
                 out.write_raw(data)
                 out.flush()
+                self._committed.feed(data, out.get_size().columns)
                 hooks, self._after_flush = self._after_flush, []
                 for hook in hooks:
                     hook()

@@ -152,9 +152,17 @@ VERIFICATION = {
 }
 VERIFIED = {"verified", "checks pass"}
 
+# How a run's stop reason reads under the answer. Reasons the answer or another line already explains (a claim note,
+# a refusal note, the handoff at the step limit) say nothing more; unknown ones show only in verbose mode.
+STOP_WORDS = {
+    "model_repetition": "started repeating itself, so it was stopped",
+    "no_answer": "ended without an answer",
+}
+UNFINISHED = "Not finished · say “continue” to pick up where it left off"
+
 
 def outcome_blocks(*, outcome: Optional[dict], work: Optional[dict], journal: str, success: Optional[bool],
-                   error: str, caps_glyphs, denied: bool = False) -> list[B.Block]:
+                   error: str, caps_glyphs, denied: bool = False, unfinished: bool = False) -> list[B.Block]:
     """The end of a run, stated explicitly. A tool ✓ never implies Done; only the outcome + verification do."""
     g = caps_glyphs
     verification = str((work or {}).get("verification") or "").strip().lower()
@@ -167,6 +175,8 @@ def outcome_blocks(*, outcome: Optional[dict], work: Optional[dict], journal: st
         return [B.Outcome(g.denied, "Stopped: you denied a step it needed", "bold")]
     if journal == "failed" or (success is False and not outcome):
         return [B.Outcome(g.fail, "The run failed" + (f": {one_line(plain_error(error), 300)}" if error else ""), "error")]
+    if unfinished:
+        return [B.Outcome(g.unverified, UNFINISHED, "", label)]
     if outcome and outcome.get("status") == "done":
         summary = one_line(outcome.get("summary") or "Finished.", 400)
         if verified:
@@ -248,6 +258,7 @@ class Run:
         self.tokens = 0
         self.context: Optional[tuple[int, int]] = None
         self.outcome: Optional[dict] = None
+        self.unfinished = False       # the run reached its limit before the work was done
         self.work: Optional[dict] = None
         self.success: Optional[bool] = None
         self.error = ""
@@ -447,10 +458,12 @@ class Run:
             return [B.Note(g.handoff, f"{one_line(evt.get('from'), 40)} handed work to {one_line(evt.get('to'), 40)}: "
                                       f"{one_line(evt.get('task'), 300)}", "dim", 0)]
         if kind == "context_compacted":
-            return [B.RuleLine("Earlier steps summarized to fit the context window")]
+            # Echo manages its own context; the owner sees it in verbose mode and the transcript.
+            return [B.Note("·", "Earlier steps summarized to fit the context window", "dim", 2)] if self.verbose else []
         if kind == "auto_continue":
-            # Past the step limit while still making progress: carried on without asking for "Continue".
-            return [B.RuleLine(f"Kept going: still making progress (limit now {one_line(evt.get('limit'), 6)} steps)")]
+            # Past the step limit while still making progress: carried on without asking. Internal (verbose only).
+            return ([B.Note("·", f"Kept going: still making progress (limit now {one_line(evt.get('limit'), 6)} steps)",
+                            "dim", 2)] if self.verbose else [])
         if kind == "answer_note" and str(evt.get("verification") or "").lower() == "blocked" \
                 and any(d in {"deny", "timeout", "cancelled"} for d in self.decisions.values()):
             return []   # the ⊘ line already says you denied it; the outcome line says Blocked
@@ -506,8 +519,13 @@ class Run:
             m.status = "failed" if evt.get("success") is False and evt.get("error") else "done"
             stop = str(evt.get("stop_reason") or "")
             if stop not in NORMAL_STOPS:
-                words = {"max_steps": "stopped at the step limit before finishing"}.get(stop, f"stopped: {one_line(stop, 60)}")
-                out.append(B.Note("!", f"{m.name} {words}", "bold", 2))
+                if stop == "max_steps":
+                    self.unfinished = True    # said once, in plain words, by the outcome line
+                words = STOP_WORDS.get(stop, "")
+                if words:
+                    out.append(B.Note("!", f"{m.name} {words}", "bold", 2))
+                elif self.verbose:
+                    out.append(B.Note("·", f"stop reason: {one_line(stop, 60)}", "dim", 2))
             err = one_line(plain_error(evt.get("error")), 400)
             if evt.get("success") is False and err and not cancelled and err[:60] not in one_line(m.md.total, 4000):
                 out.append(B.Note(g.fail, err, "error", 2))
@@ -686,7 +704,7 @@ class Run:
                 out += self._end_thinking(m, now) + self._flush_text(m)
         out += outcome_blocks(outcome=self.outcome, work=self.work, journal=journal, success=self.success,
                               error=self.error, caps_glyphs=self.g,
-                              denied=any(d == "deny" for d in self.decisions.values()))
+                              denied=any(d == "deny" for d in self.decisions.values()), unfinished=self.unfinished)
         elapsed = fmt_elapsed(now - self.started)
         summary = " · ".join(x for x in (steps_summary(self.finished_tools),
                                          f"{self.denied_steps} denied" if self.denied_steps else "") if x)

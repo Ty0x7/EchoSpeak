@@ -49,3 +49,61 @@ def test_terminal_reflow_guess():
     assert not L.terminal_reflows({"TERM": "linux"})
     assert not L.terminal_reflows({"TERM": "xterm-ghostty", "ECHO_TUI_REFLOW": "0"})
     assert L.terminal_reflows({"TERM": "linux", "ECHO_TUI_REFLOW": "1"})
+
+
+# ── live region fit (top-anchored growth, bottom pin, borrowed rows) ──────────
+def test_fit_unpinned_while_rows_remain_below():
+    fit = L.LiveRegionFit()
+    assert fit.floor(5, 23) == 0          # unknown position: no floor
+    fit.reported(20)
+    assert fit.floor(5, 23) == 0          # 15 free rows under the region
+    fit.rendered(5)
+    assert fit.below == 20
+
+
+def test_fit_pins_once_the_region_reaches_the_bottom():
+    fit = L.LiveRegionFit()
+    fit.reported(4)
+    fit.rendered(12)                      # a taller render scrolled the terminal
+    assert fit.below == 12
+    assert fit.floor(12, 31) == 12        # keeps every row down to the bottom when content shrinks
+    fit.stale()
+    assert not fit.known and fit.floor(12, 31) == 0
+
+
+def test_fit_borrow_and_give_back_move_the_top():
+    fit = L.LiveRegionFit()
+    fit.reported(4)
+    fit.borrow(8)
+    assert (fit.below, fit.borrowed) == (12, 8)
+    fit.give_back(5)
+    assert (fit.below, fit.borrowed) == (7, 3)
+    fit.give_back(10)
+    assert (fit.below, fit.borrowed) == (4, 0)
+
+
+def test_committed_rows_keep_plain_rows_exactly():
+    rows = L.CommittedRows()
+    rows.feed("\x1b[1mhello\x1b[0m\nworld\n", 20)
+    rows.feed("\x1b]8;;https://x\x1b\\link\x1b]8;;\x1b\\\n", 20)
+    assert rows.last(3) == ["\x1b[1mhello\x1b[0m", "world", "\x1b]8;;https://x\x1b\\link\x1b]8;;\x1b\\"]
+    assert rows.last(4) is None
+    assert rows.last(0) == []
+
+
+def test_committed_rows_forget_what_they_cannot_place():
+    rows = L.CommittedRows()
+    rows.feed("a\nb\n", 10)
+    rows.feed("x" * 11 + "\n", 10)        # wraps: the rows above it no longer line up
+    assert rows.last(1) is None
+    rows.feed("c\n\x1b[2J\x1b[Hd\ne\n", 10)
+    assert rows.last(1) == ["e"] and rows.last(2) is None   # the clearing row itself is dropped too
+    rows.feed("half", 10)                 # the cursor is mid-row: nothing can be drawn back yet
+    assert rows.last(1) is None
+    rows.feed(" done\n", 10)
+    assert rows.last(1) == ["half done"]
+
+
+def test_committed_rows_restore_clears_each_row_first():
+    out = L.CommittedRows.restore(["one", "two"])
+    assert out == "\r\x1b[0m\x1b[2Kone\x1b[0m\r\n\r\x1b[0m\x1b[2Ktwo\x1b[0m\r\n"
