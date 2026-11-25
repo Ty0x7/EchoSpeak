@@ -261,6 +261,23 @@ FAIL_STREAK_NOTE = 3
 # after a "no" is a known failure mode; Claude Code (3 in a row / 20) and Codex auto-review
 # (3 in a row / 10 of 50) both stop and return control.
 REFUSAL_STREAK_NOTE = 3
+# At the step limit, the agent the user talks to hands over in its own words (LeanTurn._handoff_answer).
+HANDOFF_PROMPT = (
+    "[EchoSpeak]: This request has used its time for now, and the work isn't finished. Reply now, without tools, "
+    "to the user in two to four short sentences: what you changed (only what tool results showed), what is still "
+    "left or failing, and the next thing you'll do. Don't say that anything works, passes or is ready: it isn't "
+    "finished. Don't ask a question. Don't mention steps, limits or budgets. End with exactly: "
+    "Say “continue” and I'll pick up from here.")
+# A handoff that reports unfinished work as working is not used: the turn stopped before it was done (PC1/PCH1 live,
+# 25 November 2026: "The tests pass (12/0 failed)" and "The core logic and tests are ready" with 5 and 13 failing).
+_CLAIMS_DONE = re.compile(
+    r"(?i)\b(?:all\s+done|everything\s+(?:is\s+)?(?:done|complete|finished|working|works)|"
+    r"(?:task|work|it)\s+is\s+(?:now\s+)?(?:complete|finished|done)|"
+    r"tests?\s+(?:all\s+|now\s+)?pass(?:es|ed|ing)?\b|all\s+(?:the\s+)?tests\s+(?:are\s+)?(?:pass|green)|"
+    r"\d+\s*/\s*0\s+failed|0\s+failed|"
+    r"(?:is|are)\s+(?:now\s+|all\s+)?(?:ready|working|fixed|done)\b|"
+    r"works\s+(?:now|correctly|as\s+expected)|looks\s+good)")
+
 REFUSAL_STOP = 10
 # Screen work that isn't moving. A 4B model on Minecraft's menu took a screenshot seven times
 # in ten minutes and never clicked: every look "worked", and the animated menu made each image
@@ -1072,6 +1089,9 @@ class LeanTurn:
             total = max_steps + self._extended
             limited = self._steps_allowed(total) < total
             grace = self._grace_answer(messages, step + 1) if getattr(self, "final_grace", False) or limited else ""
+            if not grace and self.auto_continue and self.promise_guard and not self.cancel.is_set():
+                # The agent the user talks to says where things stand in its own words, held to the same claim checks.
+                grace = self._handoff_answer(messages, step + 1)
             if grace:
                 final_text = grace
             else:
@@ -1178,14 +1198,40 @@ class LeanTurn:
         return None
 
     def _out_of_steps_note(self, max_steps: int) -> str:
+        """Where an unfinished turn stands, in plain words (the step count stays in the record, not the reply)."""
         done = [str(item.get("label") or item.get("name") or "") for item in self.timeline if item.get("kind") == "tool"]
         done = [label for label in dict.fromkeys(done) if label]
-        lines = [f"I ran out of steps ({max_steps}) before finishing."]
+        lines = ["I haven't finished this yet."]
         if done:
             shown = done[-8:]
-            lines.append("So far I: " + "; ".join(shown) + ("; and more." if len(done) > len(shown) else "."))
-        lines.append("Press Continue and I'll pick up where I left off.")
+            # Paths read as file names: the owner knows the project; a full path in every item is noise.
+            shown = [re.sub(r"(?<![\w.])/?(?:[\w.-]+/)+([\w.-]+)", r"\1", label) for label in shown]
+            lines.append("What I did so far: " + "; ".join(shown) + ("; and more." if len(done) > len(shown) else "."))
+        lines.append("Say “continue” and I'll pick up from here.")
+        self.timeline.append({"kind": "note", "step": 0, "text": f"Stopped at the step limit ({max_steps}).",
+                              "at": time.time()})
         return "\n\n".join(lines)
+
+    def _handoff_answer(self, messages: list[dict[str, Any]], step: int) -> str:
+        """At the step limit: one tool-free reply saying what is done, what is left and what comes next, or ''.
+
+        The owner asked for a natural account of unfinished work instead of "Stopped at step limit"
+        (campaign 24 November 2026). The reply is held to the same checks as any answer: if it claims a
+        change no tool made or calls the work done, it is taken back and the plain note is used.
+        """
+        saved = self.grace_prompt
+        self.grace_prompt = HANDOFF_PROMPT
+        try:
+            text = self._grace_answer(messages, step)
+        finally:
+            self.grace_prompt = saved
+        if not text:
+            return ""
+        if unbacked_claim(text, self.succeeded) or unbacked_file_claim(text, self._written) or _CLAIMS_DONE.search(text):
+            self._retract_text(step)
+            self.emit({"type": "claim_nudge", "step": step, "claim": "handoff withdrawn"})
+            return ""
+        return text
 
     # ── model ───────────────────────────────────────────────────────────
     def _call_model(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], step: int) -> ModelTurn:

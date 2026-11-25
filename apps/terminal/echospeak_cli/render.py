@@ -277,8 +277,11 @@ class Renderer:
                 self.mid_line = False
             self.current = ""
             stop = str(evt.get("stop_reason") or "")
-            if stop not in NORMAL_STOPS:
-                out += self._line(self.s.yellow(f"  stopped: {one_line(stop, 60)}"))
+            if stop == "max_steps":
+                out += self._line(self.s.yellow("  not finished · say “continue” to pick up where it left off"))
+            elif stop in {"model_repetition", "no_answer"}:
+                out += self._line(self.s.yellow("  " + {"model_repetition": "stopped: it started repeating itself",
+                                                         "no_answer": "ended without an answer"}[stop]))
             if evt.get("success") is False and evt.get("error"):
                 out += self._line(self.s.red(f"  error: {one_line(evt.get('error'), 300)}"))
             return out

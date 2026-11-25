@@ -58,7 +58,7 @@ def test_tools_reasoning_outcome_and_stop_reason():
     assert "  ✓ Searched cats · 14 results (1.2s)" in lines
     assert "  ✗ Running ls · boom line2 (50ms)" in lines
     assert any("summarized" in l for l in lines)
-    assert "Done" in lines and "  stopped: max_steps" in lines
+    assert "Done" in lines and "  not finished · say “continue” to pick up where it left off" in lines
     assert lines[-1] == "■ outcome: stopped — you stopped it"
     _, shown = render(events, show_thinking=True)
     assert "secret plan more" in shown

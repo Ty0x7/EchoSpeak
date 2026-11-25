@@ -548,8 +548,8 @@ def test_step_limit_stops_honestly_without_an_extra_model_call(monkeypatch):
     result = _turn(client, _toolbox({"lookup": lambda args: "ok"}), events).run("big job")
     assert len(client.calls) == 2  # no forced third call
     assert result.stop_reason == "max_steps"
-    assert result.text.startswith("I ran out of steps (2) before finishing.")
-    assert "Press Continue" in result.text
+    assert result.text.startswith("I haven't finished this yet.")
+    assert "continue" in result.text and "step" not in result.text.lower()
     assert events[-1]["type"] == "agent_done" and events[-1]["stop_reason"] == "max_steps"
 
 
