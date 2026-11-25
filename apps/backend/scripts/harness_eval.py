@@ -999,6 +999,14 @@ def setup_tasks_todo(p: Path) -> dict[str, Any]:
             "allowed_extensions": [".py", ".md", ".json", ".txt"]}
 
 
+def setup_pong_folder(p: Path) -> dict[str, Any]:
+    """PA1: the FA1 game, but the conversation has no project: the folder is only named in the request."""
+    truth = setup_pong_todo(p)
+    truth.pop("no_question", None)
+    return {**truth, "vars": {"folder": str(p)}, "asked_question": False, "tools_not_used": ["create_artifact"],
+            "project_offer": True}
+
+
 FAIL_DEV = [
     Case("FC1", "A config typo behind a raw traceback; fix the config, not the code", "recovery-config",
          [Turn("app.py crashes when I start it. Get it running without changing the code, and tell me the port it "
@@ -1006,6 +1014,10 @@ FAIL_DEV = [
     Case("FA1", "'Continue development' on a game, with the next step in TODO.md", "autonomy",
          [Turn("can we continue development on this game? do whats next on the todo and use tests",
                answer="yes, go ahead, just do it")], setup_pong_todo, ideal_calls=8),
+    # Owner decision on #187: Chat without a project offers to work in the folder instead of writing artifacts.
+    Case("PA1", "'Continue development' named by folder in a chat without a project", "project-offer",
+         [Turn("can we continue development on the game in {folder}? do whats next on the todo and use tests",
+               answer="yes, go ahead")], setup_pong_folder, ideal_calls=10, attach=False),
 ]
 FAIL_HELDOUT = [
     Case("FCH1", "A JSON typo behind a misleading error message (held-out)", "recovery-config",
@@ -1396,6 +1408,20 @@ def run_case(stack: Stack, case: Case, run_dir: Path) -> dict[str, Any]:
             mark = len(events)
             follow = run_turn(stack, thread_id, Turn(turn.answer, turn.approvals, turn.timeout), events, readable)
             follow.update(thread_id=thread_id, events=events[mark:], simulated_owner_reply=True)
+            turns.append(follow)
+        for _ in range(3):
+            # A follow-up the backend queued (a late steer, an approved project's continuation) runs next, as the
+            # terminal and the desktop app do (POST /query/queue/claim after a completed turn).
+            try:
+                claimed = stack.api.call("POST", f"/query/queue/claim?thread_id={urllib.parse.quote(thread_id)}", {})
+            except Exception:  # noqa: BLE001 - nothing to claim, or the turn is still finishing
+                break
+            message = str(((claimed or {}).get("item") or {}).get("message") or "").strip()
+            if not (claimed or {}).get("claimed") or not message:
+                break
+            mark = len(events)
+            follow = run_turn(stack, thread_id, Turn(message, turn.approvals, turn.timeout), events, readable)
+            follow.update(thread_id=thread_id, events=events[mark:], queued_follow_up=True)
             turns.append(follow)
     since, until = turns[0]["started"], turns[-1]["ended"]
     traces = []

@@ -111,9 +111,9 @@ export async function loadAssistantMode(apiBase: string, fetcher: Fetcher): Prom
 
 export const APPROVAL_LABEL: Record<string, string> = {
   smart: "Ask for risky actions",
-  autonomous: "Autonomous",
-  always: "Ask before every action",
-  never: "Never ask",
+  autonomous: "Work independently",
+  always: "Ask first",
+  never: "Don't ask",
 };
 
 /**

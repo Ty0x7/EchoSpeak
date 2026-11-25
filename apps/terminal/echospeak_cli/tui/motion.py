@@ -278,15 +278,15 @@ class FooterInput:
 
 MODE_LABEL = {
     "smart": "ask for risky actions",
-    "autonomous": "autonomous",
-    "always": "ask before every action",
-    "never": "never ask",
+    "autonomous": "work independently",
+    "always": "ask first",
+    "never": "don't ask",
 }
-MODE_SHORT = {"smart": "ask if risky", "autonomous": "auto", "always": "ask always", "never": "never ask"}
+MODE_SHORT = {"smart": "ask if risky", "autonomous": "indep.", "always": "ask first", "never": "don't ask"}
 MODE_LINE = {
-    "autonomous": "autonomous: routine approvals won't interrupt",
-    "always": "always ask: every action waits for your OK",
-    "never": "never ask: actions run without approval",
+    "autonomous": "work independently: routine steps won't interrupt",
+    "always": "ask first: every action waits for your OK",
+    "never": "don't ask: actions run without approval",
 }
 MODE_LINE_MIN_W = 30
 CONTEXT_BOLD = 85

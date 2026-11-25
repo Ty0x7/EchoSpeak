@@ -79,6 +79,19 @@ export function AdvancedSection(props: {
 function AdvancedSettings({ s, save }: { s: SettingsMap; save: Save }) {
   return (
     <>
+      <Group title="Assistant" description="How conversations are organised.">
+        <Row label="Assistant mode" help="Unified: one Echo for chat and code; attaching a trusted project to a conversation gives Echo file and terminal tools there. Environments: the classic separate Chat, Code and Agents areas (legacy).">
+          <Segmented
+            value={String(s.assistant_mode || "unified")}
+            onChange={(v) => save({ assistant_mode: v })}
+            options={[
+              { value: "unified", label: "Unified", hint: "Recommended" },
+              { value: "environments", label: "Environments (legacy)" },
+            ]}
+          />
+        </Row>
+      </Group>
+
       <Group title="Models" description="Rarely needed. Chat models are chosen in Models.">
         <Row label="LM Studio only" help="Every chat uses LM Studio, whatever a chat had selected.">
           <Toggle checked={asBool(s.lm_studio_only)} onChange={(v) => save({ lm_studio_only: v })} label="LM Studio only" />

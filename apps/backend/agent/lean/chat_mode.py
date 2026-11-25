@@ -46,6 +46,8 @@ ALLOWED = frozenset({
     "spawn_workers",
     # An explicit "tell Jarvis …" from the owner (System C); offered only for such a request.
     "message_agent",
+    # Unified mode, no project: ask the owner to let Echo work in a folder (agent/lean/project_offer.py).
+    "use_project_folder",
 })
 # Connected apps register at runtime under their own names; these origins are allowed.
 ALLOWED_ORIGINS = frozenset({"mcp", "skill", "connection"})
@@ -220,8 +222,10 @@ def chat_hits(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 _TO_CODE = "suggest sending it to an agent (the Send to an agent button on a reply) or using Code"
-_TO_PROJECT = ("say that attaching a trusted project folder (/project in the terminal, the project chip in the "
-               "desktop app) adds files and commands to this conversation, or that one of their agents can do it")
+_TO_PROJECT = ("if it is work in a folder (code to build, fix or change), call use_project_folder with that folder so "
+               "the owner can let you work there, instead of writing the work into artifacts; otherwise say that "
+               "attaching a trusted project folder (/project in the terminal, the project chip in the desktop app) "
+               "adds files and commands to this conversation")
 
 
 def rules(compact: bool = False) -> str:
@@ -229,7 +233,9 @@ def rules(compact: bool = False) -> str:
     if compact:
         line = "make PDF or Excel files; say so in one sentence if asked."
         return CHAT_RULES_COMPACT.replace(line, line[:-1] + ", and that a trusted project (/project) adds files and "
-                                          "commands to this conversation.") if _unified() else CHAT_RULES_COMPACT
+                                          "commands to this conversation. For work in a folder (code to build, fix or "
+                                          "change), call use_project_folder with the folder instead of writing "
+                                          "artifacts.") if _unified() else CHAT_RULES_COMPACT
     return CHAT_RULES.replace(_TO_CODE, _TO_PROJECT) if _unified() else CHAT_RULES
 
 

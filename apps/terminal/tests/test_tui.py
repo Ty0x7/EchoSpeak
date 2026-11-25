@@ -281,7 +281,7 @@ def test_footer_composition():
     # Narrow: items shorten one at a time and keep their order; nothing jumps or disappears all at once.
     narrow = text_of(M.footer_lines(M.FooterInput(model="m", agent="Jarvis", approval_mode="autonomous",
                                                   context_pct=70), 50, CAPS)[0])
-    assert narrow.strip().startswith("m · context 70% · Jarvis · ◇ auto")
+    assert narrow.strip().startswith("m · context 70% · Jarvis · ◇ indep.")   # #187: Work independently, abbreviated like "auto" was
     for width in range(1, 201):
         for line in M.footer_lines(fi, width, CAPS):
             assert M.frag_width(line) <= width

@@ -84,7 +84,7 @@ KEYS_HELP = (
     ("Esc", "close the menu · while running: stop · Esc Esc clears the draft"),
     ("Ctrl+C", "clear the input; twice exits · while running: stop; twice detaches"),
     ("Ctrl+D", "exit on an empty line · while running: detach"),
-    ("Shift+Tab", "cycle approval mode: smart → autonomous → always ask"),
+    ("Shift+Tab", "cycle approval mode: ask for risky actions → work independently → ask first"),
     ("↑ / ↓", "history · while running, ↑ on empty input takes back the last queued message"),
     ("←", "on an empty input: your sessions; ← again: the sessions page (enter resumes, → or esc goes back a level)"),
     ("Ctrl+O", "transcript in the pager"),
