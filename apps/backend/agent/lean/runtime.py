@@ -1365,7 +1365,9 @@ class LeanSession:
                 assistant_soul=self._unified_soul() if self.code_first and not guest else "",
                 project_root=self.project_root,
                 notes=list(toolbox.notes) + learned.notes + ([] if guest else [n for n in [mcp_apps.context_note(self.session_id)] if n]),
-                terminal_note=terminal.describe() if "terminal" in toolbox.names else "",
+                # The terminal tool's own description already carries describe() whenever its schema is sent; the
+                # Environment line is only needed while it is deferred (~100 tokens per call otherwise duplicated).
+                terminal_note=terminal.describe() if "terminal" in toolbox.deferred else "",
                 computer_note="" if guest else toolbox.computer_context(native=self._native_computer(persona, toolbox), goal=goal),
                 git_note=repo_note,
                 git_rules="terminal" in toolbox.names and (git_context.wants_rules(goal, repo_note) or (self.code_first and bool(repo_note))),
@@ -1387,6 +1389,7 @@ class LeanSession:
                 # Guests get no description of the owner's settings.
                 capabilities="" if guest else capabilities.report(toolbox),
                 tool_names=set(toolbox.names),
+                offered_tools=set(toolbox.names) - set(toolbox.deferred),
                 can_write=capabilities.can_write_files(toolbox),
                 model=facts_model,
                 provider=facts_provider,

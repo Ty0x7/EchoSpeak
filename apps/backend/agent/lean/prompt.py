@@ -83,6 +83,10 @@ _RULE_TOOLS: dict[str, set[str]] = {
     "- An artifact (create_artifact)": {"create_artifact"},
     "- For substantial engineering work": {"set_objective"},
 }
+# Safety rules stay while their tools could be loaded at all (find_tools can load a deferred tool mid-turn).
+# Every other rule needs its tool offered this turn: a Code turn carried four rules for deferred tools it couldn't
+# see (research_notebook, screenshots, propose_skill), ~200 tokens on every call (campaign round 2, 25 November 2026).
+_SAFETY_RULES = ("- Follow the computer-control", "- Looking and doing")
 CARD_TOOLS = {
     "weather_live": "weather card", "stock_history": "price chart", "product_search": "product cards with prices and links",
     "video_search": "video cards", "image_search": "image gallery", "web_search": "source chips",
@@ -90,10 +94,15 @@ CARD_TOOLS = {
 _CARDS_LINE = "- Cards appear by themselves when you use these tools"
 
 
-def _for_tools(text: str, tool_names: Optional[set[str]]) -> str:
-    """``text`` without the rules for tools this turn doesn't offer (all of it when unknown)."""
+def _for_tools(text: str, tool_names: Optional[set[str]], offered: Optional[set[str]] = None) -> str:
+    """``text`` without the rules for tools this turn doesn't offer (all of it when unknown).
+
+    ``offered`` is what the model sees this turn (the toolbox minus deferred tools); ``tool_names`` includes the
+    deferred ones. Usage rules follow ``offered``; safety rules (_SAFETY_RULES) follow ``tool_names``.
+    """
     if tool_names is None:
         return text
+    offered = tool_names if offered is None else offered
     lines: list[str] = []
     skip_continuation = False
     for line in text.split("\n"):
@@ -108,7 +117,7 @@ def _for_tools(text: str, tool_names: Optional[set[str]]) -> str:
                 lines.append("  " + ", ".join(cards) + ".")
             continue
         needs = next((tools for prefix, tools in _RULE_TOOLS.items() if line.startswith(prefix)), None)
-        if needs is not None and not needs & tool_names:
+        if needs is not None and not needs & (tool_names if line.startswith(_SAFETY_RULES) else offered):
             continue
         lines.append(line)
     return "\n".join(lines)
@@ -224,6 +233,7 @@ def build_system_prompt(
     skills: str = "",
     capabilities: str = "",
     tool_names: Optional[set[str]] = None,
+    offered_tools: Optional[set[str]] = None,
     can_write: bool = True,
     instructions: str = "",
     environment: str = "",
@@ -246,7 +256,7 @@ def build_system_prompt(
         if assistant_soul.strip() else "",
         ("Configured role description (does not grant permissions): " + persona.description) if persona.description else "",
         identity_section(persona, model, provider, short=short_facts),
-        _for_tools(WORKING_RULES, tool_names),
+        _for_tools(WORKING_RULES, tool_names, offered_tools),
         _code_rules() if code else "",
         WRITING_REPLIES,
         "" if code else _for_tools(SHOWING_ANSWERS, tool_names),
