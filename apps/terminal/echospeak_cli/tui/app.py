@@ -309,6 +309,11 @@ class EchoTUI:
         self.changes: list[DV.Change] = []     # file changes seen in this terminal (fallback for /diff)
         self.preview_pane = ""                  # tmux pane id of the /preview companion
         self.project_root = ""
+        # The project this terminal works in (its start folder, /project, or the folder question): a new
+        # conversation (/new, /clear) belongs to it even after switching to a session that has none, so it
+        # keeps file and terminal tools (unified mode gives a conversation without a project only Chat).
+        # None: not worked out yet; "": none (the folder isn't a trusted project, or /project - detached it).
+        self.home_project_id: Optional[str] = None
         self._diff_cache: dict = {}
         self.notice = ("", 0.0)
         self.ctrl_c_at = 0.0
@@ -2189,9 +2194,37 @@ class EchoTUI:
     async def cmd_quit(self, args) -> None:
         self.app.exit()
 
+    async def _home_project(self) -> str:
+        """The trusted project this terminal works in, or "" (worked out once from the start folder)."""
+        if self.home_project_id is None:
+            pid = ""
+            try:
+                if self.start_project:
+                    project = self.start_project
+                    pid = await self.call(self.core.project_for_path, project, False) \
+                        if (os.sep in project or Path(project).is_dir()) else project
+                else:
+                    found = await self.call(self.core.project_for_path, os.getcwd(), False)
+                    if found:
+                        body = await self.call(self.client.get, "/projects/" + found)
+                        pid = found if str(body.get("trust_state") or "") == "trusted" else ""
+            except (ApiError, ConnectError, LookupError):
+                return ""   # unknown for now; try again next time
+            self.home_project_id = str(pid or "")
+        return self.home_project_id
+
+    async def _back_to_home_project(self) -> None:
+        """A new conversation starts in the terminal's own project, not the one last switched to."""
+        home = await self._home_project()
+        if home and home != self.core.project_id:
+            self.core.project_id = home
+            self.project_name = await self._project_name(home)
+            self.note(f"project {self.project_name} · this folder's project, for the new session")
+
     async def cmd_clear(self, args) -> None:
         self.core.session = None
         self.context = None
+        await self._back_to_home_project()
         self._out.append("\x1b[2J\x1b[H")
         if self._out_event:
             self._out_event.set()
@@ -2203,6 +2236,7 @@ class EchoTUI:
             await self._set_agent(args[args.index("--agent") + 1], announce=False)
         self.core.session = None
         self.context = None
+        await self._back_to_home_project()
         who = self.agent_name
         self.emit(B.RuleLine(f"New session with {who}" if self.core.agent_id else "New session"))
         self.app.invalidate()
@@ -2439,6 +2473,7 @@ class EchoTUI:
             if self.sid:
                 await self.call(self.client.request, "POST", "/projects/deactivate", None, {"thread_id": self.sid})
             self.core.project_id, self.project_name = "", ""
+            self.home_project_id = ""
             self.note("project detached from this session")
             self.app.invalidate()
             return
@@ -2473,6 +2508,7 @@ class EchoTUI:
         if self.sid and not activated:
             await self.call(self.client.request, "POST", f"/projects/{pid}/activate", None, {"thread_id": self.sid})
         self.core.project_id = pid
+        self.home_project_id = pid
         self.project_name = one_line(project.get("name") or "", 40)
         self.project_root = str(project.get("workspace_root") or "")
         trust = str(project.get("trust_state") or "")
