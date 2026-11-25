@@ -36,7 +36,8 @@ from agent.lean import file_access
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, evidence, outbound, removal_scope
 from agent.lean.job import (CHECK_TOOLS, READ_ONLY_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
-                            is_promise_without_action, named_files, promise_nudge, unbacked_claim, unbacked_file_claim,
+                            is_promise_without_action, missing_file_link, named_files, promise_nudge, unbacked_claim,
+                            unbacked_file_claim,
                             unbacked_screen_claim, written_names)
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
@@ -892,9 +893,11 @@ class LeanTurn:
                             claim_tools = claim_tools - {"memory_save"}
                     checked_removals = (self.toolbox.file_removal_state(content, self.timeline)
                                         if self.promise_guard and self.toolbox.names else {})
+                    linked = missing_file_link(content) if self.promise_guard and self.toolbox.names else ""
                     claim = ((unbacked_claim(content, claim_tools)
                               or unbacked_file_claim(content, self._written, checked_removals=checked_removals)
-                              or unbacked_screen_claim(content, self._screen_changed))
+                              or unbacked_screen_claim(content, self._screen_changed)
+                              or (f"a link to {linked}, which doesn't exist" if linked else ""))
                              if self.promise_guard and self.toolbox.names else "")
                     if claim and not stop_reason:
                         # "I've saved it" with nothing saved: ask once for the tool call or the truth.

@@ -24,6 +24,7 @@ Nothing ends silently: every job closes with an outcome the chat shows as
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from collections.abc import Collection
@@ -77,9 +78,12 @@ def is_promise_without_action(text: str) -> bool:
 # in `calc.py`" (and "- Modified `calc.py` …") with no write at all, and passed (two-model campaign, 16 Nov 2026).
 _DONE_VERBS = (r"saved|updated|added|wrote|written|created|deleted|removed|sent|stored|changed|edited|installed|"
                r"committed|recorded|renamed|moved|copied|scheduled|posted|uploaded|downloaded|"
-               r"fixed|corrected|modified|patched|replaced|rewritten|rewrote|applied|implemented|appended|inserted")
+               r"fixed|corrected|modified|patched|replaced|rewritten|rewrote|applied|implemented|appended|inserted|"
+               # Integration verbs: qwen3.5:9b said "I've integrated the camera and UI systems into `game.js`" after
+               # only create_artifact calls; game.js never changed (the owner's GTA_CLONE session, 24 Nov 2026).
+               r"integrated|wired|hooked|built(?!-)|refactored|connected|set\s+up")
 # A summary line that starts with such a verb and names a file ("- Modified `calc.py` to …") is the same claim.
-_LINE_CLAIM = re.compile(rf"(?i)^\W*(?:{_DONE_VERBS})\b")
+_LINE_CLAIM = re.compile(rf"(?i)^\W*(?:\d{{1,2}}[.)]\s*\W*)?(?:{_DONE_VERBS})\b")
 _ACTION_CLAIM = re.compile(
     rf"""(?ix)
     \b(?:i'?ve|i\s+have|i\s+just|i'?ve\s+just|i\s+(?:now\s+)?(?:also\s+)?)\s*(?:now\s+|also\s+|successfully\s+)?(?:{_DONE_VERBS})\b
@@ -137,6 +141,27 @@ def unbacked_file_claim(text: str, written: set[str], *, checked_removals: Colle
         missing = named_files(sentence) - written
         if missing:
             return sentence.strip()
+    return ""
+
+
+# A link to a file on this computer: file:///home/me/x.js, or a Markdown link to an absolute path.
+_LOCAL_LINK = re.compile(r"file://(/[^\s)\]>\"'`]+)|\]\((/(?:home|Users|tmp|mnt|srv|opt|var|etc)/[^\s)]+)\)")
+
+
+def missing_file_link(text: str) -> str:
+    """The first local file an answer links to that doesn't exist, or ''.
+
+    In the owner's GTA_CLONE session the answer listed "What I Built" with links to
+    file:///home/dev/Work/GTA_CLONE/camera_system.js; only artifacts had been made, so the file
+    never existed. A link is a claim that the file is there, whatever the sentence around it says.
+    """
+    from urllib.parse import unquote
+
+    for match in _LOCAL_LINK.finditer(str(text or "")):
+        raw = unquote(match.group(1) or match.group(2) or "").split("#", 1)[0]
+        path = raw.rstrip(".,;:")
+        if path and not os.path.exists(path):
+            return path
     return ""
 
 
