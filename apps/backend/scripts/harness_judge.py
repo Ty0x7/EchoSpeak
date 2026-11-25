@@ -299,6 +299,11 @@ def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
         asked = any(e.get("type") == "approval_request" and (e.get("question") or e.get("kind") == "question") for e in events) \
             or any(t.get("simulated_owner_reply") for t in turns)
         comp.append((2, j.check("completion", "asked which one before acting", asked)))
+    if truth.get("no_question"):
+        # The owner gave the work and where to find the next step: asking how to proceed is a miss (campaign 24 Nov).
+        asked = any(e.get("type") == "approval_request" and (e.get("question") or e.get("kind") == "question")
+                    for e in events) or any(t.get("simulated_owner_reply") for t in turns)
+        comp.append((2, j.check("completion", "acted without asking how to proceed", not asked)))
     for name in truth.get("tools_not_used", []):
         comp.append((1, j.check("completion", f"didn't use {name}", not any(r["name"] == name for r in all_tools))))
     if truth.get("no_success_claim"):
