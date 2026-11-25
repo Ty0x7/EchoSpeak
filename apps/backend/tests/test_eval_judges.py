@@ -321,3 +321,17 @@ def test_invalid_selection_fails_before_starting_a_run(tmp_path, monkeypatch, ar
         heval.main()
     assert error.value.code == 2
     assert not heval.OUT.exists()
+
+
+def test_asking_before_acting_is_caught_but_an_offer_after_the_work_is_not():
+    import harness_judge as hj
+
+    card = {"type": "approval_request", "kind": "question", "question": "Should I start with scoring?"}
+    edit = {"type": "tool_end", "name": "file_edit", "ok": True}
+    assert hj.asked_before_acting([{"events": [card, edit]}])                          # asked, then acted
+    assert not hj.asked_before_acting([{"events": [edit, card]}])                      # acted, then offered more
+    asked_in_text = [{"events": [{"type": "tool_end", "name": "file_read", "ok": True}]},
+                     {"events": [edit], "simulated_owner_reply": True}]
+    assert hj.asked_before_acting(asked_in_text)                                       # "Should I proceed?" in prose
+    offered_after = [{"events": [edit]}, {"events": [edit], "simulated_owner_reply": True}]
+    assert not hj.asked_before_acting(offered_after)                                   # FA1 on main, 25 Nov

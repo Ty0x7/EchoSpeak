@@ -42,6 +42,7 @@ import os
 import re
 import shlex
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -49,12 +50,12 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 BACKEND = Path(__file__).resolve().parents[1]
 if str(BACKEND) not in sys.path:
     sys.path.insert(0, str(BACKEND))
-from scripts import harness_campaign
+from scripts import eval_server, harness_campaign
 
 REPO = BACKEND.parents[1]
 SESSIONS = Path(os.environ.get("ATF_HOME") or Path.home() / "Work" / "echospeak-model-testing-2026" / "auto-test-fix")
@@ -65,7 +66,7 @@ ALLOWED = ["apps/backend/agent/*", "apps/backend/api/*", "apps/backend/config.py
            "apps/backend/tests/*", "apps/terminal/echospeak_cli/*", "apps/terminal/tests/*", "docs/research/*"]
 FORBIDDEN = ["apps/backend/scripts/harness_eval.py", "apps/backend/scripts/harness_judge.py",
              "apps/backend/scripts/model_recorder.py", "apps/backend/scripts/harness_campaign.py",
-             "apps/backend/scripts/auto_test_fix.py", ".agents/*", ".claude/*", "AGENTS.md", "CLAUDE.md",
+             "apps/backend/scripts/auto_test_fix.py", "apps/backend/scripts/eval_server.py", ".agents/*", ".claude/*", "AGENTS.md", "CLAUDE.md",
              "apps/backend/tests/conftest.py"]
 # Security boundaries: a change here is never accepted automatically.
 SECURITY = ["apps/backend/agent/lean/linux_sandbox.py", "apps/backend/agent/lean/policy.py",
@@ -159,16 +160,87 @@ class Session:
 
 # ── the system under test: run, judge, read ─────────────────────────────
 
+def throttled(check: Callable[[], str], seconds: float) -> Callable[[], str]:
+    """Run ``check`` at most every ``seconds``; "" in between."""
+    last = [0.0]
+
+    def run() -> str:
+        if time.monotonic() - last[0] < seconds:
+            return ""
+        last[0] = time.monotonic()
+        return check()
+    return run
+
+
+def run_live_eval(argv: list[str], backend: Path, log_path: Path, timeout: float = 7200,
+                  guard: Callable[[], str] | None = None) -> str:
+    """Capture partial receipts and stop the isolated evaluation if available RAM drops."""
+    deadline = time.monotonic() + timeout
+    with log_path.open("w", encoding="utf-8") as log:
+        child = subprocess.Popen(argv, cwd=backend, env=_clean_env(), stdout=log,
+                                 stderr=subprocess.STDOUT, start_new_session=True)
+        try:
+            while child.poll() is None:
+                available = free_gb()
+                if available < MIN_FREE_GB:
+                    raise RuntimeError(f"low memory during evaluation ({available:.1f} GB available)")
+                if guard is not None and (stopped := guard()):
+                    raise RuntimeError(stopped)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError(f"evaluation exceeded {timeout:g}s")
+                try:
+                    child.wait(timeout=min(1, remaining))
+                except subprocess.TimeoutExpired:
+                    continue
+        except BaseException:
+            # A normal interrupt lets the evaluator stop its recorder and backend.
+            # The separate process group also bounds cleanup if a child lingers.
+            try:
+                child.send_signal(signal.SIGINT)
+                child.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            finally:
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                child.wait()
+            raise
+    output = log_path.read_text(encoding="utf-8", errors="replace")
+    if child.returncode:
+        raise RuntimeError(f"harness_eval failed ({child.returncode}): {output[-600:]}")
+    return output
+
+
 def run_eval(tree: Path, cases: list[str], repeat: int, model: str, label: str, session: Session) -> Path:
     """harness_eval.py from ``tree``'s own harness, in its isolated backend; returns the judged run folder."""
     backend = tree / "apps" / "backend"
     python = str(backend / ".venv" / "bin" / "python")
-    out = sh([python, "scripts/harness_eval.py", "--model", model, "--only", ",".join(cases), "--repeat", str(repeat),
-              "--label", label, "--env", "LEARNING_ENABLED=false"], backend, timeout=3600 * 2)
-    (session.dir / f"{label}.eval.log").write_text(out.stdout + out.stderr, encoding="utf-8")
-    found = re.search(r"harness_judge\.py (\S+)", out.stdout)
-    if out.returncode or not found:
-        raise RuntimeError(f"harness_eval failed ({out.returncode}): {(out.stderr or out.stdout)[-600:]}")
+    argv = [python, "scripts/harness_eval.py", "--model", model, "--only", ",".join(cases), "--repeat", str(repeat),
+            "--label", label, "--env", "LEARNING_ENABLED=false"]
+    context = int(session.state.get("context") or 0)
+    if not context:
+        # Sessions from before the context setting, and --context 0: the shared workstation service (16K).
+        output = run_live_eval(argv, backend, session.dir / f"{label}.eval.log")
+    else:
+        # A private server per evaluation at the comparison window (scripts/eval_server.py). It stops if the
+        # shared service loads a model meanwhile: both can't share the GPU, and the run would not be comparable.
+        with (session.dir / f"{label}.server.log").open("w", encoding="utf-8") as server_log, \
+                eval_server.private_server(context, log=server_log) as server:
+            def competing() -> str:
+                reason = server.competing()
+                return f"{reason} during the evaluation" if reason else ""
+
+            output = run_live_eval([*argv, "--upstream", server.url, "--env", f"LOCAL_MODEL_CONTEXT={context}"],
+                                   backend, session.dir / f"{label}.eval.log", guard=throttled(competing, 10))
+            served = eval_server.served_context(server.url)
+        if served != context:
+            raise RuntimeError(f"the private server served {served} tokens instead of {context}")
+    found = re.search(r"harness_judge\.py (\S+)", output)
+    if not found:
+        raise RuntimeError(f"harness_eval exited without a completed run receipt: {output[-600:]}")
     run = Path(found.group(1))
     judged = sh([python, "scripts/harness_judge.py", str(run)], backend, timeout=1800)
     if judged.returncode:
@@ -751,7 +823,7 @@ def run(args: argparse.Namespace) -> int:
                          "limits": {"cycles": args.cycles, "minutes": args.minutes, "driver_minutes": args.driver_minutes,
                                     "driver_budget_usd": args.driver_budget, "max_cost_usd": args.max_cost_usd,
                                     "max_eval_tokens": args.max_eval_tokens},
-                         "ai_judge": args.ai_judge, "ai_consensus": args.ai_consensus}
+                         "ai_judge": args.ai_judge, "ai_consensus": args.ai_consensus, "context": args.context}
         session.save()
         session.log("session", dir=str(session.dir), base=base, driver=args.driver, model=args.model)
     st = session.state
@@ -1304,6 +1376,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     r.add_argument("--max-eval-tokens", type=int, default=0, help="Session budget: model-server tokens (0 = no limit)")
     r.add_argument("--ai-consensus", type=int, default=2, help="independent AI judgements that must agree")
     r.add_argument("--ai-judge", default="", help="Layer 4 judge: claude:<model> | codex | ollama:<model> | command:<argv> (off if empty)")
+    r.add_argument("--context", type=int, default=eval_server.DEFAULT_CONTEXT,
+                   help="Window of the private evaluation server (32768, the development comparison; 65536 for "
+                        "tasks that need it). 0 uses the shared 16K service, the historical reference.")
     r.add_argument("--base", default="HEAD")
     r.add_argument("--label", default="")
     r.add_argument("--issue", type=int, help="Existing GitHub issue for this engineering effort")

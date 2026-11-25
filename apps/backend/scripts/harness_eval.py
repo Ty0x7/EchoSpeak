@@ -931,20 +931,105 @@ AUDIT_HELDOUT = [
          setup_build(_SPEND_CLI), ideal_calls=16),
 ]
 
+# Campaign 24 November 2026 (workstreams 6 and 10): failures to discover and the owner's own way of asking for work.
+# FC: a broken configuration behind a misleading or raw error; the code is right and stays untouched.
+# FA: "continue development", the owner's GTA_CLONE wording, on a project whose TODO.md says what's next.
+#     Echo should just do it: no question (no_question), tests run, the feature works (cli_checks).
+# Written before any run; FCH1 and FAH1 are held out and never used to shape a fix.
+def setup_broken_ini(p: Path) -> dict[str, Any]:
+    _w(p, "app.py", "import configparser, sys\n\ncfg = configparser.ConfigParser()\ncfg.read('settings.ini')\ntry:\n"
+       "    port = int(cfg['server']['port'])\nexcept KeyError:\n    sys.exit('error: settings.ini has no [server] port')\n"
+       "print('PORT', port, 'WORKERS', int(cfg['server']['workers']))\n")
+    _w(p, "settings.ini", "[server]\nport = 80O0\nworkers = 4\n")
+    return {"answer": ["8000"], "protected": ["app.py"], "files": {"settings.ini": "8000"}}
+
+
+def setup_misleading_json(p: Path) -> dict[str, Any]:
+    _w(p, "deploy.py", "import json, sys\n\ntry:\n    cfg = json.load(open('deploy.json'))\n    region = cfg['region']\n"
+       "except Exception:\n    sys.exit(\"error: deploy.json must define 'region'\")\n"
+       "print('DEPLOY', region, cfg.get('replicas', 1), 'replicas')\n")
+    _w(p, "deploy.json", '{\n  "region": "eu-west-2",\n  "replicas": 3,\n}\n')
+    return {"answer": ["eu-west-2"], "protected": ["deploy.py"], "files": {"deploy.json": "eu-west-2"}}
+
+
+def setup_pong_todo(p: Path) -> dict[str, Any]:
+    _w(p, "game.py", "WIDTH, HEIGHT = 80, 24\n\n\nclass Ball:\n    def __init__(self):\n"
+       "        self.x, self.y = WIDTH / 2, HEIGHT / 2\n        self.vx, self.vy = 1, 1\n\n\nclass Game:\n"
+       "    def __init__(self):\n        self.ball = Ball()\n        self.left_y = self.right_y = HEIGHT / 2\n\n"
+       "    def step(self):\n        b = self.ball\n        b.x += b.vx\n        b.y += b.vy\n"
+       "        if b.y <= 0 or b.y >= HEIGHT:\n            b.vy = -b.vy\n"
+       "        if b.x <= 1 and abs(b.y - self.left_y) <= 3:\n            b.vx = -b.vx\n"
+       "        if b.x >= WIDTH - 1 and abs(b.y - self.right_y) <= 3:\n            b.vx = -b.vx\n")
+    _w(p, "tests/test_game.py", "from game import Game, HEIGHT\n\n\ndef test_bounces_off_the_top():\n    g = Game()\n"
+       "    g.ball.y, g.ball.vy = 1, -1\n    g.step()\n    assert g.ball.vy == 1\n")
+    _w(p, "TODO.md", "# Pong\n\n## Next\n- Scoring: when the ball goes past a paddle (x < 0 or x > WIDTH), the other player "
+       "scores a point (`game.score`, a dict {'left': 0, 'right': 0}) and the ball goes back to the centre.\n\n"
+       "## Later\n- A two-player keyboard UI.\n")
+    _w(p, "run_tests.py", RUN_TESTS)
+    check = ("from game import Game, WIDTH\ng = Game(); g.right_y = -100; g.ball.x, g.ball.vx, g.ball.vy = WIDTH - 1.5, 1, 0\n"
+             "for _ in range(10):\n    g.step()\n    if sum(g.score.values()):\n        break\n"
+             "print('SCORE', g.score['left'], g.score['right'], 'CENTRE', g.ball.x == WIDTH / 2)")
+    return {"tests": "tests", "verify": True, "no_question": True,
+            "cli_checks": [{"argv": ["-c", check], "expect": ["SCORE 1 0 CENTRE True"]}],
+            "allowed_extensions": [".py", ".md", ".json", ".txt"]}
+
+
+def setup_tasks_todo(p: Path) -> dict[str, Any]:
+    _w(p, "tasks.py", "import json, pathlib, sys\n\nDB = pathlib.Path('tasks.json')\n\n\ndef load():\n"
+       "    return json.loads(DB.read_text()) if DB.exists() else []\n\n\ndef save(tasks):\n"
+       "    DB.write_text(json.dumps(tasks, indent=1))\n\n\ndef main(argv):\n    cmd, *rest = argv or ['list']\n"
+       "    tasks = load()\n    if cmd == 'add':\n        tasks.append({'title': ' '.join(rest), 'done': False})\n"
+       "        save(tasks)\n        print('added')\n    elif cmd == 'list':\n        for i, t in enumerate(tasks, 1):\n"
+       "            print(f\"{i}. [{'x' if t['done'] else ' '}] {t['title']}\")\n    elif cmd == 'done':\n"
+       "        tasks[int(rest[0]) - 1]['done'] = True\n        save(tasks)\n        print('done')\n\n\n"
+       "if __name__ == '__main__':\n    main(sys.argv[1:])\n")
+    _w(p, "tests/test_tasks.py", "import contextlib, io, pathlib, tempfile\n\nimport tasks\n\n\ndef test_add_and_list():\n"
+       "    tasks.DB = pathlib.Path(tempfile.mkdtemp()) / 't.json'\n    tasks.main(['add', 'buy', 'milk'])\n"
+       "    out = io.StringIO()\n    with contextlib.redirect_stdout(out):\n        tasks.main(['list'])\n"
+       "    assert '1. [ ] buy milk' in out.getvalue()\n")
+    _w(p, "TODO.md", "# tasks\n\n## Next\n- Due dates: `add` accepts `--due YYYY-MM-DD`; `list` shows the date after the "
+       "title and lists unfinished tasks that are overdue (due before today) first, marked OVERDUE.\n\n"
+       "## Later\n- Priorities.\n")
+    _w(p, "run_tests.py", RUN_TESTS)
+    return {"tests": "tests", "verify": True, "no_question": True,
+            "cli_checks": [{"argv": ["tasks.py", "add", "buy", "milk"]},
+                           {"argv": ["tasks.py", "add", "pay", "rent", "--due", "2000-01-01"]},
+                           {"argv": ["tasks.py", "list"], "expect": ["OVERDUE", "pay rent", "2000-01-01"],
+                            "not_expect": ["--due"]}],
+            "allowed_extensions": [".py", ".md", ".json", ".txt"]}
+
+
+FAIL_DEV = [
+    Case("FC1", "A config typo behind a raw traceback; fix the config, not the code", "recovery-config",
+         [Turn("app.py crashes when I start it. Get it running without changing the code, and tell me the port it "
+               "reports.")], setup_broken_ini, ideal_calls=5),
+    Case("FA1", "'Continue development' on a game, with the next step in TODO.md", "autonomy",
+         [Turn("can we continue development on this game? do whats next on the todo and use tests",
+               answer="yes, go ahead, just do it")], setup_pong_todo, ideal_calls=8),
+]
+FAIL_HELDOUT = [
+    Case("FCH1", "A JSON typo behind a misleading error message (held-out)", "recovery-config",
+         [Turn("deploy.py fails. Fix whatever is wrong with the setup, without editing deploy.py, and tell me the line it "
+               "prints.")], setup_misleading_json, ideal_calls=5),
+    Case("FAH1", "'Keep going' on a task CLI, with the next step in TODO.md (held-out)", "autonomy",
+         [Turn("keep going on this project, whatever's next on the list. make sure it works",
+               answer="yes, go ahead")], setup_tasks_todo, ideal_calls=8),
+]
+
 SETS = {"dev": DEV, "heldout": HELDOUT, "all": DEV + HELDOUT, "env": ENV_DEV + ENV_HELDOUT,
         "audit": AUDIT_DEV + AUDIT_HELDOUT, "audit-dev": AUDIT_DEV, "audit-heldout": AUDIT_HELDOUT,
         "audit-pj": [AUDIT_DEV[0], AUDIT_HELDOUT[0]], "audit-pc": [AUDIT_DEV[1], AUDIT_HELDOUT[1]],
         "long": LONG_DEV + LONG_HELDOUT, "long-dev": LONG_DEV, "long-heldout": LONG_HELDOUT, "long-task": LONG_TASK,
         "env-dev": ENV_DEV, "env-heldout": ENV_HELDOUT, "cap": CAP_DEV + CAP_HELDOUT, "cap-dev": CAP_DEV,
-        "cap-heldout": CAP_HELDOUT,
+        "cap-heldout": CAP_HELDOUT, "fail": FAIL_DEV + FAIL_HELDOUT, "fail-dev": FAIL_DEV, "fail-heldout": FAIL_HELDOUT,
         "everything": DEV + HELDOUT + ENV_DEV + ENV_HELDOUT + CAP_DEV + CAP_HELDOUT + LONG_DEV + LONG_HELDOUT}
 
 # These memberships describe the cases themselves. The selected command-line
 # suite can combine splits, and --only can select across unrelated suites.
 CASE_MEMBERSHIP: dict[str, str] = {}
 for split, split_cases in (
-    ("dev", DEV + ENV_DEV + CAP_DEV + LONG_DEV + LONG_TASK + AUDIT_DEV),
-    ("heldout", HELDOUT + ENV_HELDOUT + CAP_HELDOUT + LONG_HELDOUT + AUDIT_HELDOUT),
+    ("dev", DEV + ENV_DEV + CAP_DEV + LONG_DEV + LONG_TASK + AUDIT_DEV + FAIL_DEV),
+    ("heldout", HELDOUT + ENV_HELDOUT + CAP_HELDOUT + LONG_HELDOUT + AUDIT_HELDOUT + FAIL_HELDOUT),
 ):
     for case in split_cases:
         if CASE_MEMBERSHIP.setdefault(case.id, split) != split:
@@ -971,6 +1056,12 @@ def assert_local(url: str) -> None:
     host = urllib.parse.urlsplit(url).hostname or ""
     if host not in _LOCAL_HOSTS:
         raise SystemExit(f"Refusing {url}: the model server must run on this machine (zero API billing policy).")
+
+
+def upstream_origin(url: str) -> str:
+    """Record the requested server without URL credentials, paths, or query parameters."""
+    endpoint = urllib.parse.urlsplit(url)
+    return f"{endpoint.scheme}://{endpoint.netloc.rsplit('@', 1)[-1]}"
 
 
 # ── backend and recorder ────────────────────────────────────────────────
@@ -1368,6 +1459,7 @@ def main() -> int:
     diff = subprocess.run(["git", "diff", "HEAD", "--", *tracked], cwd=ROOT, capture_output=True, text=True).stdout
     meta = {"label": args.label, "model": args.model, "set": args.set, "cases": [c.id for c in cases], "repeat": args.repeat,
             "case_membership": {case.id: CASE_MEMBERSHIP[case.id] for case in cases},
+            "upstream": upstream_origin(args.upstream),
             "commit": commit + ("+dirty" if status else ""), "started": time.time(),
             "projects_root": str(projects_root(run_dir)),
             "dirty": {"files": status.splitlines()[:40], "diff_sha256": hashlib.sha256(diff.encode()).hexdigest()[:16]} if status else {}}

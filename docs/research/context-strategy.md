@@ -467,3 +467,186 @@ owner talks to. Eval: each trial is redrawn until its identifying values are new
 ### Release follow-up, 20 November
 
 The Linux release includes the sandbox pytest diagnostic and the measured context-fill change. At 16K, two of three completed five-module trials fully passed. The last held-out trial hit the memory guard. In the default-budget LT1 run the local model finished in 34 model calls, below the first 60-step boundary. An independent pytest run passed all ten tests. Echo marked its result unverified because the runtime ledger did not recognize the successful post-edit `run_tests.py` invocations. [Trace follow-up](https://github.com/Ty0x7/EchoSpeak/issues/121) The earlier 12-step trials remain the evidence for crossing continuation boundaries. [Full release results](integration-11.15.md)
+
+## Matched 16K, 32K and 64K follow-up · 24 November 2026
+
+The first capability campaign used runtime `112f258a` and the two installed Q4_K_M reference models, Qwen 3.5 9B
+and Gemma 4 12B. The saved 100-trial baseline, its two scorecards, and the historical evidence manifest still match
+their original SHA-256 checksums. The earlier results in this document remain a depth-scaled, one-fact reference.
+The new comparison holds the input fixed so it can reveal the effect of allocated window size at the same prompt depth.
+
+Each arm starts a fresh, single-runner Ollama process on a private loopback port with local inference, Flash Attention
+and `q8_0` KV cache. It submits the same synthetic dispatch question with three counts at temperature zero, then sends
+the stock D8 four-report task through EchoSpeak's isolated evaluation backend. The native judge checks the task's
+answer, truncation and execution evidence. Native requests use the same prompt and default sampling within each
+model series. The two model families tokenize the same input differently. The measurements are single trials.
+Provider `/api/ps`, the emitted native context limit and the private Ollama log provide separate context checks.
+
+The workstation had an RTX 3060 Ti with 8 GiB VRAM and about 15.5 GiB system RAM. The monitor samples VRAM,
+available host RAM, Ollama and runner resident memory, and process CPU time. The model's CPU share is the fraction
+of reported resident bytes outside VRAM. The RAM and CPU observations cover the direct probe and the native task.
+The experiment stops its own processes if host RAM falls below 2,300 MiB or the shared service loads a model.
+One pilot was interrupted at the latter boundary and is excluded from the matched table. The workstation service
+retained its 16,384-token setting throughout. [Ollama context guide](https://docs.ollama.com/context-length)
+
+### Matched results
+
+Both models independently passed the four-report task at 32K and 64K with zero compactions. Qwen
+completed it in 21.1 seconds at 32K and 29.6 seconds at 64K. Gemma took 44.6 and 62.0 seconds.
+The native prompt peaked at roughly 17.7–17.8K tokens in these four completed runs. This used
+54% of 32K and 27% of 64K, so D8 measured extra headroom above 16K and left most of 64K unexercised.
+
+Qwen's 16K run stopped at the 150-second limit. Its retained record contains 37 model calls, 21
+file reads, eight saved-output reads, and 10 attempted compaction calls. Its largest recorded prompt
+was 11,809 tokens. The run has no independent grade. The 16K Gemma run was graded. It found the
+offsite location and returned an incorrect room code. The file search and terminal tools were visible
+to Qwen, so the repeated reads demonstrate a tool-choice and context-management problem.
+
+| Model | Context | Prompt tokens | Prefill s | Gen tok/s | VRAM GiB | CPU share | Peak RSS GiB | Min RAM GiB | Direct result | Native result | Peak native prompt | Compactions |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | ---: |
+| Gemma 4 12B | 16K | 8878 | 9.34 | 13.6 | 5.79 | 2% | 6.03 | 8.27 | fail | fail | 10577 | 1 |
+| Qwen 3.5 9B | 16K | 10353 | 4.56 | 58.4 | 5.40 | 0% | 5.72 | 8.03 | fail | stopped (stage exceeded 150s) | — | — |
+| Gemma 4 12B | 32K | 8878 | 9.47 | 13.1 | 5.73 | 2% | 6.94 | 8.00 | fail | pass | 17677 | 0 |
+| Qwen 3.5 9B | 32K | 10353 | 5.71 | 29.4 | 5.37 | 16% | 5.49 | 10.06 | fail | pass | 17809 | 0 |
+| Gemma 4 12B | 64K | 8878 | 10.01 | 11.2 | 5.59 | 3% | 7.11 | 7.59 | fail | pass | 17670 | 0 |
+| Qwen 3.5 9B | 64K | 10353 | 7.34 | 16.0 | 5.36 | 26% | 5.26 | 9.98 | fail | pass | 17824 | 0 |
+
+The direct pass requires the exact route and sum. Both models remembered the route across all settings
+and returned the wrong total at all three sizes. The identical direct responses across windows
+provide a useful control for this particular multi-fact reasoning failure. The five completed native
+runs had zero provider prompt-truncation log entries. The retained 16K Qwen log also has zero entries.
+
+The 64K Ollama configuration is feasible for these bounded workloads. Relative to 32K, it added
+about 40% native elapsed time for both models without improving the result. The same-input Qwen
+generation probe dropped from 29.4 to 16.0 tokens/s as the CPU-resident share rose from 16% to 26%.
+Retain 16K as the controlled and installed default, use 32K as a development comparison arm,
+and keep 64K for experiments whose active prompts actually exceed 32K. The heavier multi-module
+completion question, memory continuity, and repeatability across fresh tasks remain open.
+[Issue #122](https://github.com/Ty0x7/EchoSpeak/issues/122)
+
+### Campaign reliability
+
+- Campaign warm-up and unload honored `--upstream` while both evaluation arms omitted it. The fix forwards the
+  selected origin into both child launches and records a credential-free origin. A disposable server received
+  the warm-up, two inference requests and unload. All 69 related tests passed on `eea67a2`.
+- The controller completed its 2,152-test baseline and the independent 16K Gemma control. During the development
+  batch, available memory fell to 2,265 MiB with 10,643 MiB of swap in use. The isolated evaluator was interrupted
+  and the partial run was retained without a score. A controller fix monitors the existing RAM floor during
+  execution, captures partial output, and bounds cleanup to the evaluated process group. Its failing-first
+  subprocess regression and 37 controller tests passed on `a161ed1`.
+- The repeated-prose candidate on `65d3694` detected the saved Gemma failure at 5,461 of 21,248 characters with
+  single-character streaming. It closes the stream, retracts the stalled draft and tries once using the existing
+  tool history. Controls covered fenced code, quotations, prose with new details, structured calls,
+  cancellation and a repeated second failure. Its 91 focused backend checks passed. The interrupted live
+  development baseline left candidate acceptance open. Printed terminal output also needs a separate presentation
+  check before deployment. [Issue #160](https://github.com/Ty0x7/EchoSpeak/issues/160)
+
+### KV-cache quantization at 64K
+
+One additional Qwen arm repeated the 64K run with a `q4_0` KV cache (`matrix-004608`). It passed D8 in two model
+calls and 25.3 seconds, compared with 29.6 seconds using `q8_0`. The prompt peaked at 17,816 tokens with zero
+compactions and zero truncation log entries. The CPU-resident share fell from 26% to 21%, and the minimum available
+host RAM was 9.4 GiB. The direct probe generated only 24 tokens, so its 5.4 tokens/s rate is too short to compare.
+This single trial shows that `q4_0` is feasible. It does not change the recommendation: a 32K window with the
+existing `q8_0` cache remains the next development arm.
+
+| Model | Context | Cache | Prompt tokens | Prefill s | Gen tok/s | VRAM GiB | CPU share | Peak RSS GiB | Min RAM GiB | Direct result | Native result | Peak native prompt | Compactions |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- | ---: | ---: |
+| Qwen 3.5 9B | 64K | q4_0 | 10353 | 6.30 | 5.4 (24 tokens) | 5.29 | 21% | 5.71 | 9.42 | fail | pass | 17816 | 0 |
+
+### Adversarial capability probe: missing and misleading utilities
+
+`adversarial_inventory.py` runs a disposable CSV reconciliation task through the isolated evaluation backend at 16K.
+The task names a `./legacy_stock` utility. In the *missing* variant the utility doesn't exist. In the *broken*
+variant it prints "Report generated successfully" and exits with status 24. The agent must check the utility, recover
+with what the project already provides, write a reusable `reconcile.py`, run it and verify the report. The check
+runs independently of the agent's own claims. It compares `report.json` with the expected totals. It then copies the
+agent's script into a network-less bubblewrap sandbox and runs it on a **changed input the agent never saw**. That
+input adds a negative count and a quoted SKU with a comma.
+
+| Model | Variant | Model calls | Utility probes | Report | Changed input | Source and utility preserved | Result |
+| --- | --- | ---: | --- | --- | --- | --- | --- |
+| Qwen 3.5 9B | missing | 8 | 1 (`which`) | correct | correct | yes | pass |
+| Gemma 4 12B | broken | 11 | 3 (`ls`, `--help`, one run) | correct | correct | yes | pass |
+
+Gemma did not trust the utility's printed success. It cited the exit status, switched to Python, wrote the reusable
+script and re-read the produced report. The utility probes were a diagnosis sequence, not repeated retries. Qwen's
+reply said "Recovery needed: none" although it had replaced the missing utility. Its tool record is accurate, but
+the wording undersells the recovery. These are single trials, one variant per model. They show the expected
+behavior exists but don't measure its rate.
+
+The current campaign made two tooling commits and kept the runtime prototype on its own experimental branch.
+The installed 11.15.0 desktop package, terminal target and shared backend were verified. The desktop remained
+closed.
+
+### Continuation after the Codex handoff · 24 November
+
+Claude Code resumed the campaign after Codex reached its usage limit. The two tooling commits were re-verified
+(42 and 37 tests) and proposed as [#167](https://github.com/Ty0x7/EchoSpeak/pull/167) and
+[#168](https://github.com/Ty0x7/EchoSpeak/pull/168). Review of the repeated-prose candidate found that one paragraph
+repeated verbatim was not detected. `9c4f50a` adds that case with a failing-first test. The saved Gemma failure is
+still detected at 5,461 characters, and a scan of 1,691 unique saved prose responses found two genuine loops and
+no false positives.
+
+The live controller gate then ran twice. On Gemma 4 12B the post-change dev run crossed the memory floor at
+1.7 GB available. The new in-flight guard from #168 stopped it cleanly with no score. On Qwen 3.5 9B, D1 rose
+from 8.37 to 8.80 and held-out H1 from 8.45 to 8.80. C1 fell from 9.60 to 5.60 when Qwen deleted both notes files
+instead of asking which one, and the controller rejected the cycle. The detector did not fire in any live trial.
+A matched three-trial C1 follow-up passed on both trees (9.59 base, 9.49 candidate). The candidate remains
+unaccepted pending owner review. The full record is on [#160](https://github.com/Ty0x7/EchoSpeak/issues/160).
+
+### Decision: 32K for development comparisons · 24 November
+
+The owner adopted 32K as the primary development comparison window. The installed application and the shared
+workstation service stay at 16K, and every saved 16K result remains the historical reference. 64K is reserved for
+tasks whose active prompts need it. The controller now evaluates on a private server per run
+(`scripts/eval_server.py`, `auto_test_fix.py run --context`, default 32768). That server has llama-server's prompt
+cache off. On the shared service, that cache stored about 3 GiB per Gemma 4 12B prompt and reached 7.5 GiB after
+three prompts during the #160 gate. That growth took available RAM to 1.7 GB.
+
+### Evaluation server: what the lock and GPU checks cover · 24 November
+
+`scripts/eval_server.py` (#174) keeps private evaluations from competing with each other or with the workstation
+service for the GPU. Its protection has the following scope.
+
+**The lock** is an advisory `flock` on `~/.cache/echospeak/eval-gpu.lock` (override: `ECHO_EVAL_GPU_LOCK`). The
+kernel releases it when the holder exits, crashes or is killed.
+
+- *Covers:* every evaluation started through `private_server`, which today means `auto_test_fix.py run --context N`
+  with N above 0.
+- *Doesn't cover:*
+  - `harness_eval.py --upstream` run by hand;
+  - `harness_campaign.py`;
+  - the one-off scripts in the evaluation folders;
+  - the shared service itself;
+  - other users;
+  - a process started with a different `HOME` or lock path.
+
+  The lock prevents only the races it can see. The GPU check below is the second line.
+
+**The GPU check** reads `nvidia-smi`'s compute-process list and memory totals at start, and the compute-process list
+every 10 seconds during a run.
+
+- *Counts as busy:*
+  - another `llama-server` or `ollama` process;
+  - any process holding 1 GiB or more, excluding the evaluation's own runner, identified by process group;
+  - less than 6 GiB free at start;
+  - `nvidia-smi` failing or returning output it can't parse.
+- *Small desktop GPU users,* such as a browser or video player, are ignored.
+- *Limits:*
+  - **NVIDIA only.** On other GPUs the check fails closed and private evaluations don't start.
+  - **Compute processes only.** Whether a graphics workload (a game, a compositor) appears depends on the driver.
+    Some GPU processes do appear (FreeTube's renderer did); one that doesn't is seen only through free VRAM at
+    start, not during a run.
+  - **Polling, not reservation.** A workload starting mid-run can overlap for up to about 10 seconds before the
+    evaluation stops. A stopped evaluation is recorded as an error with no score.
+  - **Thresholds are tuned for this workstation:** 8 GB RTX 3060 Ti, Q4 9–12B models, up to 32K. Larger models or
+    64K windows can need more than 6 GiB, and the threshold is a starting check, not a guarantee.
+  - Processes in another PID namespace (containers) can't be matched to a process group and count as foreign
+    when large.
+  - The shared-service check asks only `127.0.0.1:11434`. A refused connection means it isn't running; any other
+    failure counts as busy.
+
+**Host RAM** is a separate guard. The controller stops an evaluation below 2 GB available (#168). The private
+server's disabled prompt cache keeps that guard from being needed for Gemma 4 12B at 32K: in the #160 targeted
+replay, the minimum stayed above 8.4 GB.

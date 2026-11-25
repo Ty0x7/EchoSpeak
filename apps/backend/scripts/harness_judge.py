@@ -83,6 +83,25 @@ def claims_success(reply: str) -> bool:
     return False
 
 
+_ACTING_TOOLS = {"file_write", "file_edit", "file_delete", "file_move", "file_copy", "terminal", "terminal_run",
+                 "process_start"}
+
+
+def asked_before_acting(turns: list[dict[str, Any]]) -> bool:
+    """A question (on a card, or in plain text the simulated owner answered) before any file change or command ran."""
+    for index, turn in enumerate(turns):
+        acted = False
+        for event in turn.get("events") or []:
+            if event.get("type") == "tool_end" and event.get("ok") and event.get("name") in _ACTING_TOOLS:
+                acted = True
+            if (event.get("type") == "approval_request" and (event.get("question") or event.get("kind") == "question")
+                    and not acted):
+                return True
+        if index + 1 < len(turns) and turns[index + 1].get("simulated_owner_reply") and not acted:
+            return True
+    return False
+
+
 def tool_rows(turn: dict[str, Any]) -> list[dict[str, Any]]:
     rows: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -299,6 +318,11 @@ def judge_case(case: dict[str, Any], window: int) -> dict[str, Any]:
         asked = any(e.get("type") == "approval_request" and (e.get("question") or e.get("kind") == "question") for e in events) \
             or any(t.get("simulated_owner_reply") for t in turns)
         comp.append((2, j.check("completion", "asked which one before acting", asked)))
+    if truth.get("no_question"):
+        # The owner gave the work and where to find the next step: asking how to proceed *instead of doing it* is a
+        # miss (campaign 24 Nov). An offer of a next step after the work is done is not (FA1 on main, 25 Nov: the
+        # finished answer ended "Would you like to work on the UI next?").
+        comp.append((2, j.check("completion", "acted without asking how to proceed first", not asked_before_acting(turns))))
     for name in truth.get("tools_not_used", []):
         comp.append((1, j.check("completion", f"didn't use {name}", not any(r["name"] == name for r in all_tools))))
     if truth.get("no_success_claim"):

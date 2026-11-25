@@ -34,9 +34,10 @@ from agent.lean import quarantine, read_outline, tool_outputs, tool_prompting, t
 from agent.lean import approvals, steering
 from agent.lean import file_access
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
-from agent.lean import ask, evidence, outbound
+from agent.lean import ask, evidence, outbound, removal_scope
 from agent.lean.job import (CHECK_TOOLS, READ_ONLY_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
-                            is_promise_without_action, named_files, promise_nudge, unbacked_claim, unbacked_file_claim,
+                            is_promise_without_action, missing_file_link, named_files, promise_nudge, unbacked_claim,
+                            unbacked_file_claim,
                             unbacked_screen_claim, written_names)
 from agent.lean.recall import REMIND_EVERY, reminder
 from agent.lean.personas import AgentPersona
@@ -51,6 +52,20 @@ NUDGE_EMPTY = (
 )
 NUDGE_TRUNCATED = "Your last reply was cut off by the output limit. Continue from where you stopped, concisely."
 # Output limit reached mid-answer: the same answer continues (thinking off), it isn't rewritten.
+# The user asks for repeated text, so repeated paragraphs are the answer, not a stall.
+REPETITION_REQUEST = re.compile(
+    r"\b(?:repeat(?:ed|ing|s)?|over and over|again and again|(?:\d+|two|three|four|five|six|seven|eight|nine|ten|"
+    r"twenty|thirty|fifty|hundred|several|many)\s+times|copies of|duplicates? (?:it|this|that|the))\b", re.I)
+
+
+def _accepts(method: Callable[..., Any], name: str) -> bool:
+    import inspect
+    try:
+        return name in inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False
+
+
 NUDGE_CONTINUE = ("Your answer was cut off by the output limit. Continue it exactly where it stopped, without repeating "
                   "anything already written and without starting over.")
 # All of the output went to reasoning: answer from it instead of reasoning again from scratch.
@@ -246,6 +261,23 @@ FAIL_STREAK_NOTE = 3
 # after a "no" is a known failure mode; Claude Code (3 in a row / 20) and Codex auto-review
 # (3 in a row / 10 of 50) both stop and return control.
 REFUSAL_STREAK_NOTE = 3
+# At the step limit, the agent the user talks to hands over in its own words (LeanTurn._handoff_answer).
+HANDOFF_PROMPT = (
+    "[EchoSpeak]: This request has used its time for now, and the work isn't finished. Reply now, without tools, "
+    "to the user in two to four short sentences: what you changed (only what tool results showed), what is still "
+    "left or failing, and the next thing you'll do. Don't say that anything works, passes or is ready: it isn't "
+    "finished. Don't ask a question. Don't mention steps, limits or budgets. End with exactly: "
+    "Say “continue” and I'll pick up from here.")
+# A handoff that reports unfinished work as working is not used: the turn stopped before it was done (PC1/PCH1 live,
+# 25 November 2026: "The tests pass (12/0 failed)" and "The core logic and tests are ready" with 5 and 13 failing).
+_CLAIMS_DONE = re.compile(
+    r"(?i)\b(?:all\s+done|everything\s+(?:is\s+)?(?:done|complete|finished|working|works)|"
+    r"(?:task|work|it)\s+is\s+(?:now\s+)?(?:complete|finished|done)|"
+    r"tests?\s+(?:all\s+|now\s+)?pass(?:es|ed|ing)?\b|all\s+(?:the\s+)?tests\s+(?:are\s+)?(?:pass|green)|"
+    r"\d+\s*/\s*0\s+failed|0\s+failed|"
+    r"(?:is|are)\s+(?:now\s+|all\s+)?(?:ready|working|fixed|done)\b|"
+    r"works\s+(?:now|correctly|as\s+expected)|looks\s+good)")
+
 REFUSAL_STOP = 10
 # Screen work that isn't moving. A 4B model on Minecraft's menu took a screenshot seven times
 # in ten minutes and never clicked: every look "worked", and the animated menu made each image
@@ -664,6 +696,11 @@ class LeanTurn:
         self._history_in_messages = len(self.history)
         messages.append({"role": "user", "content": user_message + (f"\n\n{self.request_note}" if self.request_note else "")})
         self._goal = user_message  # what the quarantined reader extracts facts for
+        self._turn_started, self._unnamed_removed = time.time(), set()
+        # What existed when the request began: a removal's ownership comes from this record (removal_scope.py).
+        self._provenance = removal_scope.Provenance.snapshot(self._project_root())
+        # A request for repeated text ("write it 20 times") turns off the repeated-prose stop for this request.
+        self._repetition_requested = bool(REPETITION_REQUEST.search(user_message or ""))
 
         # A research worker gets its own, smaller step budget (agent/lean/swarm.py).
         max_steps = int(getattr(self, "max_steps_override", 0) or 0) or settings.max_iterations()
@@ -689,6 +726,7 @@ class LeanTurn:
         overflow_retries = 0
         transient_retries = 0
         continuations = 0
+        repetition_retried = False
         step = 0
         planned = self.prefetch() if self.prefetch is not None else []
         if planned and not self.cancel.is_set():
@@ -764,6 +802,22 @@ class LeanTurn:
             if turn.finish_reason == "cancelled":
                 error = "cancelled"
                 success = False
+                break
+            if turn.finish_reason == "repeated_prose":
+                self._discard_step(step)
+                self.emit({"type": "model_repetition", "step": step, "characters": len(turn.content),
+                           "retry": not repetition_retried and step < max_steps})
+                if not repetition_retried and step < max_steps:
+                    repetition_retried = True
+                    add_note(messages, "Your last draft stalled. Continue from the existing tool results. "
+                             "Take the next necessary action, or give a concise answer grounded in what already ran.")
+                    self._no_think_next = True
+                    continue
+                stop_reason = "model_repetition"
+                success = False
+                final_text = "The model got stuck repeating itself. I stopped this attempt."
+                self._append_text("text", step, final_text)
+                self.emit({"type": "agent_token", "step": step, "data": final_text})
                 break
 
             calls = list(turn.tool_calls)
@@ -856,9 +910,11 @@ class LeanTurn:
                             claim_tools = claim_tools - {"memory_save"}
                     checked_removals = (self.toolbox.file_removal_state(content, self.timeline)
                                         if self.promise_guard and self.toolbox.names else {})
+                    linked = missing_file_link(content) if self.promise_guard and self.toolbox.names else ""
                     claim = ((unbacked_claim(content, claim_tools)
                               or unbacked_file_claim(content, self._written, checked_removals=checked_removals)
-                              or unbacked_screen_claim(content, self._screen_changed))
+                              or unbacked_screen_claim(content, self._screen_changed)
+                              or (f"a link to {linked}, which doesn't exist" if linked else ""))
                              if self.promise_guard and self.toolbox.names else "")
                     if claim and not stop_reason:
                         # "I've saved it" with nothing saved: ask once for the tool call or the truth.
@@ -1033,6 +1089,9 @@ class LeanTurn:
             total = max_steps + self._extended
             limited = self._steps_allowed(total) < total
             grace = self._grace_answer(messages, step + 1) if getattr(self, "final_grace", False) or limited else ""
+            if not grace and self.auto_continue and self.promise_guard and not self.cancel.is_set():
+                # The agent the user talks to says where things stand in its own words, held to the same claim checks.
+                grace = self._handoff_answer(messages, step + 1)
             if grace:
                 final_text = grace
             else:
@@ -1139,14 +1198,40 @@ class LeanTurn:
         return None
 
     def _out_of_steps_note(self, max_steps: int) -> str:
+        """Where an unfinished turn stands, in plain words (the step count stays in the record, not the reply)."""
         done = [str(item.get("label") or item.get("name") or "") for item in self.timeline if item.get("kind") == "tool"]
         done = [label for label in dict.fromkeys(done) if label]
-        lines = [f"I ran out of steps ({max_steps}) before finishing."]
+        lines = ["I haven't finished this yet."]
         if done:
             shown = done[-8:]
-            lines.append("So far I: " + "; ".join(shown) + ("; and more." if len(done) > len(shown) else "."))
-        lines.append("Press Continue and I'll pick up where I left off.")
+            # Paths read as file names: the owner knows the project; a full path in every item is noise.
+            shown = [re.sub(r"(?<![\w.])/?(?:[\w.-]+/)+([\w.-]+)", r"\1", label) for label in shown]
+            lines.append("What I did so far: " + "; ".join(shown) + ("; and more." if len(done) > len(shown) else "."))
+        lines.append("Say “continue” and I'll pick up from here.")
+        self.timeline.append({"kind": "note", "step": 0, "text": f"Stopped at the step limit ({max_steps}).",
+                              "at": time.time()})
         return "\n\n".join(lines)
+
+    def _handoff_answer(self, messages: list[dict[str, Any]], step: int) -> str:
+        """At the step limit: one tool-free reply saying what is done, what is left and what comes next, or ''.
+
+        The owner asked for a natural account of unfinished work instead of "Stopped at step limit"
+        (campaign 24 November 2026). The reply is held to the same checks as any answer: if it claims a
+        change no tool made or calls the work done, it is taken back and the plain note is used.
+        """
+        saved = self.grace_prompt
+        self.grace_prompt = HANDOFF_PROMPT
+        try:
+            text = self._grace_answer(messages, step)
+        finally:
+            self.grace_prompt = saved
+        if not text:
+            return ""
+        if unbacked_claim(text, self.succeeded) or unbacked_file_claim(text, self._written) or _CLAIMS_DONE.search(text):
+            self._retract_text(step)
+            self.emit({"type": "claim_nudge", "step": step, "claim": "handoff withdrawn"})
+            return ""
+        return text
 
     # ── model ───────────────────────────────────────────────────────────
     def _call_model(self, messages: list[dict[str, Any]], tools: list[dict[str, Any]], step: int) -> ModelTurn:
@@ -1180,6 +1265,9 @@ class LeanTurn:
                         provider=str(getattr(endpoint, "provider", "") or ""), tools=len(tools or [])) as span:
             # A template that drops tool definitions gets them as text (agent/lean/tool_prompting.py).
             sent_messages = tool_prompting.with_catalog(messages, tools) if tools and tool_prompting.needed(endpoint) else messages
+            options = {}
+            if getattr(self, "_repetition_requested", False) and _accepts(self.client.stream_turn, "detect_repetition"):
+                options["detect_repetition"] = False
             turn = self.client.stream_turn(
                 sent_messages,
                 tools=tools or None,
@@ -1187,6 +1275,7 @@ class LeanTurn:
                 on_content=on_content,
                 cancel=self.cancel,
                 temperature=self.temperature,
+                **options,
             )
             span.set(tool_calls=len(turn.tool_calls), finish=str(turn.finish_reason or ""),
                      prompt_tokens=int((turn.usage or {}).get("prompt") or 0),
@@ -1442,6 +1531,21 @@ class LeanTurn:
                 results[call.id] = (False, undone)
                 self._tool_finished(call, name, args, step, False, undone, 0, outcome="skipped")
                 continue
+            removing = removal_scope.removal(name, args, self._project_root()) if not problem else None
+            if removing is not None:
+                # A removal stays within what the user asked to remove (agent/lean/removal_scope.py). Checked
+                # before the approval card, which shows the command but not whether it exceeds the request, and
+                # in every approval mode, autonomous included.
+                scope, used = removal_scope.problem(
+                    removing, self._removal_intent(), getattr(self, "_provenance", None) or removal_scope.Provenance(),
+                    getattr(self, "_unnamed_removed", set()), self._project_root())
+                if scope:
+                    policy.audit(policy.Decision("deny", scope, "removal_scope"), name=name, args=args,
+                                 session_id=self.session_id, agent=self.persona.id, outcome="blocked")
+                    results[call.id] = (False, scope)
+                    self._tool_finished(call, name, args, step, False, scope, 0, outcome="skipped")
+                    continue
+                self._unnamed_removed = getattr(self, "_unnamed_removed", set()) | used
             if not problem and (self.unavailable_delegates or self.failed_delegates):
                 from agent.lean.agent_reach import artifact_attribution_problem
 
@@ -1729,6 +1833,24 @@ class LeanTurn:
             return f" ({'; '.join(parts)})" if parts else ""
         return ""
 
+    def _project_root(self) -> Path:
+        return Path(str(getattr(self.toolbox, "project_root", "") or ".")).expanduser().resolve()
+
+    def _removal_intent(self) -> "removal_scope.Intent":
+        """What the user asked to remove: this request, their card answers in it, and their own previous message.
+
+        The assistant's messages and suggestions never authorize a removal.
+        """
+        started = getattr(self, "_turn_started", 0.0)
+        selections = [(str(item.get("question") or ""), [str(o) for o in item.get("options") or []],
+                       str(item.get("answer") or ""))
+                      for item in self.timeline
+                      if item.get("kind") == "approval" and item.get("tool") == ask.ASK_USER
+                      and item.get("decision") == "answered" and float(item.get("at") or 0) >= started]
+        previous = next((str(m.get("content") or "") for m in reversed(self.history or [])
+                         if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
+        return removal_scope.intent(getattr(self, "_goal", "") or "", selections, previous)
+
     def _touched(self, name: str, args: dict[str, Any]) -> set[str]:
         """Existing files and folders a call names: a file tool's paths, or a command's arguments.
 
@@ -1878,6 +2000,9 @@ class LeanTurn:
             # got "I ran out of steps" under an answer they had watched being thought (19 November 2026).
             self._no_think_next = True
             turn = self._call_model(messages, [], step)
+            if turn.finish_reason == "repeated_prose":
+                self._discard_step(step)
+                return ""
             text = str(turn.content or "").strip()
             reasoning = str(getattr(turn, "reasoning", "") or "").strip()
             if not text and reasoning and not self.cancel.is_set():
@@ -1885,7 +2010,11 @@ class LeanTurn:
                 messages.append({"role": "assistant", "content": ""})
                 add_note(messages, NUDGE_THOUGHT_ONLY + f" Your reasoning ended with: \"{reasoning[-1200:]}\"")
                 self._no_think_next = True
-                text = str(self._call_model(messages, [], step).content or "").strip()
+                turn = self._call_model(messages, [], step)
+                if turn.finish_reason == "repeated_prose":
+                    self._discard_step(step)
+                    return ""
+                text = str(turn.content or "").strip()
         except Exception:
             logger.debug("Grace answer failed", exc_info=True)
             return ""

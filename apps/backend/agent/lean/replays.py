@@ -123,7 +123,8 @@ class ScriptedTurns:
             for i, turn in enumerate(turns)
         ]
 
-    def stream_turn(self, messages, *, tools=None, on_reasoning=None, on_content=None, cancel=None, temperature=None, max_tokens=None):
+    def stream_turn(self, messages, *, tools=None, on_reasoning=None, on_content=None, cancel=None, temperature=None, max_tokens=None,
+                    detect_repetition=True):
         turn = self.turns.pop(0) if self.turns else ModelTurn(content="")
         if turn.content and on_content:
             on_content(turn.content)
