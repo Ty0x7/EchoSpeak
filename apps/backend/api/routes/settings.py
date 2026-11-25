@@ -1141,7 +1141,9 @@ async def context_windows_info():
     from agent.lean import window
     from agent.lean.provider import resolve_endpoint
 
-    provider = str(getattr(config.local, "provider", "") or "")
+    raw = getattr(config.local, "provider", "") or ""
+    # config.local.provider is a ModelProvider enum: str() of it is "ModelProvider.OLLAMA", not "ollama".
+    provider = str(getattr(raw, "value", raw))
     configured = int(getattr(config.local, "context_length", 0) or 0)
     if provider != "ollama":
         return {"provider": provider, "model": str(config.local.model_name or ""), "configured": configured,

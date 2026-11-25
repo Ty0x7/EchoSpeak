@@ -204,3 +204,25 @@ def test_the_old_16k_default_moves_to_32k_once(tmp_path, monkeypatch):
     assert cfg._migrate_context_32k({"local": {"provider": "lmstudio", "context_length": 16384}})["local"]["context_length"] == 16384
     (tmp_path / ".marker").unlink()
     assert cfg._migrate_context_32k({"local": {"provider": "ollama", "context_length": 65536}})["local"]["context_length"] == 65536
+
+
+def test_the_report_recognises_ollama_as_the_live_config_stores_it(monkeypatch):
+    """Installed 25 Nov 2026: config.local.provider is ModelProvider.OLLAMA, and str() of it is
+    "ModelProvider.OLLAMA", so GET /settings/context-windows took the "provider sets its own window" branch and
+    /context refused, while Ollama was serving the 32K variant."""
+    import asyncio
+    from api.routes.settings import context_windows_info
+    from config import ModelProvider
+
+    server = FakeOllama()
+    try:
+        monkeypatch.setattr(config.local, "provider", ModelProvider.OLLAMA)
+        monkeypatch.setattr(config.local, "base_url", server.url)
+        monkeypatch.setattr(config.local, "model_name", "qwen3.5:9b")
+        monkeypatch.setattr(config.local, "context_length", 32768)
+        info = asyncio.run(context_windows_info())
+        assert info["provider"] == "ollama" and info["choices"] and info["served_as"] == "echospeak/qwen3.5-9b:32k"
+        monkeypatch.setattr(config.local, "provider", ModelProvider.LM_STUDIO)
+        assert asyncio.run(context_windows_info())["choices"] == []
+    finally:
+        server.close()
