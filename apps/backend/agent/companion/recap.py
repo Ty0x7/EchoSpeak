@@ -49,9 +49,14 @@ def activity_answer(snapshot: dict[str, Any], agent: str = "") -> str:
         return f"{name} isn't doing anything I can see right now." if agent else "It's quiet. No agent is active right now."
     order = {"needs_permission": 0, "working": 1, "your_turn": 2, "quiet": 3, "idle": 4}
     rows.sort(key=lambda r: (order.get(r["state"], 9), -float(r.get("updated_at") or 0)))
-    sentences = [_describe(r) for r in rows[:4]]
-    if len(rows) > 4:
-        sentences.append(f"And {len(rows) - 4} more.")
+    active = [r for r in rows if r["state"] in {"needs_permission", "working", "your_turn"}]
+    resting = [r for r in rows if r not in active]
+    sentences = [_describe(r) for r in active[:4]]
+    if len(active) > 4:
+        sentences.append(f"And {len(active) - 4} more active.")
+    if resting:  # idle and quiet sessions are summarised, never listed one by one
+        sentences.append(f"{len(resting)} other session{'s are' if len(resting) != 1 else ' is'} resting." if active
+                         else f"Nothing's active; {len(resting)} session{'s are' if len(resting) != 1 else ' is'} resting.")
     focus = snapshot.get("focus") or {}
     if not agent and focus.get("uncertain"):
         names = " or ".join(c["label"].replace("Claude Code", "Claude") for c in focus["candidates"][:2])
