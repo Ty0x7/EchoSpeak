@@ -81,7 +81,8 @@ def test_compose_is_grounded_and_claims_saving_only_when_saved():
     line = compose(_event(), d, humor=1, saved=False)
     assert line.startswith("Claude reported back on echospeak") and "PR 212 is up" in line
     assert "saved" not in line.lower() and "verified" not in line.lower()
-    assert "saved" in compose(_event(), d, humor=1, saved=True).lower() or "echo can use" in compose(_event(), d, saved=True).lower()
+    saved_line = compose(_event(), d, humor=1, saved=True).lower()
+    assert "saved" in saved_line or "echo can use" in saved_line
     clean = analyse("## Results\n- All 40 tests pass, 40 passed.\n- Implemented the parser.\n## Changes\n- Added docs.\n" + "x " * 300)
     assert "suspicious" in compose(_event(text="x"), clean, humor=2)
     assert "suspicious" not in compose(_event(text="x"), clean, humor=1)
@@ -231,13 +232,13 @@ def test_recap_answers_come_from_observations(tmp_path, monkeypatch):
                                                                                   "hook_event_name": "Stop", "last_assistant_message": REPORT}}))
     snapshot = activity(store, include_echo=False, now=300.0)
     text = recap.answer("activity", store, snapshot)
-    assert "Codex" in text and "fixing the config loader" in text and "Claude is waiting for you" in text
+    assert "Codex" in text and "fixing the config loader" in text and "Claude reported back" in text
     assert "<" not in text
-    assert "Claude's report" in recap.answer("latest_report", store, snapshot) and "haven't checked it independently" in recap.answer("latest_report", store, snapshot)
+    assert "Claude reported back" in recap.answer("latest_report", store, snapshot) and "haven't checked it independently" in recap.answer("latest_report", store, snapshot)
     assert "missing comma" in recap.answer("discovery", store, snapshot)
     away = recap.answer("recap", store, snapshot, since=150.0)
     assert away.startswith("While you were away: Claude finished 1 turn") and "mixed results" in away
-    assert "isn't doing anything" in recap.answer("agent:echo", store, snapshot)
+    assert "can't confirm current activity" in recap.answer("agent:echo", store, snapshot)
 
 
 def test_reports_that_arrive_while_closed_are_kept_but_not_spoken(monkeypatch, tmp_path):

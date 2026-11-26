@@ -354,6 +354,7 @@ class Companion(Gtk.Application):
         ask = Gio.Menu()
         for label, topic in (("What's happening?", "activity"), ("What is Claude Code doing?", "agent:claude-code"),
                              ("What is Codex doing?", "agent:codex"), ("What is Echo doing?", "agent:echo"),
+                             ("What are my other agents doing?", "other_agents"), ("What did Codex just finish?", "report:codex"),
                              ("Latest report", "latest_report"), ("Recent discovery", "discovery"),
                              ("While I was away", "recap")):
             ask.append(label, f"app.ask::{topic}")
