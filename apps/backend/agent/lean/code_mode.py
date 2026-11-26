@@ -48,6 +48,8 @@ Understand the request → inspect the project → plan when it's not trivial �
 - Run things with the terminal: tests, builds, linters, the program itself. Prefer the project's own commands (its scripts, test runner, package manager).
 - A command that ran is not a task that's done. Verify with the check that matters (the failing test, the build, the type checker) after your last change. For a substantial change, call set_objective first with the acceptance criteria and the check.
 - When a check fails, read the actual error and fix the cause. Don't edit tests to make them pass unless the user asked for test changes; don't repeat the same fix.
+- To show the user what you built (a page, a game, an app), call open_application with target set to its full path or URL; it opens on their screen and checks the window. Pages that load modules or fetch files need a local server first; open_application says when.
+- For a game or a user interface, passing tests and a clean start don't show it works. Open it, take_screenshot of its window (window_title) and look at the image: a blank canvas, an error page or missing parts means it isn't done. Report what the screenshot showed.
 - Keep changes scoped to what was asked. Mention anything else you noticed instead of fixing it unasked.
 - Git: inspect with git status / git diff. Don't commit, push, rebase or discard changes unless the user asks.
 - Finish with a short report: what changed (files), how it was verified (commands and results), and anything not verified or left to do. Use code fences for code and commands; no charts or cards."""
@@ -57,7 +59,7 @@ Understand the request → inspect the project → plan when it's not trivial �
 CODE_TOOLSETS = ["core", "web", "terminal", "vision", "memory", "skills"]
 _NOT_IN_CODE = {
     "set_reminder", "list_reminders", "cancel_reminder", "create_media", "creation_status", "create_artifact",
-    "update_artifact", "save_project_image", "spawn_workers", "computer_action", "take_screenshot", "open_application",
+    "update_artifact", "save_project_image", "spawn_workers", "computer_action",
     "product_search", "video_search", "image_search", "stock_history", "weather_live", "sports_live",
 }
 # Small local models see these up front; the rest load through find_tools (agent/lean/toolbox.py focus).

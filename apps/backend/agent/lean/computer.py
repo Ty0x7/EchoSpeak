@@ -4,6 +4,7 @@ from __future__ import annotations
 import io
 import math
 import os
+import platform
 import re
 import threading
 import time
@@ -190,8 +191,49 @@ def _grab(session: str, args: dict):
     return observations.save(image, session, source, screen=screen)
 
 
+def _wayland() -> bool:
+    return platform.system() == "Linux" and bool(os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _capture_wayland(args: dict, monitors: list[dict]) -> tuple[Image.Image, dict, str]:
+    """Wayland: X11 capture (mss) through XWayland returns a black frame on Hyprland (26 November 2026), so the
+    compositor's own screencopy is used, for a monitor or for one window found by its title."""
+    import io
+
+    from agent import desktop_open
+
+    window = str(args.get("window_title") or "").strip()
+    note = ""
+    if window:
+        win, note = desktop_open.find_window(window)
+        if win is None:
+            raise ValueError(note[0].upper() + note[1:])
+        x, y, w, h = win["rect"]
+        screen = {"left": x, "top": y, "width": w, "height": h}
+        source = f"{win['title'][:120]} ({win['where']})"
+    else:
+        monitor = int(args.get("monitor", 1))
+        if monitor < 1 or monitor >= len(monitors):
+            raise ValueError("Monitor unavailable; monitor numbers start at 1")
+        screen = {k: monitors[monitor][k] for k in ("left", "top", "width", "height")}
+        screen["monitor"] = monitor
+        output = monitors[monitor].get("output")
+        source = f"Monitor {monitor}" + (f" ({output})" if output else "")
+    if screen["width"] <= 0 or screen["height"] <= 0 or screen["width"] * screen["height"] > observations.MAX_PIXELS:
+        raise ValueError("Window cannot be captured at this size")
+    png = desktop_open.wayland_capture((screen["left"], screen["top"], screen["width"], screen["height"]))
+    image = Image.open(io.BytesIO(png)).convert("RGB")
+    if note:
+        source += f"; {note}"
+    return image, screen, source
+
+
 def _capture(args: dict) -> tuple[Image.Image, dict, str]:
     import mss
+    if _wayland():
+        with mss.mss() as capture:
+            monitors = [dict(m) for m in capture.monitors]
+        return _capture_wayland(args, monitors)
     screen: dict[str, Any]
     window = str(args.get("window_title") or "").strip()
     with mss.mss() as capture:

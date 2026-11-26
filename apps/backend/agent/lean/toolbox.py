@@ -43,7 +43,10 @@ TOOLSETS: dict[str, list[str]] = {
         "weather_live", "sports_live", "browse_task",
         "stock_history", "product_search", "video_search", "image_search",
     ],
-    "terminal": ["terminal", "process_output", "process_stop"],
+    # open_application shows what was built (a page, a game, a document) on the user's screen. An agent that can
+    # run commands on this PC can already start apps there; this is the checked route, under the same Open apps
+    # switch and approval (GTA_CLONE session, 26 November 2026: the sandbox can't reach the screen).
+    "terminal": ["terminal", "process_output", "process_stop", "open_application"],
     "vision": ["take_screenshot", "analyze_screen", "vision_qa", "read_image"],
     "desktop": [
         "open_application", "open_chrome", "notepad_write",
@@ -663,8 +666,12 @@ class Toolbox:
             if not getattr(config, "allow_open_application", False):
                 guidance += " App launching is disabled in Settings > Permissions > Open apps."
             else:
-                guidance += (" open_application launches installed apps by Start-menu name, desktop shortcut name or "
-                             "executable path; apps in the owner's Blocked apps list are refused.")
+                guidance += ((" open_application launches installed apps by Start-menu name, desktop shortcut name or "
+                              "executable path; apps in the owner's Blocked apps list are refused.")
+                             if platform.system() == "Windows" else
+                             (" open_application opens an installed app by name, or a file, folder or URL (target) in "
+                              "its default app, and checks the window appeared; apps in the owner's Blocked apps list "
+                              "are refused."))
                 if wants_apps(goal):
                     favorites = list(getattr(config, "open_application_favorites", None) or [])
                     blocked = list(getattr(config, "open_application_blocklist", None) or [])
