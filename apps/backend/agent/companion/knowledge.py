@@ -159,5 +159,10 @@ def remember(event: dict[str, Any], digest: Digest, *, scope_mode: Optional[str]
         project_path=root or None, project_id=project_id, scope=scope,
         source_item_id=event["id"], semantic_key=f"companion:{event['agent']}:{event['session_id']}:{event.get('turn_id') or event['id']}",
     )
-    return {"stored": bool(item_id), "id": item_id or "", "scope": scope, "project_id": project_id,
-            "reason": "" if item_id else "memory declined the item (duplicate or sensitive)"}
+    reason = ""
+    if not item_id:
+        text = memory_text(event, digest)
+        sensitive = getattr(memory, "_is_sensitive_text", None)
+        reason = ("Echo's memory filter treats a word in it (such as 'token' or 'secret') as a possible secret"
+                  if callable(sensitive) and sensitive(text) else "memory already has this item")
+    return {"stored": bool(item_id), "id": item_id or "", "scope": scope, "project_id": project_id, "reason": reason}

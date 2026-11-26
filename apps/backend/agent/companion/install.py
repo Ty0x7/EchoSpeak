@@ -278,8 +278,40 @@ def companion_launcher() -> Optional[Path]:
     return candidate if candidate.is_file() else None
 
 
+def stable_launcher_path() -> Path:
+    return companion_home() / "echo-companion"
+
+
+STABLE_LAUNCHER = """#!/bin/sh
+# Echo Companion at login. It follows whichever EchoSpeak install the `echospeak` command points at,
+# so an update (which switches that command) needs no change here. Written by Settings › Echo Companion.
+cli=$(command -v echospeak 2>/dev/null || echo "$HOME/.local/bin/echospeak")
+cli=$(readlink -f "$cli" 2>/dev/null)
+launcher="${{cli%/apps/terminal/echospeak}}/apps/companion/echo-companion"
+[ -x "$launcher" ] || launcher={fallback}
+exec "$launcher" "$@"
+"""
+
+
+def write_stable_launcher(fallback: Path) -> Path:
+    import shlex
+
+    home = companion_home()
+    home.mkdir(parents=True, exist_ok=True)
+    path = stable_launcher_path()
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(STABLE_LAUNCHER.format(fallback=shlex.quote(str(fallback))), encoding="utf-8")
+    os.chmod(temporary, 0o755)
+    os.replace(temporary, path)
+    return path
+
+
 def set_autostart(enabled: bool) -> dict[str, Any]:
-    """Start Echo Companion at login through XDG autostart (Omarchy/uwsm honours it)."""
+    """Start Echo Companion at login through XDG autostart (Omarchy/uwsm honours it).
+
+    The entry runs a stable launcher in the companion's home, not a versioned install path, so updates
+    never require turning autostart off and on again.
+    """
     path = autostart_path()
     if not enabled:
         path.unlink(missing_ok=True)
@@ -287,8 +319,9 @@ def set_autostart(enabled: bool) -> dict[str, Any]:
     launcher = companion_launcher()
     if launcher is None:
         raise ValueError("This build doesn't include the desktop companion")
+    stable = write_stable_launcher(launcher)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("[Desktop Entry]\nType=Application\nName=Echo Companion\n"
                     "Comment=Echo on your desktop: what your agents are doing, out loud\n"
-                    f"Exec={launcher}\nTerminal=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n", encoding="utf-8")
-    return {"enabled": True, "path": str(path)}
+                    f"Exec={stable}\nTerminal=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n", encoding="utf-8")
+    return {"enabled": True, "path": str(path), "launcher": str(stable)}
