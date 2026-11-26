@@ -129,6 +129,66 @@ def test_noop_when_not_posix(rt, monkeypatch):
 def test_xdg_runtime_dir_fallback(tmp_path, monkeypatch):
     monkeypatch.delenv("ECHOSPEAK_RUNTIME_DIR", raising=False)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    assert endpoint_file.runtime_dir() == tmp_path / "echospeak"
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    owner = tmp_path / "share" / "ai.echospeak.desktop" / "runtime"
+    # #213: only the owner's data folder publishes to the shared XDG location
+    assert endpoint_file.runtime_dir(owner) == tmp_path / "echospeak"
+    assert endpoint_file.runtime_dir("/data") == endpoint_file.Path("/data/runtime")
     monkeypatch.delenv("XDG_RUNTIME_DIR")
     assert endpoint_file.runtime_dir("/data") == endpoint_file.Path("/data/runtime")
+
+
+# ---- #213: a backend for another data folder must not take over the owner's endpoint ----
+
+def _xdg(tmp_path, monkeypatch):
+    monkeypatch.delenv("ECHOSPEAK_RUNTIME_DIR", raising=False)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "xdg"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    (tmp_path / "xdg").mkdir(exist_ok=True)
+    owner = tmp_path / "share" / "ai.echospeak.desktop" / "runtime"
+    owner.mkdir(parents=True, exist_ok=True)
+    return owner
+
+
+def test_only_the_owners_data_folder_publishes_to_the_shared_location(tmp_path, monkeypatch):
+    owner = _xdg(tmp_path, monkeypatch)
+    lab = tmp_path / "lab-data"
+    lab.mkdir()
+    assert endpoint_file.runtime_dir(owner) == tmp_path / "xdg" / "echospeak"
+    assert endpoint_file.runtime_dir(lab) == lab / "runtime"
+    path = endpoint_file.write_endpoint("127.0.0.1", 39321, data_dir=str(lab))
+    assert path == lab / "runtime" / "endpoint.json"
+    assert not (tmp_path / "xdg" / "echospeak" / "endpoint.json").exists()
+
+
+def _foreign_owner_file(directory, pid, data_dir):
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path = directory / "endpoint.json"
+    path.write_text(json.dumps({"schema": 1, "pid": pid, "host": "127.0.0.1", "port": 39117, "auth_key": "k",
+                                "auth_required": True, "version": "x", "data_dir": str(data_dir), "started_at": 1}))
+    os.chmod(path, 0o600)
+    return path
+
+
+def test_never_replaces_another_live_backends_endpoint(tmp_path, monkeypatch):
+    owner = _xdg(tmp_path, monkeypatch)
+    sleeper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        path = _foreign_owner_file(tmp_path / "xdg" / "echospeak", sleeper.pid, owner)
+        assert endpoint_file.write_endpoint("127.0.0.1", 1, data_dir=str(owner)) is None
+        assert json.loads(path.read_text())["pid"] == sleeper.pid
+        # ensure_endpoint leaves a live owner alone, and takes over only once it is gone
+        assert endpoint_file.ensure_endpoint("127.0.0.1", 1, data_dir=str(owner)) is None
+    finally:
+        sleeper.kill()
+        sleeper.wait()
+    assert endpoint_file.ensure_endpoint("127.0.0.1", 1, data_dir=str(owner)) == path
+    assert json.loads(path.read_text())["pid"] == os.getpid()
+
+
+def test_ensure_endpoint_restores_a_deleted_file(tmp_path, monkeypatch):
+    owner = _xdg(tmp_path, monkeypatch)
+    path = endpoint_file.write_endpoint("127.0.0.1", 39117, data_dir=str(owner))
+    path.unlink()
+    assert endpoint_file.ensure_endpoint("127.0.0.1", 39117, data_dir=str(owner)) == path
+    assert json.loads(path.read_text())["port"] == 39117

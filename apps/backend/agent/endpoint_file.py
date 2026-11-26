@@ -33,17 +33,39 @@ FILENAME = "endpoint.json"
 IS_POSIX = os.name == "posix"
 
 
+DESKTOP_APP_ID = "ai.echospeak.desktop"
+
+
+def default_data_dir() -> Path:
+    """The owner's data folder: the desktop app's, which the terminal attaches to by default."""
+    base = os.environ.get("XDG_DATA_HOME", "").strip() or str(Path.home() / ".local" / "share")
+    return Path(base) / DESKTOP_APP_ID / "runtime"
+
+
+def _same_dir(a: Any, b: Any) -> bool:
+    try:
+        return os.path.realpath(os.path.expanduser(str(a))) == os.path.realpath(os.path.expanduser(str(b)))
+    except (TypeError, ValueError):
+        return False
+
+
 def runtime_dir(data_dir: Optional[str | os.PathLike] = None) -> Path:
+    """Where this data folder's endpoint lives.
+
+    The shared ``$XDG_RUNTIME_DIR/echospeak`` belongs to the owner's default data folder
+    only. A backend for any other folder (a test, a dev checkout) publishes inside that
+    folder, ``<data dir>/runtime``, so it can never replace the owner's endpoint (#213).
+    """
     explicit = os.environ.get("ECHOSPEAK_RUNTIME_DIR", "").strip()
     if explicit:
         return Path(explicit).expanduser()
-    xdg = os.environ.get("XDG_RUNTIME_DIR", "").strip()
-    if xdg:
-        return Path(xdg) / "echospeak"
     if data_dir is None:
         from config import DATA_DIR
 
         data_dir = DATA_DIR
+    xdg = os.environ.get("XDG_RUNTIME_DIR", "").strip()
+    if xdg and _same_dir(data_dir, default_data_dir()):
+        return Path(xdg) / "echospeak"
     return Path(data_dir) / "runtime"
 
 
@@ -88,6 +110,12 @@ def write_endpoint(host: str, port: int, *, auth_key: str = "", auth_required: b
         "started_at": time.time(),
     }
     target = directory / FILENAME
+    current = _load(target)
+    if current and int(current.get("pid") or 0) not in {0, os.getpid()} and _pid_alive(int(current.get("pid") or 0)):
+        # Another live backend owns this endpoint; never take it over.
+        logger.warning("Not replacing {}: it belongs to live backend pid {} ({})", target, current.get("pid"),
+                       current.get("data_dir") or "unknown data folder")
+        return None
     temp = directory / f".{FILENAME}.{os.getpid()}.tmp"
     try:
         try:
@@ -168,3 +196,16 @@ def remove_endpoint(data_dir: Optional[str | os.PathLike] = None) -> bool:
     except OSError:
         return False
     return True
+
+
+def ensure_endpoint(host: str, port: int, **kwargs: Any) -> Optional[Path]:
+    """Re-publish this backend's endpoint if the file went missing or names a dead process."""
+    if not IS_POSIX:
+        return None
+    data_dir = kwargs.get("data_dir") or None
+    current = _load(runtime_dir(data_dir) / FILENAME)
+    if current and int(current.get("pid") or 0) == os.getpid():
+        return runtime_dir(data_dir) / FILENAME
+    if current and _pid_alive(int(current.get("pid") or 0)):
+        return None
+    return write_endpoint(host, port, **kwargs)

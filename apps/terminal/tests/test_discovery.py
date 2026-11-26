@@ -85,3 +85,28 @@ def test_serve_env_mirrors_desktop_launcher(tmp_path):
     assert env["API_HOST"] == "127.0.0.1" and env["API_PORT"] == "8123" and env["API_AUTH_KEY"] == "k" * 10
     assert "ECHOSPEAK_KEY" not in env and "ECHOSPEAK_URL" not in env
     assert oct((tmp_path / "d").stat().st_mode & 0o777) == "0o700"
+
+
+def test_a_lab_backends_endpoint_never_captures_the_owners_terminal(tmp_path):
+    """#213: the shared file names a backend for another data folder; the terminal must skip it."""
+    owner = tmp_path / "share" / "ai.echospeak.desktop" / "runtime"
+    owner.mkdir(parents=True)
+    xdg = tmp_path / "xdg"
+    _endpoint(xdg / "echospeak", port=39321, data_dir=str(tmp_path / "lab-data"), auth_key="labkey")
+    env = {"XDG_RUNTIME_DIR": str(xdg), "XDG_DATA_HOME": str(tmp_path / "share"), "HOME": str(tmp_path)}
+    assert discovery.find_endpoint(env) is None
+    assert discovery.discover(env=env).source == "default"
+    # the owner's own endpoint, in the owner's folder's runtime dir, is found
+    _endpoint(owner / "runtime", port=39117, data_dir=str(owner))
+    found = discovery.find_endpoint(env)
+    assert found["port"] == 39117
+    # and a lab terminal pointed at the lab folder finds the lab backend, not the owner's
+    (xdg / "echospeak" / "endpoint.json").unlink()  # the pre-fix stray file; fixed backends never write it
+    lab_env = {**env, "ECHOSPEAK_DATA_DIR": str(tmp_path / "lab-data")}
+    _endpoint(tmp_path / "lab-data" / "runtime", port=39400, data_dir=str(tmp_path / "lab-data"))
+    assert discovery.find_endpoint(lab_env)["port"] == 39400
+
+
+def test_files_without_a_data_folder_are_still_accepted(tmp_path):
+    _endpoint(tmp_path / "rt")
+    assert discovery.find_endpoint({"ECHOSPEAK_RUNTIME_DIR": str(tmp_path / "rt")})["port"] == 9123

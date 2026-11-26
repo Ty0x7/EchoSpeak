@@ -88,11 +88,7 @@ def lock_holder(data: Path) -> int:
 
 def status(env: Mapping[str, str] = os.environ) -> Status:
     data = discovery.data_dir(env)
-    found = None
-    for directory in discovery.runtime_dirs(env):
-        found = discovery.read_endpoint_file(directory / "endpoint.json")
-        if found:
-            break
+    found = discovery.find_endpoint(env)
     record = read_record(env)
     log = str(Path(env.get("ECHOSPEAK_LOGS_DIR") or data / "logs") / LOG_NAME)
     if not found:

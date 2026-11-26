@@ -65,6 +65,27 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _same_dir(a: object, b: object) -> bool:
+    try:
+        return os.path.realpath(os.path.expanduser(str(a))) == os.path.realpath(os.path.expanduser(str(b)))
+    except (TypeError, ValueError):
+        return False
+
+
+def find_endpoint(env: Mapping[str, str] = os.environ) -> Optional[dict]:
+    """The first live endpoint, in discovery order, that serves this terminal's data folder.
+
+    A file naming a different data folder (a test or dev backend) is skipped, so it can never
+    capture the owner's terminal (#213). Files without a recorded folder are accepted as before.
+    """
+    expected = data_dir(env)
+    for directory in runtime_dirs(env):
+        data = read_endpoint_file(directory / "endpoint.json")
+        if data and (not data.get("data_dir") or _same_dir(data["data_dir"], expected)):
+            return data
+    return None
+
+
 def read_endpoint_file(path: Path) -> Optional[dict]:
     """The file's contents if it is ours, private and names a live process; else None."""
     if os.name != "posix":
@@ -129,11 +150,10 @@ def discover(url: str = "", key: str = "", env: Mapping[str, str] = os.environ,
     if env.get("ECHOSPEAK_URL", "").strip():
         return Endpoint(check_url(env["ECHOSPEAK_URL"].strip(), insecure_remote),
                         key or env.get("ECHOSPEAK_KEY", ""), "env")
-    for directory in runtime_dirs(env):
-        data = read_endpoint_file(directory / "endpoint.json")
-        if data:
-            return Endpoint(_file_url(data), key or str(data.get("auth_key") or ""), "endpoint-file",
-                            version=str(data.get("version") or ""), pid=int(data.get("pid") or 0))
+    data = find_endpoint(env)
+    if data:
+        return Endpoint(_file_url(data), key or str(data.get("auth_key") or ""), "endpoint-file",
+                        version=str(data.get("version") or ""), pid=int(data.get("pid") or 0))
     return Endpoint(DEFAULT_URL, key or env.get("ECHOSPEAK_KEY", ""), "default")
 
 
