@@ -75,7 +75,9 @@ def compose(event: dict[str, Any], digest: Digest, *, humor: int = 1, saved: boo
     kind = event["kind"]
     if kind == "needs_permission":
         return soul.phrase("needs_you", seed, "{agent} is waiting for your permission{where}.", agent=who, where=where)
-    if kind == "waiting_input" or (kind == "turn_completed" and digest.kind == "question"):
+    if kind == "waiting_input":  # idle at its prompt, not asking anything in particular
+        return soul.phrase("waiting", seed, "{agent} is waiting for you{where}.", agent=who, where=where)
+    if kind == "turn_completed" and digest.kind == "question":
         opener = soul.phrase("question", seed, "{agent} has a question for you{where}.", agent=who, where=where).rstrip(".")
         return f"{opener}: {_brief(digest.headline or event.get('text', ''), 14)}"
     if kind == "stage_completed":

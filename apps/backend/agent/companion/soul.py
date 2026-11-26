@@ -47,6 +47,7 @@ failure: That didn't work, but we learned something. On to the next one. | Not t
 all_green: Everything passed, which is honestly a little suspicious.
 saved: I saved the key points for Echo. | Echo can use what it found from now on. | The important parts are saved for Echo.
 needs_you: {agent} is waiting for your permission{where}.
+waiting: {agent} is waiting for you{where}.
 question: {agent} has a question for you{where}.
 
 ## Never

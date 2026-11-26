@@ -100,13 +100,13 @@ def _section(heading: str) -> str:
     return ""
 
 
-def _lines(text: str) -> list[tuple[str, str]]:
-    """(section category or "", line) for each meaningful sentence."""
+def _lines(text: str) -> list[tuple[str, str, int]]:
+    """(section category or "", sentence, source line number) for each meaningful sentence."""
 
     body = re.sub(r"```.*?```", " ", text, flags=re.S)
-    out: list[tuple[str, str]] = []
+    out: list[tuple[str, str, int]] = []
     section = ""
-    for raw in body.splitlines():
+    for number, raw in enumerate(body.splitlines()):
         stripped = raw.strip()
         heading = re.match(r"^(#{1,6}\s+(.+)|\*\*([^*]{2,60})\*\*:?\s*$|([A-Z][A-Za-z /&-]{2,40}):\s*$)", stripped)
         if heading:
@@ -121,7 +121,7 @@ def _lines(text: str) -> list[tuple[str, str]]:
             line = " · ".join(cell.strip() for cell in line.strip("|").split("|") if cell.strip())
         for sentence in re.split(r"(?<=[.!?])\s+(?=[A-Z])", line):
             if len(sentence) >= 4:
-                out.append((section, sentence[:300]))
+                out.append((section, sentence[:300], number))
     return out
 
 
@@ -154,9 +154,10 @@ def analyse(text: str) -> Digest:
     else:
         digest.kind = "progress"
     lines = _lines(message)
-    digest.headline = next((l for _, l in lines if not _INJECTION.search(l)), "")[:200]
+    digest.headline = next((l for _, l, _n in lines if not _INJECTION.search(l)), "")[:200]
     seen: set[str] = set()
-    for section, line in lines:
+    counted: set[tuple[str, int]] = set()  # one item per bullet, not per sentence
+    for section, line, number in lines:
         if _INJECTION.search(line):
             digest.dropped_lines += 1
             continue
@@ -171,14 +172,26 @@ def analyse(text: str) -> Digest:
         else:
             category = next((name for name, rule in _RULES[1:] if _match(name, rule, line)), "")
         if category:
+            seen.add(key)
+            if (category, number) in counted:
+                continue
+            counted.add((category, number))
             bucket = getattr(digest, category)
             if len(bucket) < 8:
                 bucket.append(line)
-            seen.add(key)
     digest.prs = sorted(set(_PR.findall(message)), key=int)[:10]
     digest.issues = sorted(set(_ISSUE.findall(message)) - set(digest.prs), key=int)[:10]
     digest.commits = sorted({sha for sha in _SHA.findall(message) if re.search(r"[a-f]", sha) and re.search(r"\d", sha)})[:10]
     counts = _TESTS.findall(message)  # the largest mention; summing would double count repeats
     digest.tests_passed = max((int(p) for p, _ in counts), default=0)
     digest.tests_failed = max((int(f or 0) for _, f in counts), default=0)
+    # unittest: "Ran 5 tests … OK" / "FAILED (failures=2)"; plain "5 tests pass(ed)"
+    for ran, tail in re.findall(r"\bRan (\d+) tests?\b([^\n]{0,80})", message):
+        failures = re.search(r"failures=(\d+)|errors=(\d+)", tail + message[message.find("Ran " + ran):][:200])
+        if "OK" in tail or not failures:
+            digest.tests_passed = max(digest.tests_passed, int(ran))
+        else:
+            digest.tests_failed = max(digest.tests_failed, int(failures.group(1) or failures.group(2) or 0))
+    for number in re.findall(r"\b(\d+) tests? pass(?:ed|es)?\b", message, re.I):
+        digest.tests_passed = max(digest.tests_passed, int(number))
     return digest

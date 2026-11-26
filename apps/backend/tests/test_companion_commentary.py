@@ -250,3 +250,15 @@ def test_reports_that_arrive_while_closed_are_kept_but_not_spoken(monkeypatch, t
     assert not item["spoken"] and item["silent_because"] == "arrived while EchoSpeak was closed"
     assert h.order == ["archive", "remember"]  # kept, not spoken
     assert store.unhandled(0) == []  # and never processed twice
+
+
+def test_counts_bullets_not_sentences():
+    report = ("## Summary\nAdded slugify_unique. The suite passes.\n\n## What changed\n"
+              "- slugify.py: added the function. It keeps input order. Repeats get -2, -3.\n"
+              "- test_slugify.py: two tests. One covers collisions.\n\n## Verification\n- Ran 5 tests, OK.\n\n"
+              "## Not verified / limits\n- Not a git repository. No diff to show.\n- Empty inputs are not special-cased. They become -2.\n")
+    d = analyse(report)
+    assert len(d.open) == 2 and d.open[0].startswith("Not a git repository")
+    assert len(d.results) <= 4
+    assert d.tests_passed == 5 and d.tests_failed == 0
+    assert analyse("## Verification\n- Ran 7 tests in 0.1s\n- FAILED (failures=2)\n## Summary\nx\n## Changes\n- y\n").tests_failed == 2
