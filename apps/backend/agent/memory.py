@@ -51,6 +51,21 @@ def _synchronized_records(*, refresh: bool = True):
     return decorate
 
 
+_SECRET_VALUE = re.compile(
+    r"\bsk-[A-Za-z0-9_-]{10,}"                                   # OpenAI-style keys
+    r"|\bgh[pousr]_[A-Za-z0-9]{20,}|\bgithub_pat_[A-Za-z0-9_]{20,}"  # GitHub tokens
+    r"|\bAKIA[0-9A-Z]{16}\b|\bxox[baprs]-[A-Za-z0-9-]{10,}"      # AWS, Slack
+    r"|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\."               # JWTs
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"|\bbearer\s+[A-Za-z0-9._~+/-]{12,}"
+    r"|\bauthorization\s*:\s*\S{8,}"
+    r"|\b(?:api[_ -]?key|apikey|access[_ -]?key|secret(?:[_ -]?key)?|client[_ -]?secret|token|access[_ -]?token|"
+    r"auth[_ -]?token|password|passwd|passphrase|pin)\b\s*(?:is|was|=|:)\s*[\"']?(?=[^\s\"']*[0-9!@#$%^&*_+=-])"
+    r"[^\s\"']{6,}",
+    re.I,
+)
+
+
 class AgentMemory:
     """Manages conversation memory using FAISS vector store."""
 
@@ -1128,13 +1143,9 @@ class AgentMemory:
         s = str(text or "")
         if not s.strip():
             return False
-        low = s.lower()
-        # Conservative denylist. We never want to store secrets.
-        if any(k in low for k in ["api_key", "apikey", "password", "passwd", "secret", "token", "bearer ", "authorization:"]):
-            return True
-        if re.search(r"\bsk-[a-z0-9]{10,}\b", low):
-            return True
-        return False
+        # Never store a secret, but recognise the secret itself, not the topic: "reasoning tokens",
+        # "password field" and "secret masking" are ordinary engineering words.
+        return bool(_SECRET_VALUE.search(s))
 
     def _dedupe_should_skip(self, text: str, existing_text: str) -> bool:
         a = str(text or "").strip().lower()
