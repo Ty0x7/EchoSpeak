@@ -254,9 +254,10 @@ class Companion(Gtk.Application):
                 and not self._menu_open() and not self.bubble.get_visible()):
             self.target_shown = 0.0
         if self.visible:
-            # Full frame rate while something moves; resting Echo redraws at 20 fps (gaze drift, blinks).
+            # Resting Echo redraws at 20 fps, with full-rate frames for short blinks and pose changes.
             resting = mode in {"idle", "waiting", "sleeping"} and self.shown == self.target_shown and self.pointer is None
-            if not resting or now - getattr(self, "_last_frame", 0.0) >= 0.05:
+            animating = not self.reduced and self.animator.needs_full_rate(now)
+            if not resting or animating or now - getattr(self, "_last_frame", 0.0) >= 0.05:
                 self._last_frame = now
                 self.animator.step(now, self.pointer, idle_wander=self.appearance.idle_motion)
                 self.animator.state.reduced_motion = self.reduced
