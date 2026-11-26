@@ -112,3 +112,42 @@ def test_guard_keeps_rewrites_faithful(rewrite, ok):
     f = _f(body=REPORT, agent="codex", task="fix the loader")
     grounded = "Codex just wrapped up fixing the loader. It says the tests pass."
     assert narrate.guard(f, grounded, rewrite)[0] is ok
+
+
+def test_activity_skips_unprompted_sessions_and_names_a_second_session(tmp_path, monkeypatch):
+    from agent.companion import recap
+    from agent.companion import observe as obs
+    monkeypatch.setattr(obs, "echo_sessions", lambda limit=30: [])
+    import agent.companion.text as t
+    monkeypatch.setattr(t, "owner_name", lambda: "")
+    store = CompanionStore(tmp_path / "o.sqlite3", tmp_path / "spool")
+    now = time.time()
+    p = lambda sid, at, prompt: normalise({"agent": "claude-code", "received_at": at, "event": {"session_id": sid, "prompt_id": sid + str(at),
+                                           "cwd": "/w/app", "hook_event_name": "UserPromptSubmit", "prompt": prompt}})
+    store.add(p("a", now - 30, "Fix the flaky eval test in the harness"))
+    store.add(p("b", now - 300, "Write the release notes for the companion"))
+    store.add(normalise({"agent": "claude-code", "received_at": now - 20, "event": {"session_id": "c", "cwd": "/w/app",
+                                                                                   "hook_event_name": "SessionStart", "source": "startup"}}))
+    answer = recap.activity_answer(obs.activity(store, include_echo=False, now=now, ingest=False))
+    assert answer.startswith("You're working with Claude on fixing the flaky eval test")
+    assert "Another Claude session is working on writing the release notes" in answer
+    assert answer.count("Claude") == 2  # the never-prompted session "c" isn't mentioned
+
+
+def test_old_sessions_are_migrated(tmp_path):
+    import sqlite3
+    db_path = tmp_path / "o.sqlite3"
+    db = sqlite3.connect(db_path)
+    db.executescript("""
+        CREATE TABLE events (id TEXT PRIMARY KEY, agent TEXT, session_id TEXT, kind TEXT, at REAL, turn_id TEXT,
+            cwd TEXT, project TEXT, text TEXT, transcript_path TEXT, subagent TEXT, meta TEXT);
+        CREATE TABLE sessions (agent TEXT, session_id TEXT, cwd TEXT, project TEXT, state TEXT, started_at REAL,
+            updated_at REAL, last_prompt TEXT, last_prompt_at REAL, last_message TEXT, last_message_at REAL,
+            turns INTEGER DEFAULT 0, attention TEXT, transcript_path TEXT, PRIMARY KEY (agent, session_id));
+        INSERT INTO events VALUES ('1','claude-code','s','prompt',1,'','/w/app','app','# Ship the companion','','','{}');
+        INSERT INTO events VALUES ('2','claude-code','s','prompt',2,'','/w/app/build','build','<task-notification>x</task-notification>','','','{}');
+        INSERT INTO sessions (agent, session_id, cwd, project, state, started_at, updated_at) VALUES ('claude-code','s','/w/app/build','build','working',1,2);
+    """)
+    db.commit(); db.close()
+    [row] = CompanionStore(db_path, tmp_path / "spool").sessions(now=3)
+    assert row["task"] == "Ship the companion" and row["project"] == "app"
