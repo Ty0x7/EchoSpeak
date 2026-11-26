@@ -2328,7 +2328,7 @@ class EchoTUI:
             self.note(f"couldn't read that aloud: {one_line(str(exc), 120)}")
 
     async def cmd_voice(self, args) -> None:
-        word = (args or "").strip().lower()
+        word = (args[0] if isinstance(args, (list, tuple)) and args else args if isinstance(args, str) else "").strip().lower()
         if word in {"on", "off"}:
             self._read_aloud = word == "on"
             try:
