@@ -124,7 +124,7 @@ def latest_report_answer(store) -> str:
     event, digest = found[0]["event"], found[0]["digest"]
     when = time.strftime("%H:%M", time.localtime(float(event["at"])))
     where = f" on {event['project']}" if event.get("project") else ""
-    parts = [f"{knowledge.label(event['agent']).replace('Claude Code', 'Claude')}'s report from {when}{where}: {_brief(digest.headline, 16)}."]
+    parts = [f"{knowledge.label(event['agent']).replace('Claude Code', 'Claude')}'s report from {when}{where}: {_brief(digest.headline, 16).rstrip('.')}."]
     if digest.results:
         parts.append(f"It says it got {len(digest.results)} thing{'s' if len(digest.results) != 1 else ''} done, including {_brief(digest.results[0], 12)}.")
     if digest.failures:

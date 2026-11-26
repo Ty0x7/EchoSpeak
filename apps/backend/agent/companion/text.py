@@ -17,6 +17,10 @@ from typing import Optional
 
 _SYSTEM = re.compile(r"^\s*(<\s*(task-notification|system-reminder|command-name|local-command-stdout|bash-input|bash-stdout)\b"
                      r"|\[SYSTEM NOTIFICATION|<\s*user-prompt-submit-hook)", re.I)
+# Short conversational replies ("you're good, no need for that") answer the agent; they aren't a new task.
+_REPLY = re.compile(r"^\s*(you'?re|you are|you|it'?s|that'?s|this is|no|nope|nah|yes|yeah|yep|sure|ok(ay)?|fine|"
+                    r"nice|good|great|cool|thanks|thank you|lol|haha|hmm|i think|i guess|maybe|perhaps|all good|never ?mind)\b",
+                    re.I)
 _FOLLOW_UP = re.compile(r"^\s*(continue|go on|go ahead|yes|yep|ok(ay)?|sure|proceed|do it|keep going|next|thanks?|"
                         r"thank you|great|perfect|sounds good|looks good|lgtm|y|n|no)\b[\s.!]*$", re.I)
 
@@ -50,6 +54,8 @@ def task_title(prompt: str, words: int = 14) -> str:
     if not text:
         cleaned = clean(body)
         if not cleaned or _FOLLOW_UP.match(cleaned) or len(cleaned.split()) < 3:
+            return ""
+        if _REPLY.match(cleaned) and len(cleaned.split()) < 10:
             return ""
         for sentence in re.split(r"(?<=[.!?])\s+", cleaned):
             core = _LEAD_IN.sub("", sentence).strip()
