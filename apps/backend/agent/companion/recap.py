@@ -13,6 +13,7 @@ work is described as reported.
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Any, Optional
 
@@ -29,8 +30,16 @@ def _who(row: dict[str, Any]) -> str:
     return str(row.get("label") or knowledge.label(row["agent"])).replace("Claude Code", "Claude")
 
 
+def clean(text: str) -> str:
+    """Prompts as a person would say them: no paste/markup tags, no code fences, no URLs."""
+    value = re.sub(r"```.*?(```|$)", " ", str(text or ""), flags=re.S)
+    value = re.sub(r"</?[A-Za-z][\w:-]*(\s[^<>]{0,200})?/?>", " ", value)
+    value = re.sub(r"https?://\S+", "a link", value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
 def _brief(text: str, words: int = 10) -> str:
-    parts = str(text or "").split()
+    parts = clean(text).split()
     return " ".join(parts[:words]) + ("…" if len(parts) > words else "")
 
 
