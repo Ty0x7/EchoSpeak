@@ -65,6 +65,8 @@ def test_system_notifications_are_not_the_owners_request(tmp_path):
     ("Excellent progress. I approve proceeding with the companion install.", "the companion install"),
     ("Please fix the flaky eval test", "fix the flaky eval test"),
     ("continue", ""), ("thanks!", ""), ("<task-notification>x</task-notification>", ""),
+    ("you're good no need for that", ""), ("ok that works, ship it", ""), ("It's fine, leave it as is", ""),
+    ("Make the desktop background an animated black hole", "Make the desktop background an animated black hole"),
 ])
 def test_task_titles(prompt, task):
     assert text.task_title(prompt) == task
