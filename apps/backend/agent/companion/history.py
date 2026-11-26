@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 INTERVAL = 90
 LOOKBACK = 36 * 3600
 TAIL_BYTES = 1024 * 1024
+CODEX_TAIL_BYTES = 4 * TAIL_BYTES  # tool records can bury the last completion while a new turn is active
 PREFIX_BYTES = 64 * 1024
 MAX_FILES = 24
 MAX_ENTRIES = 512
@@ -172,9 +173,10 @@ def read_events(path: Path, agent: str, scope: dict, now: float, eligible):
             session, cwd = meta.get("sessionId"), meta.get("cwd")
         if not session or not eligible(agent, cwd):
             return
-        offset = max(0, info.st_size - TAIL_BYTES)
+        limit = CODEX_TAIL_BYTES if agent == "codex" else TAIL_BYTES
+        offset = max(0, info.st_size - limit)
         stream.seek(offset)
-        data = stream.read(TAIL_BYTES)
+        data = stream.read(limit)
     if offset:
         data = data.partition(b"\n")[2]
     rows = _rows(data)

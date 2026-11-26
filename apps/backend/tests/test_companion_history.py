@@ -78,6 +78,17 @@ def test_claude_stop_deduplicates_against_history_in_both_orders(tmp_path):
         assert store.sessions(now)[0]["state"] == "completed"
 
 
+def test_coding_tool_chatter_does_not_hide_a_recent_completion(tmp_path):
+    now = time.time()
+    path = tmp_path / "rollout-large.jsonl"
+    write(path, row(now - 1800, "session_meta", payload={"id": "codex", "cwd": str(tmp_path)}),
+          codex(now - 90, "task_complete", turn_id="previous", last_agent_message=REPORT),
+          codex(now - 85, "task_started", turn_id="current"),
+          *[codex(now - 70, "item_completed", item={"type": "Reasoning", "raw_content": "y" * 12000}) for _ in range(100)])
+    events = list(history.read_events(path, "codex", {}, now, lambda *a: "project"))
+    assert [(e["turn_id"], e["kind"]) for e in events] == [("previous", "turn_completed"), ("current", "activity_started")]
+
+
 def test_new_long_task_progress_announces_once(monkeypatch):
     for name, value in {"companion_enabled": True, "companion_speak": True, "companion_soul_style": "templates",
                         "companion_progress_minutes": 30, "companion_quiet_hours": ""}.items():
