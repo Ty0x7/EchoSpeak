@@ -116,7 +116,7 @@ def test_codex_notify_argument_and_stop_hook_are_one_turn(home, tmp_path):
     store = CompanionStore(tmp_path / "o.sqlite3", home_dir / "spool")
     assert store.ingest_spool() == 1
     [session] = store.sessions()
-    assert session["agent"] == "codex" and session["turns"] == 1 and session["state"] == "your_turn"
+    assert session["agent"] == "codex" and session["turns"] == 1 and session["state"] == "completed"
     assert "missing comma" in session["last_message"]
     assert list((home_dir / "spool").glob("*.json")) == []
 
@@ -136,7 +136,7 @@ def test_session_lifecycle_states(home, tmp_path):
     assert row["state"] == "needs_permission" and "permission" in row["attention"]
     store.add(normalise({"agent": "claude-code", "received_at": t + 5, "event": _payload("Stop", root)}))
     row = store.sessions(now=t + 6)[0]
-    assert row["state"] == "your_turn" and row["turns"] == 1 and row["last_prompt"] == "Fix the parser"
+    assert row["state"] == "completed" and row["turns"] == 1 and row["last_prompt"] == "Fix the parser"
     assert row["project"] == "proj"
     store.add(normalise({"agent": "claude-code", "received_at": t + 7, "event": _payload("SessionEnd", root)}))
     assert store.sessions(now=t + 8)[0]["state"] == "ended"
@@ -245,15 +245,18 @@ def test_scope_refuses_home_and_missing_folders(home, tmp_path, monkeypatch):
     assert "evil" not in scope["agents"]
 
 
-def test_autostart_entry_points_at_the_launcher(tmp_path, monkeypatch):
+def test_autostart_entry_points_at_the_launcher(tmp_path, monkeypatch, home):
+    companion_home, _ = home
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     launcher = tmp_path / "echo-companion"
     launcher.write_text("#!/bin/sh\n")
     monkeypatch.setattr(install, "companion_launcher", lambda: launcher)
     result = install.set_autostart(True)
     entry = (tmp_path / "cfg" / "autostart" / "echo-companion.desktop").read_text()
-    assert f"Exec={install.stable_launcher_path()}" in entry and "Type=Application" in entry
-    assert result["launcher"] == str(install.stable_launcher_path())
+    stable = companion_home / "echo-companion"
+    assert f"Exec={stable}" in entry and "Type=Application" in entry
+    assert result["launcher"] == str(stable)
+    assert stable.is_file()
     install.set_autostart(False)
     assert not (tmp_path / "cfg" / "autostart" / "echo-companion.desktop").exists()
 

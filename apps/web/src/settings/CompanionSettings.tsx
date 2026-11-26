@@ -62,6 +62,10 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
           onChange={v => void send("PUT", "/companion/autostart", { enabled: v }).then(d => setAutostart({ enabled: d.enabled, available: true })).catch(e => setNotice(String(e.message || e)))}
           label="Start at login" />
       </Row>
+      <Row label="Recover recent activity" help="Read recent Claude Code and Codex session records in the EchoSpeak projects you’ve selected for observation.">
+        <Toggle checked={s.companion_recover_history !== false}
+          onChange={v => save({ companion_recover_history: v })} label="Recover recent activity" />
+      </Row>
       {notice ? <Row label={<Status tone="err">{notice}</Status>} /> : null}
     </Group>
 
@@ -72,6 +76,10 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
       <Row label="How often" help="Quiet: finished reports only. Milestones: also when an agent you aren't looking at needs you. Chatty: also long background turns.">
         <Select value={String(s.companion_frequency || "milestones")} onChange={v => save({ companion_frequency: v })}
           options={[{ value: "quiet", label: "Quiet" }, { value: "milestones", label: "Milestones" }, { value: "chatty", label: "Chatty" }]} />
+      </Row>
+      <Row label="Long-task updates" help="After this much time, a newly observed completed operation can prompt an update.">
+        <Select value={String(s.companion_progress_minutes ?? 30)} onChange={v => save({ companion_progress_minutes: Number(v) })}
+          options={[{ value: "0", label: "Off" }, ...[15, 30, 60].map(v => ({ value: String(v), label: `${v} minutes` }))]} />
       </Row>
       <Row label="Humour">
         <Select value={String(s.companion_humor ?? 1)} onChange={v => save({ companion_humor: Number(v) })}

@@ -19,6 +19,7 @@ import threading
 import time
 from typing import Optional
 
+from config import config
 from agent.companion.observe import get_companion_store
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,10 @@ def _run() -> None:
     while not _stop.is_set():
         try:
             store.ingest_spool()
+            if config.companion_enabled:
+                from agent.companion.history import refresh
+
+                refresh(store)
             if time.time() - last_prune > 3600:
                 store.prune()
                 last_prune = time.time()

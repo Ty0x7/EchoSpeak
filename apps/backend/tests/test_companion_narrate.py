@@ -30,7 +30,7 @@ REPORT = "## Summary\nFixed the config loader in the harness.\n\n## Verification
     (dict(kind="waiting_input", body="Claude is waiting for your input"), ""),            # idle prompts: never
     (dict(body="Done, renamed it.", interacting=True), ""),                              # the owner is reading it
     (dict(body=REPORT, interacting=True, minutes=1), ""),                                 # short job in their session
-    (dict(body=REPORT, interacting=True, minutes=12, task="fix the loader"), "long_job_done"),  # they stepped away
+    (dict(body=REPORT, interacting=True, minutes=12, task="fix the loader"), "report"),  # they stepped away
     (dict(body=REPORT, interacting=False), "report"),                                     # background report
     (dict(body="Which do you prefer, A or B?", interacting=False), "needs_you"),
     (dict(kind="needs_permission", body="Bash: rm -rf build/", interacting=True), ""),    # they can see the prompt
