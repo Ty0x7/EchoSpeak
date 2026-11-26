@@ -223,7 +223,10 @@ class Commentary:
         reason = "" if catching_up else narrate.worth_saying(facts, str(_setting("companion_frequency", "milestones")))
         # Knowledge doesn't depend on speaking: a finished report is kept (where authorised) even in silence.
         saved, stored, archived = False, {}, ""
-        if digest.kind == "report" and kind in {"turn_completed", "report_ready"} and bool(_setting("companion_knowledge", True)):
+        # Only knowledge from *outside* EchoSpeak is imported. Echo and its named agents already keep their own
+        # conversations in memory; re-importing their replies would copy imported reports back in (a feedback loop).
+        external = str((event.get("meta") or {}).get("via") or "") != "native"
+        if external and digest.kind == "report" and kind in {"turn_completed", "report_ready"} and bool(_setting("companion_knowledge", True)):
             try:
                 decision = self._authorize(event)
                 if decision.get("allowed"):

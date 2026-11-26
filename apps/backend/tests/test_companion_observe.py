@@ -250,8 +250,38 @@ def test_autostart_entry_points_at_the_launcher(tmp_path, monkeypatch):
     launcher = tmp_path / "echo-companion"
     launcher.write_text("#!/bin/sh\n")
     monkeypatch.setattr(install, "companion_launcher", lambda: launcher)
-    assert install.set_autostart(True)["enabled"]
+    result = install.set_autostart(True)
     entry = (tmp_path / "cfg" / "autostart" / "echo-companion.desktop").read_text()
-    assert f"Exec={launcher}" in entry and "Type=Application" in entry
+    assert f"Exec={install.stable_launcher_path()}" in entry and "Type=Application" in entry
+    assert result["launcher"] == str(install.stable_launcher_path())
     install.set_autostart(False)
     assert not (tmp_path / "cfg" / "autostart" / "echo-companion.desktop").exists()
+
+
+def test_stable_launcher_follows_the_installed_echospeak(tmp_path, home):
+    """An update switches the `echospeak` command; the autostart launcher follows it with no re-toggle."""
+    import os
+    import subprocess
+
+    def fake_install(name):
+        root = tmp_path / "installs" / name
+        (root / "apps" / "terminal").mkdir(parents=True)
+        (root / "apps" / "terminal" / "echospeak").write_text("#!/bin/sh\n")
+        (root / "apps" / "terminal" / "echospeak").chmod(0o755)
+        companion = root / "apps" / "companion" / "echo-companion"
+        companion.parent.mkdir(parents=True)
+        companion.write_text(f"#!/bin/sh\necho {name}\n")
+        companion.chmod(0o755)
+        return root
+    old, new = fake_install("old"), fake_install("new")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "echospeak").symlink_to(old / "apps" / "terminal" / "echospeak")
+    launcher = install.write_stable_launcher(old / "apps" / "companion" / "echo-companion")
+    # Only the fake install is reachable: never the owner's real echospeak or companion.
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": str(tmp_path)}
+    run = lambda: subprocess.run([str(launcher)], capture_output=True, text=True, env=env, timeout=10).stdout.strip()
+    assert run() == "old"
+    (bin_dir / "echospeak").unlink()
+    (bin_dir / "echospeak").symlink_to(new / "apps" / "terminal" / "echospeak")  # what an install does
+    assert run() == "new"
