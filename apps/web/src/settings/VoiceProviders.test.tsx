@@ -8,11 +8,20 @@ import { OptionalCapabilities } from "../setup/OptionalCapabilities";
 const save = async () => undefined;
 describe("Optional native voice setup", () => {
   it("retains all existing providers and adds Drama without replacing the conversation model", () => {
-    expect(SPEECH_PROVIDERS.map(p => p.value)).toEqual(["windows-sapi", "piper-local", "drama3-local", "elevenlabs"]);
-    const html = renderToStaticMarkup(<VoiceProviders s={{}} save={save} apiBase="http://api" />);
+    expect(SPEECH_PROVIDERS.map(p => p.value)).toEqual(["kokoro-local", "windows-sapi", "piper-local", "drama3-local", "elevenlabs"]);
+    const html = renderToStaticMarkup(<VoiceProviders s={{ voice_local_tts_provider: "windows-sapi" }} save={save} apiBase="http://api" />);
     expect(html.includes("Your AI model still handles the conversation")).toBe(true);
     expect(html.includes("Windows default")).toBe(true);
     expect(html.includes("API key")).toBe(false);
+  });
+  it("offers Kokoro on the CPU with shared speaker controls", () => {
+    const html = renderToStaticMarkup(<VoiceProviders s={{ voice_local_tts_provider: "kokoro-local", voice_kokoro_voice: "bf_emma" }} save={save} apiBase="http://api" />);
+    expect(html.includes("Kokoro voice")).toBe(true);
+    expect(html.includes("GPU memory")).toBe(true);
+    expect(html.includes("Emma · British female")).toBe(true);
+    expect(html.includes("never talk over each other")).toBe(true);
+    expect(html.includes("Speaking speed")).toBe(true);
+    expect(html.includes("System default")).toBe(true);
   });
   it("does not fetch or expose cloud credentials when a local provider is selected", () => {
     const html = renderToStaticMarkup(<VoiceProviders s={{ voice_local_tts_provider: "piper-local", elevenlabs_api_key: "secret" }} save={save} apiBase="http://api" />);
