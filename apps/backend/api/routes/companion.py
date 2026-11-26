@@ -72,20 +72,26 @@ def hooks_status():
 
 
 class AskRequest(BaseModel):
-    topic: str = Field(pattern=r"^(activity|latest_report|discovery|recap|agent:[a-z0-9-]{2,40})$")
+    topic: str = Field(pattern=r"^(activity|other_agents|latest_report|discovery|recap|(agent|report):[a-z0-9-]{2,40})$")
     speak: bool = True
     since: float | None = None
+    project_id: str = Field(default="", max_length=128)
 
 
 @router.post("/ask")
 def ask(request: AskRequest):
     """The owner clicked Echo Companion: answer from what was observed, and say it."""
     from agent.companion import recap
+    from agent.companion.history import refresh
     from agent.companion.observe import activity as build, get_companion_store
     from agent.speech_output import get_speech_output
+    from config import config
 
     store = get_companion_store()
-    text = recap.answer(request.topic, store, build(store), request.since)
+    if config.companion_enabled:
+        refresh(store)
+    text = recap.answer(request.topic, store, build(store, include_echo=config.companion_observe_echo), request.since,
+                        reword=config.companion_soul_style == "local_model", project_id=request.project_id)
     spoken = None
     if request.speak:
         spoken = get_speech_output().speak(text, channel="companion", priority=70, interrupt=True, source="companion")

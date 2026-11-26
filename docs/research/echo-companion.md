@@ -50,3 +50,13 @@ Campaign issue #210. Status as of 2026-11-26, round 2.
 - Hyprland focus is not used. Interacting is inferred from prompts.
 - Local-model wording can imply causality that the fact guard does not catch. Templates stay the default.
 - The digest is heuristic. Counts are per bullet and wording is hedged, but it can still misfile a line.
+
+## Session awareness and recovery · 26 November 2026
+
+The handover report was present in Codex's persisted turn history while the Companion observation database had zero Codex events. The configured hooks were visible to Codex and untrusted. Review is through Codex's `/hooks`. History recovery reads existing local records and never changes that trust state.
+
+`agent/companion/history.py` reads bounded Claude and Codex transcript tails, per-file change stamps and recent candidate directories. It requires an enabled integration, an authorized observation root, and the same registered project for the session and the observed event. This path retains user prompts only if prompt capture is enabled, plus confirmed completion, interruption and operation categories. It does not preserve raw command arguments or output. It does not read archived Codex sessions. Old or unverifiable work is described as such. The existing Companion archive and canonical memory rules still decide what to keep.
+
+`observe.py` orders live state by event timestamps. Codex completion identities are shared across hook and history sources. Claude coalesces the same near-time reply across the two sources. The recap distinguishes live status, uncertainty and recent reports, and can filter by EchoSpeak project. A positive result for a command establishes only the observed operation. Proactive updates require a fresh completed operation and the configured elapsed time and cooldown. A substantial report can be announced even if it came from the most recently prompted session, subject to freshness and quiet hours.
+
+EchoSpeak's own read-only session overview supplies named-agent, execution and approval state. Worker lifecycles produce one-way observations. Companion can use its independent local wording path after selecting facts from the session and report. It never runs the agent loop. Echo's ordinary Chat activity question remains a separate issue (#225).

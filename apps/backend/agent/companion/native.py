@@ -135,6 +135,19 @@ def finished(session: Any, *, final_text: str, success: bool, cancelled: bool, e
         logger.debug("Echo Companion native finish failed", exc_info=True)
 
 
+def worker_status(session: Any, name: str, index: int, goal: str, status: str) -> None:
+    """Publish a research worker's observed state under its parent's session and execution."""
+    try:
+        sid = f"{session.session_id}:worker:{session.execution_id}:{index}"
+        label = f"{name} research worker {index}"
+        kind = {"running": "prompt", "done": "subagent_completed", "partial": "subagent_completed"}.get(status, "interrupted")
+        text = goal if kind == "prompt" else f"Research worker {status} after looking into {goal}"
+        _publish(_event(agent_key(label), sid, kind, text=text[:600], cwd=_project_root(session),
+                        meta={"agent_name": label, "subagent": label, "parent_session": str(session.session_id)}))
+    except Exception:
+        logger.debug("Echo Companion worker observation failed", exc_info=True)
+
+
 def post_stage(agent: str, session_id: str, text: str, *, cwd: str = "", kind: str = "stage_completed") -> None:
     """For EchoSpeak tools in another process (the loop-13 controller): tell the running backend.
 

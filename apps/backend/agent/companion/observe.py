@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import threading
 import time
@@ -61,6 +62,10 @@ KINDS = {
     "PermissionRequest": "needs_permission",
     "SessionEnd": "session_ended",
     "PreCompact": "compacting",
+    "ActivityStarted": "activity_started",
+    "OperationStarted": "operation_started",
+    "OperationDone": "operation_done",
+    "Interrupted": "interrupted",
 }
 
 
@@ -102,7 +107,8 @@ def normalise(record: dict[str, Any]) -> Optional[dict[str, Any]]:
             kind = "waiting_input"
     at = float(record.get("received_at") or time.time())
     # A Codex turn can arrive both from the Stop hook and from notify: one turn, one event.
-    basis = [agent, session, kind, turn] if turn and kind in {"turn_completed", "prompt", "subagent_completed"} \
+    basis = [agent, session, kind, turn, event.get("agent_id") or _text(text, 200)] if kind == "subagent_completed" else \
+        [agent, session, kind, turn] if turn and kind in {"turn_completed", "prompt"} \
         else [agent, session, kind, turn, round(at, 1), _text(text, 200)]
     ident = hashlib.sha256(json.dumps(basis).encode()).hexdigest()[:24]
     cwd = _text(event.get("cwd"), 1000)
@@ -198,6 +204,17 @@ class CompanionStore:
 
     def add(self, event: dict[str, Any]) -> bool:
         with self._lock, self._db() as db:
+            # Claude's end-turn transcript record and Stop hook use different identifiers.
+            # Match only the same reply near the same time, and only across sources.
+            if event["agent"] == "claude-code" and event["kind"] == "turn_completed" and event.get("text"):
+                candidates = db.execute(
+                    "SELECT text, meta FROM events WHERE agent=? AND session_id=? AND kind=? AND at BETWEEN ? AND ?",
+                    (event["agent"], event["session_id"], event["kind"], event["at"] - 90, event["at"] + 90),
+                )
+                recovered = event.get("meta", {}).get("via") == "history"
+                if any(clean(r["text"]) == clean(event["text"]) and
+                       (json.loads(r["meta"] or "{}").get("via") == "history") != recovered for r in candidates):
+                    return False
             inserted = db.execute(
                 "INSERT OR IGNORE INTO events VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (event["id"], event["agent"], event["session_id"], event["kind"], event["at"], event.get("turn_id", ""),
@@ -232,7 +249,10 @@ class CompanionStore:
                 " VALUES (?,?,?,?,?,?,?,0,?)",
                 (*key, cwd, project, "your_turn", event["at"], event["at"], event.get("transcript_path", "")),
             )
-            row = {"project": project}
+            row = {"project": project, "updated_at": 0, "state": ""}
+        elif event["at"] < float(row["updated_at"] or 0):
+            event["late"] = True
+            return  # retain late evidence without rewinding a more recent session state
         updates: dict[str, Any] = {"updated_at": event["at"]}
         if not row["project"] and event.get("cwd"):
             updates.update(cwd=event["cwd"], project=project_label(event["cwd"]) or event.get("project", ""))
@@ -245,19 +265,31 @@ class CompanionStore:
             title = task_title(event.get("text", ""))
             if title:  # "continue" keeps the task it continues
                 updates["task"] = title
+        elif kind == "activity_started":
+            updates.update(state="working", turn_started_at=event["at"], attention="")
+        elif kind == "operation_started":
+            updates.update(state="operation", attention=event.get("meta", {}).get("operation", ""))
+        elif kind in {"operation_done", "compacting"}:
+            updates.update(state="working", attention="")
         elif kind == "system_prompt":  # the agent works on, but the owner didn't ask anything new
             updates["state"] = "working"
             if not isinstance(row, sqlite3.Row) or row["state"] != "working":
                 updates["turn_started_at"] = event["at"]
         elif kind == "turn_completed":
-            updates.update(state="your_turn", last_message=event.get("text", ""), last_message_at=event["at"], attention="")
+            updates.update(state="completed", last_message=event.get("text", ""), last_message_at=event["at"], attention="")
             db.execute("UPDATE sessions SET turns = turns + 1 WHERE agent=? AND session_id=?", key)
+        elif kind == "subagent_completed" and event.get("meta", {}).get("parent_session"):
+            updates.update(state="completed", last_message=event.get("text", ""), last_message_at=event["at"], attention="")
         elif kind == "needs_permission":
             updates.update(state="needs_permission", attention=event.get("text", ""))
         elif kind == "waiting_input":
             updates.update(state="your_turn")
         elif kind == "session_ended":
             updates.update(state="ended")
+        elif kind == "interrupted":
+            updates.update(state="paused", attention="")
+        elif kind == "session_started" and row["state"] in {"ended", "paused", ""}:
+            updates.update(state="unknown", attention="")
         assignments = ", ".join(f"{name}=?" for name in updates)
         db.execute(f"UPDATE sessions SET {assignments} WHERE agent=? AND session_id=?", (*updates.values(), *key))
 
@@ -311,9 +343,11 @@ class CompanionStore:
             for key in ("cwd", "project", "last_prompt", "last_message", "attention", "transcript_path"):
                 row[key] = row.get(key) or ""
             quiet_for = now - float(row["updated_at"] or 0)
-            if row["state"] == "working" and quiet_for > QUIET_AFTER:
+            if row["state"] in {"working", "operation"} and quiet_for > QUIET_AFTER:
                 row["state"] = "quiet"
-            elif row["state"] == "your_turn" and quiet_for > IDLE_AFTER:
+            elif row["state"] == "needs_permission" and quiet_for > QUIET_AFTER:
+                row["state"] = "unknown"
+            elif row["state"] in {"your_turn", "completed"} and quiet_for > IDLE_AFTER:
                 row["state"] = "idle"
             row["label"] = AGENT_LABELS.get(row["agent"]) or row["agent"].replace("-", " ").title()
         return rows
@@ -330,14 +364,16 @@ def echo_sessions(limit: int = 30) -> list[dict[str, Any]]:
         return []
     # An idle Echo conversation is resting, not waiting on the owner; only a question is "your turn".
     states = {"running": "working", "streaming": "working", "needs_approval": "needs_permission",
-              "needs_answer": "your_turn", "failed": "idle", "idle": "idle"}
+              "needs_answer": "your_turn", "failed": "paused", "idle": "idle"}
     rows = []
     for item in items:
         agents = item.get("agents") or [{"id": "echo", "name": "Echo"}]
         name = ", ".join(str(a.get("name") or a.get("id")) for a in agents)
         project = item.get("project") or {}
         rows.append({
-            "agent": "echo", "label": name if item.get("kind") != "echo" else "Echo",
+            "agent": "echo" if item.get("kind") == "echo" or len(agents) != 1 else
+                     re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-") or "echo",
+            "label": name if item.get("kind") != "echo" else "Echo",
             "session_id": str(item.get("thread_id") or ""), "cwd": str(project.get("root") or ""),
             "project": str(project.get("name") or ""), "state": states.get(str(item.get("status") or "idle"), "idle"),
             "started_at": float(item.get("created_at") or 0), "updated_at": float(item.get("last_active_at") or 0),
@@ -356,8 +392,13 @@ def activity(store: CompanionStore, *, include_echo: bool = True, now: Optional[
         store.ingest_spool()
     rows = [r for r in store.sessions(now) if r["state"] != "ended" or now - float(r["updated_at"] or 0) < 3600]
     if include_echo:
-        known = {r["session_id"] for r in rows}  # native events already describe these conversations
-        rows += [r for r in echo_sessions() if r["session_id"] not in known and now - float(r["updated_at"] or 0) < 86400]
+        overview = {(r["agent"], r["session_id"]): r for r in echo_sessions()
+                    if now - float(r["updated_at"] or 0) < 86400}
+        for row in rows:
+            native = overview.pop((row["agent"], row["session_id"]), None)
+            if native and native["state"] in {"needs_permission", "your_turn", "working", "paused"}:
+                row["state"] = native["state"]
+        rows.extend(overview.values())
     prompted = sorted(
         (r for r in rows if r["state"] not in {"ended"} and now - float(r.get("last_prompt_at") or r["updated_at"] or 0) < INTERACTING_WINDOW
          and (r.get("last_prompt_at") or r["agent"] == "echo")),
@@ -375,7 +416,7 @@ def activity(store: CompanionStore, *, include_echo: bool = True, now: Optional[
             focus["candidates"] = [{"agent": r["agent"], "session_id": r["session_id"], "label": r["label"]} for r in [top, *close]]
     for row in rows:
         row["interacting"] = bool(focus["session_id"]) and row["session_id"] == focus["session_id"] and row["agent"] == focus["agent"]
-        row["background"] = row["state"] == "working" and not row["interacting"]
+        row["background"] = row["state"] in {"working", "operation", "quiet"} and not row["interacting"]
     counts: dict[str, int] = {}
     for row in rows:
         counts[row["state"]] = counts.get(row["state"], 0) + 1

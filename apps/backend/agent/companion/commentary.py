@@ -210,9 +210,10 @@ class Commentary:
             return None
         if catching_up and kind not in {"turn_completed", "report_ready"}:
             return None
-        if kind not in {"turn_completed", "needs_permission", "waiting_input", "stage_completed", "report_ready"}:
+        if kind not in {"turn_completed", "needs_permission", "waiting_input", "stage_completed", "report_ready",
+                        "subagent_completed", "operation_done"}:
             return None
-        digest = analyse(event.get("text", "")) if kind in {"turn_completed", "report_ready"} else Digest()
+        digest = analyse(event.get("text", "")) if event.get("text") else Digest()
         if kind == "report_ready":
             digest.kind = "report"
         from agent.companion import narrate
@@ -220,7 +221,15 @@ class Commentary:
         now = time.time()
         interacting = self._interacting(event)
         facts = narrate.facts(event, digest, interacting=interacting, now=now)
-        reason = "" if catching_up else narrate.worth_saying(facts, str(_setting("companion_frequency", "milestones")))
+        frequency = str(_setting("companion_frequency", "milestones"))
+        reason = "" if catching_up else narrate.worth_saying(facts, frequency)
+        if kind == "operation_done":
+            minutes = int(_setting("companion_progress_minutes", 30))
+            interval = minutes * 60
+            if (minutes > 0 and frequency != "quiet" and facts["minutes"] * 60 >= interval
+                    and facts["age_seconds"] < 180 and facts["operation"]
+                    and not event.get("late") and now - self._last_session.get(key, 0) >= interval):
+                reason = "progress"
         # Knowledge doesn't depend on speaking: a finished report is kept (where authorised) even in silence.
         saved, stored, archived = False, {}, ""
         # Only knowledge from *outside* EchoSpeak is imported. Echo and its named agents already keep their own
