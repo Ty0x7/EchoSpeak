@@ -1905,6 +1905,8 @@ class EchoTUI:
         self.changes.extend(run.changes)
         if run.final_text:
             self.last_answer = run.final_text
+            if status not in {"failed", "cancelled", "canceled", "interrupted", "stopped", "error"} and await self._read_aloud_on():
+                asyncio.ensure_future(self._speak(run.final_text))
         self.session_tokens["runs"] += 1
         self.run = None
         self.follow_abandon = None
@@ -2305,6 +2307,50 @@ class EchoTUI:
         if self.run:
             self.run.verbose = self.verbose
         self.note(f"verbose {'on: full tool output and thinking' if self.verbose else 'off'}")
+
+    async def _read_aloud_on(self) -> bool:
+        if getattr(self, "_read_aloud", None) is None:
+            try:
+                settings = (await self.call(self.client.get, "/settings") or {}).get("settings") or {}
+                self._read_aloud = bool(settings.get("voice_read_aloud_terminal"))
+            except Exception:
+                self._read_aloud = False
+        return bool(self._read_aloud)
+
+    async def _speak(self, text: str) -> None:
+        """Echo's reply, spoken through the backend's shared speaker (it never talks over Echo Companion)."""
+        try:
+            result = await self.call(self.client.post, "/media-runtime/voice/speak",
+                                     {"text": text[:6000], "channel": "echo", "source": "echo"})
+            if (result or {}).get("status") not in {"queued", "skipped"}:
+                self.note("couldn't read that aloud · check /voice and Settings › Voice")
+        except Exception as exc:
+            self.note(f"couldn't read that aloud: {one_line(str(exc), 120)}")
+
+    async def cmd_voice(self, args) -> None:
+        word = (args or "").strip().lower()
+        if word in {"on", "off"}:
+            self._read_aloud = word == "on"
+            try:
+                await self.call(self.client.request, "PUT", "/settings", {"voice_read_aloud_terminal": self._read_aloud})
+            except Exception as exc:
+                self.note(f"couldn't save that: {one_line(str(exc), 120)}")
+                return
+            self.note("Echo reads replies aloud" if self._read_aloud else "replies stay silent")
+        elif word == "say":
+            if not self.last_answer:
+                self.note("nothing to read yet")
+                return
+            await self._speak(self.last_answer)
+        elif word == "stop":
+            try:
+                await self.call(self.client.post, "/media-runtime/voice/speak/cancel", {"channel": "echo"})
+            except Exception:
+                pass
+            self.note("stopped speaking")
+        else:
+            on = await self._read_aloud_on()
+            self.note(f"read aloud is {'on' if on else 'off'} · /voice on|off · /voice say (last reply) · /voice stop")
 
     async def cmd_copy(self, args) -> None:
         text = self.last_answer

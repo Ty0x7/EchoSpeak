@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { stopTts, sanitizeForTTS, useAppStore } from "../app/runtime";
 import { LocalVoiceInput, WakeListener, localVoicePlayback } from "../voiceTransport";
+import { systemSpeaker } from "../systemSpeaker";
+import { isDesktopRuntime } from "../desktop/bridge";
 import type { SpeechScope, VoiceTranscript, VoiceTransportPhase } from "../voiceTransport";
 import { NativeLiveInput, liveAudioPlayback } from "../liveVoiceTransport";
 
@@ -64,6 +66,22 @@ export function useVoice({
     const cleaned = sanitizeForTTS(text);
     if ((!useAppStore.getState().speechEnabled && !metadata.force) || !sessionId || !cleaned) return false;
     setVoiceNotice("");
+    const onPhase = (phase: "speaking" | "idle", detail?: string) => {
+      setVoicePhase(phase);
+      setVoiceNotice(detail || "");
+      useAppStore.getState().setSpeaking(phase === "speaking");
+    };
+    if (isDesktopRuntime() && !voiceModeRef.current) {
+      // Desktop read-aloud: the shared speaker, coordinated with Echo Companion.
+      try {
+        return await systemSpeaker.speak(cleaned, apiBase, onPhase);
+      } catch (error) {
+        setVoicePhase("error");
+        setVoiceNotice(error instanceof Error ? error.message : "Read aloud is unavailable. Check Settings › Voice.");
+        useAppStore.getState().setSpeaking(false);
+        return false;
+      }
+    }
     try {
       await localVoicePlayback.speak(
         cleaned,

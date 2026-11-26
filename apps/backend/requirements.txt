@@ -100,3 +100,5 @@ pyasn1>=0.6.4          # google-auth: decoder denial of service (CVE-2026-59884)
 
 # Native Windows ConPTY for the owner workspace terminal.
 pywinpty==3.1.0; sys_platform == "win32"
+# Local CPU read-aloud voice (agent/kokoro_voice.py); the model is fetched on request
+kokoro-onnx==0.6.1

@@ -87,6 +87,7 @@ class Companion(Gtk.Application):
         self.after_speech_mode = "idle"
         self.speech_active = ""  # request id between speech.started and its speech.finished (chunks have gaps)
         self.connected = False
+        self.enabled = True
         self.stop = threading.Event()
         self.pointer = None
 
@@ -137,7 +138,14 @@ class Companion(Gtk.Application):
         self._build_menu()
 
         self.window.connect("realize", lambda *_: GLib.idle_add(self._update_input_region))
-        self.area.add_tick_callback(self._tick)
+        self._tick_id = self.area.add_tick_callback(self._tick)
+        # Keybindable: `pkill -USR1 -f "python3 -m echo_companion"` opens the menu,
+        # USR2 asks "what's happening?". Same popover and actions as a click.
+        import signal
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1, self._summon_menu)
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR2, self._summon_ask)
+        # Settings changes (on/off, position, captions, motion) reach the window within 30 s.
+        GLib.timeout_add_seconds(30, lambda: (threading.Thread(target=self._load_settings, daemon=True).start(), True)[1])
         threading.Thread(target=self._load_settings, daemon=True).start()
         threading.Thread(target=self.backend.stream, args=("/companion/stream", self._on_event_thread,
                                                              self._on_connection_thread, self.stop), daemon=True).start()
@@ -177,6 +185,8 @@ class Companion(Gtk.Application):
         if not self.visible:
             self.visible = True
             self.window.present()
+            if not getattr(self, "_tick_id", 0):
+                self._tick_id = self.area.add_tick_callback(self._tick)
             GLib.idle_add(self._update_input_region)
 
     def _tick(self, widget, clock) -> bool:
@@ -188,6 +198,8 @@ class Companion(Gtk.Application):
             if self.shown == 0.0 and self.target_shown == 0.0 and self.visible:
                 self.visible = False
                 self.window.set_visible(False)
+                self._tick_id = 0
+                return GLib.SOURCE_REMOVE  # hidden Echo costs nothing until the next event
         mode = self.animator.state.mode
         if mode == "speaking" and not self.speech_active and now > self.speaking_until and not self.animator.envelope:
             self.animator.set_mode(self.after_speech_mode, now)
@@ -201,9 +213,13 @@ class Companion(Gtk.Application):
         if self.visible and mode in {"idle", "waiting"} and now - self.last_event > HIDE_AFTER and not self._menu_open():
             self.target_shown = 0.0
         if self.visible:
-            self.animator.step(now, self.pointer, idle_wander=self.appearance.idle_motion)
-            self.animator.state.reduced_motion = self.reduced
-            self.area.queue_draw()
+            # Full frame rate while something moves; resting Echo redraws at 20 fps (gaze drift, blinks).
+            resting = mode in {"idle", "waiting", "sleeping"} and self.shown == self.target_shown and self.pointer is None
+            if not resting or now - getattr(self, "_last_frame", 0.0) >= 0.05:
+                self._last_frame = now
+                self.animator.step(now, self.pointer, idle_wander=self.appearance.idle_motion)
+                self.animator.state.reduced_motion = self.reduced
+                self.area.queue_draw()
         return GLib.SOURCE_CONTINUE
 
     def _draw(self, area, cr, width, height) -> None:
@@ -251,7 +267,7 @@ class Companion(Gtk.Application):
 
     def _on_event(self, name: str, data: dict) -> bool:
         now = time.monotonic()
-        if now < self.paused_until:
+        if now < self.paused_until or not self.enabled:
             return False
         if name == "commentary":
             self._show_caption(data.get("label", ""), data.get("text", ""),
@@ -321,6 +337,9 @@ class Companion(Gtk.Application):
         if avatar:
             self.appearance = facelib.Appearance.from_config(avatar)
         if settings:
+            self.enabled = bool(settings.get("companion_enabled", True)) or os.environ.get("ECHO_COMPANION_SHOW") == "1"
+            if not self.enabled and self.visible:
+                self.target_shown = 0.0
             corner = str(settings.get("companion_position") or self.corner)
             if corner in CORNERS and corner != self.corner:
                 self.corner = corner
@@ -356,7 +375,24 @@ class Companion(Gtk.Application):
         self.popover = Gtk.PopoverMenu.new_from_model(menu)
         self.popover.set_parent(self.area)
         self.popover.set_has_arrow(False)
-        self.popover.connect("closed", lambda *_: GLib.idle_add(self._update_input_region))
+        self.popover.connect("closed", self._menu_closed)
+
+    def _menu_closed(self, *_args) -> None:
+        # Back to never taking focus once the menu is gone.
+        if LayerShell is not None and LayerShell.is_layer_window(self.window):
+            LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.NONE)
+        GLib.idle_add(self._update_input_region)
+
+    def _summon_menu(self) -> bool:
+        self.appear("listening")
+        width, height = facelib.canvas_size(FACE)
+        GLib.timeout_add(350, lambda: self._clicked(None, 1, width / 2, height / 2 - 0.08 * FACE) or False)
+        return GLib.SOURCE_CONTINUE
+
+    def _summon_ask(self) -> bool:
+        self.appear("listening")
+        self.activate_action("ask", GLib.Variant.new_string("activity"))
+        return GLib.SOURCE_CONTINUE
 
     def _menu_open(self) -> bool:
         return bool(getattr(self, "popover", None) and self.popover.get_visible())
@@ -369,7 +405,13 @@ class Companion(Gtk.Application):
         surface = self.window.get_surface()
         if surface is not None:
             surface.set_input_region(None)
+        # Only while the owner has the menu open may Echo take the keyboard (Escape, arrows).
+        if LayerShell is not None and LayerShell.is_layer_window(self.window):
+            LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.ON_DEMAND)
         self.popover.popup()
+        opened = time.monotonic()
+        self._menu_opened = opened
+        GLib.timeout_add_seconds(20, lambda: (self.popover.popdown() if self._menu_open() and self._menu_opened == opened else None) and False)
 
     def _ask(self, _action, value) -> None:
         topic = value.get_string()

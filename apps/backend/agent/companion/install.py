@@ -19,7 +19,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from agent.companion import hook_client
 
@@ -105,7 +105,8 @@ def _codex_notify(text: str, add: bool) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def plan(*, claude_dir: Path, codex_dir: Path, add: bool, agents: tuple[str, ...] = ("claude-code", "codex")) -> list[dict[str, Any]]:
+def plan(*, claude_dir: Path, codex_dir: Path, add: bool, agents: tuple[str, ...] = ("claude-code", "codex"),
+         codex_notify: bool = False) -> list[dict[str, Any]]:
     """The file changes install/uninstall would make, without making them."""
 
     changes = []
@@ -118,13 +119,16 @@ def plan(*, claude_dir: Path, codex_dir: Path, add: bool, agents: tuple[str, ...
         path = codex_dir / "hooks.json"
         before = _read_json(path)
         changes.append({"path": path, "before": before, "after": _with_hooks(before, CODEX_EVENTS, "codex", add), "kind": "json"})
+        # notify duplicates the Stop hook; only touch config.toml when asked to, or to remove ours.
         config = codex_dir / "config.toml"
         text = config.read_text(encoding="utf-8") if config.exists() else ""
-        changes.append({"path": config, "before": text, "after": _codex_notify(text, add), "kind": "text"})
+        if codex_notify or MARK in text:
+            changes.append({"path": config, "before": text, "after": _codex_notify(text, add and codex_notify), "kind": "text"})
     return [c for c in changes if c["before"] != c["after"]]
 
 
-def apply(changes: list[dict[str, Any]], *, add: bool, roots: list[str], agents: tuple[str, ...]) -> dict[str, Any]:
+def apply(changes: list[dict[str, Any]], *, add: bool, roots: list[str], agents: tuple[str, ...],
+          capture_prompts: bool = True) -> dict[str, Any]:
     backups = []
     home = companion_home()
     if add:
@@ -135,7 +139,7 @@ def apply(changes: list[dict[str, Any]], *, add: bool, roots: list[str], agents:
         scope_path = home / "scope.json"
         scope = _read_json(scope_path) if scope_path.exists() else {}
         scope.setdefault("enabled", True)
-        scope.setdefault("capture_prompts", True)
+        scope["capture_prompts"] = bool(capture_prompts)
         scope["agents"] = {**scope.get("agents", {}), **{a: True for a in agents}}
         scope["roots"] = sorted({*scope.get("roots", []), *roots})
         _write_json(scope_path, scope)
@@ -186,6 +190,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--apply", action="store_true", help="make the changes (default: show them)")
     parser.add_argument("--agent", action="append", choices=["claude-code", "codex"], help="limit to one agent")
     parser.add_argument("--root", action="append", default=[], help="project folder to observe (repeatable)")
+    parser.add_argument("--codex-notify", action="store_true", help="also add Codex notify (only if its hooks can't be trusted)")
+    parser.add_argument("--no-prompts", action="store_true", help="don't record the prompts you send")
     parser.add_argument("--claude-dir", default=os.path.expanduser("~/.claude"))
     parser.add_argument("--codex-dir", default=os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"))
     args = parser.parse_args(argv)
@@ -199,7 +205,7 @@ def main(argv: list[str]) -> int:
     if add and not roots:
         print("Choose at least one project folder to observe with --root.", file=sys.stderr)
         return 2
-    changes = plan(claude_dir=claude_dir, codex_dir=codex_dir, add=add, agents=agents)
+    changes = plan(claude_dir=claude_dir, codex_dir=codex_dir, add=add, agents=agents, codex_notify=args.codex_notify)
     for change in changes:
         print(f"--- {change['path']}")
         if change["kind"] == "json":
@@ -211,9 +217,78 @@ def main(argv: list[str]) -> int:
     if not args.apply:
         print("(dry run: nothing changed; add --apply)")
         return 0
-    print(json.dumps(apply(changes, add=add, roots=roots, agents=agents), indent=2))
+    print(json.dumps(apply(changes, add=add, roots=roots, agents=agents, capture_prompts=not args.no_prompts), indent=2))
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
+
+# ---- used by Settings › Echo Companion ---------------------------------------------------
+def read_scope() -> dict[str, Any]:
+    path = companion_home() / "scope.json"
+    data = _read_json(path) if path.exists() else {}
+    return {"enabled": bool(data.get("enabled", True)), "capture_prompts": bool(data.get("capture_prompts", True)),
+            "agents": {"claude-code": bool(data.get("agents", {}).get("claude-code")),
+                       "codex": bool(data.get("agents", {}).get("codex"))},
+            "roots": list(data.get("roots", []))}
+
+
+def write_scope(*, roots: list[str] | None = None, agents: dict[str, bool] | None = None,
+                capture_prompts: bool | None = None, enabled: bool | None = None) -> dict[str, Any]:
+    """Narrow or widen what the hook keeps. Folders must exist; the home folder itself is refused."""
+    home = companion_home()
+    home.mkdir(parents=True, exist_ok=True)
+    os.chmod(home, 0o700)
+    path = home / "scope.json"
+    data = _read_json(path) if path.exists() else {}
+    if roots is not None:
+        clean = []
+        for root in roots:
+            real = Path(os.path.expanduser(str(root))).resolve()
+            if real == Path.home().resolve() or real == Path("/"):
+                raise ValueError("Choose project folders, not your whole home folder")
+            if not real.is_dir():
+                raise ValueError(f"{root} isn't a folder")
+            clean.append(str(real))
+        data["roots"] = sorted(set(clean))
+    if agents is not None:
+        data["agents"] = {**data.get("agents", {}), **{k: bool(v) for k, v in agents.items() if k in {"claude-code", "codex"}}}
+    if capture_prompts is not None:
+        data["capture_prompts"] = bool(capture_prompts)
+    if enabled is not None:
+        data["enabled"] = bool(enabled)
+    _write_json(path, data)
+    os.chmod(path, 0o600)
+    return read_scope()
+
+
+AUTOSTART = "echo-companion.desktop"
+
+
+def autostart_path() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME", "").strip() or os.path.expanduser("~/.config")
+    return Path(base) / "autostart" / AUTOSTART
+
+
+def companion_launcher() -> Optional[Path]:
+    """apps/companion/echo-companion beside this backend's source tree, if this build has it."""
+    candidate = Path(__file__).resolve().parents[4] / "apps" / "companion" / "echo-companion"
+    return candidate if candidate.is_file() else None
+
+
+def set_autostart(enabled: bool) -> dict[str, Any]:
+    """Start Echo Companion at login through XDG autostart (Omarchy/uwsm honours it)."""
+    path = autostart_path()
+    if not enabled:
+        path.unlink(missing_ok=True)
+        return {"enabled": False, "path": str(path)}
+    launcher = companion_launcher()
+    if launcher is None:
+        raise ValueError("This build doesn't include the desktop companion")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[Desktop Entry]\nType=Application\nName=Echo Companion\n"
+                    "Comment=Echo on your desktop: what your agents are doing, out loud\n"
+                    f"Exec={launcher}\nTerminal=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n", encoding="utf-8")
+    return {"enabled": True, "path": str(path)}

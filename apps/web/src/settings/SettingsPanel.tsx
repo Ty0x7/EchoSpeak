@@ -22,6 +22,7 @@ import { AgentSkillsSection } from "./AgentSkillsSection";
 import { DesktopControlOffer } from "./DesktopControlOffer";
 import { AlwaysAllowed } from "./AlwaysAllowed";
 import { VoiceProviders } from "./VoiceProviders";
+import { CompanionSettings } from "./CompanionSettings";
 import { ShowMore, useShowMore } from "../lean/ShowMore";
 import { ThemePicker } from "../theme/ThemePicker";
 import { requestSetup } from "../setup/openSetup";
@@ -33,6 +34,7 @@ type SectionId =
   | "personality"
   | "permissions"
   | "terminal"
+  | "companion"
   | "voice"
   | "search"
   | "memory"
@@ -61,6 +63,7 @@ const NAV: { group: string; items: { id: SectionId; label: string; icon: IconNam
       { id: "permissions", label: "Permissions", icon: "shield" },
       { id: "terminal", label: "Terminal", icon: "terminal" },
       { id: "voice", label: "Voice", icon: "mic" },
+      { id: "companion", label: "Echo Companion", icon: "spark" },
       { id: "search", label: "Web search", icon: "globe" },
       { id: "memory", label: "Memory", icon: "brain" },
       { id: "skills", label: "Skills", icon: "spark" },
@@ -93,6 +96,7 @@ const SEARCH_WORDS: Partial<Record<SectionId, string>> = {
   personality: "soul personality tone",
   permissions: "permissions approvals approval mode autonomous risky ask before outside content reader quarantine prompt injection files desktop applications system actions apps allowlist allowed apps launch minecraft",
   terminal: "terminal shell commands powershell allowlist",
+  companion: "companion echo companion desktop commentary claude code codex hooks observe quiet hours humour humor soul knowledge autostart captions position",
   voice: "voice whisper speech to text microphone wake word read aloud piper windows speech elevenlabs drama gguf audio.cpp local download tts stt",
   search: "web search brave tavily searxng duckduckgo timeout results blocked sites sports odds live data",
   memory: "memory documents embeddings recall remember conversations learning lessons reviews reflections experience playbook",
@@ -323,6 +327,8 @@ function SectionBody({
       return <TerminalSection s={s} save={save} apiBase={props.apiBase} />;
     case "voice":
       return <VoiceSection s={s} save={save} apiBase={props.apiBase} openAdvanced={openAdvanced} />;
+    case "companion":
+      return <CompanionSettings s={s} save={save} apiBase={props.apiBase} />;
     case "search":
       return <SearchSection s={s} save={save} />;
     case "memory":

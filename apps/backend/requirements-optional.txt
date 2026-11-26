@@ -6,6 +6,5 @@ sentence-transformers>=2.2.2
 
 # Local CPU read-aloud voices (agent/kokoro_voice.py, piper-local). Install with
 # `python scripts/setup_local_tts.py kokoro|piper`, which also fetches the voice files.
-kokoro-onnx==0.6.1
 # piper-tts is GPL-3.0; it runs as a separate process and is optional.
 piper-tts==1.8.0

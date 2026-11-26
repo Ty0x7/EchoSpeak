@@ -194,3 +194,14 @@ def test_kokoro_status_reports_missing_pieces_without_loading(monkeypatch, tmp_p
     (tmp_path / "voices-v1.0.bin").write_bytes(b"x")
     status = next(p for p in voice_runtime.voice_provider_statuses() if p.id == "kokoro-local")
     assert status.operation_readiness["text_to_speech"] and status.locality == "local"
+
+
+def test_kokoro_download_respects_offline_mode(monkeypatch):
+    from agent import kokoro_voice, privacy
+
+    def blocked(*_a, **_k):
+        raise privacy.PrivacyBlocked("downloads", "Offline mode")
+    monkeypatch.setattr(privacy, "require", blocked)
+    with pytest.raises(privacy.PrivacyBlocked):
+        kokoro_voice.start_download()
+    assert kokoro_voice.download_status()["state"] != "running"

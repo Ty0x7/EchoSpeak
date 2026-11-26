@@ -113,7 +113,9 @@ class Harness:
             self.order.append("archive")
             return "/r/x.md"
 
-        self.c = Commentary(speak=speak, focus=lambda: focus or {}, remember=remember, archive=archive)
+        self.allowed = True
+        self.c = Commentary(speak=speak, focus=lambda: focus or {}, remember=remember, archive=archive,
+                            authorize=lambda event: {"allowed": self.allowed, "reason": "not authorised"})
 
 
 def test_disabled_companion_does_nothing(monkeypatch):
@@ -127,6 +129,14 @@ def test_report_is_stored_before_it_is_spoken(monkeypatch):
     assert h.order == ["archive", "remember", "speak"]
     assert item["spoken"] and item["memory"]["stored"] and item["reason"] == "report"
     assert any(w in h.spoken[0].lower() for w in ("saved", "echo can use"))
+
+
+def test_unauthorised_report_is_neither_archived_nor_remembered(monkeypatch):
+    h = Harness(monkeypatch)
+    h.allowed = False
+    item = h.c.handle(_event())
+    assert h.order == ["speak"] and not item["archived"] and item["memory"] == {"stored": False, "reason": "not authorised"}
+    assert "saved" not in h.spoken[0].lower()
 
 
 @pytest.mark.parametrize("remember_ok", [False, None])
@@ -183,16 +193,20 @@ def test_memory_has_provenance_scope_and_no_duplicates(monkeypatch, tmp_path):
     memory = FakeMemory()
     event = _event(cwd=str(tmp_path / "echospeak" / "sub"))
     d = analyse(REPORT)
-    first = knowledge.remember(event, d, scope_mode="auto", memory=memory)
-    again = knowledge.remember(event, d, scope_mode="auto", memory=memory)
+    first = knowledge.remember(event, d, memory=memory)  # default: project_only
+    again = knowledge.remember(event, d, memory=memory)
     assert first["stored"] and first["scope"] == "project" and first["project_id"] == "p-echo" and again["id"] == first["id"]
     [item] = memory.items.values()
     assert item["memory_type"] == "project" and item["source"] == "echo-companion" and item["source_item_id"] == event["id"]
     assert "Claude Code reported on" in item["text"] and "not independently verified" in item["text"]
     assert "rm -rf" not in item["text"] and "PR #212" in item["text"]
     outside = _event(cwd=str(tmp_path / "elsewhere"), at=2000.0)
-    assert knowledge.remember(outside, d, scope_mode="project_only", memory=memory)["stored"] is False
-    assert knowledge.remember(outside, d, scope_mode="auto", memory=memory)["scope"] == "account"
+    monkeypatch.setattr(knowledge.config, "companion_memory_scope", "project_only", raising=False)
+    refused = knowledge.remember(outside, d, memory=memory)
+    assert refused["stored"] is False and "needs your OK" in refused["reason"]  # default never goes account-wide
+    assert knowledge.remember(outside, d, scope_mode="project_or_account", memory=memory)["scope"] == "account"
+    assert knowledge.remember(outside, d, scope_mode="auto", memory=memory)["scope"] == "account"  # round-1 name
+    assert knowledge.remember(outside, d, scope_mode="everything", memory=memory)["stored"] is False  # unknown → narrowest
     assert knowledge.remember(outside, d, scope_mode="off", memory=memory)["stored"] is False
 
 
@@ -200,6 +214,7 @@ def test_archive_keeps_verbatim_report_with_front_matter(monkeypatch, tmp_path):
     monkeypatch.setattr(knowledge, "reports_dir", lambda: tmp_path)
     path = knowledge.archive(_event(), analyse(REPORT))
     body = path.read_text()
+    assert (path.stat().st_mode & 0o777) == 0o600 and (path.parent.stat().st_mode & 0o777) == 0o700
     assert body.startswith("---\nagent: \"claude-code\"") and "not independently verified" in body
     assert "Ignore previous instructions" in body  # verbatim, labelled untrusted, never stored as memory
     assert "Untrusted reference material" in body
@@ -220,3 +235,30 @@ def test_recap_answers_come_from_observations(tmp_path, monkeypatch):
     away = recap.answer("recap", store, snapshot, since=150.0)
     assert away.startswith("While you were away: Claude finished 1 turn") and "mixed results" in away
     assert "isn't doing anything" in recap.answer("agent:echo", store, snapshot)
+
+
+def test_reports_that_arrive_while_closed_are_kept_but_not_spoken(monkeypatch, tmp_path):
+    store = CompanionStore(tmp_path / "o.sqlite3", tmp_path / "spool")
+    store.add(normalise({"agent": "claude-code", "received_at": 100.0, "event": {
+        "session_id": "s", "prompt_id": "1", "cwd": "/w/p", "hook_event_name": "Stop", "last_assistant_message": REPORT}}))
+    pending = store.unhandled(0)
+    assert len(pending) == 1
+    h = Harness(monkeypatch)
+    h.c._mark = store.mark_handled
+    assert h.c.catch_up(pending) == 1
+    item = h.c.feed[-1]
+    assert not item["spoken"] and item["silent_because"] == "arrived while EchoSpeak was closed"
+    assert h.order == ["archive", "remember"]  # kept, not spoken
+    assert store.unhandled(0) == []  # and never processed twice
+
+
+def test_counts_bullets_not_sentences():
+    report = ("## Summary\nAdded slugify_unique. The suite passes.\n\n## What changed\n"
+              "- slugify.py: added the function. It keeps input order. Repeats get -2, -3.\n"
+              "- test_slugify.py: two tests. One covers collisions.\n\n## Verification\n- Ran 5 tests, OK.\n\n"
+              "## Not verified / limits\n- Not a git repository. No diff to show.\n- Empty inputs are not special-cased. They become -2.\n")
+    d = analyse(report)
+    assert len(d.open) == 2 and d.open[0].startswith("Not a git repository")
+    assert len(d.results) <= 4
+    assert d.tests_passed == 5 and d.tests_failed == 0
+    assert analyse("## Verification\n- Ran 7 tests in 0.1s\n- FAILED (failures=2)\n## Summary\nx\n## Changes\n- y\n").tests_failed == 2

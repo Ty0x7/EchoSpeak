@@ -474,3 +474,22 @@ def kokoro_voices():
         return {"items": kokoro_voice.voices(), "selected": kokoro_voice.DEFAULT_VOICE}
     except kokoro_voice.KokoroError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/voice/kokoro/setup")
+def kokoro_setup_status():
+    from agent import kokoro_voice
+    detected, ready, detail = kokoro_voice.readiness()
+    return {"ready": ready, "installed": kokoro_voice.runtime_installed(), "detail": detail, **kokoro_voice.download_status()}
+
+
+@router.post("/voice/kokoro/setup")
+def kokoro_setup_start():
+    """The owner asked for the Kokoro voice: download it (never implicit; Offline/Private mode refuses)."""
+    from agent import kokoro_voice, privacy
+    if not kokoro_voice.runtime_installed():
+        raise HTTPException(409, "Kokoro's engine isn't installed in this build.")
+    try:
+        return kokoro_voice.start_download()
+    except privacy.PrivacyBlocked as exc:
+        raise HTTPException(403, str(exc)) from exc

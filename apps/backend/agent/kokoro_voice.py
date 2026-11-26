@@ -122,3 +122,56 @@ def synthesize(text: str, output: Path, *, voice: str = "", speed: float = 1.0) 
         handle.setframerate(int(sample_rate))
         handle.writeframes(pcm.tobytes())
     return len(pcm) / float(sample_rate)
+
+
+# ---- explicit, owner-started download (Settings › Voice › Kokoro › Download) -------------
+RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.1"
+FILES = {
+    "kokoro-v1.0.fp16.onnx": "f3a290d384fbb27966d462905c71a46cef9e5fd00516b40df32a0b4afe77ac96",
+    "voices-v1.0.bin": "bca610b8308e8d99f32e6fe4197e7ec01679264efed0cac9140fe9c29f1fbf7d",
+}
+_download: dict[str, Any] = {"state": "idle", "done": 0, "total": 0, "error": ""}
+
+
+def download_status() -> dict[str, Any]:
+    return dict(_download)
+
+
+def start_download() -> dict[str, Any]:
+    """Fetch the fp16 model (164 MB) and voices (28 MB) with SHA-256 checks. Offline/Private mode refuses."""
+    from agent import privacy
+
+    privacy.require("downloads", RELEASE)
+    if _download["state"] == "running":
+        return download_status()
+    _download.update(state="running", done=0, total=0, error="")
+
+    def work() -> None:
+        import hashlib
+        import urllib.request
+
+        try:
+            target = default_model_dir()
+            target.mkdir(parents=True, exist_ok=True)
+            for name, expected in FILES.items():
+                final = target / name
+                if final.is_file() and hashlib.sha256(final.read_bytes()).hexdigest() == expected:
+                    continue
+                partial = final.with_suffix(final.suffix + ".part")
+                digest = hashlib.sha256()
+                with urllib.request.urlopen(f"{RELEASE}/{name}", timeout=60) as response, partial.open("wb") as handle:
+                    _download["total"] += int(response.headers.get("Content-Length") or 0)
+                    while block := response.read(1 << 20):
+                        handle.write(block)
+                        digest.update(block)
+                        _download["done"] += len(block)
+                if digest.hexdigest() != expected:
+                    partial.unlink(missing_ok=True)
+                    raise KokoroError(f"{name} failed its checksum; nothing was installed")
+                partial.replace(final)
+            _download["state"] = "done"
+        except Exception as exc:
+            _download.update(state="failed", error=str(exc)[:300])
+
+    threading.Thread(target=work, name="kokoro-download", daemon=True).start()
+    return download_status()
