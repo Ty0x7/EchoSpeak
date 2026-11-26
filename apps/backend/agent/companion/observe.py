@@ -37,6 +37,8 @@ from typing import Any, Iterable, Optional
 
 from config import DATA_DIR
 
+from agent.companion.text import clean, is_system_prompt, project_label, task_title
+
 COMPANION_HOME = Path(os.environ.get("ECHOSPEAK_COMPANION_HOME") or os.path.expanduser("~/.local/share/echospeak/companion"))
 RETAIN_SECONDS = 30 * 86400
 RETAIN_ROWS = 20000
@@ -86,6 +88,8 @@ def normalise(record: dict[str, Any]) -> Optional[dict[str, Any]]:
     message = event.get("last_assistant_message") or event.get("last-assistant-message") or ""
     if kind == "prompt":
         text = event.get("prompt") or ""
+        if is_system_prompt(text):  # harness traffic through the prompt hook, never the owner's request
+            kind, text = "system_prompt", ""
     elif kind in {"attention", "needs_permission"}:
         text = event.get("message") or event.get("tool_name") or ""
     else:
@@ -134,6 +138,11 @@ class CompanionStore:
                     attention TEXT, transcript_path TEXT, PRIMARY KEY (agent, session_id));
                 """
             )
+            for column in ("task TEXT", "turn_started_at REAL"):
+                try:
+                    db.execute(f"ALTER TABLE sessions ADD COLUMN {column}")
+                except sqlite3.OperationalError:
+                    pass  # already there
 
     def _db(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10)
@@ -179,6 +188,12 @@ class CompanionStore:
             if not inserted:
                 return False
             self._apply(db, event)
+            row = db.execute("SELECT project, task, turn_started_at FROM sessions WHERE agent=? AND session_id=?",
+                             (event["agent"], event["session_id"])).fetchone()
+            if row is not None:  # downstream sees the session's stable project and the owner's task
+                event["project"] = row["project"] or event.get("project", "")
+                event["task"] = row["task"] or ""
+                event["turn_started_at"] = float(row["turn_started_at"] or 0)
         for callback in list(self._listeners):
             try:
                 callback(event)
@@ -190,20 +205,31 @@ class CompanionStore:
         key = (event["agent"], event["session_id"])
         row = db.execute("SELECT * FROM sessions WHERE agent=? AND session_id=?", key).fetchone()
         if row is None:
+            cwd = event.get("cwd", "")
+            # The project is fixed when the session starts: an agent changing directory doesn't change it.
+            project = (project_label(cwd) if cwd else None) or event.get("project", "")
             db.execute(
                 "INSERT INTO sessions (agent, session_id, cwd, project, state, started_at, updated_at, turns, transcript_path)"
                 " VALUES (?,?,?,?,?,?,?,0,?)",
-                (*key, event.get("cwd", ""), event.get("project", ""), "your_turn", event["at"], event["at"],
-                 event.get("transcript_path", "")),
+                (*key, cwd, project, "your_turn", event["at"], event["at"], event.get("transcript_path", "")),
             )
+            row = {"project": project}
         updates: dict[str, Any] = {"updated_at": event["at"]}
-        if event.get("cwd"):
-            updates.update(cwd=event["cwd"], project=event.get("project", ""))
+        if not row["project"] and event.get("cwd"):
+            updates.update(cwd=event["cwd"], project=project_label(event["cwd"]) or event.get("project", ""))
         if event.get("transcript_path"):
             updates["transcript_path"] = event["transcript_path"]
         kind = event["kind"]
         if kind == "prompt":
-            updates.update(state="working", last_prompt=event.get("text", ""), last_prompt_at=event["at"], attention="")
+            updates.update(state="working", last_prompt=clean(event.get("text", ""))[:600], last_prompt_at=event["at"],
+                           attention="", turn_started_at=event["at"])
+            title = task_title(event.get("text", ""))
+            if title:  # "continue" keeps the task it continues
+                updates["task"] = title
+        elif kind == "system_prompt":  # the agent works on, but the owner didn't ask anything new
+            updates["state"] = "working"
+            if not isinstance(row, sqlite3.Row) or row["state"] != "working":
+                updates["turn_started_at"] = event["at"]
         elif kind == "turn_completed":
             updates.update(state="your_turn", last_message=event.get("text", ""), last_message_at=event["at"], attention="")
             db.execute("UPDATE sessions SET turns = turns + 1 WHERE agent=? AND session_id=?", key)
