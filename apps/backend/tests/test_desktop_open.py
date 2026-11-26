@@ -368,7 +368,7 @@ def test_offline_mode_refuses_internet_pages_and_redirects(desk, tmp_path, monke
     page.write_text("<title>R</title>")
     monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: desktop_open.PageCheck([], ["example.org"], ["example.org"]))
     out = _open(desk, target=str(page))
-    assert out.startswith("Error: nothing was opened: Offline mode is on") and "reaches example.org" in out
+    assert out.startswith("Error: not opened in the browser: Offline mode is on") and "example.org" in out
     assert not desk["record"].exists()
 
 
@@ -456,13 +456,13 @@ def test_server_guidance_names_a_route_the_browser_can_reach(desk):
 
 @pytest.mark.parametrize("check, expect", [
     (None, "couldn't run"),                                                          # no Playwright, or timed out
-    (desktop_open.PageCheck(["the page did not load: Timeout 15000ms"], [], []), "didn't load"),
-    (desktop_open.PageCheck([], ["cdn.example.com"], [], ["cdn.example.com"]), "reaches cdn.example.com"),
-    (desktop_open.PageCheck([], ["fonts.lan.example"], [], ["unresolved-name.example"]), "reaches unresolved"),
+    (desktop_open.PageCheck(["the page did not load: Timeout 15000ms"], [], []), "did not load"),
+    (desktop_open.PageCheck([], ["cdn.example.com"], [], ["cdn.example.com"]), "tried to reach cdn.example.com"),
+    (desktop_open.PageCheck([], ["192.168.1.5"], [], ["192.168.1.5", "localhost"]), "no JavaScript errors"),  # stays local
 ])
-def test_offline_fails_closed_unless_the_check_shows_the_page_stays_local(desk, tmp_path, monkeypatch, check, expect):
-    """Owner review of 3a1b62a: the check runs in a restricted headless browser, the user's browser doesn't. In
-    Offline mode a page opens there only when the check ran, loaded it and saw nothing beyond your machines."""
+def test_offline_never_opens_a_web_page_in_the_desktop_browser(desk, tmp_path, monkeypatch, check, expect):
+    """Owner's review of 56981c5: a clean bounded headless check can't make an unrestricted desktop browser stay
+    offline afterwards, so in Offline mode no web page opens there; the check is reported as inspection only."""
     from agent import privacy
 
     monkeypatch.setattr(privacy, "mode", lambda: "offline")
@@ -470,20 +470,16 @@ def test_offline_fails_closed_unless_the_check_shows_the_page_stays_local(desk, 
     page.write_text("<title>Game</title>")
     monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: check)
     out = _open(desk, target=str(page))
-    assert out.startswith("Error: nothing was opened: Offline mode is on") and expect in out, out
+    assert out.startswith("Error: not opened in the browser: Offline mode is on") and expect in out, out
+    assert "inspection, not enforcement" in out or check is None
+    assert str(page) in out and "don't open it another way" in out
     assert not desk["record"].exists()
 
 
-def test_offline_opens_a_page_that_stays_on_your_machines(desk, tmp_path, monkeypatch):
+def test_offline_still_opens_folders_and_other_files(desk, tmp_path, monkeypatch):
     from agent import privacy
 
     monkeypatch.setattr(privacy, "mode", lambda: "offline")
-    page = tmp_path / "game.html"
-    page.write_text("<title>Game</title>")
-    monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: desktop_open.PageCheck(
-        [], ["192.168.1.5", "localhost"], [], ["192.168.1.5", "localhost"]))
-    assert "Error" not in _open(desk, target=str(page)).splitlines()[0]
-    # A folder isn't a page: Offline mode doesn't stop a file manager.
     assert "Error" not in _open(desk, target=str(tmp_path)).splitlines()[0]
 
 

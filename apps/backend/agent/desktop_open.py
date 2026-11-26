@@ -663,13 +663,14 @@ def open_on_desktop(app: str = "", target: str = "", *, log_dir: Path, blocked: 
 
 
 def offline_refusal(item: Target, check: Optional["PageCheck"]) -> str:
-    """Why a page must not open in the user's browser while web pages may only use this PC and your network, or ''.
+    """Why a web page isn't opened in the user's desktop browser while web pages may only use your machines, or ''.
 
-    The page check runs in a restricted headless browser; the user's own browser has no such limits and would
-    fetch whatever the page asks for. So when internet pages aren't allowed (Offline mode, or Reading web pages
-    switched off) a page opens only after the check ran, loaded it, and saw it reach nothing outside your
-    machines. Anything less fails closed. Hosts are judged without a DNS lookup; a name that isn't provably
-    yours counts as the internet.
+    Owner's security review (26 November 2026): the page check is a bounded inspection in a restricted headless
+    browser. It is not network enforcement, and a clean result says nothing about what an unrestricted desktop
+    browser does afterwards: later fetches from the page, and the browser's own background traffic. EchoSpeak
+    can't hold that browser to Offline mode (privacy.NOT_ENFORCED: "your browser and other apps"), so while
+    internet pages aren't allowed (Offline mode, or Reading web pages switched off) no web page is opened in it,
+    whatever the check found. The check still runs, and its findings are reported as inspection only.
     """
     from agent import privacy
 
@@ -679,19 +680,19 @@ def offline_refusal(item: Target, check: Optional["PageCheck"]) -> str:
         or item.kind == "url"
     if not is_page:
         return ""
-    reason = privacy.decide("web_pages", "https://internet.invalid/").reason or "web pages may only use your machines"
+    reason = privacy.decide("web_pages", "https://internet.invalid/").reason or "web pages may only use your machines."
     if check is None:
-        return (f"Error: nothing was opened: {reason} The page check couldn't run (or didn't finish), so EchoSpeak "
-                "can't confirm this page stays on your machines, and your browser wouldn't hold it to that.")
-    if not check.loaded:
-        return (f"Error: nothing was opened: {reason} The page didn't load in the page check ({check.problems[0]}), "
-                "so what it reaches in your browser is unknown.")
-    outside = [h for h in dict.fromkeys(check.hosts + [n.split(":")[0] for n in check.left])
-               if privacy.locality(f"http://{h}/", resolve=False) not in {"this_pc", "your_network", "trusted"}]
-    if outside:
-        return (f"Error: nothing was opened: {reason} The page reaches {', '.join(outside[:3])}, and your browser "
-                "would fetch it.")
-    return ""
+        seen = "The restricted page check couldn't run here."
+    else:
+        outside = [h for h in dict.fromkeys(check.hosts + [n.split(":")[0] for n in check.left])
+                   if privacy.locality(f"http://{h}/", resolve=False) not in {"this_pc", "your_network", "trusted"}]
+        seen = ("The restricted page check (an inspection, not enforcement) found: "
+                + ("; ".join(check.problems[:3]) if check.problems else "no JavaScript errors or failed loads")
+                + (f"; it tried to reach {', '.join(outside[:3])}" if outside else "") + ".")
+    where = str(item.path) if item.path is not None else item.uri
+    return (f"Error: not opened in the browser: {reason} A desktop browser isn't limited by Offline mode, so "
+            f"EchoSpeak doesn't open web pages in it while Offline mode is on. {seen} Tell the user it is ready at "
+            f"{where} for them to open if they choose; don't open it another way (terminal, xdg-open).")
 
 
 def evidence_ladder(*, window: bool, check: Optional["PageCheck"], is_page: bool, look: str) -> str:
@@ -706,7 +707,8 @@ def evidence_ladder(*, window: bool, check: Optional["PageCheck"], is_page: bool
         lines.append(f"3. Page loaded: NO. A separate headless browser found {len(check.problems)} problem"
                      f"{'s' if len(check.problems) > 1 else ''}: " + "; ".join(check.problems) + ".")
     else:
-        lines.append("3. Page loaded: yes, with no JavaScript errors or failed loads in a separate headless browser.")
+        lines.append("3. Page loaded: yes, with no JavaScript errors or failed loads in a separate headless browser "
+                     "(an inspection of its first moments; it doesn't limit what the desktop browser does later).")
     if check is not None and check.blocked:
         lines.append("   The check didn't load " + "; ".join(check.blocked[:4]) + " (outside what EchoSpeak may read "
                      "or reach); in the user's browser those may behave differently.")
