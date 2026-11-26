@@ -585,8 +585,14 @@ class Presented:
             self.used = self.used or screen_changed >= SCREEN_UNCHANGED   # input reached it and the screen changed
 
     def unbacked(self, text: str) -> str:
-        """The sentence claiming it works when nobody used it (or the page failed), or ''."""
-        if not self.opened or (self.used and self.page is not False):
+        """The sentence claiming it works, or ''.
+
+        Nothing this harness observes backs "it works" for something it opened: a launch, a clean load, a
+        screenshot and even a screen change after input (owner, 26 November 2026: "screen changes alone are not
+        proof") each show less than the outcome the user asked for. Such a reply goes back once to say which
+        levels were verified; the user's confirmation is what verifies it works.
+        """
+        if not self.opened:
             return ""
         for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")):
             if sentence.strip() and _WORKS_CLAIM.search(sentence) and not _HEDGED.search(sentence):
@@ -597,6 +603,7 @@ class Presented:
         page = {None: "not checked", True: "loaded with no errors", False: "FAILED: it has errors"}[self.page]
         return (f"You wrote \"{claim[:200]}\". What this turn shows: launch requested; window "
                 f"{'verified' if self.window else 'not verified'}; page {page}; looked at with a screenshot: "
-                f"{'yes' if self.looked else 'no'}; used (input that changed the screen): {'yes' if self.used else 'no'}. "
-                "None of that shows it works. Reply again saying exactly which of these you verified and what the "
-                "screenshot showed, fix what failed if you can, and ask the user to try it.")
+                f"{'yes' if self.looked else 'no'}; responded to input (the screen changed after it): "
+                f"{'yes' if self.used else 'no'}. None of that shows it works as the user asked. Reply again saying "
+                "exactly which of these you verified and what the screenshot showed, fix what failed if you can, "
+                "and ask the user to try it.")

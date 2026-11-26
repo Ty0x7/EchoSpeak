@@ -728,4 +728,4 @@ def test_ready_to_play_after_only_a_launch_and_a_screenshot_goes_back_once(tmp_p
     result = _turn(box, client, [], events).run("Open my game and make sure it works.")
     assert sum(e["type"] == "presentation_nudge" for e in events) == 1
     assert "ready for you to play" not in result.text and "haven't played it" in result.text
-    assert "used (input that changed the screen): no" in client.calls[3][-1]["content"]
+    assert "responded to input (the screen changed after it): no" in client.calls[3][-1]["content"]

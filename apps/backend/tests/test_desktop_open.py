@@ -152,7 +152,7 @@ def test_a_window_that_shows_the_page_verifies_the_launch(desk, tmp_path, monkey
     monkeypatch.setattr(desktop_open, "windows", lambda env=None: next(seen, [{"id": "0x1", "title": "GTA Clone - Good Browser", "app": "goodbrowser", "pid": 1, "where": "monitor DP-1, workspace 11"}]))
     out = _open(desk, app="Good Browser", target=str(page), wait=2)
     assert out.startswith("Opened") and 'Window "GTA Clone - Good Browser" is open on monitor DP-1' in out, out
-    assert "2. Window open: verified" in out and "5. Works: not verified" in out
+    assert "2. Window open: verified" in out and "6. Works as the user asked: not verified" in out
 
 
 def test_targets_are_classified_without_guessing(desk, tmp_path):
@@ -368,7 +368,8 @@ def test_offline_mode_refuses_internet_pages_and_redirects(desk, tmp_path, monke
     page.write_text("<title>R</title>")
     monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: desktop_open.PageCheck([], ["example.org"], ["example.org"]))
     out = _open(desk, target=str(page))
-    assert out.startswith("Error: nothing was opened: the page goes on to example.org") and not desk["record"].exists()
+    assert out.startswith("Error: nothing was opened: Offline mode is on") and "reaches example.org" in out
+    assert not desk["record"].exists()
 
 
 def test_a_blocked_browser_behind_a_link_launcher_is_refused(desk, tmp_path, monkeypatch):
@@ -418,7 +419,9 @@ def test_opening_and_a_screenshot_do_not_make_it_work():
                    "Try it and tell me whether it works.", "The page loaded but the canvas is empty."):
         assert seen.unbacked(honest) == "", honest
     seen.observe("computer_action", True, "", screen_changed=0.4)
-    assert seen.unbacked(claim) == ""                                 # used, and the screen responded
+    assert seen.used                                                  # it responded to input...
+    assert seen.unbacked(claim)                                       # ...which still isn't "it works" (owner)
+    assert "responded to input (the screen changed after it): yes" in seen.note(claim)
 
 
 def test_a_failed_page_load_keeps_a_works_claim_unbacked_even_after_input():
@@ -449,3 +452,55 @@ def test_server_guidance_names_a_route_the_browser_can_reach(desk):
         port = s.getsockname()[1]
     out = _open(desk, target=f"http://127.0.0.1:{port}/")
     assert "network: true" in out and 'where="host"' in out
+
+
+@pytest.mark.parametrize("check, expect", [
+    (None, "couldn't run"),                                                          # no Playwright, or timed out
+    (desktop_open.PageCheck(["the page did not load: Timeout 15000ms"], [], []), "didn't load"),
+    (desktop_open.PageCheck([], ["cdn.example.com"], [], ["cdn.example.com"]), "reaches cdn.example.com"),
+    (desktop_open.PageCheck([], ["fonts.lan.example"], [], ["unresolved-name.example"]), "reaches unresolved"),
+])
+def test_offline_fails_closed_unless_the_check_shows_the_page_stays_local(desk, tmp_path, monkeypatch, check, expect):
+    """Owner review of 3a1b62a: the check runs in a restricted headless browser, the user's browser doesn't. In
+    Offline mode a page opens there only when the check ran, loaded it and saw nothing beyond your machines."""
+    from agent import privacy
+
+    monkeypatch.setattr(privacy, "mode", lambda: "offline")
+    page = tmp_path / "game.html"
+    page.write_text("<title>Game</title>")
+    monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: check)
+    out = _open(desk, target=str(page))
+    assert out.startswith("Error: nothing was opened: Offline mode is on") and expect in out, out
+    assert not desk["record"].exists()
+
+
+def test_offline_opens_a_page_that_stays_on_your_machines(desk, tmp_path, monkeypatch):
+    from agent import privacy
+
+    monkeypatch.setattr(privacy, "mode", lambda: "offline")
+    page = tmp_path / "game.html"
+    page.write_text("<title>Game</title>")
+    monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: desktop_open.PageCheck(
+        [], ["192.168.1.5", "localhost"], [], ["192.168.1.5", "localhost"]))
+    assert "Error" not in _open(desk, target=str(page)).splitlines()[0]
+    # A folder isn't a page: Offline mode doesn't stop a file manager.
+    assert "Error" not in _open(desk, target=str(tmp_path)).splitlines()[0]
+
+
+def test_standard_mode_still_opens_when_the_check_cannot_run(desk, tmp_path, monkeypatch):
+    page = tmp_path / "game.html"
+    page.write_text("<title>Game</title>")
+    monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: None)
+    out = _open(desk, target=str(page))
+    assert "Error" not in out.splitlines()[0] and "3. Page loaded: not checked" in out
+
+
+def test_the_real_check_reports_every_internet_host_a_page_reaches(tmp_path):
+    pytest.importorskip("playwright")
+    (tmp_path / "index.html").write_text("<title>P</title><img src='https://images.example.invalid/a.png'>"
+                                         "<script>fetch('https://api.example.invalid/x')</script>")
+    target, _ = desktop_open.classify(str(tmp_path / "index.html"))
+    check = desktop_open.page_check(target, readable=[tmp_path], hidden=[])
+    if check is None:
+        pytest.skip("headless browser unavailable here")
+    assert {"images.example.invalid", "api.example.invalid"} <= set(check.hosts), check

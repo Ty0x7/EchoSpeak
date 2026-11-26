@@ -600,13 +600,8 @@ def open_on_desktop(app: str = "", target: str = "", *, log_dir: Path, blocked: 
                         "(add the page's file name if it isn't index.html).")
         # Before the user's browser opens it: what the page loads, and where it would try to go.
         check = page_check(item, env, readable=readable or [], hidden=hidden or [])
-        if check is not None and check.left:
-            from agent import privacy
-
-            outside = [host for host in check.left if not privacy.decide("web_pages", f"http://{host}/").allowed]
-            if outside:
-                return (f"Error: nothing was opened: the page goes on to {', '.join(outside[:3])}, and "
-                        f"{privacy.decide('web_pages', 'http://' + outside[0] + '/').reason}")
+        if refusal := offline_refusal(item, check):
+            return refusal
     chosen: list[tuple[Entry, str]] = []           # (entry, why this one)
     problems: list[str] = []
     if app:
@@ -667,6 +662,38 @@ def open_on_desktop(app: str = "", target: str = "", *, log_dir: Path, blocked: 
     return "Error: nothing was opened: " + "; ".join(problems + attempts) + "."
 
 
+def offline_refusal(item: Target, check: Optional["PageCheck"]) -> str:
+    """Why a page must not open in the user's browser while web pages may only use this PC and your network, or ''.
+
+    The page check runs in a restricted headless browser; the user's own browser has no such limits and would
+    fetch whatever the page asks for. So when internet pages aren't allowed (Offline mode, or Reading web pages
+    switched off) a page opens only after the check ran, loaded it, and saw it reach nothing outside your
+    machines. Anything less fails closed. Hosts are judged without a DNS lookup; a name that isn't provably
+    yours counts as the internet.
+    """
+    from agent import privacy
+
+    if privacy.component_state("web_pages") == "allowed":
+        return ""
+    is_page = (item.kind == "file" and item.path is not None and item.path.suffix.lower() in {".html", ".htm", ".xhtml"}) \
+        or item.kind == "url"
+    if not is_page:
+        return ""
+    reason = privacy.decide("web_pages", "https://internet.invalid/").reason or "web pages may only use your machines"
+    if check is None:
+        return (f"Error: nothing was opened: {reason} The page check couldn't run (or didn't finish), so EchoSpeak "
+                "can't confirm this page stays on your machines, and your browser wouldn't hold it to that.")
+    if not check.loaded:
+        return (f"Error: nothing was opened: {reason} The page didn't load in the page check ({check.problems[0]}), "
+                "so what it reaches in your browser is unknown.")
+    outside = [h for h in dict.fromkeys(check.hosts + [n.split(":")[0] for n in check.left])
+               if privacy.locality(f"http://{h}/", resolve=False) not in {"this_pc", "your_network", "trusted"}]
+    if outside:
+        return (f"Error: nothing was opened: {reason} The page reaches {', '.join(outside[:3])}, and your browser "
+                "would fetch it.")
+    return ""
+
+
 def evidence_ladder(*, window: bool, check: Optional["PageCheck"], is_page: bool, look: str) -> str:
     """What this result shows and what it doesn't, step by step: launch, window, page, looks right, works."""
     lines = ["Evidence so far:", "1. Launch requested: yes.",
@@ -685,9 +712,12 @@ def evidence_ladder(*, window: bool, check: Optional["PageCheck"], is_page: bool
                      "or reach); in the user's browser those may behave differently.")
     lines += [f"4. Looks right: not checked yet. Use {look} and look at the image: a blank canvas, an error or "
               "missing parts means it isn't working.",
-              "5. Works: not verified. Opening it, a clean page load and a screenshot don't show that a game or app "
-              "works; that takes using it (controls responding, state changing). Say which of these you verified "
-              "and ask the user to try it."]
+              "5. Responds to input: not checked (that takes desktop input; a screen change after it shows only "
+              "that something responded).",
+              "6. Works as the user asked: not verified. A launch, a clean load, a screenshot and a screen change "
+              "after input each show less than that; it takes checking the requested outcome itself (playing it, "
+              "using the feature) and, in the end, the user's confirmation. Say which of these you verified and "
+              "ask the user to try it."]
     return "\n".join(lines)
 
 
@@ -767,6 +797,7 @@ def _run_page_check(url: str, wait_ms: int, allowed: list[str], hidden: list[str
     errors: list[str] = []
     blocked: list[str] = []
     left: list[str] = []
+    hosts: list[str] = []
 
     def inside(path: str, folder: str) -> bool:
         return path == folder or path.startswith(folder.rstrip("/") + "/")
@@ -789,8 +820,10 @@ def _run_page_check(url: str, wait_ms: int, allowed: list[str], hidden: list[str
             return
         u = urlparse(req.url)
         name = u.hostname or os.path.basename(unquote(u.path)) or req.url[:60]
-        if req.is_navigation_request() and u.hostname and u.hostname != origin.hostname:
-            left.append(u.netloc)
+        if u.hostname and u.scheme in ("http", "https", "ws", "wss"):
+            hosts.append(u.hostname)          # the user's own browser would try this host
+            if req.is_navigation_request() and u.hostname != origin.hostname:
+                left.append(u.netloc)
         blocked.append(name)
         r.abort("blockedbyclient")
 
@@ -818,7 +851,7 @@ def _run_page_check(url: str, wait_ms: int, allowed: list[str], hidden: list[str
         finally:
             browser.close()
     return {"errors": list(dict.fromkeys(errors))[:6], "blocked": list(dict.fromkeys(blocked))[:8],
-            "left": list(dict.fromkeys(left))[:4]}
+            "left": list(dict.fromkeys(left))[:4], "hosts": list(dict.fromkeys(hosts))[:20]}
 
 
 @dataclass
@@ -826,6 +859,11 @@ class PageCheck:
     problems: list[str]          # JavaScript errors, failed loads
     blocked: list[str]           # requests the check refused (outside readable folders, other origins)
     left: list[str]              # hosts the page navigated to (redirects), refused
+    hosts: list[str] = field(default_factory=list)   # every web host it tried that the check refused
+
+    @property
+    def loaded(self) -> bool:
+        return not any(p.startswith("the page did not load") for p in self.problems)
 
 
 def page_check(target: Target, env: Optional[dict] = None, *, readable: list, hidden: list,
@@ -857,4 +895,4 @@ def page_check(target: Target, env: Optional[dict] = None, *, readable: list, hi
     if not isinstance(data, dict):
         return None
     clip = lambda rows: [str(r)[:240] for r in rows or []]
-    return PageCheck(clip(data.get("errors")), clip(data.get("blocked")), clip(data.get("left")))
+    return PageCheck(clip(data.get("errors")), clip(data.get("blocked")), clip(data.get("left")), clip(data.get("hosts")))
