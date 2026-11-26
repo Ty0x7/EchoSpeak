@@ -1,6 +1,6 @@
 # Echo Companion: how it works
 
-This describes the session-awareness candidate `2759791` based on `cfa8c99`. Campaign issue #210. Requirements are tracked against the implementation in [echo-companion.md](echo-companion.md).
+The session-awareness work originated in issue #210. Issue #233 covers the presentation and check-in refinements described below. [Companion engineering record](echo-companion.md)
 
 Echo Companion is an **observer**. It notices what Claude Code, Codex, Echo and Echo's agents do. When something is worth saying, it says it out loud, and it keeps reports from outside agents as project memory. It never prompts, starts, steers or approves for any agent.
 
@@ -78,11 +78,21 @@ The **SOUL** is `DATA_DIR/companion/SOUL.md`. It holds a personality, phrases an
 
 **Speech** goes through `agent/speech_output.py`, one queue shared with Echo's read-aloud (priority, dedup, mute, cancel, stale drop). Kokoro (`agent/kokoro_voice.py`) synthesises on the CPU and PipeWire plays it. Chunk events carry amplitude envelopes, which the desktop window (`apps/companion`, a GTK4 layer-shell overlay) uses to move Echo's eyes. Captions disappear 2.5 s after the speech ends.
 
+### Active work, completed work, and overall check-ins
+
+- **Active work.** Permission waits and explicit milestones can surface during a turn. A fresh observed operation can prompt a progress update after the existing long-task threshold. An operation establishes progress on that operation.
+- **Completed work.** Fresh substantive reports use the task and a useful finding, check, open item or decision. Native measured results retain their verification status. External results stay attributed to their reporter. Existing authorized report and memory storage runs independently of speaking.
+- **Overall check-ins.** The existing observer loop schedules a review at Off, 30 or 60 minutes. The commentary worker reads a bounded recent window from SQLite and the active session snapshot. Recorded announcement IDs suppress repeats across restarts. Quiet hours, mute, a busy speech queue, the global cooldown and a lack of meaningful new evidence keep the review silent. Check-ins enter the speech queue below individual commentary.
+
+The review checks the current external observer allowlist. It keeps project identities distinct and adds fresh concurrent work when it helps explain a new event. Only structured native parent-worker evidence establishes collaboration. Local-model wording mode can rank a few jointly presented evidence cards and use bounded project-memory context for ranking. It selects validated card IDs and never supplies the facts that are spoken. The memory lookup uses the canonical scoped projection and can rank those results with local ONNX semantic retrieval. Invalid or unavailable model replies fall back to deterministic selection.
+
+Caption and speech share the same prepared text. The presentation layer removes Markdown, URLs, verbose paths and opaque identifiers and expands common abbreviations. The original reports and canonical memories keep their provenance and text. The caption fades within a fixed-size GTK overlay slot, while the body blends from the last rendered pose. Only the face and visible caption accept input. Reduced motion switches directly to the final pose. [GTK overlay sizing](https://docs.gtk.org/gtk4/method.Overlay.set_measure_overlay.html)
+
 ## 4. Local-model inference is isolated
 
 `soul.reword` makes **one** HTTP request to the local model's OpenAI-compatible `/chat/completions`. The request has a system message (facts, SOUL personality and rules) and a user message ("Say it."). It has no tools, no conversation history, no session and no streaming. Thinking is switched off through the provider's own mapping.
 
-The companion uses exactly two helpers from `agent.lean.provider`: `resolve_endpoint`, which reads configuration only and refuses non-local endpoints, and `reasoning_effort_for`. It never calls Echo's runtime, harness, tool loop, history, delegation or learning. Sharing a model server doesn't mean sharing an agent session.
+The Companion uses `resolve_endpoint` and `reasoning_effort_for` from `agent.lean.provider`. It requires a local endpoint and the normal model privacy policy, and uses nonblocking admission to yield to existing or waiting model work. It never calls Echo's runtime, harness, tool loop, history, delegation or learning. Sharing a model server doesn't mean sharing an agent session.
 
 ## 5. Knowledge: where it goes
 

@@ -1127,6 +1127,8 @@ class Config:
         self.companion_speak = os.getenv("COMPANION_SPEAK", "true").lower() == "true"
         self.companion_frequency = os.getenv("COMPANION_FREQUENCY", "milestones").strip() or "milestones"  # quiet|milestones|chatty
         self.companion_progress_minutes = max(0, int(os.getenv("COMPANION_PROGRESS_MINUTES", "30")))
+        checkin_minutes = os.getenv("COMPANION_CHECKIN_MINUTES", "0")
+        self.companion_checkin_minutes = int(checkin_minutes) if checkin_minutes in {"30", "60"} else 0
         self.companion_recover_history = os.getenv("COMPANION_RECOVER_HISTORY", "true").lower() == "true"
         self.companion_humor = int(os.getenv("COMPANION_HUMOR", "1") or 1)  # 0 none, 1 light, 2 playful
         self.companion_quiet_hours = os.getenv("COMPANION_QUIET_HOURS", "").strip()  # e.g. 22:00-08:00
@@ -1704,6 +1706,7 @@ class Config:
             "companion_speak",
             "companion_frequency",
             "companion_progress_minutes",
+            "companion_checkin_minutes",
             "companion_recover_history",
             "companion_humor",
             "companion_quiet_hours",

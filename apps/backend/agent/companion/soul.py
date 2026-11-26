@@ -38,8 +38,9 @@ DEFAULT_SOUL = """# Echo Companion
 
 ## Personality
 Warm, observant and a little dry. Speaks like a teammate glancing over from the next desk:
-short, plain sentences, never hype. Credits the agent that did the work by name. Jokes only
-when the facts give it something to work with, and never about the owner.
+short sentences with room to breathe. Lead with what changed or what needs attention.
+Credit the agent that did the work by name and say when a result is its own account.
+Use contractions and familiar words. A little dry humor is welcome when the evidence earns it.
 
 ## Phrases
 success: Report in from {agent}{where}. | {agent} wrapped up{where}. | {agent} finished a report{where}.
@@ -150,63 +151,56 @@ def fact_check(grounded: str, rewrite: str, agent_label: str) -> tuple[bool, str
     return True, ""
 
 
-def reword(grounded: str, agent_label: str, *, timeout: float = 8.0, instruction: str = "") -> tuple[str, dict[str, Any]]:
-    """Ask the owner's local model to say `grounded` in the SOUL's voice; keep it only if it passes."""
+def local_reply(messages: list[dict[str, str]], *, timeout: float, max_tokens: int, temperature: float) -> str:
+    """One tool-free local model request. Yield to work already using or waiting for inference."""
+    from agent.admission import inference
+    from agent.lean.provider import reasoning_effort_for, resolve_endpoint
+    from agent.privacy import require
+
+    endpoint = resolve_endpoint(str(getattr(config.local.provider, "value", config.local.provider)),
+                                str(config.local.model_name or ""))
+    if not endpoint.local:
+        raise ValueError("Companion synthesis requires a local model")
+    require("models", endpoint.base_url)
+    body = {"model": endpoint.model, "stream": False, "temperature": temperature,
+            "max_tokens": max_tokens, "messages": messages}
+    effort = reasoning_effort_for(endpoint, False, "low")
+    if effort:
+        if str(getattr(endpoint, "provider", "")) in {"llama_cpp", "vllm"}:
+            body["chat_template_kwargs"] = {"enable_thinking": effort != "none"}
+        else:
+            body["reasoning_effort"] = effort
+    request = urllib.request.Request(endpoint.base_url.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"}, method="POST")
+    if getattr(endpoint, "api_key", ""):
+        request.add_header("Authorization", f"Bearer {endpoint.api_key}")
+    with inference(endpoint, wait=False):
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            data = json.loads(response.read(65536))
+    text = str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+    return re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+
+
+def reword(grounded: str, agent_label: str, *, timeout: float = 4.0, instruction: str = "") -> tuple[str, dict[str, Any]]:
+    """Ask the owner's local model for spoken wording, then validate it."""
     info: dict[str, Any] = {"style": "local_model", "used": False}
     try:
-        from agent.lean.provider import resolve_endpoint
-
-        endpoint = resolve_endpoint(str(getattr(config.local.provider, "value", config.local.provider)),
-                                    str(config.local.model_name or ""))
-        if not getattr(endpoint, "local", False):
-            info["reason"] = "not a local model"
-            return grounded, info
-        soul = load()
-        if instruction:  # the caller supplies the full brief (narrate.hybrid)
-            messages = [{"role": "system", "content": instruction}, {"role": "user", "content": "Say it."}]
-        else:
-            messages = None
-        body = {
-            "model": endpoint.model, "stream": False, "temperature": 0.6, "max_tokens": 160,
-            "messages": [
-                {"role": "system", "content": (
-                    "You voice a desktop companion. Personality:\n" + soul["personality"] + "\n\n"
-                    "Rewrite the status line in that voice, in at most two short spoken sentences. Keep every fact "
-                    "exactly; do not add numbers, results, claims or names that are not in it. Results an agent only "
-                    "reported stay attributed to it: keep wording like 'by its account', or say '<agent> says' or "
-                    "'<agent> reports'. Keep the agent's name. Reply with the sentence only.")},
-                {"role": "user", "content": grounded},
-            ],
-        }
-        if messages:
-            body["messages"] = messages
-        from agent.lean.provider import reasoning_effort_for
-
-        effort = reasoning_effort_for(endpoint, False, "low")  # the provider's own "thinking off"
-        if effort:
-            if str(getattr(endpoint, "provider", "")) in {"llama_cpp", "vllm"}:
-                body["chat_template_kwargs"] = {"enable_thinking": effort != "none"}
-            else:
-                body["reasoning_effort"] = effort
+        system = instruction or (
+            "Speak like a teammate giving a short update. Personality:\n" + load()["personality"]
+            + "\nUse only the draft. Keep agent names and qualify all reported results. "
+              "Use natural sentences and contractions. Skip markup, paths and URLs. Reply with the spoken words only."
+        )
         started = time.monotonic()
-        request = urllib.request.Request(endpoint.base_url.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json"}, method="POST")
-        if getattr(endpoint, "api_key", ""):
-            request.add_header("Authorization", f"Bearer {endpoint.api_key}")
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read())
-        text = str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
-        text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip().strip('"').strip()
+        text = local_reply([{"role": "system", "content": system}, {"role": "user", "content": grounded}],
+                           timeout=timeout, max_tokens=160, temperature=0.5).strip('"').strip()
         info["ms"] = int((time.monotonic() - started) * 1000)
-        if instruction:  # the caller (narrate.guard) checks against the full facts
-            info["used"] = bool(text)
-            return (text or grounded), info
-        ok, why = fact_check(grounded, text, agent_label)
-        if not ok:
-            info["reason"] = f"rejected: {why}"
-            return grounded, info
-        info["used"] = True
-        return text, info
-    except Exception as exc:  # timeouts, no model, provider errors: the template line stands
-        info["reason"] = f"{type(exc).__name__}"
+        if not instruction:
+            ok, why = fact_check(grounded, text, agent_label)
+            if not ok:
+                info["reason"] = f"rejected: {why}"
+                return grounded, info
+        info["used"] = bool(text)
+        return text or grounded, info
+    except Exception as exc:
+        info["reason"] = type(exc).__name__
         return grounded, info

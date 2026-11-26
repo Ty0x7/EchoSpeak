@@ -77,9 +77,13 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
         <Select value={String(s.companion_frequency || "milestones")} onChange={v => save({ companion_frequency: v })}
           options={[{ value: "quiet", label: "Quiet" }, { value: "milestones", label: "Milestones" }, { value: "chatty", label: "Chatty" }]} />
       </Row>
-      <Row label="Long-task updates" help="After this much time, a newly observed completed operation can prompt an update.">
+        <Row label="Long-task updates" help="After this much time, a newly observed completed operation can prompt an update.">
         <Select value={String(s.companion_progress_minutes ?? 30)} onChange={v => save({ companion_progress_minutes: Number(v) })}
           options={[{ value: "0", label: "Off" }, ...[15, 30, 60].map(v => ({ value: String(v), label: `${v} minutes` }))]} />
+      </Row>
+      <Row label="Overall check-ins" help="Review active work and recent results. Echo stays quiet when there is nothing meaningful to add.">
+        <Select value={String(s.companion_checkin_minutes ?? 0)} onChange={v => save({ companion_checkin_minutes: Number(v) })}
+          options={[{ value: "0", label: "Off" }, { value: "30", label: "Every 30 minutes" }, { value: "60", label: "Every 60 minutes" }]} />
       </Row>
       <Row label="Humour">
         <Select value={String(s.companion_humor ?? 1)} onChange={v => save({ companion_humor: Number(v) })}

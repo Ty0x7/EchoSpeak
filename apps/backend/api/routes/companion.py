@@ -83,6 +83,7 @@ def ask(request: AskRequest):
     """The owner clicked Echo Companion: answer from what was observed, and say it."""
     from agent.companion import recap
     from agent.companion.history import refresh
+    from agent.companion.text import spoken as prepare_speech
     from agent.companion.observe import activity as build, get_companion_store
     from agent.speech_output import get_speech_output
     from config import config
@@ -92,6 +93,7 @@ def ask(request: AskRequest):
         refresh(store)
     text = recap.answer(request.topic, store, build(store, include_echo=config.companion_observe_echo), request.since,
                         reword=config.companion_soul_style == "local_model", project_id=request.project_id)
+    text = prepare_speech(text)
     spoken = None
     if request.speak:
         spoken = get_speech_output().speak(text, channel="companion", priority=70, interrupt=True, source="companion")

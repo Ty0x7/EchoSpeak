@@ -31,12 +31,14 @@ class Admission:
         self.local = threading.local()
 
     @contextmanager
-    def enter(self, *, cancel=None, rank=None):
+    def enter(self, *, cancel=None, rank=None, wait=True):
         if getattr(self.local, "inside", False):
             yield
             return
         waiter = (time.monotonic(), _PRIORITY.get() if rank is None else rank, object())
         with self.condition:
+            if not wait and (self.active >= self.slots or self.waiters):
+                raise InterruptedError("Inference is busy")
             self.waiters.append(waiter)
             try:
                 while True:
@@ -68,14 +70,14 @@ LOCAL_GATE = Admission(slots=1)
 
 
 @contextmanager
-def inference(endpoint=None, *, cancel=None):
+def inference(endpoint=None, *, cancel=None, wait=True):
     from contextlib import nullcontext
     url = str(getattr(endpoint, "base_url", "") or "").lower()
     local = bool(getattr(endpoint, "local", False)) or any(host in url for host in ("localhost", "127.0.0.1", "[::1]"))
     # Acquire the scarce local slot first so waiting GPU jobs do not consume
     # all cloud slots. Both gates are reentrant on the executing thread.
-    with LOCAL_GATE.enter(cancel=cancel) if local else nullcontext():
-        with GATE.enter(cancel=cancel):
+    with LOCAL_GATE.enter(cancel=cancel, wait=wait) if local else nullcontext():
+        with GATE.enter(cancel=cancel, wait=wait):
             yield
 
 

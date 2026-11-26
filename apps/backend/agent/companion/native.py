@@ -143,7 +143,7 @@ def worker_status(session: Any, name: str, index: int, goal: str, status: str) -
         kind = {"running": "prompt", "done": "subagent_completed", "partial": "subagent_completed"}.get(status, "interrupted")
         text = goal if kind == "prompt" else f"Research worker {status} after looking into {goal}"
         _publish(_event(agent_key(label), sid, kind, text=text[:600], cwd=_project_root(session),
-                        meta={"agent_name": label, "subagent": label, "parent_session": str(session.session_id)}))
+                        meta={"agent_name": label, "subagent": label, "parent_session": str(session.session_id), "status": status}))
     except Exception:
         logger.debug("Echo Companion worker observation failed", exc_info=True)
 

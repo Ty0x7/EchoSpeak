@@ -133,3 +133,32 @@ def project_label(cwd: str) -> Optional[str]:
         return best[0] or None
     except Exception:
         return None
+
+
+def spoken(text: str) -> str:
+    """Normalize display and speech together, without changing the stored source."""
+    from agent.companion.hook_client import mask
+
+    value = mask(str(text or ""), 4800)
+    value = re.sub(r"```.*?(?:```|$)", " ", value, flags=re.S)
+    value = re.sub(r"\[([^\]\n]+)\]\(https?://[^)]+\)", r"\1", value)
+    value = re.sub(r"https?://[^\s)>]+", "the link", value)
+    value = re.sub(r"(?<!\w)(?:(?:~/|/|[A-Za-z]:\\)[\w./\\~+@-]*[\w/]|[\w.-]+/[\w./-]+\.[A-Za-z0-9]+)", "the file", value)
+    value = re.sub(r"(?m)^ *#{1,6} +[^\n]*", "", value)
+    value = re.sub(r"(?m)^ *(?:[-*•]|\d+[.)]|>) *", "", value)
+    value = re.sub(r"\bPRs?\s*#?(?=\d)", "pull request ", value)
+    value = re.sub(r"\b(?:TUI|CLI)\b", "terminal interface", value)
+    value = re.sub(r"(?i)\b(commit|revision|sha)\s+`?[a-f0-9]{7,40}\b`?", "the recorded revision", value)
+    value = re.sub(r"(?<!\w)(?=[a-f0-9]{12,}\b)(?=[a-f0-9]*[0-9])[a-f0-9]+", "the recorded ID", value, flags=re.I)
+    value = re.sub(r"`([A-Za-z_][\w.:-]{14,})`", "the named item", value)
+    value = re.sub(r"([\w])_+(?=\w)", r"\1 ", value)
+    value = re.sub(r"[\[\]()]|[`*_#>|]", " ", value)
+    value = re.sub(r"(?:;|:(?!\d))\s*", ". ", value)
+    value = re.sub(r"(?<=[\w])\n+(?=\s*[\w])", ". ", value)
+    value = re.sub(r"\s+([,.!?])", r"\1", " ".join(value.split()))
+    value = re.sub(r"\.{2,}", ".", value).replace("at the file", "in the file").strip(" ,.")
+    if not value:
+        return ""
+    sentences = re.split(r"(?<=[.!?])\s+", value)
+    result = " ".join(part[:1].upper() + part[1:] for part in sentences if part)
+    return result if result[-1] in ".!?" else result + "."

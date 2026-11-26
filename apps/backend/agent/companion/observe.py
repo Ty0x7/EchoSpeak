@@ -137,6 +137,7 @@ class CompanionStore:
                 CREATE INDEX IF NOT EXISTS events_session ON events(agent, session_id, at);
                 CREATE INDEX IF NOT EXISTS events_at ON events(at);
                 CREATE TABLE IF NOT EXISTS handled (id TEXT PRIMARY KEY, at REAL);
+                CREATE TABLE IF NOT EXISTS announced (id TEXT PRIMARY KEY, at REAL);
                 CREATE TABLE IF NOT EXISTS sessions (
                     agent TEXT, session_id TEXT, cwd TEXT, project TEXT, state TEXT,
                     started_at REAL, updated_at REAL, last_prompt TEXT, last_prompt_at REAL,
@@ -308,12 +309,21 @@ class CompanionStore:
             row["meta"] = json.loads(row.get("meta") or "{}")
         return rows
 
+    def announced(self, since: float) -> set[str]:
+        with self._db() as db:
+            return {row["id"] for row in db.execute("SELECT id FROM announced WHERE at > ?", (since,))}
+
+    def mark_announced(self, ids: Iterable[str]) -> None:
+        with self._lock, self._db() as db:
+            db.executemany("INSERT OR REPLACE INTO announced VALUES (?,?)", [(id_, time.time()) for id_ in ids])
+
     def prune(self) -> None:
         with self._lock, self._db() as db:
             db.execute("DELETE FROM events WHERE at < ?", (time.time() - RETAIN_SECONDS,))
             db.execute("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY at DESC LIMIT ?)", (RETAIN_ROWS,))
             db.execute("DELETE FROM sessions WHERE updated_at < ?", (time.time() - RETAIN_SECONDS,))
             db.execute("DELETE FROM handled WHERE at < ?", (time.time() - RETAIN_SECONDS,))
+            db.execute("DELETE FROM announced WHERE at < ?", (time.time() - 12 * 3600,))
 
     # ---- read ---------------------------------------------------------------
     def events(self, *, since: float = 0.0, agent: str = "", session_id: str = "", kinds: Iterable[str] = (),

@@ -193,7 +193,14 @@ def answer(topic: str, store, snapshot: dict[str, Any], since: Optional[float] =
             rows = [r for r in rows if knowledge._project_for(r.get("cwd", ""))[0] == project_id]
         if topic == "other_agents":
             rows = [r for r in rows if r["agent"] not in {"echo", "codex", "claude-code"}]
-        summary = activity_answer({**snapshot, "sessions": rows, "focus": {} if project_id else snapshot.get("focus")}, agent)
+        current = {**snapshot, "sessions": rows, "focus": {} if project_id else snapshot.get("focus")}
+        from agent.companion import awareness
+
+        cards = awareness.collect(store, current, float(snapshot["at"]) - awareness.MAX_LOOKBACK,
+                                  project_id=project_id, agent=agent, include_active=True) if snapshot.get("at") else []
+        if cards and not agent:
+            return awareness.summarize(cards, use_model=reword)[0]
+        summary = activity_answer(current, agent)
         recent = _reports(store, since=float(snapshot.get("at") or time.time()) - 12 * 3600,
                           limit=1, agent=agent, project_id=project_id,
                           exclude_agents=frozenset({"echo", "codex", "claude-code"}) if topic == "other_agents" else frozenset())

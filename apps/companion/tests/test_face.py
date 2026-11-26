@@ -57,3 +57,22 @@ def test_speaking_follows_the_envelope_in_time():
     assert a.step(100.35).amplitude == 0.5
     assert a.step(100.5).amplitude == 0.0 and a.envelope == []  # past the clip: silent, envelope released
     assert a.step(100.6).amplitude == 0.0
+
+
+def test_speaking_pose_blends_from_the_last_rendered_frame():
+    a = Animator()
+    render(a.step(2.0))
+    start = a.state.body_pose
+    a.set_mode("speaking", 2.0)
+    a.speak([0.7] * 50, 50, 2.0)
+    render(a.step(2.0))
+    assert a.state.body_pose == pytest.approx(start)
+    render(a.step(2.09))
+    midway = a.state.body_pose
+    assert midway != start
+    a.set_mode("idle", 2.09)
+    render(a.step(2.09))
+    assert a.state.body_pose == pytest.approx(midway)
+    a.state.reduced_motion = True
+    render(a.step(2.10))
+    assert a.state.body_pose == (0.0, 0.0, 1.0)
