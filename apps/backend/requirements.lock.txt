@@ -3381,3 +3381,32 @@ pywinpty==3.1.0 ; sys_platform == "win32" \
     --hash=sha256:751d0c727d0e81a246aba722cf0dcb2155fd6bc7b82574b1432f81256157ec73 \
     --hash=sha256:188923081eea840c15f37c54a29ad6871b04fddf8fbf1c4acf317d0e27bd9cac \
     --hash=sha256:714e8aa138bc61dcfd26c139d8cb8e7b954ea5c09c98bb014ab9b1f5741e289c
+# Local CPU read-aloud (Kokoro), added 2026-11: resolved against this lock's pins (numpy, onnxruntime unchanged)
+cloudpickle==3.1.3 \
+    --hash=sha256:1654f4f18e416447210a63c5c25a135d65a292156aa5fa519dfa4baf7726dddb \
+    --hash=sha256:cbe9fde14429a5db009ea05ce94e5182cf998c97b96918d50c10f73f9c2f4f33
+    # via joblib
+dlinfo==2.0.0 \
+    --hash=sha256:88a2bc04f51d01bc604cdc9eb1c3cc0bde89057532ca6a3e71a41f6235433e17 \
+    --hash=sha256:b32cc18e3ea67c0ca9ca409e5b41eed863bd1363dbc9dd3de90fedf11b61e7bc
+    # via phonemizer
+espeakng-loader==0.2.4 \
+    --hash=sha256:08721baf27d13d461f6be6eed9a65277e70d68234ff484fd8b9897b222cdcb6d \
+    --hash=sha256:41f1e08ac9deda2efd1ea9de0b81dab9f5ae3c4b24284f76533d0a7b1dd7abd7 \
+    --hash=sha256:b77477ae2ddf62a748e04e49714eabb2f3a24f344166200b00539083bd669904 \
+    --hash=sha256:d1e798141b46a050cdb75fcf3c17db969bb2c40394f3f4a48910655d547508b9 \
+    --hash=sha256:d27cdca31112226e7299d8562e889d3e38a1e48055c9ee381b45d669072ee59f \
+    --hash=sha256:d7a2928843eaeb2df82f99a370f44e8a630f59b02f9b0d1f168a03c4eeb76b89
+    # via kokoro-onnx
+joblib==1.6.0 \
+    --hash=sha256:2ccc96785b12046c08fd6d55839c12857831b54a3c1673ffadd2f04bfc4eda03 \
+    --hash=sha256:3dbbf9f6e4b592a2357b854608e980fe6390d131d7a82f011a377ef2ebef7aba
+    # via phonemizer
+kokoro-onnx==0.6.1 \
+    --hash=sha256:50c8de4950d601df41428ee5462a48c8a78bef441bf671f2492e070ef44d8a32 \
+    --hash=sha256:7bbdb66dd53775f71088a99999a9aefdad240740daf54cb09410d8bb1e294e35
+    # via -r /home/dev/.claude/jobs/974187e7/tmp/kreq.in
+phonemizer==3.6.0 \
+    --hash=sha256:9808c897773a23def58d89e1a3ac3506f56e8d04ee806d3ee80214880e2c9261 \
+    --hash=sha256:efb0703d3204f334756cafc9c97390c588446469c69214af4092836ca128cbab
+    # via kokoro-onnx

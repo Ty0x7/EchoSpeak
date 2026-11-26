@@ -2,6 +2,7 @@ import { DEFAULT_AVATAR_CONFIG } from "../components/avatarConfig";
 // Moved out of index.tsx (10.0 split). Kept verbatim.
 import { create } from "zustand";
 import { localVoicePlayback } from "../voiceTransport";
+import { systemSpeaker } from "../systemSpeaker";
 import { liveAudioPlayback } from "../liveVoiceTransport";
 import { type AppState, type AvatarConfig, type ProviderInfo, type ProviderListItem } from "./types";
 
@@ -103,6 +104,7 @@ export const sanitizeForTTS = (input: string) => {
 
 export const stopTts = () => {
   localVoicePlayback.stop();
+  systemSpeaker.stop();
   liveAudioPlayback.stop();
   useAppStore.getState().setSpeaking(false);
 };

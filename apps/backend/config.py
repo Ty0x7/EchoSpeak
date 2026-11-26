@@ -1121,6 +1121,7 @@ class Config:
         self.voice_speed = float(os.getenv("VOICE_SPEED", "1.0") or 1.0)
         self.voice_volume = float(os.getenv("VOICE_VOLUME", "1.0") or 1.0)
         self.voice_output_device = os.getenv("VOICE_OUTPUT_DEVICE", "").strip()
+        self.voice_read_aloud_terminal = os.getenv("VOICE_READ_ALOUD_TERMINAL", "false").lower() == "true"
         # Echo Companion (agent/companion). Off until the owner turns it on.
         self.companion_enabled = os.getenv("COMPANION_ENABLED", "false").lower() == "true"
         self.companion_speak = os.getenv("COMPANION_SPEAK", "true").lower() == "true"
@@ -1695,6 +1696,7 @@ class Config:
             "voice_speed",
             "voice_volume",
             "voice_output_device",
+            "voice_read_aloud_terminal",
             "companion_enabled",
             "companion_speak",
             "companion_frequency",

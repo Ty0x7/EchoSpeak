@@ -161,3 +161,66 @@ def put_soul(update: SoulUpdate):
     """The owner edits the companion's personality. Echo's own SOUL is a different file."""
     from agent.companion import soul
     return {"parsed": soul.save(update.text)}
+
+
+class ScopeUpdate(BaseModel):
+    roots: list[str] | None = None
+    agents: dict[str, bool] | None = None
+    capture_prompts: bool | None = None
+    enabled: bool | None = None
+
+
+@router.get("/scope")
+def get_scope():
+    from agent.companion.install import read_scope
+    return read_scope()
+
+
+@router.put("/scope")
+def put_scope(update: ScopeUpdate):
+    """Which folders and agents the Claude Code / Codex hook may report on."""
+    from agent.companion.install import write_scope
+    try:
+        return write_scope(**update.model_dump())
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+class HooksAction(BaseModel):
+    action: str = Field(pattern=r"^(install|uninstall)$")
+    agent: str = Field(pattern=r"^(claude-code|codex)$")
+
+
+@router.post("/hooks")
+def hooks_action(request: HooksAction):
+    """The owner adds or removes the observer hook for one agent (backs files up first)."""
+    import os
+
+    from agent.companion import install
+    claude, codex = Path(os.path.expanduser("~/.claude")), Path(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"))
+    roots = install.read_scope()["roots"]
+    if request.action == "install" and not roots:
+        raise HTTPException(400, "Choose at least one project folder to observe first")
+    changes = install.plan(claude_dir=claude, codex_dir=codex, add=request.action == "install", agents=(request.agent,))
+    result = install.apply(changes, add=request.action == "install", roots=roots, agents=(request.agent,),
+                           capture_prompts=install.read_scope()["capture_prompts"])
+    return {**result, "status": install.status(claude_dir=claude, codex_dir=codex)}
+
+
+class AutostartUpdate(BaseModel):
+    enabled: bool
+
+
+@router.get("/autostart")
+def get_autostart():
+    from agent.companion.install import autostart_path, companion_launcher
+    return {"enabled": autostart_path().exists(), "available": companion_launcher() is not None}
+
+
+@router.put("/autostart")
+def put_autostart(update: AutostartUpdate):
+    from agent.companion.install import set_autostart
+    try:
+        return set_autostart(update.enabled)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc

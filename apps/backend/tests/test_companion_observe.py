@@ -222,3 +222,28 @@ def test_echo_conversations_and_named_agents_join_the_same_list(monkeypatch, tmp
     assert by_label["Echo"]["state"] == "working" and by_label["Echo"]["project"] == "EchoSpeak"
     assert by_label["Glados"]["state"] == "needs_permission"
     assert result["focus"]["agent"] == "echo" and result["focus"]["label"] == "Echo"
+
+
+def test_scope_refuses_home_and_missing_folders(home, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with pytest.raises(ValueError):
+        install.write_scope(roots=[str(tmp_path)])
+    with pytest.raises(ValueError):
+        install.write_scope(roots=[str(tmp_path / "nope")])
+    work = tmp_path / "work2"
+    work.mkdir()
+    scope = install.write_scope(roots=[str(work)], agents={"codex": False, "evil": True}, capture_prompts=False)
+    assert scope["roots"] == [str(work.resolve())] and scope["agents"]["codex"] is False and not scope["capture_prompts"]
+    assert "evil" not in scope["agents"]
+
+
+def test_autostart_entry_points_at_the_launcher(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    launcher = tmp_path / "echo-companion"
+    launcher.write_text("#!/bin/sh\n")
+    monkeypatch.setattr(install, "companion_launcher", lambda: launcher)
+    assert install.set_autostart(True)["enabled"]
+    entry = (tmp_path / "cfg" / "autostart" / "echo-companion.desktop").read_text()
+    assert f"Exec={launcher}" in entry and "Type=Application" in entry
+    install.set_autostart(False)
+    assert not (tmp_path / "cfg" / "autostart" / "echo-companion.desktop").exists()

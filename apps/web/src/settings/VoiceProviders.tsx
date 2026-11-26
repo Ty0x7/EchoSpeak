@@ -80,7 +80,7 @@ function KokoroSettings({ s, save, apiBase, ready }: { s: SettingsMap; save: Sav
     <Row label="Voice" help="American (a…) and British (b…) English voices; f is female, m is male.">
       <Select value={current} onChange={v => save({ voice_kokoro_voice: v })} options={options} disabled={!ready} />
     </Row>
-    {!ready ? <Row label="Set up" help="Run scripts/setup_local_tts.py kokoro in the backend folder. It installs kokoro-onnx and downloads the 164 MB model once." stack><span /></Row> : null}
+    {!ready ? <KokoroDownload apiBase={apiBase} /> : null}
   </Group>;
 }
 
@@ -137,4 +137,30 @@ function SpeakerSettings({ s, save, apiBase, ready }: { s: SettingsMap; save: Sa
       </span>
     </Row>
   </Group>;
+}
+
+function KokoroDownload({ apiBase }: { apiBase: string }) {
+  const [status, setStatus] = useState<{ state: string; done: number; total: number; error: string; detail?: string }>({ state: "idle", done: 0, total: 0, error: "" });
+  useEffect(() => {
+    if (status.state !== "running") return;
+    const timer = window.setInterval(() => {
+      void fetch(`${apiBase}/media-runtime/voice/kokoro/setup`).then(r => r.ok ? r.json() : null).then(d => d && setStatus(d)).catch(() => undefined);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [apiBase, status.state]);
+  const start = async () => {
+    const res = await fetch(`${apiBase}/media-runtime/voice/kokoro/setup`, { method: "POST" });
+    const data = await res.json().catch(() => ({}));
+    setStatus(res.ok ? data : { state: "failed", done: 0, total: 0, error: String(data.detail || "Download refused.") });
+  };
+  const mb = (n: number) => `${Math.round(n / 1048576)} MB`;
+  const help = status.state === "running" ? `Downloading… ${mb(status.done)}${status.total ? ` of ${mb(status.total)}` : ""}`
+    : status.state === "done" ? "Downloaded. Kokoro is ready."
+    : status.state === "failed" ? status.error
+    : "One-time download of 192 MB from the kokoro-onnx release, checked by SHA-256. Offline and Private mode block it.";
+  return <Row label="Kokoro voice files" help={help}>
+    <button className="es-btn es-btn-sm" disabled={status.state === "running"} onClick={() => void start()}>
+      {status.state === "running" ? "Downloading…" : "Download"}
+    </button>
+  </Row>;
 }

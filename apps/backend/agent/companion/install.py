@@ -19,7 +19,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from agent.companion import hook_client
 
@@ -223,3 +223,72 @@ def main(argv: list[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
+
+
+# ---- used by Settings › Echo Companion ---------------------------------------------------
+def read_scope() -> dict[str, Any]:
+    path = companion_home() / "scope.json"
+    data = _read_json(path) if path.exists() else {}
+    return {"enabled": bool(data.get("enabled", True)), "capture_prompts": bool(data.get("capture_prompts", True)),
+            "agents": {"claude-code": bool(data.get("agents", {}).get("claude-code")),
+                       "codex": bool(data.get("agents", {}).get("codex"))},
+            "roots": list(data.get("roots", []))}
+
+
+def write_scope(*, roots: list[str] | None = None, agents: dict[str, bool] | None = None,
+                capture_prompts: bool | None = None, enabled: bool | None = None) -> dict[str, Any]:
+    """Narrow or widen what the hook keeps. Folders must exist; the home folder itself is refused."""
+    home = companion_home()
+    home.mkdir(parents=True, exist_ok=True)
+    os.chmod(home, 0o700)
+    path = home / "scope.json"
+    data = _read_json(path) if path.exists() else {}
+    if roots is not None:
+        clean = []
+        for root in roots:
+            real = Path(os.path.expanduser(str(root))).resolve()
+            if real == Path.home().resolve() or real == Path("/"):
+                raise ValueError("Choose project folders, not your whole home folder")
+            if not real.is_dir():
+                raise ValueError(f"{root} isn't a folder")
+            clean.append(str(real))
+        data["roots"] = sorted(set(clean))
+    if agents is not None:
+        data["agents"] = {**data.get("agents", {}), **{k: bool(v) for k, v in agents.items() if k in {"claude-code", "codex"}}}
+    if capture_prompts is not None:
+        data["capture_prompts"] = bool(capture_prompts)
+    if enabled is not None:
+        data["enabled"] = bool(enabled)
+    _write_json(path, data)
+    os.chmod(path, 0o600)
+    return read_scope()
+
+
+AUTOSTART = "echo-companion.desktop"
+
+
+def autostart_path() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME", "").strip() or os.path.expanduser("~/.config")
+    return Path(base) / "autostart" / AUTOSTART
+
+
+def companion_launcher() -> Optional[Path]:
+    """apps/companion/echo-companion beside this backend's source tree, if this build has it."""
+    candidate = Path(__file__).resolve().parents[4] / "apps" / "companion" / "echo-companion"
+    return candidate if candidate.is_file() else None
+
+
+def set_autostart(enabled: bool) -> dict[str, Any]:
+    """Start Echo Companion at login through XDG autostart (Omarchy/uwsm honours it)."""
+    path = autostart_path()
+    if not enabled:
+        path.unlink(missing_ok=True)
+        return {"enabled": False, "path": str(path)}
+    launcher = companion_launcher()
+    if launcher is None:
+        raise ValueError("This build doesn't include the desktop companion")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[Desktop Entry]\nType=Application\nName=Echo Companion\n"
+                    "Comment=Echo on your desktop: what your agents are doing, out loud\n"
+                    f"Exec={launcher}\nTerminal=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n", encoding="utf-8")
+    return {"enabled": True, "path": str(path)}

@@ -87,6 +87,7 @@ class Companion(Gtk.Application):
         self.after_speech_mode = "idle"
         self.speech_active = ""  # request id between speech.started and its speech.finished (chunks have gaps)
         self.connected = False
+        self.enabled = True
         self.stop = threading.Event()
         self.pointer = None
 
@@ -138,6 +139,8 @@ class Companion(Gtk.Application):
 
         self.window.connect("realize", lambda *_: GLib.idle_add(self._update_input_region))
         self.area.add_tick_callback(self._tick)
+        # Settings changes (on/off, position, captions, motion) reach the window within 30 s.
+        GLib.timeout_add_seconds(30, lambda: (threading.Thread(target=self._load_settings, daemon=True).start(), True)[1])
         threading.Thread(target=self._load_settings, daemon=True).start()
         threading.Thread(target=self.backend.stream, args=("/companion/stream", self._on_event_thread,
                                                              self._on_connection_thread, self.stop), daemon=True).start()
@@ -251,7 +254,7 @@ class Companion(Gtk.Application):
 
     def _on_event(self, name: str, data: dict) -> bool:
         now = time.monotonic()
-        if now < self.paused_until:
+        if now < self.paused_until or not self.enabled:
             return False
         if name == "commentary":
             self._show_caption(data.get("label", ""), data.get("text", ""),
@@ -321,6 +324,9 @@ class Companion(Gtk.Application):
         if avatar:
             self.appearance = facelib.Appearance.from_config(avatar)
         if settings:
+            self.enabled = bool(settings.get("companion_enabled", True)) or os.environ.get("ECHO_COMPANION_SHOW") == "1"
+            if not self.enabled and self.visible:
+                self.target_shown = 0.0
             corner = str(settings.get("companion_position") or self.corner)
             if corner in CORNERS and corner != self.corner:
                 self.corner = corner

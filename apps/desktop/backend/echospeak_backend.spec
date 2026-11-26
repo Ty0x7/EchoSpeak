@@ -37,6 +37,12 @@ for package in ("trafilatura", "justext", "ddgs", "primp"):
 binaries_extra = collect_dynamic_libs("ctranslate2")
 # Local embeddings (agent/embeddings.py) and the voice VAD run on onnxruntime.
 binaries_extra += collect_dynamic_libs("onnxruntime")
+# Local read-aloud (agent/kokoro_voice.py): kokoro-onnx's config/vocab, and espeakng-loader's
+# bundled libespeak-ng plus its espeak-ng-data (phonemes). The Kokoro model itself is
+# downloaded on request into the user's data folder, never bundled.
+datas += collect_data_files("kokoro_onnx")
+datas += collect_data_files("espeakng_loader")
+binaries_extra += collect_dynamic_libs("espeakng_loader")
 
 for distribution in (
     "mcp",
@@ -55,6 +61,7 @@ hiddenimports = (
     + collect_submodules("ddgs.engines")
     + collect_submodules("py7zr")
     + ["faiss", "onnxruntime", "tokenizers", "trafilatura", "lxml.html.clean", "primp", "websockets.sync.client"]
+    + collect_submodules("kokoro_onnx") + collect_submodules("phonemizer") + ["espeakng_loader"]
 )
 
 # Bundled skills ship as data files, so PyInstaller never sees their imports (review R6).
