@@ -1113,8 +1113,11 @@ class Stack:
 
     def __init__(self, run_dir: Path, model: str, upstream: str, extra_env: dict[str, str],
                  agents_md: str = "", skills: tuple[str, ...] = (), *,
-                 fixture_mcp: Optional[dict[str, Any]] = None) -> None:
+                 fixture_mcp: Optional[dict[str, Any]] = None, provider: str = "ollama") -> None:
         self.run_dir, self.model, self.upstream, self.extra_env = run_dir, model, upstream, extra_env
+        # The local provider adapter the backend uses for the model server: ollama, or an OpenAI-compatible host
+        # (localai/vllm/lmstudio, e.g. llama-server). Pinned below, like the URL, so --env can't change it.
+        self.provider = provider
         # A/B variables (one experiment arm): the owner's AGENTS.md text, and skills imported + approved through
         # the real API. Both go in through EchoSpeak's own mechanisms, not a test-only prompt path.
         self.agents_md, self.skills = agents_md, skills
@@ -1160,7 +1163,7 @@ class Stack:
             "ECHOSPEAK_HOME": str(dirs["backend-home"]), "SOUL_PATH": str(dirs["backend-data"] / "SOUL.md"),
             "ECHOSPEAK_RUNTIME_DIR": str(dirs["backend-rt"]), "ECHOSPEAK_RUNTIME_KIND": "desktop",
             "API_AUTH_ENABLED": "true", "API_AUTH_LOCALHOST_BYPASS": "false", "API_AUTH_KEY": self.key,
-            "USE_LOCAL_MODELS": "true", "LOCAL_MODEL_PROVIDER": "ollama", "LOCAL_MODEL_URL": f"http://127.0.0.1:{rec_port}",
+            "USE_LOCAL_MODELS": "true", "LOCAL_MODEL_PROVIDER": self.provider, "LOCAL_MODEL_URL": f"http://127.0.0.1:{rec_port}",
             "LOCAL_MODEL_NAME": self.model, "PYTHON_DOTENV_DISABLED": "1",
             "TERMINAL_EXECUTION_MODE": "bwrap", "TERMINAL_DOCKER_NETWORK": "off",
             "ECHOSPEAK_TERMINAL_REQUIRE_SANDBOX": "1",
@@ -1177,7 +1180,8 @@ class Stack:
         # or the eval records (other cases' and earlier repetitions' ground truth and trajectories).
         env["ECHOSPEAK_SANDBOX_HIDE"] = os.pathsep.join([str(ROOT.parents[1]), str(OUT), str(self.run_dir)])
         self.env_used = {k: v for k, v in env.items() if k.startswith(("LOCAL_MODEL", "LEAN_", "ASSISTANT", "USE_LOCAL", "LEARNING",
-                                                                       "ENABLE_SYSTEM", "ALLOW_", "TERMINAL_"))}
+                                                                       "ENABLE_SYSTEM", "ALLOW_", "TERMINAL_",
+                                                                       "MODEL_CAPABILITY_PROFILES"))}
         self.procs.append(subprocess.Popen(
             [sys.executable, "app.py", "--mode", "api", "--host", "127.0.0.1", "--port", str(api_port)],
             cwd=str(ROOT), env=env, stdout=open(self.run_dir / "backend.log", "wb"), stderr=subprocess.STDOUT))
@@ -1239,16 +1243,48 @@ def snapshot(project: Path) -> dict[str, Any]:
     return dict(sorted(files.items()))
 
 
+SERVER_LOG_KEEP = ("truncating input prompt", "level=WARN", "level=ERROR", "exceeds", "truncated = 1",
+                   # llama-server: a prompt longer than the slot, context shifting, failed requests
+                   "context shift", "exceeds the available context", "failed to", "error:", "srv    send_error")
+
+
+class ServerLogTail:
+    """A private model server's own log file (``--server-log``), read case by case from a byte offset.
+
+    The shared service logs to the user journal; a private evaluation server (eval_server.py, or a llama-server the
+    operator started) logs to a file that only this run uses, so the lines between two offsets belong to one case.
+    """
+
+    def __init__(self, path: str) -> None:
+        self.path = Path(path)
+        self.offset = self.path.stat().st_size if self.path.exists() else 0
+
+    def take(self) -> list[str]:
+        try:
+            with open(self.path, "rb") as handle:
+                handle.seek(self.offset)
+                raw = handle.read()
+                self.offset = handle.tell()
+        except OSError:
+            return []
+        lines = raw.decode("utf-8", errors="replace").splitlines()
+        return [line for line in lines if any(k in line for k in SERVER_LOG_KEEP)][:200]
+
+
+SERVER_LOG: Optional[ServerLogTail] = None
+
+
 def server_log(since: float, until: float) -> list[str]:
-    """Model-server warnings in the window (Ollama under systemd --user). Empty if not available."""
+    """Model-server warnings in the window (Ollama under systemd --user, or --server-log). Empty if not available."""
+    if SERVER_LOG is not None:
+        return SERVER_LOG.take()
     try:
         out = subprocess.run(["journalctl", "--user", "-u", "ollama", "--no-pager", "-o", "cat",
                               "--since", f"@{int(since) - 1}", "--until", f"@{int(until) + 2}"],
                              capture_output=True, text=True, errors="replace", timeout=30).stdout  # model tokens aren't always UTF-8
     except (OSError, subprocess.SubprocessError):
         return []
-    keep = ("truncating input prompt", "level=WARN", "level=ERROR", "exceeds", "truncated = 1")
-    return [line for line in out.splitlines() if any(k in line for k in keep)][:200]
+    return [line for line in out.splitlines() if any(k in line for k in SERVER_LOG_KEEP)][:200]
 
 
 def calls_between(path: Path, since: float, until: float) -> list[dict[str, Any]]:
@@ -1452,6 +1488,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--model", default="qwen3.5:9b")
     parser.add_argument("--upstream", default="http://127.0.0.1:11434")
+    parser.add_argument("--provider", default="ollama", choices=("ollama", "localai", "vllm", "lmstudio"),
+                        help="The backend's local provider for --upstream (llama-server: localai, OpenAI-compatible)")
+    parser.add_argument("--server-log", default="", help="A private model server's log file, read per case for warnings")
     parser.add_argument("--set", default="dev", choices=sorted(SETS))
     parser.add_argument("--only", default="", help="Case ids, e.g. D1,D3")
     parser.add_argument("--label", default="run")
@@ -1461,6 +1500,9 @@ def main() -> int:
     parser.add_argument("--skill", action="append", default=[], help="A/B arm: SKILL.md to import and approve (repeatable)")
     args = parser.parse_args()
     assert_local(args.upstream)
+    global SERVER_LOG
+    if args.server_log:
+        SERVER_LOG = ServerLogTail(args.server_log)
     if args.repeat < 1:
         parser.error("--repeat must be at least 1")
     cases = SETS[args.set]
@@ -1485,7 +1527,8 @@ def main() -> int:
     diff = subprocess.run(["git", "diff", "HEAD", "--", *tracked], cwd=ROOT, capture_output=True, text=True).stdout
     meta = {"label": args.label, "model": args.model, "set": args.set, "cases": [c.id for c in cases], "repeat": args.repeat,
             "case_membership": {case.id: CASE_MEMBERSHIP[case.id] for case in cases},
-            "upstream": upstream_origin(args.upstream),
+            "upstream": upstream_origin(args.upstream), "provider_adapter": args.provider,
+            "server_log": args.server_log,
             "commit": commit + ("+dirty" if status else ""), "started": time.time(),
             "projects_root": str(projects_root(run_dir)),
             "dirty": {"files": status.splitlines()[:40], "diff_sha256": hashlib.sha256(diff.encode()).hexdigest()[:16]} if status else {}}
@@ -1502,7 +1545,8 @@ def main() -> int:
         fixture_mcp["accounts"] = {"command": sys.executable, "args": [str(FIXTURES / "accounts_mcp.py")],
                                    "env": {"ACCOUNTS_DB": str(db)}}
     print(f"Harness eval {args.label} · {args.model} · {len(cases)} cases × {args.repeat} · {run_dir}", flush=True)
-    with Stack(run_dir, args.model, args.upstream, extra, agents_md, skills, fixture_mcp=fixture_mcp) as stack:
+    with Stack(run_dir, args.model, args.upstream, extra, agents_md, skills, fixture_mcp=fixture_mcp,
+               provider=args.provider) as stack:
         if "accounts" in needs:
             stack.api.call("POST", "/lean/mcp/accounts/approve", {})  # trusted as an owner would, for this run only
         meta["env"] = stack.env_used

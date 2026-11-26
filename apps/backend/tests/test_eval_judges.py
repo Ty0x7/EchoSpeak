@@ -362,3 +362,42 @@ def test_ready_and_working_are_claims_unless_negated_or_future():
     assert not hj.claims_success("The tests aren't ready yet.")
     assert not hj.claims_success("It will be ready after the next change.")
     assert not hj.claims_success("Working on the CLI next.")
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="the evaluator requires Bubblewrap")
+def test_openai_compatible_provider_is_pinned_and_profiles_are_recorded(tmp_path, monkeypatch):
+    """A llama-server arm runs through the OpenAI-compatible adapter; --env can't switch it back or off-machine."""
+    heval = _load("harness_eval")
+    stack = heval.Stack(tmp_path, "bonsai-test", "http://127.0.0.1:8080", {
+        "LOCAL_MODEL_PROVIDER": "openai",
+        "MODEL_CAPABILITY_PROFILES": '{"bonsai-test": {"thinking_supported": true}}',
+    }, provider="localai")
+    processes = []
+
+    def popen(argv, **kwargs):
+        processes.append(kwargs.get("env", {}))
+        kwargs["stdout"].close()
+        return type("Process", (), {"poll": lambda self: None})()
+
+    monkeypatch.setattr(heval.subprocess, "Popen", popen)
+    monkeypatch.setattr(heval.Api, "call", lambda *args, **kwargs: {})
+    stack.__enter__()
+    env = processes[-1]
+
+    assert env["LOCAL_MODEL_PROVIDER"] == "localai"
+    assert env["LOCAL_MODEL_URL"].startswith("http://127.0.0.1:")
+    assert "MODEL_CAPABILITY_PROFILES" in stack.env_used
+
+
+def test_private_server_log_is_read_case_by_case(tmp_path):
+    """Warnings from a private model server's log belong to the case that produced them, not to every case."""
+    heval = _load("harness_eval")
+    log = tmp_path / "server.log"
+    log.write_text("startup noise\nerror: before the run\n")
+    tail = heval.ServerLogTail(str(log))
+    with open(log, "a") as handle:
+        handle.write("slot update_slots: id 0 | task 1 | prompt processing\n"
+                     "srv    send_error: task id = 3, error: the request exceeds the available context size\n")
+    first = tail.take()
+    assert len(first) == 1 and "exceeds the available context" in first[0]
+    assert tail.take() == []
