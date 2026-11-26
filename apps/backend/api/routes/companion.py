@@ -142,3 +142,22 @@ async def stream():
             unsubscribe_commentary()
 
     return StreamingResponse(body(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
+
+
+class SoulUpdate(BaseModel):
+    text: str = Field(max_length=20000)
+
+
+@router.get("/soul")
+def get_soul():
+    from agent.companion import soul
+    parsed = soul.load()
+    return {"text": soul.soul_path().read_text(encoding="utf-8") if soul.soul_path().exists() else soul.DEFAULT_SOUL,
+            "parsed": parsed, "default": soul.DEFAULT_SOUL}
+
+
+@router.put("/soul")
+def put_soul(update: SoulUpdate):
+    """The owner edits the companion's personality. Echo's own SOUL is a different file."""
+    from agent.companion import soul
+    return {"parsed": soul.save(update.text)}

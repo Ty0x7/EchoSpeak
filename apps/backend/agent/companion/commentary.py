@@ -31,7 +31,7 @@ from typing import Any, Callable, Optional
 
 from config import config
 
-from agent.companion import knowledge
+from agent.companion import knowledge, soul
 from agent.companion.digest import Digest, analyse
 
 logger = logging.getLogger(__name__)
@@ -74,9 +74,10 @@ def compose(event: dict[str, Any], digest: Digest, *, humor: int = 1, saved: boo
     seed = event["id"]
     kind = event["kind"]
     if kind == "needs_permission":
-        return f"{who} is waiting for your permission{where}."
+        return soul.phrase("needs_you", seed, "{agent} is waiting for your permission{where}.", agent=who, where=where)
     if kind == "waiting_input" or (kind == "turn_completed" and digest.kind == "question"):
-        return f"{who} has a question for you{where}: {_brief(digest.headline or event.get('text', ''), 14)}"
+        opener = soul.phrase("question", seed, "{agent} has a question for you{where}.", agent=who, where=where).rstrip(".")
+        return f"{opener}: {_brief(digest.headline or event.get('text', ''), 14)}"
     if kind == "stage_completed":
         return f"{who} finished a stage{where}: {_brief(event.get('text', ''), 14)}"
     if digest.kind != "report":
@@ -91,17 +92,16 @@ def compose(event: dict[str, Any], digest: Digest, *, humor: int = 1, saved: boo
     else:
         tests = ""
     if outcome == "success":
-        lines.append(_pick([f"{who} finished a report{where}.", f"{who} wrapped up{where}.",
-                            f"Report in from {who}{where}."], seed) + tests)
+        lines.append(soul.phrase("success", seed, "{agent} finished a report{where}.", agent=who, where=where,
+                                 project=event.get("project", ""), headline=_brief(digest.headline)) + tests)
         if digest.results:
             lines.append(f"Headline: {_brief(digest.results[0])}.")
         if humor >= 2 and digest.tests_passed and not digest.open and measured not in {"verified", "checks_pass"}:
-            lines.append("Everything passed, which is honestly a little suspicious.")
+            lines.append(soul.phrase("all_green", seed, "Everything passed, which is honestly a little suspicious."))
     elif outcome == "failed":
         lines.append(f"{who} hit a wall{where}: {_brief(digest.failures[0])}.")
         if humor >= 1:
-            lines.append(_pick(["That didn't work, but we learned something. On to the next one.",
-                                "Not this time. The notes are worth keeping, though."], seed))
+            lines.append(soul.phrase("failure", seed, "That didn't work, but we learned something. On to the next one."))
     else:
         done, still = len(digest.results), len(digest.open)
         lines.append(f"{who} reported back{where}: {done} thing{'s' if done != 1 else ''} done"
@@ -115,8 +115,7 @@ def compose(event: dict[str, Any], digest: Digest, *, humor: int = 1, saved: boo
     if digest.asks_owner:
         lines.append("It's waiting on you.")
     if saved:
-        lines.append(_pick(["I saved the key points for Echo.", "Echo can use what it found from now on.",
-                            "The important parts are saved for Echo."], seed + "s"))
+        lines.append(soul.phrase("saved", seed, "I saved the key points for Echo."))
     text = " ".join(lines)
     return text.replace("..", ".")
 
@@ -244,6 +243,9 @@ class Commentary:
                 stored = {"stored": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
                 logger.warning("Echo Companion could not store a report", exc_info=True)
         text = compose(event, digest, humor=int(_setting("companion_humor", 1)), saved=saved)
+        style = {"style": "templates"}
+        if str(_setting("companion_soul_style", "templates")) == "local_model" and not catching_up:
+            text, style = soul.reword(text, knowledge.label(event["agent"]))
         now = time.time()
         spoken, why_silent = False, ""
         if catching_up:
@@ -267,7 +269,7 @@ class Commentary:
             "session_id": event["session_id"], "project": event.get("project", ""), "reason": reason,
             "text": text, "spoken": spoken, "silent_because": why_silent, "outcome": digest.outcome,
             "digest": digest.public() if reason == "report" else {"kind": digest.kind, "headline": digest.headline},
-            "memory": stored, "archived": archived,
+            "memory": stored, "archived": archived, "wording": style,
         }
         self.feed.append(item)
         for callback in list(self._listeners):
