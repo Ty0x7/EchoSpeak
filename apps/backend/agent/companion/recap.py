@@ -72,7 +72,8 @@ def activity_answer(snapshot: dict[str, Any], agent: str = "") -> str:
     now = float(snapshot.get("at") or time.time())
     rows = [r for r in snapshot["sessions"] if (not agent or r["agent"] == agent)
             and r["state"] in {"working", "your_turn", "needs_permission"}
-            and now - float(r.get("updated_at") or 0) < RECENT]
+            and now - float(r.get("updated_at") or 0) < RECENT
+            and (r.get("last_prompt") or r.get("turns") or r["agent"] == "echo")]  # opened but never asked anything
     who = lambda r: agent_name(r["agent"], {"agent_name": r.get("label")})  # noqa: E731
     if not rows:
         if agent:
@@ -91,10 +92,11 @@ def activity_answer(snapshot: dict[str, Any], agent: str = "") -> str:
         sentences.append(f"{(name + ', y') if name else 'Y'}ou're working with {who(mine)}{on}, and {state}.")
     for row in sorted(others, key=lambda r: {"needs_permission": 0, "working": 1, "your_turn": 2}[r["state"]])[:2]:
         task = _task_of(row)
+        label = f"Another {who(row)} session" if mine and row["agent"] == mine["agent"] else who(row)
         what = f" on {task}" if task else (f" in {row['project']}" if row.get("project") else "")
         doing = {"working": f"is working{what} in the background", "your_turn": f"is waiting for you{what}",
                  "needs_permission": f"needs your permission{what}"}[row["state"]]
-        sentences.append(f"{who(row)} {doing}.")
+        sentences.append(f"{label} {doing}.")
     if len(others) > 2:
         sentences.append(f"And {len(others) - 2} more.")
     if not agent and focus.get("uncertain"):

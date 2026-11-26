@@ -138,16 +138,35 @@ class CompanionStore:
                     attention TEXT, transcript_path TEXT, PRIMARY KEY (agent, session_id));
                 """
             )
+            added = False
             for column in ("task TEXT", "turn_started_at REAL"):
                 try:
                     db.execute(f"ALTER TABLE sessions ADD COLUMN {column}")
+                    added = True
                 except sqlite3.OperationalError:
                     pass  # already there
+            if added:
+                self._migrate_sessions(db)
 
     def _db(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path, timeout=10)
         db.row_factory = sqlite3.Row
         return db
+
+    @staticmethod
+    def _migrate_sessions(db: sqlite3.Connection) -> None:
+        """Sessions recorded before tasks existed: the task from the owner's last real request, and the
+        project from where the session started (older code followed the agent's cd)."""
+        for row in db.execute("SELECT agent, session_id FROM sessions").fetchall():
+            key = (row["agent"], row["session_id"])
+            prompts = db.execute("SELECT text FROM events WHERE agent=? AND session_id=? AND kind='prompt' ORDER BY at DESC",
+                                 key).fetchall()
+            task = next((t for t in (task_title(p["text"] or "") for p in prompts) if t), "")
+            first = db.execute("SELECT cwd FROM events WHERE agent=? AND session_id=? AND cwd != '' ORDER BY at LIMIT 1",
+                               key).fetchone()
+            project = (project_label(first["cwd"]) or Path(first["cwd"]).name) if first else None
+            db.execute("UPDATE sessions SET task=COALESCE(NULLIF(task, ''), ?), project=COALESCE(?, project) "
+                       "WHERE agent=? AND session_id=?", (task, project, *key))
 
     def on_event(self, callback) -> None:
         self._listeners.append(callback)
