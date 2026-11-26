@@ -1,6 +1,6 @@
 # Echo Companion: how it works
 
-As of main `cfa8c99`, installed 2026-11-26. Campaign issue #210. Requirements are tracked against the implementation in [echo-companion.md](echo-companion.md).
+This describes the session-awareness candidate `2759791` based on `cfa8c99`. Campaign issue #210. Requirements are tracked against the implementation in [echo-companion.md](echo-companion.md).
 
 Echo Companion is an **observer**. It notices what Claude Code, Codex, Echo and Echo's agents do. When something is worth saying, it says it out loud, and it keeps reports from outside agents as project memory. It never prompts, starts, steers or approves for any agent.
 
@@ -37,10 +37,12 @@ The backend's `agent/companion/service.py` waits on the spool with inotify, then
 - `observe.normalise` turns each file into an event;
 - `CompanionStore.add` stores the event in `DATA_DIR/companion/observe.sqlite3` (tables `events`, `sessions` and `handled`; 30-day retention) and updates the session's state.
 
-Session states are working, your_turn, needs_permission, quiet, idle and ended. Each session also keeps:
+States distinguish observed work and operations, input and permission waits, completion, interruption, quiet, idle and unknown. Each session also keeps:
 
 - the owner's **task**, taken from their real request; system notifications, "continue" and short replies don't count;
 - a fixed **project**, the EchoSpeak project of the folder the session started in.
+
+Bounded read-only reconciliation in `agent/companion/history.py` also observes local Claude Code and Codex records. The selected integration and folder must be enabled, and the original and observed paths must resolve to the same registered EchoSpeak project. It limits candidate files, processing cadence and bytes read, and discards command arguments and output. Codex turn IDs deduplicate hook and history delivery. Claude completion matching uses the same reply near the same time across sources. Late observations do not rewind a newer session state. EchoSpeak research workers contribute native status under their parent session and execution.
 
 "Interacting" means the most recently prompted session. When two sessions were prompted close together, it reports that it isn't sure.
 
@@ -58,7 +60,8 @@ Everything an agent says stays **reported**. Only Echo's own turns carry a **mea
 2. **`worth_saying`**: silence by default. It speaks for:
    - reports, questions and permission waits from sessions the owner isn't in;
    - delegated work that EchoSpeak measured;
-   - a long job finishing in the owner's own session.
+   - fresh substantial reports, including reports in the owner's most recently prompted session;
+   - fresh completed operations during a long task, when its configured interval and cooldown have elapsed.
 
    It never speaks for idle prompts, follow-ups, notifications, short replies the owner is reading, stale (>10 min) events or repeats. Cooldowns and quiet hours apply.
 3. **`compose`** writes one or two natural sentences deterministically. **`hybrid`** (the owner's choice: `companion_soul_style=local_model`) sends the same facts to the owner's **local** model. `guard` keeps the result only if it adds nothing:
@@ -87,13 +90,13 @@ Knowledge transfer applies to completed **reports** from **external** agents: Cl
 
 Each report goes through `knowledge.authorize` (default `project_only`). The verbatim archive and the memory item are only written if it allows them:
 
-1. **Verbatim archive** at `DATA_DIR/companion/reports/<date>/<time>-<agent>-<session>-<event>.md` (0600 files in 0700 folders). Front matter records:
+1. **Captured report archive** at `DATA_DIR/companion/reports/<date>/<time>-<agent>-<session>-<event>.md` (0600 files in 0700 folders). Front matter records:
    - agent, session and turn;
    - project and folder, and time;
    - transcript path and event id;
    - kind, outcome, evidence, and PRs, issues and commits.
 
-   The body is the agent's own words, under an "untrusted reference material" banner.
+   The body preserves the captured report under an untrusted reference banner. Hook masking and size limits apply. Archive creation precedes canonical memory filtering.
 2. **One canonical memory** through `AgentMemory.add_memory_item` (`agent/memory.py`):
    - `memory_type="project"`, `source="echo-companion"`, scope `project`, and the project id and path;
    - `source_item_id` set to the event id and `semantic_key` to `companion:<agent>:<session>:<turn>`;
@@ -103,7 +106,7 @@ Memory then does what it does for any item:
 
 - **Sensitive-text filter.** It currently refuses any text containing "token" or "secret"; #223, awaiting review, makes it value-aware.
 - **Dedup.** The same semantic key with the same text is never stored twice; text at least 94% similar is skipped.
-- **Indexing.** It updates the **FAISS vector index** with the local ONNX embeddings (on the installed build) and the keyword index.
+- **Indexing.** Canonical records live in `DATA_DIR/memory/conversation_index/records.json`. Local ONNX embeddings are stored in NumPy `vectors.npy` and `store.json`; FAISS naming survives in compatibility code.
 - **Retirement.** Items nobody recalls for months are retired by the normal memory tidy.
 
 Further properties:
@@ -114,14 +117,14 @@ Further properties:
 - **Speech off.** Knowledge is still kept when spoken commentary is off. Turning `companion_knowledge` off stops it.
 - **Restarts.**
   - While EchoSpeak is closed, hook files wait in the spool (up to 5,000).
-  - At start, the service ingests them, and `catch_up` processes up to 24 h of unhandled reports: archived and remembered, never spoken.
+  - Startup catch-up quietly processes already-stored, unhandled reports from the last 24 hours. Pending hook or history events enter normal ingestion and still pass the commentary freshness rules.
   - The `handled` table prevents double processing, and event ids prevent duplicates.
 
 ## 6. How Echo finds it later
 
 There are two paths. Both use Echo's existing memory infrastructure, and neither is specific to the companion.
 
-- **Automatic.** On every turn, `LeanSession._recall(<the message>)` (`agent/lean/runtime.py`) calls `AgentMemory.runtime_memory_projection`. It returns up to 8 memories matched to the request's words, from account memory, the conversation and **the conversation's active project**, and they go into Echo's system prompt with no tool call.
+- **Automatic.** On every turn, `LeanSession._recall(<the message>)` (`agent/lean/runtime.py`) calls `AgentMemory.runtime_memory_projection`. It returns up to 8 memories matched to the request's words, from account memory, the conversation and **the conversation's active project**, and supplies them as labelled background alongside the current request before any tool call.
 - **On demand.** The `memory_search` tool runs `retrieve_relevant`, a keyword plus vector search over the same scopes.
 
 Echo also has a separate, older tool, `agent_sessions` (`agent/lean/session_logs.py`). It reads Claude Code's and Codex's **raw logs** directly; it is owner-only and read-only. Its description tells Echo to prefer it for "what did that session do", so "What did Claude accomplish…" questions often go there.
@@ -149,7 +152,7 @@ Enforced by `tests/test_companion_boundaries.py`:
 
 - **Imports.** Companion code and the desktop app cannot import Echo's runtime, loop, core, approvals, swarm, job, steering, toolbox, threads, Echo Code, learning, routines, heartbeat, a2a, coordination, tools or the loop-13 controller. Only the two provider helpers above are allowed. No agent endpoint is called (`/query`, `/threads`, `/approvals`, `/lean`, `/code`, `/tasks`, `/routines`, `/a2a`). The desktop app calls only `/companion/*`, `/avatar/config`, `/settings` and `/media-runtime/voice/speak/mute`.
 - **Traps.** With `LeanSession.run`, `run_lean_query`, `run_lean_text`, `ApprovalBroker.resolve`, `code_sessions.manager` and `ThreadManager.create_thread` set to fail, the whole pipeline runs (report, archive, memory, wording, speech, "what's happening?", native events) and reaches none of them.
-- **No recursion.** The companion writes audio, files and memory, never events. After a full run the store holds only the event that triggered it. Native observation comes from Echo's own turns, which the companion never starts. Echo's replies are not re-imported.
+- **No recursion.** The observer persists source observations. Commentary, speech, and memory writes do not publish new agent observations. Native observation comes from Echo's own turns, which the companion never starts. Echo's replies are not re-imported.
 - **Live check on the install.** Across a spoken "What's happening?" and a "latest report" request, Echo's state store was identical before and after: 134 executions, 554 tool runs, 262 items, 35 thread states. Echo's thread count stayed at 15.
 
 The only things the companion changes are its own store, the report archive, memory items, its SOUL, settings the owner sets, and, when the owner clicks Install or Remove in Settings, the hook entries in `~/.claude/settings.json` and `~/.codex/hooks.json`.
@@ -180,8 +183,12 @@ The only things the companion changes are its own store, the report archive, mem
 
 ## Known limits
 
-- Live Codex verification is pending until its subscription resets on 2026-11-28.
+- The normal Codex subscription is available. Live hook delivery depends on owner review in Codex’s `/hooks`. Authorized local-record recovery is independent of that decision.
 - The memory secret filter drops reports that mention "token" or "secret" until #223 is decided.
-- Task titles are heuristic (#226 refines replies).
+- Task titles are heuristic (#226 refines short replies).
 - The local-model guard can't catch an implied cause and effect.
 - `agent_sessions` and companion memory can describe the same work from two sources: raw logs versus condensed, project-scoped reports.
+
+## Interactive activity checks
+
+Companion selects from the observation store, native session overview and scoped report history. Agent questions can show current status and recent accomplishments together. Optional local-model wording follows source selection. The installed check recovered a real Codex final report, and isolated tests exercised eight topics, native Echo/Jarvis/Glados attribution and a different-project control. The ordinary Echo chat gap remains tracked in #225.
