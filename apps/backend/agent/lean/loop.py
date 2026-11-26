@@ -35,7 +35,7 @@ from agent.lean import approvals, steering
 from agent.lean import file_access
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean import ask, evidence, outbound, removal_scope
-from agent.lean.job import (CHECK_TOOLS, READ_ONLY_TOOLS, changed_code_file, check_nudge, claim_nudge, file_claim_note,
+from agent.lean.job import (CHECK_TOOLS, READ_ONLY_TOOLS, Presented, changed_code_file, check_nudge, claim_nudge, file_claim_note,
                             is_promise_without_action, missing_file_link, named_files, promise_nudge, unbacked_claim,
                             unbacked_file_claim,
                             unbacked_screen_claim, written_names)
@@ -410,6 +410,8 @@ class LeanTurn:
         # Each call's outcome (agent/lean/evidence.py), and how much the screen changed after the latest action.
         self._outcomes_by_call: dict[str, str] = {}
         self._screen_changed: Optional[float] = None
+        # Something opened for the user this turn, and how far the evidence goes (agent/lean/job.py Presented).
+        self._presented = Presented()
         # Screen progress: looks since the last action, and actions in a row that moved nothing.
         self._look_streak = 0
         self._no_effect_streak = 0
@@ -715,6 +717,7 @@ class LeanTurn:
         claim_nudges = 0
         memory_repairs = 0
         check_nudges = 0
+        present_nudges = 0
         verify_nudges = 0
         location_nudges = 0
         menus = 0
@@ -970,6 +973,19 @@ class LeanTurn:
                                    "location": self._unwritable_requested[0][:200]})
                         self._retract_text(step)
                         continue
+                    works = (self._presented.unbacked(content) if self.promise_guard and not stop_reason
+                             and self.toolbox.names else "")
+                    if works and present_nudges < 1 and step < max_steps:
+                        # "Ready to play" from a launch and a screenshot: back once with what was actually shown.
+                        present_nudges += 1
+                        add_note(messages, self._presented.note(works))
+                        self.emit({"type": "presentation_nudge", "step": step, "claim": works[:200]})
+                        self._retract_text(step)
+                        continue
+                    if works:
+                        note = f"Not verified: nothing in this turn used it, so “{works[:160]}” isn't shown."
+                        self.timeline.append({"kind": "note", "step": step, "text": note, "at": time.time()})
+                        self.emit({"type": "claim_unverified", "step": step, "claim": works[:200], "note": note})
                     problem = (self.verifier.unfinished(content) if self.verifier is not None and not stop_reason
                                and verify_nudges < 1 and step < max_steps else "")
                     if problem:
@@ -1437,6 +1453,18 @@ class LeanTurn:
                 elif decision.action == "ask":
                     self._policy_reasons[call.id] = decision.reason
                     self._policy_rules[call.id] = decision.rule
+            if not problem and self._unwritable_requested and (moved := self._relocated_write(name, args)):
+                # The user's own location was refused in this request; a copy somewhere else isn't their project
+                # (GTA_CLONE evaluation, 26 November 2026: refused in ~/Work, qwen rebuilt it in ~/Documents with
+                # approvals off). Enforced, not only noted, and approval mode never doesn't lift it.
+                reason = (f"the user asked for {self._unwritable_requested[0]}, which is outside the folders EchoSpeak may "
+                          f"change; writing {moved} instead would put their work somewhere they didn't ask for. Tell "
+                          "the user the folder isn't one EchoSpeak may change (they can attach it as a project) "
+                          "instead of making a copy elsewhere")
+                policy.audit(policy.Decision("deny", reason, "relocated_write"), name=name, args=args,
+                             session_id=self.session_id, agent=self.persona.id, outcome="blocked")
+                self._policy_reasons[call.id] = reason
+                problem = "policy"
             if not problem and self._declined_folders and (closed := self._in_declined_folder(name, args)):
                 # The owner said no to this folder in this request: final, whatever tool comes next. The sandboxed
                 # terminal mounts / read-only, so `cat` would otherwise read what the card refused (live baseline).
@@ -1889,6 +1917,31 @@ class LeanTurn:
             except (OSError, ValueError):
                 continue
         return found
+
+    def _relocated_write(self, name: str, args: dict[str, Any]) -> str:
+        """After the user's own location was refused: a write elsewhere that the request didn't name, or ""."""
+        if name not in _PLACING_TOOLS:
+            return ""
+        request = f"{getattr(self, '_goal', '')}\n{self.goal or ''}"
+        refused = [Path(item).expanduser() for item in self._unwritable_requested]
+        for key in ("dst", "destination", "path", "file_path"):
+            raw = str(args.get(key) or "").strip().rstrip("/")
+            if not raw:
+                continue
+            path = Path(raw).expanduser()
+            # Still the user's own location (the refused path, beside it, or under it): the boundary refuses it again.
+            places = {item for item in refused} | {item.parent for item in refused if item.suffix}
+            if any(path == place or place in path.parents for place in places):
+                continue
+            if raw in request or str(path) in request or (str(path.parent) in request and "/" in str(path.parent)):
+                continue    # the user named this place too
+            project = str(getattr(self.toolbox, "project_root", "") or "").strip()
+            if project and not path.is_absolute():
+                continue    # relative: inside the attached project
+            if project and (path == Path(project) or Path(project) in path.parents):
+                continue    # inside the attached project: allowed, and the reply must say where (W1)
+            return raw
+        return ""
 
     def _requested_location(self, name: str, args: dict[str, Any], output: str) -> str:
         """The destination the folder boundary just refused, when the user's request named it (or its folder), or ""."""
@@ -2533,6 +2586,8 @@ class LeanTurn:
         for effect in effects:
             if effect.get("kind") == "screen":
                 self._screen_changed = float(effect.get("changed", 1.0))
+        self._presented.observe(name, bool(ok) and outcome == "ok", output or "",
+                                self._screen_changed if name == "computer_action" else None)
         if outcome == "ok":
             # A call that ran but changed nothing visible (no_effect) backs no "it worked".
             self.succeeded.add(name)

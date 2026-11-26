@@ -77,7 +77,7 @@ def desk(tmp_path, monkeypatch):
     # The fake apps run as plain children: no systemd scope, no real compositor.
     monkeypatch.setattr(desktop_open.shutil, "which", _which_in(env["PATH"]))
     monkeypatch.setattr(desktop_open, "windows", lambda env=None: None)
-    monkeypatch.setattr(desktop_open, "page_errors", lambda target, env=None, wait_ms=0: None)
+    monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: None)
     return {"env": env, "record": record, "tmp": tmp_path}
 
 
@@ -151,7 +151,8 @@ def test_a_window_that_shows_the_page_verifies_the_launch(desk, tmp_path, monkey
                        "where": "monitor DP-1, workspace 11"}]])
     monkeypatch.setattr(desktop_open, "windows", lambda env=None: next(seen, [{"id": "0x1", "title": "GTA Clone - Good Browser", "app": "goodbrowser", "pid": 1, "where": "monitor DP-1, workspace 11"}]))
     out = _open(desk, app="Good Browser", target=str(page), wait=2)
-    assert out.startswith("Opened") and 'Verified: window "GTA Clone - Good Browser"' in out and "DP-1" in out, out
+    assert out.startswith("Opened") and 'Window "GTA Clone - Good Browser" is open on monitor DP-1' in out, out
+    assert "2. Window open: verified" in out and "5. Works: not verified" in out
 
 
 def test_targets_are_classified_without_guessing(desk, tmp_path):
@@ -203,7 +204,7 @@ def test_a_localhost_url_with_no_server_is_not_opened(desk):
 
 
 # ── the tool and where it is offered ─────────────────────────────────────────────────────────────────────────────
-def test_the_tool_keeps_its_permission_switches_and_takes_no_shell_arguments(monkeypatch):
+def test_the_tool_keeps_its_permission_switches_and_takes_no_shell_arguments(monkeypatch, bound):
     from agent import tools
     from config import config
 
@@ -213,7 +214,7 @@ def test_the_tool_keeps_its_permission_switches_and_takes_no_shell_arguments(mon
     monkeypatch.setattr(config, "allow_open_application", True)
     assert "no free-form arguments" in tools.open_application.invoke({"app": "chromium", "args": "--no-sandbox"})
     monkeypatch.setattr(config, "open_application_blocklist", ["chromium"])
-    assert "Blocked apps" in tools.open_application.invoke({"app": "chromium", "target": "/etc/hostname"})
+    assert "Blocked apps" in tools.open_application.invoke({"app": "chromium"})
 
 
 def test_code_mode_can_present_its_work():
@@ -281,7 +282,7 @@ def test_a_page_already_showing_counts_only_in_the_launched_apps_window(desk, tm
     assert "LibreWolf" not in out and out.startswith("Launched"), out
     monkeypatch.setattr(desktop_open, "windows", lambda env=None: [other, mine])
     out = _open(desk, app="Good Browser", target=str(page), wait=0.5)
-    assert 'window "GTA Clone - Good Browser"' in out, out
+    assert 'Window "GTA Clone - Good Browser"' in out, out
 
 
 def test_a_page_that_throws_is_reported_beside_the_open_window(desk, tmp_path, monkeypatch):
@@ -291,12 +292,160 @@ def test_a_page_that_throws_is_reported_beside_the_open_window(desk, tmp_path, m
     win = {"id": "gb", "title": "GTA Clone - Good Browser", "app": "goodbrowser", "pid": 8, "where": "monitor DP-1, workspace 11"}
     seen = iter([[]])
     monkeypatch.setattr(desktop_open, "windows", lambda env=None: next(seen, [win]))
-    monkeypatch.setattr(desktop_open, "page_errors",
-                        lambda target, env=None, wait_ms=0: ["Uncaught Identifier 'MapSystem' has already been declared"])
+    monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: desktop_open.PageCheck(
+        ["Uncaught Identifier 'MapSystem' has already been declared"], [], []))
     out = _open(desk, app="Good Browser", target=str(page), wait=2)
-    assert "Verified" in out and "MapSystem" in out and "doesn't work as built" in out, out
+    assert "2. Window open: verified" in out and "3. Page loaded: NO" in out and "MapSystem" in out, out
 
 
 def test_internet_pages_are_not_fetched_again_for_the_page_check():
     target = desktop_open.Target("https://example.com", "https://example.com", "url", "x-scheme-handler/https")
-    assert desktop_open.page_errors(target) is None
+    assert desktop_open.page_check(target, readable=[], hidden=[]) is None
+
+
+# ── boundaries (#235 review) ─────────────────────────────────────────────────────────────────────────────────────
+@pytest.fixture
+def bound(tmp_path, monkeypatch):
+    """A bound tool context with a fake home: Documents is the conversation's folder; ~/.ssh is never readable."""
+    from agent.tools import _tool_execution_context
+    from config import config
+
+    home = tmp_path / "home"
+    (home / "Documents" / "game").mkdir(parents=True)
+    (home / "Work" / "other").mkdir(parents=True)
+    (home / ".ssh").mkdir()
+    (home / ".ssh" / "id_ed25519").write_text("PRIVATE")
+    (home / "Documents" / "game" / "index.html").write_text("<title>Game</title>")
+    (home / "Documents" / "game" / "keys").symlink_to(home / ".ssh")
+    (home / "Documents" / "game" / "elsewhere.html").symlink_to(home / "Work" / "other")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(config, "file_tool_root", str(home / "Documents"), raising=False)
+    monkeypatch.setattr(config, "file_tool_extra_roots", [], raising=False)
+    monkeypatch.setattr(config, "enable_system_actions", True)
+    monkeypatch.setattr(config, "allow_open_application", True)
+    monkeypatch.setattr(config, "open_application_blocklist", [])
+    token = _tool_execution_context.set({"strict_scope": False, "project_root": "", "lean_runtime": True,
+                                         "enforce_tools": True, "allowed_tool_names": ["open_application"]})
+    yield home
+    _tool_execution_context.reset(token)
+
+
+def test_local_targets_follow_the_file_read_boundary(bound, monkeypatch):
+    from agent import tools
+
+    opened = []
+    monkeypatch.setattr(desktop_open, "open_on_desktop", lambda app, target, **kw: opened.append((target, kw)) or "ok")
+    # Never-readable places, directly or through a symlink inside the allowed folder.
+    for target in (bound / ".ssh" / "id_ed25519", bound / "Documents" / "game" / "keys" / "id_ed25519"):
+        assert "Not readable" in tools.open_application.invoke({"target": str(target)}), target
+    # Outside the conversation's folders (through a symlink too): refused at the tool, asked about by the loop.
+    out = tools.open_application.invoke({"target": f"file://{bound / 'Work' / 'other'}"})
+    assert out.startswith("Error:") and "outside" in out
+    assert not opened
+    # Inside: opened by its resolved path, with the readable folders and never-readable places for the page check.
+    assert tools.open_application.invoke({"target": str(bound / "Documents" / "game" / "index.html")}) == "ok"
+    target, kw = opened[0]
+    assert target == str((bound / "Documents" / "game" / "index.html").resolve())
+    assert any(str(r).endswith("Documents") for r in kw["readable"]) and kw["hidden"]
+
+
+def test_the_loop_asks_before_opening_outside_the_conversations_folders():
+    from agent.lean import file_access
+
+    assert "open_application" in file_access.READ_TOOLS
+    assert file_access.target("open_application", {"target": "file:///home/x/Work/game/index.html"}) == "/home/x/Work/game/index.html"
+    assert file_access.target("open_application", {"target": "https://example.com"}) == "."
+    assert file_access.target("open_application", {"app": "Files"}) == "."
+
+
+def test_offline_mode_refuses_internet_pages_and_redirects(desk, tmp_path, monkeypatch):
+    from agent import privacy
+
+    monkeypatch.setattr(privacy, "mode", lambda: "offline")
+    out = _open(desk, target="https://example.com")
+    assert out.startswith("Error: nothing was opened: Offline mode is on")
+    page = tmp_path / "redir.html"
+    page.write_text("<title>R</title>")
+    monkeypatch.setattr(desktop_open, "page_check", lambda target, env=None, **kw: desktop_open.PageCheck([], ["example.org"], ["example.org"]))
+    out = _open(desk, target=str(page))
+    assert out.startswith("Error: nothing was opened: the page goes on to example.org") and not desk["record"].exists()
+
+
+def test_a_blocked_browser_behind_a_link_launcher_is_refused(desk, tmp_path, monkeypatch):
+    # The https handler only routes links (like Omarchy's "Browser"); the browser behind it is Blocked.
+    apps = desk["tmp"] / "share" / "applications"
+    (apps / "good.desktop").write_text("[Desktop Entry]\nType=Application\nName=Browser\nExec=goodbrowser %U\n"
+                                        "MimeType=x-scheme-handler/https;\n")
+    # The desktop's HTML default (Broken Browser, the one the router hands links to) is Blocked.
+    out = _open(desk, target="https://example.com",
+                blocked=lambda entry, argv: "brokenbrowser" if entry.id == "broken.desktop" else "")
+    assert out.startswith("Error: nothing was opened") and "opens links in Broken Browser" in out, out
+    assert not desk["record"].exists()
+
+
+def test_the_page_check_never_loads_outside_files_or_other_hosts(tmp_path):
+    """Real headless run when Playwright is installed: symlinks out, ../ files, ~/.ssh and internet scripts are refused."""
+    pytest.importorskip("playwright")
+    root = tmp_path / "site"
+    (root / "proj").mkdir(parents=True)
+    (root / "outside").mkdir()
+    (root / "outside" / "secret.js").write_text("window.leak = 1")
+    (root / "proj" / "link.js").symlink_to(root / "outside" / "secret.js")
+    (root / "proj" / "index.html").write_text(
+        "<title>P</title><script src='link.js'></script><script src='../outside/secret.js'></script>"
+        "<script src='https://cdn.example.invalid/x.js'></script><script>window.ok = 1</script>")
+    target, _ = desktop_open.classify(str(root / "proj" / "index.html"))
+    check = desktop_open.page_check(target, readable=[root / "proj"], hidden=[])
+    if check is None:
+        pytest.skip("headless browser unavailable here")
+    assert {"link.js", "secret.js", "cdn.example.invalid"} <= set(check.blocked), check
+
+
+# ── what counts as "it works" ────────────────────────────────────────────────────────────────────────────────────
+def test_opening_and_a_screenshot_do_not_make_it_work():
+    from agent.lean.job import Presented
+
+    seen = Presented()
+    assert seen.unbacked("The game is ready to play!") == ""          # nothing was opened: not this check's business
+    seen.observe("open_application", True, 'Opened x in Chromium. Window "X" is open\n2. Window open: verified in the '
+                                           "window list.\n3. Page loaded: yes, with no JavaScript errors")
+    seen.observe("take_screenshot", True, "Screenshot obs-1")
+    claim = "Perfect! The game is running and ready for you to play."
+    assert seen.unbacked(claim) == "The game is running and ready for you to play."
+    note = seen.note(claim)
+    assert "window verified" in note and "page loaded with no errors" in note and "screenshot: yes" in note
+    for honest in ("It opened; I haven't played it, so I can't say it works yet.",
+                   "Try it and tell me whether it works.", "The page loaded but the canvas is empty."):
+        assert seen.unbacked(honest) == "", honest
+    seen.observe("computer_action", True, "", screen_changed=0.4)
+    assert seen.unbacked(claim) == ""                                 # used, and the screen responded
+
+
+def test_a_failed_page_load_keeps_a_works_claim_unbacked_even_after_input():
+    from agent.lean.job import Presented
+
+    seen = Presented()
+    seen.observe("open_application", True, "Opened x.\n3. Page loaded: NO. A separate headless browser found 1 problem")
+    seen.observe("computer_action", True, "", screen_changed=0.5)
+    assert seen.unbacked("It works now.") == "It works now."
+
+
+def test_apps_started_from_the_desktop_package_get_the_users_environment():
+    """In the AppImage, the backend's library paths and GTK modules point into the package mount."""
+    env = {"APPDIR": "/tmp/.mount_EchoX", "PATH": "/tmp/.mount_EchoX/usr/bin:/usr/bin",
+           "LD_LIBRARY_PATH": "/tmp/.mount_EchoX/usr/lib", "LD_LIBRARY_PATH_ORIG": "/opt/lib",
+           "GIO_MODULE_DIR": "/tmp/.mount_EchoX/usr/lib/gio", "XDG_DATA_DIRS": "/tmp/.mount_EchoX/usr/share:/usr/share",
+           "WAYLAND_DISPLAY": "wayland-1", "HOME": "/home/x"}
+    assert desktop_open.without_bundle(env) == {"PATH": "/usr/bin", "XDG_DATA_DIRS": "/usr/share",
+                                                "WAYLAND_DISPLAY": "wayland-1", "HOME": "/home/x",
+                                                "LD_LIBRARY_PATH": "/opt/lib"}
+
+
+def test_server_guidance_names_a_route_the_browser_can_reach(desk):
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    out = _open(desk, target=f"http://127.0.0.1:{port}/")
+    assert "network: true" in out and 'where="host"' in out

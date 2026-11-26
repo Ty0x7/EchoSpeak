@@ -32,7 +32,10 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 # Tools that only read files, by the argument that names where.
-READ_TOOLS = {"file_read": ("path", "file"), "file_list": ("path",), "file_find": ("path",), "file_search": ("path",)}
+READ_TOOLS = {"file_read": ("path", "file"), "file_list": ("path",), "file_find": ("path",), "file_search": ("path",),
+              # Opening a local file or folder on screen shows its contents and has the page check load it, so it
+              # follows the same folders, approvals and never-readable places (#235). Web addresses read nothing.
+              "open_application": ("target", "path", "file", "url", "open")}
 GRANT_PREFIX = "read:"
 
 # Absolute system places no agent reads through file tools: other processes' memory and environment
@@ -131,8 +134,25 @@ def target(name: str, args: dict[str, Any]) -> str:
     for key in READ_TOOLS.get(name, ()):
         value = str(args.get(key) or "").strip()
         if value:
+            if name == "open_application":
+                return local_target(value) or "."
             return value
     return "."
+
+
+def local_target(value: str) -> str:
+    """The local path an open_application target names (a path or a file:// URL), or '' for a web address."""
+    from urllib.parse import unquote, urlparse
+
+    text = str(value or "").strip().strip("\"'")
+    parsed = urlparse(text)
+    if parsed.scheme.lower() == "file":
+        return unquote(parsed.path)
+    if parsed.scheme and len(parsed.scheme) > 1:
+        return ""
+    if text.startswith(("/", "~")):
+        return text
+    return ""
 
 
 def classify(raw: str, roots: Iterable[Path], granted: Iterable[Path] = ()) -> Access:

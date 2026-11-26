@@ -28,7 +28,7 @@ import shlex
 import shutil
 import socket
 import subprocess
-import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
@@ -43,6 +43,12 @@ VERIFY_SECONDS = 8.0
 _FILE_CODES = {"%f", "%F", "%u", "%U"}
 _DROP_CODES = {"%i", "%c", "%k", "%d", "%D", "%n", "%N", "%v", "%m"}
 _URL_SCHEMES = {"http", "https", "file"}
+# Lab run A (26 November 2026): servers started in the sandbox answered inside it, but the sandbox has its own
+# network, so the user's browser (and this check) found nothing listening. With network: true the sandbox shares
+# this PC's network (that asks, as any network use does); a server on this PC (where="host") asks too.
+SERVE_HOW = ("Start the server with the terminal in the background with network: true (without it the sandbox has "
+             "its own network and the browser can't reach the server), or on this PC with where=\"host\"; confirm it "
+             "answers on 127.0.0.1,")
 # "index.html" is a file name, not a web address, even though it looks like one.
 _FILE_SUFFIXES = {"html", "htm", "xhtml", "js", "mjs", "ts", "tsx", "jsx", "css", "json", "md", "txt", "py", "png",
                   "jpg", "jpeg", "gif", "svg", "webp", "pdf", "wav", "ogg", "mp3", "mp4", "webm", "zip", "sh", "toml",
@@ -88,7 +94,7 @@ def session_env(base: Optional[dict] = None) -> tuple[dict, str]:
     way (a service, an SSH shell) may not, so the per-user runtime folder is checked for the
     session's Wayland socket and bus, the way a login session would set them.
     """
-    env = dict(base if base is not None else child_env())
+    env = without_bundle(dict(base if base is not None else child_env()))
     runtime = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     if Path(runtime).is_dir():
         env.setdefault("XDG_RUNTIME_DIR", runtime)
@@ -102,6 +108,40 @@ def session_env(base: Optional[dict] = None) -> tuple[dict, str]:
         return env, ("there is no graphical session to open it on (neither WAYLAND_DISPLAY nor DISPLAY is set "
                      "for EchoSpeak's backend, and no Wayland socket was found)")
     return env, ""
+
+
+_PATH_LISTS = {"PATH", "LD_LIBRARY_PATH", "XDG_DATA_DIRS", "XDG_CONFIG_DIRS", "GST_PLUGIN_SYSTEM_PATH",
+               "GST_PLUGIN_PATH", "QT_PLUGIN_PATH", "GI_TYPELIB_PATH", "PYTHONPATH", "PERL5LIB"}
+_BUNDLE_ONLY = {"APPDIR", "APPIMAGE", "ARGV0", "OWD", "PYTHONHOME", "_MEIPASS2", "_PYI_APPLICATION_HOME_DIR",
+                "_PYI_ARCHIVE_FILE", "_PYI_PARENT_PROCESS_LEVEL"}
+
+
+def without_bundle(env: dict) -> dict:
+    """The environment without what the desktop package set up for itself.
+
+    In the desktop AppImage the backend is a PyInstaller program inside the AppImage's mount: its library
+    paths, GTK/GIO module folders and Python home point there, and an app started with them (Chromium, a file
+    manager) can load the wrong libraries or fail. PyInstaller keeps the original LD_LIBRARY_PATH in *_ORIG.
+    """
+    import sys as _sys
+
+    bundles = [b for b in (env.get("APPDIR"), getattr(_sys, "_MEIPASS", None)) if b]
+    out = {}
+    for key, value in env.items():
+        if key in _BUNDLE_ONLY or key.endswith("_ORIG"):
+            continue
+        if bundles and key in _PATH_LISTS:
+            kept = [part for part in value.split(":") if part and not any(part.startswith(b) for b in bundles)]
+            if kept:
+                out[key] = ":".join(kept)
+            continue
+        if bundles and any(b in value for b in bundles):
+            continue
+        out[key] = value
+    for key, value in env.items():
+        if key.endswith("_ORIG") and key[:-5] not in out and value:
+            out[key[:-5]] = value            # PyInstaller's saved original (LD_LIBRARY_PATH_ORIG)
+    return out
 
 
 # ---- desktop entries -------------------------------------------------------------------------------------------
@@ -526,30 +566,47 @@ def _tail(log: Path) -> str:
 
 
 def open_on_desktop(app: str = "", target: str = "", *, log_dir: Path, blocked: Callable[[Entry, list[str]], str],
-                    env: Optional[dict] = None, wait: float = VERIFY_SECONDS) -> str:
+                    env: Optional[dict] = None, wait: float = VERIFY_SECONDS, readable: Optional[list] = None,
+                    hidden: Optional[list] = None) -> str:
     """Open target (file, folder or http(s) URL) in app, or in the desktop's default app; or start app alone.
 
+    The caller has checked the permission switches and that a local target is readable (agent.tools).
     blocked(entry, argv) returns the Blocked apps entry that refuses this launch, or ''.
+    readable / hidden: the folders the page check may load files from, and places it never loads.
     """
     env, no_session = session_env(env)
     if no_session:
         return f"Error: nothing was opened: {no_session}."
     table = entries(env)
     item: Optional[Target] = None
+    check: Optional[PageCheck] = None
     if target:
         item, problem = classify(target, env)
         if item is None:
             return f"Error: nothing was opened: {problem}."
         if item.kind == "url":
+            from agent import privacy
+
+            decision = privacy.decide("web_pages", item.uri)
+            if not decision.allowed:
+                return f"Error: nothing was opened: {decision.reason}"
             if down := local_server_down(item.uri):
-                return (f"Error: nothing was opened: {down}. Start the project's server first (terminal, in the "
-                        "background), confirm it is listening, then open the URL.")
+                return (f"Error: nothing was opened: {down}. {SERVE_HOW} then open the URL.")
         elif item.path is not None:
             reason, command = server_needed(item.path)
             if reason:
-                return (f"Error: not opened as a file: {reason}. Serve the folder instead: start `{command}` with the "
-                        "terminal in the background, confirm it is listening, then call open_application with the "
-                        "http://127.0.0.1:<port>/ address it prints (add the page's file name if it isn't index.html).")
+                return (f"Error: not opened as a file: {reason}. Serve the folder instead with `{command}`. "
+                        f"{SERVE_HOW} then call open_application with the http://127.0.0.1:<port>/ address it prints "
+                        "(add the page's file name if it isn't index.html).")
+        # Before the user's browser opens it: what the page loads, and where it would try to go.
+        check = page_check(item, env, readable=readable or [], hidden=hidden or [])
+        if check is not None and check.left:
+            from agent import privacy
+
+            outside = [host for host in check.left if not privacy.decide("web_pages", f"http://{host}/").allowed]
+            if outside:
+                return (f"Error: nothing was opened: the page goes on to {', '.join(outside[:3])}, and "
+                        f"{privacy.decide('web_pages', 'http://' + outside[0] + '/').reason}")
     chosen: list[tuple[Entry, str]] = []           # (entry, why this one)
     problems: list[str] = []
     if app:
@@ -571,22 +628,25 @@ def open_on_desktop(app: str = "", target: str = "", *, log_dir: Path, blocked: 
             return f"Error: nothing was opened: {problems[0] if problems else 'no app was named'}."
         return (f"Error: nothing was opened: {'; '.join(problems) + '; ' if problems else ''}no installed app is set up "
                 f"to open {item.mime}. Ask the user which app to use; don't install one without their go-ahead.")
+    # A link handler can be a launcher script that only routes to the web browser (Omarchy's "Browser" runs
+    # omarchy-launch-browser): the browser that opens is the desktop's default for HTML. It must pass Blocked
+    # apps too, and its window is the one to look for.
+    browser = default_app("text/html", env, table) if item is not None and item.kind == "url" else None
 
     attempts: list[str] = []
-    for index, (entry, why) in enumerate(chosen[:3]):
+    for entry, why in chosen[:3]:
         argv = exec_argv(entry, item.uri if item else "")
         if blocked_by := blocked(entry, argv):
             attempts.append(f"{entry.name} is in Blocked apps ({blocked_by})")
             continue
+        router = browser is not None and "text/html" not in entry.mime_types and entry.command != browser.command
+        if router and (blocked_by := blocked(browser, exec_argv(browser, item.uri))):
+            attempts.append(f"{entry.name} opens links in {browser.name}, which is in Blocked apps ({blocked_by})")
+            continue
         if entry.terminal:
             attempts.append(f"{entry.name} runs in a terminal, not a window")
             continue
-        also: set[str] = set()
-        if item is not None and item.kind == "url":
-            # A link handler can be a launcher script (Omarchy's "Browser" runs omarchy-launch-browser): the window
-            # that appears is the web browser's, which the desktop names as the default for HTML.
-            browser = default_app("text/html", env, table)
-            also = _app_words(browser) if browser else set()
+        also = _app_words(browser) if router else set()
         result = launch(entry, item, env, log_dir / f"open-{time.time_ns()}.log", wait=wait, also=also)
         if not result.ok:
             attempts.append(result.detail)
@@ -596,15 +656,39 @@ def open_on_desktop(app: str = "", target: str = "", *, log_dir: Path, blocked: 
         if result.verified and result.window:
             w = result.window
             mode = " (floating)" if w.get("floating") else ""
-            page = _page_note(item, env)
-            return (f"{lead}Opened {what} ({why}). Verified: window \"{w['title'][:120]}\" is open on {w['where']}{mode}. "
-                    "Don't open it again. An open window doesn't show that a game or interface works: before saying "
-                    f"it does, look at it with take_screenshot (window_title \"{w['title'][:60]}\") and check the "
-                    "image (a blank canvas, an error, missing parts)." + page)
-        return (f"{lead}Launched {what} ({why}); it is still running, but {result.detail}. Don't launch it again: "
-                "look with take_screenshot (the monitor, or the window's title) to see whether it is showing and "
-                "working, and say what the screenshot showed." + _page_note(item, env))
+            head = (f"{lead}Opened {what} ({why}). Window \"{w['title'][:120]}\" is open on {w['where']}{mode}; "
+                    "don't open it again.")
+            look = f"take_screenshot with window_title \"{w['title'][:60]}\""
+        else:
+            head = f"{lead}Launched {what} ({why}); it is still running, but {result.detail}. Don't launch it again."
+            look = "take_screenshot of the monitor (or the window's title)"
+        return head + "\n" + evidence_ladder(window=bool(result.verified and result.window), check=check,
+                                              is_page=item is not None and item.kind in {"file", "url"}, look=look)
     return "Error: nothing was opened: " + "; ".join(problems + attempts) + "."
+
+
+def evidence_ladder(*, window: bool, check: Optional["PageCheck"], is_page: bool, look: str) -> str:
+    """What this result shows and what it doesn't, step by step: launch, window, page, looks right, works."""
+    lines = ["Evidence so far:", "1. Launch requested: yes.",
+             f"2. Window open: {'verified in the window list' if window else 'not verified'}."]
+    if not is_page:
+        lines.append("3. Page loaded: not a web page.")
+    elif check is None:
+        lines.append("3. Page loaded: not checked (only local files and localhost pages are checked).")
+    elif check.problems:
+        lines.append(f"3. Page loaded: NO. A separate headless browser found {len(check.problems)} problem"
+                     f"{'s' if len(check.problems) > 1 else ''}: " + "; ".join(check.problems) + ".")
+    else:
+        lines.append("3. Page loaded: yes, with no JavaScript errors or failed loads in a separate headless browser.")
+    if check is not None and check.blocked:
+        lines.append("   The check didn't load " + "; ".join(check.blocked[:4]) + " (outside what EchoSpeak may read "
+                     "or reach); in the user's browser those may behave differently.")
+    lines += [f"4. Looks right: not checked yet. Use {look} and look at the image: a blank canvas, an error or "
+              "missing parts means it isn't working.",
+              "5. Works: not verified. Opening it, a clean page load and a screenshot don't show that a game or app "
+              "works; that takes using it (controls responding, state changing). Say which of these you verified "
+              "and ask the user to try it."]
+    return "\n".join(lines)
 
 
 # ---- looking at it ---------------------------------------------------------------------------------------------
@@ -666,53 +750,111 @@ def wayland_capture(region: tuple[int, int, int, int], env: Optional[dict] = Non
 
 # ---- does the page run -----------------------------------------------------------------------------------------
 
-_PAGE_CHECK = r"""
-import json, sys
-from playwright.sync_api import sync_playwright
-url, wait_ms = sys.argv[1], int(sys.argv[2])
-errors = []
-with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True)
-    page = browser.new_page(viewport={"width": 1280, "height": 800})
-    page.on("pageerror", lambda e: errors.append("Uncaught " + str(e).splitlines()[0]))
-    page.on("console", lambda m: m.type == "error" and errors.append(m.text.splitlines()[0]
-                                                                     + (f" ({m.location.get('url', '').rsplit('/', 1)[-1]}:{m.location.get('lineNumber')})" if m.location.get("url") else "")))
-    page.on("response", lambda r: r.status >= 400 and errors.append(f"{r.status} loading {r.url.rsplit('/', 1)[-1]}"))
-    page.on("requestfailed", lambda r: errors.append(f"failed to load {r.url.rsplit('/', 1)[-1]}"))
-    page.goto(url, wait_until="load", timeout=15000)
-    page.wait_for_timeout(wait_ms)
-    browser.close()
-print(json.dumps(list(dict.fromkeys(errors))[:6]))
-"""
+# Runs in a separate process with EchoSpeak's own Playwright Chromium: a fresh profile, never the user's browser.
+# Every request goes through route(): local files only inside the folders this conversation may read (symlinks
+# resolved, never-readable places refused), web requests only to the page's own localhost origin. Everything else,
+# redirects and navigations included, is refused and reported.
+def _run_page_check(url: str, wait_ms: int, allowed: list[str], hidden: list[str]) -> dict:
+    """The headless load itself (EchoSpeak's own Playwright Chromium, a fresh context, never the user's browser).
+
+    Every request goes through route(): local files only inside the folders this conversation may read (symlinks
+    resolved, never-readable places refused), web requests only to the page's own localhost origin. Everything
+    else, redirects and navigations included, is refused and reported.
+    """
+    from playwright.sync_api import sync_playwright
+
+    origin = urlparse(url)
+    errors: list[str] = []
+    blocked: list[str] = []
+    left: list[str] = []
+
+    def inside(path: str, folder: str) -> bool:
+        return path == folder or path.startswith(folder.rstrip("/") + "/")
+
+    def allow(request_url: str) -> bool:
+        u = urlparse(request_url)
+        if u.scheme in ("data", "blob", "about"):
+            return True
+        if u.scheme == "file":
+            real = os.path.realpath(unquote(u.path))
+            return any(inside(real, a) for a in allowed) and not any(inside(real, h) for h in hidden)
+        if u.scheme in ("http", "https", "ws", "wss") and origin.scheme in ("http", "https"):
+            return (u.hostname, u.port) == (origin.hostname, origin.port)
+        return False
+
+    def route(r) -> None:
+        req = r.request
+        if allow(req.url):
+            r.continue_()
+            return
+        u = urlparse(req.url)
+        name = u.hostname or os.path.basename(unquote(u.path)) or req.url[:60]
+        if req.is_navigation_request() and u.hostname and u.hostname != origin.hostname:
+            left.append(u.netloc)
+        blocked.append(name)
+        r.abort("blockedbyclient")
+
+    def console(m) -> None:
+        if m.type == "error" and "ERR_BLOCKED_BY_CLIENT" not in m.text:
+            where = m.location.get("url", "")
+            errors.append(m.text.splitlines()[0] + (f" ({where.rsplit('/', 1)[-1]}:{m.location.get('lineNumber')})"
+                                                    if where else ""))
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        try:
+            context = browser.new_context(accept_downloads=False, service_workers="block",
+                                          viewport={"width": 1280, "height": 800})
+            context.route("**/*", route)
+            page = context.new_page()
+            page.on("pageerror", lambda e: errors.append("Uncaught " + str(e).splitlines()[0]))
+            page.on("console", console)
+            page.on("response", lambda r: r.status >= 400 and errors.append(f"{r.status} loading {r.url.rsplit('/', 1)[-1]}"))
+            try:
+                page.goto(url, wait_until="load", timeout=15000)
+                page.wait_for_timeout(wait_ms)
+            except Exception as error:   # noqa: BLE001 - a page that doesn't load is the finding
+                errors.append("the page did not load: " + str(error).splitlines()[0][:160])
+        finally:
+            browser.close()
+    return {"errors": list(dict.fromkeys(errors))[:6], "blocked": list(dict.fromkeys(blocked))[:8],
+            "left": list(dict.fromkeys(left))[:4]}
 
 
-def page_errors(target: Target, env: Optional[dict] = None, wait_ms: int = 1500) -> Optional[list[str]]:
-    """JavaScript errors and failed loads when this page runs, from a separate headless browser (EchoSpeak's own
-    Playwright, never the user's browser or profile). Local files and localhost pages only: an internet page
-    isn't fetched a second time. None when the check can't run."""
+@dataclass
+class PageCheck:
+    problems: list[str]          # JavaScript errors, failed loads
+    blocked: list[str]           # requests the check refused (outside readable folders, other origins)
+    left: list[str]              # hosts the page navigated to (redirects), refused
+
+
+def page_check(target: Target, env: Optional[dict] = None, *, readable: list, hidden: list,
+               wait_ms: int = 1500) -> Optional[PageCheck]:
+    """Load a local page in a separate headless browser and report what fails. Local files and localhost pages
+    only: an internet page isn't fetched a second time. None when the check can't run here."""
     if target.kind == "file" and target.path is not None and target.path.suffix.lower() in {".html", ".htm", ".xhtml"}:
         url = target.path.as_uri()
     elif target.kind == "url" and urlparse(target.uri).hostname in {"localhost", "127.0.0.1", "::1"}:
         url = target.uri
     else:
         return None
-    try:
-        result = subprocess.run([sys.executable, "-c", _PAGE_CHECK, url, str(wait_ms)], capture_output=True, text=True,
-                                timeout=30, env=env)
-        found = json.loads(result.stdout.strip().splitlines()[-1]) if result.returncode == 0 and result.stdout.strip() else None
-    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+    allowed = sorted({os.path.realpath(str(p)) for p in readable})
+    never = sorted({os.path.realpath(str(p)) for p in hidden} | {str(p) for p in hidden})
+    # Its own thread: Playwright's sync API refuses a thread that runs an event loop, and the desktop package's
+    # backend is a frozen program that can't start `python -c`.
+    box: dict = {}
+
+    def run() -> None:
+        try:
+            box["data"] = _run_page_check(url, wait_ms, allowed, never)
+        except Exception:   # noqa: BLE001 - no Playwright or no browser here: the check didn't run
+            box["data"] = None
+
+    worker = threading.Thread(target=run, name="echospeak-page-check", daemon=True)
+    worker.start()
+    worker.join(45)
+    data = box.get("data")
+    if not isinstance(data, dict):
         return None
-    return [str(e)[:240] for e in found] if isinstance(found, list) else None
-
-
-def _page_note(target: Optional[Target], env: Optional[dict]) -> str:
-    if target is None:
-        return ""
-    errors = page_errors(target, env)
-    if errors is None:
-        return ""
-    if not errors:
-        return " Page check (a separate headless browser): no JavaScript errors or failed loads."
-    return (f" Page check (a separate headless browser) found {len(errors)} problem{'s' if len(errors) > 1 else ''}: "
-            + "; ".join(errors) + ". The page doesn't work as built: fix this before saying it works, and say what "
-            "the screenshot shows.")
+    clip = lambda rows: [str(r)[:240] for r in rows or []]
+    return PageCheck(clip(data.get("errors")), clip(data.get("blocked")), clip(data.get("left")))

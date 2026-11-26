@@ -1040,7 +1040,12 @@ def file_write(path: str, content: str, append: bool = False) -> str:
         return "File write is disabled. To enable: set ENABLE_SYSTEM_ACTIONS=true and ALLOW_FILE_WRITE=true, then restart the API."
     target = _safe_file_path(path)
     if target is None:
-        return f"Path not allowed. Allowed roots: {_format_file_tool_roots()}. Prefer Desktop/<project>/filename for user projects."
+        # The old "Prefer Desktop/<project>" read as an instruction to relocate the user's own project (GTA_CLONE
+        # evaluation, 26 November 2026): a new project may start there, an existing one may not move there.
+        return (f"Path not allowed. Allowed roots: {_format_file_tool_roots()}. If this is the user's existing project "
+                "or a place they named, don't write a copy anywhere else: tell them it is outside the folders EchoSpeak "
+                "may change (attaching it as a project allows it). Only a new project with no location given may go "
+                "in Desktop/<project>/.")
     # Never persist tool wrapper / "Read N chars" pollution into real source files
     body = strip_echo_file_wrapper(content or "")
     if not append and _looks_like_code_stub(str(path), body):
@@ -1590,25 +1595,37 @@ def _desktop_open_logs() -> Path:
 def _open_on_linux_desktop(app: str, args: Optional[str], target: Optional[str]) -> str:
     """Linux (freedesktop) launches: desktop entries, default apps and window checks in agent/desktop_open.py."""
     from agent import app_launcher, desktop_open
+    from agent.lean import file_access
 
+    if denied := _tool_scope_denial("open_application"):
+        return denied
     if str(args or "").strip():
         return ("Error: On Linux, open_application takes no free-form arguments. Give the file, folder or URL as "
                 "target; run other commands with the terminal tool, where its approvals apply.")
     app, target = str(app or "").strip(), str(target or "").strip()
     if not app and not target:
         return "Error: Name the app to open, or give a target file or URL."
-    if app and not target and (("/" in app and os.path.exists(os.path.expanduser(app))) or re.match(r"(?i)https?://", app)):
+    if app and not target and (app.startswith(("/", "~")) or re.match(r"(?i)(?:https?|file)://", app)):
         app, target = "", app            # a path or link given as the app: open it in its default app
     if entry := app_launcher.blocked_by(app) if app else "":
         return _app_blocked_message(app, entry)
+    readable: list[Path] = []
+    if target and (local := file_access.local_target(target)):
+        # A local file or folder is read by whatever shows it (and by the page check): the same folders,
+        # approvals and never-readable places as file_read, after symlinks are resolved (#235).
+        resolved = _safe_file_path(local, read=True)
+        if resolved is None:
+            return "Error: " + file_access.explain(local, _file_tool_roots())
+        target = str(resolved)
+        readable = [*_file_tool_roots(), *_file_read_grants()]
 
     def blocked(desktop_entry, argv: list[str]) -> str:
         return (app_launcher.blocked_by(desktop_entry.name, command=argv)
                 or app_launcher.blocked_by(desktop_entry.id.removesuffix(".desktop")))
 
     try:
-        return desktop_open.open_on_desktop(app, target, log_dir=_desktop_open_logs(),
-                                            blocked=blocked)
+        return desktop_open.open_on_desktop(app, target, log_dir=_desktop_open_logs(), blocked=blocked,
+                                            readable=readable, hidden=[p for p, _ in file_access.hidden_places()])
     except Exception as e:
         return f"Error: Failed to open: {e}"
 
