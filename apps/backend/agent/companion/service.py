@@ -49,6 +49,12 @@ def _run() -> None:
     import select
 
     store = get_companion_store()
+    try:
+        from agent.companion.commentary import get_commentary
+
+        get_commentary()  # subscribes to new events; does nothing while the companion is off
+    except Exception:
+        logger.warning("Echo Companion commentary did not start", exc_info=True)
     store.spool.mkdir(parents=True, exist_ok=True)
     try:
         os.chmod(store.spool, 0o700)

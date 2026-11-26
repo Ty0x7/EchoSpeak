@@ -69,3 +69,69 @@ def hooks_status():
     from agent.companion.install import status
     return status(claude_dir=Path(os.path.expanduser("~/.claude")),
                   codex_dir=Path(os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")))
+
+
+class AskRequest(BaseModel):
+    topic: str = Field(pattern=r"^(activity|latest_report|discovery|recap|agent:[a-z0-9-]{2,40})$")
+    speak: bool = True
+    since: float | None = None
+
+
+@router.post("/ask")
+def ask(request: AskRequest):
+    """The owner clicked Echo Companion: answer from what was observed, and say it."""
+    from agent.companion import recap
+    from agent.companion.observe import activity as build, get_companion_store
+    from agent.speech_output import get_speech_output
+
+    store = get_companion_store()
+    text = recap.answer(request.topic, store, build(store), request.since)
+    spoken = None
+    if request.speak:
+        spoken = get_speech_output().speak(text, channel="companion", priority=70, interrupt=True, source="companion")
+    return {"topic": request.topic, "text": text, "speech": spoken}
+
+
+@router.get("/commentary")
+def commentary(limit: int = Query(default=30, ge=1, le=100)):
+    from agent.companion.commentary import get_commentary
+    return {"items": list(get_commentary().feed)[-limit:]}
+
+
+@router.get("/stream")
+async def stream():
+    """Server-sent events for the companion window: commentary items and speech events."""
+    import asyncio
+    import json as _json
+
+    from fastapi.responses import StreamingResponse
+
+    from agent.companion.commentary import get_commentary
+    from agent.speech_output import get_speech_output
+
+    loop = asyncio.get_running_loop()
+    events: asyncio.Queue = asyncio.Queue(maxsize=500)
+
+    def push(kind):
+        return lambda item: loop.call_soon_threadsafe(lambda: events.full() or events.put_nowait((kind, item)))
+
+    commentary = get_commentary()
+    unsubscribe_speech = get_speech_output().subscribe(push("speech"))
+    unsubscribe_commentary = commentary.on_item(push("commentary"))
+
+    async def body():
+        try:
+            yield "event: hello\ndata: {}\n\n"
+            while True:
+                try:
+                    kind, item = await asyncio.wait_for(events.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                name = item.get("type", kind) if kind == "speech" else "commentary"
+                yield f"event: {name}\ndata: {_json.dumps(item, default=str)}\n\n"
+        finally:
+            unsubscribe_speech()
+            unsubscribe_commentary()
+
+    return StreamingResponse(body(), media_type="text/event-stream", headers={"Cache-Control": "no-store"})
