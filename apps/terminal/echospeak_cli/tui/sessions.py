@@ -149,6 +149,10 @@ class SessionBrowser:
     loading: bool = True
     error: str = ""
     mode: str = "picker"            # picker (in the composer's place) | page (the full-screen browser has it)
+    opened_at: float = 0.0
+    editing: bool = False
+    confirm_delete: Optional[dict] = None
+    deleting: bool = False
     prefer_id: str = ""             # highlighted first when you are in no conversation yet ("last here")
 
     # ── what is listed ────────────────────────────────────────────────
@@ -203,6 +207,28 @@ class SessionBrowser:
         self.selected = next((i for i, row in enumerate(rows) if row.get("thread_id") == thread_id), 0)
         self.top = 0
 
+    def remove(self, thread_id: str) -> None:
+        visible = self.visible()
+        order = self.page_order() if self.mode == "page" else list(range(len(visible)))
+        ids = [visible[i].get("thread_id") for i in order]
+        if self.current_id == thread_id:
+            self.current_id = ""
+        if self.prefer_id == thread_id:
+            self.prefer_id = ""
+        self.rows = [row for row in self.rows if row.get("thread_id") != thread_id]
+        if thread_id in ids:
+            index = ids.index(thread_id)
+            ids.remove(thread_id)
+            self._select_id(ids[min(index, len(ids) - 1)] if ids else "")
+
+    def delete_status(self) -> str:
+        if self.deleting:
+            return "Deleting conversation…"
+        if self.confirm_delete:
+            title = one_line(self.confirm_delete.get("title") or "Untitled", 80)
+            return f"Delete “{title}”? · Enter delete · Esc cancel"
+        return self.error if self.rows else ""
+
     # ── keys ──────────────────────────────────────────────────────────
     def move(self, delta: int) -> None:
         count = len(self.visible())
@@ -219,6 +245,7 @@ class SessionBrowser:
         self._select_id(keep or "")
 
     def type(self, text: str) -> None:
+        self.editing = True
         self.query += text
         self.selected, self.top = 0, 0
 
@@ -234,6 +261,7 @@ class SessionBrowser:
         if not self.query:
             return False
         self.query, self.selected, self.top = "", 0, 0
+        self.editing = False
         return True
 
     # ── drawing ───────────────────────────────────────────────────────
@@ -267,6 +295,8 @@ class SessionBrowser:
             out.append(M.rule(width, title, caps, title_style="class:title"))
         if rows >= 4:
             out.append(self._filter_line(width, caps))
+        if rows == 1 and self.delete_status():
+            return [[("class:attention", M.truncate(self.delete_status(), width))]]
         hint = self._hint(width, caps) if rows >= 2 else None
         room = rows - len(out) - (1 if hint is not None else 0)
         preview = self._preview(width, caps) if room >= MIN_LIST + PREVIEW_ROWS and width >= L.NARROW else []
@@ -383,15 +413,21 @@ class SessionBrowser:
         return lines
 
     def _hint(self, width: int, caps: Caps) -> Fragments:
+        status = self.delete_status()
+        if status:
+            if self.confirm_delete and not self.deleting and M.width_of(status) > width:
+                status = "Delete? Enter yes · Esc no"
+            return [("class:attention", M.truncate(status, width))]
         g = caps.glyphs
         sep = f" {g.sep} "
         clear = "esc clear search" if self.query else "→ or esc back"
         left = "← all sessions"
+        delete = f"{g.arrow_up_down} select" if self.editing and self.query else "del/bs delete"
         forms = [
-            sep.join([f"{g.arrow_up_down} browse", "enter resume", "tab filter", "type to search", left, clear, "ctrl+n new"]),
-            sep.join([f"{g.arrow_up_down} browse", "enter resume", "tab filter", left, clear]),
-            sep.join([f"{g.arrow_up_down} browse", "enter resume", "tab filter", clear]),
-            sep.join(["enter resume", "esc back"]),
+            sep.join([f"{g.arrow_up_down} browse", "enter resume", "tab filter", "type to search", left, delete, clear, "ctrl+n new"]),
+            sep.join([f"{g.arrow_up_down} browse", "enter resume", "tab filter", left, delete, clear]),
+            sep.join([f"{g.arrow_up_down} browse", "enter resume", "tab filter", delete, clear]),
+            sep.join(["enter resume", delete, "esc back"]),
             "enter" + sep + "esc",
         ]
         text = next((form for form in forms if M.width_of(form) + 1 <= width), "")

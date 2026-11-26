@@ -1094,7 +1094,12 @@ class AgentMemory:
             if not (getattr(doc, "metadata", {}) or {}).get("bootstrap")
         ]
 
+    @_synchronized_records()
     def add_conversation(self, user_message: str, ai_response: str, mode: Optional[str] = None, thread_id: Optional[str] = None) -> None:
+        from agent.state import get_state_store
+
+        if thread_id and get_state_store().session_deleted(thread_id):
+            return
         timestamp = datetime.now().isoformat()
         combined_text = f"User: {user_message}\nAI: {ai_response}\nTimestamp: {timestamp}"
         mode_value = self._normalize_mode_value(mode)
@@ -1614,6 +1619,7 @@ class AgentMemory:
             raw = raw[:max_chars].rstrip() + "..."
         return raw
 
+    @_synchronized_records()
     def append_daily_memory(self, text: str, mode: Optional[str] = None, thread_id: Optional[str] = None) -> bool:
         if not self.file_memory_enabled:
             return False
@@ -2280,6 +2286,63 @@ class AgentMemory:
                 include_global=include_global,
             )
         )
+
+    @_synchronized_records()
+    def delete_session(self, session_id: str) -> None:
+        """Purge chat-owned memory records and projections without re-embedding other memories."""
+        from agent.vector_store import has_index
+
+        def owned(record: dict) -> bool:
+            meta = record.get("metadata") or {}
+            scope = record.get("scope") or meta.get("scope")
+            source = record.get("source_session_id") or meta.get("thread_id")
+            kind = record.get("memory_type") or meta.get("type")
+            return source == session_id and (scope in {"session", "temporary"} or
+                                             (kind == "conversation" and (not scope or meta.get("legacy_import"))))
+
+        ids = {key for key, record in self._records.items() if owned(record)}
+        # Read both layouts, including on-disk projections from a previous mode or embedding provider.
+        folders = {self.memory_root, *self.memory_root.glob("*/*")}
+        for path in folders:
+            if not has_index(path):
+                continue
+            store = VectorStore.load_local(path, self.embeddings)
+            keep = [i for i, (key, doc) in enumerate(zip(store.ids, store.docs))
+                    if key not in ids and not owned({"metadata": doc.metadata})]
+            if len(keep) != len(store.ids):
+                store.ids = [store.ids[i] for i in keep]
+                store.docs = [store.docs[i] for i in keep]
+                store.vectors = store.vectors[keep]
+                store.save_local(path)
+            if path == self.memory_root and self.vector_store is not None:
+                self.vector_store = store
+            if str(path) in self._vector_stores:
+                self._vector_stores[str(path)] = store
+        if hasattr(self, "simple_memory"):
+            self.simple_memory = [r for r in self.simple_memory if r.get("id") not in ids and not owned(r)]
+        if ids:
+            for key in ids:
+                del self._records[key]
+            self._save_records()
+
+        # Daily memory is an optional legacy journal whose generated blocks carry a mode/session heading.
+        header = re.compile(r"(?m)^- \[\d{2}:\d{2}\] \([^/\n]+/([^\n)]+)\) ")
+        for path in (self.file_memory_dir / "memory").glob("????-??-??.md"):
+            if path.is_symlink():
+                continue
+            text = path.read_text(encoding="utf-8")
+            entries = list(header.finditer(text))
+            for i, match in reversed(list(enumerate(entries))):
+                if match[1] == session_id:
+                    end = entries[i + 1].start() if i + 1 < len(entries) else len(text)
+                    text = text[:match.start()] + text[end:]
+            if any(match[1] == session_id for match in entries):
+                temp = path.with_suffix(f".{uuid.uuid4().hex}.tmp")
+                temp.write_text(text, encoding="utf-8")
+                try:
+                    atomic_replace(temp, path)
+                finally:
+                    temp.unlink(missing_ok=True)
 
     @_synchronized_records()
     def clear_scope(

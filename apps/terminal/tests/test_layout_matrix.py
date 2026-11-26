@@ -3,13 +3,13 @@
 For each UI state (idle, slash menu, shortcuts, a running task with tail, steps and pending input,
 an approval with a diff, a question, a long footer notice) and each size in a grid from 8x4 to
 240x60, this renders ``EchoTUI``'s actual layout into a W x H screen buffer and checks the
-invariants that keep an inline terminal UI from breaking:
+invariants that keep the full-screen terminal UI usable:
 
 1. The live region fits the terminal (never clipped, never "Window too small").
 2. No row is wider than the terminal (a wider row would be wrapped by the terminal and the region
    would no longer be where prompt_toolkit thinks it is).
 3. The input prompt and the footer are always on screen while the composer is shown.
-4. Height grows monotonically with the terminal and stays within the region budget.
+4. The composer stays at the bottom of the full-height viewport.
 
 Run as a script for a report of every failing (state, size): ``python tests/test_layout_matrix.py``.
 """
@@ -34,7 +34,6 @@ from prompt_toolkit.output import DummyOutput  # noqa: E402
 
 from echospeak_cli import discovery  # noqa: E402
 from echospeak_cli.tui import app as A  # noqa: E402
-from echospeak_cli.tui.layout import budget  # noqa: E402
 from echospeak_cli.tui.motion import width_of  # noqa: E402
 from echospeak_cli.tui.state import Run, Tool  # noqa: E402
 from echospeak_cli.tui.theme import ASCII_GLYPHS, Caps  # noqa: E402
@@ -191,7 +190,7 @@ def render_live(tui: A.EchoTUI, out: SizedOutput, width: int, height: int) -> tu
     with set_app(tui.app):
         container = tui.app.layout.container
         want = container.preferred_height(width, height).preferred
-        h = min(max(want, tui.app.renderer._min_available_height), height)
+        h = height
         screen = Screen()
         container.write_to_screen(screen, MouseHandlers(), WritePosition(xpos=0, ypos=0, width=width, height=h),
                                   parent_style="", erase_bg=False, z_index=None)
@@ -225,8 +224,8 @@ def check(state: str, width: int, height: int, caps: Caps = DEFAULT_CAPS) -> lis
             STATES[state](tui)
         rows, want = render_live(tui, out, width, height)
         problems = []
-        if want > budget(height):
-            problems.append(f"clipped: wants {want} rows of {budget(height)} (terminal {height})")
+        if want > height:
+            problems.append(f"clipped: wants {want} rows of {height}")
         joined = "\n".join(rows)
         if "Window too small" in joined:
             problems.append("Window too small")
@@ -281,18 +280,16 @@ if __name__ == "__main__":
 
 @pytest.mark.parametrize("state", ["idle", "slash-menu", "running", "question"])
 @pytest.mark.parametrize("width,height", [(24, 8), (40, 16), (80, 24), (120, 40)])
-def test_region_with_free_rows_below_takes_only_what_it_needs(state, width, height):
-    """A new conversation starts at the top and grows downward: free rows stay under the composer."""
+def test_full_screen_uses_the_terminal_height(state, width, height):
+    """Conversation space grows above the composer even with no content."""
     with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
         tui, out = make_tui()
         out.size = Size(rows=height, columns=width)
-        tui.app.renderer.report_absolute_cursor_row(2)
-        assert tui._fit.below == height - 1
-        assert tui.app.renderer._min_available_height == 1   # known, but not pinned to the bottom
+        assert tui.app.full_screen
         with set_app(tui.app):
             STATES[state](tui)
         rows, want = render_live(tui, out, width, height)
-        assert len(rows) == min(want, height)
+        assert len(rows) == height and want <= height
         if tui.dialog is None or height >= 12:
             assert any(tui.model[:4] in row for row in rows[-3:])
         if tui.dialog is None:

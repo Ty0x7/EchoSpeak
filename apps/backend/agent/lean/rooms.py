@@ -164,19 +164,18 @@ class RoomStore:
             room.last_preview = re.sub(r"\s+", " ", preview or "").strip()[:140]
             self._save()
 
-    def delete(self, room_id: str) -> bool:
-        from agent.threads import get_thread_manager
-
+    def remove_for_session(self, thread_id: str) -> bool:
         with self._lock:
-            room = self._rooms.pop(room_id, None)
+            room = next((r for r in self._rooms.values() if r.thread_id == thread_id), None)
             if room is None:
                 return False
-            self._save()
-        try:
-            get_thread_manager().delete_thread(room.thread_id)
-        except Exception:
-            pass
-        return True
+            del self._rooms[room.id]
+            try:
+                self._save()
+            except Exception:
+                self._rooms[room.id] = room
+                raise
+            return True
 
 
 _STORE: Optional[RoomStore] = None

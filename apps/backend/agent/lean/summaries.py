@@ -68,6 +68,8 @@ def update(session_id: str, client: Any) -> bool:
     from agent.state import get_state_store
 
     with _LOCK:
+        if get_state_store().session_deleted(session_id):
+            return False
         turns = get_state_store().session_timeline(session_id, limit=400).get("turns") or []
         older = turns[:-RECENT_TURNS] if len(turns) > RECENT_TURNS else []
         data = load(session_id)
@@ -98,7 +100,11 @@ def update(session_id: str, client: Any) -> bool:
             "covered": sorted(covered | {str(t.get("execution_id") or "") for t in fresh}),
             "updated_at": time.time(),
         }
-        _save(session_id, data)
+        store = get_state_store()
+        with store._lock:
+            if store.session_deleted(session_id):
+                return False
+            _save(session_id, data)
         return True
 
 

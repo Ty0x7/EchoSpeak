@@ -216,12 +216,11 @@ def test_a_blocked_answer_ends_with_one_line_pointing_at_the_switch():
     async def go(tui):
         from echospeak_cli.tui.state import Run
 
-        tui._out_event = asyncio.Event()
         tui.run = Run("r1", tui.now(), glyphs=tui.caps.glyphs)
         tui.run.feed({"type": "agent_start", "message_id": "m1", "agent": {"id": "echo", "name": "Echo"}}, tui.now())
         tui.run.feed({"type": "agent_done", "message_id": "m1", "text": PONG}, tui.now())
         await tui._end_run("completed")
-        said = "".join(tui._out)
+        said = "\n".join("".join(part[1] for part in row) for row in tui._transcript_rows())
         assert "Write files" in said and "/permissions" in said
     session(go, SettingsClient())
 

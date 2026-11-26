@@ -1,5 +1,12 @@
 # Echo terminal UI: design spec (from Claude Code, Codex CLI and Hermes)
 
+The current TUI uses a full-height alternate-screen viewport with a scrollable app-owned transcript
+and a bottom composer. Sessions shares that viewport and animates the same Echo face.
+Older implementation sections below describe the prior inline terminal and its resize experiments.
+See the [terminal guide](../../apps/terminal/README.md) for current keys, terminal behavior and the
+shared deletion endpoint's storage and retention rules.
+
+
 Status: design spec, **implemented** in `apps/terminal/echospeak_cli/tui/` (14 November 2026; merged in 11.14.0).
 §5 records what was built, what was verified and what is left. §6 (16 November 2026, branch `tui-responsive`)
 makes the live region and scrollback fit any terminal size and fixes leftover rules after a resize.

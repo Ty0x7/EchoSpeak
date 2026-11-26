@@ -1137,6 +1137,7 @@ class Config:
         # that broader scope is the owner's explicit choice. off stores nothing.
         self.companion_memory_scope = os.getenv("COMPANION_MEMORY_SCOPE", "project_only").strip() or "project_only"
         self.companion_voice = os.getenv("COMPANION_VOICE", "").strip()  # blank: Echo's voice
+        self.companion_auto_hide = os.getenv("COMPANION_AUTO_HIDE", "true").lower() == "true"
         self.companion_position = os.getenv("COMPANION_POSITION", "top-right").strip() or "top-right"
         self.companion_animation = os.getenv("COMPANION_ANIMATION", "full").strip() or "full"  # full|reduced
         self.companion_observe_echo = os.getenv("COMPANION_OBSERVE_ECHO", "true").lower() == "true"  # Echo and its agents
@@ -1710,6 +1711,7 @@ class Config:
             "companion_knowledge",
             "companion_memory_scope",
             "companion_voice",
+            "companion_auto_hide",
             "companion_position",
             "companion_animation",
             "companion_observe_echo",

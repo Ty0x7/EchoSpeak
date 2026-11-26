@@ -488,6 +488,17 @@ export const Dashboard: React.FC<{
       const data = await resp.json();
       const items = Array.isArray(data) ? data : [];
       const selectedId = activeThreadIdRef.current || localStorage.getItem("echospeak.active_thread_id") || "";
+      if (selectedId && !deletedThreadIdsRef.current.has(selectedId)
+          && !items.some((row: any) => String(row.thread_id || row.id || "") === selectedId)) {
+        // A pinned tab may be older than the list limit. Verify it before clearing its selection.
+        const current = await fetchWithTimeout(`${apiBase}/threads/${encodeURIComponent(selectedId)}`, undefined, 5000);
+        if (current.ok) items.push(await current.json());
+        else if (current.status === 404) {
+          sessionProjectionRef.current.delete(selectedId);
+          deletedThreadIdsRef.current.add(selectedId);
+        } else return false;
+      }
+      if (activeThreadIdRef.current && activeThreadIdRef.current !== selectedId) return false;
       const mapped = items.map((item: any) => ({
         id: String(item.thread_id || item.id || ""),
         name: String(item.title || item.name || "Session"),
@@ -668,16 +679,21 @@ export const Dashboard: React.FC<{
     const deleted = threads.find((t) => t.id === id);
     try {
       const response = await fetch(`${apiBase}/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
-      if (!response.ok) throw new Error(`Delete Session failed (${response.status})`);
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(typeof body.detail === "string" ? body.detail : `Delete Session failed (${response.status})`);
+      }
     } catch (e2) {
       // Not deleted: keep it in the list instead of hiding a Session that still exists.
-      console.error("Failed to delete thread:", e2);
+      window.alert(e2 instanceof Error ? e2.message : "Could not delete the conversation.");
       return;
     }
     deletedThreadIdsRef.current.add(id);
     sessionProjectionRef.current.delete(id);
     setThreads((prev) => prev.filter((t) => t.id !== id));
-    if (!wasOpen) return;
+    setOverviewRows(prev => prev?.filter(row => row.thread_id !== id) ?? null);
+    if (roomThreadIds.has(id)) void refreshRoster();
+    if (!wasOpen || activeThreadIdRef.current !== id) return;
     cancelSessionTurn(id);
     // Stay in the same environment: its most recent Session (Code: in the same project), or its new-chat screen.
     const next = threads
@@ -1708,7 +1724,11 @@ export const Dashboard: React.FC<{
       if (alive) setApprovalMode(mode);
     };
     void refreshApprovalMode();
-    const onFocus = () => void refreshApprovalMode();
+    const onFocus = () => {
+      void refreshApprovalMode();
+      void refreshThreads();
+      void refreshRoster();
+    };
     window.addEventListener("focus", onFocus);
     return () => { alive = false; window.removeEventListener("focus", onFocus); };
   }, [apiBase]);
@@ -1718,7 +1738,7 @@ export const Dashboard: React.FC<{
     if (assistantMode !== "unified") return;
     let alive = true;
     const load = () => loadOverview(apiBase, fetchWithTimeout)
-      .then(rows => { if (alive) setOverviewRows(rows); })
+      .then(rows => { if (alive) setOverviewRows(rows?.filter(row => !deletedThreadIdsRef.current.has(row.thread_id)) ?? null); })
       .catch(() => { /* keep the last list; the next refresh tries again */ });
     const soon = window.setTimeout(load, 250);
     const every = window.setInterval(load, 15000);   // a terminal or a routine may have changed something
@@ -2152,24 +2172,7 @@ export const Dashboard: React.FC<{
                 activeThreadId={activeThreadId}
                 onOpen={openRoom}
                 onNew={() => setRoomDialog({ open: true, room: null })}
-                onDelete={async (room) => {
-                  try {
-                    await leanClient.deleteRoom(room.id);
-                  } catch (error) {
-                    console.warn("Delete room failed", error);
-                    return;
-                  }
-                  deletedThreadIdsRef.current.add(room.thread_id);
-                  setThreads((prev) => prev.filter((t) => t.id !== room.thread_id));
-                  if (activeThreadIdRef.current === room.thread_id) {
-                    activeThreadIdRef.current = "";
-                    setActiveThreadId("");
-                    useAppStore.setState({ messages: [] });
-                    setActivities([]);
-                  }
-                  await refreshRoster();
-                  await refreshThreads();
-                }}
+                onDelete={room => void deleteThread(room.thread_id)}
               />
             ) : mainPage === "projects" ? (
               workspaceProjectId ? <ProjectWorkspace key={workspaceProjectId} apiBase={apiBase} projectId={workspaceProjectId}

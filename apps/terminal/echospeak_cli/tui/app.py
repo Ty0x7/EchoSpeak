@@ -1,10 +1,4 @@
-"""Echo TUI: the interactive terminal (prompt_toolkit live region + rich scrollback), spec §3.
-
-Inline, never the alternate screen. Finished output goes into real terminal scrollback; only a small
-live region at the bottom (stream tail, running steps, status, pending input, menu or dialog,
-composer, footer) is redrawn. Backend calls run in worker threads; the app object is only touched
-from the event loop.
-"""
+"""Echo's full-screen interactive terminal. The transcript belongs to the application viewport."""
 from __future__ import annotations
 
 import asyncio
@@ -38,7 +32,6 @@ from prompt_toolkit.layout import (ConditionalContainer, D, FormattedTextControl
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.layout.processors import Processor, Transformation, TransformationInput
 from prompt_toolkit.output.color_depth import ColorDepth
-from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import SearchToolbar
 
@@ -51,6 +44,7 @@ from . import blocks as B
 from . import diffview as DV
 from . import layout as L
 from . import motion as M
+from . import sessionpage
 from .commands import COMMANDS, KEYS_HELP, SHORTCUTS, filter_commands, lookup, visible
 from .dialog import Action, Dialog, Option, approval_options, question_options
 from .sessions import SessionBrowser, from_thread, plain_recap  # noqa: F401 (plain_recap: re-exported)
@@ -59,7 +53,7 @@ from .theme import Caps
 
 VERSION_FALLBACK = ""
 PASTE_CHARS = 1000
-PROMPT_W = 3            # "›  ": the composer's prompt column (the scrollback user line uses the same)
+PROMPT_W = 3            # "›  ": the composer's prompt column (the transcript user line uses the same)
 PASTE_LINES = 12
 CHIP_RE = re.compile(r"\[Pasted [\d,]+ chars · \d+ lines #(\d+)\]")
 # Approval with a diff (edit-preview.md §3.3): two columns from this width (and height), else stacked.
@@ -270,14 +264,16 @@ class EchoTUI:
         # choose one. --continue (or `echospeak resume`) picks up where you left off.
         self.start_continue = continue_last
         self.last_here: Optional[dict] = None   # the latest conversation in this folder's project, offered on ←
-        # The welcome banner while Echo's entrance plays in the live region; then it is printed to scrollback.
         self.welcome: Optional[B.Banner] = None
-        self.welcome_t0 = 0.0
-        self._after_flush: list[Callable[[], None]] = []
-        self._committing_welcome = False
-        self._welcome_sent = False      # committed once (printed or queued); the live copy waits for the flush
+        self.welcome_t0: Optional[float] = None
         self._welcome_cache: Optional[tuple] = None
-        self._last_block: type = type(None)
+        self._screen_blocks: list[tuple[B.Block, bool]] = []
+        self._screen_rows: list[StyleAndTextTuples] = []
+        self._screen_width = 0
+        self._screen_rendered = 0
+        self._scroll = 0
+        self._resetting = False
+        self._sessions_refreshed_at = 0.0
         self.version = endpoint.version or VERSION_FALLBACK
         self.data_dir = ""
         # backend-derived state
@@ -328,16 +324,10 @@ class EchoTUI:
         self.prompted: set[str] = set()
         self.exit_note = ""
         self._held_base = 0
-        self._out: list[str] = []
-        self._tail = "\n\n"
-        self._out_event: Optional[asyncio.Event] = None
-        self._fit = L.LiveRegionFit()            # where the live region sits (_fit_live_region)
-        self._committed = L.CommittedRows()      # the last committed screen rows, to draw back over
         self._events: Optional[asyncio.Queue] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._plan_cache: Optional[tuple[tuple[int, int], dict[str, int]]] = None
         self._tail_cache: Optional[tuple[tuple[str, int], list]] = None   # the tail redraws ~20×/s
-        self.reflows = L.terminal_reflows(env)   # does the terminal re-wrap lines on resize?
         self.app = self._build_app()
 
     # ── small helpers ────────────────────────────────────────────────
@@ -374,32 +364,63 @@ class EchoTUI:
     _PROSE = (B.MarkdownBlock, B.Note, B.ThinkingLine, B.UserLine, B.Outcome, B.AgentHeader, B.TaskBoard)
 
     def emit(self, *blocks: B.Block, transcript: bool = True) -> None:
-        if self.welcome is not None and not self._welcome_sent and not self._committing_welcome:
-            self._commit_welcome()   # nothing may be printed above the banner
-        width = self.width()
-        prose = L.measure(width, self.env)
-        for b in blocks:
-            if b is None:
+        self._commit_welcome()
+        for block in blocks:
+            if block is None:
                 continue
-            text = B.render(b, prose if isinstance(b, self._PROSE) else width, self.caps, verbose=self.verbose)
-            if isinstance(b, (B.UserLine, B.Outcome)) or (isinstance(b, B.AgentHeader)):
-                # One blank line before a new turn or a header, never two.
-                text = ("" if self._tail.endswith("\n\n") else "\n") + text.lstrip("\n")
-            elif isinstance(b, B.MarkdownBlock) and self._last_block in (B.ToolLine, B.FileDiff, B.Note, B.ThinkingLine):
-                # What the agent says after its steps is a new paragraph, apart from the step lines.
-                text = ("" if self._tail.endswith("\n\n") else "\n") + text.lstrip("\n")
-            self._last_block = type(b)
-            if transcript and not isinstance(b, B.ToolLine):
-                self.transcript.append(b)
-            if text:
-                self._out.append(text)
-                self._tail = (self._tail + text)[-2:]
-        if self._out_event is not None:
-            self._out_event.set()
-        elif self._out:
-            sys.stdout.write("".join(self._out))
-            sys.stdout.flush()
-            self._out.clear()
+            self._screen_blocks.append((block, self.verbose))
+            if transcript and not isinstance(block, B.ToolLine):
+                self.transcript.append(block)
+        self.app.invalidate()
+
+    @staticmethod
+    def _ansi_lines(text: str) -> list[StyleAndTextTuples]:
+        lines: list[StyleAndTextTuples] = [[]]
+        for style, chunk, *_ in to_formatted_text(ANSI(text)):
+            for i, part in enumerate(chunk.split("\n")):
+                if i:
+                    lines.append([])
+                if part:
+                    lines[-1].append((style, part))
+        return lines
+
+    def _transcript_rows(self) -> list[StyleAndTextTuples]:
+        width = self.width()
+        if width != self._screen_width:
+            self._screen_width = width
+            self._screen_rendered = 0
+            self._screen_rows = []
+        prose = L.measure(width, self.env)
+        for index in range(self._screen_rendered, len(self._screen_blocks)):
+            block, verbose = self._screen_blocks[index]
+            previous = self._screen_blocks[index - 1][0] if index else None
+            text = B.render(block, prose if isinstance(block, self._PROSE) else width, self.caps, verbose=verbose)
+            if not text:
+                continue
+            separate = isinstance(block, (B.UserLine, B.Outcome, B.AgentHeader)) or (
+                isinstance(block, B.MarkdownBlock) and isinstance(previous, (B.ToolLine, B.FileDiff, B.Note, B.ThinkingLine))
+            )
+            if separate:
+                text = text.lstrip("\n")
+                if self._screen_rows and self._screen_rows[-1]:
+                    self._screen_rows.append([])
+            self._screen_rows.extend(self._ansi_lines(text.removesuffix("\n")))
+        self._screen_rendered = len(self._screen_blocks)
+        return self._screen_rows
+
+    def _conversation_height(self) -> int:
+        return max(0, self.height() - sum(self._plan().values()))
+
+    def _conversation_text(self) -> StyleAndTextTuples:
+        room = self._conversation_height()
+        if self.welcome is not None:
+            if self.welcome_t0 is None:
+                self.welcome_t0 = self.now()
+            return self._join(self._welcome_lines()[:room])
+        rows = self._transcript_rows()
+        self._scroll = min(self._scroll, max(0, len(rows) - room))
+        end = len(rows) - self._scroll
+        return self._join(rows[max(0, end - room):end])
 
     def note(self, text: str, style: str = "dim", glyph: str = "") -> None:
         self.emit(B.Note(glyph, text, style, 2))
@@ -431,7 +452,9 @@ class EchoTUI:
                                     width=lambda: D.exact(self._left_w()) if self._two_col() else D())
         self.diff_window = Window(FormattedTextControl(self._diff_pane_text), dont_extend_height=True, wrap_lines=False)
         self.browser_window = Window(FormattedTextControl(self._browser_text, focusable=True, show_cursor=False),
-                                     dont_extend_height=True, wrap_lines=False)
+                                     height=lambda: D.exact(self._rows("sessions")), wrap_lines=False)
+        self.session_page_window = Window(FormattedTextControl(self._session_page_text, focusable=True, show_cursor=False),
+                                          wrap_lines=False)
         self.dialog_text_window = Window(BufferControl(self.dialog_buffer), height=1,
                                          get_line_prefix=lambda _l, _w: [("class:attention", f" {self._dialog_prompt()} ")])
 
@@ -456,13 +479,11 @@ class EchoTUI:
             ConditionalContainer(self.dialog_text_window, filter=text_mode),
             Window(FormattedTextControl(self._dialog_footer), dont_extend_height=True),
         ])
+        page_open = browser_open & Condition(lambda: self.browser.mode == "page")
         root = HSplit([
-            # Echo's entrance: the banner at the top of the live region, the row it is printed to afterwards.
-            ConditionalContainer(Window(FormattedTextControl(self._welcome_text), dont_extend_height=True),
-                                 filter=Condition(lambda: self.welcome is not None) & shown("welcome")),
-            # Grow above the live conversation, keeping the composer at the terminal's bottom.
-            # Preferred height stays zero: inline output and terminal scrollback still work.
-            Window(height=D(min=0, preferred=0, weight=1)),
+            ConditionalContainer(Window(FormattedTextControl(self._conversation_text), wrap_lines=False,
+                                        height=lambda: D.exact(self._conversation_height())),
+                                 Condition(lambda: self._conversation_height() > 0)),
             ConditionalContainer(Window(FormattedTextControl(self._tail_text), dont_extend_height=True),
                                  filter=shown("tail")),
             ConditionalContainer(Window(FormattedTextControl(self._steps_text), dont_extend_height=True),
@@ -481,157 +502,19 @@ class EchoTUI:
             ConditionalContainer(Window(FormattedTextControl(self._footer_text), dont_extend_height=True),
                                  filter=shown("footer")),
         ])
+        root = HSplit([ConditionalContainer(root, ~page_open),
+                       ConditionalContainer(self.session_page_window, page_open)])
         kb = self._key_bindings(dialog_open, text_mode, is_running, browser_open)
         color_depth = None if self.caps.color else ColorDepth.DEPTH_1_BIT
         app = Application(layout=Layout(root, focused_element=self.composer_window),
                           key_bindings=merge_key_bindings([load_key_bindings(), kb]),
-                          style=Style.from_dict(self._style()), full_screen=False, mouse_support=False,
+                          style=Style.from_dict(self._style()), full_screen=True, mouse_support=False,
                           erase_when_done=True, color_depth=color_depth, include_default_pygments_style=False)
         app.ttimeoutlen = 0.05
         app.timeoutlen = 0.08
         app.before_render += lambda _a: self._forget_plan()
         app.after_render += lambda _a: self._forget_plan()
-        self._fit_live_region(app)
-        self._reflow_on_resize(app)
         return app
-
-    def _fit_live_region(self, app: Application) -> None:
-        """Size the live region from the top down, and keep the composer at the bottom once it gets there.
-
-        A conversation with free rows below it grows downward: the region is as tall as its content,
-        so a new answer streams right under the question and stays where it was drawn when it is
-        committed. Once the region reaches the terminal's bottom row, it keeps every row down to the
-        bottom, so the composer stays there when something shrinks. Row zero stays reserved for the
-        inline resize/scrollback rule (layout.budget).
-
-        A region already at the bottom that grows for something passing (the slash menu, the
-        shortcuts) borrows the rows above it instead of scrolling the terminal: it is drawn
-        over the last committed lines, which are written back from ``_committed`` when it shrinks
-        again or before the next output is printed. Nothing scrolls, so closing the menu leaves no
-        blank rows above or below the composer. When those lines aren't known exactly (a resize,
-        a line wider than the terminal), the region grows and scrolls as before.
-
-        prompt_toolkit only knows the rows below the region from a cursor-position report, forgets
-        them on every erase, and never learns that a taller render scrolled the terminal; ``_fit``
-        tracks them here (layout.LiveRegionFit).
-        """
-        renderer = app.renderer
-        original = renderer.report_absolute_cursor_row
-        fit = self._fit
-
-        def report(row: int) -> None:
-            original(row)
-            fit.reported(renderer._min_available_height)
-            last = renderer._last_screen
-            renderer._min_available_height = max(1, fit.floor(last.height if last else 0,
-                                                              L.budget(app.output.get_size().rows)))
-
-        renderer.report_absolute_cursor_row = report
-        request = renderer.request_absolute_cursor_position
-
-        def request_position() -> None:
-            fit.stale()   # the region is about to be drawn somewhere new; wait for its report
-            request()
-
-        renderer.request_absolute_cursor_position = request_position
-
-        def before_render(_app) -> None:
-            last = renderer._last_screen
-            if last is None or not fit.known:
-                return
-            size = app.output.get_size()
-            budget = L.budget(size.rows)
-            preferred = min(budget, app.layout.container.preferred_height(size.columns, size.rows).preferred)
-            floor = fit.floor(last.height, budget)
-            out = app.output
-            if floor and preferred > fit.below and self._overlay_open():
-                extra = preferred - fit.below
-                if size.rows - fit.below - extra >= 1 and self._committed.last(fit.borrowed + extra) is not None:
-                    renderer.erase(leave_alternate_screen=False)   # cursor at the region's top, renderer reset
-                    out.cursor_up(extra)
-                    out.flush()
-                    fit.borrow(extra)
-            elif fit.borrowed and preferred < fit.below:
-                give = min(fit.borrowed, fit.below - preferred)
-                renderer.erase(leave_alternate_screen=False)
-                out.write_raw(self._committed.restore(self._committed.last(fit.borrowed)[:give]))
-                out.flush()
-                fit.give_back(give)
-            want = min(budget, max(preferred, fit.floor(last.height, budget)))
-            if renderer._last_screen is not None and want < renderer._last_screen.height:
-                renderer.erase(leave_alternate_screen=False)   # resets the renderer, keeping the region's top
-            renderer._min_available_height = max(1, want)
-
-        def after_render(_app) -> None:
-            last = renderer._last_screen
-            if last is not None and fit.known:
-                fit.rendered(last.height)
-
-        app.before_render += before_render
-        app.after_render += after_render
-
-    def _overlay_open(self) -> bool:
-        """The slash menu or the shortcuts are open: passing lists that may draw over committed rows.
-
-        Dialogs (an approval, a question) and the session browser are not: the conversation right
-        above an approval is what it is about, so those still push the conversation up.
-        """
-        return self.dialog is None and self.browser is None and (self._rows("menu") > 0 or self._rows("shortcuts") > 0)
-
-    def _reflow_on_resize(self, app: Application) -> None:
-        """Erase the old live region correctly when the terminal narrows (layout.reflowed_rows_above).
-
-        prompt_toolkit erases by moving up the number of rows it drew. A terminal that re-wraps lines
-        on resize has turned each full-width rule into two or more rows by then, so that erase stops
-        short and leaves copies of the rules above the new region. Count the rows the old region takes
-        at the new width instead, and erase from there. Widening (or a terminal that only crops) keeps
-        prompt_toolkit's own erase.
-        """
-        renderer = app.renderer
-        if self.env.get("TMUX") or str(self.env.get("TERM", "")).startswith(("tmux", "screen")):
-            # tmux treats erase-to-bottom at the top-left as a screen clear and archives it.
-            # A bottom-anchored region can reach that row after a height shrink. Clear each
-            # physical line instead, preserving the cursor and the real conversation history.
-            output = app.output
-
-            def erase_lines() -> None:
-                rows = max(1, output.get_size().rows)
-                output.write_raw("\x1b7\x1b[0K" + "\x1b[1B\r\x1b[0K" * (rows - 1) + "\x1b8")
-
-            output.erase_down = erase_lines
-
-        def on_resize() -> None:
-            # The terminal re-wraps what is on screen: rows drawn over can't be written back exactly.
-            self._fit.borrowed = 0
-            self._committed.reset()
-            last = renderer._last_screen
-            old = renderer._last_size
-            new = app.output.get_size()
-            if self.reflows and last is not None and old is not None and new.columns < old.columns:
-                lengths = []
-                styled = renderer._style_string_has_style   # what prompt_toolkit counts as written
-                for y in range(last.height):
-                    row = last.data_buffer[y]
-                    used = [x for x, ch in row.items()
-                            if ch.char != " " or (styled[ch.style] if styled is not None else bool(ch.style.strip()))]
-                    lengths.append(min(old.columns, max(used) + 1) if used else 0)
-                pos = renderer._cursor_pos
-                up = L.reflowed_rows_above(lengths, pos.y, pos.x, new.columns)
-                out = app.output
-                out.write_raw("\r")
-                out.cursor_up(up)
-                out.erase_down()
-                out.reset_attributes()
-                out.enable_autowrap()
-                out.flush()
-                renderer.reset(leave_alternate_screen=False)
-            else:
-                renderer.erase(leave_alternate_screen=False)
-            self._forget_plan()
-            app._request_absolute_cursor_position()
-            app._redraw()
-
-        app._on_resize = on_resize   # used by both the SIGWINCH handler and the size poll
 
     def _style(self) -> dict:
         from .theme import pt_style_dict
@@ -661,9 +544,6 @@ class EchoTUI:
         if self._plan_cache is not None and self._plan_cache[0] == (w, h):
             return self._plan_cache[1]
         wants: list[L.Want] = []
-        if self.welcome is not None:
-            n = len(self._welcome_lines())
-            wants.append(L.Want("welcome", n, n, 6))   # gives way before the composer, the rules and the footer
         run = self.run
         if run is not None:
             tail = len(self._tail_all())
@@ -1223,6 +1103,8 @@ class EchoTUI:
         @kb.add("right", filter=browsing)
         @kb.add("left", filter=browsing)
         @kb.add("backspace", filter=browsing)
+        @kb.add("delete", filter=browsing)
+        @kb.add("c-d", filter=browsing)
         @kb.add("c-n", filter=browsing)
         @kb.add("escape", filter=browsing, eager=True)
         def _sessions_keys(event) -> None:
@@ -1231,8 +1113,16 @@ class EchoTUI:
         @kb.add(Keys.Any, filter=browsing)
         def _sessions_char(event) -> None:
             if self.browser is not None and event.data and event.data.isprintable():
-                self.browser.type(event.data)
+                if not self.browser.confirm_delete and not self.browser.deleting:
+                    self.browser.type(event.data)
                 self.app.invalidate()
+
+        @kb.add("pageup", filter=composer)
+        @kb.add("pagedown", filter=composer)
+        def _scroll_conversation(event) -> None:
+            room = max(1, self._conversation_height() - 1)
+            direction = 1 if event.key_sequence[0].key == Keys.PageUp else -1
+            self._scroll = max(0, self._scroll + direction * room)
 
         @kb.add("enter", filter=composer)
         def _enter(event) -> None:
@@ -1306,7 +1196,10 @@ class EchoTUI:
                 self._close_dialog(Action("cancel", self.dialog.escape_value if self.dialog.kind != "approval" else None))
                 return
             if self.browser is not None:
-                self.close_sessions()
+                if self.browser.confirm_delete:
+                    self.browser.confirm_delete = None
+                else:
+                    self.close_sessions()
                 return
             if self.running:
                 if twice:
@@ -1500,6 +1393,7 @@ class EchoTUI:
         browser = self.browser
         if browser is None:
             return
+        self._sessions_refreshed_at = self.now()
         try:
             try:
                 rows = (await self.call(self.client.get, "/sessions/overview", limit=200) or {}).get("items") or []
@@ -1513,8 +1407,9 @@ class EchoTUI:
                 browser.loading, browser.error = False, f"could not load conversations: {one_line(str(exc), 120)}"
                 self.app.invalidate()
             return
-        if self.browser is browser:
+        if self.browser is browser and not browser.deleting and browser.confirm_delete is None:
             browser.load(rows)
+            self._forget_plan()
             self.app.invalidate()
 
     def _browser_text(self) -> StyleAndTextTuples:
@@ -1522,13 +1417,29 @@ class EchoTUI:
             return []
         return self._join(self.browser.lines(self.width(), max(1, self._rows("sessions")), self.caps))
 
+    def _session_page_text(self) -> StyleAndTextTuples:
+        if self.browser is None:
+            return []
+        elapsed = (self.now() - self.browser.opened_at) * 1000
+        return self._join(sessionpage.render(self.browser, self.width(), self.height(), self.caps, elapsed=elapsed))
+
     def _browser_key(self, key) -> None:
         browser = self.browser
-        if browser is None:
+        if browser is None or browser.deleting:
             return
-        page = max(1, self._rows("sessions") - 6)
+        if browser.confirm_delete is not None:
+            if key == Keys.Escape:
+                browser.confirm_delete = None
+            elif key in {Keys.Enter, Keys.ControlM}:
+                browser.deleting = True
+                self._spawn(self._delete_session(browser))
+            self.app.invalidate()
+            return
         on_page = browser.mode == "page"
+        page = max(1, self.height() - sessionpage.HEAD - sessionpage.FOOT - 2 if on_page else self._rows("sessions") - 6)
         move = browser.move_page if on_page else browser.move
+        if key in {Keys.Up, Keys.Down, Keys.PageUp, Keys.PageDown, Keys.Home, Keys.End, Keys.Tab, Keys.BackTab}:
+            browser.editing = False
         if key == Keys.Up:
             move(-1)
         elif key == Keys.Down:
@@ -1545,76 +1456,60 @@ class EchoTUI:
             browser.cycle_scope(1)
         elif key == Keys.BackTab:
             browser.cycle_scope(-1)
-        elif key == Keys.Backspace:
-            browser.backspace()
-        elif key == Keys.Left:
-            # ← again: the full-screen session browser (tui/sessionpage.py), on the alternate screen.
-            self._spawn(self._open_page())
-            return
-        elif key == Keys.Escape:
-            # Esc clears a search first, then goes back one level: page → picker → your conversation.
-            if not browser.clear_query():
+        elif key in {Keys.Backspace, Keys.Delete}:
+            if browser.editing and browser.query:
+                if key == Keys.Backspace:
+                    browser.backspace()
+            else:
+                browser.error = ""
+                browser.confirm_delete = browser.chosen()
+        elif key == Keys.Left and not on_page:
+            browser.mode = "page"
+            browser.opened_at = self.now()
+            self.app.layout.focus(self.session_page_window)
+        elif key in {Keys.Escape, Keys.Right}:
+            if key != Keys.Escape or not browser.clear_query():
                 if on_page:
                     browser.mode = "picker"
+                    self.app.layout.focus(self.browser_window)
                 else:
                     self.close_sessions()
-                    return
-        elif key == Keys.Right:
-            if on_page:
-                browser.mode = "picker"
-            else:
-                self.close_sessions()
-                return
+        elif key == Keys.ControlD:
+            self.close_sessions()
         elif key == Keys.ControlN:
             self.close_sessions()
             self._spawn(self.cmd_new([]))
-            return
         elif key in {Keys.Enter, Keys.ControlM}:
             row = browser.chosen()
-            if row is None:
-                return
-            self.close_sessions()
-            if row.get("thread_id") == self.sid:
-                self.say_notice("you are already in this conversation")
-            else:
-                self._spawn(self._resume_row(row))
-            return
-        self._forget_plan()    # the page and the picker want different heights
-        self.app.invalidate()
-
-    async def _open_page(self) -> None:
-        """The full-screen browser in place of the picker; back returns to the picker as it was."""
-        browser = self.browser
-        if browser is None or self.dialog is not None:
-            return
-        from . import sessionpage
-
-        self.browser = None            # the picker steps aside while the page has the screen
-        self._forget_plan()
-        try:
-            async with in_terminal():
-                action, row = await sessionpage.run(browser, self.caps, self.app.style)
-        except Exception:  # noqa: BLE001 - never lose the conversation over the browser
-            action, row = "back", None
-        browser.mode = "picker"
-        if action == "back" and self.dialog is None:
-            self.browser = browser
-            try:
-                self.app.layout.focus(self.browser_window)
-            except ValueError:
-                pass
-        else:
-            try:
-                self.app.layout.focus(self.composer_window)
-            except ValueError:
-                pass
-            if action == "resume" and row is not None:
+            if row is not None:
+                self.close_sessions()
                 if row.get("thread_id") == self.sid:
                     self.say_notice("you are already in this conversation")
                 else:
-                    await self._resume_row(row)
-            elif action == "new":
-                await self.cmd_new([])
+                    self._spawn(self._resume_row(row))
+        self._forget_plan()
+        self.app.invalidate()
+
+    async def _delete_session(self, browser: SessionBrowser) -> None:
+        thread_id = str((browser.confirm_delete or {}).get("thread_id") or "")
+        try:
+            await self.call(self.client.delete_thread, thread_id)
+        except (ApiError, ConnectError) as exc:
+            if not isinstance(exc, ApiError) or exc.status != 404:
+                browser.error = one_line(str(exc), 160)
+                return
+        finally:
+            browser.deleting = False
+            browser.confirm_delete = None
+            self.app.invalidate()
+        browser.remove(thread_id)
+        if str((self.last_here or {}).get("thread_id") or "") == thread_id:
+            self.last_here = None
+        if self.sid == thread_id:
+            # A completed stream can still be attached in this client for a moment.
+            if self.run is not None:
+                self._detach()
+            await self._fresh_view(None)
         self._forget_plan()
         self.app.invalidate()
 
@@ -1700,8 +1595,9 @@ class EchoTUI:
 
     def _submit(self) -> None:
         raw = self.buffer.text
-        if not raw.strip():
+        if self._resetting or not raw.strip():
             return
+        self._scroll = 0
         if raw.startswith("/") and not raw.startswith("//"):
             self.buffer.append_to_history()
             self.buffer.reset()
@@ -1768,7 +1664,7 @@ class EchoTUI:
         if self.running:
             await self._steer(text)
             return
-        # Paste chips stay chips in scrollback; the backend gets the full text.
+        # Paste chips stay chips in the transcript; the backend gets the full text.
         self.emit(B.UserLine(display or text, queued=queued))
         try:
             sid = await self.call(self.core.ensure_session, CHIP_RE.sub("(pasted text)", display) if display else text)
@@ -2237,8 +2133,9 @@ class EchoTUI:
         if handler is None:
             self.note(f"unknown command {one_line(name, 40)}")
             return
-        # Echo the command into scrollback (as Claude Code does), so its output never looks spontaneous.
-        self.emit(B.UserLine(text))
+        # A command's results should have the command beside them in the transcript.
+        if cmd is None or cmd.name != "/clear":
+            self.emit(B.UserLine(text))
         try:
             await handler(args)
         except (ApiError, ConnectError, LookupError) as exc:
@@ -2282,15 +2179,45 @@ class EchoTUI:
             self.project_name = await self._project_name(home)
             self.note(f"project {self.project_name} · this folder's project, for the new session")
 
-    async def cmd_clear(self, args) -> None:
-        self.core.session = None
+    def _reset_session_context(self) -> None:
         self.context = None
-        await self._back_to_home_project()
-        self._out.append("\x1b[2J\x1b[H")
-        if self._out_event:
-            self._out_event.set()
-        await asyncio.sleep(0.06)
-        self.emit(self._banner())
+        self.session_tokens = {"prompt": 0, "completion": 0, "runs": 0}
+        self.changes.clear()
+        self._diff_cache.clear()
+        self.last_answer = ""
+        self.pending.clear()
+        self.held = 0
+        self.prompted.clear()
+
+    async def _fresh_view(self, session: Optional[dict]) -> None:
+        self.core.session = session
+        self._reset_session_context()
+        self.transcript.clear()
+        self._screen_blocks.clear()
+        self._screen_rows.clear()
+        self._screen_rendered = self._scroll = 0
+        self.chips.clear()
+        self.notice = ("", 0.0)
+        self.buffer.reset()
+        self.typed = False
+        self.start_ms = self.now() * 1000
+        await self._refresh_model()
+        self.welcome, self.welcome_t0 = self._banner(), None
+        self._forget_plan()
+        self.app.invalidate()
+
+    async def cmd_clear(self, args) -> None:
+        if self._resetting:
+            return
+        self._resetting = True
+        try:
+            home = await self._home_project()
+            session = await self.call(self.core.create_session, "New Session", project_id=home)
+            self.core.project_id = home
+            self.project_name = await self._project_name(home)
+            await self._fresh_view(session)
+        finally:
+            self._resetting = False
 
     async def cmd_new(self, args) -> None:
         if "--agent" in args and args.index("--agent") + 1 < len(args):
@@ -2358,9 +2285,8 @@ class EchoTUI:
             self.note("nothing to copy yet")
             return
         payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
-        self._out.append(f"\x1b]52;c;{payload}\x07")
-        if self._out_event:
-            self._out_event.set()
+        self.app.output.write_raw(f"\x1b]52;c;{payload}\x07")
+        self.app.output.flush()
         self.note(f"copied the last answer ({len(text):,} chars) · in tmux this needs `set -g set-clipboard on`")
 
     async def cmd_transcript(self, args) -> None:
@@ -3048,12 +2974,8 @@ class EchoTUI:
         self.project_name = await self._project_name(self.core.project_id)
         # What belonged to the conversation you left stays with it: its context meter, its token
         # count, its file changes and its queued follow-ups are not this one's.
-        self.context = None
-        self.session_tokens = {"prompt": 0, "completion": 0, "runs": 0}
-        self.changes = []
-        self.last_answer = ""
-        self.pending = []
-        self.held = 0
+        self._reset_session_context()
+        self._scroll = 0
         await self._sync_agent_from_session(session)
         await self._refresh_model()
         who = f" {self.caps.glyphs.sep} {self.agent_name}" if self.core.agent_id else ""
@@ -3188,87 +3110,28 @@ class EchoTUI:
         self.commands = visible(COMMANDS, self.features)
 
     # ── Echo's entrance (tui/avatar.py) ──────────────────────────────
-    def _animate_welcome(self) -> bool:
-        """The entrance plays only where it can look right; everywhere else the banner is printed at once."""
-        w, h = self.width(), self.height()
-        return (not self.caps.reduced_motion and not self.caps.ascii and w >= L.NARROW and h >= 14
-                and str(self.env.get("TERM", "")) != "dumb")
-
     def _welcome_lines(self) -> list[StyleAndTextTuples]:
         """The banner as it will be printed, with the face at this moment of the entrance."""
         b = self.welcome
         if b is None:
             return []
-        t = (self.now() - self.welcome_t0) * 1000 if self.welcome_t0 else 0.0
-        face = A.frame(t, self.caps.reduced_motion)
+        animate = (not self.caps.ascii and self.width() >= L.NARROW and self.height() >= 14)
+        t = (self.now() - self.welcome_t0) * 1000 if animate and self.welcome_t0 is not None else A.ENTRANCE_MS
+        face = A.terminal_face(self.caps, t)
         key = (face, self.width(), id(b))
         if self._welcome_cache is not None and self._welcome_cache[0] == key:
             return self._welcome_cache[1]
         b.face = face
         text = B.render(b, self.width(), self.caps).rstrip("\n")
         b.face = None
-        frags = to_formatted_text(ANSI(text))
-        lines: list[StyleAndTextTuples] = [[]]
-        for style, chunk, *_ in frags:
-            parts = chunk.split("\n")
-            for i, part in enumerate(parts):
-                if i:
-                    lines.append([])
-                if part:
-                    lines[-1].append((style, part))
+        lines = self._ansi_lines(text)
         self._welcome_cache = (key, lines)
         return lines
 
-    def _welcome_text(self) -> StyleAndTextTuples:
-        if self.welcome is not None and not self.welcome_t0:
-            self.welcome_t0 = self.now()   # the clock starts on the first frame actually drawn
-        rows = self._rows("welcome")
-        return self._join(self._welcome_lines()[:rows]) if rows > 0 else []
-
     def _commit_welcome(self) -> None:
-        """Print the banner (Echo at rest) into scrollback where the entrance played, then drop the live copy.
-
-        The live copy stays until the flusher has written the banner, inside the same terminal hand-off, so
-        there is never a frame without it (no flicker) and never two of it (no duplicate)."""
-        banner = self.welcome
-        if banner is None or self._committing_welcome or self._welcome_sent:
-            return
-        # Once only: several outputs before the flush (a resume prints a rule and its recap at once) each used to
-        # commit it again, and the banner was printed between every one of them.
-        self._welcome_sent = True
-        self._committing_welcome = True
-        try:
-            self.emit(banner)
-        finally:
-            self._committing_welcome = False
-        if self._out_event is None:
+        if self.welcome is not None:
+            self._screen_blocks.append((self.welcome, False))
             self.welcome = None
-            return
-
-        def drop() -> None:
-            if self.welcome is banner:
-                self.welcome = None
-                self._forget_plan()
-
-        self._after_flush.append(drop)
-
-    async def _welcome_runner(self) -> None:
-        """Redraw the entrance at ~30 fps while it plays, then leave Echo at rest in the live region.
-
-        The banner is not committed when the entrance ends: committing hands the terminal back to print it,
-        which erases and redraws the whole live region (the flash at the end of the first entrance). It is
-        committed by the next output (``emit``), or at exit, both of which redraw anyway; or at once if the
-        terminal gets too short to show it.
-        """
-        while self.welcome is not None:
-            elapsed = (self.now() - self.welcome_t0) * 1000 if self.welcome_t0 else 0.0
-            if self.welcome_t0 and self._rows("welcome") <= 0:
-                self._commit_welcome()
-                return
-            playing = not (self.welcome_t0 and A.done(elapsed, self.caps.reduced_motion))
-            if playing:
-                self.app.invalidate()
-            await asyncio.sleep(0.033 if playing else 0.25)
 
     # ── startup ──────────────────────────────────────────────────────
     def _banner(self) -> B.Banner:
@@ -3281,8 +3144,7 @@ class EchoTUI:
                         tagline=self._phrases()[0])
 
     async def _prepare(self) -> Optional[dict]:
-        """Everything the banner needs. Runs before the live region exists, so the banner is printed
-        straight to the terminal and the region starts below it."""
+        """Resolve the startup session and build the first viewport."""
         await self._load_settings()
         await self._probe()
         await self._load_agents()
@@ -3329,10 +3191,7 @@ class EchoTUI:
             banner.last = sep.join([f'Last here: “{one_line(last.get("title") or "(untitled)", 50)}”',
                                     _plural_msgs(last.get("message_count")), _ago(last.get("last_active_at")),
                                     f"{arrow} to pick it up"])
-        if self._animate_welcome():
-            self.welcome = banner   # drawn in the live region while Echo arrives, then printed (_commit_welcome)
-        else:
-            self.emit(banner)
+        self.welcome = banner
         return session
 
     async def _after_start(self) -> None:
@@ -3424,33 +3283,21 @@ class EchoTUI:
         await self._refresh_model()
         self.note(f"model: {action.value} · context {ctx:,} tokens", "bold", self.caps.glyphs.ok)
 
-    # ── output pump and ticker ───────────────────────────────────────
-    async def _flusher(self) -> None:
-        assert self._out_event is not None
-        while True:
-            await self._out_event.wait()
-            await asyncio.sleep(0.05)   # coalesce: at most ~20 flushes a second
-            self._out_event.clear()
-            if not self._out:
-                continue
-            data = "".join(self._out)
-            self._out.clear()
-            async with in_terminal():
-                out = self.app.output
-                if self._fit.borrowed:
-                    # The region was drawn over the last committed lines; put them back first.
-                    out.write_raw(self._committed.restore(self._committed.last(self._fit.borrowed) or []))
-                    self._fit.give_back(self._fit.borrowed)
-                out.write_raw(data)
-                out.flush()
-                self._committed.feed(data, out.get_size().columns)
-                hooks, self._after_flush = self._after_flush, []
-                for hook in hooks:
-                    hook()
-
+    # ── redraw and pager ───────────────────────────────────────────────
     async def _ticker(self) -> None:
         while True:
-            if self.run is not None:
+            if (self.browser and not self.browser.deleting and not self.browser.confirm_delete
+                    and self.now() - self._sessions_refreshed_at >= 15):
+                self._sessions_refreshed_at = self.now()
+                self.app.create_background_task(self._load_sessions())
+            appearing = (self.welcome is not None and self.welcome_t0 is not None
+                         and not A.done((self.now() - self.welcome_t0) * 1000, self.caps.reduced_motion))
+            page_appearing = (self.browser is not None and self.browser.mode == "page"
+                              and not A.done((self.now() - self.browser.opened_at) * 1000, self.caps.reduced_motion))
+            if (appearing or page_appearing) and not self.caps.ascii:
+                interval = 0.033
+                self.app.invalidate()
+            elif self.run is not None:
                 interval = 1.0 if self.caps.reduced_motion else 0.05
                 self.app.invalidate()
             elif not self.typed and not self.caps.reduced_motion and not self.buffer.text and self.dialog is None:
@@ -3482,8 +3329,17 @@ class EchoTUI:
                 if pager:
                     subprocess.call([pager, "-R", "+G", path] if end else [pager, "-R", path])
                 else:
-                    sys.stdout.write(text)
-                    sys.stdout.flush()
+                    from prompt_toolkit.widgets import TextArea
+
+                    area = TextArea(text=re.sub(r"\x1b\[[0-9;]*m", "", text), read_only=True, scrollbar=True)
+                    keys = KeyBindings()
+
+                    @keys.add("escape")
+                    @keys.add("c-c")
+                    def close(event) -> None:
+                        event.app.exit()
+
+                    await Application(layout=Layout(area), key_bindings=keys, full_screen=True).run_async()
         finally:
             try:
                 os.unlink(path)
@@ -3495,27 +3351,15 @@ class EchoTUI:
         self.loop = asyncio.get_running_loop()
         self._events = asyncio.Queue()
         await self._prepare()
-        self._out_event = asyncio.Event()
-
         def pre_run() -> None:
-            # Created inside the running app so get_app() (and in_terminal) find it; prompt_toolkit
-            # cancels them when the app exits.
-            for coro in (self._flusher(), self._ticker(), self._consume(), self._after_start(), self._welcome_runner()):
+            for coro in (self._ticker(), self._consume(), self._after_start()):
                 self.app.create_background_task(coro)
 
         try:
-            with patch_stdout(raw=True):
-                await self.app.run_async(pre_run=pre_run)
+            await self.app.run_async(pre_run=pre_run)
         finally:
             if self.follow_abandon:
                 self.follow_abandon.set()
-        if self.welcome is not None and not self._welcome_sent:
-            # Never printed (nothing else was): the live region is gone now, so the banner goes where it stood.
-            self._out.insert(0, B.render(self.welcome, self.width(), self.caps))
-            self.welcome = None
-        tail = "".join(self._out)
-        if tail:
-            sys.stdout.write(tail)
         if self.running:
             print(f"The task keeps running on the backend · echospeak attach {self.sid[:8]}")
         elif self.sid:

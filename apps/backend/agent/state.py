@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS records (
     PRIMARY KEY (kind, id)
 );
 CREATE INDEX IF NOT EXISTS records_session ON records(kind, session_id, created_at);
+CREATE TABLE IF NOT EXISTS deleted_sessions (id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, body TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS message_search USING fts5(
     text, item_id UNINDEXED, session_id UNINDEXED, turn_id UNINDEXED,
@@ -593,6 +594,7 @@ class StateStore:
         self._saved: dict[str, dict[str, str]] = {kind: {} for kind in _RECORD_KINDS}
         self._events_saved = 0
         self._open_db()
+        self._deleted_sessions = {row[0] for row in self._db.execute("SELECT id FROM deleted_sessions")}
         self._load_all()
         from agent.coordination import Coordinator
         self.coordination = Coordinator(self)
@@ -894,6 +896,12 @@ class StateStore:
     def _load_all(self) -> None:
         imported = self._meta("imported_json") == "1"
         raw = self._db_raw() if imported else self._json_raw()
+        if self._deleted_sessions:
+            for kind in _RECORD_KINDS:
+                raw[kind] = {key: value for key, value in raw[kind].items()
+                             if value.get("session_id") not in self._deleted_sessions
+                             and value.get("thread_id") not in self._deleted_sessions}
+            raw["events"] = [value for value in raw["events"] if value.get("session_id") not in self._deleted_sessions]
         source = self.db_path if imported else None
         approvals_raw = raw["approvals"]
         for approval_id, data in approvals_raw.items():
@@ -1036,6 +1044,7 @@ class StateStore:
                            session_id=session_id or "default", project_id=project_id,
                            tool_run_id=tool_run_id, model_id=model_id)
         with self._lock:
+            self._require_live_session(session_id)
             if item_id:
                 existing = self._items.get(item_id)
                 if existing:
@@ -1089,6 +1098,7 @@ class StateStore:
                         requirement_id: str = "", attempt_id: str = "") -> ToolRunRecord:
         rid = str(run_id or "").strip() or str(uuid.uuid4())
         with self._lock:
+            self._require_live_session(session_id)
             existing = self._tool_runs.get(rid)
             if existing is not None:
                 # Never re-open a terminal ToolRun (trailing start after end).
@@ -1632,19 +1642,60 @@ class StateStore:
             "count": len(turns),
         }
 
+    def session_deleted(self, session_id: str) -> bool:
+        with self._lock:
+            return session_id in self._deleted_sessions
+
+    def _require_live_session(self, session_id: str) -> None:
+        if session_id in self._deleted_sessions:
+            raise KeyError("Conversation was deleted")
+
+    def delete_session(self, session_id: str) -> None:
+        """Delete the canonical records and search rows in one SQLite transaction."""
+        if not session_id or session_id == "default":
+            raise ValueError("An explicit conversation is required")
+        with self._lock:
+            maps = self._record_maps()
+            ids = {
+                kind: [key for key, record in mapping.items()
+                       if session_id in (getattr(record, "session_id", ""), getattr(record, "thread_id", ""))]
+                for kind, mapping in maps.items()
+            }
+            for key in ids["executions"]:
+                trace = self._executions[key].trace_id
+                if trace and re.fullmatch(r"[A-Za-z0-9_.-]{1,200}", trace):
+                    (self.trace_dir / f"{trace}.json").unlink(missing_ok=True)
+            self._persist_events()
+            with self._db_lock, self._db:
+                self._db.execute("INSERT OR IGNORE INTO deleted_sessions(id) VALUES (?)", (session_id,))
+                self._db.execute("DELETE FROM records WHERE session_id = ?", (session_id,))
+                self._db.executemany("DELETE FROM records WHERE kind = ? AND id = ?",
+                                     [(kind, key) for kind, keys in ids.items() for key in keys])
+                self._db.execute("DELETE FROM message_search WHERE session_id = ?", (session_id,))
+                self._db.execute("DELETE FROM events WHERE json_extract(body, '$.session_id') = ?", (session_id,))
+            self._deleted_sessions.add(session_id)
+            for kind, keys in ids.items():
+                for key in keys:
+                    maps[kind].pop(key, None)
+                    self._saved[kind].pop(key, None)
+            self._events = [event for event in self._events if event.session_id != session_id]
+            self._events_saved = len(self._events)
+
     def get_thread_state(self, thread_id: Optional[str]) -> ThreadSessionState:
         key = str(thread_id or "default").strip() or "default"
         with self._lock:
             state = self._thread_state.get(key)
             if state is None:
                 state = ThreadSessionState(thread_id=key, session_id=key)
-                self._thread_state[key] = state
-                self._persist_records("thread_state", self._thread_state, [key])
+                if key not in self._deleted_sessions:
+                    self._thread_state[key] = state
+                    self._persist_records("thread_state", self._thread_state, [key])
             return ThreadSessionState(**state.model_dump())
 
     def update_thread_state(self, thread_id: Optional[str], **updates: Any) -> ThreadSessionState:
         key = str(thread_id or "default").strip() or "default"
         with self._lock:
+            self._require_live_session(key)
             state = self._thread_state.get(key) or ThreadSessionState(thread_id=key)
             for field, value in updates.items():
                 if not hasattr(state, field):
@@ -1681,6 +1732,7 @@ class StateStore:
         if not text or not request_id:
             raise ValueError("Queued Turn requires message and client_request_id")
         with self._lock:
+            self._require_live_session(key)
             state = self._thread_state.get(key) or ThreadSessionState(
                 thread_id=key, session_id=key
             )
@@ -1761,6 +1813,7 @@ class StateStore:
         """Atomically remove and return the oldest queued follow-up (none while paused, unless forced)."""
         key = str(thread_id or "default").strip() or "default"
         with self._lock:
+            self._require_live_session(key)
             state = self._thread_state.get(key) or ThreadSessionState(
                 thread_id=key, session_id=key
             )
@@ -1793,6 +1846,7 @@ class StateStore:
 
         key = str(session_id or "default").strip() or "default"
         with self._lock:
+            self._require_live_session(key)
             state = self._thread_state.get(key) or ThreadSessionState(
                 thread_id=key, session_id=key
             )
@@ -1823,6 +1877,7 @@ class StateStore:
 
         key = str(session_id or "default").strip() or "default"
         with self._lock:
+            self._require_live_session(key)
             state = self._thread_state.get(key) or ThreadSessionState(
                 thread_id=key, session_id=key
             )
@@ -1990,6 +2045,7 @@ class StateStore:
         payload.setdefault("project_id", payload.get("active_project_id") or "")
         record = ExecutionRecord(**payload)
         with self._lock:
+            self._require_live_session(record.thread_id)
             state = self._thread_state.get(record.thread_id) or ThreadSessionState(
                 thread_id=record.thread_id, session_id=record.thread_id
             )
@@ -2077,6 +2133,7 @@ class StateStore:
     def create_approval(self, **payload: Any) -> ApprovalRecord:
         record = ApprovalRecord(**payload)
         with self._lock:
+            self._require_live_session(record.thread_id)
             self._approvals[record.id] = record
             self._persist_approvals()
             self.update_thread_state(record.thread_id, pending_approval_id=record.id)

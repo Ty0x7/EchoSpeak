@@ -120,7 +120,7 @@ class ThreadManager:
             f"Session registry is unreadable at {self._path}; the authoritative file was not overwritten; {note}. ({error})"
         ) from error
 
-    def _save(self) -> None:
+    def _save(self, *, strict: bool = False) -> None:
         """Persist threads to disk."""
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +132,8 @@ class ThreadManager:
                 os.fsync(handle.fileno())
             atomic_replace(temp, self._path)
         except Exception as exc:
+            if strict:
+                raise
             logger.warning(f"Failed to save threads: {exc}")
 
     # ── CRUD ────────────────────────────────────────────────────
@@ -304,8 +306,12 @@ class ThreadManager:
         """Delete a thread by ID."""
         with self._lock:
             if thread_id in self._threads:
-                del self._threads[thread_id]
-                self._save()
+                record = self._threads.pop(thread_id)
+                try:
+                    self._save(strict=True)
+                except Exception:
+                    self._threads[thread_id] = record
+                    raise
                 logger.info(f"Thread deleted: {thread_id}")
                 return True
             return False

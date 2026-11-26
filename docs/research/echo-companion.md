@@ -43,6 +43,15 @@ Campaign issue #210. Status as of 2026-11-26, round 2.
 | 15 | Low idle cost | Hidden companion: **0.0 % CPU**. Visible resting: 2.4 % CPU, 109 MB (Cairo). Backend idle 0 %. Hook ~21 ms. | Measured | Done (V2) |
 | 17 | Integrated acceptance | Echo native task (`checks_pass`) → Claude Code real task → report spoken and stored in the project → Echo recall and continuation | Live lab run, 2026-11-25 | Done in the lab (V3); **install and owner acceptance pending merge approval** |
 
+## Keeping Echo on screen
+
+In **Settings → Echo Companion → On screen**, turn off **Auto-hide when idle** to keep the face
+visible while idle or waiting. Captions still expire on their own. **Hide** in Echo's corner menu
+persists on this workstation until **Show Echo** in Settings or an explicit summon. The window's
+existing `SIGUSR1` (menu) and `SIGUSR2` (activity) shortcuts also restore it. The visibility preference
+is saved with EchoSpeak settings and the manual Hide marker is stored under XDG state. Both controls
+apply to presentation only. Companion observation, commentary audio and knowledge retention continue.
+
 ## Known limits
 
 - Codex has not been tested live; its subscription is at its usage limit until 2026-11-28 17:53. No paid fallback was used.

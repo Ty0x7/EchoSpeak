@@ -150,6 +150,9 @@ class Client:
     def thread(self, thread_id: str) -> dict:
         return self.get("/threads/" + quote(thread_id, safe=""))
 
+    def delete_thread(self, thread_id: str) -> dict:
+        return self.request("DELETE", "/threads/" + quote(thread_id, safe=""))
+
     def create_thread(self, title: str = "", project_id: str = "", idempotency_key: str = "") -> dict:
         return self.post("/threads", {"title": title, "source": "web", "project_id": project_id,
                                       "idempotency_key": idempotency_key})

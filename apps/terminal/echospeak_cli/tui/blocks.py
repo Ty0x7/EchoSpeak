@@ -324,7 +324,7 @@ def banner_rows(b: Banner, width: int, caps: Caps) -> list[Text]:
     from . import avatar
 
     g = caps.glyphs
-    face = (b.face or avatar.FACE_REST) if not caps.ascii else g.face
+    face = b.face or avatar.terminal_face(caps)
     pad = "  "
     l1 = Text()
     l1.append(face[0], style="bold")

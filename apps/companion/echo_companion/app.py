@@ -24,6 +24,7 @@ import sys
 import threading
 import time
 from ctypes import CDLL
+from pathlib import Path
 
 # gtk4-layer-shell must be loaded before libwayland-client (it hooks wl_proxy).
 try:
@@ -88,6 +89,10 @@ class Companion(Gtk.Application):
         self.speech_active = ""  # request id between speech.started and its speech.finished (chunks have gaps)
         self.connected = False
         self.enabled = True
+        self.auto_hide = True
+        state_dir = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
+        self.hidden_file = state_dir / "echospeak" / "companion-hidden"
+        self.manually_hidden = self.hidden_file.exists()
         self.stop = threading.Event()
         self.pointer = None
 
@@ -138,7 +143,7 @@ class Companion(Gtk.Application):
         self._build_menu()
 
         self.window.connect("realize", lambda *_: GLib.idle_add(self._update_input_region))
-        self._tick_id = self.area.add_tick_callback(self._tick)
+        self._tick_id = 0
         # Keybindable: `pkill -USR1 -f "python3 -m echo_companion"` opens the menu,
         # USR2 asks "what's happening?". Same popover and actions as a click.
         import signal
@@ -178,6 +183,8 @@ class Companion(Gtk.Application):
 
     # ---- appearance in time -----------------------------------------------------------
     def appear(self, mode: str) -> None:
+        if self.manually_hidden or not self.enabled:
+            return
         now = time.monotonic()
         self.last_event = now
         self.animator.set_mode(mode, now)
@@ -210,7 +217,8 @@ class Companion(Gtk.Application):
         if self.bubble.get_visible() and now > self.bubble_until and mode != "speaking":
             self.bubble.set_visible(False)
             GLib.idle_add(self._update_input_region)
-        if self.visible and mode in {"idle", "waiting"} and now - self.last_event > HIDE_AFTER and not self._menu_open():
+        if (self.auto_hide and mode in {"idle", "waiting"} and now - self.last_event > HIDE_AFTER
+                and not self._menu_open()):
             self.target_shown = 0.0
         if self.visible:
             # Full frame rate while something moves; resting Echo redraws at 20 fps (gaze drift, blinks).
@@ -267,7 +275,10 @@ class Companion(Gtk.Application):
 
     def _on_event(self, name: str, data: dict) -> bool:
         now = time.monotonic()
-        if now < self.paused_until or not self.enabled:
+        if name == "show":
+            self._restore("idle")
+            return False
+        if now < self.paused_until or not self.enabled or self.manually_hidden:
             return False
         if name == "commentary":
             self._show_caption(data.get("label", ""), data.get("text", ""),
@@ -311,7 +322,7 @@ class Companion(Gtk.Application):
         return False
 
     def _show_caption(self, who: str, text: str, seconds: float) -> None:
-        if not self.captions or not text:
+        if self.manually_hidden or not self.captions or not text:
             return
         known = {"claude-code": "Claude Code", "codex": "Codex", "echo": "Echo", "companion": "Echo", "": "Echo"}
         label = known.get(who) or (who if any(c.isupper() for c in who) else who.replace("-", " ").title())
@@ -338,14 +349,17 @@ class Companion(Gtk.Application):
             self.appearance = facelib.Appearance.from_config(avatar)
         if settings:
             self.enabled = bool(settings.get("companion_enabled", True)) or os.environ.get("ECHO_COMPANION_SHOW") == "1"
-            if not self.enabled and self.visible:
+            self.auto_hide = bool(settings.get("companion_auto_hide", True))
+            if not self.enabled:
                 self.target_shown = 0.0
+            elif not self.auto_hide and self.target_shown == 0.0 and time.monotonic() >= self.paused_until:
+                self.appear("idle")
             corner = str(settings.get("companion_position") or self.corner)
             if corner in CORNERS and corner != self.corner:
                 self.corner = corner
                 self._apply_corner()
             self.captions = bool(settings.get("companion_captions", True))
-            self.reduced = self.reduced or settings.get("companion_animation") == "reduced"
+            self.reduced = os.environ.get("ECHO_COMPANION_REDUCED_MOTION") == "1" or settings.get("companion_animation") == "reduced"
         return False
 
     # ---- menu ---------------------------------------------------------------------------
@@ -382,16 +396,32 @@ class Companion(Gtk.Application):
         # Back to never taking focus once the menu is gone.
         if LayerShell is not None and LayerShell.is_layer_window(self.window):
             LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.NONE)
+        if self.animator.state.mode == "listening":
+            self.animator.set_mode("idle", time.monotonic())
         GLib.idle_add(self._update_input_region)
 
+    def _restore(self, mode: str) -> None:
+        self.last_event = time.monotonic()
+        self.manually_hidden = False
+        try:
+            self.hidden_file.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"Could not save Companion visibility: {exc}", file=sys.stderr)
+        if mode != "idle" or self.target_shown == 0.0:
+            self.appear(mode)
+
     def _summon_menu(self) -> bool:
-        self.appear("listening")
+        self._restore("listening")
+        if not self.enabled:
+            return GLib.SOURCE_CONTINUE
         width, height = facelib.canvas_size(FACE)
         GLib.timeout_add(350, lambda: self._clicked(None, 1, width / 2, height / 2 - 0.08 * FACE) or False)
         return GLib.SOURCE_CONTINUE
 
     def _summon_ask(self) -> bool:
-        self.appear("listening")
+        self._restore("listening")
+        if not self.enabled:
+            return GLib.SOURCE_CONTINUE
         self.activate_action("ask", GLib.Variant.new_string("activity"))
         return GLib.SOURCE_CONTINUE
 
@@ -436,10 +466,28 @@ class Companion(Gtk.Application):
     def _pause(self, *_args) -> None:
         self.paused_until = time.monotonic() + 3600
         self._show_caption("companion", "Taking an hour off. Your agents keep working.", 4)
-        GLib.timeout_add(4500, lambda: self._hide() or False)
+        paused_at = self.last_event
+
+        def slide_away() -> bool:
+            if self.last_event == paused_at:
+                self.target_shown = 0.0
+            return GLib.SOURCE_REMOVE
+
+        GLib.timeout_add(4500, slide_away)
 
     def _hide(self, *_args) -> None:
+        self.manually_hidden = True
+        try:
+            self.hidden_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.hidden_file.touch(mode=0o600)
+        except OSError as exc:
+            print(f"Could not save Companion visibility: {exc}", file=sys.stderr)
         self.target_shown = 0.0
+        self.speech_active = ""
+        self.animator.envelope = []
+        self.after_speech_mode = "idle"
+        self.bubble.set_visible(False)
+        self.popover.popdown()
 
     def _move(self, _action, value) -> None:
         self.corner = value.get_string()

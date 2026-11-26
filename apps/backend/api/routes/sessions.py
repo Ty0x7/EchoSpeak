@@ -8,14 +8,18 @@ from loguru import logger
 
 from config import config
 from agent.state import get_state_store
-from api.deps import _apply_thread_scope, _normalize_thread_id, get_agent, get_existing_agent
+from api.deps import (
+    _ACTIVE_QUERY_CANCELLATIONS, _ACTIVE_QUERY_CANCEL_LOCK, _DELETING_SESSIONS, _QUERY_WORKERS,
+    _apply_thread_scope, _normalize_thread_id, forget_session_agent, get_agent, get_existing_agent,
+)
+
 
 router = APIRouter()
 
 
 def _notebook_session(session_id: str):
     from agent.threads import get_thread_manager
-    if not get_thread_manager().get_thread(session_id):
+    if get_state_store().session_deleted(session_id) or not get_thread_manager().get_thread(session_id):
         raise HTTPException(404, "Chat not found")
     from agent.research_notebook import ResearchNotebook
     return ResearchNotebook()
@@ -213,6 +217,8 @@ class HistoryResponse(BaseModel):
 @router.get("/threads/{thread_id}/state", response_model=ThreadSessionStateResponse)
 async def get_thread_state(thread_id: str):
     store = get_state_store()
+    if store.session_deleted(thread_id):
+        raise HTTPException(404, "Conversation was deleted.")
     return ThreadSessionStateResponse(**store.get_thread_state(thread_id).model_dump())
 
 
@@ -494,18 +500,75 @@ def branch_prompt(thread_id: str, request: PromptBranchRequest):
 
 
 @router.delete("/threads/{thread_id}")
-async def delete_thread(thread_id: str):
-    """Delete a conversation thread."""
-    from agent.threads import get_thread_manager
-    tm = get_thread_manager()
-    deleted = tm.delete_thread(thread_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"Thread {thread_id} not found")
-    from agent.research_notebook import ResearchNotebook
-    ResearchNotebook().clear(thread_id)
+def delete_thread(thread_id: str):
+    """Delete an EchoSpeak conversation and its session-owned persistent data."""
+    from agent import code_tasks, session_data
+    from agent.lean import steering, terminal
+    from agent.lean.rooms import get_room_store
+    from agent.memory import get_agent_memory
     from agent.query_journal import get_query_journal
-    get_query_journal().clear(thread_id)
-    return {"deleted": True, "thread_id": thread_id}
+    from agent.research_notebook import ResearchNotebook
+    from agent.threads import get_thread_manager
+    from agent.voice_runtime import get_voice_job_store
+
+    manager, store = get_thread_manager(), get_state_store()
+    missing = HTTPException(404, "Conversation not found.")
+    busy = HTTPException(409, "This conversation has active work. Stop it or wait, then retry deletion.")
+    with _ACTIVE_QUERY_CANCEL_LOCK:
+        if thread_id == "default":
+            raise missing
+        if thread_id in _DELETING_SESSIONS:
+            raise busy
+        if manager.get_thread(thread_id) is None:
+            if store.session_deleted(thread_id):
+                return {"deleted": True, "thread_id": thread_id}
+            raise missing
+        if (thread_id in _QUERY_WORKERS.values() or
+                any(owner == thread_id for owner, _event, _execution in _ACTIVE_QUERY_CANCELLATIONS.values())):
+            raise busy
+        _DELETING_SESSIONS.add(thread_id)
+
+    request_lock = None
+    try:
+        if code_tasks.active(thread_id):
+            raise busy
+        agent = get_existing_agent(thread_id)
+        lock = getattr(agent, "_request_lock", None)
+        if lock is not None:
+            if not lock.acquire(blocking=False):
+                raise busy
+            request_lock = lock
+        if any(terminal._process_alive(proc) for proc in terminal.session_processes(thread_id)):
+            raise busy
+        jobs = get_voice_job_store()
+        with jobs._lock, store._lock:
+            if any(job.get("status") in {"queued", "running"} for _, job in
+                   session_data.owned_files(jobs.jobs_root, "voice-*.json", thread_id)):
+                raise busy
+            if any(row.get("session_id") == thread_id and row.get("status") == "running"
+                   for row in store.coordination.view("attempts")):
+                raise busy
+            store.delete_session(thread_id)
+
+        # Each cleanup is idempotent. Keep the registry entry until they all commit,
+        # so a failed cleanup can be retried while the tombstone blocks new work.
+        get_query_journal().clear(thread_id)
+        ResearchNotebook().clear(thread_id)
+        store.coordination.delete_session_approvals(thread_id)
+        session_data.delete_files(thread_id)
+        get_agent_memory().delete_session(thread_id)
+        terminal.clear_session_processes(thread_id)
+        steering.take(thread_id)
+        code_tasks.forget_session(thread_id)
+        forget_session_agent(thread_id)
+        get_room_store().remove_for_session(thread_id)
+        manager.delete_thread(thread_id)
+        return {"deleted": True, "thread_id": thread_id}
+    finally:
+        if request_lock is not None:
+            request_lock.release()
+        with _ACTIVE_QUERY_CANCEL_LOCK:
+            _DELETING_SESSIONS.discard(thread_id)
 
 
 @router.get("/history", response_model=HistoryResponse)
@@ -517,9 +580,11 @@ def get_history(thread_id: Optional[str] = Query(default=None)):
       - turns: durable Turn projections (messages, ToolRuns, research, approvals, verification)
       - history: legacy Human/Assistant strings (backward compatible)
     """
+    store = get_state_store()
+    session_id = _normalize_thread_id(thread_id)
+    if store.session_deleted(session_id):
+        raise HTTPException(404, "Conversation was deleted.")
     try:
-        store = get_state_store()
-        session_id = _normalize_thread_id(thread_id)
         agent = get_existing_agent(thread_id)
         if agent is not None:
             with agent._request_lock:

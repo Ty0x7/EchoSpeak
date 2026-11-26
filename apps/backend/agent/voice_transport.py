@@ -129,7 +129,7 @@ def validate_voice_scope(session_id: str, project_id: str = "") -> tuple[Any, An
     """Validate transport scope without pretending a user microphone is a tool action."""
 
     session = _safe_id(session_id, "Session id")
-    if get_thread_manager().get_thread(session) is None:
+    if get_state_store().session_deleted(session) or get_thread_manager().get_thread(session) is None:
         raise VoiceTransportError("Session not found")
     state = get_state_store().get_thread_state(session)
     requested_project = str(project_id or "").strip()
@@ -219,11 +219,19 @@ class VoiceTransportStore:
     def save_turn(self, turn: VoiceTransportTurn) -> VoiceTransportTurn:
         turn.updated_at = time.time()
         with self._lock:
+            from agent.state import get_state_store
+
+            if get_state_store().session_deleted(turn.session_id):
+                raise VoiceTransportError("Conversation was deleted")
             self._write(self._record_path("turn", turn.id), turn)
         return turn
 
     def save_clip(self, clip: VoiceTransportClip) -> VoiceTransportClip:
         with self._lock:
+            from agent.state import get_state_store
+
+            if get_state_store().session_deleted(clip.session_id):
+                raise VoiceTransportError("Conversation was deleted")
             self._write(self._record_path("clip", clip.id), clip)
         return clip
 

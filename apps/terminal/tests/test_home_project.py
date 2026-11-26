@@ -15,10 +15,7 @@ from test_layout_matrix import make_tui  # noqa: E402
 
 
 def _run(tui, coro):
-    async def go():
-        tui._out_event = None
-        await coro
-    asyncio.run(go())
+    asyncio.run(coro)
 
 
 def _setup(tui, home: str, current: str):
@@ -37,8 +34,26 @@ def test_new_conversation_returns_to_the_home_project_after_a_switch(command):
     with create_pipe_input() as inp, create_app_session(input=inp, output=DummyOutput()):
         tui, _ = make_tui()
         _setup(tui, home="home-pid", current="")       # switched to a session without a project
+        old_id = tui.sid
+
+        def create(title, *, project_id):
+            assert title == "New Session" and project_id == "home-pid"
+            return {"thread_id": "fresh-id"}
+
+        async def refresh_model():
+            pass
+
+        tui.core.create_session = create
+        tui._refresh_model = refresh_model
+        tui.buffer.text = "draft to clear"
+        tui.buffer._load_history_task = None
+        tui.last_answer = "previous answer"
         _run(tui, getattr(tui, command)([]))
-        assert tui.core.session is None
+        if command == "cmd_clear":
+            assert tui.sid == "fresh-id" and tui.sid != old_id
+            assert not tui.buffer.text and not tui.last_answer and tui.welcome is not None
+        else:
+            assert tui.core.session is None
         assert tui.core.project_id == "home-pid"
         assert tui.project_name == "name-home-pid"
 

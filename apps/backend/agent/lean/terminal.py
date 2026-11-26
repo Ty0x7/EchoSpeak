@@ -1009,6 +1009,11 @@ def stop_servers(session_id: str = "") -> list[str]:
 _PROC_DIR = Path(DATA_DIR) / "lean" / "processes"
 
 
+def _process_dir(session_id: str) -> Path:
+    digest = hashlib.sha256(session_id.encode()).hexdigest()
+    return _PROC_DIR / digest
+
+
 def _process_alive(proc: BackgroundProcess) -> bool:
     if proc.mode == "host":
         return proc.popen is not None and proc.popen.poll() is None
@@ -1041,6 +1046,25 @@ def _tail(proc: BackgroundProcess, chars: int = 6000) -> str:
         _, err = proc.sandbox.exec(f"tail -c {chars // 3} /tmp/es-proc-{proc.id}.err 2>/dev/null", "/work", 15)
     out, err = out.strip(), err.strip()
     return out + (f"\n[stderr]\n{err}" if err else "")
+
+
+def session_processes(session_id: str) -> list[BackgroundProcess]:
+    return [proc for proc in list(_PROCESSES.values()) if proc.session_id == session_id]
+
+
+def clear_session_processes(session_id: str) -> None:
+    for proc in session_processes(session_id):
+        for path in (proc.log_path, proc.err_path):
+            if path.parent == _PROC_DIR:
+                path.unlink(missing_ok=True)
+        _PROCESSES.pop(proc.id, None)
+    folder = _process_dir(session_id)
+    if folder.is_dir() and not folder.is_symlink():
+        for path in folder.iterdir():
+            if re.fullmatch(r"[a-f0-9]{8}\.(?:log|err)", path.name):
+                path.unlink(missing_ok=True)
+        if not any(folder.iterdir()):
+            folder.rmdir()
 
 
 def _running() -> list[BackgroundProcess]:
@@ -1195,8 +1219,10 @@ class Terminal:
     def _launch(self, command: str, cwd: Path, wait: int, where: str, *, network: bool = False, shell: str = "") -> Launch:
         proc_id = uuid.uuid4().hex[:8]
         if where in {"host", "bwrap"}:
-            _PROC_DIR.mkdir(parents=True, exist_ok=True)
-            log, err = _PROC_DIR / f"{proc_id}.log", _PROC_DIR / f"{proc_id}.err"
+            owner, session = _owner()
+            folder = _process_dir(session) if session else _PROC_DIR
+            folder.mkdir(parents=True, exist_ok=True)
+            log, err = folder / f"{proc_id}.log", folder / f"{proc_id}.err"
             confine = workspace_roots(self.project_root) if where == "bwrap" else None
             # A bwrap command is a local process like a host one (same logs, same stop); its network is per command.
             popen = _host_launch(command, cwd, log, err, shell, confine=confine, network=network)
@@ -1217,7 +1243,6 @@ class Terminal:
                         code, stopped = popen.returncode if popen.returncode is not None else -15, True
                         break
                     if time.monotonic() >= deadline:
-                        owner, session = _owner()
                         proc = BackgroundProcess(id=proc_id, command=command, cwd=str(cwd), mode="host", log_path=log,
                                                  err_path=err, popen=popen, owner=owner, session_id=session)
                         return Launch(False, proc=proc)
