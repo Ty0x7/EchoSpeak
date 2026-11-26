@@ -33,6 +33,7 @@ from config import config
 
 from agent.companion import knowledge, soul
 from agent.companion.digest import Digest, analyse
+from agent.companion.text import spoken as prepare_speech
 
 logger = logging.getLogger(__name__)
 
@@ -125,13 +126,18 @@ def compose(event: dict[str, Any], digest: Digest, *, humor: int = 1, saved: boo
 class Commentary:
     def __init__(self, *, speak: Optional[Callable[..., dict]] = None, focus: Optional[Callable[[], dict]] = None,
                  remember: Optional[Callable[..., dict]] = None, archive: Optional[Callable[..., Any]] = None,
-                 authorize: Optional[Callable[..., dict]] = None, mark: Optional[Callable[[str], None]] = None):
+                 authorize: Optional[Callable[..., dict]] = None, mark: Optional[Callable[[str], None]] = None,
+                 store=None, speech_state: Optional[Callable[[], dict]] = None):
         self._speak = speak
         self._focus = focus
         self._remember = remember or knowledge.remember
         self._archive = archive or knowledge.archive
         self._authorize = authorize or knowledge.authorize
         self._mark = mark
+        self._store = store
+        self._speech_state = speech_state
+        self._review_interval = 0
+        self._next_review = 0.0
         self._queue: queue.Queue = queue.Queue(maxsize=1000)
         self.feed: deque[dict[str, Any]] = deque(maxlen=100)
         self._last_session: dict[str, float] = {}
@@ -168,11 +174,79 @@ class Commentary:
         while True:
             event = self._queue.get()
             try:
-                self.handle(event)
+                if event is None:
+                    self.review()
+                else:
+                    self.handle(event)
             except Exception:
                 logger.warning("Echo Companion could not process an event", exc_info=True)
             finally:
                 self._queue.task_done()
+
+    def schedule_review(self, now: Optional[float] = None) -> None:
+        """Enqueue a lightweight review from the existing observer loop."""
+        now = time.monotonic() if now is None else now
+        raw = _setting("companion_checkin_minutes", 0)
+        minutes = raw if raw in (30, 60) and _setting("companion_enabled", False) else 0
+        interval = minutes * 60
+        if interval != self._review_interval:
+            self._review_interval = interval
+            self._next_review = now + interval
+        elif interval and now >= self._next_review:
+            self._next_review = now + interval
+            try:
+                self._queue.put_nowait(None)
+            except queue.Full:
+                pass
+
+    def _publish_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        self.feed.append(item)
+        for callback in list(self._listeners):
+            try:
+                callback(item)
+            except Exception:
+                pass
+        return item
+
+    def review(self, now: Optional[float] = None) -> Optional[dict[str, Any]]:
+        from agent.companion import awareness
+        from agent.companion.observe import activity
+
+        minutes = _setting("companion_checkin_minutes", 0)
+        now = time.time() if now is None else now
+        if (not self._store or minutes not in (30, 60) or not _setting("companion_enabled", False)
+                or in_quiet_hours(str(_setting("companion_quiet_hours", "")))
+                or now - self._last_any < GLOBAL_COOLDOWN):
+            return None
+        state = self._speech_state() if self._speech_state else {}
+        if state.get("speaking") or state.get("queued") or "companion" in (state.get("muted") or ()):
+            return None
+        since = now - minutes * 60
+        cards = awareness.collect(self._store, activity(self._store, include_echo=bool(
+            _setting("companion_observe_echo", True)), now=now, ingest=False), since,
+            announced=self._store.announced(since))
+        if not cards:
+            return None
+        text, ids = awareness.summarize(cards, use_model=_setting("companion_soul_style", "") == "local_model")
+        if not text or not ids:
+            return None
+        state = self._speech_state() if self._speech_state else {}
+        if state.get("speaking") or state.get("queued") or "companion" in (state.get("muted") or ()):
+            return None
+        can_speak = bool(_setting("companion_speak", True))
+        result = self._speak(text, channel="companion", priority=20, source="companion",
+                             voice=str(_setting("companion_voice", ""))) if self._speak and can_speak else {}
+        queued = result.get("status") == "queued"
+        if can_speak and not queued:
+            return None
+        self._store.mark_announced(ids)
+        self._last_any = now
+        return self._publish_item({
+            "id": "checkin-" + hashlib.sha256("|".join(ids).encode()).hexdigest()[:16],
+            "at": now, "agent": "companion", "label": "Echo", "reason": "checkin", "phase": "checkin",
+            "text": text, "speech_id": result.get("id", ""), "spoken": queued,
+            "silent_because": "" if queued else "speech off", "evidence": ids,
+        })
 
     # ---- policy ---------------------------------------------------------------
     def _interacting(self, event: dict[str, Any]) -> bool:
@@ -250,12 +324,10 @@ class Commentary:
         if not reason and not catching_up:
             if not stored:
                 return None  # nothing worth saying and nothing kept: stay quiet, leave no trace
-        greet = bool(facts["name"]) and now - self._last_greeting > 20 * 60
-        text = narrate.compose(facts, reason or "report", greet=greet, saved=saved and reason == "report")
+        greet = bool(facts["name"]) and now - self._last_greeting > 60 * 60
+        text = prepare_speech(narrate.compose(facts, reason or "report", greet=greet, saved=saved and reason == "report"))
         style = {"style": "templates"}
-        if reason and str(_setting("companion_soul_style", "templates")) == "local_model":
-            text, style = narrate.hybrid(facts, reason, text)
-        spoken, why_silent = False, ""
+        spoken, why_silent, result = False, "", {}
         if catching_up:
             why_silent = "arrived while EchoSpeak was closed"
         elif not reason:
@@ -267,6 +339,11 @@ class Commentary:
         elif reason != "report" and (now - self._last_session.get(key, 0) < SESSION_COOLDOWN or now - self._last_any < GLOBAL_COOLDOWN):
             why_silent = "cooldown"
         elif self._speak is not None:
+            state = self._speech_state() if self._speech_state else {}
+            if ("companion" not in (state.get("muted") or ())
+                    and str(_setting("companion_soul_style", "templates")) == "local_model"):
+                rewrite, style = narrate.hybrid(facts, reason, text)
+                text = prepare_speech(rewrite) or text
             result = self._speak(text, channel="companion", source=event["agent"],
                                  voice=str(_setting("companion_voice", "") or ""))
             spoken = result.get("status") == "queued"
@@ -279,17 +356,15 @@ class Commentary:
         item = {
             "id": event["id"], "at": now, "agent": event["agent"], "label": knowledge.label(event["agent"]),
             "session_id": event["session_id"], "project": event.get("project", ""), "reason": reason,
-            "text": text, "spoken": spoken, "silent_because": why_silent, "outcome": digest.outcome,
+            "phase": "completion" if kind in {"turn_completed", "report_ready"} else "active",
+            "text": text, "spoken": spoken, "speech_id": result.get("id", ""),
+            "silent_because": why_silent, "outcome": digest.outcome,
             "digest": digest.public() if reason == "report" else {"kind": digest.kind, "headline": digest.headline},
             "memory": stored, "archived": archived, "wording": style,
         }
-        self.feed.append(item)
-        for callback in list(self._listeners):
-            try:
-                callback(item)
-            except Exception:
-                pass
-        return item
+        if self._store and reason and (spoken or why_silent in {"speech off", "muted"}):
+            self._store.mark_announced([event["id"]])
+        return self._publish_item(item)
 
 
 _instance: Optional[Commentary] = None
@@ -307,7 +382,8 @@ def get_commentary() -> Commentary:
             _instance = Commentary(
                 speak=lambda text, **kw: get_speech_output().speak(text, **kw),
                 focus=lambda: activity(store, include_echo=False, ingest=False)["focus"],
-                mark=store.mark_handled,
+                mark=store.mark_handled, store=store,
+                speech_state=lambda: get_speech_output().state(),
             )
             store.on_event(_instance.submit)
             pending = store.unhandled(time.time() - 86400)

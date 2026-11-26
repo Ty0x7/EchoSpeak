@@ -76,6 +76,8 @@ class FaceState:
     mode_since: float = 0.0
     reduced_motion: bool = False
     extras: dict = field(default_factory=dict)
+    body_pose: tuple[float, float, float] | None = None
+    transition_pose: tuple[float, float, float] | None = None
 
 
 def _rounded_rect(cr, x: float, y: float, w: float, h: float, r: float) -> None:
@@ -97,18 +99,9 @@ def canvas_size(face: float) -> tuple[int, int]:
     return int(face * 1.7), int(face * 1.75)
 
 
-def draw(cr, width: float, height: float, face: float, state: FaceState, look: Appearance) -> None:
-    """Draw one frame centred in (width, height). Cairo context `cr` is not cleared."""
-
-    F = face
-    t = state.t
-    mode = state.mode if state.mode in MODES else "idle"
-    since = max(0.0, t - state.mode_since)
-    still = state.reduced_motion
+def _body_pose(F: float, t: float, mode: str, since: float, still: bool,
+               amp: float, look: Appearance) -> tuple[float, float, float]:
     period = 6.0 / look.breathing_speed
-    amp = max(0.0, min(1.0, state.amplitude)) if mode == "speaking" else 0.0
-
-    # ---- body motion (float, bob, tilt, reactions) ----------------------------------
     dy, rot, scale = 0.0, 0.0, 1.0
     if not still:
         if look.idle_motion or mode != "idle":
@@ -141,6 +134,25 @@ def draw(cr, width: float, height: float, face: float, state: FaceState, look: A
             dy += -0.06 * F * math.sin(math.pi * since / 0.5)
         if mode == "error" and since < 0.5:  # echoShake
             rot += math.radians(5) * math.sin(since * 4 * math.pi / 0.5) * (1 - since / 0.5)
+    return dy, rot, scale
+
+
+def draw(cr, width: float, height: float, face: float, state: FaceState, look: Appearance) -> None:
+    """Draw one frame centred in (width, height). Cairo context `cr` is not cleared."""
+
+    F = face
+    t = state.t
+    mode = state.mode if state.mode in MODES else "idle"
+    since = max(0.0, t - state.mode_since)
+    still = state.reduced_motion
+    amp = max(0.0, min(1.0, state.amplitude)) if mode == "speaking" else 0.0
+
+    pose = _body_pose(F, t, mode, since, still, amp, look)
+    if state.transition_pose is not None and not still:
+        progress = _ease(since / 0.18)
+        pose = tuple(old + (new - old) * progress for old, new in zip(state.transition_pose, pose))
+    state.body_pose = pose
+    dy, rot, scale = pose
 
     cx, cy = width / 2, height / 2 - 0.08 * F
     # ---- shadow --------------------------------------------------------------------
@@ -370,6 +382,7 @@ class Animator:
 
     def set_mode(self, mode: str, now: float) -> None:
         if mode != self.state.mode:
+            self.state.transition_pose = self.state.body_pose
             self.state.mode = mode
             self.state.mode_since = now
 

@@ -50,10 +50,11 @@ def _run() -> None:
     import select
 
     store = get_companion_store()
+    commentary = None
     try:
         from agent.companion.commentary import get_commentary
 
-        get_commentary()  # subscribes to new events; does nothing while the companion is off
+        commentary = get_commentary()  # subscribes to new events; does nothing while the companion is off
     except Exception:
         logger.warning("Echo Companion commentary did not start", exc_info=True)
     store.spool.mkdir(parents=True, exist_ok=True)
@@ -71,6 +72,8 @@ def _run() -> None:
                 from agent.companion.history import refresh
 
                 refresh(store)
+            if commentary:
+                commentary.schedule_review()
             if time.time() - last_prune > 3600:
                 store.prune()
                 last_prune = time.time()

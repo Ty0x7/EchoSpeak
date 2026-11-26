@@ -35,7 +35,7 @@ REPORT = "## Summary\nFixed the config loader in the harness.\n\n## Verification
     (dict(body="Which do you prefer, A or B?", interacting=False), "needs_you"),
     (dict(kind="needs_permission", body="Bash: rm -rf build/", interacting=True), ""),    # they can see the prompt
     (dict(kind="needs_permission", body="Bash: rm -rf build/", interacting=False), "needs_you"),
-    (dict(body="Done.", agent="glados", meta={"measured": "checks_pass", "agent_name": "Glados"}), "report"),
+    (dict(body="Done.", agent="glados", meta={"measured": "checks_pass", "agent_name": "Glados", "via": "native"}), "report"),
 ])
 def test_speaks_only_when_it_is_worth_it(case, expected):
     assert narrate.worth_saying(_f(**case)) == expected
@@ -75,7 +75,7 @@ def test_task_titles(prompt, task):
 def test_natural_grammar_and_attribution():
     line = narrate.compose(_f(body=REPORT, task="restore the backend and install the build"), "report")
     assert line.startswith("Claude just wrapped up restoring the backend and installing the build.")
-    assert "It says the tests pass." in line and "Something worth knowing" in line
+    assert "It says the tests pass." in line and "Claude says it found" in line
     assert narrate.gerund("the install") == "the install" and narrate.gerund("run the evals") == "running the evals"
     perm = narrate.compose(_f(kind="needs_permission", body="Bash: rm -rf build/"), "needs_you")
     assert perm.startswith("Claude needs your permission to run a shell command")

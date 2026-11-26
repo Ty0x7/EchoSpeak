@@ -52,6 +52,10 @@ existing `SIGUSR1` (menu) and `SIGUSR2` (activity) shortcuts also restore it. Th
 is saved with EchoSpeak settings and the manual Hide marker is stored under XDG state. Both controls
 apply to presentation only. Companion observation, commentary audio and knowledge retention continue.
 
+## Overall check-ins
+
+In **Settings → Echo Companion → What it says**, choose **Overall check-ins** and set Off, Every 30 minutes, or Every 60 minutes. A review only announces meaningful new evidence. The existing long-task update interval controls individual progress notes. When a model is busy or unavailable, the check-in can use the evidence directly. [Companion architecture](echo-companion-architecture.md)
+
 ## Known limits
 
 - Codex has not been tested live; its subscription is at its usage limit until 2026-11-28 17:53. No paid fallback was used.

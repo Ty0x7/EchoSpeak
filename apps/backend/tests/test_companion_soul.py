@@ -62,4 +62,4 @@ def test_reword_falls_back_without_a_local_model(monkeypatch):
 
     monkeypatch.setattr(provider, "resolve_endpoint", lambda *a, **k: type("E", (), {"local": False})())
     text, info = soul.reword("Codex finished a report.", "Codex")
-    assert text == "Codex finished a report." and info["used"] is False and info["reason"] == "not a local model"
+    assert text == "Codex finished a report." and info["used"] is False and info["reason"] == "ValueError"

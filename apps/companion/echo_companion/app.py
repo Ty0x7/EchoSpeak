@@ -36,7 +36,7 @@ import gi  # noqa: E402
 
 gi.require_version("Gtk", "4.0")
 gi.require_version("Gdk", "4.0")
-from gi.repository import Gdk, Gio, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 try:
     gi.require_version("Gtk4LayerShell", "1.0")
@@ -52,6 +52,8 @@ from echo_companion.client import Backend  # noqa: E402
 FACE = int(os.environ.get("ECHO_COMPANION_FACE", "112"))
 MARGIN = 14
 HIDE_AFTER = float(os.environ.get("ECHO_COMPANION_HIDE_AFTER", "45"))
+BUBBLE_WIDTH = 304
+BUBBLE_FADE = 0.24
 BUBBLE_AFTER_SPEECH = 2.5  # the owner asked: text leaves 2–3 s after Echo stops talking
 CORNERS = {"top-right": ("TOP", "RIGHT"), "top-left": ("TOP", "LEFT"),
            "bottom-right": ("BOTTOM", "RIGHT"), "bottom-left": ("BOTTOM", "LEFT")}
@@ -83,9 +85,15 @@ class Companion(Gtk.Application):
         self.last_event = 0.0
         self.speaking_until = 0.0
         self.bubble_until = 0.0
+        self.bubble_alpha = 0.0
+        self.caption_content: tuple[str, str] = ("", "")
+        self.caption_pending: tuple[str, str] | None = None
+        self.caption_clickable = False
+        self.last_tick = 0.0
         self.paused_until = 0.0
         self.muted = False
         self.after_speech_mode = "idle"
+        self.speech_reactions: dict[str, str] = {}
         self.speech_active = ""  # request id between speech.started and its speech.finished (chunks have gaps)
         self.connected = False
         self.enabled = True
@@ -111,27 +119,35 @@ class Companion(Gtk.Application):
             LayerShell.set_layer(self.window, LayerShell.Layer.OVERLAY)
             LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.NONE)
             LayerShell.set_exclusive_zone(self.window, 0)
-            self._apply_corner()
         else:
             print("gtk4-layer-shell is unavailable; Echo will be an ordinary window.", file=sys.stderr)
 
         self.box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self.bubble = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self.bubble.add_css_class("echo-bubble")
-        self.bubble.set_valign(Gtk.Align.START)
+        self.bubble.set_halign(Gtk.Align.FILL)
         self.bubble.set_margin_top(int(FACE * 0.18))
-        self.who = Gtk.Label(xalign=0)
+        self.who = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
         self.who.add_css_class("who")
-        self.caption = Gtk.Label(xalign=0, wrap=True, max_width_chars=34, width_chars=22)
+        self.caption = Gtk.Label(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR,
+                                 lines=7, ellipsize=Pango.EllipsizeMode.END)
         self.bubble.append(self.who)
         self.bubble.append(self.caption)
+        self.bubble.set_opacity(0)
         self.bubble.set_visible(False)
+
+        # The caption can change height, fade or disappear without reconfiguring the layer.
         width, height = facelib.canvas_size(FACE)
+        self.bubble_slot = Gtk.Overlay()
+        self.bubble_slot.set_child(Gtk.DrawingArea(content_width=BUBBLE_WIDTH, content_height=height))
+        self.bubble_slot.add_overlay(self.bubble)
+        self.bubble_slot.set_measure_overlay(self.bubble, False)
         self.area = Gtk.DrawingArea(content_width=width, content_height=height)
         self.area.set_draw_func(self._draw)
-        self.box.append(self.bubble)
+        self.box.append(self.bubble_slot)
         self.box.append(self.area)
         self.window.set_child(self.box)
+        self._apply_corner()
 
         click = Gtk.GestureClick(button=0)
         click.connect("released", self._clicked)
@@ -162,9 +178,19 @@ class Companion(Gtk.Application):
         Gtk.Application.do_shutdown(self)
 
     def _apply_corner(self) -> None:
+        vertical, horizontal = CORNERS.get(self.corner, CORNERS["top-right"])
+        left = horizontal == "LEFT"
+        self.box.reorder_child_after(self.area, None if left else self.bubble_slot)
+        if left:
+            self.bubble.add_css_class("left")
+        else:
+            self.bubble.remove_css_class("left")
+        self.bubble.set_valign(Gtk.Align.START if vertical == "TOP" else Gtk.Align.END)
+        self.bubble.set_margin_top(int(FACE * 0.18) if vertical == "TOP" else 0)
+        self.bubble.set_margin_bottom(int(FACE * 0.18) if vertical == "BOTTOM" else 0)
+        GLib.idle_add(self._update_input_region)
         if LayerShell is None or not LayerShell.is_layer_window(self.window):
             return
-        vertical, horizontal = CORNERS.get(self.corner, CORNERS["top-right"])
         for edge in ("TOP", "BOTTOM", "LEFT", "RIGHT"):
             LayerShell.set_anchor(self.window, getattr(LayerShell.Edge, edge), edge in (vertical, horizontal))
         self._set_slide()
@@ -175,7 +201,7 @@ class Companion(Gtk.Application):
             self.window.set_opacity(self.shown)
             return
         vertical, horizontal = CORNERS.get(self.corner, CORNERS["top-right"])
-        width = facelib.canvas_size(FACE)[0]
+        width = facelib.canvas_size(FACE)[0] + BUBBLE_WIDTH + self.box.get_spacing()
         eased = 1 - (1 - self.shown) ** 3
         LayerShell.set_margin(self.window, getattr(LayerShell.Edge, horizontal), int(-width * (1 - eased) + MARGIN * eased))
         LayerShell.set_margin(self.window, getattr(LayerShell.Edge, vertical), MARGIN)
@@ -191,6 +217,9 @@ class Companion(Gtk.Application):
         self.target_shown = 1.0
         if not self.visible:
             self.visible = True
+            self.last_tick = now
+            # Initial alpha and position are committed before revealing the Wayland surface.
+            self._set_slide()
             self.window.present()
             if not getattr(self, "_tick_id", 0):
                 self._tick_id = self.area.add_tick_callback(self._tick)
@@ -198,27 +227,31 @@ class Companion(Gtk.Application):
 
     def _tick(self, widget, clock) -> bool:
         now = time.monotonic()
+        dt = min(0.1, max(0.0, now - self.last_tick))
+        self.last_tick = now
         if self.target_shown != self.shown:
-            step = 1 / 18  # ~300 ms at 60 Hz
+            step = 1.0 if self.reduced else dt / 0.30
             self.shown = min(self.target_shown, self.shown + step) if self.target_shown > self.shown else max(self.target_shown, self.shown - step)
             self._set_slide()
             if self.shown == 0.0 and self.target_shown == 0.0 and self.visible:
                 self.visible = False
+                self._reset_caption()
                 self.window.set_visible(False)
                 self._tick_id = 0
                 return GLib.SOURCE_REMOVE  # hidden Echo costs nothing until the next event
         mode = self.animator.state.mode
-        if mode == "speaking" and not self.speech_active and now > self.speaking_until and not self.animator.envelope:
+        if mode in {"speaking", "thinking"} and not self.speech_active and self.speaking_until and now >= self.speaking_until:
+            self.animator.envelope = []
             self.animator.set_mode(self.after_speech_mode, now)
             self.after_speech_mode = "idle"
+            self.speaking_until = 0.0
             self.bubble_until = now + BUBBLE_AFTER_SPEECH
+            mode = self.animator.state.mode
         if mode in {"celebrating", "discovery", "confused"} and now - self.animator.state.mode_since > 2.2:
             self.animator.set_mode("idle", now)
-        if self.bubble.get_visible() and now > self.bubble_until and mode != "speaking":
-            self.bubble.set_visible(False)
-            GLib.idle_add(self._update_input_region)
+        self._step_caption(now, dt)
         if (self.auto_hide and mode in {"idle", "waiting"} and now - self.last_event > HIDE_AFTER
-                and not self._menu_open()):
+                and not self._menu_open() and not self.bubble.get_visible()):
             self.target_shown = 0.0
         if self.visible:
             # Full frame rate while something moves; resting Echo redraws at 20 fps (gaze drift, blinks).
@@ -248,11 +281,11 @@ class Companion(Gtk.Application):
             return False
         region = cairo.Region()
         width, height = facelib.canvas_size(FACE)
-        ok, bounds = self.area.compute_bounds(self.window)
-        if ok:
-            x, y = int(bounds.get_x()), int(bounds.get_y())
-            region.union(cairo.RectangleInt(x + int((width - FACE) / 2), y + int(height / 2 - 0.58 * FACE), FACE, FACE))
-        if self.bubble.get_visible():
+        # GTK can report the face at x=0 before the first allocation. Its position
+        # in the fixed-width row is already known, even on the first surface commit.
+        x = 0 if self.box.get_first_child() == self.area else BUBBLE_WIDTH + self.box.get_spacing()
+        region.union(cairo.RectangleInt(x + (width - FACE) // 2, int(height / 2 - 0.58 * FACE), FACE, FACE))
+        if self.caption_clickable:
             ok, bounds = self.bubble.compute_bounds(self.window)
             if ok:
                 region.union(cairo.RectangleInt(int(bounds.get_x()), int(bounds.get_y()),
@@ -267,6 +300,9 @@ class Companion(Gtk.Application):
     def _on_connection(self, connected: bool) -> bool:
         if connected and not self.connected:
             threading.Thread(target=self._load_settings, daemon=True).start()
+        if not connected and self.connected and self.speech_active:
+            self.speech_active = ""
+            self.speaking_until = time.monotonic()
         self.connected = connected
         return False
 
@@ -281,44 +317,51 @@ class Companion(Gtk.Application):
         if now < self.paused_until or not self.enabled or self.manually_hidden:
             return False
         if name == "commentary":
-            self._show_caption(data.get("label", ""), data.get("text", ""),
-                               seconds=60 if data.get("spoken") else min(10.0, 3 + len(data.get("text", "")) / 25))
             outcome = data.get("outcome")
             digest = data.get("digest") or {}
-            if data.get("reason") == "needs_you":
-                self.after_speech_mode = "waiting"
-            elif outcome == "success":
-                self.after_speech_mode = "celebrating"
-            elif outcome == "failed":
-                self.after_speech_mode = "confused"
-            elif digest.get("discoveries"):
-                self.after_speech_mode = "discovery"
-            if not data.get("spoken"):
-                self.appear(self.after_speech_mode if self.after_speech_mode != "idle" else "idle")
-                self.after_speech_mode = "idle"
+            reaction = ("waiting" if data.get("reason") == "needs_you" else
+                        "celebrating" if outcome == "success" else "confused" if outcome == "failed" else
+                        "discovery" if digest.get("discoveries") else "idle")
+            if data.get("spoken"):
+                speech_id = data.get("speech_id")
+                if speech_id == self.speech_active:
+                    self.after_speech_mode = reaction
+                elif speech_id:
+                    if len(self.speech_reactions) >= 24:
+                        self.speech_reactions.pop(next(iter(self.speech_reactions)))
+                    self.speech_reactions[speech_id] = reaction
+            elif data.get("reason") and data.get("silent_because") in {"", "muted", "speech off", "quiet hours"}:
+                if not self.speech_active:
+                    self._show_caption(data.get("label", ""), data.get("text", ""),
+                                       seconds=min(10.0, 3 + len(data.get("text", "")) / 25))
+                    self.appear(reaction)
             return False
         request = data.get("request") or {}
         if request.get("channel") not in {"companion", "preview", "echo"}:
             return False
+        request_id = str(request.get("id") or "")
         if name == "speech.started":
-            self.speech_active = str(request.get("id") or "")
-            self.appear("thinking")  # synthesising the first chunk
+            self.speech_active = request_id
+            self.after_speech_mode = self.speech_reactions.pop(request_id, "idle")
+            self.speaking_until = 0.0
+            self.animator.envelope = []
+            self.appear("thinking")
             if request.get("channel") != "echo":
                 self._show_caption(request.get("source", ""), request.get("text", ""), seconds=60)
-        elif name == "speech.chunk_started":
-            # Event time is the backend's wall clock; convert it to our monotonic clock.
+        elif name == "speech.chunk_started" and request_id == self.speech_active:
             lag = max(0.0, time.time() - float(data.get("at") or time.time()))
             start = now - lag
             self.animator.speak(data.get("envelope") or [], int(data.get("envelope_hz") or 50), start)
-            self.speaking_until = start + float(data.get("duration") or 0) + 0.1
             self.appear("speaking")
-        elif name == "speech.finished":
-            if request.get("id") != self.speech_active:
-                return False  # a queued line was cancelled or skipped; the current one is still playing
+        elif name in {"speech.finished", "speech.skipped"}:
+            self.speech_reactions.pop(request_id, None)
+            if request_id != self.speech_active:
+                return False
             self.speech_active = ""
-            self.speaking_until = min(self.speaking_until, now + 0.1)
-            if request.get("status") == "failed" and self.animator.state.mode != "speaking":
-                self.after_speech_mode = "confused"
+            self.animator.envelope = []
+            self.speaking_until = now + (0.10 if name == "speech.finished" else 0)
+            if request.get("status") in {"failed", "cancelled", "canceled"}:
+                self.after_speech_mode = "confused" if request.get("status") == "failed" else "idle"
         return False
 
     def _show_caption(self, who: str, text: str, seconds: float) -> None:
@@ -326,11 +369,42 @@ class Companion(Gtk.Application):
             return
         known = {"claude-code": "Claude Code", "codex": "Codex", "echo": "Echo", "companion": "Echo", "": "Echo"}
         label = known.get(who) or (who if any(c.isupper() for c in who) else who.replace("-", " ").title())
-        self.who.set_text(label)
-        self.caption.set_text(text if len(text) <= 260 else text[:257] + "…")
-        self.bubble.set_visible(True)
+        content = label, text
+        self.caption_pending = content if content != self.caption_content else None
         self.bubble_until = time.monotonic() + seconds
-        GLib.idle_add(self._update_input_region)
+
+    def _reset_caption(self) -> None:
+        self.caption_pending = None
+        self.caption_content = ("", "")
+        self.bubble_alpha = 0.0
+        self.caption_clickable = False
+        self.bubble.set_opacity(0.0)
+        self.bubble.set_visible(False)
+
+    def _step_caption(self, now: float, dt: float) -> None:
+        allowed = self.enabled and self.target_shown > 0 and self.captions
+        if not allowed:
+            self.caption_pending = None
+        due = allowed and (bool(self.speech_active) or now < self.bubble_until)
+        if due and self.caption_pending and (self.bubble_alpha == 0.0 or self.reduced):
+            self.caption_content = self.caption_pending
+            self.who.set_text(self.caption_content[0])
+            self.caption.set_text(self.caption_content[1])
+            self.caption_pending = None
+            self.bubble.set_visible(True)
+        target = 1.0 if due and self.caption_content[1] and self.caption_pending is None else 0.0
+        if self.bubble_alpha != target:
+            rate = 1.0 if self.reduced else dt / (BUBBLE_FADE * (0.55 if self.caption_pending else 1.0))
+            self.bubble_alpha = (min(target, self.bubble_alpha + rate) if target else
+                                 max(target, self.bubble_alpha - rate))
+            alpha = self.bubble_alpha
+            self.bubble.set_opacity(alpha * alpha * (3 - 2 * alpha))
+            clickable = alpha > 0.2
+            if self.caption_clickable != clickable:
+                self.caption_clickable = clickable
+                GLib.idle_add(self._update_input_region)
+        if self.bubble_alpha == 0.0 and not due and self.bubble.get_visible():
+            self._reset_caption()
 
     # ---- settings ------------------------------------------------------------------------
     def _load_settings(self) -> None:
@@ -398,7 +472,6 @@ class Companion(Gtk.Application):
             LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.NONE)
         if self.animator.state.mode == "listening":
             self.animator.set_mode("idle", time.monotonic())
-        GLib.idle_add(self._update_input_region)
 
     def _restore(self, mode: str) -> None:
         self.last_event = time.monotonic()
@@ -407,7 +480,7 @@ class Companion(Gtk.Application):
             self.hidden_file.unlink(missing_ok=True)
         except OSError as exc:
             print(f"Could not save Companion visibility: {exc}", file=sys.stderr)
-        if mode != "idle" or self.target_shown == 0.0:
+        if (mode != "idle" and not self.speech_active) or self.target_shown == 0.0:
             self.appear(mode)
 
     def _summon_menu(self) -> bool:
@@ -430,12 +503,9 @@ class Companion(Gtk.Application):
 
     def _clicked(self, gesture, _n, x, y) -> None:
         self.last_event = time.monotonic()
-        self.animator.set_mode("listening", time.monotonic())
+        if not self.speech_active:
+            self.animator.set_mode("listening", time.monotonic())
         self.popover.set_pointing_to(Gdk.Rectangle(int(x), int(y), 1, 1))
-        # While the menu is open the whole surface takes input, so the menu is clickable.
-        surface = self.window.get_surface()
-        if surface is not None:
-            surface.set_input_region(None)
         # Only while the owner has the menu open may Echo take the keyboard (Escape, arrows).
         if LayerShell is not None and LayerShell.is_layer_window(self.window):
             LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.ON_DEMAND)
@@ -446,12 +516,15 @@ class Companion(Gtk.Application):
 
     def _ask(self, _action, value) -> None:
         topic = value.get_string()
-        self.animator.set_mode("thinking", time.monotonic())
+        if not self.speech_active:
+            self.animator.set_mode("thinking", time.monotonic())
 
         def work():
             try:
                 answer = self.backend.post("/companion/ask", {"topic": topic, "speak": not self.muted}, timeout=20)
-                GLib.idle_add(self._show_caption, "companion", answer.get("text", ""), 25)
+                if (answer.get("speech") or {}).get("status") != "queued":
+                    GLib.idle_add(self._show_caption, "companion", answer.get("text", ""), 25)
+                    GLib.idle_add(self.appear, "idle")
             except Exception:
                 GLib.idle_add(self._show_caption, "companion", "I can't reach EchoSpeak right now.", 8)
                 GLib.idle_add(lambda: self.animator.set_mode("confused", time.monotonic()) or False)
@@ -486,7 +559,6 @@ class Companion(Gtk.Application):
         self.speech_active = ""
         self.animator.envelope = []
         self.after_speech_mode = "idle"
-        self.bubble.set_visible(False)
         self.popover.popdown()
 
     def _move(self, _action, value) -> None:
