@@ -283,8 +283,9 @@ def echo_sessions(limit: int = 30) -> list[dict[str, Any]]:
         items = overview(limit=limit)
     except Exception:
         return []
+    # An idle Echo conversation is resting, not waiting on the owner; only a question is "your turn".
     states = {"running": "working", "streaming": "working", "needs_approval": "needs_permission",
-              "needs_answer": "your_turn", "failed": "your_turn", "idle": "your_turn"}
+              "needs_answer": "your_turn", "failed": "idle", "idle": "idle"}
     rows = []
     for item in items:
         agents = item.get("agents") or [{"id": "echo", "name": "Echo"}]
@@ -293,7 +294,7 @@ def echo_sessions(limit: int = 30) -> list[dict[str, Any]]:
         rows.append({
             "agent": "echo", "label": name if item.get("kind") != "echo" else "Echo",
             "session_id": str(item.get("thread_id") or ""), "cwd": str(project.get("root") or ""),
-            "project": str(project.get("name") or ""), "state": states.get(str(item.get("status") or "idle"), "your_turn"),
+            "project": str(project.get("name") or ""), "state": states.get(str(item.get("status") or "idle"), "idle"),
             "started_at": float(item.get("created_at") or 0), "updated_at": float(item.get("last_active_at") or 0),
             "last_prompt": str(item.get("last_request") or ""), "last_message": str(item.get("preview") or ""),
             "title": str(item.get("title") or ""), "turns": int(item.get("message_count") or 0) // 2,

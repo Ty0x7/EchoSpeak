@@ -262,3 +262,11 @@ def test_counts_bullets_not_sentences():
     assert len(d.results) <= 4
     assert d.tests_passed == 5 and d.tests_failed == 0
     assert analyse("## Verification\n- Ran 7 tests in 0.1s\n- FAILED (failures=2)\n## Summary\nx\n## Changes\n- y\n").tests_failed == 2
+
+
+def test_spoken_prompts_have_no_markup():
+    assert recap.clean('<pasted_content id="cee7"> Excellent progress. </pasted_content> see https://x.y/z') == "Excellent progress. see a link"
+    row = {"agent": "claude-code", "label": "Claude Code", "state": "working", "project": "Work",
+           "last_prompt": '<pasted_content id="cee7">\\nExcellent progress. I approve proceeding'}
+    line = recap._describe(row)
+    assert "<" not in line and "pasted_content" not in line and "Excellent progress" in line

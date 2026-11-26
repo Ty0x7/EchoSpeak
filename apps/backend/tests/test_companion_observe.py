@@ -224,6 +224,14 @@ def test_echo_conversations_and_named_agents_join_the_same_list(monkeypatch, tmp
     assert result["focus"]["agent"] == "echo" and result["focus"]["label"] == "Echo"
 
 
+def test_idle_echo_conversations_rest(monkeypatch, tmp_path, home):
+    import agent.session_overview as overview_module
+
+    monkeypatch.setattr(overview_module, "overview", lambda limit=30: [
+        {"thread_id": "t9", "kind": "echo", "agents": [], "status": "idle", "last_active_at": 1.0, "created_at": 1.0}])
+    assert observe.echo_sessions()[0]["state"] == "idle"
+
+
 def test_scope_refuses_home_and_missing_folders(home, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     with pytest.raises(ValueError):
