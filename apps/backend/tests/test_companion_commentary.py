@@ -56,6 +56,12 @@ def test_injection_guard_is_phrase_level():
     assert d.headline.startswith("Fixed a loader bug") and d.dropped_lines == 2
 
 
+def test_concise_structured_report_counts():
+    d = analyse("## Summary\nRepaired the config loader.\n\n## What changed\n- Added the missing comma.\n\n"
+                "## Verification\n- 52 passed, 0 failed.\n\n## Root cause\n- The cause was a missing comma.\n")
+    assert d.kind == "report" and d.outcome == "success" and d.tests_passed == 52
+
+
 def test_short_replies_and_questions():
     assert analyse("Done, 391.").kind == "short_reply"
     q = analyse("I've drafted both options. Should I go with the second one?")

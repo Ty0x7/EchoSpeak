@@ -1,0 +1,5 @@
+#!/bin/sh
+# Echo Companion launcher: system Python (python-gobject, gtk4-layer-shell), no venv needed.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/bin/python3 -m echo_companion "$@"
