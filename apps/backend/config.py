@@ -1121,6 +1121,18 @@ class Config:
         self.voice_speed = float(os.getenv("VOICE_SPEED", "1.0") or 1.0)
         self.voice_volume = float(os.getenv("VOICE_VOLUME", "1.0") or 1.0)
         self.voice_output_device = os.getenv("VOICE_OUTPUT_DEVICE", "").strip()
+        # Echo Companion (agent/companion). Off until the owner turns it on.
+        self.companion_enabled = os.getenv("COMPANION_ENABLED", "false").lower() == "true"
+        self.companion_speak = os.getenv("COMPANION_SPEAK", "true").lower() == "true"
+        self.companion_frequency = os.getenv("COMPANION_FREQUENCY", "milestones").strip() or "milestones"  # quiet|milestones|chatty
+        self.companion_humor = int(os.getenv("COMPANION_HUMOR", "1") or 1)  # 0 none, 1 light, 2 playful
+        self.companion_quiet_hours = os.getenv("COMPANION_QUIET_HOURS", "").strip()  # e.g. 22:00-08:00
+        self.companion_captions = os.getenv("COMPANION_CAPTIONS", "true").lower() == "true"
+        self.companion_knowledge = os.getenv("COMPANION_KNOWLEDGE", "true").lower() == "true"
+        self.companion_memory_scope = os.getenv("COMPANION_MEMORY_SCOPE", "auto").strip() or "auto"  # auto|project_only|account|off
+        self.companion_voice = os.getenv("COMPANION_VOICE", "").strip()  # blank: Echo's voice
+        self.companion_position = os.getenv("COMPANION_POSITION", "top-right").strip() or "top-right"
+        self.companion_animation = os.getenv("COMPANION_ANIMATION", "full").strip() or "full"  # full|reduced
         self.voice_windows_voice = ""
         self.voice_drama_runtime_path = ""
         self.voice_drama_model_path = ""
@@ -1677,6 +1689,17 @@ class Config:
             "voice_speed",
             "voice_volume",
             "voice_output_device",
+            "companion_enabled",
+            "companion_speak",
+            "companion_frequency",
+            "companion_humor",
+            "companion_quiet_hours",
+            "companion_captions",
+            "companion_knowledge",
+            "companion_memory_scope",
+            "companion_voice",
+            "companion_position",
+            "companion_animation",
             "voice_windows_voice",
             "voice_drama_runtime_path",
             "voice_drama_model_path",

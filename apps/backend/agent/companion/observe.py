@@ -282,11 +282,13 @@ def echo_sessions(limit: int = 30) -> list[dict[str, Any]]:
     return rows
 
 
-def activity(store: CompanionStore, *, include_echo: bool = True, now: Optional[float] = None) -> dict[str, Any]:
+def activity(store: CompanionStore, *, include_echo: bool = True, now: Optional[float] = None,
+             ingest: bool = True) -> dict[str, Any]:
     """Who is doing what right now, and which session the owner is interacting with."""
 
     now = time.time() if now is None else now
-    store.ingest_spool()
+    if ingest:
+        store.ingest_spool()
     rows = [r for r in store.sessions(now) if r["state"] != "ended" or now - float(r["updated_at"] or 0) < 3600]
     if include_echo:
         rows += [r for r in echo_sessions() if now - float(r["updated_at"] or 0) < 86400]
