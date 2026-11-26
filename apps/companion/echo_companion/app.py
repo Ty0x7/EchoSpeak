@@ -277,14 +277,14 @@ class Companion(Gtk.Application):
     def _update_input_region(self) -> bool:
         """Only Echo's face and the bubble take clicks; the rest of the surface is see-through."""
         surface = self.window.get_surface()
-        if surface is None or self._menu_open():
+        if surface is None:
             return False
         region = cairo.Region()
         width, height = facelib.canvas_size(FACE)
-        ok, bounds = self.area.compute_bounds(self.window)
-        if ok:
-            x, y = int(bounds.get_x()), int(bounds.get_y())
-            region.union(cairo.RectangleInt(x + int((width - FACE) / 2), y + int(height / 2 - 0.58 * FACE), FACE, FACE))
+        # GTK can report the face at x=0 before the first allocation. Its position
+        # in the fixed-width row is already known, even on the first surface commit.
+        x = 0 if self.box.get_first_child() == self.area else BUBBLE_WIDTH + self.box.get_spacing()
+        region.union(cairo.RectangleInt(x + (width - FACE) // 2, int(height / 2 - 0.58 * FACE), FACE, FACE))
         if self.caption_clickable:
             ok, bounds = self.bubble.compute_bounds(self.window)
             if ok:
@@ -472,7 +472,6 @@ class Companion(Gtk.Application):
             LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.NONE)
         if self.animator.state.mode == "listening":
             self.animator.set_mode("idle", time.monotonic())
-        GLib.idle_add(self._update_input_region)
 
     def _restore(self, mode: str) -> None:
         self.last_event = time.monotonic()
@@ -507,10 +506,6 @@ class Companion(Gtk.Application):
         if not self.speech_active:
             self.animator.set_mode("listening", time.monotonic())
         self.popover.set_pointing_to(Gdk.Rectangle(int(x), int(y), 1, 1))
-        # While the menu is open the whole surface takes input, so the menu is clickable.
-        surface = self.window.get_surface()
-        if surface is not None:
-            surface.set_input_region(None)
         # Only while the owner has the menu open may Echo take the keyboard (Escape, arrows).
         if LayerShell is not None and LayerShell.is_layer_window(self.window):
             LayerShell.set_keyboard_mode(self.window, LayerShell.KeyboardMode.ON_DEMAND)
