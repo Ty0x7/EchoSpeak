@@ -245,15 +245,18 @@ def test_scope_refuses_home_and_missing_folders(home, tmp_path, monkeypatch):
     assert "evil" not in scope["agents"]
 
 
-def test_autostart_entry_points_at_the_launcher(tmp_path, monkeypatch):
+def test_autostart_entry_points_at_the_launcher(tmp_path, monkeypatch, home):
+    companion_home, _ = home
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     launcher = tmp_path / "echo-companion"
     launcher.write_text("#!/bin/sh\n")
     monkeypatch.setattr(install, "companion_launcher", lambda: launcher)
     result = install.set_autostart(True)
     entry = (tmp_path / "cfg" / "autostart" / "echo-companion.desktop").read_text()
-    assert f"Exec={install.stable_launcher_path()}" in entry and "Type=Application" in entry
-    assert result["launcher"] == str(install.stable_launcher_path())
+    stable = companion_home / "echo-companion"
+    assert f"Exec={stable}" in entry and "Type=Application" in entry
+    assert result["launcher"] == str(stable)
+    assert stable.is_file()
     install.set_autostart(False)
     assert not (tmp_path / "cfg" / "autostart" / "echo-companion.desktop").exists()
 

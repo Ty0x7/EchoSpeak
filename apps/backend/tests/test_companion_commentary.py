@@ -81,7 +81,8 @@ def test_compose_is_grounded_and_claims_saving_only_when_saved():
     line = compose(_event(), d, humor=1, saved=False)
     assert line.startswith("Claude reported back on echospeak") and "PR 212 is up" in line
     assert "saved" not in line.lower() and "verified" not in line.lower()
-    assert "saved" in compose(_event(), d, humor=1, saved=True).lower() or "echo can use" in compose(_event(), d, saved=True).lower()
+    saved_line = compose(_event(), d, humor=1, saved=True).lower()
+    assert "saved" in saved_line or "echo can use" in saved_line
     clean = analyse("## Results\n- All 40 tests pass, 40 passed.\n- Implemented the parser.\n## Changes\n- Added docs.\n" + "x " * 300)
     assert "suspicious" in compose(_event(text="x"), clean, humor=2)
     assert "suspicious" not in compose(_event(text="x"), clean, humor=1)
