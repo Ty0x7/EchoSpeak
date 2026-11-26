@@ -25,7 +25,8 @@ import io
 import json
 import os
 import pickle
-import time
+import tempfile
+import threading
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,6 +37,27 @@ from loguru import logger
 
 VECTORS, STORE = "vectors.npy", "store.json"
 LEGACY = ("index.faiss", "index.pkl")
+_PENDING = ".vector-index-pending"
+_INDEX_IO_LOCK = threading.RLock()
+
+
+def _finish_replace(folder: Path) -> None:
+    pending = folder / _PENDING
+    if pending.is_symlink():
+        raise ValueError("The staged vector index cannot be a symbolic link")
+    if not pending.is_dir():
+        return
+    # A missing staged file was already atomically promoted by an earlier attempt.
+    for name in (VECTORS, STORE):
+        staged = pending / name
+        if staged.is_symlink():
+            raise ValueError("Staged vector index files cannot be symbolic links")
+        if staged.is_file():
+            atomic_replace(staged, folder / name)
+    for name in (*LEGACY, "index.pkl.sha256"):
+        (folder / name).unlink(missing_ok=True)
+    pending.rmdir()
+
 
 
 @dataclass
@@ -107,23 +129,31 @@ class VectorStore:
 
     def save_local(self, folder: str | Path) -> None:
         folder = Path(folder)
-        folder.mkdir(parents=True, exist_ok=True)
-        stamp = f".tmp.{os.getpid()}.{time.time_ns()}"
-        vectors, store = folder / (VECTORS + stamp), folder / (STORE + stamp)
-        with vectors.open("wb") as handle:
-            np.save(handle, self.vectors, allow_pickle=False)
-        store.write_text(json.dumps({"format": 1, "dim": self.dim, "ids": self.ids,
-                                     "docs": [{"text": d.page_content, "metadata": d.metadata} for d in self.docs]},
-                                    ensure_ascii=False, default=str), encoding="utf-8")
-        atomic_replace(vectors, folder / VECTORS)
-        atomic_replace(store, folder / STORE)
-        for name in LEGACY:  # converted: the old pickle is no longer needed
-            (folder / name).unlink(missing_ok=True)
-        (folder / "index.pkl.sha256").unlink(missing_ok=True)
+        with _INDEX_IO_LOCK:
+            folder.mkdir(parents=True, exist_ok=True)
+            _finish_replace(folder)
+            with tempfile.TemporaryDirectory(prefix=".vector-index-stage-", dir=folder) as directory:
+                stage = Path(directory)
+                with (stage / VECTORS).open("wb") as handle:
+                    np.save(handle, self.vectors, allow_pickle=False)
+                (stage / STORE).write_text(json.dumps(
+                    {"format": 1, "dim": self.dim, "ids": self.ids,
+                     "docs": [{"text": d.page_content, "metadata": d.metadata} for d in self.docs]},
+                    ensure_ascii=False, default=str,
+                ), encoding="utf-8")
+                # Publish a complete generation before touching either live file.
+                os.rename(stage, folder / _PENDING)
+            _finish_replace(folder)
 
     @classmethod
     def load_local(cls, folder: str | Path, embeddings: Any) -> "VectorStore":
         folder = Path(folder)
+        with _INDEX_IO_LOCK:
+            _finish_replace(folder)
+            return cls._load_local(folder, embeddings)
+
+    @classmethod
+    def _load_local(cls, folder: Path, embeddings: Any) -> "VectorStore":
         if (folder / STORE).is_file() and (folder / VECTORS).is_file():
             data = json.loads((folder / STORE).read_text(encoding="utf-8"))
             store = cls(embeddings)
@@ -143,7 +173,7 @@ class VectorStore:
 
 def has_index(folder: str | Path) -> bool:
     folder = Path(folder)
-    return (folder / STORE).is_file() or (folder / LEGACY[1]).is_file()
+    return (folder / _PENDING).is_dir() or (folder / STORE).is_file() or (folder / LEGACY[1]).is_file()
 
 
 # ── converting a LangChain FAISS index ──────────────────────────────────

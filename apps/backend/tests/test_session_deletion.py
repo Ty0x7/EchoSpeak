@@ -2,10 +2,11 @@
 import json
 import threading
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent import memory, state, threads
+from agent import memory, state, threads, vector_store
 from agent.lean import rooms, summaries, tool_outputs
 from agent.query_journal import get_query_journal
 from agent.research_notebook import ResearchNotebook
@@ -14,7 +15,8 @@ from api import deps
 from api.routes import chat, lean, sessions
 
 
-def test_deletion_removes_chat_and_search_data_after_restart(tmp_path, monkeypatch):
+@pytest.mark.parametrize("interrupted", [None, vector_store.VECTORS, vector_store.STORE])
+def test_deletion_removes_chat_and_search_data_after_restart(tmp_path, monkeypatch, interrupted):
     registry = threads.ThreadManager(tmp_path / "threads.json")
     store = state.StateStore(tmp_path / "state")
     room_store = rooms.RoomStore(tmp_path / "rooms.json")
@@ -30,7 +32,7 @@ def test_deletion_removes_chat_and_search_data_after_restart(tmp_path, monkeypat
     app.include_router(sessions.router)
     app.include_router(chat.router)
     app.include_router(lean.router)
-    client = TestClient(app)
+    client = TestClient(app, raise_server_exceptions=False)
 
     conversation = client.post("/threads", json={"title": "Synthetic deletion case"}).json()["thread_id"]
     other = client.post("/threads", json={"title": "Keep this chat"}).json()["thread_id"]
@@ -78,6 +80,26 @@ def test_deletion_removes_chat_and_search_data_after_restart(tmp_path, monkeypat
     finally:
         deps._release_query_cancellation(run, cancel)
 
+    if interrupted:
+        real_replace = vector_store.atomic_replace
+
+        def fail_promotion(src, dst):
+            if dst == source.memory_root / interrupted:
+                raise OSError("simulated interruption during vector index replacement")
+            return real_replace(src, dst)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(vector_store, "atomic_replace", fail_promotion)
+            assert client.delete(f"/threads/{conversation}").status_code == 500
+
+        store = state.StateStore(store.root)
+        source = memory.AgentMemory(str(source.memory_root))
+        monkeypatch.setattr(state, "_state_store", store)
+        monkeypatch.setattr(threads, "_thread_manager", threads.ThreadManager(tmp_path / "threads.json"))
+        assert store.session_deleted(conversation)
+        assert client.get("/history", params={"thread_id": conversation}).status_code == 404
+        assert {hit["session_id"] for hit in store.search_messages("purgekeyword")} == {other}
+
     assert client.delete(f"/threads/{conversation}").status_code == 200
     assert client.delete(f"/threads/{conversation}").status_code == 200
     assert client.get("/history", params={"thread_id": conversation}).status_code == 404
@@ -101,7 +123,9 @@ def test_deletion_removes_chat_and_search_data_after_restart(tmp_path, monkeypat
     assert conversation not in {row.thread_id for row in restarted.list_thread_states()}
     assert {hit["session_id"] for hit in restarted.search_messages("purgekeyword")} == {other}
     assert not threads.ThreadManager(tmp_path / "threads.json").get_thread(conversation)
-    assert set(VectorStore.load_local(source.memory_root, None).ids) == {account_memory, project_memory}
+    retained = VectorStore.load_local(source.memory_root, None)
+    assert retained.ids == [account_memory, project_memory]
+    assert retained.vectors.tolist() == [[1.0, 1.0], [2.0, 1.0]]
     source.rebuild_faiss_from_canonical()
     on_disk = json.loads(source._records_path.read_text())["records"]
     assert set(on_disk) == {account_memory, project_memory}

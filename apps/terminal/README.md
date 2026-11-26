@@ -217,7 +217,8 @@ a command line.
 
 The desktop Sessions menu and terminal Sessions picker call the same backend endpoint. If Echo is
 still executing a turn, preparing voice output or running a background process for the conversation,
-stop or finish that work before retrying. A confirmed deletion removes the thread and room metadata,
+stop or finish that work before retrying. If cleanup fails partway, retry deletion from Sessions.
+The saved deletion marker blocks new work on that conversation while cleanup is pending. A confirmed deletion removes the thread and room metadata,
 session state and queued messages, chat history and search rows, execution and tool records, replay
 journal, research notebook, running summary, session-scoped memories and their vectors, and owned
 traces, tool output files, screenshots, connected-app views, voice transport records and clips.
