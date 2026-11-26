@@ -172,19 +172,19 @@ class App:
         chats.sort(key=lambda t: float(t.get("last_active_at") or 0), reverse=True)
         return chats[0] if chats else None
 
+    def create_session(self, title: str, *, project_id: str) -> dict:
+        if not self.agent_id:
+            return self.client.create_thread(title=title, project_id=project_id, idempotency_key=new_request_id())
+        # A persona answers in a direct room, as in the desktop Agents view.
+        room = self.client.post("/lean/rooms", {"name": title, "agent_ids": [self.agent_id], "kind": "direct"})
+        thread_id = str(room["thread_id"])
+        if project_id:
+            self.client.request("POST", f"/projects/{project_id}/activate", params={"thread_id": thread_id})
+        return self.client.thread(thread_id)
+
     def ensure_session(self, first_message: str) -> str:
         if not self.sid:
-            title = one_line(first_message, 60)
-            if self.agent_id:
-                # In a plain chat the backend answers with the model, not a persona (agent/lean/runtime.py
-                # model_first); a persona answers in a direct room, as the app's Agents view does.
-                room = self.client.post("/lean/rooms", {"name": title, "agent_ids": [self.agent_id], "kind": "direct"})
-                self.session = self.client.thread(str(room["thread_id"]))
-                if self.project_id:
-                    self.client.request("POST", f"/projects/{self.project_id}/activate", params={"thread_id": self.sid})
-            else:
-                self.session = self.client.create_thread(title=title, project_id=self.project_id,
-                                                         idempotency_key=new_request_id())
+            self.session = self.create_session(one_line(first_message, 60), project_id=self.project_id)
             self.say(self.r.s.dim(f"new session {self.sid}"))
         return self.sid
 

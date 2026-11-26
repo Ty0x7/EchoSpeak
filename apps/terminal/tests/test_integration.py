@@ -71,7 +71,8 @@ def backend(tmp_path_factory):
                 assert time.monotonic() < deadline, "backend did not start"
                 time.sleep(0.5)
         cli_env = {k: v for k, v in os.environ.items() if not k.startswith(("ECHOSPEAK_", "XDG_RUNTIME"))}
-        cli_env.update({"ECHOSPEAK_RUNTIME_DIR": str(dirs["rt"]), "NO_COLOR": "1"})
+        cli_env.update({"ECHOSPEAK_RUNTIME_DIR": str(dirs["rt"]), "ECHOSPEAK_DATA_DIR": str(dirs["data"]),
+                        "NO_COLOR": "1"})
         yield {"client": client, "port": port, "env": cli_env, "rt": dirs["rt"], "proc": proc, "model": model}
         proc.send_signal(signal.SIGTERM)
         proc.wait(timeout=30)

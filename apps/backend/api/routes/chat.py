@@ -23,6 +23,7 @@ from api.deps import (
     _metric_inc,
     _normalize_thread_id,
     _register_query_cancellation,
+    require_session_writable,
     _release_query_cancellation,
     _safe_stream_failure,
     _start_agent_thread,
@@ -141,6 +142,7 @@ class QueryQueueRequest(BaseModel):
 async def queue_query(request: QueryQueueRequest):
     """Queue a follow-up prompt to run after the active turn finishes."""
     thread_id = _normalize_thread_id(request.thread_id)
+    require_session_writable(thread_id)
     store = get_state_store()
     item = store.enqueue_turn(
         thread_id,
@@ -221,6 +223,7 @@ async def claim_queued_query(thread_id: str, force: bool = False):
     (force=true, which also un-pauses it) or sends a new message.
     """
     key = _normalize_thread_id(thread_id)
+    require_session_writable(key)
     with _ACTIVE_QUERY_CANCEL_LOCK:
         session_active = any(owner == key for owner, _event, _execution in _ACTIVE_QUERY_CANCELLATIONS.values())
     if session_active:
@@ -443,16 +446,18 @@ async def query_stream(request: QueryRequest):
     q: queue.Queue = queue.Queue()
     request_id = str(request.client_request_id or "").strip() or str(uuid.uuid4())
     fingerprint = hashlib.sha256(request.model_dump_json().encode()).hexdigest()
-    # The owner is talking again: a queue paused by Stop may continue after this turn.
-    get_state_store().set_queue_paused(session, False)
-    try:
-        claimed = journal.claim(request_id, session, fingerprint)
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
-    if not claimed:
-        return _journal_response(request_id, session, 0, replay=True)
     cancel_event = threading.Event()
-    _register_query_cancellation(request_id, request.thread_id or "default", cancel_event)
+    with _ACTIVE_QUERY_CANCEL_LOCK:
+        require_session_writable(session)
+        try:
+            claimed = journal.claim(request_id, session, fingerprint)
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        if not claimed:
+            return _journal_response(request_id, session, 0, replay=True)
+        # The owner is talking again: a queue paused by Stop may continue after this turn.
+        get_state_store().set_queue_paused(session, False)
+        _register_query_cancellation(request_id, session, cancel_event)
     _metric_inc("requests", 1)
 
     logger.debug(

@@ -1033,8 +1033,12 @@ def update_room(room_id: str, payload: RoomUpdatePayload) -> dict[str, Any]:
 
 @router.delete("/rooms/{room_id}")
 def delete_room(room_id: str) -> dict[str, Any]:
-    if not get_room_store().delete(room_id):
+    from api.routes.sessions import delete_thread
+
+    room = get_room_store().get(room_id)
+    if room is None:
         raise HTTPException(status_code=404, detail="Room not found")
+    delete_thread(room.thread_id)
     return {"deleted": True, "id": room_id}
 
 

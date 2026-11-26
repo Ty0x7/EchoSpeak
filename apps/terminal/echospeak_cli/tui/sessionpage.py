@@ -1,15 +1,4 @@
-"""The full-screen session browser: ← twice on an empty input (cli-design.md §11).
-
-The first ← opens the quick picker in the composer's place (sessions.py). The second opens this: a
-dedicated page on the terminal's alternate screen, like Codex's resume picker (0.170, studied in its real
-terminal UI): a title, the filters, a search line, a dense list, a position rule and key hints. Codex shows a
-session's details inline with ^e; here they are always in a pane on the right: who answers, the project
-and its folder, the state, when it was created and last active, the model, and the last exchange. Below 96
-columns the details move under the list. Leaving restores the conversation and its scrollback untouched.
-
-``render(browser, width, height, caps, now)`` is pure (rows in, lines out); ``run(...)`` is the full-screen
-prompt_toolkit app around it, opened from the main app inside ``in_terminal``.
-"""
+"""Full-height Sessions view in Echo's terminal viewport."""
 from __future__ import annotations
 
 import os
@@ -17,6 +6,7 @@ import time
 from typing import Any, Optional
 
 from ..render import one_line
+from . import avatar
 from . import motion as M
 from .sessions import (SCOPE_LABEL, STATUS_LABEL, SessionBrowser, agent_class, ago, plain_recap, project_name,
                        who)
@@ -121,7 +111,7 @@ def _list_lines(b: SessionBrowser, width: int, rows: int, caps: Caps, now: float
     top = 0
     if len(body) > rows:
         top = max(0, min(sel_at - rows // 3, len(body) - rows))
-        if sel_at > 0 and body[sel_at - 1][1] is None:     # keep the group header above the first row of a group
+        if rows > 1 and sel_at > 0 and body[sel_at - 1][1] is None:     # keep the group header above the first row of a group
             top = min(top, sel_at - 1)
     shown = [line for line, _i in body[top:top + rows]]
     return shown + [[("", " " * width)]] * (rows - len(shown))
@@ -193,19 +183,27 @@ def _detail_lines(b: SessionBrowser, width: int, rows: int, caps: Caps, now: flo
 # ── the page ─────────────────────────────────────────────────────────
 def _hints(width: int, b: SessionBrowser, caps: Caps) -> list[Fragments]:
     g = caps.glyphs
+    status = b.delete_status()
+    if status:
+        if b.confirm_delete and M.width_of(status) > width:
+            return [_fit([("class:attention", "Delete conversation?")], width),
+                    _fit([("class:attention", "Enter delete · Esc cancel")], width)]
+        return [_fit([("class:attention", status)], width), _fit([], width)]
     back = "esc clear search" if b.query else "esc back"
+    delete = f"{g.arrow_up_down} select" if b.editing and b.query else "del/bs delete"
     forms = [
         [f"enter resume   ctrl+n new   {back}   {g.arrow_up_down} browse   pgup/pgdn page",
-         "tab filter   type to search   ctrl+c close sessions"],
-        [f"enter resume   ctrl+n new   {back}", f"{g.arrow_up_down} browse   tab filter   type to search"],
-        ["enter resume   esc back", f"{g.arrow_up_down} browse   tab filter"],
+         f"tab filter   type to search   {delete}   ctrl+c close sessions"],
+        [f"enter resume   ctrl+n new   {back}", f"{g.arrow_up_down} browse   tab filter   {delete}"],
+        ["enter resume   esc back", delete],
         ["enter · esc", ""],
     ]
     pick = next((f for f in forms if all(M.width_of(x) + 1 <= width for x in f)), ["", ""])
     return [_fit([("class:dim", " " + x if x else "")], width) for x in pick]
 
 
-def render(b: SessionBrowser, width: int, height: int, caps: Caps, now: Optional[float] = None) -> list[Fragments]:
+def render(b: SessionBrowser, width: int, height: int, caps: Caps, now: Optional[float] = None,
+           *, elapsed: float = avatar.ENTRANCE_MS) -> list[Fragments]:
     """The whole page: exactly ``height`` lines of exactly ``width`` cells."""
     now = time.time() if now is None else now
     width, height = max(1, width), max(1, height)
@@ -214,19 +212,24 @@ def render(b: SessionBrowser, width: int, height: int, caps: Caps, now: Optional
     agents = sorted({who(r) for r in b.rows})
     right = f"{len(b.rows)} conversations" + (f" {g.sep} {len(agents)} agents" if len(agents) > 1 else "")
     title: Fragments = [("", " "), ("class:title", "Sessions"), ("class:dim", f"  {g.sep}  pick up any conversation")]
-    pad = width - M.frag_width(title) - M.width_of(right) - 1
-    head = [_fit(title + ([("", " " * pad), ("class:dim", right)] if pad >= 2 else []), width)]
+    pad = width - (8 if width >= 20 else 0) - M.frag_width(title) - M.width_of(right) - 1
+    head = [title + ([("", " " * pad), ("class:dim", right)] if pad >= 2 else [])]
     filt: Fragments = [("class:dim", " Filter: ")]
     for scope in b.scopes():
         filt += [("", "  "), ("class:sel" if scope == b.scope else "class:dim", SCOPE_LABEL[scope])]
     sort = [("class:dim", "     Sort: most recent")] if M.frag_width(filt) + 22 <= width else []
-    head.append(_fit(filt + sort, width))
-    head.append(_fit([("", " Search: "), ("", b.query), ("class:accent", "▏")] if b.query else
-                     [("class:dim", " Type to search")], width))
-    head.append([("", " " * width)])
+    head.append(filt + sort)
+    head.append([("", " Search: "), ("", b.query), ("class:accent", "▏" if b.editing else "")] if b.query else
+                [("class:dim", " Type to search")])
+    if width >= 20:
+        face = avatar.terminal_face(caps, elapsed)
+        head = [[("bold", row), ("", " ")] + line for row, line in zip(face, head)]
+    head = [_fit(line, width) for line in head] + [_fit([], width)]
     if height < HEAD + FOOT + 3:
-        # A tiny terminal: the list alone.
-        return (_list_lines(b, width, height, caps, now))[:height]
+        # Leave as many rows as possible for navigation in a tiny terminal.
+        footer = _hints(width, b, caps) if b.delete_status() else []
+        footer = footer[:max(0, height - 1)]
+        return _list_lines(b, width, height - len(footer), caps, now) + footer
     body_h = height - HEAD - FOOT
     if width >= TWO_PANES:
         left_w = max(44, min(72, int(width * 0.46)))
@@ -250,114 +253,3 @@ def render(b: SessionBrowser, width: int, height: int, caps: Caps, now: Optional
     rule = [("class:rule", g.rule * max(0, width - M.width_of(pos) - 1)), ("class:dim", pos), ("class:rule", g.rule)]
     foot = [_fit(rule, width)] + _hints(width, b, caps)
     return (head + body + foot)[:height]
-
-
-# ── the app ──────────────────────────────────────────────────────────
-async def run(browser: SessionBrowser, caps: Caps, style: Any, now: Any = time.time) -> tuple[str, Optional[dict]]:
-    """The page on the alternate screen until a choice: ("resume", row) · ("new", None) · ("back", None) · ("close", None)."""
-    from prompt_toolkit.application import Application
-    from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.keys import Keys
-    from prompt_toolkit.layout import Layout, Window
-    from prompt_toolkit.layout.controls import FormattedTextControl
-    from prompt_toolkit.output.color_depth import ColorDepth
-
-    holder: dict[str, Any] = {}
-
-    def text():
-        app = holder["app"]
-        size = app.output.get_size()
-        lines = render(browser, size.columns, size.rows, caps, now())
-        out: Fragments = []
-        for i, line in enumerate(lines):
-            if i:
-                out.append(("", "\n"))
-            out += line
-        return out
-
-    kb = KeyBindings()
-
-    def page() -> int:
-        return max(1, holder["app"].output.get_size().rows - HEAD - FOOT - 2)
-
-    @kb.add("up")
-    @kb.add("c-p")
-    def _up(e):
-        browser.move_page(-1, now())
-
-    @kb.add("down")
-    def _down(e):
-        browser.move_page(1, now())
-
-    @kb.add("pageup")
-    def _pgup(e):
-        browser.move_page(-page(), now())
-
-    @kb.add("pagedown")
-    def _pgdn(e):
-        browser.move_page(page(), now())
-
-    @kb.add("home")
-    def _home_key(e):
-        browser.jump_page(False, now())
-
-    @kb.add("end")
-    def _end(e):
-        browser.jump_page(True, now())
-
-    @kb.add("tab")
-    def _tab(e):
-        browser.cycle_scope(1)
-
-    @kb.add("s-tab")
-    def _stab(e):
-        browser.cycle_scope(-1)
-
-    @kb.add("backspace")
-    def _bs(e):
-        browser.backspace()
-
-    @kb.add("enter")
-    def _enter(e):
-        row = browser.chosen()
-        if row is not None:
-            e.app.exit(result=("resume", row))
-
-    @kb.add("c-n")
-    def _new(e):
-        e.app.exit(result=("new", None))
-
-    @kb.add("escape", eager=True)
-    def _esc(e):
-        if not browser.clear_query():
-            e.app.exit(result=("back", None))
-
-    @kb.add("right")
-    def _right(e):
-        e.app.exit(result=("back", None))
-
-    @kb.add("left")
-    def _left(e):
-        pass        # nowhere deeper than this page
-
-    @kb.add("c-c")
-    @kb.add("c-d")
-    def _close(e):
-        e.app.exit(result=("close", None))
-
-    @kb.add(Keys.Any)
-    def _type(e):
-        if e.data and e.data.isprintable():
-            browser.type(e.data)
-
-    app = Application(layout=Layout(Window(FormattedTextControl(text, show_cursor=False))), key_bindings=kb,
-                      full_screen=True, style=style, mouse_support=False, include_default_pygments_style=False,
-                      color_depth=None if caps.color else ColorDepth.DEPTH_1_BIT)
-    app.ttimeoutlen = 0.05
-    app.timeoutlen = 0.08
-    holder["app"] = app
-    browser.mode = "page"
-    if browser.selected not in browser.page_order(now()):
-        browser.jump_page(False, now())
-    result = await app.run_async()
-    return result or ("back", None)

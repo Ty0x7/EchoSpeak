@@ -36,6 +36,9 @@ def submit(thread_id, message, request_id, effort="medium"):
     fingerprint = hashlib.sha256((thread_id + "\0" + message + "\0" + effort).encode()).hexdigest()
     store = get_state_store()
     with _lock:
+        from api.deps import require_session_writable
+
+        require_session_writable(thread_id)
         previous = _receipts.get(request_id)
         if previous:
             if previous["fingerprint"] != fingerprint:
@@ -136,3 +139,10 @@ def _drain_after_turn(thread_id, effort):
 def active(thread_id):
     with _lock:
         return thread_id in _active
+
+
+def forget_session(thread_id):
+    with _lock:
+        for request_id in [key for key, row in _receipts.items() if row["thread_id"] == thread_id]:
+            del _receipts[request_id]
+            _cancelled.discard(request_id)

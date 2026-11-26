@@ -95,3 +95,7 @@ def done(t_ms: float, reduced_motion: bool = False) -> bool:
 
 
 FACE_REST = frame(ENTRANCE_MS)
+
+
+def terminal_face(caps, elapsed: float = ENTRANCE_MS) -> tuple[str, str, str]:
+    return caps.glyphs.face if caps.ascii else frame(elapsed, caps.reduced_motion)

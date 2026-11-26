@@ -124,11 +124,15 @@ def root() -> Path:
     return Path(DATA_DIR) / "lean" / "traces"
 
 
+def session_dir(session_id: str) -> Path:
+    chat = hashlib.sha256(str(session_id).encode()).hexdigest()[:20]
+    return root() / chat
+
+
 def _path(session_id: str, message_id: str) -> Path:
     if not _MESSAGE.fullmatch(str(message_id or "")):
         raise ValueError("Invalid message ID")
-    chat = hashlib.sha256(str(session_id).encode()).hexdigest()[:20]  # any session string, never a path
-    return root() / chat / f"{message_id}.json"
+    return session_dir(session_id) / f"{message_id}.json"
 
 
 def save(record: dict[str, Any]) -> None:

@@ -134,6 +134,7 @@ def get_agent(thread_id: Optional[str] = None):
 
     key = _normalize_thread_id(thread_id)
     with _agent_pool_lock:
+        require_session_writable(key)
         binding = _ensure_session_model_binding(key)
         existing = _agent_pool.pop(key, None)
         if existing is not None:
@@ -509,8 +510,17 @@ def _start_agent_thread(
     voice_turn_id: str = "",
     agent_id: str = "",
 ) -> None:
-    threading.Thread(
-        target=_run_lean_stream,
+    key = _normalize_thread_id(thread_id)
+
+    def run(**kwargs):
+        try:
+            _run_lean_stream(**kwargs)
+        finally:
+            with _ACTIVE_QUERY_CANCEL_LOCK:
+                _QUERY_WORKERS.pop(cancel_event, None)
+
+    worker = threading.Thread(
+        target=run,
         kwargs=dict(
             agent=agent, message=message, thread_id=thread_id, request_id=request_id,
             q=q, cancel_event=cancel_event, source=source,
@@ -519,7 +529,15 @@ def _start_agent_thread(
         ),
         name="lean-turn",
         daemon=True,
-    ).start()
+    )
+    with _ACTIVE_QUERY_CANCEL_LOCK:
+        require_session_writable(key)
+        _QUERY_WORKERS[cancel_event] = key
+        try:
+            worker.start()
+        except BaseException:
+            _QUERY_WORKERS.pop(cancel_event, None)
+            raise
 
 
 def _cancel_incompatible_session_work(session_id: str, *, reason: str) -> dict[str, int]:
@@ -553,11 +571,28 @@ def _cancel_incompatible_session_work(session_id: str, *, reason: str) -> dict[s
 
 _ACTIVE_QUERY_CANCEL_LOCK = threading.RLock()
 _ACTIVE_QUERY_CANCELLATIONS: Dict[str, tuple[str, threading.Event, str]] = {}
+_DELETING_SESSIONS: set[str] = set()
+_QUERY_WORKERS: dict[threading.Event, str] = {}
+
+
+def require_session_writable(session_id: str) -> None:
+    with _ACTIVE_QUERY_CANCEL_LOCK:
+        if session_id in _DELETING_SESSIONS:
+            raise HTTPException(409, "This conversation is being deleted.")
+        if get_state_store().session_deleted(session_id):
+            raise HTTPException(404, "This conversation was deleted.")
+
+
+def forget_session_agent(session_id: str) -> None:
+    with _agent_pool_lock:
+        _agent_pool.pop(session_id, None)
 
 
 def _register_query_cancellation(request_id: str, thread_id: str, event: threading.Event) -> None:
     with _ACTIVE_QUERY_CANCEL_LOCK:
-        _ACTIVE_QUERY_CANCELLATIONS[str(request_id)] = (_normalize_thread_id(thread_id), event, "")
+        key = _normalize_thread_id(thread_id)
+        require_session_writable(key)
+        _ACTIVE_QUERY_CANCELLATIONS[str(request_id)] = (key, event, "")
 
 
 def _release_query_cancellation(request_id: str, event: threading.Event) -> None:

@@ -104,6 +104,23 @@ def commentary(limit: int = Query(default=30, ge=1, le=100)):
     return {"items": list(get_commentary().feed)[-limit:]}
 
 
+_presentation_streams = set()
+
+
+@router.post("/show")
+async def show_companion():
+    """Send a presentation-only signal to connected Companion windows."""
+    from config import config
+
+    if not config.companion_enabled:
+        raise HTTPException(409, "Turn on Echo Companion first.")
+    if not _presentation_streams:
+        raise HTTPException(409, "Start Echo Companion on your desktop first.")
+    for push in tuple(_presentation_streams):
+        push({})
+    return {"shown": True}
+
+
 @router.get("/stream")
 async def stream():
     """Server-sent events for the companion window: commentary items and speech events."""
@@ -127,6 +144,8 @@ async def stream():
     unsubscribe_commentary = commentary.on_item(push("commentary"))
 
     async def body():
+        show = push("show")
+        _presentation_streams.add(show)
         try:
             yield "event: hello\ndata: {}\n\n"
             started = time.monotonic()
@@ -144,6 +163,7 @@ async def stream():
                 name = item.get("type", kind) if kind == "speech" else "commentary"
                 yield f"event: {name}\ndata: {_json.dumps(item, default=str)}\n\n"
         finally:
+            _presentation_streams.discard(show)
             unsubscribe_speech()
             unsubscribe_commentary()
 

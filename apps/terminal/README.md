@@ -5,9 +5,8 @@ agents, and to control EchoSpeak itself (model, permissions, approvals, projects
 It talks HTTP only: sessions are backend threads, runs are the backend's journaled runs, approvals go to the
 same approval routes. Nothing executes in the terminal process.
 
-- **Echo TUI** (default on a terminal): an inline terminal UI in the style of Claude Code and Codex CLI, built
-  with `prompt_toolkit` and `rich`. Output goes into real scrollback (no alternate screen); only a small live
-  region at the bottom (status, steps, composer, footer) is redrawn. Design: `docs/research/cli-design.md` §3.
+- **Echo TUI** (default on a terminal) opens a full-screen viewport with the composer at the bottom.
+  Page Up and Page Down browse the conversation above it. Ctrl+O opens the full transcript.
 - **Plain REPL** (`--plain`, or automatically when stdin/stdout is not a terminal, `TERM=dumb`, or the TUI
   dependencies are missing): the standard-library line client. Every subcommand (`send`, `attach`, …) is
   standard library only and unchanged.
@@ -98,7 +97,7 @@ Options: `--plain` (line REPL, no colours) · `--no-anim` · `--ascii` · `--no-
 - **Status line** while a task runs: the Echo ping (`· • ● ◉ ◎ ○ ◌`, time-based), what is happening in the
   app's own words ("Echo is thinking it through", "Running `pytest`", "Echo: Checking the output"), elapsed,
   tokens, `esc to stop`. No events for 10 s: "waiting on the model"; 30 s: "still waiting".
-- **Answers** stream into the live tail and are committed to scrollback as rendered markdown, block by block.
+- **Answers** stream into the conversation pane as rendered Markdown, block by block.
   Thinking is collapsed (`∴ Thought for 8s`; `/verbose` shows it). Tool steps: `✓` done (dim), `✗` failed
   (bold), `⊘` denied, `⏸` held, with `⎿` previews; Ctrl+O has the full output.
 - **File edits** print as a diff block: `✓ Edited src/stats.py · +4 −2` (or Created / Wrote / Deleted), then
@@ -132,14 +131,12 @@ Options: `--plain` (line REPL, no colours) · `--no-anim` · `--ascii` · `--no-
 | Ctrl+O · Ctrl+R · Ctrl+G | transcript pager · history search · edit in `$EDITOR` (in a dialog: full arguments) | same |
 | `\`+Enter, Ctrl+J, Alt+Enter | newline | newline |
 | `?` on empty input | shortcuts | shortcuts |
-| ← on empty input | your sessions (picker); ← again: the sessions page, grouped by what needs you, running, then by day. Esc or → go back one level | same |
+| ← on empty input | Open the Sessions picker. Press ← again for the full Sessions page. Esc or → goes back one level. | same |
+| Backspace / Delete in Sessions | Ask to delete the highlighted conversation. Enter confirms and Esc cancels. While typing a filter, Backspace edits it. Use ↑ or ↓ to select a match. | same |
+| PgUp / PgDn in the composer | Scroll the conversation by one page. | same |
 
-**Any size.** The live region fits every terminal from a 20-column split to an ultrawide window: sections get
-rows by priority (input and dialogs first, the stream tail last), the footer shortens one item at a time and
-always keeps the model and context %, and resizing never leaves old rules behind (the terminal's re-wrap is
-accounted for). Answers wrap at 100 columns on wide terminals (`ECHO_TUI_MEASURE=0` for full width);
-`ECHO_TUI_REFLOW=0` for terminals that crop instead of re-wrapping on resize (plain xterm, detected
-automatically). Design and verification: `docs/research/cli-design.md` §6.
+The composer and dialogs get space first when a terminal shrinks. The conversation rewraps to fit
+the new width. Answers wrap at 100 columns on wide terminals (`ECHO_TUI_MEASURE=0` for full width).
 
 Pastes over 1,000 characters or 12 lines become a chip (`[Pasted 2,431 chars · 58 lines #1]`), expanded when
 sent. Never auto-submitted. History: `~/.local/state/echospeak/history`.
@@ -199,16 +196,36 @@ hidden; under 40 the status is `● Working… esc`; under 12 rows dialogs show 
 
 ## tmux
 
-Inline rendering: scrollback, copy-mode, search and `capture-pane` work. `/copy` uses OSC 52, which tmux
-forwards with `set -g set-clipboard on`. Run the TUI in one pane and `echospeak attach <session>` in another to
-watch the same run.
+EchoSpeak uses the terminal's alternate screen. `/clear` creates a new backend session ID, resets
+the client context and replaces the application transcript with the welcome view. The previous
+conversation stays in Sessions. Quitting restores the shell screen. EchoSpeak keeps its transcript
+out of normal pane scrollback and leaves previous shell output, older tmux history, outer emulator
+history and other panes alone. Terminal or tmux configurations that disable the alternate screen can
+retain their own copies. [tmux terminal and pane behavior](https://github.com/tmux/tmux/wiki/Getting-Started)
+
+`/copy` uses OSC 52, which tmux forwards with `set -g set-clipboard on`. Run `echospeak attach <session>`
+in another pane to watch the same run.
 
 `/preview` splits the current pane (`split-window -h -l 40%`) and runs `echospeak preview --follow <session>`
-there: a read-only, full-screen viewer (its own alternate screen; the conversation pane keeps its scrollback)
+in a separate full-screen viewer
 with the session's changed files and the selected file's diffs, newest first, including edits waiting for
 approval (`PROPOSED`). Keys: j/k or arrows scroll, n/p file, f follow the newest edit, s split old│new (pane ≥ 150
 columns), q quit. `/preview` again closes it. It finds the backend like every other client; the key is never put on
 a command line.
+
+## Deleting a conversation
+
+The desktop Sessions menu and terminal Sessions picker call the same backend endpoint. If Echo is
+still executing a turn, preparing voice output or running a background process for the conversation,
+stop or finish that work before retrying. A confirmed deletion removes the thread and room metadata,
+session state and queued messages, chat history and search rows, execution and tool records, replay
+journal, research notebook, running summary, session-scoped memories and their vectors, and owned
+traces, tool output files, screenshots, connected-app views, voice transport records and clips.
+EchoSpeak retains project files, uploaded library items, saved media and artifacts, reports, work and
+audit ledgers, account and project memories, profiles, settings, backups and original Claude Code and
+Codex files. Terminal input history is shared across chats and can still recall typed commands or
+prompts. Historical diagnostic logs and migration copies may also contain past text. Deletion applies
+to active conversation storage.
 
 ## Security
 

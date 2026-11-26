@@ -135,6 +135,10 @@ class VoiceJobStore:
         job.updated_at = time.time()
         path = self._path(job.id)
         with self._lock:
+            from agent.state import get_state_store
+
+            if get_state_store().session_deleted(job.session_id):
+                raise VoiceRuntimeError("Conversation was deleted")
             tmp = path.with_suffix(f".tmp.{os.getpid()}.{time.time_ns()}")
             with tmp.open("w", encoding="utf-8") as handle:
                 handle.write(job.model_dump_json(indent=2) + "\n")

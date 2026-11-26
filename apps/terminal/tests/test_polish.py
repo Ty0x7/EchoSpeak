@@ -6,8 +6,6 @@ harness), so a navigation that draws right but routes keys wrong would fail here
 """
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 pytest.importorskip("prompt_toolkit")
@@ -82,15 +80,13 @@ def test_the_live_welcome_has_exactly_the_rows_the_printed_banner_will_have():
     session(go(None))
 
 
-def test_the_banner_is_printed_before_anything_else_and_its_live_copy_waits_for_the_flush():
+def test_the_banner_is_committed_once_before_the_first_note():
     async def go(tui):
-        tui._out_event = asyncio.Event()
         tui.welcome = tui._banner()
         tui.note("first note")
-        assert "EchoSpeak" in tui._out[0] and "first note" in tui._out[-1]
-        assert tui.welcome is not None, "kept on screen until the banner is really written"
-        for hook in tui._after_flush:
-            hook()
+        rows = ["".join(p[1] for p in line) for line in tui._transcript_rows()]
+        assert "EchoSpeak" in next(row for row in rows if row.strip())
+        assert any("first note" in row for row in rows)
         assert tui.welcome is None
     session(go)
 
@@ -175,55 +171,68 @@ def test_the_cli_has_a_continue_flag():
 
 
 # ── D. ← twice: the picker, then the sessions page ─────────────────
-def _scripted_page(monkeypatch, *results):
-    """Stand in for the full-screen page: return these results in turn, recording what it was given."""
-    from echospeak_cli.tui import sessionpage
-
-    calls = []
-
-    async def fake(browser, caps, style, now=None):
-        calls.append((browser.mode, browser.chosen()))
-        browser.mode = "page"
-        result = results[len(calls) - 1]
-        return result(browser) if callable(result) else result
-
-    monkeypatch.setattr(sessionpage, "run", fake)
-    return calls
-
-
-def test_left_twice_opens_the_full_screen_page_and_back_returns_to_the_picker(monkeypatch):
-    calls = _scripted_page(monkeypatch, ("back", None), ("close", None))
-
+def test_left_twice_opens_the_full_screen_page_and_back_returns_to_the_picker():
     async def go(tui):
         press(tui, Keys.Left)
         await settle(tui)
         assert tui.browser.mode == "picker"
-        press(tui, Keys.Left)                                          # the page
-        await settle(tui)
-        assert len(calls) == 1 and calls[0][0] == "picker"           # opened from the picker, on its selection
-        assert tui.browser is not None and tui.browser.mode == "picker"   # back: the picker as it was
-        assert tui.app.layout.has_focus(tui.browser_window)
         press(tui, Keys.Left)
         await settle(tui)
-        assert len(calls) == 2 and tui.browser is None               # close: straight back to the conversation
+        assert tui.browser.mode == "page"
+        assert tui.app.layout.has_focus(tui.session_page_window)
+        press(tui, Keys.Escape)
+        assert tui.browser.mode == "picker"
+        assert tui.app.layout.has_focus(tui.browser_window)
+        press(tui, Keys.Left)
+        press(tui, Keys.ControlC)
+        assert tui.browser is None
         assert tui.app.layout.has_focus(tui.composer_window)
     session(go)
 
 
-def test_enter_on_the_page_resumes_the_selected_conversation(monkeypatch):
-    def pick_needs_you(browser):
-        browser.jump_page(False)
-        return ("resume", browser.chosen())
+def test_enter_on_the_page_resumes_the_selected_conversation():
+    async def go(tui):
+        press(tui, Keys.Left)
+        await settle(tui)
+        press(tui, Keys.Left)
+        press(tui, Keys.Home)
+        press(tui, Keys.Enter)
+        await settle(tui)
+        assert tui.browser is None and tui.sid == "t-pong"
+    session(go, RecordingClient())
 
-    _scripted_page(monkeypatch, pick_needs_you)
+
+def test_page_delete_confirms_cancels_and_keeps_the_nearest_session_selected():
+    class Client(RecordingClient):
+        removed = []
+
+        def delete_thread(self, thread_id):
+            self.removed.append(thread_id)
+
+    client = Client()
 
     async def go(tui):
         press(tui, Keys.Left)
         await settle(tui)
         press(tui, Keys.Left)
+        browser = tui.browser
+        target = browser.chosen()["thread_id"]
+        press(tui, Keys.Backspace)
+        assert browser.confirm_delete["thread_id"] == target
+        press(tui, Keys.Escape)
+        assert browser.confirm_delete is None and not client.removed
+        browser.type("x")
+        press(tui, Keys.Backspace)
+        assert not browser.query and browser.confirm_delete is None
+        press(tui, Keys.Delete)
+        target = browser.confirm_delete["thread_id"]
+        press(tui, Keys.Enter)
         await settle(tui)
-        assert tui.browser is None and tui.sid == "t-pong"            # the page's first row: what needs you
-    session(go, RecordingClient())
+        assert client.removed == [target]
+        assert target not in {row["thread_id"] for row in browser.rows}
+        assert browser.chosen() is not None
+
+    session(go, client)
 
 
 def _page(**kw) -> SessionBrowser:
@@ -252,7 +261,8 @@ def test_the_page_lists_beside_a_details_pane_with_the_real_facts():
     b.selected = next(i for i, r in enumerate(b.visible()) if r["thread_id"] == "t-oilers")
     lines = [text(line) for line in sessionpage.render(b, 130, 30, CAPS, NOW)]
     body = "\n".join(lines)
-    assert lines[0].lstrip().startswith("Sessions") and "5 conversations" in lines[0]
+    assert lines[0].startswith(avatar.FACE_REST[0]) and "Sessions" in lines[0] and "5 conversations" in lines[0]
+    assert all(lines[i].startswith(face_row) for i, face_row in enumerate(avatar.FACE_REST))
     assert "Needs you" in body and "Running" in body and "Release crew" in body
     row = next(line for line in lines if "│" in line and "When do the Oilers" in line.split("│", 1)[0])
     left, right = row.split("│", 1)
@@ -286,13 +296,10 @@ def test_the_page_fills_the_screen_exactly(width, rows):
 def test_several_outputs_at_once_print_the_banner_once():
     """A resume prints a rule and several recap lines in one go; each used to commit the banner again (lab, 19 Nov)."""
     async def go(tui):
-        tui._out_event = asyncio.Event()
         tui.welcome = tui._banner()
         for n in range(4):
             tui.note(f"recap line {n}")
-        said = plain("".join(tui._out))
+        said = "\n".join("".join(part[1] for part in row) for row in tui._transcript_rows())
         assert said.count("EchoSpeak v") == 1 and said.index("EchoSpeak v") < said.index("recap line 0")
-        for hook in tui._after_flush:
-            hook()
         assert tui.welcome is None
     session(go)

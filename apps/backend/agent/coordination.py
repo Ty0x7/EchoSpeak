@@ -145,6 +145,21 @@ class Coordinator:
             self.store._write_json(self.path, data)
             return copy.deepcopy(result)
 
+    def delete_session_approvals(self, session_id: str) -> None:
+        """Remove chat-owned prompts for a decision while keeping the independent work ledger."""
+        def change(data):
+            for key, approval in list(data["approvals"].items()):
+                if approval.get("session_id") != session_id:
+                    continue
+                del data["approvals"][key]
+                work = data["works"].get(approval.get("work_id"))
+                if work and (work.get("wake") or {}).get("id") == key and work.get("status") in {
+                    "waiting_approval", "waiting_input",
+                }:
+                    work.update(status="interrupted", wake={}, revision=work["revision"] + 1, updated_at=time.time())
+
+        self._tx(change)
+
     def view(self, bucket: str, *, principal: str = "owner") -> list[dict]:
         if bucket not in BUCKETS:
             raise ValueError("Unknown coordination record type")
@@ -216,6 +231,7 @@ class Coordinator:
 
     def claim(self, work_id: str, *, principal="owner", session_id="", agent_id="") -> WorkContext:
         def change(data):
+            self.store._require_live_session(session_id)
             row = self._work(data, work_id, principal)
             if row["status"] != "ready":
                 raise PermissionError(f"Work is {row['status']}; explicit reconciliation or resume is required")

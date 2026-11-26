@@ -99,6 +99,14 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
     </Group>
 
     <Group title="On screen">
+      <Row label="Auto-hide when idle" help="Slide Echo away when idle or waiting.">
+        <Toggle checked={s.companion_auto_hide !== false} onChange={v => save({ companion_auto_hide: v })}
+          label="Auto-hide when idle" />
+      </Row>
+      <Row label="Show Echo" help="Bring Echo back after hiding it from the corner menu.">
+        <button type="button" className="es-btn es-btn-sm" disabled={!enabled} onClick={() => void send("POST", "/companion/show", {})
+          .then(() => setNotice("")).catch(e => setNotice(String(e.message || e)))}>Show Echo</button>
+      </Row>
       <Row label="Position">
         <Select value={String(s.companion_position || "top-right")} onChange={v => save({ companion_position: v })}
           options={["top-right", "top-left", "bottom-right", "bottom-left"].map(v => ({ value: v, label: v.replace("-", " ") }))} />
