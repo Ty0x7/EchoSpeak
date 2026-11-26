@@ -300,7 +300,9 @@ def test_a_trusted_project_adds_engineering_and_keeps_the_conversation_tools(env
     assert {"set_reminder", "create_artifact", "create_media", "stock_history", "image_search"} <= plain
     # and takes nothing away, except the offer to attach a project, which only a conversation without one needs (#187)
     assert plain - attached == {"use_project_folder"}
-    assert not attached & {"computer_action", "take_screenshot", "spawn_workers", "browse_task", "delegate_to_agent"}
+    assert not attached & {"computer_action", "spawn_workers", "browse_task", "delegate_to_agent"}
+    # Owner, 26 November 2026: a game or UI isn't verified by tests alone; Echo looks at the window it opened.
+    assert "take_screenshot" in attached
 
     # The same research safeguards in both: evidence, citation review, URL prefetch, the stale-date note.
     for turn in (talking, working):

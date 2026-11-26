@@ -356,7 +356,8 @@ def test_an_opener_in_the_sandbox_that_found_no_desktop_says_nothing_opened():
     err = ("Failed to connect to user scope bus via local transport: $DBUS_SESSION_BUS_ADDRESS and $XDG_RUNTIME_DIR "
            "not defined\njq: parse error: Invalid numeric literal at line 1, column 9")
     note = launcher_note("xdg-open /home/dev/Work/pong/index.html", 0, "", err, "bwrap")
-    assert note.startswith("Hint: nothing opened") and 'where="host"' in note
+    # Pointing at a host `xdg-open` (the old hint) blocked for 62 s in the GTA_CLONE session: it stays the browser's parent.
+    assert note.startswith("Hint: nothing opened") and "open_application" in note and "target" in note
 
 
 def test_other_commands_get_no_opener_note():

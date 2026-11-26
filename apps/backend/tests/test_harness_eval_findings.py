@@ -678,3 +678,54 @@ def test_identical_test_can_run_after_an_edit_but_denial_still_holds(tmp_path, m
     else:
         assert ends["after"]["outcome"] == "refused"
         assert not ran
+
+
+def test_a_refused_project_is_not_rebuilt_outside_any_project(tmp_path, monkeypatch):
+    """GTA_CLONE evaluation (26 November 2026, no project attached, approvals off): ~/Work/GTA_CLONE was refused and
+    qwen3.5:9b rebuilt the game in ~/Documents/GTA_CLONE. With no project, a copy in another file root is refused."""
+    documents = tmp_path / "Documents"
+    documents.mkdir()
+    users = tmp_path / "Work" / "GTA_CLONE"
+    users.mkdir(parents=True)
+    box, _ran = _project(documents)
+    box.project_root = ""          # no project attached: the configured roots apply
+    box.native = {**box.native, "file_write": _bounded_write(documents)}
+    copy = documents / "GTA_CLONE" / "game.js"
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("w1", "file_write", '{"path": "%s", "content": "fixed"}' % (users / "game.js"))]),
+        ModelTurn(tool_calls=[ToolCall("w2", "file_write", '{"path": "%s", "content": "fixed"}' % copy)]),
+        ModelTurn(content=f"I couldn't change {users}: it's outside the folders I may change. Attach it as a project."),
+    ])
+    events: list[dict[str, Any]] = []
+    result = _turn(box, client, [], events).run(f"The game in {users} is broken, fix it.")
+    assert not copy.exists() and not (users / "game.js").exists()
+    assert "didn't ask for" in client.calls[2][-1]["content"]
+    assert "couldn't change" in result.text
+
+
+def test_ready_to_play_after_only_a_launch_and_a_screenshot_goes_back_once(tmp_path, monkeypatch):
+    """Live run 4 (#235): the game opened, the screenshot showed an empty canvas, and the reply said "ready to play".
+    Launching, a window, a clean page load and a screenshot are each weaker than "it works"."""
+    from agent.lean import settings as lean_settings
+
+    monkeypatch.setattr(lean_settings, "approval_mode", lambda: "never")
+    box, _ran = _project(tmp_path)
+    obj = {"type": "object", "properties": {}}
+    opened = ('Opened /p/index.html in Chromium (requested). Window "GTA Clone - Chromium" is open on monitor DP-1.\n'
+              "Evidence so far:\n1. Launch requested: yes.\n2. Window open: verified in the window list.\n"
+              "3. Page loaded: yes, with no JavaScript errors or failed loads in a separate headless browser.")
+    box.native = {**box.native,
+                  "open_application": NativeTool("open_application", "open", obj, lambda a: opened),
+                  "take_screenshot": NativeTool("take_screenshot", "look", obj, lambda a: "Screenshot obs-1: the game")}
+    client = Client([
+        ModelTurn(tool_calls=[ToolCall("o1", "open_application", '{"target": "/p/index.html"}')]),
+        ModelTurn(tool_calls=[ToolCall("s1", "take_screenshot", '{"window_title": "GTA Clone - Chromium"}')]),
+        ModelTurn(content="Perfect! The game is running and ready for you to play."),
+        ModelTurn(content="It's open in Chromium and the page loaded without errors; the screenshot shows the map. "
+                          "I haven't played it, so give the controls a try and tell me how it goes."),
+    ])
+    events: list[dict[str, Any]] = []
+    result = _turn(box, client, [], events).run("Open my game and make sure it works.")
+    assert sum(e["type"] == "presentation_nudge" for e in events) == 1
+    assert "ready for you to play" not in result.text and "haven't played it" in result.text
+    assert "responded to input (the screen changed after it): no" in client.calls[3][-1]["content"]

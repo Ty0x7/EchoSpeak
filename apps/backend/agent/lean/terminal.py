@@ -283,14 +283,25 @@ def launcher_note(command: str, code: int, out: str, err: str, where: str) -> st
     """
     if not _LAUNCHER.search(command or ""):
         return ""
-    if where != "host" and _NO_DESKTOP.search(f"{out}\n{err}"):
-        return ("Hint: nothing opened. The sandbox has no desktop session (no display or session bus), so apps and "
-                "browsers can't open from it. To open this for the user, run the opener once on this PC "
-                "(where=\"host\"), for example xdg-open with the file's full path.")
+    use = ("To show it to the user, call open_application with target set to the file's full path or the URL (and "
+           "no app, for the default app): it opens on this PC's screen and checks that the window appeared.")
+    text = f"{out}\n{err}"
+    if where != "host":
+        # GTA_CLONE session (26 November 2026): `xdg-open … &` and `firefox … &` in the sandbox returned 0 with
+        # nothing (or "command not found") on stderr, and this note said they had opened. The sandbox never has a
+        # screen, whatever the opener prints.
+        return "Hint: nothing opened. The sandbox has no desktop session (no display or session bus). " + use
+    if code == 127 or re.search(r"(?i)command not found|no such file or directory", text):
+        return ("Hint: nothing opened: that program isn't installed on this PC. Don't guess other program names. "
+                + use)
+    if re.search(r"&\s*$", str(command or "").strip()) and not re.search(r"&&\s*$", str(command or "").strip()):
+        return ("Hint: the trailing & means exit code 0 only says the shell started it; whether anything opened "
+                "isn't known. Don't launch it again with the terminal. " + use)
     if code == 0 and not str(out or "").strip():
         return ("This opener hands the file to the desktop app (or to a browser window that is already open) and "
-                "returns at once, so exit code 0 means it was opened. Don't launch it again: tell the user it should "
-                "be open now, and ask them to say if it isn't.")
+                "returns, so exit code 0 means it was handed over, not that a window is showing. Don't launch it "
+                "again: tell the user it should be open now, and ask them to say if it isn't. Next time, "
+                "open_application checks the window for you.")
     return ""
 
 

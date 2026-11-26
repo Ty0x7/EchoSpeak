@@ -779,14 +779,21 @@ class ArtifactWriteArgs(BaseModel):
 
 class OpenApplicationArgs(BaseModel):
     app: str = Field(
-        ...,
+        default="",
         validation_alias=AliasChoices("app", "application", "name", "program"),
-        description="Exact installed app name, desktop shortcut name, or executable path from Settings > Permissions > Allowed apps.",
+        description=("Installed app name (Start-menu or desktop shortcut name, executable path; on Linux the app's "
+                     "name or desktop entry). Leave empty to open target in the system's default app."),
     )
     args: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("args", "arguments", "cmd", "command"),
-        description="Optional arguments string.",
+        description="Optional arguments string (Windows only).",
+    )
+    target: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("target", "path", "file", "url", "open"),
+        description=("Full path of a file or folder, or an http(s) URL, to open: a built page or game, a document, "
+                     "a local dev-server address. With no app it opens in the system's default app."),
     )
 
 
@@ -1033,7 +1040,12 @@ def file_write(path: str, content: str, append: bool = False) -> str:
         return "File write is disabled. To enable: set ENABLE_SYSTEM_ACTIONS=true and ALLOW_FILE_WRITE=true, then restart the API."
     target = _safe_file_path(path)
     if target is None:
-        return f"Path not allowed. Allowed roots: {_format_file_tool_roots()}. Prefer Desktop/<project>/filename for user projects."
+        # The old "Prefer Desktop/<project>" read as an instruction to relocate the user's own project (GTA_CLONE
+        # evaluation, 26 November 2026): a new project may start there, an existing one may not move there.
+        return (f"Path not allowed. Allowed roots: {_format_file_tool_roots()}. If this is the user's existing project "
+                "or a place they named, don't write a copy anywhere else: tell them it is outside the folders EchoSpeak "
+                "may change (attaching it as a project allows it). Only a new project with no location given may go "
+                "in Desktop/<project>/.")
     # Never persist tool wrapper / "Read N chars" pollution into real source files
     body = strip_echo_file_wrapper(content or "")
     if not append and _looks_like_code_stub(str(path), body):
@@ -1574,12 +1586,68 @@ def _app_blocked_message(app: str, entry: str) -> str:
             "Settings > Permissions > Blocked apps. Do not open it another way (terminal, shortcuts, other tools).")
 
 
-@tool(args_schema=OpenApplicationArgs, description="Launch an installed Windows app by its Start-menu name, desktop shortcut name or executable path. Apps in the owner's Blocked apps list are refused.")
-def open_application(app: str, args: Optional[str] = None) -> str:
+def _desktop_open_logs() -> Path:
+    from config import LOGS_DIR
+
+    return Path(LOGS_DIR) / "desktop-open"
+
+
+def _open_on_linux_desktop(app: str, args: Optional[str], target: Optional[str]) -> str:
+    """Linux (freedesktop) launches: desktop entries, default apps and window checks in agent/desktop_open.py."""
+    from agent import app_launcher, desktop_open
+    from agent.lean import file_access
+
+    if denied := _tool_scope_denial("open_application"):
+        return denied
+    if str(args or "").strip():
+        return ("Error: On Linux, open_application takes no free-form arguments. Give the file, folder or URL as "
+                "target; run other commands with the terminal tool, where its approvals apply.")
+    app, target = str(app or "").strip(), str(target or "").strip()
+    if not app and not target:
+        return "Error: Name the app to open, or give a target file or URL."
+    if app and not target and (app.startswith(("/", "~")) or re.match(r"(?i)(?:https?|file)://", app)):
+        app, target = "", app            # a path or link given as the app: open it in its default app
+    if entry := app_launcher.blocked_by(app) if app else "":
+        return _app_blocked_message(app, entry)
+    readable: list[Path] = []
+    if target and (local := file_access.local_target(target)):
+        # A local file or folder is read by whatever shows it (and by the page check): the same folders,
+        # approvals and never-readable places as file_read, after symlinks are resolved (#235).
+        resolved = _safe_file_path(local, read=True)
+        if resolved is None:
+            return "Error: " + file_access.explain(local, _file_tool_roots())
+        target = str(resolved)
+        readable = [*_file_tool_roots(), *_file_read_grants()]
+
+    def blocked(desktop_entry, argv: list[str]) -> str:
+        return (app_launcher.blocked_by(desktop_entry.name, command=argv)
+                or app_launcher.blocked_by(desktop_entry.id.removesuffix(".desktop")))
+
+    try:
+        return desktop_open.open_on_desktop(app, target, log_dir=_desktop_open_logs(), blocked=blocked,
+                                            readable=readable, hidden=[p for p, _ in file_access.hidden_places()])
+    except Exception as e:
+        return f"Error: Failed to open: {e}"
+
+
+@tool(args_schema=OpenApplicationArgs, description=(
+    "Open an installed app, or open a file, folder or web page (target) on the user's screen in its default app "
+    "or a named one, and check the window appeared. Use it to show the user what you built (an HTML game or page, "
+    "a document, a localhost dev server), not shell commands like xdg-open: the sandbox has no screen. "
+    "Apps in the owner's Blocked apps list are refused."))
+def open_application(app: str = "", args: Optional[str] = None, target: Optional[str] = None) -> str:
     if not getattr(config, "enable_system_actions", False) or not getattr(config, "allow_open_application", False):
         return "Error: Application launching is disabled. The owner must enable Allow actions on this computer and Open apps in Settings > Permissions."
     if os.name != "nt":
-        return "Error: open_application is only supported on Windows."
+        if sys.platform == "darwin":
+            return "Error: open_application is not supported on macOS yet."
+        return _open_on_linux_desktop(app, args, target)
+    if not str(app or "").strip():
+        if not str(target or "").strip():
+            return "Error: Name the app to open, or give a target file or URL."
+        app, target = str(target), None
+    if str(target or "").strip():
+        args = (str(args or "") + " " + subprocess.list2cmdline([str(target).strip()])).strip()
 
     from agent import app_launcher
 

@@ -115,7 +115,8 @@ TOOL_COMPONENTS: dict[str, str] = {
 }
 
 NOT_ENFORCED = (
-    "Programs EchoSpeak starts: terminal commands on this PC and local MCP servers run as their own programs. "
+    "Programs EchoSpeak starts: terminal commands on this PC, local MCP servers and apps it opens for you run as "
+    "their own programs. In Offline mode it doesn't open web pages in your browser, which nothing here can limit. "
     "In Offline mode the sandbox terminal has no internet; commands on this PC are not network-restricted.",
     "Native code inside two libraries (the DuckDuckGo client and the Playwright browser) is outside the backstop; "
     "both are gated before they start.",

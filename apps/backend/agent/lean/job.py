@@ -547,3 +547,63 @@ COMPLETE_TASK_DESCRIPTION = (
     "(files written, answers found, actions taken). This is how the work is marked done: saying "
     "\"I'll do it\" or \"done\" in text does not count. Don't call it to report a plan or a partial result."
 )
+
+
+# ── presenting what was built: launch → window → page → looks right → works (#235) ───────────────────────────
+# Live GTA_CLONE run (26 November 2026): qwen3.5:9b opened the game, looked at a screenshot of an empty canvas and
+# wrote "The game is running and ready for you to play." Opening, a clean page load and a screenshot are separate,
+# weaker facts than "it works", which takes someone using it.
+_WORKS_CLAIM = re.compile(
+    r"(?i)\b(?:works|is\s+working|are\s+working|working\s+(?:now|correctly|properly|fine|great|perfectly)|"
+    r"runs\s+(?:fine|correctly|properly|well|smoothly|perfectly)|ready\s+(?:for\s+you\s+)?to\s+(?:play|use)|"
+    r"playable|fully\s+functional|is\s+functional|load(?:s|ed)\s+(?:correctly|properly|fine|successfully|without\s+errors?))\b")
+_HEDGED = re.compile(r"(?i)\b(?:not|never|no\s+longer|unverified|whether|until|once|if|should|might|may|try)\b|n['’]t\b")
+
+
+class Presented:
+    """What this turn's evidence shows about something opened for the user."""
+
+    def __init__(self) -> None:
+        self.opened = self.window = self.looked = self.used = False
+        self.page: Optional[bool] = None       # None: not checked; True: loaded clean; False: errors
+
+    def observe(self, name: str, ok: bool, output: str, screen_changed: Optional[float] = None) -> None:
+        text = str(output or "")
+        if name == "open_application":
+            if ok and not text.lstrip().startswith("Error") and ("Opened " in text or "Launched " in text):
+                self.opened, self.looked, self.used = True, False, False
+                self.window = "verified in the window list" in text
+                self.page = (False if "3. Page loaded: NO" in text else
+                             True if "3. Page loaded: yes" in text else None)
+        elif not self.opened or not ok:
+            return
+        elif name in {"take_screenshot", "vision_qa"}:
+            self.looked = True
+        elif name == "computer_action" and screen_changed is not None:
+            from agent.lean.evidence import SCREEN_UNCHANGED
+
+            self.used = self.used or screen_changed >= SCREEN_UNCHANGED   # input reached it and the screen changed
+
+    def unbacked(self, text: str) -> str:
+        """The sentence claiming it works, or ''.
+
+        Nothing this harness observes backs "it works" for something it opened: a launch, a clean load, a
+        screenshot and even a screen change after input (owner, 26 November 2026: "screen changes alone are not
+        proof") each show less than the outcome the user asked for. Such a reply goes back once to say which
+        levels were verified; the user's confirmation is what verifies it works.
+        """
+        if not self.opened:
+            return ""
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", str(text or "")):
+            if sentence.strip() and _WORKS_CLAIM.search(sentence) and not _HEDGED.search(sentence):
+                return sentence.strip()
+        return ""
+
+    def note(self, claim: str) -> str:
+        page = {None: "not checked", True: "loaded with no errors", False: "FAILED: it has errors"}[self.page]
+        return (f"You wrote \"{claim[:200]}\". What this turn shows: launch requested; window "
+                f"{'verified' if self.window else 'not verified'}; page {page}; looked at with a screenshot: "
+                f"{'yes' if self.looked else 'no'}; responded to input (the screen changed after it): "
+                f"{'yes' if self.used else 'no'}. None of that shows it works as the user asked. Reply again saying "
+                "exactly which of these you verified and what the screenshot showed, fix what failed if you can, "
+                "and ask the user to try it.")
