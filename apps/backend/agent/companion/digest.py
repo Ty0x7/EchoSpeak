@@ -144,7 +144,8 @@ def analyse(text: str) -> Digest:
     tail = message.rstrip()[-300:]
     digest.asks_owner = tail.endswith("?") or bool(re.search(r"\b(should i|do you want|would you like|shall i|want me to|"
                                                               r"your (call|decision|approval)|let me know)\b", tail, re.I))
-    if len(message) >= 500 and (heads >= 2 or (bullets >= 4 and words >= 2) or words >= 5):
+    if (len(message) >= 500 and (heads >= 2 or (bullets >= 4 and words >= 2) or words >= 5)) \
+            or (len(message) >= 120 and heads >= 3 and words >= 2):  # a concise but structured report
         digest.kind = "report"
     elif digest.asks_owner:
         digest.kind = "question"

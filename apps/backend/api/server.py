@@ -681,6 +681,9 @@ def start_server(host: str = None, port: int = None):
     global _SERVE_ADDRESS
     _SERVE_ADDRESS = (str(host), int(port))
     logger.info(f"Starting server on {host}:{port}")
+    from api.stream_shutdown import install as install_stream_shutdown
+
+    install_stream_shutdown()  # endless event streams must not keep a stopping server alive
     uvicorn.run(app, host=host, port=port)
 
 

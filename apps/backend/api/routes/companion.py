@@ -108,6 +108,7 @@ async def stream():
 
     from agent.companion.commentary import get_commentary
     from agent.speech_output import get_speech_output
+    from api.stream_shutdown import MAX_STREAM_SECONDS, SHUTTING_DOWN
 
     loop = asyncio.get_running_loop()
     events: asyncio.Queue = asyncio.Queue(maxsize=500)
@@ -122,12 +123,18 @@ async def stream():
     async def body():
         try:
             yield "event: hello\ndata: {}\n\n"
-            while True:
+            started = time.monotonic()
+            quiet = 0.0
+            while not SHUTTING_DOWN.is_set() and time.monotonic() - started < MAX_STREAM_SECONDS:
                 try:
-                    kind, item = await asyncio.wait_for(events.get(), timeout=15)
+                    kind, item = await asyncio.wait_for(events.get(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
+                    quiet += 1.0
+                    if quiet >= 15:
+                        quiet = 0.0
+                        yield ": keepalive\n\n"
                     continue
+                quiet = 0.0
                 name = item.get("type", kind) if kind == "speech" else "commentary"
                 yield f"event: {name}\ndata: {_json.dumps(item, default=str)}\n\n"
         finally:

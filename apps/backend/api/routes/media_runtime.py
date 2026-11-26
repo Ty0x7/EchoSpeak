@@ -424,6 +424,7 @@ async def speak_events(after: int = Query(default=0, ge=0)):
     from fastapi.responses import StreamingResponse
 
     from agent.speech_output import get_speech_output
+    from api.stream_shutdown import MAX_STREAM_SECONDS, SHUTTING_DOWN
 
     output = get_speech_output()
     loop = asyncio.get_running_loop()
@@ -439,12 +440,18 @@ async def speak_events(after: int = Query(default=0, ge=0)):
             for event in output.events_since(after):
                 last = event["seq"]
                 yield f"id: {event['seq']}\nevent: {event['type']}\ndata: {_json.dumps(event)}\n\n"
-            while True:
+            started = time.monotonic()
+            quiet = 0.0
+            while not SHUTTING_DOWN.is_set() and time.monotonic() - started < MAX_STREAM_SECONDS:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    yield ": keepalive\n\n"
+                    quiet += 1.0
+                    if quiet >= 15:
+                        quiet = 0.0
+                        yield ": keepalive\n\n"
                     continue
+                quiet = 0.0
                 if event["seq"] > last:
                     last = event["seq"]
                     yield f"id: {event['seq']}\nevent: {event['type']}\ndata: {_json.dumps(event)}\n\n"
