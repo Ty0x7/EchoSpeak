@@ -136,6 +136,7 @@ class Commentary:
         self.feed: deque[dict[str, Any]] = deque(maxlen=100)
         self._last_session: dict[str, float] = {}
         self._last_any = 0.0
+        self._last_greeting = 0.0
         self._prompt_at: dict[str, float] = {}
         self._listeners: list[Callable[[dict[str, Any]], None]] = []
         self._thread = threading.Thread(target=self._run, name="echo-companion-commentary", daemon=True)
@@ -214,25 +215,15 @@ class Commentary:
         digest = analyse(event.get("text", "")) if kind in {"turn_completed", "report_ready"} else Digest()
         if kind == "report_ready":
             digest.kind = "report"
-        frequency = str(_setting("companion_frequency", "milestones"))
+        from agent.companion import narrate
+
+        now = time.time()
         interacting = self._interacting(event)
-        long_turn = kind == "turn_completed" and float(event["at"]) - self._prompt_at.get(key, float(event["at"])) >= LONG_TURN
-        if digest.kind == "report":
-            reason = "report"
-        elif kind in {"needs_permission", "waiting_input"} or digest.kind == "question":
-            reason = "needs_you" if not interacting and frequency != "quiet" else ""
-        elif kind == "stage_completed":
-            reason = "stage" if frequency != "quiet" else ""
-        elif long_turn and not interacting and frequency == "chatty":
-            reason = "long_turn"
-        else:
-            reason = ""
-        if not reason:
-            return None
-        saved = False
-        stored: dict[str, Any] = {}
-        archived = ""
-        if reason == "report" and bool(_setting("companion_knowledge", True)):
+        facts = narrate.facts(event, digest, interacting=interacting, now=now)
+        reason = "" if catching_up else narrate.worth_saying(facts, str(_setting("companion_frequency", "milestones")))
+        # Knowledge doesn't depend on speaking: a finished report is kept (where authorised) even in silence.
+        saved, stored, archived = False, {}, ""
+        if digest.kind == "report" and kind in {"turn_completed", "report_ready"} and bool(_setting("companion_knowledge", True)):
             try:
                 decision = self._authorize(event)
                 if decision.get("allowed"):
@@ -244,14 +235,19 @@ class Commentary:
             except Exception as exc:
                 stored = {"stored": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
                 logger.warning("Echo Companion could not store a report", exc_info=True)
-        text = compose(event, digest, humor=int(_setting("companion_humor", 1)), saved=saved)
+        if not reason and not catching_up:
+            if not stored:
+                return None  # nothing worth saying and nothing kept: stay quiet, leave no trace
+        greet = bool(facts["name"]) and now - self._last_greeting > 20 * 60
+        text = narrate.compose(facts, reason or "report", greet=greet, saved=saved and reason == "report")
         style = {"style": "templates"}
-        if str(_setting("companion_soul_style", "templates")) == "local_model" and not catching_up:
-            text, style = soul.reword(text, knowledge.label(event["agent"]))
-        now = time.time()
+        if reason and str(_setting("companion_soul_style", "templates")) == "local_model":
+            text, style = narrate.hybrid(facts, reason, text)
         spoken, why_silent = False, ""
         if catching_up:
             why_silent = "arrived while EchoSpeak was closed"
+        elif not reason:
+            why_silent = "nothing worth saying"
         elif not bool(_setting("companion_speak", True)):
             why_silent = "speech off"
         elif in_quiet_hours(str(_setting("companion_quiet_hours", ""))):
@@ -266,6 +262,8 @@ class Commentary:
             if spoken:
                 self._last_session[key] = now
                 self._last_any = now
+                if greet:
+                    self._last_greeting = now
         item = {
             "id": event["id"], "at": now, "agent": event["agent"], "label": knowledge.label(event["agent"]),
             "session_id": event["session_id"], "project": event.get("project", ""), "reason": reason,

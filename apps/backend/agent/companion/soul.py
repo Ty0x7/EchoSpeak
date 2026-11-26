@@ -131,7 +131,7 @@ def _facts(text: str) -> dict[str, set[str]]:
 
 def fact_check(grounded: str, rewrite: str, agent_label: str) -> tuple[bool, str]:
     """The rewrite may drop details but must not add any."""
-    if not rewrite or len(rewrite) > max(320, int(len(grounded) * 1.4)):
+    if not rewrite or len(rewrite) > max(320, int(len(grounded) * 1.4)) and len(grounded) < 2000:
         return False, "length"
     source, new = _facts(grounded), _facts(rewrite)
     if new["numbers"] - source["numbers"]:
@@ -150,7 +150,7 @@ def fact_check(grounded: str, rewrite: str, agent_label: str) -> tuple[bool, str
     return True, ""
 
 
-def reword(grounded: str, agent_label: str, *, timeout: float = 8.0) -> tuple[str, dict[str, Any]]:
+def reword(grounded: str, agent_label: str, *, timeout: float = 8.0, instruction: str = "") -> tuple[str, dict[str, Any]]:
     """Ask the owner's local model to say `grounded` in the SOUL's voice; keep it only if it passes."""
     info: dict[str, Any] = {"style": "local_model", "used": False}
     try:
@@ -162,6 +162,10 @@ def reword(grounded: str, agent_label: str, *, timeout: float = 8.0) -> tuple[st
             info["reason"] = "not a local model"
             return grounded, info
         soul = load()
+        if instruction:  # the caller supplies the full brief (narrate.hybrid)
+            messages = [{"role": "system", "content": instruction}, {"role": "user", "content": "Say it."}]
+        else:
+            messages = None
         body = {
             "model": endpoint.model, "stream": False, "temperature": 0.6, "max_tokens": 160,
             "messages": [
@@ -174,6 +178,8 @@ def reword(grounded: str, agent_label: str, *, timeout: float = 8.0) -> tuple[st
                 {"role": "user", "content": grounded},
             ],
         }
+        if messages:
+            body["messages"] = messages
         from agent.lean.provider import reasoning_effort_for
 
         effort = reasoning_effort_for(endpoint, False, "low")  # the provider's own "thinking off"
@@ -192,6 +198,9 @@ def reword(grounded: str, agent_label: str, *, timeout: float = 8.0) -> tuple[st
         text = str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip().strip('"').strip()
         info["ms"] = int((time.monotonic() - started) * 1000)
+        if instruction:  # the caller (narrate.guard) checks against the full facts
+            info["used"] = bool(text)
+            return (text or grounded), info
         ok, why = fact_check(grounded, text, agent_label)
         if not ok:
             info["reason"] = f"rejected: {why}"

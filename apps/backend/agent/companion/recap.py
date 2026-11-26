@@ -51,25 +51,55 @@ def _describe(row: dict[str, Any]) -> str:
     return line + "."
 
 
+RECENT = 30 * 60.0
+
+
+def _task_of(row: dict[str, Any]) -> str:
+    from agent.companion.text import lower_first, task_title
+
+    from agent.companion.narrate import gerund
+
+    task = row.get("task") or task_title(row.get("last_prompt") or "") or ""
+    return gerund(lower_first(clean(task)))
+
+
 def activity_answer(snapshot: dict[str, Any], agent: str = "") -> str:
-    rows = [r for r in snapshot["sessions"] if r["state"] != "ended" and (not agent or r["agent"] == agent)]
+    """What the owner is doing and what else is moving, in a sentence or two. Old and resting
+    sessions are left out; there is nothing to say about them."""
+    from agent.companion.narrate import agent_name
+    from agent.companion.text import owner_name
+
+    now = float(snapshot.get("at") or time.time())
+    rows = [r for r in snapshot["sessions"] if (not agent or r["agent"] == agent)
+            and r["state"] in {"working", "your_turn", "needs_permission"}
+            and now - float(r.get("updated_at") or 0) < RECENT]
+    who = lambda r: agent_name(r["agent"], {"agent_name": r.get("label")})  # noqa: E731
     if not rows:
-        name = knowledge.label(agent).replace("Claude Code", "Claude") if agent else "Nobody"
-        return f"{name} isn't doing anything I can see right now." if agent else "It's quiet. No agent is active right now."
-    order = {"needs_permission": 0, "working": 1, "your_turn": 2, "quiet": 3, "idle": 4}
-    rows.sort(key=lambda r: (order.get(r["state"], 9), -float(r.get("updated_at") or 0)))
-    active = [r for r in rows if r["state"] in {"needs_permission", "working", "your_turn"}]
-    resting = [r for r in rows if r not in active]
-    sentences = [_describe(r) for r in active[:4]]
-    if len(active) > 4:
-        sentences.append(f"And {len(active) - 4} more active.")
-    if resting:  # idle and quiet sessions are summarised, never listed one by one
-        sentences.append(f"{len(resting)} other session{'s are' if len(resting) != 1 else ' is'} resting." if active
-                         else f"Nothing's active; {len(resting)} session{'s are' if len(resting) != 1 else ' is'} resting.")
+        if agent:
+            return f"{agent_name(agent)} isn't doing anything right now."
+        return "It's quiet. Nothing is running right now."
     focus = snapshot.get("focus") or {}
+    mine = next((r for r in rows if r.get("interacting")), None)
+    others = [r for r in rows if r is not mine]
+    sentences = []
+    name = owner_name()
+    if mine:
+        task = _task_of(mine)
+        on = f" on {task}" if task else (f" in {mine['project']}" if mine.get("project") else "")
+        state = {"working": "it's still at it", "your_turn": "it's waiting for your reply",
+                 "needs_permission": "it needs your permission to continue"}[mine["state"]]
+        sentences.append(f"{(name + ', y') if name else 'Y'}ou're working with {who(mine)}{on}, and {state}.")
+    for row in sorted(others, key=lambda r: {"needs_permission": 0, "working": 1, "your_turn": 2}[r["state"]])[:2]:
+        task = _task_of(row)
+        what = f" on {task}" if task else (f" in {row['project']}" if row.get("project") else "")
+        doing = {"working": f"is working{what} in the background", "your_turn": f"is waiting for you{what}",
+                 "needs_permission": f"needs your permission{what}"}[row["state"]]
+        sentences.append(f"{who(row)} {doing}.")
+    if len(others) > 2:
+        sentences.append(f"And {len(others) - 2} more.")
     if not agent and focus.get("uncertain"):
-        names = " or ".join(c["label"].replace("Claude Code", "Claude") for c in focus["candidates"][:2])
-        sentences.append(f"I'm not sure whether you're working with {names}.")
+        names = " or ".join(agent_name(c["agent"], {"agent_name": c.get("label")}) for c in focus["candidates"][:2])
+        sentences.append(f"I'm not sure whether you're with {names} right now.")
     return " ".join(sentences)
 
 

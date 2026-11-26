@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -68,7 +69,8 @@ def test_short_replies_and_questions():
     assert q.kind == "question" and q.asks_owner
 
 
-def _event(kind="turn_completed", text=REPORT, agent="claude-code", session="s1", at=1000.0, **extra):
+def _event(kind="turn_completed", text=REPORT, agent="claude-code", session="s1", at=None, **extra):
+    at = time.time() if at is None else at
     return {"id": f"e-{kind}-{session}-{at}", "agent": agent, "session_id": session, "kind": kind, "at": at, "turn_id": "t1",
             "cwd": "/w/echospeak", "project": "echospeak", "text": text, "transcript_path": "/t/x.jsonl", "subagent": "",
             "meta": {}, **extra}
@@ -152,13 +154,13 @@ def test_owner_is_not_narrated_their_own_conversation(monkeypatch):
     assert h.c.handle(_event(text="Sure, renamed it.")) is None
     assert h.c.handle(_event(kind="needs_permission", text="Bash")) is None  # they can see the prompt
     other = h.c.handle(_event(kind="needs_permission", text="Bash", agent="codex", session="cx"))
-    assert other["spoken"] and "Codex is waiting for your permission" in h.spoken[-1]
+    assert other["spoken"] and "Codex needs your permission to run a shell command" in h.spoken[-1]
 
 
 def test_cooldown_quiet_hours_and_mute_keep_captions(monkeypatch):
     h = Harness(monkeypatch)
-    h.c.handle(_event(kind="needs_permission", text="Bash", session="a", at=1.0))
-    second = h.c.handle(_event(kind="needs_permission", text="Edit", session="a", at=2.0))
+    h.c.handle(_event(kind="needs_permission", text="Bash", session="a"))
+    second = h.c.handle(_event(kind="needs_permission", text="Edit", session="a"))
     assert not second["spoken"] and second["silent_because"] == "cooldown"
     h2 = Harness(monkeypatch, companion_speak=False)
     item = h2.c.handle(_event())
@@ -200,7 +202,7 @@ def test_memory_has_provenance_scope_and_no_duplicates(monkeypatch, tmp_path):
     assert item["memory_type"] == "project" and item["source"] == "echo-companion" and item["source_item_id"] == event["id"]
     assert "Claude Code reported on" in item["text"] and "not independently verified" in item["text"]
     assert "rm -rf" not in item["text"] and "PR #212" in item["text"]
-    outside = _event(cwd=str(tmp_path / "elsewhere"), at=2000.0)
+    outside = _event(cwd=str(tmp_path / "elsewhere"), at=time.time() + 1)
     monkeypatch.setattr(knowledge.config, "companion_memory_scope", "project_only", raising=False)
     refused = knowledge.remember(outside, d, memory=memory)
     assert refused["stored"] is False and "needs your OK" in refused["reason"]  # default never goes account-wide
@@ -229,7 +231,8 @@ def test_recap_answers_come_from_observations(tmp_path, monkeypatch):
                                                                                   "hook_event_name": "Stop", "last_assistant_message": REPORT}}))
     snapshot = activity(store, include_echo=False, now=300.0)
     text = recap.answer("activity", store, snapshot)
-    assert "Codex is working on harness" in text and "Fix the config loader" in text and "Claude is waiting for you" in text
+    assert "Codex" in text and "fixing the config loader" in text and "Claude is waiting for you" in text
+    assert "<" not in text
     assert "Claude's report" in recap.answer("latest_report", store, snapshot) and "haven't checked it independently" in recap.answer("latest_report", store, snapshot)
     assert "missing comma" in recap.answer("discovery", store, snapshot)
     away = recap.answer("recap", store, snapshot, since=150.0)
