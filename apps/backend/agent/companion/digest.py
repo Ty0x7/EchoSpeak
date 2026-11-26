@@ -24,7 +24,7 @@ _RULES: list[tuple[str, re.Pattern[str]]] = [
     ("failures", re.compile(r"\b(fail(ed|s|ing|ure)?|regress(ed|ion)(?!\s+(tests?|suites?|checks?))|didn'?t work|did not work|broke|broken|reverted|rejected|"
                             r"couldn'?t|could not|error(s)? (remain|persist)|worse)\b", re.I)),
     ("open", re.compile(r"\b(not (yet )?(verified|tested|done|run)|pending|todo|remaining|still (open|needs|to)|limitation|"
-                        r"blocked|blocker|follow[- ]?up|next steps?|needs? (owner|approval|review)|unverified|not covered|left to)\b", re.I)),
+                        r"blocked|blocker|follow[- ]?up|needs? (owner|approval|review)|unverified|not covered|left to)\b", re.I)),
     ("proposals", re.compile(r"\b(i (propose|recommend|suggest)|we (could|should)|recommend(ation)?|option [a-z0-9]|consider|proposal)\b", re.I)),
     ("discoveries", re.compile(r"\b(found|discover(ed|y)|root cause|the cause|turns out|learned|it appears|because)\b", re.I)),
     ("decisions", re.compile(r"\b(decided|decision|chose|chosen|kept|dropped|switched to|went with)\b", re.I)),
@@ -94,6 +94,8 @@ _NEGATED = re.compile(r"\b(never|no|not|nothing|without|zero|0)\s+(\w+\s+){0,2}$
 
 
 def _section(heading: str) -> str:
+    if re.search(r"\band\b", heading, re.I):
+        return ""  # mixed sections need line-level evidence
     for category, rule in _SECTIONS:
         if rule.search(heading):
             return category

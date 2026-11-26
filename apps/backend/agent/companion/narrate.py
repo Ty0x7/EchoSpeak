@@ -132,6 +132,9 @@ def facts(event: dict[str, Any], digest: Digest, *, interacting: bool, now: Opti
         "prs": digest.prs[:2],
         "permission_for": permission_phrase(event.get("text", "")) if event["kind"] == "needs_permission" else "",
         "measured_status": measured,
+        "operation": meta.get("operation", ""),
+        "substantial": digest.kind == "report" and bool(digest.results or digest.discoveries or digest.failures or digest.open)
+                       and (duration >= LONG_TURN or len(event.get("text") or "") >= 500),
         "interacting": interacting,
         "age_seconds": max(0.0, now - float(event["at"])),
         "name": owner_name(),
@@ -144,9 +147,11 @@ def worth_saying(f: dict[str, Any], frequency: str = "milestones") -> str:
         return ""
     if f["kind"] == "needs_permission":
         return "" if f["interacting"] else "needs_you"
+    if f["kind"] in {"turn_completed", "report_ready"} and f.get("substantial") and frequency != "quiet":
+        return "report"
     if f["kind"] in {"waiting_input", "prompt", "system_prompt", "session_started", "session_ended", "subagent_started"}:
         return ""
-    if f["kind"] in {"stage_completed", "report_ready"}:
+    if f["kind"] in {"stage_completed", "report_ready", "subagent_completed"}:
         return "" if f["interacting"] or frequency == "quiet" else "stage"
     if f["kind"] != "turn_completed":
         return ""
@@ -177,11 +182,20 @@ def compose(f: dict[str, Any], reason: str, *, greet: bool = False, saved: bool 
         return f"{hello}{who} has a question for you{(' while ' + gerund(task)) if task else where}.{q}"
     if reason == "stage":
         return f"{hello}{who} finished a stage{where}: {lower_first(f['detail'] or 'details are in the log')}".rstrip(".") + "."
+    if reason == "progress":
+        activity = f" while {gerund(task)}" if task else where
+        return f"{hello}{who} completed {f['operation']}{activity}. That session's turn was still open at the last update."
+    if f.get("substantial") and reason == "report":
+        opening = f"{hello}{who} just reported back{where}."
+        if task:
+            opening = f"{hello}{who} just reported back on {gerund(task)}."
+    else:
+        opening = ""
     lead = {"report": "just wrapped up", "long_job_done": "just finished"}.get(reason, "finished")
-    if task:
+    if not opening and task:
         g = gerund(task)
         opening = f"{hello}{who} {lead} {g}." if g != task else f"{hello}{who} {lead} working on {task}."
-    else:
+    elif not opening:
         opening = f"{hello}{who} {lead} a {'long ' if f['minutes'] * 60 >= LONG_TURN else ''}stretch of work{where}."
     if f["detail_kind"] == "found":
         middle = f" Something worth knowing: {lower_first(f['detail'])}"
@@ -205,7 +219,8 @@ def compose(f: dict[str, Any], reason: str, *, greet: bool = False, saved: bool 
     if saved:
         text += " " + soul.phrase("saved", f.get("agent", ""), "I saved the key points for Echo.")
     words = text.split()
-    return " ".join(words[:60]) + ("…" if len(words) > 60 else "")
+    limit = 88 if f.get("substantial") and reason == "report" else 60
+    return " ".join(words[:limit]) + ("…" if len(words) > limit else "")
 
 
 _KNOWN = re.compile(r"\b(Claude|Codex|Echo|Glados|Jarvis|Gemini|ChatGPT|GPT|Copilot)\b")
@@ -242,7 +257,9 @@ def hybrid(f: dict[str, Any], reason: str, grounded: str, *, timeout: float = 8.
     instruction = (
         "You are Echo, a desktop companion speaking out loud to the person you work with"
         + (f" (their name is {f['name']}; greet them by name once)" if greeting else "") + ". Personality:\n" + personality + "\n\n"
-        "Tell them what happened in one or two short, natural spoken sentences, like a teammate glancing over. "
+        + ("Use up to four natural spoken sentences for this substantial report. " if f.get("substantial")
+           else "Tell them what happened in one or two short, natural spoken sentences. ")
+        +
         "Use only the facts below and the draft; add nothing. Results that measured=false are what the agent reports, "
         "so say '<agent> says' or 'by its account'. Keep the agent's name. Skip counts and file names unless they matter. "
         "Speak as yourself (I), never about 'Echo' in the third person. Don't use any name for them unless told above. "

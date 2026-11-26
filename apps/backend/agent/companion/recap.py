@@ -64,75 +64,92 @@ def _task_of(row: dict[str, Any]) -> str:
 
 
 def activity_answer(snapshot: dict[str, Any], agent: str = "") -> str:
-    """What the owner is doing and what else is moving, in a sentence or two. Old and resting
-    sessions are left out; there is nothing to say about them."""
+    """Describe observed activity, keeping uncertain and completed sessions distinct."""
     from agent.companion.narrate import agent_name
     from agent.companion.text import owner_name
 
     now = float(snapshot.get("at") or time.time())
-    rows = [r for r in snapshot["sessions"] if (not agent or r["agent"] == agent)
-            and r["state"] in {"working", "your_turn", "needs_permission"}
-            and now - float(r.get("updated_at") or 0) < RECENT
-            and (r.get("last_prompt") or r.get("turns") or r["agent"] == "echo")]  # opened but never asked anything
-    who = lambda r: agent_name(r["agent"], {"agent_name": r.get("label")})  # noqa: E731
-    if not rows:
-        if agent:
-            return f"{agent_name(agent)} isn't doing anything right now."
-        return "It's quiet. Nothing is running right now."
-    focus = snapshot.get("focus") or {}
-    mine = next((r for r in rows if r.get("interacting")), None)
-    others = [r for r in rows if r is not mine]
+    rows = [r for r in snapshot["sessions"] if not agent or r["agent"] == agent]
+    live = {"needs_permission": 0, "your_turn": 1, "operation": 2, "working": 3, "quiet": 4, "paused": 5}
+    visible = [r for r in rows if r["state"] in live and
+               (r.get("last_prompt") or r.get("turns") or r.get("attention") or r["state"] in {"working", "quiet", "paused"})
+               and now - float(r.get("updated_at") or 0) < (8 * RECENT if agent or r["state"] == "quiet" else RECENT)]
+    if not visible:
+        return f"I can't confirm current activity for {agent_name(agent)}." if agent else "I don't have confirmed live activity to report."
     sentences = []
-    name = owner_name()
-    if mine:
-        task = _task_of(mine)
-        on = f" on {task}" if task else (f" in {mine['project']}" if mine.get("project") else "")
-        state = {"working": "it's still at it", "your_turn": "it's waiting for your reply",
-                 "needs_permission": "it needs your permission to continue"}[mine["state"]]
-        sentences.append(f"{(name + ', y') if name else 'Y'}ou're working with {who(mine)}{on}, and {state}.")
-    for row in sorted(others, key=lambda r: {"needs_permission": 0, "working": 1, "your_turn": 2}[r["state"]])[:2]:
+    who_seen = set()
+    for row in sorted(visible, key=lambda r: (live[r["state"]], not r.get("interacting"), -float(r.get("updated_at") or 0)))[:4]:
+        who = agent_name(row["agent"], {"agent_name": row.get("label")})
+        label = f"Another {who} session" if who in who_seen else who
+        who_seen.add(who)
         task = _task_of(row)
-        label = f"Another {who(row)} session" if mine and row["agent"] == mine["agent"] else who(row)
-        what = f" on {task}" if task else (f" in {row['project']}" if row.get("project") else "")
-        doing = {"working": f"is working{what} in the background", "your_turn": f"is waiting for you{what}",
-                 "needs_permission": f"needs your permission{what}"}[row["state"]]
-        sentences.append(f"{label} {doing}.")
-    if len(others) > 2:
-        sentences.append(f"And {len(others) - 2} more.")
+        where = f" on {task}" if task else (f" in {row['project']}" if row.get("project") else "")
+        state = row["state"]
+        if state == "quiet":
+            line = f"{label} was working{where}. There hasn't been a recent update, so I'm unsure whether it's still running"
+        elif state == "operation":
+            line = f"{label} was last seen running {row.get('attention') or 'an operation'}{where}"
+        elif state == "working" and row.get("interacting"):
+            name = owner_name()
+            line = f"{(name + ', y') if name else 'Y'}ou're working with {label}{where}, and it's still at it"
+        else:
+            action = {"working": "is working", "needs_permission": "needs your permission",
+                      "your_turn": "is waiting for your reply", "paused": "was interrupted"}[state]
+            line = f"{label} {action}{where}"
+        sentences.append(line + ".")
+    focus = snapshot.get("focus") or {}
     if not agent and focus.get("uncertain"):
-        names = " or ".join(agent_name(c["agent"], {"agent_name": c.get("label")}) for c in focus["candidates"][:2])
-        sentences.append(f"I'm not sure whether you're with {names} right now.")
+        sentences.append("I'm not sure which of those conversations you're following right now.")
     return " ".join(sentences)
 
 
-def _reports(store, since: float = 0.0, limit: int = 20) -> list[dict[str, Any]]:
-    events = store.events(since=since, kinds=["turn_completed", "report_ready"], limit=200)
+def _reports(store, since: float = 0.0, limit: int = 20, agent: str = "", *, project_id: str = "",
+             exclude_agents: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
+    events = store.events(since=since, kinds=["turn_completed", "report_ready"], limit=200, agent=agent)
     out = []
     for event in events:
+        if event["agent"] in exclude_agents:
+            continue
+        if project_id and knowledge._project_for(event.get("cwd", ""))[0] != project_id:
+            continue
         digest = analyse(event.get("text", ""))
         if digest.kind == "report" or event["kind"] == "report_ready":
+            digest.kind = "report"
             out.append({"event": event, "digest": digest})
             if len(out) >= limit:
                 break
     return out
 
 
-def latest_report_answer(store) -> str:
-    found = _reports(store, limit=1)
-    if not found:
-        return "No finished reports yet."
-    event, digest = found[0]["event"], found[0]["digest"]
-    when = time.strftime("%H:%M", time.localtime(float(event["at"])))
+def report_answer(found: dict[str, Any], *, reword: bool = False) -> str:
+    from agent.companion import narrate
+
+    event, digest = found["event"], found["digest"]
+    who = narrate.agent_name(event["agent"], event.get("meta"))
     where = f" on {event['project']}" if event.get("project") else ""
-    parts = [f"{knowledge.label(event['agent']).replace('Claude Code', 'Claude')}'s report from {when}{where}: {_brief(digest.headline, 16).rstrip('.')}."]
-    if digest.results:
-        parts.append(f"It says it got {len(digest.results)} thing{'s' if len(digest.results) != 1 else ''} done, including {_brief(digest.results[0], 12)}.")
-    if digest.failures:
-        parts.append(f"Didn't work: {_brief(digest.failures[0], 12)}.")
-    if digest.open:
-        parts.append(f"Still open: {_brief(digest.open[0], 12)}.")
-    parts.append("That's its own account; I haven't checked it independently.")
-    return " ".join(parts)
+    headline = _brief(digest.headline, 26).rstrip(".!?")
+    parts = [f"{who} reported back{where}: {headline}." if headline else f"{who} filed a report{where}."]
+    details = (("It says", digest.results), ("It found", digest.discoveries),
+               ("A problem it reported", digest.failures), ("Still open", digest.open or digest.proposals))
+    for label, lines in details:
+        if lines:
+            detail = _brief(lines[0], 22).rstrip(".!?")
+            if detail and not (detail.casefold() in headline.casefold() or headline.casefold() == detail.casefold()):
+                parts.append(f"{label}: {detail}.")
+    measured = (event.get("meta") or {}).get("measured")
+    parts.append("EchoSpeak recorded passing checks." if measured in {"checks_pass", "verified"} else
+                 "That's its own account. I haven't checked it independently.")
+    draft = " ".join(parts)
+    if reword:
+        facts = narrate.facts(event, digest, interacting=False)
+        facts.update(substantial=True, name="", question="", task="", permission_for="")
+        return narrate.hybrid(facts, "the owner asked for this report", draft, timeout=4.0)[0]
+    return draft
+
+
+def latest_report_answer(store, agent: str = "", *, reword: bool = False, project_id: str = "") -> str:
+    found = _reports(store, limit=1, agent=agent, project_id=project_id)
+    return report_answer(found[0], reword=reword) if found else "I haven't seen a completed report here yet."
 
 
 def discovery_answer(store) -> str:
@@ -148,9 +165,9 @@ def recap_answer(store, snapshot: dict[str, Any], since: Optional[float] = None)
     if since is None:
         prompts = store.events(kinds=["prompt"], limit=1)
         since = float(prompts[0]["at"]) if prompts else time.time() - 8 * 3600
-    events = store.events(since=since, kinds=["turn_completed"], limit=1000)
+    events = store.events(since=since, kinds=["turn_completed", "report_ready"], limit=1000)
     if not events:
-        return "Nothing finished while you were away."
+        return "I haven’t seen a completion in that period."
     per_agent: dict[str, int] = {}
     for event in events:
         per_agent[event["agent"]] = per_agent.get(event["agent"], 0) + 1
@@ -167,15 +184,35 @@ def recap_answer(store, snapshot: dict[str, Any], since: Optional[float] = None)
     return " ".join(parts)
 
 
-def answer(topic: str, store, snapshot: dict[str, Any], since: Optional[float] = None) -> str:
-    if topic == "activity":
-        return activity_answer(snapshot)
-    if topic.startswith("agent:"):
-        return activity_answer(snapshot, topic.split(":", 1)[1])
-    if topic == "latest_report":
-        return latest_report_answer(store)
+def answer(topic: str, store, snapshot: dict[str, Any], since: Optional[float] = None, *,
+           reword: bool = False, project_id: str = "") -> str:
+    if topic in {"activity", "other_agents"} or topic.startswith("agent:"):
+        agent = topic.partition(":")[2]
+        rows = snapshot["sessions"]
+        if project_id:
+            rows = [r for r in rows if knowledge._project_for(r.get("cwd", ""))[0] == project_id]
+        if topic == "other_agents":
+            rows = [r for r in rows if r["agent"] not in {"echo", "codex", "claude-code"}]
+        summary = activity_answer({**snapshot, "sessions": rows, "focus": {} if project_id else snapshot.get("focus")}, agent)
+        recent = _reports(store, since=float(snapshot.get("at") or time.time()) - 12 * 3600,
+                          limit=1, agent=agent, project_id=project_id,
+                          exclude_agents=frozenset({"echo", "codex", "claude-code"}) if topic == "other_agents" else frozenset())
+        if recent:
+            report = report_answer(recent[0], reword=reword and bool(agent))
+            summary += f" {report}"
+        return summary
+    if topic == "latest_report" or topic.startswith("report:"):
+        return latest_report_answer(store, topic.partition(":")[2], reword=reword, project_id=project_id)
     if topic == "discovery":
+        if project_id:
+            reports = _reports(store, limit=10, project_id=project_id)
+            match = next((item for item in reports if item["digest"].discoveries), None)
+            return report_answer(match) if match else "I haven't seen a recent discovery in this project."
         return discovery_answer(store)
     if topic == "recap":
+        if project_id:
+            reports = _reports(store, since=since if since is not None else time.time() - 8 * 3600,
+                               limit=3, project_id=project_id)
+            return " ".join(report_answer(item) for item in reports) or "I haven't seen a completed report in that period."
         return recap_answer(store, snapshot, since)
     raise ValueError("unknown topic")

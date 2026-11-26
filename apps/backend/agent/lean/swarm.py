@@ -260,6 +260,9 @@ class Swarm:
             self.publish()
             return
         worker.status, worker.started = "running", time.time()
+        from agent.companion.native import worker_status
+
+        worker_status(self.session, self.persona.name, worker.index, worker.goal, worker.status)
         self.publish()
         endpoint = self.session._endpoint_for(self.persona)
         client = ChatClient(endpoint, reasoning_effort=reasoning_effort_for(endpoint, False, "low"))
@@ -319,6 +322,7 @@ class Swarm:
             worker.ended = time.time()
             client.close()
             self.publish()
+            worker_status(self.session, self.persona.name, worker.index, worker.goal, worker.status)
 
     def _finish(self, worker: Worker) -> None:
         result, turn = worker.result, worker.turn
