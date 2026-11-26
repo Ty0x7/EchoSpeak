@@ -164,6 +164,12 @@ async def lifespan(app: FastAPI):
         logger.warning("Could not end commands left running by the last run", exc_info=True)
     from agent.generation_service import recover_pending_jobs
     threading.Thread(target=recover_pending_jobs, name="creation-recovery", daemon=True).start()
+    try:
+        from agent.companion import service as companion_service
+
+        companion_service.start()  # reads the Claude Code / Codex hook spool; never blocks startup
+    except Exception:
+        logger.warning("Echo Companion's observer did not start", exc_info=True)
     build_id = (
         os.environ.get("ECHOSPEAK_BUILD_ID")
         or os.environ.get("ECHOSPEAK_DESKTOP_INSTANCE_ID")
@@ -399,9 +405,9 @@ app = FastAPI(
 )
 
 
-from api.routes import creations, onboarding, live_voice, privacy as privacy_routes, project_workspace, echo_code, workbench
+from api.routes import creations, onboarding, live_voice, privacy as privacy_routes, project_workspace, echo_code, workbench, companion
 
-for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, learning, media, media_runtime, creations, onboarding, live_voice, privacy_routes, project_workspace, echo_code, workbench):
+for _routes in (system, chat, sessions, projects, memory, settings, capabilities, channels, gateway, lean, learning, media, media_runtime, creations, onboarding, live_voice, privacy_routes, project_workspace, echo_code, workbench, companion):
     app.include_router(_routes.router)
 # Ensure domain ToolRegistry entries load independently of agent import order.
 for _domain_module in ("agent.voice_runtime", "agent.generation_runtime"):
