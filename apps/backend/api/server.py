@@ -119,6 +119,28 @@ def _publish_endpoint() -> None:
         logger.warning("Endpoint file was not written", exc_info=True)
 
 
+def _endpoint_watch(stop: "threading.Event") -> None:
+    """Restore this backend's endpoint file if it disappears (#213). One stat a minute."""
+    while not stop.wait(60):
+        if _SERVE_ADDRESS is None:
+            return
+        try:
+            from agent import endpoint_file
+            from api.auth import _api_auth_required_for_host, _configured_api_auth_key
+            from config import DATA_DIR
+            from version import APP_VERSION
+
+            endpoint_file.ensure_endpoint(
+                _SERVE_ADDRESS[0], _SERVE_ADDRESS[1], auth_key=_configured_api_auth_key(),
+                auth_required=_api_auth_required_for_host("127.0.0.1"), version=APP_VERSION, data_dir=str(DATA_DIR),
+            )
+        except Exception:
+            pass
+
+
+_ENDPOINT_WATCH_STOP = threading.Event()
+
+
 def _unpublish_endpoint() -> None:
     if _SERVE_ADDRESS is None:
         return
@@ -313,9 +335,11 @@ async def lifespan(app: FastAPI):
     research_cleanup = asyncio.create_task(prune_research())
     learning_task = asyncio.create_task(learning_worker())
     _publish_endpoint()
+    threading.Thread(target=_endpoint_watch, args=(_ENDPOINT_WATCH_STOP,), name="endpoint-watch", daemon=True).start()
     try:
         yield
     finally:
+        _ENDPOINT_WATCH_STOP.set()
         _unpublish_endpoint()
         from agent.code_sessions import stop_all as stop_code_runtimes
         await asyncio.to_thread(stop_code_runtimes, "Backend shutdown")

@@ -289,7 +289,7 @@ def plain_model_setup(app: App) -> None:
         models = control.with_hints(control.ollama_models(base), control.gpu_vram_mib())
     except (ApiError, ConnectError, OSError, ValueError):
         return
-    found = discovery.read_endpoint_file(discovery.runtime_dirs()[0] / "endpoint.json") or {}
+    found = discovery.find_endpoint() or {}
     data = str(found.get("data_dir") or discovery.data_dir())
     reason = control.model_setup_reason(settings, [m.name for m in models], control.confirmed_model(data))
     if not reason or not models:
