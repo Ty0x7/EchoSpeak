@@ -45,7 +45,7 @@ IDLE_AFTER = 30 * 60
 INTERACTING_WINDOW = 15 * 60
 UNCERTAIN_GAP = 30.0
 
-AGENT_LABELS = {"claude-code": "Claude Code", "codex": "Codex", "echo": "Echo"}
+AGENT_LABELS = {"claude-code": "Claude Code", "codex": "Codex", "echo": "Echo", "auto-test-fix": "The test-fix loop"}
 
 # Official hook / notify event -> companion kind.
 KINDS = {
@@ -126,6 +126,7 @@ class CompanionStore:
                     cwd TEXT, project TEXT, text TEXT, transcript_path TEXT, subagent TEXT, meta TEXT);
                 CREATE INDEX IF NOT EXISTS events_session ON events(agent, session_id, at);
                 CREATE INDEX IF NOT EXISTS events_at ON events(at);
+                CREATE TABLE IF NOT EXISTS handled (id TEXT PRIMARY KEY, at REAL);
                 CREATE TABLE IF NOT EXISTS sessions (
                     agent TEXT, session_id TEXT, cwd TEXT, project TEXT, state TEXT,
                     started_at REAL, updated_at REAL, last_prompt TEXT, last_prompt_at REAL,
@@ -215,11 +216,27 @@ class CompanionStore:
         assignments = ", ".join(f"{name}=?" for name in updates)
         db.execute(f"UPDATE sessions SET {assignments} WHERE agent=? AND session_id=?", (*updates.values(), *key))
 
+    def mark_handled(self, event_id: str) -> None:
+        with self._lock, self._db() as db:
+            db.execute("INSERT OR IGNORE INTO handled VALUES (?, ?)", (event_id, time.time()))
+
+    def unhandled(self, since: float, kinds: Iterable[str] = ("turn_completed", "report_ready")) -> list[dict[str, Any]]:
+        """Events the commentary pipeline never finished (the backend stopped first), oldest first."""
+        kinds = list(kinds)
+        with self._db() as db:
+            rows = [dict(row) for row in db.execute(
+                f"SELECT * FROM events WHERE at > ? AND kind IN ({','.join('?' * len(kinds))}) "
+                "AND id NOT IN (SELECT id FROM handled) ORDER BY at", [since, *kinds])]
+        for row in rows:
+            row["meta"] = json.loads(row.get("meta") or "{}")
+        return rows
+
     def prune(self) -> None:
         with self._lock, self._db() as db:
             db.execute("DELETE FROM events WHERE at < ?", (time.time() - RETAIN_SECONDS,))
             db.execute("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY at DESC LIMIT ?)", (RETAIN_ROWS,))
             db.execute("DELETE FROM sessions WHERE updated_at < ?", (time.time() - RETAIN_SECONDS,))
+            db.execute("DELETE FROM handled WHERE at < ?", (time.time() - RETAIN_SECONDS,))
 
     # ---- read ---------------------------------------------------------------
     def events(self, *, since: float = 0.0, agent: str = "", session_id: str = "", kinds: Iterable[str] = (),
@@ -246,6 +263,8 @@ class CompanionStore:
         with self._db() as db:
             rows = [dict(row) for row in db.execute("SELECT * FROM sessions ORDER BY updated_at DESC LIMIT 200")]
         for row in rows:
+            for key in ("cwd", "project", "last_prompt", "last_message", "attention", "transcript_path"):
+                row[key] = row.get(key) or ""
             quiet_for = now - float(row["updated_at"] or 0)
             if row["state"] == "working" and quiet_for > QUIET_AFTER:
                 row["state"] = "quiet"
@@ -291,7 +310,8 @@ def activity(store: CompanionStore, *, include_echo: bool = True, now: Optional[
         store.ingest_spool()
     rows = [r for r in store.sessions(now) if r["state"] != "ended" or now - float(r["updated_at"] or 0) < 3600]
     if include_echo:
-        rows += [r for r in echo_sessions() if now - float(r["updated_at"] or 0) < 86400]
+        known = {r["session_id"] for r in rows}  # native events already describe these conversations
+        rows += [r for r in echo_sessions() if r["session_id"] not in known and now - float(r["updated_at"] or 0) < 86400]
     prompted = sorted(
         (r for r in rows if r["state"] not in {"ended"} and now - float(r.get("last_prompt_at") or r["updated_at"] or 0) < INTERACTING_WINDOW
          and (r.get("last_prompt_at") or r["agent"] == "echo")),

@@ -177,7 +177,8 @@ def test_installer_preserves_existing_hooks_and_is_reversible(home, tmp_path):
     mine = {"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "notify-send done"}]}]}, "theme": "dark"}
     (claude / "settings.json").write_text(json.dumps(mine))
     (codex / "config.toml").write_text('model = "gpt-5"\n\n[features]\nhooks = true\n')
-    changes = install.plan(claude_dir=claude, codex_dir=codex, add=True)
+    assert all(c["path"].name != "config.toml" for c in install.plan(claude_dir=claude, codex_dir=codex, add=True))
+    changes = install.plan(claude_dir=claude, codex_dir=codex, add=True, codex_notify=True)
     assert len(changes) == 3
     result = install.apply(changes, add=True, roots=[str(tmp_path / "work")], agents=("claude-code", "codex"))
     assert len(result["backups"]) == 2  # settings.json and config.toml existed
@@ -187,7 +188,7 @@ def test_installer_preserves_existing_hooks_and_is_reversible(home, tmp_path):
     assert "notify-send done" in stop_commands and any(install.MARK in c for c in stop_commands)
     toml = (codex / "config.toml").read_text()
     assert toml.splitlines()[0].startswith("notify = [") and toml.index("notify") < toml.index("[features]")
-    assert install.plan(claude_dir=claude, codex_dir=codex, add=True) == []  # idempotent
+    assert install.plan(claude_dir=claude, codex_dir=codex, add=True, codex_notify=True) == []  # idempotent
     assert install.status(claude_dir=claude, codex_dir=codex)["claude_code"]
     install.apply(install.plan(claude_dir=claude, codex_dir=codex, add=False), add=False, roots=[], agents=("claude-code", "codex"))
     assert json.loads((claude / "settings.json").read_text()) == mine
@@ -199,7 +200,7 @@ def test_installer_never_replaces_an_existing_codex_notify(tmp_path, home):
     codex = tmp_path / "codex"
     codex.mkdir()
     (codex / "config.toml").write_text('notify = ["my-notifier"]\n')
-    changes = install.plan(claude_dir=tmp_path / "claude", codex_dir=codex, add=True, agents=("codex",))
+    changes = install.plan(claude_dir=tmp_path / "claude", codex_dir=codex, add=True, agents=("codex",), codex_notify=True)
     assert all(c["path"].name != "config.toml" for c in changes)
 
 

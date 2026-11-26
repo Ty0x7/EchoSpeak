@@ -151,6 +151,16 @@ class Session:
         with (self.dir / "ledger.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(row, default=str) + "\n")
         print(f"[{row['at']}] {event} " + " ".join(f"{k}={str(v)[:120]}" for k, v in data.items()), flush=True)
+        if event in {"decision", "stop", "halt", "awaiting-fix"}:
+            try:  # Echo Companion hears about milestones; best effort, never delays the loop
+                from agent.companion.native import post_stage
+
+                detail = data.get("reason") or data.get("decision") or ""
+                post_stage("auto-test-fix", self.dir.name,
+                           f"{event.replace('-', ' ')}: {data.get('decision') or ''} {detail}".strip(),
+                           cwd=str(self.state.get("tree") or ""))
+            except Exception:
+                pass
 
     @classmethod
     def latest(cls, explicit: str = "") -> "Session":

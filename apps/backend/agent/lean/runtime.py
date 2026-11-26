@@ -260,6 +260,10 @@ class LeanSession:
                 self._emit(event)
             except Exception:
                 logger.exception("Lean session emit failed")
+        if event.get("type") in {"run_start", "delegation", "run_outcome"}:
+            from agent.companion import native as companion_native  # queues only; never blocks the turn
+
+            companion_native.observe(self, event)
 
     def _members(self) -> list[AgentPersona]:
         if self.room is None:
@@ -485,6 +489,7 @@ class LeanSession:
                       **({"memory_list": list_phase} if list_phase else {})},
         )
         self.execution_id = execution.id
+        self._pending_prompt = message
         self.emit({"type": "run_start", "execution_id": execution.id, "room_id": self.room.id if self.room else "",
                    # The status pill shows when routine approvals won't interrupt.
                    "autonomous": settings.approval_mode() == "autonomous" and self.source in INTERACTIVE_SOURCES})
@@ -569,6 +574,10 @@ class LeanSession:
                       **({"verification": measured} if (measured := self._verification_record()) else {})},
         )
         self._learn(cancelled)
+        from agent.companion import native as companion_native
+
+        companion_native.finished(self, final_text=final_text, success=bool(success), cancelled=cancelled,
+                                  execution_id=execution.id, verification=self._verification_record())
         store.update_thread_state(
             self.session_id,
             execution_status="cancelled" if cancelled else ("complete" if success else "failed"),

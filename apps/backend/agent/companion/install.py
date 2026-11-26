@@ -105,7 +105,8 @@ def _codex_notify(text: str, add: bool) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def plan(*, claude_dir: Path, codex_dir: Path, add: bool, agents: tuple[str, ...] = ("claude-code", "codex")) -> list[dict[str, Any]]:
+def plan(*, claude_dir: Path, codex_dir: Path, add: bool, agents: tuple[str, ...] = ("claude-code", "codex"),
+         codex_notify: bool = False) -> list[dict[str, Any]]:
     """The file changes install/uninstall would make, without making them."""
 
     changes = []
@@ -118,13 +119,16 @@ def plan(*, claude_dir: Path, codex_dir: Path, add: bool, agents: tuple[str, ...
         path = codex_dir / "hooks.json"
         before = _read_json(path)
         changes.append({"path": path, "before": before, "after": _with_hooks(before, CODEX_EVENTS, "codex", add), "kind": "json"})
+        # notify duplicates the Stop hook; only touch config.toml when asked to, or to remove ours.
         config = codex_dir / "config.toml"
         text = config.read_text(encoding="utf-8") if config.exists() else ""
-        changes.append({"path": config, "before": text, "after": _codex_notify(text, add), "kind": "text"})
+        if codex_notify or MARK in text:
+            changes.append({"path": config, "before": text, "after": _codex_notify(text, add and codex_notify), "kind": "text"})
     return [c for c in changes if c["before"] != c["after"]]
 
 
-def apply(changes: list[dict[str, Any]], *, add: bool, roots: list[str], agents: tuple[str, ...]) -> dict[str, Any]:
+def apply(changes: list[dict[str, Any]], *, add: bool, roots: list[str], agents: tuple[str, ...],
+          capture_prompts: bool = True) -> dict[str, Any]:
     backups = []
     home = companion_home()
     if add:
@@ -135,7 +139,7 @@ def apply(changes: list[dict[str, Any]], *, add: bool, roots: list[str], agents:
         scope_path = home / "scope.json"
         scope = _read_json(scope_path) if scope_path.exists() else {}
         scope.setdefault("enabled", True)
-        scope.setdefault("capture_prompts", True)
+        scope["capture_prompts"] = bool(capture_prompts)
         scope["agents"] = {**scope.get("agents", {}), **{a: True for a in agents}}
         scope["roots"] = sorted({*scope.get("roots", []), *roots})
         _write_json(scope_path, scope)
@@ -186,6 +190,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--apply", action="store_true", help="make the changes (default: show them)")
     parser.add_argument("--agent", action="append", choices=["claude-code", "codex"], help="limit to one agent")
     parser.add_argument("--root", action="append", default=[], help="project folder to observe (repeatable)")
+    parser.add_argument("--codex-notify", action="store_true", help="also add Codex notify (only if its hooks can't be trusted)")
+    parser.add_argument("--no-prompts", action="store_true", help="don't record the prompts you send")
     parser.add_argument("--claude-dir", default=os.path.expanduser("~/.claude"))
     parser.add_argument("--codex-dir", default=os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex"))
     args = parser.parse_args(argv)
@@ -199,7 +205,7 @@ def main(argv: list[str]) -> int:
     if add and not roots:
         print("Choose at least one project folder to observe with --root.", file=sys.stderr)
         return 2
-    changes = plan(claude_dir=claude_dir, codex_dir=codex_dir, add=add, agents=agents)
+    changes = plan(claude_dir=claude_dir, codex_dir=codex_dir, add=add, agents=agents, codex_notify=args.codex_notify)
     for change in changes:
         print(f"--- {change['path']}")
         if change["kind"] == "json":
@@ -211,7 +217,7 @@ def main(argv: list[str]) -> int:
     if not args.apply:
         print("(dry run: nothing changed; add --apply)")
         return 0
-    print(json.dumps(apply(changes, add=add, roots=roots, agents=agents), indent=2))
+    print(json.dumps(apply(changes, add=add, roots=roots, agents=agents, capture_prompts=not args.no_prompts), indent=2))
     return 0
 
 

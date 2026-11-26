@@ -83,13 +83,19 @@ def compose(event: dict[str, Any], digest: Digest, *, humor: int = 1, saved: boo
         return f"{who} finished a long stretch of work{where}. {_brief(digest.headline, 12)}".strip()
     lines: list[str] = []
     outcome = digest.outcome
-    tests = f" {digest.tests_passed} tests passing by its account." if digest.tests_passed and not digest.tests_failed else ""
+    measured = str((event.get("meta") or {}).get("measured") or "")
+    if measured in {"verified", "checks_pass"}:
+        tests = " EchoSpeak's own checks pass."
+    elif digest.tests_passed and not digest.tests_failed:
+        tests = f" {digest.tests_passed} tests passing by its account."
+    else:
+        tests = ""
     if outcome == "success":
         lines.append(_pick([f"{who} finished a report{where}.", f"{who} wrapped up{where}.",
                             f"Report in from {who}{where}."], seed) + tests)
         if digest.results:
             lines.append(f"Headline: {_brief(digest.results[0])}.")
-        if humor >= 2 and digest.tests_passed and not digest.open:
+        if humor >= 2 and digest.tests_passed and not digest.open and measured not in {"verified", "checks_pass"}:
             lines.append("Everything passed, which is honestly a little suspicious.")
     elif outcome == "failed":
         lines.append(f"{who} hit a wall{where}: {_brief(digest.failures[0])}.")
@@ -117,11 +123,14 @@ def compose(event: dict[str, Any], digest: Digest, *, humor: int = 1, saved: boo
 
 class Commentary:
     def __init__(self, *, speak: Optional[Callable[..., dict]] = None, focus: Optional[Callable[[], dict]] = None,
-                 remember: Optional[Callable[..., dict]] = None, archive: Optional[Callable[..., Any]] = None):
+                 remember: Optional[Callable[..., dict]] = None, archive: Optional[Callable[..., Any]] = None,
+                 authorize: Optional[Callable[..., dict]] = None, mark: Optional[Callable[[str], None]] = None):
         self._speak = speak
         self._focus = focus
         self._remember = remember or knowledge.remember
         self._archive = archive or knowledge.archive
+        self._authorize = authorize or knowledge.authorize
+        self._mark = mark
         self._queue: queue.Queue = queue.Queue(maxsize=1000)
         self.feed: deque[dict[str, Any]] = deque(maxlen=100)
         self._last_session: dict[str, float] = {}
@@ -171,13 +180,33 @@ class Commentary:
             focus = {}
         return focus.get("agent") == event["agent"] and focus.get("session_id") == event["session_id"]
 
-    def handle(self, event: dict[str, Any]) -> Optional[dict[str, Any]]:
+    def handle(self, event: dict[str, Any], *, catching_up: bool = False) -> Optional[dict[str, Any]]:
+        try:
+            return self._handle(event, catching_up=catching_up)
+        finally:
+            if self._mark and event.get("kind") in {"turn_completed", "report_ready"} and bool(_setting("companion_enabled", False)):
+                try:
+                    self._mark(event["id"])
+                except Exception:
+                    pass
+
+    def catch_up(self, events: list[dict[str, Any]]) -> int:
+        """Keep reports that arrived while the backend was down. They are not spoken: the news is stale."""
+        done = 0
+        for event in events:
+            if self.handle(event, catching_up=True):
+                done += 1
+        return done
+
+    def _handle(self, event: dict[str, Any], *, catching_up: bool = False) -> Optional[dict[str, Any]]:
         if not bool(_setting("companion_enabled", False)):
             return None
         key = f"{event['agent']}:{event['session_id']}"
         kind = event["kind"]
         if kind == "prompt":
             self._prompt_at[key] = float(event["at"])
+            return None
+        if catching_up and kind not in {"turn_completed", "report_ready"}:
             return None
         if kind not in {"turn_completed", "needs_permission", "waiting_input", "stage_completed", "report_ready"}:
             return None
@@ -204,8 +233,12 @@ class Commentary:
         archived = ""
         if reason == "report" and bool(_setting("companion_knowledge", True)):
             try:
-                archived = str(self._archive(event, digest))
-                stored = self._remember(event, digest)
+                decision = self._authorize(event)
+                if decision.get("allowed"):
+                    archived = str(self._archive(event, digest))
+                    stored = self._remember(event, digest)
+                else:
+                    stored = {"stored": False, "reason": decision.get("reason", "")}
                 saved = bool(stored.get("stored"))
             except Exception as exc:
                 stored = {"stored": False, "reason": f"{type(exc).__name__}: {exc}"[:200]}
@@ -213,7 +246,9 @@ class Commentary:
         text = compose(event, digest, humor=int(_setting("companion_humor", 1)), saved=saved)
         now = time.time()
         spoken, why_silent = False, ""
-        if not bool(_setting("companion_speak", True)):
+        if catching_up:
+            why_silent = "arrived while EchoSpeak was closed"
+        elif not bool(_setting("companion_speak", True)):
             why_silent = "speech off"
         elif in_quiet_hours(str(_setting("companion_quiet_hours", ""))):
             why_silent = "quiet hours"
@@ -258,6 +293,10 @@ def get_commentary() -> Commentary:
             _instance = Commentary(
                 speak=lambda text, **kw: get_speech_output().speak(text, **kw),
                 focus=lambda: activity(store, include_echo=False, ingest=False)["focus"],
+                mark=store.mark_handled,
             )
             store.on_event(_instance.submit)
+            pending = store.unhandled(time.time() - 86400)
+            if pending:
+                threading.Thread(target=_instance.catch_up, args=(pending,), name="echo-companion-catch-up", daemon=True).start()
         return _instance

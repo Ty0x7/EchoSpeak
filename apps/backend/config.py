@@ -1129,10 +1129,16 @@ class Config:
         self.companion_quiet_hours = os.getenv("COMPANION_QUIET_HOURS", "").strip()  # e.g. 22:00-08:00
         self.companion_captions = os.getenv("COMPANION_CAPTIONS", "true").lower() == "true"
         self.companion_knowledge = os.getenv("COMPANION_KNOWLEDGE", "true").lower() == "true"
-        self.companion_memory_scope = os.getenv("COMPANION_MEMORY_SCOPE", "auto").strip() or "auto"  # auto|project_only|account|off
+        # Imported reports: project_only (default) keeps them inside the matching EchoSpeak project.
+        # project_or_account also stores reports from folders outside any project account-wide;
+        # that broader scope is the owner's explicit choice. off stores nothing.
+        self.companion_memory_scope = os.getenv("COMPANION_MEMORY_SCOPE", "project_only").strip() or "project_only"
         self.companion_voice = os.getenv("COMPANION_VOICE", "").strip()  # blank: Echo's voice
         self.companion_position = os.getenv("COMPANION_POSITION", "top-right").strip() or "top-right"
         self.companion_animation = os.getenv("COMPANION_ANIMATION", "full").strip() or "full"  # full|reduced
+        self.companion_observe_echo = os.getenv("COMPANION_OBSERVE_ECHO", "true").lower() == "true"  # Echo and its agents
+        self.companion_autostart = os.getenv("COMPANION_AUTOSTART", "false").lower() == "true"
+        self.companion_soul_style = os.getenv("COMPANION_STYLE", "templates").strip() or "templates"  # templates|local_model
         self.voice_windows_voice = ""
         self.voice_drama_runtime_path = ""
         self.voice_drama_model_path = ""
@@ -1700,6 +1706,9 @@ class Config:
             "companion_voice",
             "companion_position",
             "companion_animation",
+            "companion_observe_echo",
+            "companion_autostart",
+            "companion_soul_style",
             "voice_windows_voice",
             "voice_drama_runtime_path",
             "voice_drama_model_path",
