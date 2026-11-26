@@ -270,7 +270,7 @@ class CompanionStore:
                 row["state"] = "quiet"
             elif row["state"] == "your_turn" and quiet_for > IDLE_AFTER:
                 row["state"] = "idle"
-            row["label"] = AGENT_LABELS.get(row["agent"], row["agent"])
+            row["label"] = AGENT_LABELS.get(row["agent"]) or row["agent"].replace("-", " ").title()
         return rows
 
 
