@@ -109,10 +109,18 @@ def test_rewrite_replaces_atomically_even_with_leftover_temp(rt):
     assert not leftover.exists()
 
 
+def _dead_pid() -> int:
+    """A pid that certainly names no live process: a child we started and reaped.
+    (os.getpid() + 1 is often a live process on a busy machine, and #215 rightly refuses to replace a live owner.)"""
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    return child.pid
+
+
 def test_remove_only_when_it_names_this_pid(rt):
     path = _write()
     data = json.loads(path.read_text())
-    data["pid"] = os.getpid() + 1
+    data["pid"] = _dead_pid()
     path.write_text(json.dumps(data))
     assert endpoint_file.remove_endpoint() is False and path.exists()
     _write()
