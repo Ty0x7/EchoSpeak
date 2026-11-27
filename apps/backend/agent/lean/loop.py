@@ -172,8 +172,7 @@ AUTO_CONTINUE_LIMIT = 5
 # A claim about remembering: "I've saved that", "noted, I'll remember it", "I've updated my records".
 _MEMORY_CLAIM = re.compile(r"(?i)\b(sav(?:e|ed|ing)|remember(?:ed)?|noted|notes|records?|memor(?:y|ized|ised))\b")
 # The user telling us something changed: "moved to", "switched to", "they reset it, it's 9699 now", "instead".
-_CHANGE_CUE = re.compile(r"(?i)\b(moved|switched|changed|reset|rescheduled|replaced|no\s+longer|anymore|instead|left)\b"
-                         r"|\b(?:is|are|it'?s|it\s+is|they'?re)\b[^.?!]{0,40}\bnow\b")
+from agent.lean.memory_quality import CHANGE_CUE as _CHANGE_CUE  # noqa: E402
 def _asks_to_remember(text: str) -> bool:
     """The user asked for something to be remembered ("Please remember that instead"), so any unbacked "I've
     updated it" is about memory (evaluation LS3 r2, 19 November)."""
@@ -2241,6 +2240,10 @@ class LeanTurn:
         """(allowed, the result text when not, and its outcome: refused, denied, held or skipped)."""
         entry = self.toolbox.entry(name)
         needs, reason = tool_needs_approval(entry, name, args)
+        consent = str(getattr((getattr(self.toolbox, "native", None) or {}).get(name), "consent", "") or "")
+        if consent:
+            # The owner's yes on this card is the authorisation itself: asked in every approval mode, never granted ahead.
+            needs, reason = True, consent
         if not needs and settings.approval_mode() != "never" and hasattr(self.toolbox, "file_change_preview"):
             # Emptying a file, or removing most of it, is deleting work: it asks like a delete does.
             from agent.lean.file_changes import lost_work
@@ -2258,7 +2261,8 @@ class LeanTurn:
         grant = file_access.grant_key(folder) if folder is not None else policy.grant_name(name)
         # Only screen-guided desktop control and folder reads can be allowed for a whole chat; other outside
         # content asks every time.
-        grantable = (not policy_reason or rule in {"screen_control", "read_outside"}) and name not in approvals.ALWAYS_ASK_TOOLS
+        grantable = ((not policy_reason or rule in {"screen_control", "read_outside"}) and name not in approvals.ALWAYS_ASK_TOOLS
+                     and not consent)
         if policy_reason and grantable and broker.granted(self.session_id, grant):
             policy.audit(policy.Decision("allow", policy_reason, "screen_control"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome="allowed for this chat")
@@ -2273,7 +2277,7 @@ class LeanTurn:
         # Grants were made on an approval card in the app and cover chats there. Channels
         # (Discord, Telegram) and unattended routines keep refusing below: a grant must not
         # widen what a channel message, or a routine nobody watches, can do on this PC.
-        if self.interactive and scope is not None and approvals.get_grant_store().has(scope.key):
+        if self.interactive and scope is not None and not consent and approvals.get_grant_store().has(scope.key):
             # The owner chose "Always allow" for this class of action.
             policy.audit(policy.Decision("allow", reason, "always_allowed"), name=name, args=args,
                          session_id=self.session_id, agent=self.persona.id, outcome=f"always allowed: {scope.key}")
@@ -2281,7 +2285,7 @@ class LeanTurn:
             return True, "", ""
         if settings.approval_mode() == "autonomous" and self.interactive:
             # Only chats in the app: Discord, routines and other sources keep refusing below.
-            if scope is not None and scope.autonomous:
+            if scope is not None and scope.autonomous and not consent:
                 policy.audit(policy.Decision("allow", reason, "autonomous"), name=name, args=args,
                              session_id=self.session_id, agent=self.persona.id, outcome=f"autonomous: {scope.key}")
                 self._auto_note(step, f"Allowed automatically (autonomous mode): {scope.label}")

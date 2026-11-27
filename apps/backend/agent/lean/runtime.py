@@ -434,6 +434,9 @@ class LeanSession:
         endpoint = self._endpoint_for(default_persona)
         list_phase, list_payload = "", None
         self._memory_scope = None
+        # A stated change to something already saved ("it's 2786 now") without a save request: memory_save is offered
+        # only to correct a fact recalled for this message, and writes only after the owner allows it on a card (#239).
+        self._memory_correction_scope = None
         self._memory_project_id = str(state.active_project_id or "")
         direct_owner = self.caller_role == "owner" and self.source in INTERACTIVE_SOURCES and not self.work_id
         if direct_owner and getattr(self.agent, "memory", None) is not None:
@@ -442,6 +445,9 @@ class LeanSession:
                 scope = None
             if memory_quality.explicit_write(message):
                 self._memory_scope = scope
+            elif (scope and not memory_quality.refuses_memory(message) and not memory_quality.requests_list(message)
+                  and memory_quality.states_change(message)):
+                self._memory_correction_scope = scope
             if self._owner_side(default_persona) and not (self.room and self.room.kind == "group"):
                 previous = next(iter(store.list_executions(self.session_id, limit=1)), None)
                 pending = (str((previous.metadata or {}).get("memory_list") or "") if previous
@@ -1441,6 +1447,7 @@ class LeanSession:
         # What changes between turns (the time, the git status) rides on this request, not in the system prompt,
         # so the system prompt, the tools and the history stay byte-identical and the model server reuses them.
         turn.request_note = request_note("" if self.model_first else repo_note, context=recalled)
+        self._memory_request_note = turn.request_note
         if depth == 0 and not guest and memory_quality.refuses_memory(self._user_message):
             turn.request_note += (
                 "\nThe owner declined saving memory for this request. That preference is settled. "
@@ -1748,6 +1755,9 @@ class LeanSession:
         if memory is not None:
             written_ids: set[str] = set()
             scope = getattr(self, "_memory_scope", None) if depth == 0 and not delegated_by else None
+            correction = None
+            if not scope and depth == 0 and not delegated_by and self._owner_side(persona):
+                correction = getattr(self, "_memory_correction_scope", None)
             if scope == "account" and not self._owner_side(persona):
                 scope = "project" if self.project_root and persona.context_scope != "session" else "session"
             project_id = getattr(self, "_memory_project_id", "")
@@ -1759,6 +1769,8 @@ class LeanSession:
 
             def memory_save(args: dict[str, Any]) -> str | ToolResult:
                 from agent.state import get_state_store
+                if not scope and correction:
+                    return _correct_memory(args)
                 if not scope:
                     return ToolResult(False, "The current message does not authorize a persistent memory write.", 0,
                                       outcome="refused")
@@ -1839,6 +1851,40 @@ class LeanSession:
                                       meta={"memory_verified": True, "memory_written": written})
                 return f"Saved: {fact}"
 
+            def _correct_memory(args: dict[str, Any]) -> str | ToolResult:
+                """Replace one recalled saved fact with the change the owner just stated. The owner has already
+                allowed this exact write on the approval card (NativeTool.consent); this binds it to the message."""
+                from agent.lean.loop import _changes_recalled
+                from agent.state import get_state_store
+                note = str(getattr(self, "_memory_request_note", "") or "")
+                recalled = _changes_recalled(self._user_message, note)
+                if not recalled:
+                    return ToolResult(False, "No memory was saved: this message doesn't change a fact recalled for it. "
+                                      "Ask the user whether to remember it.", 0, outcome="refused")
+                proposal = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))
+                if not proposal or not memory_quality.prose_proposal_matches(self._user_message, proposal):
+                    return ToolResult(False, "No memory was saved. Use the changed fact as the user stated it in the "
+                                      "current message.", 0, outcome="refused")
+                problem = memory_quality.check_fact(proposal)
+                if problem:
+                    return problem
+                key = recalled if isinstance(recalled, str) else memory_quality.normalize_key(str(args.get("key") or ""))
+                store = get_state_store()
+                user_item = next((item.id for item in store.list_items(self.execution_id)
+                                  if item.item_type == "user_message"), "")
+                memory_id = memory.add_memory_item(
+                    proposal, memory_type=memory_quality.KINDS.get(str(args.get("type") or "fact").lower(), "note"),
+                    thread_id=self.session_id, source="agent", scope=correction, project_path=self.project_root or None,
+                    project_id=project_id, source_execution_id=self.execution_id, source_item_id=user_item,
+                    semantic_key=key or None, **({} if key else {"exact_duplicate": True}),
+                )
+                stored = _memory_on_disk(memory, str(memory_id)) if memory_id else False
+                if not isinstance(stored, dict):
+                    return "Failed: the correction could not be saved. Tell the user it did not save."
+                self.emit({"type": "memory_saved", "memory_count": int(memory.count_items() or 0)})
+                return ToolResult(True, f"Saved and verified (replaces the earlier value{f', key {key}' if key else ''}): "
+                                  f"{stored['text']}", 0, meta={"memory_verified": True, "memory_written": True})
+
             def memory_search(args: dict[str, Any]) -> str:
                 query = str(args.get("query") or "").strip()
                 rows = self._recall(query, limit=10)
@@ -1863,6 +1909,20 @@ class LeanSession:
                         "in your instructions.)" if len(kept) < len(lines) else "")
                 return ("\n".join(f"- {line}" for line in kept[:12]) or "No matching memories.") + note
 
+            if correction and not scope:
+                tools.append(NativeTool(
+                    name="memory_save",
+                    description="The user just said something you have saved has changed. Save the corrected fact in "
+                    "their words, with the saved fact's key so the new value replaces the old one. The user is asked to "
+                    "confirm before anything is saved. Only for a change to a saved fact; never anything else.",
+                    parameters={"type": "object", "properties": {
+                        "fact": {"type": "string", "description": "The corrected fact, as the user stated it now."},
+                        "key": {"type": "string", "description": "The saved fact's key, shown with it in what you know."},
+                        "type": {"type": "string", "enum": list(memory_quality.KINDS)},
+                    }, "required": ["fact"]},
+                    func=memory_save,
+                    consent="Replace a saved memory with what you just said? Nothing is saved unless you allow it.",
+                ))
             if scope:
                 tools.append(NativeTool(
                     name="memory_save",

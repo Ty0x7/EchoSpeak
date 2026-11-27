@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from agent.core import EchoSpeakAgent
-from agent.lean import policy, runtime as lean_runtime, soul
+from agent.lean import policy, runtime as lean_runtime, settings, soul
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean.job import unbacked_claim
 from agent.lean.personas import PersonaStore
@@ -773,3 +773,66 @@ def test_saved_schedule_query_returns_literal_visible_memory(
         assert result["response"].splitlines()[-1] == f"> {statement}"
     else:
         assert result["response"] == "I couldn’t find a matching saved schedule."
+
+
+# ── #239: correcting a saved fact in passing, with the owner's consent on a card ─────────────────────────────────
+
+def _correction_session(monkeypatch, lexical_memory, model, approve):
+    import json as _json
+
+    lexical_memory.add_memory_item("My locker code at the Northside gym is 1478.", semantic_key="northside_locker_code")
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    session, events = _session(monkeypatch, {"echo": model}, agent=agent, approve=approve)
+    rows = [{"content": "My locker code at the Northside gym is 1478.", "semantic_key": "northside_locker_code",
+             "type": "fact"}]
+    monkeypatch.setattr(lean_runtime.LeanSession, "_recall", lambda self, query, limit=8, **kw: list(rows))
+    monkeypatch.setattr(settings, "approval_mode", lambda: "never")  # the owner's setting: consent asks anyway
+    return session, events, lambda: [r for r in _json.loads(lexical_memory._records_path.read_text())["records"].values()]
+
+
+def _save_call(fact: str, key: str = "northside_locker_code") -> ModelTurn:
+    import json as _json
+    return ModelTurn(tool_calls=[ToolCall("fix", "memory_save", _json.dumps({"fact": fact, "key": key}))])
+
+
+def test_an_in_passing_correction_replaces_the_saved_fact_after_the_owner_allows_it(monkeypatch, lexical_memory):
+    model = ScriptedClient([_save_call("My locker code at the Northside gym is 2786."),
+                            ModelTurn(content="Updated: your Northside locker code is 2786.")])
+    session, events, disk = _correction_session(monkeypatch, lexical_memory, model, "allow")
+    session.run("Heads up, they reset the lockers at Northside, it's 2786 now.")
+    cards = [e for e in events if e["type"] == "approval_request"]
+    assert cards and "Nothing is saved unless you allow it" in cards[0].get("reason", "") + cards[0].get("summary", "")
+    active = [r["text"] for r in disk() if r.get("active", True) and "locker" in r["text"]]
+    assert active == ["My locker code at the Northside gym is 2786."]
+    assert _tool_results(model, 1)[0].startswith("Saved and verified (replaces the earlier value, key northside_locker_code)")
+
+
+def test_a_denied_correction_saves_nothing(monkeypatch, lexical_memory):
+    model = ScriptedClient([_save_call("My locker code at the Northside gym is 2786."),
+                            ModelTurn(content="Okay, I left your saved code as it was.")])
+    session, events, disk = _correction_session(monkeypatch, lexical_memory, model, "deny")
+    session.run("Heads up, they reset the lockers at Northside, it's 2786 now.")
+    assert any(e["type"] == "approval_request" for e in events)
+    assert [r["text"] for r in disk() if r.get("active", True)] == ["My locker code at the Northside gym is 1478."]
+
+
+@pytest.mark.parametrize("message,fact", [
+    # No change to a recalled fact: nothing to correct, so even an allowed card can't write.
+    ("Heads up, my gym switched to a new playlist, it's techno now.", "My gym plays techno now."),
+    # The proposal isn't what the owner said: refused.
+    ("Heads up, they reset the lockers at Northside, it's 2786 now.", "My locker code at the Northside gym is 9999."),
+])
+def test_a_correction_write_is_bound_to_the_recalled_fact_and_the_owners_words(monkeypatch, lexical_memory, message, fact):
+    model = ScriptedClient([_save_call(fact), ModelTurn(content="Okay.")])
+    session, _events, disk = _correction_session(monkeypatch, lexical_memory, model, "allow")
+    session.run(message)
+    assert [r["text"] for r in disk() if r.get("active", True)] == ["My locker code at the Northside gym is 1478."]
+    assert _tool_results(model, 1)[0].startswith("No memory was saved")
+
+
+def test_a_question_or_plain_statement_offers_no_memory_write(monkeypatch, lexical_memory):
+    model = ScriptedClient([_save_call("My locker code at the Northside gym is 2786."), ModelTurn(content="Okay.")])
+    session, events, disk = _correction_session(monkeypatch, lexical_memory, model, "allow")
+    session.run("Is my locker code at Northside still 1478?")
+    assert not any(e["type"] == "approval_request" for e in events)
+    assert [r["text"] for r in disk() if r.get("active", True)] == ["My locker code at the Northside gym is 1478."]
