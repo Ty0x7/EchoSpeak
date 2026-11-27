@@ -1,0 +1,37 @@
+# Ternary Bonsai 2.5 27B for EchoSpeak on an 8 GB NVIDIA GPU (validated 26-27 Nov 2026, docs/research/bonsai-vs-qwen-2026-11.md).
+# Install: copy to ~/.config/systemd/user/, then `systemctl --user daemon-reload && systemctl --user enable --now echospeak-bonsai`.
+# Expects the files listed in docs/local-models/bonsai.md under ~/models/bonsai (hashes in ~/models/bonsai/MANIFEST.md).
+#
+# - 32K window only with a 4-bit KV cache + Prism's K mean-centering bias (K rotation off) and a 256-token micro-batch:
+#   the default batch ran out of memory on the first request when the desktop held 1.34 GB of VRAM.
+# - Arm B settings: xhigh effort comes from EchoSpeak's capability profile; the server caps thinking at 4,096 tokens and
+#   checkpoints every 2,048 prompt tokens so edited conversations don't re-read from the start.
+# - Vision projector in system RAM (the GPU has no room for it at 32K): 18/18 screenshot tasks in the evaluation.
+# - Sleeps after 120 s idle (VRAM back to the desktop's), wakes on the next request in ~3 s; EchoSpeak asks Ollama to
+#   unload first (agent/lean/gpu_handoff.py), so the two runtimes take turns on the card.
+# - Loopback only, one slot, no host prompt cache, the template's unsupported "high"/"low" efforts mapped to medium.
+[Unit]
+Description=Ternary Bonsai 2.5 27B (llama-server, Prism fork) for EchoSpeak
+After=network.target
+
+[Service]
+Type=simple
+Environment=LD_LIBRARY_PATH=%h/models/bonsai/runtime/prism-b12232-cuda12.4:%h/models/bonsai/runtime/cuda12-libs
+Environment=LLAMA_ATTN_ROT_DISABLE=1
+ExecStart=%h/models/bonsai/runtime/prism-b12232-cuda12.4/llama-server \
+  -m %h/models/bonsai/gguf/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf --alias Ternary-Bonsai-2.5-27B \
+  --host 127.0.0.1 --port 8095 -c 32768 -ngl 99 -fa on -np 1 --jinja \
+  --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0 --repeat-penalty 1 \
+  --cache-type-k q4_0 --cache-type-v q4_0 --kv-mean-center %h/models/bonsai/gguf/Ternary-Bonsai-2.5-27B-PTQ1_0-kv-bias.gguf \
+  -ub 256 --cache-ram 0 --ctx-checkpoints 8 -cent 2048 --reasoning-budget 4096 \
+  --reasoning-effort-allow xhigh,medium --reasoning-effort-fallback medium \
+  --mmproj %h/models/bonsai/gguf/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf --no-mmproj-offload \
+  --sleep-idle-seconds 120
+Restart=on-failure
+RestartSec=10
+Nice=5
+MemoryHigh=6G
+MemoryMax=8G
+
+[Install]
+WantedBy=default.target

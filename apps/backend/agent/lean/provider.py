@@ -667,6 +667,9 @@ class ChatClient:
         # Provider-specific metadata is only meaningful to its own adapter.
         messages = _chat_history(messages, self.endpoint)
         self._prepare_window()
+        if self.endpoint.local:
+            from agent.lean import gpu_handoff
+            gpu_handoff.before_call(self.endpoint)
         body: dict[str, Any] = {
             "model": self.endpoint.wire_model,
             "messages": messages,

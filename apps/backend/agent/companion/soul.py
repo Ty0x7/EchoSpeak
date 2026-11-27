@@ -162,6 +162,8 @@ def local_reply(messages: list[dict[str, str]], *, timeout: float, max_tokens: i
     if not endpoint.local:
         raise ValueError("Companion synthesis requires a local model")
     require("models", endpoint.base_url)
+    from agent.lean.gpu_handoff import before_call as hand_gpu_to  # runtime residency only, no agent execution
+    hand_gpu_to(endpoint)
     body = {"model": endpoint.model, "stream": False, "temperature": temperature,
             "max_tokens": max_tokens, "messages": messages}
     effort = reasoning_effort_for(endpoint, False, "low")
