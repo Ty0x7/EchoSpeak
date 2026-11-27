@@ -22,9 +22,13 @@ in-process binding and is not used.
 
 ## Service
 
-`apps/backend/scripts/local_runtimes/echospeak-bonsai.service` → `~/.config/systemd/user/`, then
-`systemctl --user enable --now echospeak-bonsai`. It serves `Ternary-Bonsai-2.5-27B` on `127.0.0.1:8095`, sleeps after
-120 s idle (VRAM back to the desktop's) and wakes on the next request in about 3 s. Every flag is explained in the unit.
+1. `envsubst < apps/backend/scripts/local_runtimes/bonsai-preset.ini.in > ~/.config/echospeak/bonsai-preset.ini`
+2. Copy `apps/backend/scripts/local_runtimes/echospeak-bonsai.service` to `~/.config/systemd/user/`, then
+   `systemctl --user enable --now echospeak-bonsai`.
+
+llama-server runs in **router mode** on `127.0.0.1:8095` with one model, `Ternary-Bonsai-2.5-27B`. The model loads on
+its first request (5–12 s), can be unloaded at once with `POST /models/unload` (EchoSpeak does this before calling
+Ollama), and also sleeps after 120 s idle. Its window is read from `/models` without loading it.
 
 ## EchoSpeak settings
 
@@ -42,9 +46,12 @@ send `reasoning_effort: "none"`.
 
 ## Switching to Qwen 3.5 9B (or another Ollama model)
 
-Settings → Models → provider **Ollama**, model `qwen3.5:9b`. Both runtimes can stay running: before each call to
-Bonsai, EchoSpeak asks Ollama to unload what it holds (`agent/lean/gpu_handoff.py`, `LOCAL_GPU_HANDOFF=0` disables
-it), and Bonsai frees the GPU after two idle minutes. Qwen on this card fits 25–28 of its 33 layers; set
+Settings → Models → provider **Ollama**, model `qwen3.5:9b`. Both runtimes stay running and switching is immediate
+in both directions: before a call to Bonsai EchoSpeak asks Ollama to unload, and before a call to Ollama it unloads
+Bonsai from the router (`agent/lean/gpu_handoff.py`; `LOCAL_GPU_PEERS` lists routers, `LOCAL_GPU_HANDOFF=0`
+disables it). Measured: Bonsai → Qwen → Bonsai → Qwen, every reply correct, 7–12 s per switch including the load.
+This runs inside EchoSpeak's one-at-a-time local inference gate; a client outside EchoSpeak using the same servers is
+not coordinated. Qwen on this card fits 25–28 of its 33 layers; set
 `OLLAMA_KV_CACHE_TYPE=q4_0` for the best fit at 32K.
 
 ## Limits
