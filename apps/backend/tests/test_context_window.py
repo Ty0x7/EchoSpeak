@@ -229,3 +229,42 @@ def test_lmstudio_served_window_comes_from_the_loaded_instance(monkeypatch):
         assert window.served(unloaded) == 0  # the trained maximum is not what is served
     finally:
         server.shutdown()
+
+
+def test_llama_server_window_comes_from_props_for_openai_compatible_providers(monkeypatch):
+    """llama-server (Bonsai on the Prism fork, 27 Nov 2026) is reached as LocalAI/vLLM; its -c is only in /props.
+
+    Started with -c 32768 while EchoSpeak was told 65536, an over-long prompt would reach a server that can't hold it.
+    A LocalAI/vLLM server without /props must change nothing.
+    """
+    import http.server
+    import json as _json
+    import threading as _threading
+
+    props = _json.dumps({"default_generation_settings": {"n_ctx": 32768}, "total_slots": 1}).encode()
+
+    def handler(with_props: bool):
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802
+                ok = with_props and self.path == "/props"
+                self.send_response(200 if ok else 404)
+                self.end_headers()
+                self.wfile.write(props if ok else b"{}")
+
+            def log_message(self, *args):
+                pass
+        return Handler
+
+    from config import config
+    monkeypatch.setattr(config.local, "context_length", 65536)
+    servers = [http.server.HTTPServer(("127.0.0.1", 0), handler(flag)) for flag in (True, False)]
+    for server in servers:
+        _threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        llama, other = (f"http://127.0.0.1:{server.server_port}/v1" for server in servers)
+        assert window.served(Endpoint(llama, "not-needed", "Ternary-Bonsai-2.5-27B", "localai", True)) == 32768
+        assert settings.context_tokens(Endpoint(llama, "not-needed", "Ternary-Bonsai-2.5-27B", "vllm", True)) == 32768
+        assert settings.context_tokens(Endpoint(other, "not-needed", "some-model", "localai", True)) == 65536
+    finally:
+        for server in servers:
+            server.shutdown()
