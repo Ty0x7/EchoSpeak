@@ -1,8 +1,70 @@
 # Harness comparison plan: Bonsai 2.5 27B with EchoSpeak, with Hermes Agent, and with no harness
 
-Status: **plan for review, 27 Nov 2026. Nothing installed, nothing run.** Campaign issue to be opened on approval.
+Status: **prepared for review, 27 Nov 2026.** Hermes source was read at the pinned tag. Hermes is not installed and no
+external arm has run. The sandbox and preflight were built and tested with a probe. Campaign issue to be opened on
+approval.
 Builds on [bonsai-vs-qwen-2026-11.md](bonsai-vs-qwen-2026-11.md) (#240), whose EchoSpeak results are reused, not
 repeated.
+
+## 0. Findings from preparation (27 Nov 2026)
+
+**Hermes' context floor is enforced in code and measured honestly.**
+- Source: v0.23.4, commit `8fc0374`. `agent/model_metadata.py` sets `MINIMUM_CONTEXT_LENGTH = 64_000`, and
+  `agent/agent_init.py` `_enforce_minimum_context` raises at startup when the window is smaller.
+- For a llama.cpp server it reads the allocated `n_ctx` from `/props` (`_apply_llamacpp_props`), so at 32K it sees
+  32K and refuses.
+- Its own remedy text suggests overriding the window in config. We **won't**: that would misrepresent a 32K runtime as
+  64K. The only built-in exception is an explicit `model.context_length` with the **LM Studio** provider, which makes
+  LM Studio-specific API calls. Using it against llama-server would also misidentify the runtime.
+
+**Consequence: there is no faithful Hermes configuration on this GPU at 32K.** A faithful arm needs a genuine 64K
+server. On an 8 GB card with Bonsai that means the KV cache in system RAM (`-nkvo`), measured at 4.8–13 tok/s with
+exact recall at 48K. The arms therefore become:
+
+| Arm | Configuration | Compared with |
+|---|---|---|
+| **H64** Hermes | Bonsai at a true 64K, KV in RAM | **E64** only |
+| **E64** EchoSpeak | the same server and flags as H64, on the same cases | H64 (quality and outcomes; speed reported but caveated) |
+| **E32** EchoSpeak (existing) | 32K, GPU KV: the saved Bonsai campaign | R32, and the E64 subset (does 64K-in-RAM change EchoSpeak's outcomes?) |
+| **R32** raw model | same server as E32 | E32 |
+
+**H64 is never compared with E32.** The window, KV placement and speed differ. Results from different
+configurations go in separate tables.
+
+**Dependency and installer review (read only):**
+- **Packages:** 355 locked in `uv.lock`; Python `>=3.11,<3.15`. Optional extras pull web-search, TTS and image
+  providers; the evaluation installs none of them.
+- **Installer** (`scripts/install.sh`, 1,320 lines): downloads a pinned uv, may run `sudo` to install libatomic for
+  Node, clones into `~/.hermes`, adds `~/.local/bin/hermes`, installs Chromium unless told not to, and writes a local
+  install receipt under `$HERMES_HOME/telemetry/`. **Not used.** A pinned checkout plus `uv sync --frozen` into the
+  run folder replaces it.
+- **Telemetry:** `telemetry.shared_metrics.enabled` and `send` both default to `False` (opt-in). The endpoint
+  `https://telemetry.nousresearch.com/v1/telemetry` can't be overridden through the environment.
+- **Updates:** `updates.check` defaults to `True` (a passive GitHub API call). The run config sets it to `false`, and
+  the sandbox has no route out anyway.
+
+**Portable scorecard** (`apps/backend/scripts/portable_score.py`, tested):
+- **Excluded checks:** 12 kinds that only EchoSpeak's machinery can satisfy (its approval and read cards, harness
+  status, usage accounting, nudges, stop reasons) or that name a tool rather than an outcome.
+- **Reported:** task success, per-dimension pass rates, security violations listed separately, and successes per
+  million tokens and per hour.
+- **Saved EchoSpeak runs re-scored**, with no new compute:
+
+| Arm (existing evidence) | Success (all / held-out) | Completion · tools · efficiency · recovery · security pass rates | Security trials | Successes / 1M tokens | Successes / hour |
+|---|---|---|---|---|---|
+| E32 Bonsai, matched (118 trials) | 0.88 / 0.86 | 0.89 · 0.98 · 0.90 · 0.99 · 1.00 | 0 | 12.4 | 26.2 |
+| E32 Bonsai, best practical (59) | 0.86 / 0.88 | 0.90 · 0.98 · 0.89 · 0.99 · 1.00 | 0 | 11.8 | 22.0 |
+| E32 Qwen 9B, matched (118) | 0.81 / 0.80 | 0.85 · 0.96 · 0.85 · 0.98 · 1.00 | 1 | 6.5 | 20.5 |
+| E32 Qwen 9B, best practical (59) | 0.80 / 0.72 | 0.86 · 0.95 · 0.83 · 0.97 · 0.99 | 1 | 6.0 | 21.7 |
+
+**Sandbox and preflight, built and tested:**
+- `apps/backend/scripts/external_arm/sandbox_run.sh` was run with `escape_probe.py` against the live model service.
+- **Blocked:** the real home, `~/.ssh`, EchoSpeak data, `/run/user`, writes outside the workspace, DNS, the
+  internet, and host Ollama.
+- **Allowed:** the model endpoint and the workspace only.
+- **Audit:** the post-run home check was empty.
+- **Preflight:** `preflight.sh` checks tools, namespaces, RAM, VRAM, temperature, disk, idle runtimes, the GPU lock,
+  model files and the pinned, clean Hermes checkout. It fails when anything competes for the GPU.
 
 ## 1. Question
 
