@@ -26,14 +26,19 @@ in-process binding and is not used.
 2. Copy `apps/backend/scripts/local_runtimes/echospeak-bonsai.service` to `~/.config/systemd/user/`, then
    `systemctl --user enable --now echospeak-bonsai`.
 
-llama-server runs in **router mode** on `127.0.0.1:8095` with one model, `Ternary-Bonsai-2.5-27B`. The model loads on
+llama-server runs in **router mode** on `127.0.0.1:8080` with one model, `Ternary-Bonsai-2.5-27B`. The model loads on
 its first request (5–12 s), can be unloaded at once with `POST /models/unload` (EchoSpeak does this before calling
 Ollama), and also sleeps after 120 s idle. Its window is read from `/models` without loading it.
 
 ## EchoSpeak settings
 
+The service uses port **8080**, LocalAI's well-known default, on purpose. EchoSpeak keeps one local base URL for all
+local providers and swaps only well-known default ports when a chat selects another provider
+(`agent/model_runtime.py` `resolve_local_provider_base_url`). With Bonsai on a custom port, a chat switched to Ollama
+kept Bonsai's address and every request failed (found in the #243 acceptance check, 27 Nov 2026).
+
 ```json
-"local": {"provider": "localai", "base_url": "http://127.0.0.1:8095", "model_name": "Ternary-Bonsai-2.5-27B",
+"local": {"provider": "localai", "base_url": "http://127.0.0.1:8080", "model_name": "Ternary-Bonsai-2.5-27B",
           "context_length": 32768},
 "model_capability_profiles": {"localai:Ternary-Bonsai-2.5-27B": {"thinking_supported": true,
   "thinking_toggle_supported": true, "reasoning_effort_map": {"minimal": "xhigh", "low": "xhigh", "medium": "xhigh",
