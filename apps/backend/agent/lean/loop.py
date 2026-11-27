@@ -191,16 +191,14 @@ def _recalled_lines(request_note: str) -> list[str]:
     return [line for line in note[start:].split("\n## ")[0].splitlines() if line.startswith("- ")]
 
 
-def _changes_recalled(user_message: str, request_note: str) -> str | bool:
-    """The user states a change to a fact recalled for this request: a change cue, not a question, and two shared
-    content words with one of its lines, or one shared name ("Ines moved to Gdansk" and "Friend Ines lives in
-    Valencia"). Returns the line's key when it shows one, True without one, or False."""
-    from agent.lean import memory_quality
+def _recalled_change_line(user_message: str, request_note: str) -> str:
+    """The recalled memory line the user's message states a change to, or "" (see _changes_recalled)."""
     from agent.stopwords import keywords
+    from agent.lean import memory_quality
 
     text = str(user_message or "").strip()
     if not text or memory_quality.is_structured_list(text):
-        return False
+        return ""
     for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
         if sentence.endswith("?") or not _CHANGE_CUE.search(sentence):
             continue
@@ -209,9 +207,19 @@ def _changes_recalled(user_message: str, request_note: str) -> str | bool:
         for line in _recalled_lines(request_note):
             shared = said & set(keywords(line))
             if len(shared) >= 2 or shared & names:
-                key = re.search(r"\bkey ([\w.-]+)\)", line)
-                return key.group(1) if key else True
-    return False
+                return line
+    return ""
+
+
+def _changes_recalled(user_message: str, request_note: str) -> str | bool:
+    """The user states a change to a fact recalled for this request: a change cue, not a question, and two shared
+    content words with one of its lines, or one shared name ("Ines moved to Gdansk" and "Friend Ines lives in
+    Valencia"). Returns the line's key when it shows one, True without one, or False."""
+    line = _recalled_change_line(user_message, request_note)
+    if not line:
+        return False
+    key = re.search(r"\bkey ([\w.-]+)\)", line)
+    return key.group(1) if key else True
 
 
 def memory_follow_note(key: str) -> str:

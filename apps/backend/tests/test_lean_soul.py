@@ -836,3 +836,20 @@ def test_a_question_or_plain_statement_offers_no_memory_write(monkeypatch, lexic
     session.run("Is my locker code at Northside still 1478?")
     assert not any(e["type"] == "approval_request" for e in events)
     assert [r["text"] for r in disk() if r.get("active", True)] == ["My locker code at the Northside gym is 1478."]
+
+
+def test_a_correction_retires_a_fact_saved_without_a_key(monkeypatch, lexical_memory):
+    """Live LSH3 (#239 check, 27 Nov): 'Tomas moved to Lyon' was saved under a new key beside the keyless
+    'lives in Porto', and the next chat still said Porto. The recalled record itself must be retired."""
+    import json as _json
+
+    lexical_memory.add_memory_item("My friend Tomas lives in Porto.")
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    model = ScriptedClient([_save_call("My friend Tomas lives in Lyon.", key="tomas_city"),
+                            ModelTurn(content="Updated: Tomas lives in Lyon.")])
+    session, _events = _session(monkeypatch, {"echo": model}, agent=agent, approve="allow")
+    monkeypatch.setattr(lean_runtime.LeanSession, "_recall", lambda self, query, limit=8, **kw: [
+        {"content": "My friend Tomas lives in Porto.", "type": "fact"}])
+    session.run("Oh, Tomas moved to Lyon last month.")
+    records = _json.loads(lexical_memory._records_path.read_text())["records"].values()
+    assert [r["text"] for r in records if r.get("active", True)] == ["My friend Tomas lives in Lyon."]

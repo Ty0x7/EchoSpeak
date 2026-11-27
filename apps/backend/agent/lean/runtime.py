@@ -1854,11 +1854,11 @@ class LeanSession:
             def _correct_memory(args: dict[str, Any]) -> str | ToolResult:
                 """Replace one recalled saved fact with the change the owner just stated. The owner has already
                 allowed this exact write on the approval card (NativeTool.consent); this binds it to the message."""
-                from agent.lean.loop import _changes_recalled
+                from agent.lean.loop import _recalled_change_line
                 from agent.state import get_state_store
                 note = str(getattr(self, "_memory_request_note", "") or "")
-                recalled = _changes_recalled(self._user_message, note)
-                if not recalled:
+                line = _recalled_change_line(self._user_message, note)
+                if not line:
                     return ToolResult(False, "No memory was saved: this message doesn't change a fact recalled for it. "
                                       "Ask the user whether to remember it.", 0, outcome="refused")
                 proposal = memory_quality.tidy_fact(str(args.get("fact") or args.get("text") or ""))
@@ -1868,7 +1868,20 @@ class LeanSession:
                 problem = memory_quality.check_fact(proposal)
                 if problem:
                     return problem
-                key = recalled if isinstance(recalled, str) else memory_quality.normalize_key(str(args.get("key") or ""))
+                found = re.search(r"\bkey ([\w.-]+)\)", line)
+                key = found.group(1) if found else ""
+                # A fact saved without a key: the one active record this line was rendered from is retired once the
+                # correction is on disk (exact text, the owner's own records, this scope), never a fuzzy match.
+                body = re.sub(r"\s*\([^()]*\)$", "", line[2:]).strip()
+                owner_of = getattr(memory, "_owner_id", None)
+                owner = owner_of() if callable(owner_of) else ""
+                old_ids = [] if key else [str(r.get("id") or "") for r in list((getattr(memory, "_records", None) or {}).values())
+                                          if r.get("active", True) and str(r.get("owner_id") or "") == owner
+                                          and str(r.get("scope") or "account") == correction
+                                          and memory_quality._compact(str(r.get("text") or "")) == body]
+                if not key and len(old_ids) != 1:
+                    return ToolResult(False, "No memory was saved: the saved fact to replace couldn't be identified "
+                                      "exactly. Ask the user to say which saved fact to update.", 0, outcome="refused")
                 store = get_state_store()
                 user_item = next((item.id for item in store.list_items(self.execution_id)
                                   if item.item_type == "user_message"), "")
@@ -1881,6 +1894,9 @@ class LeanSession:
                 stored = _memory_on_disk(memory, str(memory_id)) if memory_id else False
                 if not isinstance(stored, dict):
                     return "Failed: the correction could not be saved. Tell the user it did not save."
+                if old_ids and old_ids != [str(memory_id)]:
+                    memory.delete_items(old_ids, project_id=project_id if correction == "project" else "",
+                                        thread_id=self.session_id if correction == "session" else "")
                 self.emit({"type": "memory_saved", "memory_count": int(memory.count_items() or 0)})
                 return ToolResult(True, f"Saved and verified (replaces the earlier value{f', key {key}' if key else ''}): "
                                   f"{stored['text']}", 0, meta={"memory_verified": True, "memory_written": True})
