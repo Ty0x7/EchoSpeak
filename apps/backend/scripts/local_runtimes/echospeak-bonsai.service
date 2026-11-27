@@ -21,7 +21,7 @@ Type=simple
 Environment=LD_LIBRARY_PATH=%h/models/bonsai/runtime/prism-b12232-cuda12.4:%h/models/bonsai/runtime/cuda12-libs
 Environment=LLAMA_ATTN_ROT_DISABLE=1
 ExecStart=%h/models/bonsai/runtime/prism-b12232-cuda12.4/llama-server \
-  --models-preset %h/.config/echospeak/bonsai-preset.ini --models-max 1 --host 127.0.0.1 --port 8095
+  --models-preset %h/.config/echospeak/bonsai-preset.ini --models-max 1 --host 127.0.0.1 --port 8080
 Restart=on-failure
 RestartSec=10
 Nice=5

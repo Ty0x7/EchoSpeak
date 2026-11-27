@@ -10,7 +10,7 @@ Both directions, immediately (``before_call``):
   ask the local Ollama to unload its models (``keep_alive: 0``). A llama-server woken without room aborts
   ("failed to reload model after sleeping"), so this is required, not tidy;
 - calling Ollama: ask each llama-server in router mode on this machine (``LOCAL_GPU_PEERS``, default
-  ``http://127.0.0.1:8095``) to unload its loaded models (``POST /models/unload``). It reloads on its next request.
+  ``http://127.0.0.1:8080``) to unload its loaded models (``POST /models/unload``). It reloads on its next request.
 
 Callers run this inside the local inference gate (agent/admission.py, one local call at a time), so no EchoSpeak
 generation is in flight on either runtime while the other is unloaded. Loopback only, throttled per target, best
@@ -47,7 +47,7 @@ def enabled() -> bool:
 
 
 def _peers() -> list[str]:
-    raw = os.environ.get("LOCAL_GPU_PEERS", "http://127.0.0.1:8095")
+    raw = os.environ.get("LOCAL_GPU_PEERS", "http://127.0.0.1:8080")
     return [p.strip().rstrip("/") for p in raw.split(",") if p.strip() and _loopback(p.strip())]
 
 

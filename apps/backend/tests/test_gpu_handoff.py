@@ -114,3 +114,15 @@ def test_a_plain_llama_server_without_router_status_is_left_alone(fake_ollama, m
         assert gpu_handoff.before_call(Endpoint("http://127.0.0.1:11434/v1", "", "q", "ollama", True)) == []
     finally:
         server.shutdown()
+
+
+def test_the_documented_bonsai_address_lets_each_chat_reach_its_own_runtime(monkeypatch):
+    monkeypatch.delenv("LOCAL_GPU_PEERS", raising=False)
+    """Bonsai serves on LocalAI's default port so the shared local URL resolves per provider (#243 acceptance:
+    on :8095 a chat switched to Ollama kept Bonsai's address and every request was rejected)."""
+    from agent.model_runtime import resolve_local_provider_base_url as resolve
+
+    configured = "http://127.0.0.1:8080"  # docs/local-models/bonsai.md, echospeak-bonsai.service
+    assert resolve("localai", configured).endswith(":8080")
+    assert resolve("ollama", configured).endswith(":11434")
+    assert gpu_handoff._peers() == ["http://127.0.0.1:8080"]
