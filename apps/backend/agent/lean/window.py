@@ -13,7 +13,8 @@ estimated tokens, and a 43,104-token prompt reached the model as 8,194 tokens wi
 Two defences, both cheap:
 
 - ``served(endpoint)``: the loaded model's real window (Ollama ``/api/ps`` → ``context_length``;
-  LM Studio ``/api/v1/models`` → ``loaded_instances[].config.context_length``), cached briefly. ``settings.context_tokens`` takes the smaller of this and what is configured.
+  LM Studio ``/api/v1/models`` → ``loaded_instances[].config.context_length``; llama-server behind the generic
+  OpenAI-compatible providers ``/props`` → ``default_generation_settings.n_ctx``), cached briefly. ``settings.context_tokens`` takes the smaller of this and what is configured.
 - ``truncated(...)``: after a call, the server's own prompt count compared with what was sent. A
   count far below the estimate (or exactly half the known window) means the prompt was cut. The
   loop then discards that reply, never runs its tool calls, trims harder and asks again; the
@@ -84,6 +85,20 @@ def _fetch_lmstudio(base: str, model: str) -> int:
     return 0
 
 
+def _fetch_llama_server(base: str, model: str) -> int:
+    """The per-slot window a llama.cpp ``llama-server`` was started with (``GET /props`` →
+    ``default_generation_settings.n_ctx``), 0 if the server has no such route. EchoSpeak reaches llama-server through a
+    generic OpenAI-compatible provider (LocalAI or vLLM in Settings); its window is ``-c`` divided across ``-np`` slots
+    and fixed at start, and nothing on its OpenAI routes says what it is. A server without ``/props`` (LocalAI, vLLM)
+    answers 404, which leaves the configured window in charge. ``model`` is unused: llama-server serves one model."""
+    request = urllib.request.Request(base + "/props", headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=1.0) as response:
+        data = json.loads(response.read() or b"{}")
+    settings = data.get("default_generation_settings") if isinstance(data, dict) else None
+    value = (settings or {}).get("n_ctx") if isinstance(settings, dict) else None
+    return int(value) if isinstance(value, int) and value > 0 else 0
+
+
 def served(endpoint: Any) -> int:
     """The context window the local server is actually serving for this model, or 0 if unknown."""
     if endpoint is None or not getattr(endpoint, "local", False):
@@ -95,7 +110,8 @@ def served(endpoint: Any) -> int:
         learned = _learned.get(key)
     if cached is None or cached[1] < now:
         value = 0
-        fetch = {"ollama": _fetch_ollama, "lmstudio": _fetch_lmstudio}.get(str(getattr(endpoint, "provider", "")))
+        fetch = {"ollama": _fetch_ollama, "lmstudio": _fetch_lmstudio, "localai": _fetch_llama_server,
+                 "vllm": _fetch_llama_server}.get(str(getattr(endpoint, "provider", "")))
         if fetch and _loopback(key[0]) and key[1]:
             try:
                 value = fetch(*key)
