@@ -5,10 +5,16 @@ both be resident. llama-server started with ``--sleep-idle-seconds`` frees its V
 request (measured 27 Nov 2026: 7.7 GB -> 1.4 GB, ~3 s to wake), but a model Ollama still holds (keep_alive, 5 min by
 default) leaves the waking server too little memory, and the request fails.
 
-Before a call to an OpenAI-compatible local server on this machine (LocalAI/vLLM/LM Studio providers, which is how
-llama-server is reached), ``before_call`` asks the local Ollama service to unload what it has loaded. Ollama reloads
-on its own next request, and the sleeping llama-server makes room the other way. Loopback only, throttled, and best
-effort: any failure leaves things as they were. ``LOCAL_GPU_HANDOFF=0`` turns it off.
+Both directions, immediately (``before_call``):
+- calling an OpenAI-compatible server on this machine (LocalAI/vLLM/LM Studio providers, how llama-server is reached):
+  ask the local Ollama to unload its models (``keep_alive: 0``). A llama-server woken without room aborts
+  ("failed to reload model after sleeping"), so this is required, not tidy;
+- calling Ollama: ask each llama-server in router mode on this machine (``LOCAL_GPU_PEERS``, default
+  ``http://127.0.0.1:8095``) to unload its loaded models (``POST /models/unload``). It reloads on its next request.
+
+Callers run this inside the local inference gate (agent/admission.py, one local call at a time), so no EchoSpeak
+generation is in flight on either runtime while the other is unloaded. Loopback only, throttled per target, best
+effort: a failure leaves things as they were. ``LOCAL_GPU_HANDOFF=0`` turns it off.
 """
 from __future__ import annotations
 
@@ -40,20 +46,70 @@ def enabled() -> bool:
     return os.environ.get("LOCAL_GPU_HANDOFF", "1").strip().lower() not in {"0", "false", "off", "no"}
 
 
+def _peers() -> list[str]:
+    raw = os.environ.get("LOCAL_GPU_PEERS", "http://127.0.0.1:8095")
+    return [p.strip().rstrip("/") for p in raw.split(",") if p.strip() and _loopback(p.strip())]
+
+
+def _throttled(key: str) -> bool:
+    now = time.monotonic()
+    with _lock:
+        if now - _last.get(key, -THROTTLE_SECONDS) < THROTTLE_SECONDS:
+            return True
+        _last[key] = now
+    return False
+
+
+def _forget(prefix: str) -> None:
+    with _lock:
+        for key in [k for k in _last if k.startswith(prefix)]:
+            _last.pop(key, None)
+
+
+def _unload_router_peers(base: str) -> list[str]:
+    """Ask llama-server routers on loopback to unload their loaded models (not the server being called)."""
+    own = urllib.parse.urlsplit(base).netloc
+    unloaded = []
+    for peer in _peers():
+        if urllib.parse.urlsplit(peer).netloc == own or _throttled("peer:" + peer):
+            continue
+        try:
+            with urllib.request.urlopen(peer + "/models", timeout=0.5) as reply:
+                rows = json.load(reply).get("data") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        for row in rows:
+            status = row.get("status") if isinstance(row, dict) else None
+            if not isinstance(status, dict) or status.get("value") != "loaded":
+                continue  # not a router, or nothing loaded
+            request = urllib.request.Request(peer + "/models/unload", method="POST",
+                                             data=json.dumps({"model": row.get("id")}).encode(),
+                                             headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(request, timeout=15):
+                    unloaded.append(f"{peer}:{row.get('id')}")
+            except (OSError, ValueError):
+                continue
+    return unloaded
+
+
 def before_call(endpoint: Any) -> list[str]:
-    """Unload Ollama's loaded models before calling another local runtime on loopback. Returns what was unloaded."""
+    """Free the GPU for the local runtime about to be called. Returns what was unloaded."""
     provider = str(getattr(endpoint, "provider", "") or "")
     base = str(getattr(endpoint, "base_url", "") or "")
-    if not enabled() or not getattr(endpoint, "local", False) or provider not in OPENAI_COMPATIBLE or not _loopback(base):
+    if not enabled() or not getattr(endpoint, "local", False) or not _loopback(base):
         return []
+    if provider == "ollama":
+        _forget("ollama:")  # a later call to llama-server must check Ollama again, however soon
+        return _unload_router_peers(base.removesuffix("/v1").rstrip("/"))
+    if provider not in OPENAI_COMPATIBLE:
+        return []
+    _forget("peer:")
     ollama = _ollama_url()
     if not _loopback(ollama) or urllib.parse.urlsplit(ollama).netloc == urllib.parse.urlsplit(base).netloc:
         return []
-    now = time.monotonic()
-    with _lock:
-        if now - _last.get(ollama, -THROTTLE_SECONDS) < THROTTLE_SECONDS:
-            return []
-        _last[ollama] = now
+    if _throttled("ollama:" + ollama):
+        return []
     try:
         with urllib.request.urlopen(ollama.rstrip("/") + "/api/ps", timeout=0.5) as reply:
             loaded = [str(m.get("name") or m.get("model") or "") for m in (json.load(reply).get("models") or [])]

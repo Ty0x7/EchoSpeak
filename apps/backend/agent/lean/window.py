@@ -96,7 +96,22 @@ def _fetch_llama_server(base: str, model: str) -> int:
         data = json.loads(response.read() or b"{}")
     settings = data.get("default_generation_settings") if isinstance(data, dict) else None
     value = (settings or {}).get("n_ctx") if isinstance(settings, dict) else None
-    return int(value) if isinstance(value, int) and value > 0 else 0
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(data, dict) and data.get("role") == "router":
+        # Router mode (--models-preset): /props describes the router (n_ctx 0), and /props?model= would LOAD the
+        # model. The model list carries each child server's launch arguments without loading anything.
+        with urllib.request.urlopen(urllib.request.Request(base + "/models"), timeout=1.0) as response:
+            rows = (json.loads(response.read() or b"{}") or {}).get("data") or []
+        for row in rows:
+            if not isinstance(row, dict) or (model and row.get("id") != model and model not in (row.get("aliases") or [])):
+                continue
+            args = [str(a) for a in ((row.get("status") or {}).get("args") or [])]
+            ctx = next((args[i + 1] for i in range(len(args) - 1) if args[i] in ("--ctx-size", "-c")), "")
+            slots = next((args[i + 1] for i in range(len(args) - 1) if args[i] in ("--parallel", "-np")), "1")
+            if ctx.isdigit() and int(ctx) > 0:
+                return int(ctx) // max(1, int(slots) if slots.isdigit() else 1)
+    return 0
 
 
 def served(endpoint: Any) -> int:

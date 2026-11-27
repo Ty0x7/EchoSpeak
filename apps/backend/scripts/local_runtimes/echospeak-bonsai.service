@@ -7,8 +7,10 @@
 # - Arm B settings: xhigh effort comes from EchoSpeak's capability profile; the server caps thinking at 4,096 tokens and
 #   checkpoints every 2,048 prompt tokens so edited conversations don't re-read from the start.
 # - Vision projector in system RAM (the GPU has no room for it at 32K): 18/18 screenshot tasks in the evaluation.
-# - Sleeps after 120 s idle (VRAM back to the desktop's), wakes on the next request in ~3 s; EchoSpeak asks Ollama to
-#   unload first (agent/lean/gpu_handoff.py), so the two runtimes take turns on the card.
+# - Router mode (--models-preset): the model loads on its first request (~5-12 s) and EchoSpeak can unload it at once
+#   (POST /models/unload) before calling Ollama; it also sleeps after 120 s idle. EchoSpeak asks Ollama to unload
+#   before calling Bonsai (agent/lean/gpu_handoff.py), so the two runtimes take turns on the card in both directions.
+# - The model settings live in the preset (bonsai-preset.ini.in, rendered to ~/.config/echospeak/bonsai-preset.ini).
 # - Loopback only, one slot, no host prompt cache, the template's unsupported "high"/"low" efforts mapped to medium.
 [Unit]
 Description=Ternary Bonsai 2.5 27B (llama-server, Prism fork) for EchoSpeak
@@ -19,14 +21,7 @@ Type=simple
 Environment=LD_LIBRARY_PATH=%h/models/bonsai/runtime/prism-b12232-cuda12.4:%h/models/bonsai/runtime/cuda12-libs
 Environment=LLAMA_ATTN_ROT_DISABLE=1
 ExecStart=%h/models/bonsai/runtime/prism-b12232-cuda12.4/llama-server \
-  -m %h/models/bonsai/gguf/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf --alias Ternary-Bonsai-2.5-27B \
-  --host 127.0.0.1 --port 8095 -c 32768 -ngl 99 -fa on -np 1 --jinja \
-  --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 --presence-penalty 0 --repeat-penalty 1 \
-  --cache-type-k q4_0 --cache-type-v q4_0 --kv-mean-center %h/models/bonsai/gguf/Ternary-Bonsai-2.5-27B-PTQ1_0-kv-bias.gguf \
-  -ub 256 --cache-ram 0 --ctx-checkpoints 8 -cent 2048 --reasoning-budget 4096 \
-  --reasoning-effort-allow xhigh,medium --reasoning-effort-fallback medium \
-  --mmproj %h/models/bonsai/gguf/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf --no-mmproj-offload \
-  --sleep-idle-seconds 120
+  --models-preset %h/.config/echospeak/bonsai-preset.ini --models-max 1 --host 127.0.0.1 --port 8095
 Restart=on-failure
 RestartSec=10
 Nice=5

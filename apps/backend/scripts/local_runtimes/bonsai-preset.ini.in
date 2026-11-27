@@ -1,0 +1,27 @@
+# Ternary Bonsai 2.5 27B preset for llama-server router mode (see echospeak-bonsai.service). Rendered with
+# `envsubst < bonsai-preset.ini.in > ~/.config/echospeak/bonsai-preset.ini` (llama-server does not expand ~ or $HOME).
+# Validated settings: docs/research/bonsai-vs-qwen-2026-11.md (Arm B) and docs/local-models/bonsai.md.
+[Ternary-Bonsai-2.5-27B]
+model = ${HOME}/models/bonsai/gguf/Ternary-Bonsai-2.5-27B-PTQ1_0.gguf
+mmproj = ${HOME}/models/bonsai/gguf/Ternary-Bonsai-2.5-27B-mmproj-Q8_0.gguf
+mmproj-offload = 0
+ctx-size = 32768
+n-gpu-layers = 99
+flash-attn = on
+parallel = 1
+jinja = 1
+temp = 1.0
+top-p = 0.95
+top-k = 20
+min-p = 0
+cache-type-k = q4_0
+cache-type-v = q4_0
+kv-mean-center = ${HOME}/models/bonsai/gguf/Ternary-Bonsai-2.5-27B-PTQ1_0-kv-bias.gguf
+ubatch-size = 256
+cache-ram = 0
+ctx-checkpoints = 8
+checkpoint-every-nt = 2048
+reasoning-budget = 4096
+reasoning-effort-allow = xhigh,medium
+reasoning-effort-fallback = medium
+sleep-idle-seconds = 120

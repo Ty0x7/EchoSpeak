@@ -1448,6 +1448,9 @@ class LeanSession:
         # so the system prompt, the tools and the history stay byte-identical and the model server reuses them.
         turn.request_note = request_note("" if self.model_first else repo_note, context=recalled)
         self._memory_request_note = turn.request_note
+        # The exact records shown to the model, as the verified visibility predicate returned them (agent/memory.py
+        # runtime_memory_projection): a correction may only replace one of these (#239).
+        self._memory_recalled_rows = [dict(row) for row in memories]
         if depth == 0 and not guest and memory_quality.refuses_memory(self._user_message):
             turn.request_note += (
                 "\nThe owner declined saving memory for this request. That preference is settled. "
@@ -1870,33 +1873,44 @@ class LeanSession:
                     return problem
                 found = re.search(r"\bkey ([\w.-]+)\)", line)
                 key = found.group(1) if found else ""
-                # A fact saved without a key: the one active record this line was rendered from is retired once the
-                # correction is on disk (exact text, the owner's own records, this scope), never a fuzzy match.
+                # The one record this line was rendered from, among the rows recalled for this request (already
+                # filtered to this owner, chat and project by the verified visibility predicate). Never a fuzzy match.
                 body = re.sub(r"\s*\([^()]*\)$", "", line[2:]).strip()
-                owner_of = getattr(memory, "_owner_id", None)
-                owner = owner_of() if callable(owner_of) else ""
-                old_ids = [] if key else [str(r.get("id") or "") for r in list((getattr(memory, "_records", None) or {}).values())
-                                          if r.get("active", True) and str(r.get("owner_id") or "") == owner
-                                          and str(r.get("scope") or "account") == correction
-                                          and memory_quality._compact(str(r.get("text") or "")) == body]
-                if not key and len(old_ids) != 1:
+                rows = [row for row in getattr(self, "_memory_recalled_rows", []) or []
+                        if memory_quality._compact(str(row.get("content") or "")) == body]
+                if len(rows) != 1 or not str(rows[0].get("memory_id") or ""):
                     return ToolResult(False, "No memory was saved: the saved fact to replace couldn't be identified "
                                       "exactly. Ask the user to say which saved fact to update.", 0, outcome="refused")
+                old = rows[0]
+                old_id = str(old["memory_id"])
+                # The correction stays where the fact lived: an account fact stays an account fact, a project fact
+                # stays in this project, a chat fact in this chat.
+                fact_scope = str(old.get("scope") or "account")
+                if fact_scope == "project" and (not project_id or str(old.get("project_id") or "") != project_id
+                                                or not self.project_root):
+                    return ToolResult(False, "No memory was saved: that fact belongs to a project that isn't attached "
+                                      "here.", 0, outcome="refused")
+                record = (getattr(memory, "_records", None) or {}).get(old_id) or {}
+                key = key or str(record.get("semantic_key") or "")
                 store = get_state_store()
                 user_item = next((item.id for item in store.list_items(self.execution_id)
                                   if item.item_type == "user_message"), "")
                 memory_id = memory.add_memory_item(
                     proposal, memory_type=memory_quality.KINDS.get(str(args.get("type") or "fact").lower(), "note"),
-                    thread_id=self.session_id, source="agent", scope=correction, project_path=self.project_root or None,
-                    project_id=project_id, source_execution_id=self.execution_id, source_item_id=user_item,
+                    thread_id=self.session_id, source="agent", scope=fact_scope,
+                    project_path=self.project_root or None if fact_scope == "project" else None,
+                    project_id=project_id if fact_scope == "project" else "",
+                    source_execution_id=self.execution_id, source_item_id=user_item,
                     semantic_key=key or None, **({} if key else {"exact_duplicate": True}),
                 )
                 stored = _memory_on_disk(memory, str(memory_id)) if memory_id else False
                 if not isinstance(stored, dict):
                     return "Failed: the correction could not be saved. Tell the user it did not save."
-                if old_ids and old_ids != [str(memory_id)]:
-                    memory.delete_items(old_ids, project_id=project_id if correction == "project" else "",
-                                        thread_id=self.session_id if correction == "session" else "")
+                # Written and verified first, retired second: an interruption between the two leaves both facts
+                # (the next correction or the tidy pass resolves it), never neither.
+                if str(memory_id) != old_id and (getattr(memory, "_records", {}).get(old_id) or {}).get("active", True):
+                    memory.delete_items([old_id], project_id=project_id if fact_scope == "project" else "",
+                                        thread_id=self.session_id if fact_scope == "session" else "")
                 self.emit({"type": "memory_saved", "memory_count": int(memory.count_items() or 0)})
                 return ToolResult(True, f"Saved and verified (replaces the earlier value{f', key {key}' if key else ''}): "
                                   f"{stored['text']}", 0, meta={"memory_verified": True, "memory_written": True})
