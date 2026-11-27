@@ -593,6 +593,10 @@ class ChatClient:
     def _prepare_window(self) -> None:
         """Serve the owner's chosen window: point the request at the model variant that has it (once)."""
         endpoint = self.endpoint
+        if endpoint.local:
+            # Inside the local inference gate (@admitted): hand the GPU to this runtime before calling it.
+            from agent.lean import gpu_handoff
+            gpu_handoff.before_call(endpoint)
         if endpoint.wire or not endpoint.want_context or endpoint.provider != "ollama" or not endpoint.local:
             return
         from agent import context_windows

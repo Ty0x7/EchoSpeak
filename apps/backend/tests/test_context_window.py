@@ -268,3 +268,37 @@ def test_llama_server_window_comes_from_props_for_openai_compatible_providers(mo
     finally:
         for server in servers:
             server.shutdown()
+
+
+def test_a_llama_server_router_reports_its_window_from_the_model_list_without_loading_it(monkeypatch):
+    """Router mode (the Bonsai service): /props describes the router (n_ctx 0) and /props?model= would load the model;
+    /models carries the child's launch arguments."""
+    import http.server
+    import json as _json
+    import threading as _threading
+
+    asked: list[str] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            asked.append(self.path)
+            if self.path == "/props":
+                body = {"role": "router", "default_generation_settings": {"params": None, "n_ctx": 0}}
+            elif self.path == "/models":
+                body = {"data": [{"id": "Ternary-Bonsai-2.5-27B", "status": {"value": "unloaded",
+                                  "args": ["llama-server", "--ctx-size", "32768", "--parallel", "1"]}}]}
+            else:
+                self.send_response(404); self.end_headers(); return
+            self.send_response(200); self.end_headers(); self.wfile.write(_json.dumps(body).encode())
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    _threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        endpoint = Endpoint(f"http://127.0.0.1:{server.server_port}/v1", "", "Ternary-Bonsai-2.5-27B", "localai", True)
+        assert window.served(endpoint) == 32768
+        assert all("model=" not in path for path in asked)
+    finally:
+        server.shutdown()

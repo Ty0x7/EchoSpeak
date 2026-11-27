@@ -1,0 +1,32 @@
+# Ternary Bonsai 2.5 27B for EchoSpeak on an 8 GB NVIDIA GPU (validated 26-27 Nov 2026, docs/research/bonsai-vs-qwen-2026-11.md).
+# Install: copy to ~/.config/systemd/user/, then `systemctl --user daemon-reload && systemctl --user enable --now echospeak-bonsai`.
+# Expects the files listed in docs/local-models/bonsai.md under ~/models/bonsai (hashes in ~/models/bonsai/MANIFEST.md).
+#
+# - 32K window only with a 4-bit KV cache + Prism's K mean-centering bias (K rotation off) and a 256-token micro-batch:
+#   the default batch ran out of memory on the first request when the desktop held 1.34 GB of VRAM.
+# - Arm B settings: xhigh effort comes from EchoSpeak's capability profile; the server caps thinking at 4,096 tokens and
+#   checkpoints every 2,048 prompt tokens so edited conversations don't re-read from the start.
+# - Vision projector in system RAM (the GPU has no room for it at 32K): 18/18 screenshot tasks in the evaluation.
+# - Router mode (--models-preset): the model loads on its first request (~5-12 s) and EchoSpeak can unload it at once
+#   (POST /models/unload) before calling Ollama; it also sleeps after 120 s idle. EchoSpeak asks Ollama to unload
+#   before calling Bonsai (agent/lean/gpu_handoff.py), so the two runtimes take turns on the card in both directions.
+# - The model settings live in the preset (bonsai-preset.ini.in, rendered to ~/.config/echospeak/bonsai-preset.ini).
+# - Loopback only, one slot, no host prompt cache, the template's unsupported "high"/"low" efforts mapped to medium.
+[Unit]
+Description=Ternary Bonsai 2.5 27B (llama-server, Prism fork) for EchoSpeak
+After=network.target
+
+[Service]
+Type=simple
+Environment=LD_LIBRARY_PATH=%h/models/bonsai/runtime/prism-b12232-cuda12.4:%h/models/bonsai/runtime/cuda12-libs
+Environment=LLAMA_ATTN_ROT_DISABLE=1
+ExecStart=%h/models/bonsai/runtime/prism-b12232-cuda12.4/llama-server \
+  --models-preset %h/.config/echospeak/bonsai-preset.ini --models-max 1 --host 127.0.0.1 --port 8095
+Restart=on-failure
+RestartSec=10
+Nice=5
+MemoryHigh=6G
+MemoryMax=8G
+
+[Install]
+WantedBy=default.target

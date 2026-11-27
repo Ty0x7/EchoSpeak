@@ -137,6 +137,17 @@ def requested_scope(text: str) -> Optional[str]:
     return next(iter(scopes), "account")
 
 
+# "They reset the lockers, it's 2786 now", "I switched to the 7:40 train": a stated change, not a question.
+CHANGE_CUE = re.compile(r"(?i)\b(moved|switched|changed|reset|rescheduled|replaced|no\s+longer|anymore|instead|left)\b"
+                        r"|\b(?:is|are|it'?s|it\s+is|they'?re)\b[^.?!]{0,40}\bnow\b")
+
+
+def states_change(text: str) -> bool:
+    """A sentence in the message states that something changed (and isn't a question)."""
+    return any(sentence.strip() and not sentence.rstrip().endswith("?") and CHANGE_CUE.search(sentence)
+               for sentence in re.split(r"(?<=[.!?])\s+|\n", str(text or "")))
+
+
 def explicit_write(text: str) -> bool:
     """Accept a direct save instruction or a single-line statement with a save request."""
     text = text.strip()
