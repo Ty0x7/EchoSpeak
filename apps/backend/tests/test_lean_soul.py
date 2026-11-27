@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 
 from agent.core import EchoSpeakAgent
-from agent.lean import policy, runtime as lean_runtime, soul
+from agent.lean import policy, runtime as lean_runtime, settings, soul
 from agent.lean.approvals import get_approval_broker, tool_needs_approval
 from agent.lean.job import unbacked_claim
 from agent.lean.personas import PersonaStore
@@ -773,3 +773,126 @@ def test_saved_schedule_query_returns_literal_visible_memory(
         assert result["response"].splitlines()[-1] == f"> {statement}"
     else:
         assert result["response"] == "I couldn’t find a matching saved schedule."
+
+
+# ── #239: correcting a saved fact in passing, with the owner's consent on a card ─────────────────────────────────
+
+def _real_recall(memory):
+    """Recall through the production visibility predicate (runtime_memory_projection), as LeanSession._recall does."""
+    from agent.state import get_state_store
+
+    def recall(self, query, limit=8, **kw):
+        project_id = str(get_state_store().get_thread_state(self.session_id).active_project_id or "")
+        return list(memory.runtime_memory_projection(query, session_id=self.session_id, project_id=project_id,
+                                                     project_path=self.project_root or None, limit=limit) or [])
+    return recall
+
+
+def _disk(memory):
+    import json as _json
+    return list(_json.loads(memory._records_path.read_text())["records"].values())
+
+
+def _active(memory, word="locker"):
+    return sorted(r["text"] for r in _disk(memory) if r.get("active", True) and word in r["text"].lower())
+
+
+def _correction_session(monkeypatch, lexical_memory, model, approve, *, seed=True, key="northside_locker_code"):
+    if seed:
+        lexical_memory.add_memory_item("My locker code at the Northside gym is 1478.", semantic_key=key)
+    agent = type("Agent", (_Agent,), {"memory": lexical_memory})()
+    session, events = _session(monkeypatch, {"echo": model}, agent=agent, approve=approve)
+    monkeypatch.setattr(lean_runtime.LeanSession, "_recall", _real_recall(lexical_memory))
+    monkeypatch.setattr(settings, "approval_mode", lambda: "never")  # the owner's setting: consent asks anyway
+    return session, events
+
+
+def _save_call(fact: str, key: str = "northside_locker_code") -> ModelTurn:
+    import json as _json
+    return ModelTurn(tool_calls=[ToolCall("fix", "memory_save", _json.dumps({"fact": fact, "key": key}))])
+
+
+CHANGE = "Heads up, they reset the lockers at Northside, it's 2786 now."
+
+
+def test_an_in_passing_correction_replaces_the_saved_fact_after_the_owner_allows_it(monkeypatch, lexical_memory):
+    model = ScriptedClient([_save_call("My locker code at the Northside gym is 2786."),
+                            ModelTurn(content="Updated: your Northside locker code is 2786.")])
+    session, events = _correction_session(monkeypatch, lexical_memory, model, "allow")
+    session.run(CHANGE)
+    cards = [e for e in events if e["type"] == "approval_request"]
+    assert cards and "Nothing is saved unless you allow it" in cards[0].get("reason", "") + cards[0].get("summary", "")
+    assert _active(lexical_memory) == ["My locker code at the Northside gym is 2786."]
+    assert _tool_results(model, 1)[0].startswith("Saved and verified (replaces the earlier value, key northside_locker_code)")
+
+
+def test_a_denied_correction_saves_nothing(monkeypatch, lexical_memory):
+    model = ScriptedClient([_save_call("My locker code at the Northside gym is 2786."),
+                            ModelTurn(content="Okay, I left your saved code as it was.")])
+    session, events = _correction_session(monkeypatch, lexical_memory, model, "deny")
+    session.run(CHANGE)
+    assert any(e["type"] == "approval_request" for e in events)
+    assert _active(lexical_memory) == ["My locker code at the Northside gym is 1478."]
+
+
+@pytest.mark.parametrize("message,fact", [
+    # No change to a recalled fact: nothing to correct, so even an allowed card can't write.
+    ("Heads up, my gym switched to a new playlist, it's techno now.", "My gym plays techno now."),
+    # The proposal isn't what the owner said: refused.
+    (CHANGE, "My locker code at the Northside gym is 9999."),
+])
+def test_a_correction_write_is_bound_to_the_recalled_fact_and_the_owners_words(monkeypatch, lexical_memory, message, fact):
+    model = ScriptedClient([_save_call(fact), ModelTurn(content="Okay.")])
+    session, _events = _correction_session(monkeypatch, lexical_memory, model, "allow")
+    session.run(message)
+    assert _active(lexical_memory) == ["My locker code at the Northside gym is 1478."]
+    assert _tool_results(model, 1)[0].startswith("No memory was saved")
+
+
+def test_a_question_or_plain_statement_offers_no_memory_write(monkeypatch, lexical_memory):
+    model = ScriptedClient([_save_call("My locker code at the Northside gym is 2786."), ModelTurn(content="Okay.")])
+    session, events = _correction_session(monkeypatch, lexical_memory, model, "allow")
+    session.run("Is my locker code at Northside still 1478?")
+    assert not any(e["type"] == "approval_request" for e in events)
+    assert _active(lexical_memory) == ["My locker code at the Northside gym is 1478."]
+
+
+def test_a_correction_retires_a_fact_saved_without_a_key(monkeypatch, lexical_memory):
+    """Live LSH3 (#239 check, 27 Nov): 'Tomas moved to Lyon' was saved under a new key beside the keyless
+    'lives in Porto', and the next chat still said Porto. The recalled record itself must be retired."""
+    lexical_memory.add_memory_item("My friend Tomas lives in Porto.")
+    model = ScriptedClient([_save_call("My friend Tomas lives in Lyon.", key="tomas_city"),
+                            ModelTurn(content="Updated: Tomas lives in Lyon.")])
+    session, _events = _correction_session(monkeypatch, lexical_memory, model, "allow", seed=False)
+    session.run("Oh, Tomas moved to Lyon last month.")
+    assert _active(lexical_memory, "tomas") == ["My friend Tomas lives in Lyon."]
+
+
+def test_a_project_fact_is_corrected_in_its_project_and_another_projects_copy_is_untouched(
+        monkeypatch, lexical_memory, tmp_path):
+    from agent.state import get_state_store
+
+    for project in ("project-a", "project-b"):
+        lexical_memory.add_memory_item("The deploy target is staging-west.", scope="project", project_id=project,
+                                       project_path=str(tmp_path / project), semantic_key="deploy_target")
+    model = ScriptedClient([_save_call("The deploy target is staging-east.", key="deploy_target"),
+                            ModelTurn(content="Updated.")])
+    session, _events = _correction_session(monkeypatch, lexical_memory, model, "allow", seed=False)
+    session.project_root = str(tmp_path / "project-a")
+    get_state_store().update_thread_state(session.session_id, active_project_id="project-a")
+    session.run("We moved the deploy target, it's staging-east now.")
+    rows = {(r.get("project_id"), r["text"]) for r in _disk(lexical_memory) if r.get("active", True)}
+    assert rows == {("project-a", "The deploy target is staging-east."), ("project-b", "The deploy target is staging-west.")}
+    assert all(r["scope"] == "project" for r in _disk(lexical_memory))
+
+
+def test_an_interrupted_correction_keeps_both_facts_never_neither(monkeypatch, lexical_memory):
+    """Write first, retire second: a failure while retiring leaves the old fact beside the new one."""
+    def broken(*args, **kwargs):
+        raise OSError("disk went away")
+
+    model = ScriptedClient([_save_call("My locker code at the Northside gym is 2786."), ModelTurn(content="Okay.")])
+    session, _events = _correction_session(monkeypatch, lexical_memory, model, "allow")
+    monkeypatch.setattr(lexical_memory, "delete_items", broken)
+    session.run(CHANGE)
+    assert "My locker code at the Northside gym is 2786." in _active(lexical_memory)

@@ -319,6 +319,9 @@ class NativeTool:
     hidden: bool = False
     # Offered whenever this tool is: the toolset members come with computer_action.
     rides_with: str = ""
+    # Asks the owner on every call, whatever the approval mode and without an "always allow" grant: the reason shown
+    # on the card. Used where the owner's explicit consent is the authorisation itself (a memory correction, #239).
+    consent: str = ""
 
 
 def _alias_key(name: str) -> str:
