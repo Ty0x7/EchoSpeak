@@ -341,7 +341,7 @@ def test_enter_resumes_the_highlighted_conversation_with_its_agent_project_and_h
         assert ("/history", {"thread_id": "t-pong"}) in tui.client.calls
         # What belonged to the conversation you left did not come along.
         assert tui.session_tokens == {"prompt": 0, "completion": 0, "runs": 0} and tui.changes == [] and tui.context is None
-        shown = [b for b in tui.transcript if isinstance(b, (B.RuleLine, B.Note))]
+        shown = [b for b in tui.transcript if isinstance(b, (B.RuleLine, B.Note, B.UserLine, B.MarkdownBlock))]
         said = " ".join(getattr(b, "text", "") or getattr(b, "title", "") for b in shown)
         assert "Resumed Pong in a single file" in said and "Glados" in said
         assert "make a quick pong game" in said and "File creation is off" in said
