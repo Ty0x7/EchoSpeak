@@ -56,6 +56,12 @@ Record the accepted changes since the previous product milestone and choose a pa
 
 Use `apps/desktop/src-tauri/tauri.conf.json` as the canonical product version. Align the runtime constants, package manifests and their lockfiles, add a dated milestone note under `docs/releases/`, and run `python3 scripts/check-version.py` from the repository root. Preserve historical versions in their original release notes. Record the source revision and version, the versions observed in the installed desktop, terminal and running backend, and the latest published GitHub release separately. Packaging, local installation, owner acceptance and publication each require their own evidence.
 
+### Repository maintenance in Loop 12
+
+After a substantial campaign, fetch main and run `python3 scripts/repository-maintenance.py --report /path/to/private-audit.json`. Review live remote refs and open PRs alongside local worktrees, tags, releases, workflow definitions, deployment history and the version check. Treat each proposed branch as a candidate. Check unique commits, stashes, ignored evidence, dependencies and active sessions before authorizing retirement. Review each release asset, updater reference and documentation link before retiring a tag or release.
+
+To apply an approved local branch retirement, add `--execute --retire-local BRANCH` for each selected merged branch and use a new report path. The utility records exact refs and creates and verifies a bundle before using normal Git branch deletion. Remote deletions, release asset archival and deployment retirement require their own approval, archives and recorded evidence. Keep audit files outside the repository.
+
 ## From finding to accepted change
 
 1. **Discover and record.** Inspect the current revision, relevant session evidence, existing issues (open and closed), PRs and the [20-system harness review](research/harness-architecture-2026-11.md). Name the affected systems and their callers. Reproduce the symptom against the baseline. Update the existing issue or open one confirmed, actionable issue with the environment, safe reproduction, expected/observed behavior, affected components, known cause or hypothesis, and measurable acceptance criteria. Keep private prompts, credentials, user data and raw session logs local.
