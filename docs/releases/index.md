@@ -3,7 +3,8 @@
 This collection pairs versioned notes with complementary HTML in
 `artifacts/releases/`. It contains 40 visual reports from 10.0.0 through 11.13.1;
 intervening source-only notes do not all have a historical HTML counterpart.
-The current Linux testing baseline is [11.15.0](v11.15.0.md) on `main`. [11.14.1](v11.14.1.md), subsequently integrated into 11.15.0, covers the agent-first milestone of 2026-11-17: one assistant, the terminal session manager
+[11.16.0](v11.16.0.md) collects the Companion and local runtime changes for the next minor release.
+The preceding Linux testing baseline was [11.15.0](v11.15.0.md) on `main`. [11.14.1](v11.14.1.md), subsequently integrated into 11.15.0, covers the agent-first milestone of 2026-11-17: one assistant, the terminal session manager
 and the desktop's single conversation list. [11.14.0](v11.14.0.md) (Markdown note; HTML report to follow) covers
 the harness work merged on 2026-11-16. The [11.13.0](v11.13.0.md) pair records the
 left Code inbox, optional local MCP, actual component screenshots and separate

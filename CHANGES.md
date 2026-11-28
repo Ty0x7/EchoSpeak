@@ -1,5 +1,9 @@
 # Changes
 
+## v11.16.0 — Companion and local model runtimes (prepared for local testing)
+
+Follow terminal sessions from Companion, connect supported tools from chat, and inspect the context actually served by llama-server. [Milestone notes and version checks](docs/releases/v11.16.0.md)
+
 ## v11.15.0 — Linux integration release
 
 The terminal, desktop and shared backend now use one tested revision on `main`. This release includes the context, continuation, Python test discovery, memory, connected-app and TUI improvements. [Changes and known limits](docs/releases/v11.15.0.md)

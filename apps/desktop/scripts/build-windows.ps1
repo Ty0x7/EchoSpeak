@@ -9,6 +9,8 @@ $ErrorActionPreference = "Stop"
 $PythonExecutable = Assert-EchoPythonReady (Resolve-EchoPython $PythonExecutable)
 $DesktopRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepoRoot = (Resolve-Path (Join-Path $DesktopRoot "..\..")).Path
+& $PythonExecutable (Join-Path $RepoRoot "scripts\check-version.py")
+if ($LASTEXITCODE -ne 0) { throw "EchoSpeak version consistency check failed." }
 $WebRoot = Join-Path $RepoRoot "apps\web"
 
 & (Join-Path $PSScriptRoot "build-sidecar.ps1") -PythonExecutable $PythonExecutable

@@ -51,18 +51,11 @@ const SECTIONS: Section[] = [
   },
   {
     id: "whats-new",
-    title: "What's new in 11.4",
+    title: "Current features",
     icon: "clock",
     body: <>
-      <p>11.4.0 makes ongoing work easier to follow and strengthens source reading during research.</p>
-      <ul className="doc-list">
-        <li><strong>Live step details.</strong> A running search shows what is being read, and terminal steps can show the latest output line.</li>
-        <li><strong>Useful completion summaries.</strong> Finished steps report results such as pages read, test outcomes or file changes.</li>
-        <li><strong>Grouped activity.</strong> Consecutive steps fold into a concise line. Expand it to inspect the individual actions; the current step remains visible while it runs.</li>
-        <li><strong>Clearer progress.</strong> Status messages explain when Echo is reviewing results, checking output or choosing the next action.</li>
-        <li><strong>Read before comparing.</strong> Comparison, price and review searches try to open the top two results rather than relying on snippets. Pages that cannot be fetched still need other evidence.</li>
-      </ul>
-      <p>Earlier chats can show grouped activity, but may not include the newer step summaries. <a href={`${GITHUB_URL}/releases/tag/v11.4.0`} target="_blank" rel="noreferrer">Read the 11.4.0 release notes</a>.</p>
+      <p>The {import.meta.env.VITE_APP_VERSION} development guide covers Companion session activity, project conversations and local model context. Check Settings › About for your installed desktop version.</p>
+      <p><a href={RELEASES_URL}>See published installers and their release notes</a></p>
     </>,
   },
   {
@@ -338,7 +331,7 @@ export function Docs() {
           <header className="docs-hero">
             <Face size={48} />
             <div>
-              <span className="kicker">11.4.0 guide</span>
+              <span className="kicker">Development guide</span>
               <h1>EchoSpeak docs</h1>
               <p>Everything you need, in plain words. New here? Start with <Link to="/docs/getting-started">Getting started</Link>.</p>
             </div>

@@ -11,6 +11,8 @@ same approval routes. Nothing executes in the terminal process.
   dependencies are missing): the standard-library line client. Every subcommand (`send`, `attach`, …) is
   standard library only and unchanged.
 
+Run `echospeak --version` to identify the installed terminal client. Run `echospeak backend status` for the version of its backend.
+
 ## Install
 
 ```sh
@@ -72,7 +74,7 @@ Options: `--plain` (line REPL, no colours) · `--no-anim` · `--ascii` · `--no-
 ### In the TUI
 
 ```text
- ▗▄▄▄▄▄▖  EchoSpeak  v11.15.0 · terminal
+ ▗▄▄▄▄▄▖  EchoSpeak  v11.16.0 · terminal
  ▐█ █ █▌  Echo · Personal agent · qwen3.5:9b (ollama)
  ▝▀▀▀▀▀▘  ~/Work/proj · project proj · ask for risky actions
 

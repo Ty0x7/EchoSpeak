@@ -163,7 +163,7 @@ def _self_check() -> int:
     import googleapiclient
     if not (Path(googleapiclient.__file__).parent / "discovery_cache" / "documents" / "calendar.v3.json").exists():
         raise RuntimeError("Calendar's Google discovery document is not bundled")
-    print("echospeak-backend self-check ok")
+    print(f"echospeak-backend self-check ok (version {api.server.app.version})")
     return 0
 
 
