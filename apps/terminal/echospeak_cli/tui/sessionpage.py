@@ -42,6 +42,8 @@ def _fit(frags: Fragments, width: int) -> Fragments:
 
 
 def _wrap(text: str, width: int, limit: int) -> list[str]:
+    if width <= 0 or limit <= 0:
+        return []
     words, lines, line = str(text or "").split(), [], ""
     for word in words:
         if M.width_of(word) > width:
