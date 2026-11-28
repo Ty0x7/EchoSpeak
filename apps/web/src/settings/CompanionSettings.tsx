@@ -22,7 +22,7 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
   const [soul, setSoul] = useState<{ text: string; default: string } | null>(null);
   const [soulDraft, setSoulDraft] = useState("");
   const [notice, setNotice] = useState("");
-  const [visibility, setVisibility] = useState("unknown");
+  const [presentation, setPresentation] = useState<{ enabled: boolean; visibility: string } | null>(null);
   const get = (path: string) => fetch(`${apiBase}${path}`).then(r => (r.ok ? r.json() : null)).catch(() => null);
   const send = async (method: string, path: string, body: unknown) => {
     const r = await fetch(`${apiBase}${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -31,7 +31,7 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
     return data;
   };
   const refresh = () => {
-    void get("/companion/presentation").then(d => d && setVisibility(d.visibility));
+    void get("/companion/presentation").then(d => d && setPresentation(d));
     void get("/companion/scope").then(d => d && setScope(d));
     void get("/companion/hooks/status").then(d => d && setHooks(d));
     void get("/companion/autostart").then(d => d && setAutostart(d));
@@ -42,12 +42,12 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
     void get("/media-runtime/voice/kokoro/voices").then(d => d && setVoices(d.items || []));
     void get("/companion/soul").then(d => { if (d) { setSoul(d); setSoulDraft(d.text); } });
     const timer = window.setInterval(() => {
-      void get("/companion/presentation").then(d => d && setVisibility(d.visibility));
+      void get("/companion/presentation").then(d => d && setPresentation(d));
     }, 2000);
     return () => window.clearInterval(timer);
   }, [apiBase]);
 
-  const enabled = Boolean(s.companion_enabled);
+  const enabled = presentation?.enabled ?? Boolean(s.companion_enabled);
   const scopeMode = String(s.companion_memory_scope || "project_only");
   const updateScope = async (patch: Partial<Scope>) => {
     try { setScope(await send("PUT", "/companion/scope", patch)); setNotice(""); }
@@ -61,7 +61,8 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
   return <>
     <Group title="Echo Companion" description="Echo on your desktop: it notices when Claude Code, Codex, Echo or your agents finish something, says so, and keeps what they learned. It never changes what they do.">
       <Row label="Turn on Echo Companion" help="Off: nothing is observed, said or kept.">
-        <Toggle checked={enabled} onChange={v => save({ companion_enabled: v })} label="Turn on Echo Companion" />
+        <Toggle checked={enabled} onChange={v => void send("POST", `/companion/presentation/${v ? "on" : "off"}`, {})
+          .then(next => { setPresentation(next); setNotice(""); }).catch(e => setNotice(String(e.message || e)))} label="Turn on Echo Companion" />
       </Row>
       <Row label="Start at login" help={autostart?.available === false ? "This build doesn't include the desktop companion." : "Adds Echo Companion to your desktop's autostart."}>
         <Toggle checked={Boolean(autostart?.enabled)} disabled={!autostart?.available}
@@ -113,7 +114,7 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
         <Toggle checked={s.companion_auto_hide !== false} onChange={v => save({ companion_auto_hide: v })}
           label="Auto-hide when idle" />
       </Row>
-      <Row label="Companion window" help={enabled ? visibility : "Disabled"}>
+      <Row label="Companion window" help={enabled ? presentation?.visibility || "Checking" : "Disabled"}>
         {(["show", "hide"] as const).map(action => (
           <button key={action} type="button" className="es-btn es-btn-sm" disabled={!enabled}
             onClick={() => void send("POST", `/companion/presentation/${action}`, {})

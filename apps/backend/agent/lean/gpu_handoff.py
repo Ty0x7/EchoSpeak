@@ -128,6 +128,38 @@ def before_call(endpoint: Any) -> list[str]:
     return unloaded
 
 
+def resident_model(endpoint: Any) -> str:
+    """Find an already loaded local model for optional work, without waking a runtime."""
+    from agent.context_windows import is_variant, variant_name
+
+    base = str(getattr(endpoint, "base_url", "") or "").rstrip("/").removesuffix("/v1")
+    model = str(getattr(endpoint, "model", "") or "")
+    provider = getattr(endpoint, "provider", "")
+    if not base or not model or not _loopback(base):
+        return ""
+    try:
+        if provider == "ollama":
+            want = int(getattr(endpoint, "want_context", 0) or 0)
+            names = {model, f"{model}:latest"}
+            if want and not is_variant(model):
+                names = {variant_name(model, want)}
+            with urllib.request.urlopen(base + "/api/ps", timeout=1) as reply:
+                rows = json.load(reply).get("models") or []
+            for row in rows:
+                name = row.get("name") or row.get("model")
+                if name in names:
+                    return name
+        elif provider in OPENAI_COMPATIBLE:
+            with urllib.request.urlopen(base + "/models", timeout=1) as reply:
+                rows = json.load(reply).get("data") or []
+            for row in rows:
+                if row.get("id") == model and (row.get("status") or {}).get("value") == "loaded":
+                    return model
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return ""
+
+
 def reset() -> None:
     with _lock:
         _last.clear()

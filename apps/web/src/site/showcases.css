@@ -24,6 +24,8 @@
   line-height: 1.45;
 }
 
+.h-terminal-hint { display: none; }
+
 .h-window-deck { position: relative; isolation: isolate; display: grid; grid-template-rows: minmax(0, 1fr); align-items: center; aspect-ratio: 2; }
 .h-window-deck::before {
   content: "";
@@ -124,6 +126,8 @@
   .h-window-deck { aspect-ratio: 1060 / 640; align-items: start; }
   .h-workspace-view, .h-window-deck[data-view="terminal"] .h-workspace-view { width: 100%; }
   .h-workspace-layer { display: none; }
+  .h-terminal-label .h-recorded-label { display: none; }
+  .h-terminal-hint { display: inline; }
   .h-window-deck[data-view="terminal"] .h-workspace-capture {
     overflow: auto;
     overscroll-behavior-inline: contain;

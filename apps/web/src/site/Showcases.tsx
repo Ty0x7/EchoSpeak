@@ -53,7 +53,10 @@ export function WorkspaceShowcase() {
             </button>
           ))}
         </div>
-        <span>Recorded in EchoSpeak</span>
+        <span className={selected === 1 ? "h-terminal-label" : undefined}>
+          <span className="h-recorded-label">Recorded in EchoSpeak</span>
+          {selected === 1 && <span className="h-terminal-hint">Swipe to read</span>}
+        </span>
       </div>
       <div className="h-window-deck" data-view={workspaceViews[selected].id}>
         {workspaceViews.map(({ id, width, height, alt, close, ...view }, index) => (

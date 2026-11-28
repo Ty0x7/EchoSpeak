@@ -126,3 +126,39 @@ def test_the_documented_bonsai_address_lets_each_chat_reach_its_own_runtime(monk
     assert resolve("localai", configured).endswith(":8080")
     assert resolve("ollama", configured).endswith(":11434")
     assert gpu_handoff._peers() == ["http://127.0.0.1:8080"]
+
+
+def test_companion_residency_probe_neither_loads_nor_swaps_model(fake_ollama, fake_router):
+    state, port = fake_router
+    router = Endpoint(f"http://127.0.0.1:{port}/v1", "", "Ternary-Bonsai-2.5-27B", "localai", True)
+    assert gpu_handoff.resident_model(router) == router.model
+    state["loaded"] = False
+    assert not gpu_handoff.resident_model(router)
+    assert not fake_ollama and state["unloads"] == 0
+
+
+def test_direct_client_holds_gpu_until_its_stream_ends(monkeypatch):
+    from agent.admission import LOCAL_GATE
+    from agent.lean.provider import ChatClient, ModelTurn
+
+    endpoint = Endpoint("http://127.0.0.1:11434/v1", "", "qwen3.5:9b", "ollama", True)
+    client = ChatClient(endpoint)
+    called = []
+
+    def prepare():
+        assert LOCAL_GATE.active == 1
+        called.append("handoff")
+
+    def stream(*_args):
+        assert LOCAL_GATE.active == 1
+        called.append("stream")
+        return ModelTurn()
+
+    monkeypatch.setattr(client, "_prepare_window", prepare)
+    monkeypatch.setattr(client, "_stream", stream)
+    try:
+        client.stream_turn([{"role": "user", "content": "test"}])
+    finally:
+        client.close()
+    assert called == ["handoff", "stream"]
+    assert LOCAL_GATE.active == 0

@@ -170,13 +170,17 @@ def local_reply(messages: list[dict[str, str]], *, timeout: float, max_tokens: i
             body["chat_template_kwargs"] = {"enable_thinking": effort != "none"}
         else:
             body["reasoning_effort"] = effort
-    request = urllib.request.Request(endpoint.base_url.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"}, method="POST")
-    if getattr(endpoint, "api_key", ""):
-        request.add_header("Authorization", f"Bearer {endpoint.api_key}")
     with inference(endpoint, wait=False):
-        from agent.lean.gpu_handoff import before_call as hand_gpu_to  # runtime residency only, no agent execution
-        hand_gpu_to(endpoint)
+        from agent.lean.gpu_handoff import resident_model
+
+        body["model"] = resident_model(endpoint)
+        if not body["model"]:
+            raise InterruptedError("Companion uses its template while the local model is unloaded")
+        request = urllib.request.Request(endpoint.base_url.rstrip("/") + "/chat/completions",
+                                         data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"}, method="POST")
+        if getattr(endpoint, "api_key", ""):
+            request.add_header("Authorization", f"Bearer {endpoint.api_key}")
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = json.loads(response.read(65536))
     text = str(((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")

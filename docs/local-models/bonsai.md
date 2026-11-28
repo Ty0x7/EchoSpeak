@@ -64,8 +64,10 @@ not coordinated. Qwen on this card fits 25–28 of its 33 layers; set
 - About 300–600 MB of VRAM headroom at 32K beside the desktop; a GPU-heavy browser or video window can make a request
   fail. Larger windows need the KV cache in system RAM (`-nkvo`, 4.8–13 tok/s); MTP doesn't fit.
 - The GPU runs at its 199 W limit under load.
-- The Companion's local wording passed its guard 11/15 at the 4 s budget (Qwen 15/15); it falls back to the grounded
-  sentence when it doesn't.
+- Companion uses its prepared templates while the local model is unloaded or busy. Optional wording never wakes
+  Bonsai or evicts another resident model.
+- When both VRAM and host memory are under pressure, a cold load can still fail. Keep the tested 32K launch
+  configuration and check available resources before changing the model or context.
 
 ## Rollback
 
