@@ -47,8 +47,20 @@ When an existing regression goes red, record the exact failing test ID and repro
 | 9. Delegation Loop | Give each delegate a bounded task, relevant context and an acceptance check. Verify returned evidence before integrating the work. |
 | 10. Conversation Audit Loop | Inspect recent real sessions, trace behavior to execution records, reproduce the defect, fix its cause and replay the relevant case. |
 | 11. Knowledge Preservation Loop | Record decisions, checks and limitations in the relevant project document and Obsidian note. Link evaluation results from the existing vault index so later work can reuse them. |
-| 12. Release & Acceptance Loop | Verify, commit and back up the change, integrate when authorized, then build, install and record owner acceptance when it occurs. |
+| 12. Release & Acceptance Loop | Review the product version for every substantial campaign. Record the milestone decision, verify and preserve the change, integrate when authorized, then build, install and record owner acceptance when it occurs. |
 | 13. Autonomous Engineering Loop | Orchestrate bounded, repeated improvement cycles. An engineering agent (Claude Code, Codex, later EchoSpeak) fixes what independent evaluation measured; only evidence keeps a change. Use `apps/backend/scripts/auto_test_fix.py` and the [auto-test-fix skill](../.agents/skills/auto-test-fix/SKILL.md). The evaluation layers are in [agentic evaluation](research/agentic-evaluation.md). |
+
+### Version review in Loop 12
+
+Record the accepted changes since the previous product milestone and choose a patch for fixes and minor corrections, a minor version for significant features or architectural improvements, or a major version for breaking changes or a major product transition. An individual PR or website-only campaign can retain the current version. Record the reason once for the campaign.
+
+Use `apps/desktop/src-tauri/tauri.conf.json` as the canonical product version. Align the runtime constants, package manifests and their lockfiles, add a dated milestone note under `docs/releases/`, and run `python3 scripts/check-version.py` from the repository root. Preserve historical versions in their original release notes. Record the source revision and version, the versions observed in the installed desktop, terminal and running backend, and the latest published GitHub release separately. Packaging, local installation, owner acceptance and publication each require their own evidence.
+
+### Repository maintenance in Loop 12
+
+After a substantial campaign, fetch main and run `python3 scripts/repository-maintenance.py --report /path/to/private-audit.json`. Review live remote refs and open PRs alongside local worktrees, tags, releases, workflow definitions, deployment history and the version check. Treat each proposed branch as a candidate. Check unique commits, stashes, ignored evidence, dependencies and active sessions before authorizing retirement. Review each release asset, updater reference and documentation link before retiring a tag or release.
+
+To apply an approved local branch retirement, add `--execute --retire-local BRANCH` for each selected merged branch and use a new report path. The utility records exact refs and creates and verifies a bundle before using normal Git branch deletion. Remote deletions, release asset archival and deployment retirement require their own approval, archives and recorded evidence. Keep audit files outside the repository.
 
 ## From finding to accepted change
 

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { DownloadButton, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
+import { PlatformActions, Face, Icon, SiteFooter, SiteHeader, type IconName } from "./Chrome";
 import { GroupChatDiagram, MessageTimeline, SystemDiagram } from "./diagrams";
 import "./diagrams.css";
 import { GITHUB_URL, RELEASES_URL } from "./release";
@@ -25,16 +25,33 @@ const SECTIONS: Section[] = [
     icon: "spark",
     body: (
       <>
-        <p>Set up a responding model before starting your first conversation. Optional features can be configured later.</p>
+        <p>Install a client, confirm that your model can answer, and start with a simple prompt.</p>
         <Steps
           items={[
-            <><strong>Download and install.</strong> Download from the official releases. If Windows reports a threat or blocks the app, stop and check Windows Security’s Protection history. Report the app version and warning through GitHub issues; keep Windows protection enabled.</>,
-            <><strong>Choose and verify a model.</strong> Use a running <a href="https://lmstudio.ai" target="_blank" rel="noreferrer">LM Studio</a> or Ollama installation for local chat, or add an OpenAI, Gemini, Claude or Grok API key. Setup helps you select a model and check its response. Model catalog access alone does not prove generation works. Reopen setup from <em>Settings › General › Setup</em>.</>,
-            <><strong>Start your first chat.</strong> After setup, type a request, attach a project or choose <em>Voice</em>. Optional wake word controls are in the composer’s more menu.</>,
+            <><strong>Install EchoSpeak</strong><p>Download the Windows installer or follow the Linux desktop build guide.</p>
+              <PlatformActions linuxUrl={`${GITHUB_URL}/blob/main/apps/desktop/LINUX.md`} /></>,
+            <><strong>Connect and verify a model</strong><p>Choose Ollama, <a href="https://lmstudio.ai" target="_blank" rel="noreferrer">LM Studio</a>, a compatible local server or a supported cloud provider. In <em>Settings › Models</em>, select the model, then choose <em>Test response</em> under <em>Check provider</em>.</p></>,
+            <><strong>Start a conversation</strong><p>Type a prompt in the composer. Attach a folder when you want Echo to work with project files, or choose <em>Voice</em> to speak.</p>
+              <div className="doc-example"><Face size={30} /><div><b>Try asking Echo</b><span>Help me plan a 25-minute focus session.</span></div></div></>,
           ]}
         />
-        <div className="doc-cta"><DownloadButton compact /></div>
-        <Tip>EchoSpeak updates itself: when a new version is out, <em>Settings › About</em> shows an “Update” button.</Tip>
+        <Tip>Check the release notes for the features available in your build.</Tip>
+      </>
+    ),
+  },
+  {
+    id: "terminal-setup",
+    title: "Terminal setup",
+    icon: "terminal",
+    body: (
+      <>
+        <p>The terminal client can use the same backend, settings and project sessions as the desktop.</p>
+        <Steps items={[
+          <><strong>Install from a checkout</strong><p>Follow the <a href={`${GITHUB_URL}/blob/main/apps/terminal/README.md#install`}>terminal install guide</a>. The provided script creates a Python 3.12 environment with pinned dependencies.</p></>,
+          <><strong>Connect to your backend</strong><p>Run <code>echospeak backend status</code> to check the active endpoint. Start <code>echospeak</code> and select a model when prompted.</p></>,
+          <><strong>Pick up a session</strong><p>Open <code>/sessions</code> inside the terminal or run <code>echospeak resume &lt;id-or-prefix&gt;</code> to continue an existing conversation.</p></>,
+        ]} />
+        <p><a href={`${GITHUB_URL}/blob/main/apps/terminal/README.md`}>Terminal reference and keyboard shortcuts</a></p>
       </>
     ),
   },
@@ -51,18 +68,17 @@ const SECTIONS: Section[] = [
   },
   {
     id: "whats-new",
-    title: "What's new in 11.4",
+    title: "Current features",
     icon: "clock",
     body: <>
-      <p>11.4.0 makes ongoing work easier to follow and strengthens source reading during research.</p>
+      <p>The current source tree includes project sessions, local model selection and Echo Companion. Check Settings › About for your installed version.</p>
       <ul className="doc-list">
-        <li><strong>Live step details.</strong> A running search shows what is being read, and terminal steps can show the latest output line.</li>
-        <li><strong>Useful completion summaries.</strong> Finished steps report results such as pages read, test outcomes or file changes.</li>
-        <li><strong>Grouped activity.</strong> Consecutive steps fold into a concise line. Expand it to inspect the individual actions; the current step remains visible while it runs.</li>
-        <li><strong>Clearer progress.</strong> Status messages explain when Echo is reviewing results, checking output or choosing the next action.</li>
-        <li><strong>Read before comparing.</strong> Comparison, price and review searches try to open the top two results rather than relying on snippets. Pages that cannot be fetched still need other evidence.</li>
+        <li><strong>Project work.</strong> Attach a folder, inspect the files a task uses and review its tool activity and checks.</li>
+        <li><strong>Local models.</strong> Choose a model per chat and inspect the context window the server actually allocates.</li>
+        <li><strong>Consent for corrections.</strong> Approve a proposed update before Echo changes a recalled memory.</li>
+        <li><strong>Desktop updates.</strong> Echo Companion can report activity from supported agent sessions.</li>
       </ul>
-      <p>Earlier chats can show grouped activity, but may not include the newer step summaries. <a href={`${GITHUB_URL}/releases/tag/v11.4.0`} target="_blank" rel="noreferrer">Read the 11.4.0 release notes</a>.</p>
+      <p><a href={RELEASES_URL}>Published releases</a></p>
     </>,
   },
   {
@@ -98,6 +114,19 @@ const SECTIONS: Section[] = [
     ),
   },
   {
+    id: "companion",
+    title: "Echo Companion",
+    icon: "voice",
+    body: <>
+      <p>Echo is the personal agent you chat with in EchoSpeak. Echo Companion is a separate desktop observer that can speak brief updates from EchoSpeak and supported Codex and Claude Code sessions. The Companion attributes each report to its source.</p>
+      <ul className="doc-list">
+        <li>Review voice and check-in options in <em>Settings › Echo Companion</em>.</li>
+        <li>Check-ins can summarize observed work. A reported outcome and an EchoSpeak verification result carry different evidence.</li>
+        <li>The Companion observes sessions. Tool use and approvals stay with the agent doing the work.</li>
+      </ul>
+    </>,
+  },
+  {
     id: "memory",
     title: "Memory",
     icon: "memory",
@@ -105,11 +134,11 @@ const SECTIONS: Section[] = [
       <>
         <p>Agents remember short, lasting facts about you, like “Prefers short answers” or “Partner is called Sam”. One fact per memory, so they stay easy to read and fix.</p>
         <div className="doc-loop" aria-label="How a memory is saved">
-          <span>You mention something lasting</span><i>→</i><span>Echo saves one short fact</span><i>→</i><span>Recalled when it matters</span>
+          <span>You ask Echo to remember</span><i aria-hidden="true">→</i><span>Echo saves a scoped fact</span><i aria-hidden="true">→</i><span>Recalled when relevant</span>
         </div>
         <ul className="doc-list">
           <li><strong>What isn't saved:</strong> one-off requests, reminders, questions, things that only matter in the current chat, web content, and anything that looks like a password or key.</li>
-          <li><strong>Facts that change replace themselves:</strong> tell Echo you moved and the new city replaces the old one.</li>
+          <li><strong>Corrections require consent:</strong> when you correct a recalled fact, Echo shows the proposed update for your approval. The replacement stays in the original memory scope.</li>
           <li><strong>Pinned facts</strong> ride along in every chat; the rest are recalled only when they relate to what you asked.</li>
           <li><strong>You're in charge:</strong> <em>Settings › Memory</em> shows everything, by kind. Edit, pin, change or delete any memory.</li>
           <li><strong>Safety:</strong> if an agent read a web page or email in that chat, it asks before saving a memory, so nothing online can plant one.</li>
@@ -240,7 +269,7 @@ const SECTIONS: Section[] = [
           <li><strong>Stays on your PC:</strong> chats, memory, agents, settings and files.</li>
           <li><strong>Network use depends on your choices:</strong> cloud models receive request context, search contacts online services, and cloud speech or media generation sends the relevant audio, text or approved references. Local storage alone does not make every feature offline.</li>
           <li><strong>Private mode</strong> (Settings › Privacy): your messages, files, memories and searches never go to a service outside your machines. Local models (LM Studio, Ollama) and your own SearXNG keep working. <strong>Offline mode</strong> allows only this PC and your own network. Both are enforced: a backstop refuses internet connections nothing approved, and the Privacy page runs a check that probes your setup and lists anything still reaching outside.</li>
-          <li><strong>Permissions and approvals:</strong> tool access depends on the agent, project scope and configured policy. Sensitive actions may require approval; review the proposed action and arguments. Docker can isolate terminal work when available. Host terminal mode runs with your Windows account’s access.</li>
+          <li><strong>Permissions and approvals:</strong> tool access depends on the agent, project scope and configured policy. Review the proposed action and arguments when approval is required. Terminal isolation depends on the operating system and the configured runner. Host terminal mode runs with your account’s access.</li>
           <li><strong>Outside content is untrusted:</strong> after reading a webpage or email, actions covered by the external action policy require approval or are refused where no one can approve. These checks run outside the model. Provider credentials authenticate requests to the selected service; never include keys in public screenshots or issues.</li>
           <li><strong>Strangers on Discord</strong> only get look-up tools, never your files, memory or terminal.</li>
         </ul>
@@ -254,6 +283,7 @@ const SECTIONS: Section[] = [
     body: (
       <>
         <p>EchoSpeak is the harness around your selected model: a desktop host, chat workspace and local agent runtime that prepares context, checks tool requests and records execution results. Models can run locally or through cloud APIs; configured online integrations also use network services.</p>
+        <p>The desktop and terminal clients can use the same backend. Echo Companion observes supported sessions independently.</p>
         <SystemDiagram />
         <MessageTimeline />
       </>
@@ -266,12 +296,11 @@ const SECTIONS: Section[] = [
     body: (
       <dl className="doc-reqs">
         {[
-          ["System", "Windows 10 or 11, 64-bit"],
+          ["System", "Windows 10 or 11 (x64 installer), Linux x86-64 (build from source)"],
           ["Disk", "App storage plus separate space for optional speech and generation models"],
           ["Memory", "Local model requirements depend on model size, quantization and runtime"],
-          ["Local models", "A compatible LM Studio, Ollama or model server; check its model hardware requirements"],
+          ["Local models", "Ollama, LM Studio or a compatible model server. Hardware requirements depend on the model and allocated context."],
           ["Cloud models", "OpenAI, Gemini, Claude or Grok API access, with billing where required"],
-          ["Optional", "Docker Desktop for the sandboxed terminal"],
         ].map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}
       </dl>
     ),
@@ -284,11 +313,11 @@ const SECTIONS: Section[] = [
       <div className="doc-faq">
         {[
           ["Is it free?", "Yes. EchoSpeak is free and open source (MIT). Local models are free too; cloud models bill you directly."],
-          ["Mac or Linux?", "Not yet. Windows only for now."],
+          ["Mac or Linux?", "Linux x86-64 can be built from source. There is a published Windows installer. A macOS package is currently unavailable."],
           ["Which model should I use?", "Choose a compatible model that supports the tools you need and fits your machine or API account. Verify its response in setup or Settings before starting work."],
           ["Does it need the internet?", "Configured local chat and file tools can work offline. Downloads, web tools, cloud models, cloud speech and cloud generation need network access."],
-          ["How do I update?", "Settings › About › Update. It downloads, checks the signature, and restarts."],
-          ["Where's my data?", "In your Windows user folder, under AppData › Local."],
+          ["How do I update?", "Use Settings › About when your installed build offers an update, or install a new build from the appropriate release or source tree."],
+          ["Where's my data?", "EchoSpeak stores its local data under your user account. The data directory depends on the platform and launch configuration."],
         ].map(([q, a]) => (
           <details key={q}><summary>{q}</summary><p>{a}</p></details>
         ))}
@@ -301,10 +330,9 @@ const SECTIONS: Section[] = [
 export function Docs() {
   const { section } = useParams();
   const [active, setActive] = useState(section || SECTIONS[0].id);
+  const [expanded, setExpanded] = useState(false);
   useEffect(() => {
-    if (!section) return;
-    setActive(section);
-    window.setTimeout(() => document.getElementById(`doc-${section}`)?.scrollIntoView({ block: "start" }), 50);
+    setActive(section || SECTIONS[0].id);
   }, [section]);
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined") return;
@@ -324,28 +352,28 @@ export function Docs() {
   return (
     <div className="site site-docs">
       <SiteHeader />
-      <main className="docs shell">
-        <aside className="docs-nav" aria-label="Docs sections">
-          <p className="kicker">Docs</p>
-          {SECTIONS.map((s) => (
-            <Link key={s.id} to={`/docs/${s.id}`} className={active === s.id ? "is-on" : ""} aria-current={active === s.id ? "true" : undefined}>
-              <Icon name={s.icon} size={16} />
-              {s.title}
-            </Link>
-          ))}
+      <main id="main-content" className="docs shell" tabIndex={-1}>
+        <header className="docs-hero">
+          <h1>EchoSpeak docs</h1>
+          <p>Set up a model, start a project and configure the tools you want Echo to use.</p>
+        </header>
+        <aside className="docs-toc" data-expanded={expanded}>
+          <button type="button" className="docs-toc-toggle" aria-controls="docs-sections" aria-expanded={expanded} onClick={() => setExpanded((open) => !open)}>
+            <Icon name="book" size={16} /> On this page <Icon name="down" size={15} />
+          </button>
+          <nav className="docs-nav" id="docs-sections" aria-label="Docs sections">
+            {SECTIONS.map((s) => (
+              <Link key={s.id} to={`/docs/${s.id}`} onClick={() => setExpanded(false)} className={active === s.id ? "is-on" : ""} aria-current={active === s.id ? "location" : undefined}>
+                <Icon name={s.icon} size={16} />
+                {s.title}
+              </Link>
+            ))}
+          </nav>
         </aside>
         <article className="docs-body">
-          <header className="docs-hero">
-            <Face size={48} />
-            <div>
-              <span className="kicker">11.4.0 guide</span>
-              <h1>EchoSpeak docs</h1>
-              <p>Everything you need, in plain words. New here? Start with <Link to="/docs/getting-started">Getting started</Link>.</p>
-            </div>
-          </header>
           {SECTIONS.map((s) => (
             <section key={s.id} id={`doc-${s.id}`} className="doc-section" aria-labelledby={`doc-title-${s.id}`}>
-              <h2 id={`doc-title-${s.id}`}><Icon name={s.icon} size={20} />{s.title}</h2>
+              <h2 id={`doc-title-${s.id}`} tabIndex={-1}><Icon name={s.icon} size={20} />{s.title}</h2>
               {s.body}
             </section>
           ))}

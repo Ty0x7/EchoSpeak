@@ -589,12 +589,11 @@ class ChatClient:
         except Exception:
             pass
 
-    @admitted
     def _prepare_window(self) -> None:
         """Serve the owner's chosen window: point the request at the model variant that has it (once)."""
         endpoint = self.endpoint
         if endpoint.local:
-            # Inside the local inference gate (@admitted): hand the GPU to this runtime before calling it.
+            # The whole turn owns the inference gate, including the handoff and stream.
             from agent.lean import gpu_handoff
             gpu_handoff.before_call(endpoint)
         if endpoint.wire or not endpoint.want_context or endpoint.provider != "ollama" or not endpoint.local:
@@ -604,6 +603,7 @@ class ChatClient:
         if not endpoint.wire:
             endpoint.want_context = 0   # couldn't be made: use the server's own window, and don't retry every call
 
+    @admitted
     def stream_turn(
         self,
         messages: list[dict[str, Any]],

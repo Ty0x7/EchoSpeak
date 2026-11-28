@@ -45,6 +45,8 @@ for module in webkit2gtk-4.1 gtk+-3.0 librsvg-2.0; do
   pkg-config --exists "$module" || die "missing development files for $module (see apps/desktop/LINUX.md)"
 done
 
+python3 "$REPO_ROOT/scripts/check-version.py"
+
 echo "==> Web UI"
 [[ -d "$WEB_ROOT/node_modules" ]] || npm --prefix "$WEB_ROOT" ci
 npm --prefix "$WEB_ROOT" run build

@@ -12,7 +12,7 @@ import sys
 import time
 from typing import Optional
 
-from . import backend, control, discovery
+from . import __version__, backend, control, discovery
 from .client import ApiError, AuthError, Client, ConnectError, follow, new_request_id, submit
 from .render import Renderer, one_line, sanitize
 from .repl import HELP, App, Out, RunResult
@@ -518,6 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     _add_common(common, top=False)
     p = argparse.ArgumentParser(prog="echospeak", description="Terminal client for a running EchoSpeak backend.")
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     _add_common(p, top=True)
     p.set_defaults(command="", func=cmd_repl, agent="", project="")
     sub = p.add_subparsers(dest="command")

@@ -1,0 +1,154 @@
+.h-workspace { --window-radius: clamp(8px, 1.2vw, 17px); }
+.h-workspace:focus { outline: none; }
+.h-workspace-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px 20px; margin-bottom: 14px; }
+.h-workspace-bar [role="tablist"] { display: flex; gap: clamp(14px, 3vw, 28px); }
+.h-workspace-bar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 4px 2px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font-weight: 700;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color .2s ease, border-color .2s ease;
+}
+.h-workspace-bar button:hover, .h-workspace-bar button[aria-selected="true"] { color: var(--text); }
+.h-workspace-bar button[aria-selected="true"] { border-color: var(--accent); }
+.h-workspace-bar > span, .h-agent-workflow figcaption {
+  color: var(--dim);
+  font-size: .8125rem;
+  line-height: 1.45;
+}
+
+.h-terminal-hint { display: none; }
+
+.h-window-deck { position: relative; isolation: isolate; display: grid; grid-template-rows: minmax(0, 1fr); align-items: center; aspect-ratio: 2; }
+.h-window-deck::before {
+  content: "";
+  z-index: -1;
+  position: absolute;
+  inset: 4% 0 -8%;
+  background: radial-gradient(ellipse at 58% 52%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 69%);
+}
+.h-workspace-view, .h-workspace-layer {
+  overflow: hidden;
+  border: 1px solid var(--line-2);
+  border-radius: var(--window-radius);
+  background: var(--panel);
+  box-shadow: 0 32px 68px -38px rgba(var(--es-shade-rgb), .53);
+}
+.h-workspace-view { position: relative; z-index: 1; width: 86%; animation: h-window-enter .34s var(--es-ease) both; }
+.h-window-deck[data-view="terminal"] .h-workspace-view { width: 90%; justify-self: end; }
+.h-workspace-view picture, .h-workspace-view img, .h-workspace-layer img { display: block; width: 100%; height: auto; }
+.h-window-deck[data-view="terminal"] .h-workspace-layer { right: auto; left: 0; }
+.h-workspace-layer { position: absolute; right: 0; bottom: 3%; width: 45%; opacity: .7; }
+@keyframes h-window-enter { from { opacity: .55; transform: translateY(6px); } }
+
+.h-agent-workflow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(114px, 16vw, 158px);
+  grid-template-areas: "caption ." "window track";
+  gap: 9px clamp(20px, 4.5vw, 52px);
+  align-items: center;
+  margin: clamp(24px, 5vw, 52px) 0 0;
+}
+.h-agent-workflow figcaption { grid-area: caption; }
+.h-agent-track { grid-area: track; min-width: 0; }
+.h-agent-window {
+  grid-area: window;
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: clamp(12px, 1.5vw, 19px);
+  background: var(--es-bg);
+  box-shadow: 0 32px 64px -39px rgba(var(--es-shade-rgb), .55);
+}
+.h-agent-window-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 12px clamp(13px, 2.1vw, 25px);
+  border-bottom: 1px solid var(--es-line-2);
+  color: var(--es-dim);
+  font-size: .8125rem;
+}
+.h-agent-window-bar span { display: inline-flex; align-items: center; gap: 6px; }
+.h-agent-window-bar span:first-child { color: var(--es-text-strong); font-weight: 680; }
+.h-agent-window-bar span:first-child svg { color: var(--es-accent); }
+.h-agent-window-body { min-height: 280px; padding: clamp(17px, 3vw, 30px); }
+.h-agent-request {
+  width: fit-content;
+  max-width: min(36ch, 91%);
+  margin: 0 0 18px auto;
+  padding: 10px 14px;
+  border: 1px solid var(--es-line);
+  border-radius: 14px 14px 4px 14px;
+  color: var(--es-text);
+  background: var(--es-surface-2);
+  font-size: .9375rem;
+  line-height: 1.5;
+}
+.h-agent-response .lm { padding-block: 0; }
+.h-agent-response .lm-name { font-size: .875rem; }
+.h-agent-response .lm-face[data-tone="dark"] { background: #18181a; border-color: #2c2c30; }
+:root[data-es-theme="light"] .h-agent-response .lm-face[data-tone="dark"] {
+  background: linear-gradient(180deg, #4f97ff, #2c73e8);
+  border-color: #2c73e8;
+}
+.h-agent-response .lm-tool-head, .h-agent-response .lm-steps-head { max-width: 100%; }
+.h-agent-response .lm-tool-output { white-space: pre-wrap; overflow-wrap: anywhere; }
+.h-agent-steps { display: grid; }
+.h-step {
+  position: relative;
+  min-height: 44px;
+  padding: 7px 10px;
+  border: 0;
+  border-inline-start: 2px solid var(--line-2);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.site .h-step { color: var(--dim); font-size: .875rem; font-weight: 650; }
+.h-step:hover, .site .h-step[aria-pressed="true"] { color: var(--text); }
+.h-step[aria-pressed="true"] { border-color: var(--accent); }
+.h-stage-summary { min-height: 3em; margin: 11px 0 0; color: var(--dim); font-size: .8125rem; line-height: 1.5; }
+@media (max-width: 920px) {
+  .h-workspace-view { width: 91%; }
+  .h-window-deck[data-view="terminal"] .h-workspace-view { width: 90%; }
+  .h-window-deck { aspect-ratio: 1.9; }
+}
+@media (max-width: 680px) {
+  .h-window-deck { aspect-ratio: 1060 / 640; align-items: start; }
+  .h-workspace-view, .h-window-deck[data-view="terminal"] .h-workspace-view { width: 100%; }
+  .h-workspace-layer { display: none; }
+  .h-terminal-label .h-recorded-label { display: none; }
+  .h-terminal-hint { display: inline; }
+  .h-window-deck[data-view="terminal"] .h-workspace-capture {
+    overflow: auto;
+    overscroll-behavior-inline: contain;
+    aspect-ratio: 1060 / 640;
+  }
+  .h-window-deck[data-view="terminal"] .h-workspace-capture img { min-width: 670px; }
+  .h-workspace-bar button { font-size: .875rem; gap: 4px; }
+  .h-workspace-bar button svg { width: 15px; }
+  .h-agent-workflow { grid-template-columns: minmax(0, 1fr); grid-template-areas: "caption" "window" "track"; row-gap: 10px; }
+  .h-agent-steps { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
+  .h-step { border: 0; border-top: 2px solid var(--line-2); padding-inline: 2px; }
+  .h-stage-summary { min-height: 1.5em; margin-top: 0; }
+  .h-agent-window-body { min-height: 265px; }
+}
+@media (max-width: 390px) {
+  .h-workspace-bar { gap: 5px; }
+  .h-workspace-bar [role="tablist"] { gap: 10px; }
+  .h-workspace-bar > span { text-align: right; }
+  .h-agent-window-body { padding-inline: 12px; }
+  .h-agent-response .lm-body { padding-left: 10px; }
+}
+@media (max-width: 360px) {
+  .h-agent-window-body { min-height: 295px; }
+}

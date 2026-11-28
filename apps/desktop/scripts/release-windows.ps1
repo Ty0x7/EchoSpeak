@@ -27,6 +27,8 @@ $ErrorActionPreference = "Stop"
 $PythonExecutable = Assert-EchoPythonReady (Resolve-EchoPython $PythonExecutable)
 $DesktopRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $RepoRoot = (Resolve-Path (Join-Path $DesktopRoot "..\..")).Path
+& $PythonExecutable (Join-Path $RepoRoot "scripts\check-version.py")
+if ($LASTEXITCODE -ne 0) { throw "EchoSpeak version consistency check failed." }
 $ConfPath = Join-Path $DesktopRoot "src-tauri\tauri.conf.json"
 $conf = Get-Content -LiteralPath $ConfPath -Raw | ConvertFrom-Json
 $Version = [string]$conf.version

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { useTheme } from "../theme/theme";
 import { GITHUB_URL, RELEASES_URL, useLatestRelease } from "./release";
 
@@ -37,12 +37,23 @@ export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
 }
 
 /** Echo's face drawn in CSS: white with dark eyes; teammates dark with white eyes. */
-export function Face({ tone = "light", size = 28, className = "" }: { tone?: "light" | "dark"; size?: number; className?: string }) {
+export function Face({ tone = "light", size, className = "" }: { tone?: "light" | "dark"; size?: number; className?: string }) {
   return (
-    <span className={`face face-${tone} ${className}`} style={{ ["--s" as string]: `${size}px` }} aria-hidden="true">
+    <span className={`face face-${tone} ${className}`} style={size === undefined ? undefined : { ["--s" as string]: `${size}px` }} aria-hidden="true">
       <i />
       <i />
     </span>
+  );
+}
+
+export function PlatformActions({ linuxUrl = "/docs/getting-started" }: { linuxUrl?: string }) {
+  const linuxLabel = <><Icon name="terminal" size={18} /><span>Set up on Linux</span></>;
+  return (
+    <div className="platform-actions">
+      <DownloadButton compact />
+      {linuxUrl.startsWith("/") ? <Link className="btn btn-ghost" to={linuxUrl}>{linuxLabel}</Link>
+        : <a className="btn btn-ghost" href={linuxUrl}>{linuxLabel}</a>}
+    </div>
   );
 }
 
@@ -50,7 +61,7 @@ export function DownloadButton({ variant = "primary", compact = false }: { varia
   const release = useLatestRelease();
   if (variant === "header") {
     return (
-      <a className="header-download" href={release.exeUrl}>
+      <a className="header-download" href={release.exeUrl} aria-label="Download for Windows">
         <Icon name="windows" size={15} /> <span>Download</span>
       </a>
     );
@@ -64,19 +75,6 @@ export function DownloadButton({ variant = "primary", compact = false }: { varia
       </span>
     </a>
   );
-}
-
-/** Scroll to a section on the home page (works with hash routing). */
-export function useScrollTo() {
-  const navigate = useNavigate();
-  const { pathname } = useLocation();
-  return (id: string) => {
-    const go = () => document.getElementById(id)?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
-    if (pathname !== "/") {
-      navigate("/");
-      window.setTimeout(go, 80);
-    } else go();
-  };
 }
 
 /** The display face for headings, loaded once for the website only. */
@@ -103,8 +101,11 @@ export function ThemeToggle() {
 }
 
 export function SiteHeader() {
-  const scrollTo = useScrollTo();
   const [scrolled, setScrolled] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const menuToggle = useRef<HTMLButtonElement>(null);
+  const { pathname, hash } = useLocation();
+  useEffect(() => setMenu(false), [pathname, hash]);
   useSiteFonts();
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8);
@@ -113,24 +114,42 @@ export function SiteHeader() {
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
   return (
-    <header className="site-header" data-scrolled={scrolled ? "true" : "false"}>
+    <header className="site-header" data-scrolled={scrolled} onKeyDown={(event) => {
+      if (menu && event.key === "Escape") {
+        setMenu(false);
+        menuToggle.current?.focus();
+      }
+    }}>
+      <Link className="site-skip" to={{ pathname, hash: "#main-content" }}>Skip to content</Link>
       <Link className="wordmark" to="/" aria-label="EchoSpeak home">
         <Face size={26} />
         <span>EchoSpeak</span>
       </Link>
       <nav aria-label="Main">
-        <button type="button" onClick={() => scrollTo("watch")}>Watch me work</button>
-        <button type="button" onClick={() => scrollTo("crew")}>The crew</button>
-        <button type="button" onClick={() => scrollTo("safe")}>Safety</button>
-        <Link to="/docs">Docs</Link>
+        <Link to={{ pathname: "/", hash: "#watch" }} aria-current={pathname === "/" && hash === "#watch" ? "location" : undefined}>See it work</Link>
+        <Link to="/docs/companion">Companion</Link>
+        <NavLink to="/research">Research</NavLink>
+        <NavLink to="/docs">Docs</NavLink>
       </nav>
       <div className="header-right">
+        <button ref={menuToggle} type="button" className="header-icon menu-toggle" aria-expanded={menu} aria-controls={menu ? "site-menu" : undefined} aria-label={menu ? "Close menu" : "Open menu"} onClick={() => setMenu((m) => !m)}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">{menu ? <path d="M6 6l12 12M18 6 6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}</svg>
+        </button>
         <ThemeToggle />
-        <a className="header-icon" href={GITHUB_URL} target="_blank" rel="noreferrer" aria-label="EchoSpeak on GitHub" title="GitHub">
+        <a className="header-icon header-github" href={GITHUB_URL} target="_blank" rel="noreferrer" aria-label="EchoSpeak on GitHub" title="GitHub">
           <Icon name="github" size={17} />
         </a>
         <DownloadButton variant="header" />
       </div>
+      {menu ? (
+        <nav id="site-menu" className="site-menu" aria-label="Menu">
+          <Link to={{ pathname: "/", hash: "#watch" }} onClick={() => setMenu(false)}>See it work</Link>
+          <Link to="/docs/companion" onClick={() => setMenu(false)}>Companion</Link>
+          <NavLink to="/research" onClick={() => setMenu(false)}>Research</NavLink>
+          <NavLink to="/docs" onClick={() => setMenu(false)}>Docs</NavLink>
+          <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+      ) : null}
     </header>
   );
 }
@@ -142,8 +161,9 @@ export function SiteFooter() {
         <Face size={24} />
         <span>EchoSpeak</span>
       </Link>
-      <p>Echo, a free AI agent that lives on your PC.</p>
+      <p>An open-source AI workspace.</p>
       <div>
+        <Link to="/research">Research</Link>
         <Link to="/docs">Docs</Link>
         <a href={RELEASES_URL} target="_blank" rel="noreferrer">Releases</a>
         <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>

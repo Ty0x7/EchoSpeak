@@ -45,6 +45,7 @@ except (ValueError, ImportError):
     LayerShell = None
 
 import cairo  # noqa: E402
+import json  # noqa: E402
 
 from echo_companion import face as facelib  # noqa: E402
 from echo_companion.client import Backend  # noqa: E402
@@ -101,6 +102,15 @@ class Companion(Gtk.Application):
         state_dir = Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local/state")
         self.hidden_file = state_dir / "echospeak" / "companion-hidden"
         self.manually_hidden = self.hidden_file.exists()
+        self.position_file = self.hidden_file.with_name("companion-position.json")
+        self.placement: tuple[str, int, int] | None = None
+        self.dragging = False
+        self.drag_destination: tuple[str, int, int] | None = None
+        try:
+            saved = json.loads(self.position_file.read_text())
+            self.placement = (str(saved["output"]), int(saved["x"]), int(saved["y"]))
+        except (OSError, KeyError, ValueError, TypeError):
+            pass
         self.stop = threading.Event()
         self.pointer = None
 
@@ -149,12 +159,19 @@ class Companion(Gtk.Application):
         self.window.set_child(self.box)
         self._apply_corner()
 
+        if self._is_layer():
+            drag = Gtk.GestureDrag(button=1)
+            drag.connect("drag-update", self._drag_update)
+            drag.connect("drag-end", self._drag_end)
+            self.area.add_controller(drag)
+            self.area.set_cursor_from_name("grab")
+
         click = Gtk.GestureClick(button=0)
         click.connect("released", self._clicked)
         self.area.add_controller(click)
         motion = Gtk.EventControllerMotion()
         motion.connect("motion", self._motion)
-        motion.connect("leave", lambda *_: setattr(self, "pointer", None))
+        motion.connect("leave", self._pointer_left)
         self.area.add_controller(motion)
         self._build_menu()
 
@@ -195,9 +212,91 @@ class Companion(Gtk.Application):
             LayerShell.set_anchor(self.window, getattr(LayerShell.Edge, edge), edge in (vertical, horizontal))
         self._set_slide()
 
+    def _is_layer(self) -> bool:
+        return LayerShell is not None and LayerShell.is_layer_window(self.window)
+
+    def _monitors(self):
+        return list(self.window.get_display().get_monitors())
+
+    def _resolve_monitor(self, connector: str):
+        return next((monitor for monitor in self._monitors() if monitor.get_connector() == connector), None)
+
+    def _position_on_output(self, monitor, x: int, y: int) -> None:
+        bounds = monitor.get_geometry()
+        face_width, face_height = facelib.canvas_size(FACE)
+        face_offset = 0 if self.box.get_first_child() == self.area else BUBBLE_WIDTH + self.box.get_spacing()
+        x = max(-face_offset, min(bounds.width - face_offset - face_width, x))
+        y = max(0, min(bounds.height - face_height, y))
+        if LayerShell.get_monitor(self.window) != monitor:
+            LayerShell.set_monitor(self.window, monitor)
+        for edge in ("TOP", "BOTTOM", "LEFT", "RIGHT"):
+            LayerShell.set_anchor(self.window, getattr(LayerShell.Edge, edge), edge in ("TOP", "LEFT"))
+        LayerShell.set_margin(self.window, LayerShell.Edge.LEFT, x)
+        LayerShell.set_margin(self.window, LayerShell.Edge.TOP, y)
+
+    def _drag_update(self, drag, dx: float, dy: float) -> None:
+        if not self.dragging and abs(dx) + abs(dy) < 8:
+            return
+        surface = self.window.get_surface()
+        monitor = LayerShell.get_monitor(self.window) or self.window.get_display().get_monitor_at_surface(surface)
+        if monitor is None:
+            return
+        drag.set_state(Gtk.EventSequenceState.CLAIMED)
+        if not self.dragging:
+            self.dragging = True
+            self.area.set_cursor_from_name("grabbing")
+        self.last_event = time.monotonic()
+        bounds = monitor.get_geometry()
+        if self.placement and self.placement[0] == monitor.get_connector():
+            _, left, top = self.placement
+        else:
+            vertical, horizontal = CORNERS[self.corner]
+            width, height = facelib.canvas_size(FACE)
+            left = MARGIN if horizontal == "LEFT" else bounds.width - width - BUBBLE_WIDTH - self.box.get_spacing() - MARGIN
+            top = MARGIN if vertical == "TOP" else bounds.height - height - MARGIN
+        # Coordinates are logical and relative to the currently mapped surface. Use
+        # the live origin so moving the surface does not accumulate the same delta.
+        x = int(left + dx)
+        y = int(top + dy)
+        face_offset = 0 if self.box.get_first_child() == self.area else BUBBLE_WIDTH + self.box.get_spacing()
+        center_x = bounds.x + x + face_offset + facelib.canvas_size(FACE)[0] / 2
+        center_y = bounds.y + y + facelib.canvas_size(FACE)[1] / 2
+        destination = next((m for m in self._monitors() if (g := m.get_geometry()).x <= center_x < g.x + g.width
+                            and g.y <= center_y < g.y + g.height), monitor)
+        target = destination.get_geometry()
+        self.drag_destination = (destination.get_connector(), bounds.x + x - target.x, bounds.y + y - target.y)
+        # Changing outputs remaps the surface and ends the Wayland pointer grab.
+        # Keep the grab on this output and commit the output at release.
+        if destination == monitor:
+            self.placement = self.drag_destination
+            self._position_on_output(monitor, x, y)
+
+    def _drag_end(self, _gesture, _dx, _dy) -> None:
+        if not self.dragging:
+            return
+        self.dragging = False
+        self.area.set_cursor_from_name("grab")
+        if self.drag_destination:
+            self.placement = self.drag_destination
+            self.drag_destination = None
+            self._set_slide()
+            output, x, y = self.placement
+            try:
+                self.position_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                temporary = self.position_file.with_suffix(".tmp")
+                temporary.write_text(json.dumps({"output": output, "x": x, "y": y}))
+                temporary.replace(self.position_file)
+            except OSError as exc:
+                print(f"Could not save Companion position: {exc}", file=sys.stderr)
+            GLib.idle_add(self._update_input_region)
+
     def _set_slide(self) -> None:
         """Slide horizontally from the anchored edge: margin from -(width) to MARGIN."""
         if LayerShell is None or not LayerShell.is_layer_window(self.window):
+            self.window.set_opacity(self.shown)
+            return
+        if self.placement and (monitor := self._resolve_monitor(self.placement[0])) is not None:
+            self._position_on_output(monitor, *self.placement[1:])
             self.window.set_opacity(self.shown)
             return
         vertical, horizontal = CORNERS.get(self.corner, CORNERS["top-right"])
@@ -221,6 +320,7 @@ class Companion(Gtk.Application):
             # Initial alpha and position are committed before revealing the Wayland surface.
             self._set_slide()
             self.window.present()
+            self._report_visibility()
             if not getattr(self, "_tick_id", 0):
                 self._tick_id = self.area.add_tick_callback(self._tick)
             GLib.idle_add(self._update_input_region)
@@ -237,6 +337,7 @@ class Companion(Gtk.Application):
                 self.visible = False
                 self._reset_caption()
                 self.window.set_visible(False)
+                self._report_visibility()
                 self._tick_id = 0
                 return GLib.SOURCE_REMOVE  # hidden Echo costs nothing until the next event
         mode = self.animator.state.mode
@@ -251,7 +352,7 @@ class Companion(Gtk.Application):
             self.animator.set_mode("idle", now)
         self._step_caption(now, dt)
         if (self.auto_hide and mode in {"idle", "waiting"} and now - self.last_event > HIDE_AFTER
-                and not self._menu_open() and not self.bubble.get_visible()):
+                and self.pointer is None and not self.dragging and not self._menu_open() and not self.bubble.get_visible()):
             self.target_shown = 0.0
         if self.visible:
             # Resting Echo redraws at 20 fps, with full-rate frames for short blinks and pose changes.
@@ -269,11 +370,32 @@ class Companion(Gtk.Application):
         cr.paint()
         cr.set_operator(cairo.OPERATOR_OVER)
         facelib.draw(cr, width, height, FACE, self.animator.state, self.appearance)
+        if self.pointer is not None and not self.dragging:
+            x, y = self._hide_center()
+            cr.arc(x, y, 10, 0, 6.2832)
+            cr.set_source_rgba(.11, .13, .18, .9)
+            cr.fill()
+            cr.set_source_rgb(.93, .95, 1)
+            cr.set_line_width(1.6)
+            cr.move_to(x - 4, y)
+            cr.line_to(x + 4, y)
+            cr.stroke()
+
+    def _hide_center(self) -> tuple[int, int]:
+        width, height = facelib.canvas_size(FACE)
+        return (width + FACE) // 2 - 10, int(height / 2 - .58 * FACE) + 10
+
+    def _pointer_left(self, *_args) -> None:
+        self.pointer = None
+        self.area.queue_draw()
 
     def _motion(self, _controller, x: float, y: float) -> None:
         width, height = facelib.canvas_size(FACE)
         self.pointer = (max(-1, min(1, (x - width / 2) / (FACE * 0.9))), max(-1, min(1, (y - height / 2) / (FACE * 0.9))))
         self.last_event = time.monotonic()
+        hx, hy = self._hide_center()
+        self.area.set_tooltip_text("Hide Companion" if (x - hx) ** 2 + (y - hy) ** 2 <= 100 else None)
+        self.area.queue_draw()
 
     def _update_input_region(self) -> bool:
         """Only Echo's face and the bubble take clicks; the rest of the surface is see-through."""
@@ -301,6 +423,8 @@ class Companion(Gtk.Application):
     def _on_connection(self, connected: bool) -> bool:
         if connected and not self.connected:
             threading.Thread(target=self._load_settings, daemon=True).start()
+        if connected:
+            self._report_visibility()
         if not connected and self.connected and self.speech_active:
             self.speech_active = ""
             self.speaking_until = time.monotonic()
@@ -312,8 +436,19 @@ class Companion(Gtk.Application):
 
     def _on_event(self, name: str, data: dict) -> bool:
         now = time.monotonic()
-        if name == "show":
-            self._restore("idle")
+        if name == "presentation":
+            action = data.get("action")
+            if action == "enabled":
+                self.enabled = bool(data.get("enabled"))
+                if not self.enabled:
+                    self.target_shown = 0.0
+                elif not self.auto_hide:
+                    self.appear("idle")
+            elif action == "show":
+                self._restore("idle")
+            elif action == "hide":
+                self._hide()
+            self._report_visibility()
             return False
         if now < self.paused_until or not self.enabled or self.manually_hidden:
             return False
@@ -423,7 +558,7 @@ class Companion(Gtk.Application):
         if avatar:
             self.appearance = facelib.Appearance.from_config(avatar)
         if settings:
-            self.enabled = bool(settings.get("companion_enabled", True)) or os.environ.get("ECHO_COMPANION_SHOW") == "1"
+            self.enabled = bool(settings.get("companion_enabled", True))
             self.auto_hide = bool(settings.get("companion_auto_hide", True))
             if not self.enabled:
                 self.target_shown = 0.0
@@ -432,7 +567,7 @@ class Companion(Gtk.Application):
             corner = str(settings.get("companion_position") or self.corner)
             if corner in CORNERS and corner != self.corner:
                 self.corner = corner
-                self._apply_corner()
+                self._reset_placement()
             self.captions = bool(settings.get("companion_captions", True))
             self.reduced = os.environ.get("ECHO_COMPANION_REDUCED_MOTION") == "1" or settings.get("companion_animation") == "reduced"
         return False
@@ -503,6 +638,10 @@ class Companion(Gtk.Application):
         return bool(getattr(self, "popover", None) and self.popover.get_visible())
 
     def _clicked(self, gesture, _n, x, y) -> None:
+        hx, hy = self._hide_center()
+        if gesture is not None and gesture.get_current_button() == 1 and (x - hx) ** 2 + (y - hy) ** 2 <= 100:
+            self._hide()
+            return
         self.last_event = time.monotonic()
         if not self.speech_active:
             self.animator.set_mode("listening", time.monotonic())
@@ -561,11 +700,26 @@ class Companion(Gtk.Application):
         self.animator.envelope = []
         self.after_speech_mode = "idle"
         self.popover.popdown()
+        self._report_visibility()
+
+    def _report_visibility(self) -> None:
+        state = {"visible": self.visible and self.target_shown > 0, "manually_hidden": self.manually_hidden}
+        threading.Thread(target=self._safe_post, args=("/companion/presentation/state", state, "PUT"), daemon=True).start()
 
     def _move(self, _action, value) -> None:
         self.corner = value.get_string()
-        self._apply_corner()
+        self._reset_placement()
         threading.Thread(target=lambda: self._safe_post("/settings", {"companion_position": self.corner}, "PUT"), daemon=True).start()
+
+    def _reset_placement(self) -> None:
+        self.placement = None
+        try:
+            self.position_file.unlink(missing_ok=True)
+        except OSError as exc:
+            print(f"Could not reset Companion position: {exc}", file=sys.stderr)
+        if self._is_layer():
+            LayerShell.set_monitor(self.window, None)
+        self._apply_corner()
 
     def _safe_post(self, path: str, body: dict, method: str = "POST") -> None:
         try:

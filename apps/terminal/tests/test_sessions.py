@@ -287,8 +287,8 @@ def test_left_on_an_empty_input_opens_the_manager_and_right_returns_untouched():
         assert tui.browser is not None and not tui.browser.loading
         assert ("/sessions/overview", {"limit": 200}) in tui.client.calls
         assert tui.browser.chosen()["thread_id"] == "t-models"        # it opens on where you are
-        assert tui._rows("sessions") >= 4 and tui._rows("input") == 0  # in the composer's place
-        assert tui.app.layout.has_focus(tui.browser_window)
+        assert tui.browser.mode == "page"
+        assert tui.app.layout.has_focus(tui.session_page_window)
         press(tui, Keys.Right)
         assert tui.browser is None and tui.core.session == before
         assert tui.app.layout.has_focus(tui.composer_window)
@@ -329,7 +329,7 @@ def test_enter_resumes_the_highlighted_conversation_with_its_agent_project_and_h
         tui.context = (9000, 16384)
         press(tui, Keys.Left)
         await settle(tui)
-        press(tui, Keys.Up)                      # Pong, with Glados
+        press(tui, Keys.Home)                    # First in the full page group order
         assert tui.browser.chosen()["thread_id"] == "t-pong"
         press(tui, Keys.Enter)
         await settle(tui)
@@ -341,7 +341,7 @@ def test_enter_resumes_the_highlighted_conversation_with_its_agent_project_and_h
         assert ("/history", {"thread_id": "t-pong"}) in tui.client.calls
         # What belonged to the conversation you left did not come along.
         assert tui.session_tokens == {"prompt": 0, "completion": 0, "runs": 0} and tui.changes == [] and tui.context is None
-        shown = [b for b in tui.transcript if isinstance(b, (B.RuleLine, B.Note))]
+        shown = [b for b in tui.transcript if isinstance(b, (B.RuleLine, B.Note, B.UserLine, B.MarkdownBlock))]
         said = " ".join(getattr(b, "text", "") or getattr(b, "title", "") for b in shown)
         assert "Resumed Pong in a single file" in said and "Glados" in said
         assert "make a quick pong game" in said and "File creation is off" in said
@@ -427,4 +427,23 @@ def test_the_terminal_follows_a_restarted_backend_unless_its_address_was_given(m
         monkeypatch.setattr(discovery, "discover", lambda **_kw: discovery.Endpoint(tui.client.base_url, tui.client.key,
                                                                                     "endpoint-file"))
         assert tui._rediscover() is False
+    session(go)
+
+def test_reading_history_stays_anchored_during_new_output():
+    from prompt_toolkit.data_structures import Point
+    from prompt_toolkit.mouse_events import MouseButton
+
+    async def go(tui):
+        tui.welcome = None
+        for index in range(120):
+            tui.note(f"message {index:03}")
+        press(tui, Keys.PageUp)
+        before = tui._conversation_text()
+        assert "message 119" not in "".join(text for _, text in before)
+        tui.note("incoming response")
+        assert tui._conversation_text() == before
+        tui._history_mouse(A.MouseEvent(Point(0, 0), A.MouseEventType.SCROLL_UP, MouseButton.NONE, frozenset()))
+        assert tui._conversation_text() != before
+        press(tui, Keys.ControlEnd)
+        assert "incoming response" in "".join(text for _, text in tui._conversation_text())
     session(go)

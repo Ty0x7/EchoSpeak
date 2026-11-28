@@ -260,7 +260,7 @@ class LeanSession:
                 self._emit(event)
             except Exception:
                 logger.exception("Lean session emit failed")
-        if event.get("type") in {"run_start", "delegation", "run_outcome"}:
+        if event.get("type") in {"run_start", "delegation", "run_outcome", "token_usage"}:
             from agent.companion import native as companion_native  # queues only; never blocks the turn
 
             companion_native.observe(self, event)

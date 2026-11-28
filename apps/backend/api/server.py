@@ -28,6 +28,7 @@ from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from version import APP_VERSION
 from config import (
     config,
     ModelProvider,
@@ -107,7 +108,6 @@ def _publish_endpoint() -> None:
         from agent import endpoint_file
         from api.auth import _api_auth_required_for_host, _configured_api_auth_key
         from config import DATA_DIR
-        from version import APP_VERSION
 
         endpoint_file.write_endpoint(
             _SERVE_ADDRESS[0], _SERVE_ADDRESS[1],
@@ -128,7 +128,6 @@ def _endpoint_watch(stop: "threading.Event") -> None:
             from agent import endpoint_file
             from api.auth import _api_auth_required_for_host, _configured_api_auth_key
             from config import DATA_DIR
-            from version import APP_VERSION
 
             endpoint_file.ensure_endpoint(
                 _SERVE_ADDRESS[0], _SERVE_ADDRESS[1], auth_key=_configured_api_auth_key(),
@@ -424,7 +423,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Echo Speak API",
     description="Voice AI Assistant API with support for local models",
-    version="1.0.0",
+    version=APP_VERSION,
     lifespan=lifespan
 )
 

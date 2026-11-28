@@ -106,21 +106,77 @@ def commentary(limit: int = Query(default=30, ge=1, le=100)):
     return {"items": list(get_commentary().feed)[-limit:]}
 
 
-_presentation_streams = set()
+_presentation_streams: dict = {}
+
+
+class PresentationState(BaseModel):
+    visible: bool
+    manually_hidden: bool = False
+
+
+def _presentation_status() -> dict:
+    from config import config
+
+    enabled = bool(config.companion_enabled)
+    states = [value for value in _presentation_streams.values() if value is not None]
+    visible = any(state.visible for state in states)
+    if not enabled:
+        visibility = "disabled"
+    elif not _presentation_streams:
+        visibility = "not running"
+    elif not states:
+        visibility = "unknown"
+    elif visible:
+        visibility = "visible"
+    elif any(state.manually_hidden for state in states):
+        visibility = "hidden manually"
+    else:
+        visibility = "hidden automatically"
+    return {"enabled": enabled, "connected": bool(_presentation_streams), "visibility": visibility}
+
+
+@router.get("/presentation")
+async def presentation_status():
+    return _presentation_status()
+
+
+@router.put("/presentation/state")
+async def report_presentation_state(state: PresentationState):
+    # The Linux companion is the sole presentation client; reports belong to its live stream.
+    if len(_presentation_streams) == 1:
+        stream_id = next(iter(_presentation_streams))
+        _presentation_streams[stream_id] = state
+    return _presentation_status()
+
+
+def enabled_changed(enabled: bool) -> None:
+    for push in tuple(_presentation_streams):
+        push({"action": "enabled", "enabled": enabled})
 
 
 @router.post("/show")
 async def show_companion():
-    """Send a presentation-only signal to connected Companion windows."""
-    from config import config
-
-    if not config.companion_enabled:
-        raise HTTPException(409, "Turn on Echo Companion first.")
-    if not _presentation_streams:
-        raise HTTPException(409, "Start Echo Companion on your desktop first.")
-    for push in tuple(_presentation_streams):
-        push({})
+    await control_presentation("show")
     return {"shown": True}
+
+
+@router.post("/presentation/{action}")
+async def control_presentation(action: str):
+    from config import config
+    from api.routes.settings import _apply_settings_patch
+
+    if action in {"on", "off"}:
+        _apply_settings_patch({"companion_enabled": action == "on"})
+    elif action in {"show", "hide"}:
+        if not config.companion_enabled:
+            raise HTTPException(409, "Turn on Echo Companion first.")
+        if not _presentation_streams:
+            raise HTTPException(409, "Start Echo Companion on your desktop first.")
+        for push in tuple(_presentation_streams):
+            push({"action": action})
+    else:
+        raise HTTPException(404, "Unknown presentation action")
+    return _presentation_status()
 
 
 @router.get("/stream")
@@ -146,8 +202,8 @@ async def stream():
     unsubscribe_commentary = commentary.on_item(push("commentary"))
 
     async def body():
-        show = push("show")
-        _presentation_streams.add(show)
+        presentation = push("presentation")
+        _presentation_streams[presentation] = None
         try:
             yield "event: hello\ndata: {}\n\n"
             started = time.monotonic()
@@ -162,10 +218,10 @@ async def stream():
                         yield ": keepalive\n\n"
                     continue
                 quiet = 0.0
-                name = item.get("type", kind) if kind == "speech" else "commentary"
+                name = item.get("type", kind) if kind == "speech" else kind
                 yield f"event: {name}\ndata: {_json.dumps(item, default=str)}\n\n"
         finally:
-            _presentation_streams.discard(show)
+            _presentation_streams.pop(presentation, None)
             unsubscribe_speech()
             unsubscribe_commentary()
 

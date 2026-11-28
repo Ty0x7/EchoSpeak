@@ -9,10 +9,10 @@ EchoSpeak is a local-first AI workspace for research, coding, and creative work.
 | Platform | Get EchoSpeak |
 | --- | --- |
 | **Windows x64** | [Download the 11.12.0 installer (.exe)](https://github.com/Ty0x7/EchoSpeak/releases/download/v11.12.0/EchoSpeak_11.12.0_x64-setup.exe) · [MSI and release details](https://github.com/Ty0x7/EchoSpeak/releases/tag/v11.12.0) |
-| **Linux x86-64** | [Build from source](apps/desktop/LINUX.md) for AppImage, DEB, or RPM. Version 11.15.0 was built and verified locally. |
+| **Linux x86-64** | [Build from source](apps/desktop/LINUX.md) for AppImage, DEB, or RPM. |
 | **Terminal** | [Install the terminal client](apps/terminal/README.md) from source and connect it to the shared backend. |
 
-**Latest published installer:** Windows 11.12.0. **Current application baseline on `main`:** 11.15.0. GitHub downloads require repository access. [All releases](https://github.com/Ty0x7/EchoSpeak/releases) · [11.15.0 notes and checks](docs/releases/v11.15.0.md)
+**Development milestone** · [11.16.0 release notes](docs/releases/v11.16.0.md). **Published Windows installer** · [11.12.0](https://github.com/Ty0x7/EchoSpeak/releases/latest) at preparation time. Check the installed client with `echospeak --version` and its shared backend with `echospeak backend status`.
 
 <img src="artifacts/media/agent-first-desktop-echo.png" alt="EchoSpeak desktop showing agents, conversation filters, and an attached coding project" width="960" />
 

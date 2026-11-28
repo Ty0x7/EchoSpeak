@@ -107,7 +107,9 @@ def facts(event: dict[str, Any], digest: Digest, *, interacting: bool, now: Opti
     duration = max(0.0, float(event["at"]) - started) if started else 0.0
     measured = str(meta.get("measured") or "") if meta.get("via") == "native" else ""
     detail_kind, detail = "", ""
-    if digest.discoveries:
+    if digest.results:
+        detail_kind, detail = "result", digest.results[0]
+    elif digest.discoveries:
         detail_kind, detail = "found", digest.discoveries[0]
     elif digest.failures:
         detail_kind, detail = "problem", digest.failures[0]
@@ -126,6 +128,7 @@ def facts(event: dict[str, Any], digest: Digest, *, interacting: bool, now: Opti
         "next": _third_person(first_sentence(digest.open[0], 18), who) if digest.open else "",
         "asks_owner": digest.asks_owner or event["kind"] in {"needs_permission"},
         "question": _third_person(first_sentence(clean(event.get("text", "")).split("?")[0] + "?", 18), who) if digest.asks_owner else "",
+        "usage_percent": meta.get("usage_percent"),
         "tests_passed": digest.tests_passed,
         "tests_failed": digest.tests_failed,
         "measured": measured in {"verified", "checks_pass"},
@@ -145,6 +148,8 @@ def worth_saying(f: dict[str, Any], frequency: str = "milestones") -> str:
     """The reason to speak, or "" to stay quiet."""
     if f["age_seconds"] > STALE:
         return ""
+    if f["kind"] in {"context_pressure", "compacting"}:
+        return f["kind"] if frequency != "quiet" else ""
     if f["kind"] == "needs_permission":
         return "" if f["interacting"] else "needs_you"
     if f["kind"] in {"turn_completed", "report_ready"} and f.get("substantial") and frequency != "quiet":
@@ -174,6 +179,10 @@ def compose(f: dict[str, Any], reason: str, *, greet: bool = False, saved: bool 
     who = f["agent"]
     hello = f"Hey {f['name']}, " if greet and f["name"] else ""
     task = lower_first(f["task"]) if f["task"] else ""
+    if reason == "context_pressure":
+        return f"{who} used {f['usage_percent']} percent of the available prompt budget on its last model request."
+    if reason == "compacting":
+        return f"{who} is condensing its conversation context."
     where = f" on {f['project']}" if f["project"] and not task else ""
     if reason == "needs_you":
         if f["permission_for"]:
@@ -201,8 +210,8 @@ def compose(f: dict[str, Any], reason: str, *, greet: bool = False, saved: bool 
         middle = f" {who} says it found something worth noting. {f['detail']}"
     elif f["detail_kind"] == "problem":
         middle = f" {who} reported a problem. {f['detail']}"
-    elif f["detail"] and f["outcome"] in {"success", "mixed"}:
-        middle = f" {who} reports that {lower_first(f['detail'])}"
+    elif f["detail"] and (f["detail_kind"] == "result" or f["outcome"] in {"success", "mixed"}):
+        middle = f" {who} reports: {f['detail']}"
     else:
         middle = ""
     middle = middle.rstrip(".") + "." if middle else ""
@@ -214,7 +223,11 @@ def compose(f: dict[str, Any], reason: str, *, greet: bool = False, saved: bool 
         check = f" It says some tests still fail."
     else:
         check = ""
-    tail = " It's waiting on you now." if f["asks_owner"] else (f" One thing is still open. {f['next']}".rstrip(".") + "." if f["next"] and f["outcome"] == "mixed" else "")
+    tail = ""
+    if f["next"]:
+        tail = f" Still open, according to {who}: {f['next']}".rstrip(".") + "."
+    if f["asks_owner"]:
+        tail += " It asked for your input."
     text = opening + middle + check + tail
     if saved:
         text += " " + soul.phrase("saved", f.get("agent", ""), "I saved the key points for Echo.")
