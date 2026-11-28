@@ -93,6 +93,32 @@ Reuse the native harness, execution loop, permissions, sandbox, delegation, skil
 
 For a model evaluation, use Qwen 3.5 9B (`qwen3.5:9b`) as the reference unless the owner specifies otherwise. Use the existing campaign runner, model recorder and independent judge. Weight completion **30%**, tool execution **25%**, efficiency **20%**, recovery **15%** and security **10%**. Report failures, security findings and regressions alongside the score. Choose cases that exercise the behavior being changed. See the [model-harness-testing skill](../.agents/skills/model-harness-testing/SKILL.md).
 
+### Evaluation principles (owner, 27 November 2026)
+
+EchoSpeak is the subject of the research: its strengths, weaknesses, efficiency and architecture against established
+alternatives. These refine loops 3, 4, 5, 6 and 11; the infrastructure stays as it is.
+
+- **Three kinds of cases.** *Development* cases may guide changes. *Regression* cases guard what already works.
+  *Fresh* cases are written after a configuration or change is frozen and are used once for an independent result.
+  Record a case's role in its membership before any run, and never tune on a case after it has been used as fresh or
+  held-out.
+- **Deterministic judge first.** `harness_judge.py` stays the scorer of record. A disputed or ambiguous result gets an
+  independent review (a second judge or the owner) that is recorded beside the score and never replaces it.
+- **Outcomes, not paths.** Judge what happened (tests, files, service state, the reply's facts), not whether the agent
+  used EchoSpeak's tools. Comparisons with other harnesses use the portable scorecard
+  (`scripts/portable_score.py`), which drops EchoSpeak-only checks.
+- **Dimensions beside composites.** Report completion, tools, efficiency, recovery and security individually, with
+  task success and pass^k, next to any composite.
+- **Security apart.** Security-critical violations are gates, listed per case, never averaged into a score.
+- **Cost of outcomes.** Report context overhead, tokens, time, VRAM and RAM, and successful tasks per million tokens
+  and per hour.
+- **Evidence over campaigns.** Prefer real conversation evidence and targeted regressions to repeating benchmark
+  matrices; re-score saved evidence before spending compute.
+- **Architecture by evidence.** Retain, simplify, replace or remove a mechanism based on measured effect.
+- **Formal verification, stated narrowly.** Lean 4 proves the memory-visibility model and its conformance with the
+  Python predicate (`docs/research/formal-verification.md`). Claims name that scope and never extend it to the whole
+  application.
+
 At handoff, name the change and its cause, record the baseline and final checks with their outcomes, and identify remaining limitations and the steps ready for owner testing. Preserve user data, conversations, credentials and existing work. Pushing, merging, publishing and destructive operations require authorization.
 
 Record the release and installation state separately. A passing baseline starts an investigation; a reproducible defect calls for a justified fix and a post-change check.
