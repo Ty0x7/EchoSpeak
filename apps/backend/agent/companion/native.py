@@ -89,13 +89,14 @@ def _project_root(session: Any) -> str:
 def observe(session: Any, event: dict[str, Any]) -> None:
     """Called for every Lean event; keeps only the few that matter to the companion."""
     kind = event.get("type")
-    if kind not in {"run_start", "delegation", "run_outcome"}:
+    if kind not in {"run_start", "delegation", "run_outcome", "token_usage"}:
         return
     try:
         sid = str(session.session_id)
         if kind == "run_start":
             if getattr(session, "source", "") == "heartbeat":
                 return  # a hidden scheduled prompt is not the owner talking
+            session._companion_warned_context = False
             prompt = str(getattr(session, "_pending_prompt", "") or "")
             _publish(_event("echo", sid, "prompt", text=prompt[:600], turn=str(event.get("execution_id") or ""),
                             cwd=_project_root(session)))
@@ -103,6 +104,14 @@ def observe(session: Any, event: dict[str, Any]) -> None:
             target = session._name_of(str(event.get("to") or "")) if hasattr(session, "_name_of") else str(event.get("to") or "")
             _publish(_event(agent_key(target), sid, "prompt", text=str(event.get("task") or "")[:600],
                             cwd=_project_root(session), meta={"delegated": True, "subagent": target}))
+        elif kind == "token_usage":
+            prompt, limit = event.get("prompt"), event.get("context_limit")
+            if (isinstance(prompt, int) and isinstance(limit, int) and 0 < limit
+                    and prompt >= .88 * limit and not getattr(session, "_companion_warned_context", False)
+                    and getattr(session, "source", "") != "heartbeat"):
+                session._companion_warned_context = True
+                _publish(_event("echo", sid, "context_pressure", cwd=_project_root(session),
+                                meta={"usage_percent": round(100 * prompt / limit)}))
         elif kind == "run_outcome":
             summary = str(event.get("summary") or event.get("reason") or "")
             if summary:

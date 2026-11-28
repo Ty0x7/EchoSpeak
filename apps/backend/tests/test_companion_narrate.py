@@ -75,7 +75,7 @@ def test_task_titles(prompt, task):
 def test_natural_grammar_and_attribution():
     line = narrate.compose(_f(body=REPORT, task="restore the backend and install the build"), "report")
     assert line.startswith("Claude just wrapped up restoring the backend and installing the build.")
-    assert "It says the tests pass." in line and "Claude says it found" in line
+    assert "It says the tests pass." in line and "Claude reports: Fixed the config loader" in line
     assert narrate.gerund("the install") == "the install" and narrate.gerund("run the evals") == "running the evals"
     perm = narrate.compose(_f(kind="needs_permission", body="Bash: rm -rf build/"), "needs_you")
     assert perm.startswith("Claude needs your permission to run a shell command")

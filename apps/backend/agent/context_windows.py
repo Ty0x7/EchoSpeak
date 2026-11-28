@@ -64,6 +64,13 @@ def is_variant(model: str) -> bool:
     return str(model or "").startswith(VARIANT_PREFIX)
 
 
+def visible_models(names: list[str]) -> list[str]:
+    """Hide managed context variants when their canonical model is installed."""
+    stems = {variant_name(name, 1024).rsplit(":", 1)[0] for name in names if not is_variant(name)}
+    return [name for name in names if not is_variant(name)
+            or name.rsplit(":", 1)[0] not in stems or not re.search(r":\d+k$", name)]
+
+
 def trained_max(base_url: str, model: str) -> int:
     """The window the model was trained for (``/api/show`` model_info ``*.context_length``), 0 if unknown."""
     key = (_base(base_url), model)

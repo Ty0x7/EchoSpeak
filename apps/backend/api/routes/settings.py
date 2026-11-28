@@ -610,6 +610,10 @@ def _apply_settings_patch(patch: dict) -> None:
     else:
         _apply_settings_patch_inner(patch)
 
+    if "companion_enabled" in patch:
+        from api.routes.companion import enabled_changed
+        enabled_changed(bool(config.companion_enabled))
+
 
 def _apply_settings_patch_inner(patch: dict) -> None:
     """Persist a settings patch and keep provider, port and open chats consistent."""
@@ -1146,8 +1150,10 @@ async def context_windows_info():
     provider = str(getattr(raw, "value", raw))
     configured = int(getattr(config.local, "context_length", 0) or 0)
     if provider != "ollama":
+        endpoint = resolve_endpoint(provider)
+        served = await asyncio.to_thread(window.served, endpoint)
         return {"provider": provider, "model": str(config.local.model_name or ""), "configured": configured,
-                "served": 0, "choices": [], "default": context_windows.DEFAULT_TOKENS,
+                "served": served, "choices": [], "default": context_windows.DEFAULT_TOKENS,
                 "note": "This provider sets its own window; EchoSpeak reads what it serves."}
     def _read() -> dict:
         endpoint = resolve_endpoint("ollama")
@@ -1195,6 +1201,11 @@ async def list_provider_models(provider: Optional[str] = Query(default=None)):
 
         base = _provider_configured_base_url(p)
         models = await asyncio.to_thread(list_local_models, p, base, 4.0)
+        if p == ModelProvider.OLLAMA:
+            from agent import context_windows
+            models = context_windows.visible_models(models)
+            if saved and saved not in models and context_windows.is_variant(saved):
+                models.append(saved)
         if not models:
             logger.warning(f"No {p.value} models found at {base}")
         return {"provider": p.value, "models": models, "base_url": base, "reachable": bool(models), "saved_model": saved}

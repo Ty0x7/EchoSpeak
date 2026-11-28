@@ -285,7 +285,7 @@ class Commentary:
         if catching_up and kind not in {"turn_completed", "report_ready"}:
             return None
         if kind not in {"turn_completed", "needs_permission", "waiting_input", "stage_completed", "report_ready",
-                        "subagent_completed", "operation_done"}:
+                        "subagent_completed", "operation_done", "compacting", "context_pressure"}:
             return None
         digest = analyse(event.get("text", "")) if event.get("text") else Digest()
         if kind == "report_ready":
@@ -340,7 +340,7 @@ class Commentary:
             why_silent = "cooldown"
         elif self._speak is not None:
             state = self._speech_state() if self._speech_state else {}
-            if ("companion" not in (state.get("muted") or ())
+            if (reason not in {"compacting", "context_pressure"} and "companion" not in (state.get("muted") or ())
                     and str(_setting("companion_soul_style", "templates")) == "local_model"):
                 rewrite, style = narrate.hybrid(facts, reason, text)
                 text = prepare_speech(rewrite) or text

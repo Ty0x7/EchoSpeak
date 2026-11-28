@@ -27,6 +27,7 @@ from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
 from prompt_toolkit.key_binding.defaults import load_key_bindings
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.mouse_events import MouseEvent, MouseEventType
 from prompt_toolkit.formatted_text import ANSI, to_formatted_text
 from prompt_toolkit.layout import (ConditionalContainer, D, FormattedTextControl, HSplit, Layout, VSplit, Window)
 from prompt_toolkit.layout.controls import BufferControl
@@ -271,7 +272,7 @@ class EchoTUI:
         self._screen_rows: list[StyleAndTextTuples] = []
         self._screen_width = 0
         self._screen_rendered = 0
-        self._scroll = 0
+        self._history_top = None
         self._resetting = False
         self._sessions_refreshed_at = 0.0
         self.version = endpoint.version or VERSION_FALLBACK
@@ -418,9 +419,24 @@ class EchoTUI:
                 self.welcome_t0 = self.now()
             return self._join(self._welcome_lines()[:room])
         rows = self._transcript_rows()
-        self._scroll = min(self._scroll, max(0, len(rows) - room))
-        end = len(rows) - self._scroll
-        return self._join(rows[max(0, end - room):end])
+        latest = max(0, len(rows) - room)
+        top = latest if self._history_top is None else min(self._history_top, latest)
+        return self._join(rows[top:top + room])
+
+    def _scroll_history(self, lines: int) -> None:
+        latest = max(0, len(self._transcript_rows()) - self._conversation_height())
+        top = latest if self._history_top is None else min(self._history_top, latest)
+        next_top = max(0, min(latest, top + lines))
+        self._history_top = next_top if next_top < latest else None
+        self.app.invalidate()
+
+    def _history_mouse(self, event: MouseEvent):
+        if event.event_type == MouseEventType.SCROLL_UP:
+            self._scroll_history(-3)
+        elif event.event_type == MouseEventType.SCROLL_DOWN:
+            self._scroll_history(3)
+        else:
+            return NotImplemented
 
     def note(self, text: str, style: str = "dim", glyph: str = "") -> None:
         self.emit(B.Note(glyph, text, style, 2))
@@ -451,8 +467,6 @@ class EchoTUI:
                                     dont_extend_height=True, wrap_lines=False,
                                     width=lambda: D.exact(self._left_w()) if self._two_col() else D())
         self.diff_window = Window(FormattedTextControl(self._diff_pane_text), dont_extend_height=True, wrap_lines=False)
-        self.browser_window = Window(FormattedTextControl(self._browser_text, focusable=True, show_cursor=False),
-                                     height=lambda: D.exact(self._rows("sessions")), wrap_lines=False)
         self.session_page_window = Window(FormattedTextControl(self._session_page_text, focusable=True, show_cursor=False),
                                           wrap_lines=False)
         self.dialog_text_window = Window(BufferControl(self.dialog_buffer), height=1,
@@ -479,9 +493,12 @@ class EchoTUI:
             ConditionalContainer(self.dialog_text_window, filter=text_mode),
             Window(FormattedTextControl(self._dialog_footer), dont_extend_height=True),
         ])
-        page_open = browser_open & Condition(lambda: self.browser.mode == "page")
+        class ConversationControl(FormattedTextControl):
+            def mouse_handler(control, mouse_event: MouseEvent):
+                return self._history_mouse(mouse_event)
+
         root = HSplit([
-            ConditionalContainer(Window(FormattedTextControl(self._conversation_text), wrap_lines=False,
+            ConditionalContainer(Window(ConversationControl(self._conversation_text), wrap_lines=False,
                                         height=lambda: D.exact(self._conversation_height())),
                                  Condition(lambda: self._conversation_height() > 0)),
             ConditionalContainer(Window(FormattedTextControl(self._tail_text), dont_extend_height=True),
@@ -497,18 +514,17 @@ class EchoTUI:
             ConditionalContainer(Window(FormattedTextControl(self._shortcuts_text), dont_extend_height=True),
                                  filter=shown("shortcuts")),
             ConditionalContainer(dialog, filter=dialog_open),
-            ConditionalContainer(self.browser_window, filter=browser_open),
             ConditionalContainer(composer, filter=~dialog_open & ~browser_open),
             ConditionalContainer(Window(FormattedTextControl(self._footer_text), dont_extend_height=True),
                                  filter=shown("footer")),
         ])
-        root = HSplit([ConditionalContainer(root, ~page_open),
-                       ConditionalContainer(self.session_page_window, page_open)])
+        root = HSplit([ConditionalContainer(root, ~browser_open),
+                       ConditionalContainer(self.session_page_window, browser_open)])
         kb = self._key_bindings(dialog_open, text_mode, is_running, browser_open)
         color_depth = None if self.caps.color else ColorDepth.DEPTH_1_BIT
         app = Application(layout=Layout(root, focused_element=self.composer_window),
                           key_bindings=merge_key_bindings([load_key_bindings(), kb]),
-                          style=Style.from_dict(self._style()), full_screen=True, mouse_support=False,
+                          style=Style.from_dict(self._style()), full_screen=True, mouse_support=True,
                           erase_when_done=True, color_depth=color_depth, include_default_pygments_style=False)
         app.ttimeoutlen = 0.05
         app.timeoutlen = 0.08
@@ -1121,8 +1137,15 @@ class EchoTUI:
         @kb.add("pagedown", filter=composer)
         def _scroll_conversation(event) -> None:
             room = max(1, self._conversation_height() - 1)
-            direction = 1 if event.key_sequence[0].key == Keys.PageUp else -1
-            self._scroll = max(0, self._scroll + direction * room)
+            self._scroll_history(-room if event.key_sequence[0].key == Keys.PageUp else room)
+
+        @kb.add("c-home", filter=composer)
+        @kb.add("c-end", filter=composer)
+        def _history_edge(event) -> None:
+            if event.key_sequence[0].key == Keys.ControlEnd:
+                self._history_top = None
+            else:
+                self._scroll_history(-len(self._transcript_rows()))
 
         @kb.add("enter", filter=composer)
         def _enter(event) -> None:
@@ -1364,14 +1387,14 @@ class EchoTUI:
 
     # ── the session manager ──────────────────────────────────────────
     def open_sessions(self) -> None:
-        """Show every conversation in the composer's place (← on an empty input, /sessions)."""
+        """Open the full session manager (← on an empty input, /sessions)."""
         if self.dialog is not None:
             return
         self.browser = SessionBrowser(current_id=self.sid or "", project_id=self.core.project_id or "",
-                                      prefer_id=str((self.last_here or {}).get("thread_id") or ""))
+                                      prefer_id=str((self.last_here or {}).get("thread_id") or ""), mode="page")
         self.show_shortcuts = False
         try:
-            self.app.layout.focus(self.browser_window)
+            self.app.layout.focus(self.session_page_window)
         except ValueError:
             pass
         self.app.invalidate()
@@ -1435,9 +1458,8 @@ class EchoTUI:
                 self._spawn(self._delete_session(browser))
             self.app.invalidate()
             return
-        on_page = browser.mode == "page"
-        page = max(1, self.height() - sessionpage.HEAD - sessionpage.FOOT - 2 if on_page else self._rows("sessions") - 6)
-        move = browser.move_page if on_page else browser.move
+        page = max(1, self.height() - sessionpage.HEAD - sessionpage.FOOT - 2)
+        move = browser.move_page
         if key in {Keys.Up, Keys.Down, Keys.PageUp, Keys.PageDown, Keys.Home, Keys.End, Keys.Tab, Keys.BackTab}:
             browser.editing = False
         if key == Keys.Up:
@@ -1449,9 +1471,9 @@ class EchoTUI:
         elif key == Keys.PageDown:
             move(page)
         elif key == Keys.Home:
-            (browser.jump_page if on_page else browser.jump)(False)
+            browser.jump_page(False)
         elif key == Keys.End:
-            (browser.jump_page if on_page else browser.jump)(True)
+            browser.jump_page(True)
         elif key == Keys.Tab:
             browser.cycle_scope(1)
         elif key == Keys.BackTab:
@@ -1463,17 +1485,9 @@ class EchoTUI:
             else:
                 browser.error = ""
                 browser.confirm_delete = browser.chosen()
-        elif key == Keys.Left and not on_page:
-            browser.mode = "page"
-            browser.opened_at = self.now()
-            self.app.layout.focus(self.session_page_window)
         elif key in {Keys.Escape, Keys.Right}:
             if key != Keys.Escape or not browser.clear_query():
-                if on_page:
-                    browser.mode = "picker"
-                    self.app.layout.focus(self.browser_window)
-                else:
-                    self.close_sessions()
+                self.close_sessions()
         elif key == Keys.ControlD:
             self.close_sessions()
         elif key == Keys.ControlN:
@@ -1597,12 +1611,12 @@ class EchoTUI:
         raw = self.buffer.text
         if self._resetting or not raw.strip():
             return
-        self._scroll = 0
         if raw.startswith("/") and not raw.startswith("//"):
             self.buffer.append_to_history()
             self.buffer.reset()
             self._dispatch(raw.strip(), record=raw)
             return
+        self._history_top = None
         text = self._take_input()
         display = raw[1:] if raw.startswith("//") else raw
         if raw.startswith("//"):
@@ -2195,7 +2209,8 @@ class EchoTUI:
         self.transcript.clear()
         self._screen_blocks.clear()
         self._screen_rows.clear()
-        self._screen_rendered = self._scroll = 0
+        self._screen_rendered = 0
+        self._history_top = None
         self.chips.clear()
         self.notice = ("", 0.0)
         self.buffer.reset()
@@ -2437,6 +2452,18 @@ class EchoTUI:
         else:
             rows.append(["context", "not measured yet in this session"])
         self.emit(B.Table(rows, title="Usage"))
+
+    async def cmd_companion(self, args) -> None:
+        action = args[0].lower() if args else "status"
+        if len(args) > 1 or action not in {"status", "show", "hide", "on", "off"}:
+            self.note("Use /companion show, hide, on, off or status.")
+            return
+        if action == "status":
+            status = await self.call(self.client.get, "/companion/presentation")
+            self.note(f"Companion: {status['visibility']}")
+        else:
+            await self.call(self.client.post, f"/companion/presentation/{action}", {})
+            self.note(f"Companion {action} requested · /companion status checks the window")
 
     async def cmd_sessions(self, args) -> None:
         self.open_sessions()
@@ -2906,40 +2933,51 @@ class EchoTUI:
 
     async def cmd_model(self, args) -> None:
         await self._load_settings()
-        models, base = await self._model_choices()
+        active = await self.call(self.client.get, "/provider", session_id=self.sid or "default")
+        active_provider = str(active.get("provider") or "ollama")
+        provider = active_provider
+        if len(args) > 2:
+            raise LookupError("Use /model or /model [provider] <model>.")
+        if len(args) == 2:
+            provider = args.pop(0)
+        if not args:
+            providers = [p for p in active.get("available_providers", [])
+                         if p.get("id") in {"ollama", "localai", "lmstudio", "vllm"} or p.get("id") == active_provider]
+            if len(providers) > 1:
+                labels = {"localai": "LocalAI / llama-server"}
+                runtimes = [Option(labels.get(p["id"], p["name"]), p["id"]) for p in providers]
+                choice = await self.ask("Choose a model runtime", runtimes,
+                                        selected=next((i for i, p in enumerate(providers) if p["id"] == provider), 0))
+                if choice.kind != "choose":
+                    return
+                provider = choice.value
+        res = await self.call(self.client.get, "/provider/models", provider=provider)
+        if res.get("provider"):
+            provider = str(res["provider"])
+        models = res.get("models") or []
         if args:
-            name = args[0]
-            if models and name not in [m.name for m in models]:
-                raise LookupError(f"{name} is not installed (available: {', '.join(m.name for m in models)})")
-            await self._apply_model(name, base)
+            if models and args[0] not in models:
+                raise LookupError(f"{args[0]} is not listed by {provider}. Use /model to see available models.")
+            await self._apply_model(args[0], provider)
             return
         if not models:
-            self.note("no models found; is Ollama running? (ollama list)")
+            self.note(f"No models listed by {provider}. Check its server or provider settings.")
             return
-        current = self.model
-        opts = [Option(m.name, m.name, hint=(m.hint or "") + (" · current" if m.name == current else ""),
-                       style="dim" if m.fits is False else "") for m in models]
-        sel = next((i for i, m in enumerate(models) if m.name == current), 0)
-        action = await self.ask("Choose a model", opts, selected=sel,
-                                footer=f"{self.caps.glyphs.arrow_up_down} choose · enter select · esc cancel")
+        current = active.get("model") if provider == active_provider else None
+        opts = [Option(name, name, hint="current" if name == current else "") for name in models]
+        action = await self.ask("Choose a model", opts, selected=models.index(current) if current in models else 0)
         if action.kind == "choose":
-            await self._apply_model(action.value, base)
+            await self._apply_model(action.value, provider)
 
-    async def _model_choices(self) -> tuple[list[control.ModelInfo], str]:
-        provider, _model = control.current_model(self.settings)
-        base = control.ollama_base(self.settings)
-        if provider in {"", "ollama"}:
-            try:
-                models = await self.call(control.ollama_models, base)
-                vram = await self.call(control.gpu_vram_mib)
-                return control.with_hints(models, vram), base
-            except (OSError, ValueError):
-                pass
-        res = await self.call(self.client.get, "/provider/models")
-        return [control.ModelInfo(one_line(m, 120)) for m in (res or {}).get("models") or []], str((res or {}).get("base_url") or "")
-
-    async def _apply_model(self, name: str, base: str) -> None:
-        provider, _ = control.current_model(self.settings)
+    async def _apply_model(self, name: str, provider: str) -> None:
+        is_local = provider in {"ollama", "localai", "lmstudio", "vllm"}
+        if not is_local:
+            if not self.sid:
+                raise LookupError("Start a conversation first, or change cloud defaults in Settings.")
+            await self.call(control.switch_session_model, self.client, self.sid, provider, name)
+            await self._refresh_model()
+            self.note(f"model: {name} for this chat", "bold")
+            return
         opts = [Option("For this chat and as the default for new chats", "both")] if self.sid else []
         opts.append(Option("As the default for new chats" if self.sid else "Use it (default for new chats)", "default"))
         if self.sid:
@@ -2950,14 +2988,14 @@ class EchoTUI:
             return
         scope = action.value
         if scope in {"both", "default"}:
-            if provider in {"", "ollama"}:
-                await self.call(control.save_default_model, self.client, name, base,
-                                int((self.settings.get("local") or {}).get("context_length") or control.DEFAULT_CONTEXT))
-            else:
-                await self.call(control.put_setting, self.client, "local", {"model_name": name})
-            await self.call(control.confirm_model, self.data_dir, f"ollama:{name}", self.env)
+            await self.call(control.put_setting_many, self.client, {
+                "use_local_models": True,
+                "local": {"provider": provider, "model_name": name},
+            })
+            if provider == "ollama":
+                await self.call(control.confirm_model, self.data_dir, f"ollama:{name}", self.env)
         if scope in {"both", "session"} and self.sid:
-            res = await self.call(control.switch_session_model, self.client, self.sid, provider if provider not in {"", "cloud"} else "ollama", name)
+            res = await self.call(control.switch_session_model, self.client, self.sid, provider, name)
             if res.get("cancelled_turns"):
                 self.note("the running task was stopped to switch models")
         await self._load_settings()
@@ -2975,7 +3013,7 @@ class EchoTUI:
         # What belonged to the conversation you left stays with it: its context meter, its token
         # count, its file changes and its queued follow-ups are not this one's.
         self._reset_session_context()
-        self._scroll = 0
+        self._history_top = None
         await self._sync_agent_from_session(session)
         await self._refresh_model()
         who = f" {self.caps.glyphs.sep} {self.agent_name}" if self.core.agent_id else ""

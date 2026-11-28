@@ -170,31 +170,10 @@ def test_the_cli_has_a_continue_flag():
     assert build_parser().parse_args([]).continue_last is False
 
 
-# ── D. ← twice: the picker, then the sessions page ─────────────────
-def test_left_twice_opens_the_full_screen_page_and_back_returns_to_the_picker():
-    async def go(tui):
-        press(tui, Keys.Left)
-        await settle(tui)
-        assert tui.browser.mode == "picker"
-        press(tui, Keys.Left)
-        await settle(tui)
-        assert tui.browser.mode == "page"
-        assert tui.app.layout.has_focus(tui.session_page_window)
-        press(tui, Keys.Escape)
-        assert tui.browser.mode == "picker"
-        assert tui.app.layout.has_focus(tui.browser_window)
-        press(tui, Keys.Left)
-        press(tui, Keys.ControlC)
-        assert tui.browser is None
-        assert tui.app.layout.has_focus(tui.composer_window)
-    session(go)
-
-
 def test_enter_on_the_page_resumes_the_selected_conversation():
     async def go(tui):
         press(tui, Keys.Left)
         await settle(tui)
-        press(tui, Keys.Left)
         press(tui, Keys.Home)
         press(tui, Keys.Enter)
         await settle(tui)

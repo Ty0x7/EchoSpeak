@@ -151,12 +151,12 @@ def _sessions(tui: A.EchoTUI, count: int = 14, query: str = "", scope: str = "al
     if running:
         _running(tui, tools=1, pending=0)
     tui.core.project_id = "p1"
-    tui.browser = A.SessionBrowser(current_id=tui.sid or "", project_id="p1")
+    tui.browser = A.SessionBrowser(current_id=tui.sid or "", project_id="p1", mode="page")
     tui.browser.load(session_rows(count))
     tui.browser.scope = scope
     for ch in query:
         tui.browser.type(ch)
-    tui.app.layout.focus(tui.browser_window)
+    tui.app.layout.focus(tui.session_page_window)
 
 
 STATES: dict[str, Callable[[A.EchoTUI], None]] = {
@@ -242,7 +242,7 @@ def check(state: str, width: int, height: int, caps: Caps = DEFAULT_CAPS) -> lis
         marks = (tui.model[:4], "Pres") if state == "notice" else (tui.model[:4],)   # a notice may crowd out the model
         # Under 12 rows a dialog's options outrank the footer (you are deciding, not reading the model name).
         footer_due = height >= (12 if tui.dialog is not None or tui.browser is not None else 8)
-        if width >= 12 and footer_due and not any(m in r for r in rows[-3:] for m in marks):
+        if tui.browser is None and width >= 12 and footer_due and not any(m in r for r in rows[-3:] for m in marks):
             problems.append("no footer")
         return problems
 

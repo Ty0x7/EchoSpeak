@@ -22,6 +22,7 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
   const [soul, setSoul] = useState<{ text: string; default: string } | null>(null);
   const [soulDraft, setSoulDraft] = useState("");
   const [notice, setNotice] = useState("");
+  const [visibility, setVisibility] = useState("unknown");
   const get = (path: string) => fetch(`${apiBase}${path}`).then(r => (r.ok ? r.json() : null)).catch(() => null);
   const send = async (method: string, path: string, body: unknown) => {
     const r = await fetch(`${apiBase}${path}`, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -30,6 +31,7 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
     return data;
   };
   const refresh = () => {
+    void get("/companion/presentation").then(d => d && setVisibility(d.visibility));
     void get("/companion/scope").then(d => d && setScope(d));
     void get("/companion/hooks/status").then(d => d && setHooks(d));
     void get("/companion/autostart").then(d => d && setAutostart(d));
@@ -39,6 +41,10 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
     refresh();
     void get("/media-runtime/voice/kokoro/voices").then(d => d && setVoices(d.items || []));
     void get("/companion/soul").then(d => { if (d) { setSoul(d); setSoulDraft(d.text); } });
+    const timer = window.setInterval(() => {
+      void get("/companion/presentation").then(d => d && setVisibility(d.visibility));
+    }, 2000);
+    return () => window.clearInterval(timer);
   }, [apiBase]);
 
   const enabled = Boolean(s.companion_enabled);
@@ -107,9 +113,12 @@ export function CompanionSettings({ s, save, apiBase }: { s: SettingsMap; save: 
         <Toggle checked={s.companion_auto_hide !== false} onChange={v => save({ companion_auto_hide: v })}
           label="Auto-hide when idle" />
       </Row>
-      <Row label="Show Echo" help="Bring Echo back after hiding it from the corner menu.">
-        <button type="button" className="es-btn es-btn-sm" disabled={!enabled} onClick={() => void send("POST", "/companion/show", {})
-          .then(() => setNotice("")).catch(e => setNotice(String(e.message || e)))}>Show Echo</button>
+      <Row label="Companion window" help={enabled ? visibility : "Disabled"}>
+        {(["show", "hide"] as const).map(action => (
+          <button key={action} type="button" className="es-btn es-btn-sm" disabled={!enabled}
+            onClick={() => void send("POST", `/companion/presentation/${action}`, {})
+              .then(() => setNotice("")).catch(e => setNotice(String(e.message || e)))}>{action === "show" ? "Show Echo" : "Hide Echo"}</button>
+        ))}
       </Row>
       <Row label="Position">
         <Select value={String(s.companion_position || "top-right")} onChange={v => save({ companion_position: v })}
