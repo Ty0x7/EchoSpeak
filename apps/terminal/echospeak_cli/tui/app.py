@@ -64,7 +64,6 @@ TWO_COL_LEFT = 44
 STACKED_DIFF_ROWS = 10
 DIFF_MARK = "__diff__"
 # Messages shown when a conversation is resumed: the last exchanges, so you see where it stood.
-RECAP_MESSAGES = 6
 
 
 
@@ -3018,8 +3017,12 @@ class EchoTUI:
         await self._refresh_model()
         who = f" {self.caps.glyphs.sep} {self.agent_name}" if self.core.agent_id else ""
         where = f" {self.caps.glyphs.sep} {self.project_name}" if self.project_name else ""
+        self.transcript.clear()
+        self._screen_blocks.clear()
+        self._screen_rows.clear()
+        self._screen_rendered = 0
         self.emit(B.RuleLine(f"Resumed {one_line(session.get('title') or '(untitled)', 60)}{who}{where}"))
-        await self._show_recent()
+        await self._restore_history()
         await self._catch_up()
 
     async def _sync_agent_from_session(self, session: dict) -> None:
@@ -3040,23 +3043,21 @@ class EchoTUI:
             self.agent_name = one_line((hit or {}).get("name") or aid, 30)
             self.agent_title = one_line((hit or {}).get("title") or "", 30)
 
-    async def _show_recent(self) -> None:
+    async def _restore_history(self) -> None:
         try:
             hist = (await self.call(self.client.get, "/history", thread_id=self.sid) or {}).get("history") or []
         except (ApiError, ConnectError):
             return
-        said = [h for h in hist if isinstance(h, str) and h.startswith(("Human: ", "Assistant: "))]
-        tail = said[-RECAP_MESSAGES:]
-        if len(said) > len(tail):
-            n = len(said) - len(tail)
-            self.emit(B.Note(self.caps.glyphs.vdots, f"{n} earlier message{'s' if n != 1 else ''}", "dim", 0))
-        for h in tail:
-            if h.startswith("Human: "):
-                self.emit(B.Note(self.caps.glyphs.prompt + " ", one_line(h[7:], 300), "dim", 0))   # "›  ", as when typed
-            elif h.startswith("Assistant: "):
-                self.emit(B.Note(self.caps.glyphs.bullet, one_line(plain_recap(h[11:]), 300), "dim", 0))
-        if tail:
-            self.emit(B.Raw("\n"), transcript=False)
+        messages = []
+        for item in hist:
+            if not isinstance(item, str):
+                continue
+            if item.startswith("Human: "):
+                messages.append(B.UserLine(item[7:]))
+            elif item.startswith("Assistant: "):
+                messages.append(B.MarkdownBlock(item[11:], bullet=True))
+        if messages:
+            self.emit(*messages)
 
     async def _catch_up(self) -> None:
         if not self.sid:
@@ -3237,7 +3238,7 @@ class EchoTUI:
             await self._model_setup()
             await self._folder_setup()
             if self.sid:
-                await self._show_recent()
+                await self._restore_history()
                 await self._catch_up()
         except (ApiError, ConnectError, LookupError) as exc:
             self._report(exc)

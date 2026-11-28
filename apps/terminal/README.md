@@ -6,7 +6,8 @@ It talks HTTP only: sessions are backend threads, runs are the backend's journal
 same approval routes. Nothing executes in the terminal process.
 
 - **Echo TUI** (default on a terminal) opens a full-screen viewport with the composer at the bottom.
-  Page Up and Page Down browse the conversation above it. Ctrl+O opens the full transcript.
+  Scroll over the conversation or use Page Up and Page Down. Ctrl+End returns to live output,
+  and Ctrl+O opens the transcript pager. Left from an empty composer opens the session manager.
 - **Plain REPL** (`--plain`, or automatically when stdin/stdout is not a terminal, `TERM=dumb`, or the TUI
   dependencies are missing): the standard-library line client. Every subcommand (`send`, `attach`, …) is
   standard library only and unchanged.
